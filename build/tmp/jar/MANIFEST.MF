@@ -1,0 +1,9 @@
+Manifest-Version: 1.0
+Specification-Title: rs_integration
+Specification-Vendor: Huanghuang
+Specification-Version: 1
+Implementation-Title: rs_integration
+Implementation-Version: 1.0.0
+Implementation-Vendor: Huanghuang
+MixinConfigs: rs_integration.mixins.json
+

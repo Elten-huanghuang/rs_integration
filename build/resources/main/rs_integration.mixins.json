@@ -1,0 +1,28 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "com.huanghuang.rsintegration.mixin",
+  "compatibilityLevel": "JAVA_17",
+  "refmap": "rs_integration.refmap.json",
+  "mixins": [
+    "refinedstorage.CraftingGridBehaviorMixin",
+    "refinedstorage.IngredientTrackerMixin",
+    "refinedstorage.NetworkItemUseMixin",
+    "sophisticatedbackpacks.InventoryInteractionHelperMixin",
+    "sophisticatedbackpacks.MagnetUpgradeWrapperMixin",
+    "sophisticatedbackpacks.PickupUpgradeWrapperMixin",
+    "sophisticatedbackpacks.RestockUpgradeWrapperMixin",
+    "sophisticatedbackpacks.RefillUpgradeWrapperMixin",
+    "sophisticatedbackpacks.FeedingUpgradeWrapperMixin",
+    "sophisticatedbackpacks.UpgradeHandlerMixin",
+    "sophisticatedbackpacks.StorageUpgradeSlotMixin"
+  ],
+  "client": [
+    "jei.GuiIconToggleButtonAccessor",
+    "jei.RecipeGuiLayoutsMixin",
+    "jei.RecipesGuiMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 0
+  }
+}
