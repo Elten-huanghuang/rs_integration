@@ -17,14 +17,23 @@ import java.util.function.Supplier;
 
 public final class RSSidePanelRequestPacket {
 
-    RSSidePanelRequestPacket() {}
+    /** If true, the server should force a full re-scan even if a listener is active. */
+    final boolean forceFullSync;
+
+    RSSidePanelRequestPacket() {
+        this(false);
+    }
+
+    RSSidePanelRequestPacket(boolean forceFullSync) {
+        this.forceFullSync = forceFullSync;
+    }
 
     void encode(FriendlyByteBuf buf) {
-        // empty payload
+        buf.writeBoolean(forceFullSync);
     }
 
     static RSSidePanelRequestPacket decode(FriendlyByteBuf buf) {
-        return new RSSidePanelRequestPacket();
+        return new RSSidePanelRequestPacket(buf.readBoolean());
     }
 
     static void handle(RSSidePanelRequestPacket packet,
@@ -37,23 +46,22 @@ public final class RSSidePanelRequestPacket {
         }
         context.enqueueWork(() -> {
             int maxSlots = RSIntegrationConfig.RS_SIDE_PANEL_MAX_SLOTS.get();
-            // Check cache first
-            List<ItemStack> cached = RSSidePanelNetworkHandler.getFreshCachedItems(player.getUUID());
-            List<Long> cachedTs = RSSidePanelNetworkHandler.getCachedTimestamps(player.getUUID());
-            List<Boolean> cachedCf = RSSidePanelNetworkHandler.getCachedCraftableFlags(player.getUUID());
-            if (cached != null && cachedTs != null && cachedCf != null) {
-                int total = RSSidePanelNetworkHandler.getCachedTotal(player.getUUID());
-                RSSidePanelNetworkHandler.sendSync(player, cached, cachedTs, cachedCf, total, true, "");
-                return;
-            }
 
             INetwork network = RSIntegration.resolveNetworkFromPlayer(player);
             if (network == null) {
+                RSSidePanelNetworkHandler.unregisterListener(player.getUUID());
                 RSSidePanelNetworkHandler.sendSync(player,
                         Collections.emptyList(), Collections.emptyList(),
                         Collections.emptyList(), 0, false, "");
                 return;
             }
+
+            // Always register/renew the push listener and perform a full
+            // snapshot.  Skipping the scan based on listener state is unsafe:
+            // a stale/detached listener would leave the client stuck with
+            // no data.  The listener handles subsequent incremental deltas,
+            // so the one-time full-scan cost is acceptable.
+            RSSidePanelNetworkHandler.registerListener(player, network);
 
             try {
                 IStorageCache<?> cache = network.getItemStorageCache();
@@ -110,8 +118,14 @@ public final class RSSidePanelRequestPacket {
                 }
 
                 String netName = "";
+                try {
+                    var level = network.getLevel();
+                    var pos = network.getPosition();
+                    if (level != null && pos != null) {
+                        netName = level.getBlockState(pos).getBlock().getName().getString();
+                    }
+                } catch (Exception ignored) {}
 
-                RSSidePanelNetworkHandler.putCachedItems(player.getUUID(), items, timestamps, craftableFlags, totalCount);
                 RSSidePanelNetworkHandler.sendSync(player, items, timestamps, craftableFlags, totalCount, true, netName);
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.info("[RSI] SidePanel request error: {}", e.toString());

@@ -15,30 +15,23 @@ import net.minecraftforge.registries.ForgeRegistries;
 
 import javax.annotation.Nullable;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
-/**
- * Unified recipe index that covers both vanilla crafting-table recipes and
- * multi-block mod recipes (Goety, Malum, FA, Eidolon, WR).
- *
- * <p>Used by {@link CraftingResolver} to find candidate recipes for producing
- * a given item, regardless of recipe type.</p>
- */
 public final class ModRecipeIndex {
 
     private static volatile Map<Item, List<RecipeEntry>> recipeIndex;
     private static volatile RecipeManager indexedRecipeManager;
 
-    private ModRecipeIndex() {}
+    /** Cache resolved Method objects per recipe class to avoid repeated reflection. */
+    private static final Map<Class<?>, java.lang.reflect.Method> resultMethodCache = new ConcurrentHashMap<>();
 
-    // ── recipe entry ────────────────────────────────────────────
+    private ModRecipeIndex() {}
 
     public record RecipeEntry(
             Recipe<?> recipe,
             ModType modType,
             ResourceLocation recipeTypeId
     ) {}
-
-    // ── index ────────────────────────────────────────────────────
 
     public static Map<Item, List<RecipeEntry>> getRecipeIndexForLevel(Level level) {
         RecipeManager rm = level.getRecipeManager();
@@ -57,8 +50,15 @@ public final class ModRecipeIndex {
             idx = new HashMap<>();
             Set<ResourceLocation> seen = new HashSet<>();
 
-            // 1. Vanilla crafting recipes
             for (CraftingRecipe recipe : rm.getAllRecipesFor(RecipeType.CRAFTING)) {
+                ModType type = ModType.classifyRecipe(recipe);
+                // Only index CraftingRecipes that belong to a known mod type.
+                // Vanilla recipes (type == null) live in CraftingPlanManager;
+                // unregistered mod recipes (also type == null) must not be
+                // treated as GENERIC — the vanilla execution path has no
+                // idea how to satisfy their ingredient requirements and may
+                // produce garbage step chains.
+                if (type == null) continue;
                 ItemStack result = recipe.getResultItem(level.registryAccess());
                 if (result.isEmpty()) {
                     result = tryGetResultItem(recipe, level.registryAccess());
@@ -66,23 +66,21 @@ public final class ModRecipeIndex {
                 if (result.isEmpty()) continue;
                 if (!seen.add(recipe.getId())) continue;
                 idx.computeIfAbsent(result.getItem(), k -> new ArrayList<>())
-                        .add(new RecipeEntry(recipe, ModType.GENERIC,
+                        .add(new RecipeEntry(recipe, type,
                                 new ResourceLocation("minecraft:crafting")));
             }
 
-            // 2. All mod recipes via class-name classification
             for (Recipe<?> recipe : rm.getRecipes()) {
                 if (!seen.add(recipe.getId())) continue;
                 ModType type = ModType.classifyRecipe(recipe);
-                if (type == ModType.GENERIC) continue; // already in vanilla index
+                if (type == ModType.GENERIC) continue;
 
                 ItemStack result = tryGetResultItem(recipe, level.registryAccess());
                 if (result.isEmpty()) continue;
 
-                // Unknown recipe type (not from 5 known magic mods) — index as
-                // GENERIC so the resolver can propose it as an intermediate step
+                // 💡 修复：绝不能把未知的机器配方强制降级为 GENERIC，否则会被原版合成流瞬间白嫖！
                 if (type == null) {
-                    type = ModType.GENERIC;
+                    continue; // 忽略不支持的多方块配方
                 }
 
                 ResourceLocation typeId = recipe.getType() != null
@@ -93,8 +91,6 @@ public final class ModRecipeIndex {
                 idx.computeIfAbsent(result.getItem(), k -> new ArrayList<>())
                         .add(new RecipeEntry(recipe, type, typeId));
 
-                // Index by secondary outputs too so the resolver can discover
-                // recipes that produce a needed item as a byproduct
                 List<ItemStack> secondary = tryGetSecondaryOutputs(recipe, level.registryAccess());
                 for (ItemStack sec : secondary) {
                     idx.computeIfAbsent(sec.getItem(), k -> new ArrayList<>())
@@ -112,54 +108,49 @@ public final class ModRecipeIndex {
         }
     }
 
-    // ── result extraction ────────────────────────────────────────
-
-    /**
-     * Extract the output ItemStack from any recipe type via reflection.
-     * Tries common method signatures in order.
-     */
     public static ItemStack tryGetResultItem(Recipe<?> recipe, RegistryAccess access) {
         if (recipe == null) return ItemStack.EMPTY;
         if (recipe instanceof CraftingRecipe cr) {
             return cr.getResultItem(access);
         }
-        // Try getResultItem(RegistryAccess) — standard Forge
-        try {
-            Object result = recipe.getClass().getMethod("getResultItem", RegistryAccess.class)
-                    .invoke(recipe, access);
-            if (result instanceof ItemStack s && !s.isEmpty()) return s;
-        } catch (Exception ignored) {}
-        // Try getResultItem() — no-arg variant
-        try {
-            Object result = recipe.getClass().getMethod("getResultItem").invoke(recipe);
-            if (result instanceof ItemStack s && !s.isEmpty()) return s;
-        } catch (Exception ignored) {}
-        // Try getResult() — common in older/compat recipes
-        try {
-            Object result = recipe.getClass().getMethod("getResult").invoke(recipe);
-            if (result instanceof ItemStack s && !s.isEmpty()) return s;
-        } catch (Exception ignored) {}
-        // Try getOutput() — some mods use this
-        try {
-            Object result = recipe.getClass().getMethod("getOutput").invoke(recipe);
-            if (result instanceof ItemStack s && !s.isEmpty()) return s;
-        } catch (Exception ignored) {}
-        // Try getOutputCopy() — some mods return a copy
-        try {
-            Object result = recipe.getClass().getMethod("getOutputCopy").invoke(recipe);
-            if (result instanceof ItemStack s && !s.isEmpty()) return s;
-        } catch (Exception ignored) {}
-        // Try getAssembledItem() — Goety RitualRecipe artifact
-        try {
-            Object result = recipe.getClass().getMethod("getAssembledItem").invoke(recipe);
-            if (result instanceof ItemStack s && !s.isEmpty()) return s;
-        } catch (Exception ignored) {}
-        // Try accessing public 'output' or 'result' field of type ItemStack
+        // Try cached reflective access for this recipe class
+        Class<?> clazz = recipe.getClass();
+        java.lang.reflect.Method m = resultMethodCache.get(clazz);
+        if (m != null) {
+            try {
+                Object result;
+                if (m.getParameterCount() == 1) {
+                    result = m.invoke(recipe, access);
+                } else {
+                    result = m.invoke(recipe);
+                }
+                if (result instanceof ItemStack s && !s.isEmpty()) return s;
+            } catch (Exception ignored) {}
+        }
+        // Probe for the result accessor and cache it
+        for (String methodName : new String[]{"getResultItem", "getResultItem", "getResult", "getOutput", "getOutputCopy", "getAssembledItem"}) {
+            for (java.lang.reflect.Method method : clazz.getMethods()) {
+                if (method.getName().equals(methodName)
+                        && ItemStack.class.isAssignableFrom(method.getReturnType())
+                        && (method.getParameterCount() == 1 || method.getParameterCount() == 0)) {
+                    try {
+                        Object result;
+                        if (method.getParameterCount() == 1) {
+                            result = method.invoke(recipe, access);
+                        } else {
+                            result = method.invoke(recipe);
+                        }
+                        if (result instanceof ItemStack s && !s.isEmpty()) {
+                            resultMethodCache.put(clazz, method);
+                            return s;
+                        }
+                    } catch (Exception ignored) {}
+                }
+            }
+        }
         ItemStack fieldResult = tryGetOutputField(recipe);
         if (!fieldResult.isEmpty()) return fieldResult;
 
-        RSIntegrationMod.LOGGER.debug("[ModRecipeIndex] Cannot extract result from {} (class: {})",
-                recipe.getId(), recipe.getClass().getName());
         return ItemStack.EMPTY;
     }
 
@@ -183,17 +174,10 @@ public final class ModRecipeIndex {
         return ItemStack.EMPTY;
     }
 
-    // ── secondary output extraction ────────────────────────────────
-
-    /**
-     * Extract secondary/byproduct outputs from any recipe type via reflection.
-     * Tries common method signatures that mod recipes use for byproducts.
-     */
     public static List<ItemStack> tryGetSecondaryOutputs(Recipe<?> recipe, RegistryAccess access) {
         List<ItemStack> results = new ArrayList<>();
         if (recipe == null) return results;
 
-        // getRemainingItems() — returns List<ItemStack> or ItemStack[]
         try {
             Object obj = recipe.getClass().getMethod("getRemainingItems").invoke(recipe);
             if (obj instanceof List<?> list) {
@@ -206,8 +190,6 @@ public final class ModRecipeIndex {
                 }
             }
         } catch (Exception ignored) {}
-
-        // getByproducts() — common in modded recipes
         try {
             Object obj = recipe.getClass().getMethod("getByproducts").invoke(recipe);
             if (obj instanceof List<?> list) {
@@ -216,8 +198,6 @@ public final class ModRecipeIndex {
                 }
             }
         } catch (Exception ignored) {}
-
-        // getRollResults() — Malum/WR weighted result lists
         try {
             Object obj = recipe.getClass().getMethod("getRollResults").invoke(recipe);
             if (obj instanceof List<?> list) {
@@ -226,8 +206,6 @@ public final class ModRecipeIndex {
                 }
             }
         } catch (Exception ignored) {}
-
-        // getOutputs() — returns ItemStack[] or List<ItemStack>
         try {
             Object obj = recipe.getClass().getMethod("getOutputs").invoke(recipe);
             if (obj instanceof List<?> list) {
@@ -241,10 +219,7 @@ public final class ModRecipeIndex {
             }
         } catch (Exception ignored) {}
 
-        // Field scan for List<ItemStack> fields with byproduct-related names
         trySecondaryOutputFields(recipe, results);
-
-        // Deduplicate by item type
         return results;
     }
 

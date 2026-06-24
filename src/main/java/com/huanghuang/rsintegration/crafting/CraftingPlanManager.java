@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.batch.ModType;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.CraftingRecipe;
@@ -38,6 +39,13 @@ public final class CraftingPlanManager {
                     rm.getAllRecipesFor(RecipeType.CRAFTING));
 
             for (CraftingRecipe recipe : allCrafting) {
+                // Only index vanilla-namespace recipes.  Mod recipes that extend
+                // CraftingRecipe (for JEI compat — Apotheosis, Quark, Create, etc.)
+                // can create circular or nonsensical paths inside the vanilla-only
+                // resolver, causing incorrect step chains.
+                if (!"minecraft".equals(recipe.getId().getNamespace())) continue;
+                // Double-check: also exclude registered mod-type recipes.
+                if (ModType.classifyRecipe(recipe) != null) continue;
                 ItemStack result = recipe.getResultItem(level.registryAccess());
                 if (result.isEmpty()) continue;
                 idx.computeIfAbsent(result.getItem(), k -> new ArrayList<>()).add(recipe);

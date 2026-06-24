@@ -3,15 +3,13 @@ package com.huanghuang.rsintegration.sidepanel;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.mojang.blaze3d.platform.InputConstants;
+import com.mojang.blaze3d.systems.RenderSystem;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
-import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
-import net.minecraft.client.renderer.Rect2i;
-import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.Mth;
@@ -29,37 +27,36 @@ import net.minecraftforge.eventbus.api.EventPriority;
 import net.minecraftforge.fml.ModList;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 import net.minecraftforge.registries.ForgeRegistries;
+import mezz.jei.api.constants.VanillaTypes;
+import mezz.jei.api.recipe.IFocusFactory;
+import mezz.jei.api.recipe.RecipeIngredientRole;
+import mezz.jei.api.runtime.IJeiRuntime;
 import org.lwjgl.glfw.GLFW;
 
+import com.github.stuxuhai.jpinyin.PinyinFormat;
+import com.github.stuxuhai.jpinyin.PinyinHelper;
 import java.util.*;
 
 @OnlyIn(Dist.CLIENT)
 public final class RSSidePanelClient {
 
-    // ── layout constants ───────────────────────────────────────────
-    private static final int SLOT_SIZE  = 18;
-    private static final int COLUMNS    = 9;
-    private static final int SCROLLBAR_W = 6;
-    private static final int BUTTON_SIZE = 14;
-    private static final int SIDE_BTN_SIZE = 18;   // RS side button size (icons.png)
-    private static final int SIDE_BTN_ICON = 16;
-    private static final int SIDE_BTN_GAP  = 2;    // 18+2=20 pitch
-    private static final int GRID_CONTENT_W = 162; // 9 * 18
-    private static final int SIDE_COL_W = 20;
-    private static final int RS_GRID_LEFT = 7;
-    private static final int RS_SEARCH_X = 81;
-    private static final int RS_SEARCH_Y = 7;
-    private static final int RS_SEARCH_W = 82;
-    private static final int RS_TOP_H = 19;
-    private static final int BOTTOM_STRIP_H = 4;
-    private static final int HEADER_H = RS_TOP_H;  // top texture strip
+    // ── RS-native layout (matches GridScreen grid.png UV strips) ──
+    private static final int SLOT_SIZE        = 18;
+    private static final int COLUMNS          = 9;
+    private static final int GRID_W           = 193;
+    private static final int HEADER_H         = 19;
+    private static final int BOTTOM_H         = 7;
+    private static final int GRID_ITEM_X      = 8;
+    private static final int SCROLLBAR_X      = 174;
+    private static final int SIDE_BTN_SIZE  = 18;
+    private static final int SIDE_BTN_GAP   = 2;
+    private static final int SIDE_BTN_PITCH = SIDE_BTN_SIZE + SIDE_BTN_GAP;
+    private static final int SIDE_BTN_FLOAT_X = -20;
 
     private static final ResourceLocation RS_GRID_TEX =
             new ResourceLocation("refinedstorage", "textures/gui/grid.png");
     private static final ResourceLocation RS_ICONS_TEX =
-            new ResourceLocation("refinedstorage", "textures/gui/icons.png");
-
-    private static final float RENDER_Z = 500.0f;
+            new ResourceLocation(RSIntegrationMod.MOD_ID, "textures/gui/icons.png");
 
     private static final Set<String> RS_SCREEN_CLASSES = Set.of(
             "com.refinedmods.refinedstorage.screen.grid.GridScreen",
@@ -67,17 +64,28 @@ public final class RSSidePanelClient {
             "com.refinedmods.refinedstorage.screen.ControllerScreen"
     );
 
-    // ── state ──────────────────────────────────────────────────────
+    // ── state ───────────────────────────────────────────────────
     static boolean panelVisible;
-    static boolean panelHidden = true;   // starts collapsed
+    static boolean panelHidden = true;
     static int panelX = 100, panelY = 100;
 
     static boolean networkAvailable;
     static String networkName = "";
-    static List<ItemStack> cachedItems = new ArrayList<>();
-    static List<Long> cachedTimestamps = new ArrayList<>();
-    static List<Boolean> cachedCraftableFlags = new ArrayList<>();
+
+    // ---- Unified data model: one Map instead of three parallel Maps.
+    //      Atomic put/remove guarantees item/timestamp/craftable stay in sync.
+    //      LinkedHashMap preserves insertion order for sort-mode-3 (last-modified).
+    static final Map<String, ItemEntry> itemMap = new LinkedHashMap<>();
     static int totalSlotCount;
+
+    // Pending extractions: keys that the client predicted extraction for but
+    // haven't been confirmed by a server delta yet.  On full sync or delta
+    // confirmation they are cleared.  Stale entries are reverted on tick.
+    static final Map<String, PendingExtraction> pendingExtractions = new HashMap<>();
+
+    // displayList: sorted + filtered view, rebuilt lazily when displayDirty=true
+    static final List<ItemStack> displayList = new ArrayList<>();
+    static volatile boolean displayDirty = true;
 
     static String searchText = "";
     static boolean searchOpen;
@@ -98,16 +106,15 @@ public final class RSSidePanelClient {
     static EditBox searchWidget;
     static boolean searchChangedSinceBlur;
     static boolean searchFocused;
-    static int searchAnimTicks;
 
-    // Drag / move / scrollbar states
+    // Drag / move / scrollbar
     static boolean movingPanel;
     static int moveStartMouseX, moveStartMouseY;
     static int moveStartPanelX, moveStartPanelY;
     static boolean scrolling;
     static boolean gridDragging;
-    static int gridDragButton;
-    static final Set<Integer> gridDragSlots = new LinkedHashSet<>();
+    // Store item keys (String) instead of integer indices for O(1) identity
+    static final Set<String> gridDragKeys = new LinkedHashSet<>();
     static boolean gridDragCrossedSlots;
 
     static int hoveredSideButton = -1;
@@ -116,9 +123,37 @@ public final class RSSidePanelClient {
 
     static KeyMapping KEY_TOGGLE_PANEL;
 
+    // ── inner types ────────────────────────────────────────────────
+
+    static class ItemEntry {
+        final ItemStack stack;
+        long timestamp;
+        boolean craftable;
+
+        ItemEntry(ItemStack stack, long timestamp, boolean craftable) {
+            this.stack = stack;
+            this.timestamp = timestamp;
+            this.craftable = craftable;
+        }
+    }
+
+    static class PendingExtraction {
+        final ItemStack previousStack; // snapshot before prediction
+        final long timestamp;
+        final boolean craftable;
+        final long createdAt;
+
+        PendingExtraction(ItemStack stack, long timestamp, boolean craftable) {
+            this.previousStack = stack.copy();
+            this.timestamp = timestamp;
+            this.craftable = craftable;
+            this.createdAt = System.currentTimeMillis();
+        }
+    }
+
     private RSSidePanelClient() {}
 
-    // ── init ──────────────────────────────────────────────────────
+    // ── init ────────────────────────────────────────────────────
 
     public static void init() {
         panelX = RSIntegrationConfig.RS_SIDE_PANEL_X.get();
@@ -139,103 +174,146 @@ public final class RSSidePanelClient {
         var bus = MinecraftForge.EVENT_BUS;
         bus.addListener(RSSidePanelClient::onClientTick);
         bus.addListener(EventPriority.HIGHEST, RSSidePanelClient::onRenderGuiPost);
+        bus.addListener(EventPriority.HIGHEST, RSSidePanelClient::onScreenRenderPost);
         bus.addListener(EventPriority.HIGH, RSSidePanelClient::onKeyInput);
         bus.addListener(EventPriority.HIGHEST, RSSidePanelClient::onScreenMousePressed);
         bus.addListener(EventPriority.HIGHEST, RSSidePanelClient::onScreenMouseReleased);
         bus.addListener(EventPriority.HIGHEST, RSSidePanelClient::onScreenMouseDragged);
         bus.addListener(EventPriority.HIGHEST, RSSidePanelClient::onScreenMouseScrolled);
+        bus.addListener(EventPriority.HIGHEST, RSSidePanelClient::onInputMouseScrolled);
         bus.addListener(EventPriority.HIGHEST, RSSidePanelClient::onScreenKeyPressed);
         bus.addListener(EventPriority.HIGHEST, RSSidePanelClient::onScreenCharTyped);
 
         RSIntegrationMod.LOGGER.info("[RSI] SidePanel client initialized.");
     }
 
-    // ── save ──────────────────────────────────────────────────────
+    // ── save ────────────────────────────────────────────────────
 
     static void savePosition() {
         RSIntegrationConfig.RS_SIDE_PANEL_X.set(panelX);
         RSIntegrationConfig.RS_SIDE_PANEL_Y.set(panelY);
         RSIntegrationConfig.RS_SIDE_PANEL_HIDDEN.set(panelHidden);
-        RSIntegrationConfig.CLIENT_SPEC.save();
     }
 
-    // ── sync callback ─────────────────────────────────────────────
+    // ── item key helper ─────────────────────────────────────────
+
+    private static String keyOf(ItemStack stack) {
+        if (stack == null || stack.getItem() == net.minecraft.world.item.Items.AIR) return "";
+        var rl = ForgeRegistries.ITEMS.getKey(stack.getItem());
+        String key = rl != null ? rl.toString() : "";
+        // hasTag() checks !isEmpty() internally, so it returns false when
+        // count==0 even if the tag is non-null.  Bypass via getTag() so
+        // zero-count delta packets still carry NBT and match the correct slot.
+        if (stack.getTag() != null && !stack.getTag().isEmpty()) {
+            key += "|" + stack.getTag().toString();
+        }
+        return key;
+    }
+
+    // ── sync (full snapshot) ────────────────────────────────────
 
     static void onSyncReceived(RSSidePanelSyncPacket packet) {
         clickLockTicks = 0;
-        cachedItems.clear();
-        cachedItems.addAll(packet.items);
-        cachedTimestamps.clear();
-        cachedTimestamps.addAll(packet.timestamps);
-        cachedCraftableFlags.clear();
-        cachedCraftableFlags.addAll(packet.craftableFlags);
+        itemMap.clear();
+        pendingExtractions.clear(); // full sync overrides all predictions
+        List<ItemStack> items = packet.items;
+        List<Long> timestamps = packet.timestamps;
+        List<Boolean> flags = packet.craftableFlags;
+        for (int i = 0; i < items.size(); i++) {
+            ItemStack s = items.get(i);
+            if (s.isEmpty()) continue;
+            String k = keyOf(s);
+            if (k.isEmpty()) continue;
+            itemMap.put(k, new ItemEntry(s,
+                    i < timestamps.size() ? timestamps.get(i) : 0L,
+                    i < flags.size() ? flags.get(i) : false));
+        }
         totalSlotCount = packet.totalSlotCount;
         networkAvailable = packet.networkAvailable;
         networkName = packet.networkName;
+        displayDirty = true;
         clampScroll();
     }
 
-    // ── PanelRect helper ──────────────────────────────────────────
+    // ── incremental delta ───────────────────────────────────────
 
-    private static int panelW() { return SIDE_COL_W + GRID_CONTENT_W + (needsScrollbar() ? SCROLLBAR_W + 6 : 0); }
-    private static int panelH() { return HEADER_H + visibleRows * SLOT_SIZE + BOTTOM_STRIP_H; }
+    static void onDeltaReceived(ItemStack stack, long timestamp, boolean craftable) {
+        if (stack == null || stack.getItem() == null) return;
+        String k = keyOf(stack);
+        if (k.isEmpty()) return;
+
+        // Server delta is authoritative — clear any pending prediction for this key
+        pendingExtractions.remove(k);
+
+        int count = stack.getCount();
+        if (count <= 0) {
+            itemMap.remove(k);
+        } else {
+            ItemEntry existing = itemMap.get(k);
+            if (existing != null) {
+                existing.stack.setCount(count);
+                existing.timestamp = timestamp;
+                existing.craftable = craftable;
+            } else {
+                itemMap.put(k, new ItemEntry(stack.copy(), timestamp, craftable));
+            }
+        }
+        displayDirty = true;
+    }
+
+    // ── sort guard (RS native: prevent re-sort during shift operations) ──
+
+    private static boolean canSort() {
+        if (gridDragging) return false;
+        return true;
+    }
+
+    // ── layout helpers ──────────────────────────────────────────
+
+    private static int panelWidth() { return GRID_W; }
+
+    private static int panelHeight() {
+        return HEADER_H + visibleRows * SLOT_SIZE + BOTTOM_H;
+    }
+
     private static boolean needsScrollbar() {
         return getTotalRows() > visibleRows;
     }
 
-    private static Rect2i panelRect() {
-        return new Rect2i(panelX, panelY, panelW(), panelH());
-    }
+    // ── containment ─────────────────────────────────────────────
 
-    private static boolean panelContains(double mx, double my) {
-        Rect2i r = panelRect();
-        return mx >= r.getX() && mx < r.getX() + r.getWidth()
-                && my >= r.getY() && my < r.getY() + r.getHeight();
-    }
-
-    private static boolean gridSlotsContains(double mx, double my) {
-        // The grid slot area: from side-col-right-edge, top-header-bottom, spanning 9*18 wide, visibleRows*18 high
-        int gx = panelX + SIDE_COL_W + RS_GRID_LEFT;
-        int gy = panelY + HEADER_H;
-        return mx >= gx && mx < gx + COLUMNS * SLOT_SIZE
-                && my >= gy && my < gy + visibleRows * SLOT_SIZE;
-    }
-
-    private static boolean scrollbarContains(double mx, double my) {
-        if (!needsScrollbar()) return false;
-        int sx = panelX + SIDE_COL_W + GRID_CONTENT_W + 3;
-        int sy = panelY + HEADER_H;
-        return mx >= sx && mx < sx + SCROLLBAR_W
-                && my >= sy && my < sy + visibleRows * SLOT_SIZE;
-    }
-
-    private static boolean sideButtonContains(double mx, double my) {
-        int bx = panelX + 1;
-        int by = panelY + 6;
-        return mx >= bx && mx < bx + SIDE_BTN_SIZE
-                && my >= by && my < by + 5 * (SIDE_BTN_SIZE + SIDE_BTN_GAP);
-    }
-
-    private static boolean searchBarContains(double mx, double my) {
-        if (!searchOpen) return false;
-        int sx = panelX + SIDE_COL_W + RS_SEARCH_X;
-        int sy = panelY + RS_SEARCH_Y;
-        return mx >= sx && mx < sx + RS_SEARCH_W && my >= sy && my < sy + 9;
-    }
-
-    private static boolean headerContains(double mx, double my) {
-        Rect2i r = panelRect();
-        return mx >= r.getX() && mx < r.getX() + r.getWidth()
-                && my >= r.getY() && my < r.getY() + HEADER_H;
-    }
-
-    private static boolean interactiveContains(double mx, double my) {
-        if (panelContains(mx, my)) return true;
-        if (searchBarContains(mx, my)) return true;
+    private static boolean anyPanelContains(double mx, double my) {
+        int pw = panelWidth(), ph = panelHeight();
+        if (mx >= panelX - 2 && mx < panelX + pw + 2
+                && my >= panelY - 2 && my < panelY + ph + 2)
+            return true;
+        if (mx >= panelX + SIDE_BTN_FLOAT_X && mx < panelX
+                && my >= panelY + HEADER_H + 1
+                && my < panelY + HEADER_H + 1 + 5 * SIDE_BTN_PITCH)
+            return true;
+        if (panelHidden && mx >= panelX && mx < panelX + GRID_W
+                && my >= panelY && my < panelY + HEADER_H)
+            return true;
         return false;
     }
 
-    // ── key input ─────────────────────────────────────────────────
+    private static boolean sideButtonContains(double mx, double my) {
+        int bx = panelX + SIDE_BTN_FLOAT_X, by = panelY + HEADER_H + 1;
+        return mx >= bx && mx < bx + SIDE_BTN_SIZE
+                && my >= by && my < by + 5 * SIDE_BTN_PITCH;
+    }
+
+    private static boolean searchBarContains(double mx, double my) {
+        int sx = panelX + 81, sy = panelY + 7;
+        return mx >= sx && mx < sx + 82 && my >= sy && my < sy + 9;
+    }
+
+    private static boolean headerContains(double mx, double my) {
+        return mx >= panelX && mx < panelX + panelWidth()
+                && my >= panelY && my < panelY + HEADER_H;
+    }
+
+    // ── key input ──────────────────────────────────────────────
 
     @SuppressWarnings("resource")
     private static void onKeyInput(InputEvent.Key event) {
@@ -251,15 +329,45 @@ public final class RSSidePanelClient {
             }
             return;
         }
-        if (!panelVisible || panelHidden || !searchFocused) return;
+        if (!panelVisible || panelHidden) return;
+        // JEI recipe/uses keys when hovering over a panel item
+        if (event.getAction() == GLFW.GLFW_PRESS) {
+            int key = event.getKey();
+            if ((key == GLFW.GLFW_KEY_U || key == GLFW.GLFW_KEY_R) && mc.screen == null) {
+                showJeiForHoveredItem(key == GLFW.GLFW_KEY_U);
+                return;
+            }
+        }
+        if (!searchFocused) return;
         if (Minecraft.getInstance().screen != null) return;
-        handleTextInput(event.getKey(), event.getScanCode(), event.getAction());
+        handleTextInput(event.getKey(), event.getScanCode(), event.getAction(), false);
     }
 
     @SuppressWarnings("resource")
     private static void onScreenKeyPressed(ScreenEvent.KeyPressed.Pre event) {
-        if (!panelVisible || panelHidden || !searchFocused) return;
-        handleTextInput(event.getKeyCode(), event.getScanCode(), GLFW.GLFW_PRESS);
+        if (!panelVisible || panelHidden) return;
+        if (searchFocused) {
+            event.setCanceled(true);
+            handleTextInput(event.getKeyCode(), event.getScanCode(), GLFW.GLFW_PRESS, true);
+            return;
+        }
+        if (anyPanelContains(lastMouseX, lastMouseY)) {
+            // JEI recipe (R) / uses (U) for hovered panel item
+            int key = event.getKeyCode();
+            if (key == GLFW.GLFW_KEY_U || key == GLFW.GLFW_KEY_R) {
+                showJeiForHoveredItem(key == GLFW.GLFW_KEY_U);
+                event.setCanceled(true);
+                return;
+            }
+            boolean isModifier = event.getKeyCode() == GLFW.GLFW_KEY_LEFT_SHIFT
+                    || event.getKeyCode() == GLFW.GLFW_KEY_RIGHT_SHIFT
+                    || event.getKeyCode() == GLFW.GLFW_KEY_LEFT_CONTROL
+                    || event.getKeyCode() == GLFW.GLFW_KEY_RIGHT_CONTROL
+                    || event.getKeyCode() == GLFW.GLFW_KEY_LEFT_ALT
+                    || event.getKeyCode() == GLFW.GLFW_KEY_RIGHT_ALT;
+            if (isModifier)
+                event.setCanceled(true);
+        }
     }
 
     @SuppressWarnings("resource")
@@ -274,17 +382,16 @@ public final class RSSidePanelClient {
         }
     }
 
-    private static void handleTextInput(int key, int scanCode, int action) {
+    private static void handleTextInput(int key, int scanCode, int action, boolean screenOpen) {
         if (action != GLFW.GLFW_PRESS) return;
         if (searchWidget == null) return;
 
         if (key == GLFW.GLFW_KEY_ESCAPE) { onSearchBlur(); return; }
         if (key == GLFW.GLFW_KEY_ENTER || key == GLFW.GLFW_KEY_KP_ENTER) {
             if ((searchMode % 2) == 1) {
-                List<ItemStack> filtered = getFilteredAndSortedList();
-                if (!filtered.isEmpty()) {
-                    int idx = cachedItems.indexOf(filtered.get(0));
-                    if (idx >= 0) RSSidePanelNetworkHandler.sendClick(idx,
+                ensureDisplayList();
+                if (!displayList.isEmpty()) {
+                    RSSidePanelNetworkHandler.sendClick(displayList.get(0),
                             RSSidePanelClickPacket.ACTION_EXTRACT_ONE, false);
                 }
             }
@@ -319,12 +426,14 @@ public final class RSSidePanelClient {
             pushJeiFilter();
             return;
         }
-        String ch = glfwKeyToChar(key, scanCode);
-        if (ch != null) {
-            for (int i = 0; i < ch.length(); i++)
-                searchWidget.charTyped(ch.charAt(i),
-                        Screen.hasControlDown() ? GLFW.GLFW_MOD_CONTROL : 0);
-            pushJeiFilter();
+        if (!screenOpen) {
+            String ch = glfwKeyToChar(key, scanCode);
+            if (ch != null) {
+                for (int i = 0; i < ch.length(); i++)
+                    searchWidget.charTyped(ch.charAt(i),
+                            Screen.hasControlDown() ? GLFW.GLFW_MOD_CONTROL : 0);
+                pushJeiFilter();
+            }
         }
     }
 
@@ -366,74 +475,115 @@ public final class RSSidePanelClient {
         if (searchWidget != null) searchText = searchWidget.getValue();
         if (searchChangedSinceBlur && !searchText.isEmpty()) pushSearchHistory();
         searchFocused = false;
-        searchAnimTicks = 0;
     }
 
     private static void pushJeiFilter() {
-        if (searchMode < 4) return;
+        if (searchMode < 2) return;
         try {
-            Class<?> cls = Class.forName("com.refinedmods.refinedstorage.integration.jei.RSJeiPlugin");
-            var rt = cls.getMethod("getRuntime").invoke(null);
-            if (rt != null) {
-                var f = rt.getClass().getMethod("getIngredientFilter").invoke(rt);
-                if (f != null) f.getClass().getMethod("setFilterText", String.class).invoke(f, searchText);
-            }
+            IJeiRuntime rt = com.huanghuang.rsintegration.integration.RSJeiPlugin.getRuntime();
+            if (rt != null) rt.getIngredientFilter().setFilterText(searchText);
         } catch (Exception ignored) {}
     }
 
     private static void pullJeiFilter() {
-        if (searchMode < 4) return;
+        if (searchMode < 2) return;
         try {
-            Class<?> cls = Class.forName("com.refinedmods.refinedstorage.integration.jei.RSJeiPlugin");
-            var rt = cls.getMethod("getRuntime").invoke(null);
+            IJeiRuntime rt = com.huanghuang.rsintegration.integration.RSJeiPlugin.getRuntime();
             if (rt != null) {
-                var f = rt.getClass().getMethod("getIngredientFilter").invoke(rt);
-                if (f != null) {
-                    String t = (String) f.getClass().getMethod("getFilterText").invoke(f);
-                    if (t != null && !t.equals(lastJeiFilterText)) {
-                        lastJeiFilterText = t;
-                        if (!t.equals(searchText)) {
-                            searchText = t;
-                            if (searchWidget != null) searchWidget.setValue(t);
-                            historyIndex = -1;
-                        }
+                String t = rt.getIngredientFilter().getFilterText();
+                if (t != null && !t.equals(lastJeiFilterText)) {
+                    lastJeiFilterText = t;
+                    if (!t.equals(searchText)) {
+                        searchText = t;
+                        if (searchWidget != null) searchWidget.setValue(t);
+                        historyIndex = -1;
+                        displayDirty = true;
                     }
                 }
             }
         } catch (Exception ignored) {}
     }
 
-    // ── rendering ─────────────────────────────────────────────────
+    /** Show JEI recipes (R) or uses (U) for the currently hovered item. */
+    private static void showJeiForHoveredItem(boolean usage) {
+        if (hoveredSlotIndex < 0 || hoveredSlotIndex >= displayList.size()) return;
+        ItemStack stack = displayList.get(hoveredSlotIndex);
+        if (stack.isEmpty()) return;
+        try {
+            IJeiRuntime runtime = com.huanghuang.rsintegration.integration.RSJeiPlugin.getRuntime();
+            if (runtime == null) return;
+            IFocusFactory ff = runtime.getJeiHelpers().getFocusFactory();
+            var focus = ff.createFocus(
+                    usage ? RecipeIngredientRole.INPUT : RecipeIngredientRole.OUTPUT,
+                    VanillaTypes.ITEM_STACK, stack);
+            runtime.getRecipesGui().show(focus);
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-SidePanel] JEI {} failed: {}",
+                    usage ? "showUses" : "showRecipes", e.toString());
+        }
+    }
+
+    // ═════════════════════════════════════════════════════════════
+    //  RENDERING
+    // ═════════════════════════════════════════════════════════════
+
+    // ── Common render entry point ────────────────────────────────
 
     @SuppressWarnings("resource")
-    private static void onRenderGuiPost(RenderGuiEvent.Post event) {
-        var mc = Minecraft.getInstance();
-        if (mc.player == null) return;
-        if (!panelVisible) return;
-        if (mc.screen != null && RS_SCREEN_CLASSES.contains(mc.screen.getClass().getName())) return;
-
+    private static void doRenderContext(GuiGraphics g, Minecraft mc) {
         int guiScale = (int) mc.getWindow().getGuiScale();
         lastMouseX = (int) (mc.mouseHandler.xpos() / guiScale);
         lastMouseY = (int) (mc.mouseHandler.ypos() / guiScale);
 
         visibleRows = gridSizeToRows(mc.getWindow().getGuiScaledHeight());
+        scrollRow = Mth.clamp(scrollRow, 0, Math.max(0, getTotalRows() - visibleRows));
 
-        var pose = event.getGuiGraphics().pose();
+        int sw = mc.getWindow().getGuiScaledWidth();
+        int sh = mc.getWindow().getGuiScaledHeight();
+        panelX = Mth.clamp(panelX, 0, sw - panelWidth());
+        panelY = Mth.clamp(panelY, 0, sh - panelHeight());
+
+        var pose = g.pose();
         pose.pushPose();
-        pose.translate(0, 0, RENDER_Z);
+        pose.translate(0, 0, 150.0F);
 
-        if (panelHidden) {
-            drawCollapsedBar(event.getGuiGraphics());
-        } else {
-            drawPanel(event.getGuiGraphics(), mc);
-        }
+        if (panelHidden)
+            drawCollapsedBar(g);
+        else
+            drawPanel(g, mc);
 
         pose.popPose();
     }
 
+    // ── HUD render (no screen open) ──────────────────────────────
+
+    @SuppressWarnings("resource")
+    private static void onRenderGuiPost(RenderGuiEvent.Post event) {
+        var mc = Minecraft.getInstance();
+        if (mc.player == null || !panelVisible) return;
+        if (mc.screen != null) return;
+
+        doRenderContext(event.getGuiGraphics(), mc);
+    }
+
+    // ── Screen render (e.g. chest, furnace — after ContainerScreen) ──
+
+    @SuppressWarnings("resource")
+    private static void onScreenRenderPost(ScreenEvent.Render.Post event) {
+        var mc = Minecraft.getInstance();
+        if (mc.player == null || !panelVisible) return;
+        if (RS_SCREEN_CLASSES.contains(event.getScreen().getClass().getName())) return;
+
+        doRenderContext(event.getGuiGraphics(), mc);
+    }
+
     private static int gridSizeToRows(int screenH) {
         return switch (gridSize) {
-            case 0 -> Math.max(3, (screenH - panelY - HEADER_H - BOTTOM_STRIP_H) / SLOT_SIZE);
+            case 0 -> {
+                int spaceRows = Math.max(2, (screenH - panelY - HEADER_H - BOTTOM_H) / SLOT_SIZE);
+                int contentRows = getTotalRows();
+                yield Math.min(spaceRows, Math.max(2, contentRows));
+            }
             case 1 -> 3;
             case 2 -> 5;
             default -> 8;
@@ -442,164 +592,137 @@ public final class RSSidePanelClient {
 
     @SuppressWarnings("resource")
     private static void drawPanel(GuiGraphics g, Minecraft mc) {
+        RenderSystem.setShaderColor(1.0F, 1.0F, 1.0F, 1.0F);
+        RenderSystem.enableBlend();
+        RenderSystem.defaultBlendFunc();
+        RenderSystem.enableDepthTest();
+
         var font = mc.font;
-        int px = panelX, py = panelY;
-        int pw = panelW(), ph = panelH();
-
-        // Clamp to screen
-        int sw = mc.getWindow().getGuiScaledWidth();
-        int sh = mc.getWindow().getGuiScaledHeight();
-        panelX = Math.max(0, Math.min(panelX, sw - pw));
-        panelY = Math.max(0, Math.min(panelY, sh - ph));
-
-        // Background fill
-        g.fill(px, py, px + pw, py + ph, 0xCC1B1B1B);
-        // Top border
-        g.fill(px, py, px + pw, py + 1, 0xFF555555);
-        // Bottom border
-        g.fill(px, py + ph - 1, px + pw, py + ph, 0xFF555555);
-        // Left border
-        g.fill(px, py, px + 1, py + ph, 0xFF555555);
-        // Right border
-        g.fill(px + pw - 1, py, px + pw, py + ph, 0xFF555555);
-
-        // Side column background (slightly different shade)
-        g.fill(px + 1, py + 1, px + SIDE_COL_W - 1, py + ph - 1, 0xFF222222);
-
-        // Grid slot area background
-        int gx = px + SIDE_COL_W;
-        int gy = py + HEADER_H;
-        int gridW = COLUMNS * SLOT_SIZE;
+        int gy = panelY + HEADER_H;
         int gridH = visibleRows * SLOT_SIZE;
-        g.fill(gx, gy, gx + gridW, gy + gridH, 0xFF3A3A3A);
 
-        // Draw grid.png header strip as decoration on top
-        g.blit(RS_GRID_TEX, px, py, 0, 0, SIDE_COL_W, HEADER_H); // side column header
-        g.blit(RS_GRID_TEX, gx, py, SIDE_COL_W, 0, GRID_CONTENT_W, HEADER_H); // content header
-        // Right extension
-        if (needsScrollbar()) {
-            g.fill(gx + GRID_CONTENT_W, py, px + pw, py + HEADER_H, 0xFF3A3A3A);
-        } else {
-            g.fill(gx + GRID_CONTENT_W, py, px + pw, py + HEADER_H, 0xFF272727);
+        // ── 1. Header strip ──────────────────────────────────────
+        g.blit(RS_GRID_TEX, panelX, panelY, 0, 0, GRID_W, HEADER_H);
+
+        // ── 2. Row backgrounds ───────────────────────────────────
+        for (int row = 0; row < visibleRows; row++) {
+            int v = row == 0 ? 19 : (row == visibleRows - 1 ? 55 : 37);
+            int ry = gy + row * SLOT_SIZE;
+            g.blit(RS_GRID_TEX, panelX, ry, 0, v, GRID_W, SLOT_SIZE);
         }
 
-        // Bottom strip
-        int by = py + HEADER_H + gridH;
-        g.fill(gx, by, px + pw, by + BOTTOM_STRIP_H, 0xFF2A2A2A);
+        // ── 3. Bottom strip ──────────────────────────────────────
+        int by = gy + gridH;
+        g.blit(RS_GRID_TEX, panelX, by, 0, 73, GRID_W, BOTTOM_H);
 
-        // Network name
-        String label;
-        int labelColor;
+        // ── 4. Header content ────────────────────────────────────
+        String title;
+        int titleColor;
         if (networkAvailable) {
-            label = !networkName.isEmpty() ? networkName
-                    : Component.translatable("item.sophisticatedbackpacks.rs_network.tooltip").getString();
-            labelColor = 0xFF7BAAF7;
+            title = !networkName.isEmpty() ? networkName : "Refined Storage";
+            titleColor = 0xFF7BAAF7;
         } else {
-            label = Component.translatable("rsi.side_panel.no_network").getString();
-            labelColor = 0xFFFF5555;
+            title = Component.translatable("rsi.side_panel.no_network").getString();
+            titleColor = 0xFFFF5555;
         }
-        int maxLabelW = RS_SEARCH_X - RS_GRID_LEFT - 4;
-        String trimmed = font.plainSubstrByWidth(label, maxLabelW);
-        g.drawString(font, trimmed, gx + RS_GRID_LEFT, py + RS_SEARCH_Y + 1, labelColor);
+        int titleMaxW = 73;
+        g.drawString(font, font.plainSubstrByWidth(title, titleMaxW),
+                panelX + GRID_ITEM_X, panelY + 7, titleColor);
 
-        // Search widget
+        // Search box
+        int sx = panelX + 81, sy = panelY + 7, sw = 82;
         if (searchWidget == null) {
-            searchWidget = new EditBox(font, gx + RS_SEARCH_X, py + RS_SEARCH_Y,
-                    RS_SEARCH_W, 9, Component.translatable("rsi.side_panel.search_hint"));
+            searchWidget = new EditBox(font, sx, sy, sw, 9,
+                    Component.translatable("rsi.side_panel.search_hint"));
             searchWidget.setBordered(false);
-            searchWidget.setTextColor(0xFFE0E0E0);
+            searchWidget.setTextColor(0xFFFFFFFF);
+            searchWidget.setTextColorUneditable(0xFF777777);
             searchWidget.setValue(searchText);
-            searchWidget.setResponder(t -> { searchText = t; searchChangedSinceBlur = true; });
+            searchWidget.setResponder(t -> {
+                searchText = t;
+                searchChangedSinceBlur = true;
+                displayDirty = true;
+            });
         }
-        searchWidget.setX(gx + RS_SEARCH_X);
-        searchWidget.setY(py + RS_SEARCH_Y);
+        searchWidget.setX(sx);
+        searchWidget.setY(sy);
+        searchWidget.setWidth(sw);
         searchWidget.setFocused(searchFocused);
         searchWidget.render(g, lastMouseX, lastMouseY, 0);
 
-        // Search animation
-        if (searchFocused || !searchText.isEmpty()) {
-            if (searchAnimTicks < 12) searchAnimTicks++;
-        } else {
-            if (searchAnimTicks > 0) searchAnimTicks--;
-        }
-        if (searchAnimTicks > 0 && searchAnimTicks < 12) {
-            float progress = searchAnimTicks / 12.0f;
-            progress = progress < 0.5f ? 4f * progress * progress * progress
-                    : 1f - (float) Math.pow(-2f * progress + 2f, 3) / 2f;
-            int sfX = gx + RS_SEARCH_X, sfY = py + RS_SEARCH_Y;
-            g.fill(sfX, sfY, sfX + RS_SEARCH_W, sfY + 10,
-                    0x40FFFFFF & ((int)(60 * (1f - progress)) << 24));
-        }
-
-        // Side buttons (RS icons on the left)
-        int sby = py + 6;
+        // ── 5. Side buttons ──────────────────────────────────────
+        hoveredSideButton = -1;
+        int btnX = panelX + SIDE_BTN_FLOAT_X;
+        int sby = panelY + HEADER_H + 1;
         for (int i = 0; i < 5; i++) {
-            drawSideButton(g, px + 1, sby + i * (SIDE_BTN_SIZE + SIDE_BTN_GAP), i);
+            drawSideButton(g, btnX, sby + i * SIDE_BTN_PITCH, i);
         }
 
-        // Fold button (top-right corner)
-        int foldX = px + pw - 14;
-        g.fill(foldX, py + 2, foldX + 12, py + 14, 0x80000000);
-        g.drawString(font, "X", foldX + 3, py + 3, 0xFFBBBBBB);
+        // ── 6. Fold button ───────────────────────────────────────
+        int foldX = panelX + GRID_W - 16;
+        int foldY = panelY + 2;
+        boolean foldHovered = lastMouseX >= foldX && lastMouseX < foldX + 14
+                && lastMouseY >= foldY && lastMouseY < foldY + 14;
+        g.blit(RS_ICONS_TEX, foldX, foldY, foldHovered ? 16 : 0, 128, 14, 14, 256, 256);
 
-        // Items grid
-        List<ItemStack> display = getFilteredAndSortedList();
+        // ── 7. Grid items (SCISSOR CLIPPED) ──────────────────────
+        int itemLeft = panelX + GRID_ITEM_X;
+        int itemTop  = gy;
+        int itemRight = itemLeft + COLUMNS * SLOT_SIZE;
+        int itemBottom = itemTop + gridH;
+        g.enableScissor(itemLeft, itemTop, itemRight, itemBottom);
+
         hoveredSlotIndex = -1;
 
         for (int row = 0; row < visibleRows; row++) {
             for (int col = 0; col < COLUMNS; col++) {
                 int dIdx = (scrollRow + row) * COLUMNS + col;
-                if (dIdx >= display.size()) break;
-                ItemStack stack = display.get(dIdx);
+                if (dIdx >= displayList.size()) break;
+                ItemStack stack = displayList.get(dIdx);
                 if (stack.isEmpty()) continue;
 
-                int ix = gx + RS_GRID_LEFT + col * SLOT_SIZE;
-                int iy = gy + row * SLOT_SIZE;
+                int ix = itemLeft + col * SLOT_SIZE;
+                int iy = itemTop + row * SLOT_SIZE;
 
                 boolean hovered = lastMouseX >= ix && lastMouseX < ix + SLOT_SIZE
                         && lastMouseY >= iy && lastMouseY < iy + SLOT_SIZE;
+                boolean dragHighlight = gridDragging
+                        && gridDragKeys.contains(keyOf(stack));
 
-                // Slot background
-                int bgColor;
-                if (gridDragging && gridDragSlots.contains(cachedItems.indexOf(stack)))
-                    bgColor = 0xFF66B14C;  // green tint
-                else if (hovered)
-                    bgColor = 0xFF7777C7;  // highlight
-                else
-                    bgColor = 0xFF3A3A3A;  // default
-
-                g.fill(ix, iy, ix + 17, iy + 17, bgColor);
-                g.fill(ix + 1, iy + 1, ix + 16, iy + 16, 0xFF202020);
+                if (dragHighlight) {
+                    g.fill(ix + 1, iy + 1, ix + 17, iy + 17, 0x806699CC);
+                } else if (hovered) {
+                    g.fill(ix + 1, iy + 1, ix + 17, iy + 17, 0x80FFFFFF);
+                }
 
                 g.renderItem(stack, ix + 1, iy + 1);
-                g.renderItemDecorations(font, stack, ix + 1, iy + 1, "");
 
                 if (stack.getCount() > 1) {
                     String cnt = formatCount(stack.getCount());
                     var p = g.pose();
                     p.pushPose();
-                    p.translate(ix + 16, iy + 16, 300);
-                    p.scale(0.5f, 0.5f, 1);
-                    int tw = font.width(cnt);
-                    g.drawString(font, cnt, -tw, -font.lineHeight + 1, 0xFFFFFFFF);
+                    p.translate(0, 0, 200);
+                    int tx = ix + 17 - font.width(cnt);
+                    int ty = iy + 10;
+                    g.drawString(font, cnt, tx, ty, 0xFFFFFF);
                     p.popPose();
+                } else {
+                    g.renderItemDecorations(font, stack, ix + 1, iy + 1, "");
                 }
 
                 if (hovered) hoveredSlotIndex = dIdx;
             }
         }
 
-        // Scrollbar
+        g.disableScissor();
+
+        // ── 8. Scrollbar ─────────────────────────────────────────
         drawScrollbar(g);
 
-        // Resize hints (bottom-right corner)
-        int rx = px + pw - 5, ry = py + ph - 5;
-        g.fill(rx, py + 8, rx + 1, ry, 0xFF505050);
-        g.fill(px + 8, ry, rx, ry + 1, 0xFF505050);
+        // ── 9. Tooltips ──────────────────────────────────────────
 
-        // Tooltips
-        if (hoveredSlotIndex >= 0 && hoveredSlotIndex < display.size()) {
-            ItemStack hs = display.get(hoveredSlotIndex);
+        if (hoveredSlotIndex >= 0 && hoveredSlotIndex < displayList.size()) {
+            ItemStack hs = displayList.get(hoveredSlotIndex);
             if (!hs.isEmpty())
                 renderItemTooltip(g, font, hs, lastMouseX, lastMouseY);
         }
@@ -607,91 +730,88 @@ public final class RSSidePanelClient {
             renderSideButtonTooltip(g, font, hoveredSideButton);
     }
 
+    // ── drawSideButton ──────────────────────────────────────────
+
     private static void drawSideButton(GuiGraphics g, int bx, int by, int idx) {
         boolean hovered = lastMouseX >= bx && lastMouseX < bx + SIDE_BTN_SIZE
                 && lastMouseY >= by && lastMouseY < by + SIDE_BTN_SIZE;
         if (hovered) hoveredSideButton = idx;
 
-        // Button background from RS icons.png
-        int bgV = hovered ? 35 : 16;
-        g.blit(RS_ICONS_TEX, bx, by, 238, bgV, SIDE_BTN_SIZE, SIDE_BTN_SIZE);
+        var p = g.pose();
+        p.pushPose();
+        p.translate(0, 0, 20);
 
-        // Icon
+        int bgV = hovered ? 54 : 16;
+        g.blit(RS_ICONS_TEX, bx, by, 238, bgV, SIDE_BTN_SIZE, SIDE_BTN_SIZE, 256, 256);
+
         int u = 0, v = 0;
         switch (idx) {
-            case 0: // sort direction
-                u = sortAsc ? 0 : 16; v = 16; break;
-            case 1: // sort type
-                if (sortMode == 3) { u = 48; v = 48; }
-                else { u = sortMode * 16; v = 32; }
+            case 0: u = viewType * 16; v = 112; break;
+            case 1: u = sortAsc ? 0 : 16; v = 16; break;
+            case 2:
+                switch (sortMode) {
+                    case 0 -> { u = 16; v = 32; }
+                    case 1 -> { u = 0; v = 32; }
+                    case 2 -> { u = 32; v = 32; }
+                    default -> { u = 48; v = 48; }
+                }
                 break;
-            case 2: // search mode
-                u = (searchMode % 2 == 1) ? 16 : 0; v = 96; break;
-            case 3: // grid size
+            case 3: u = (searchMode % 2 == 1) ? 16 : 0; v = 96; break;
+            case 4:
                 u = switch (gridSize) { case 0 -> 112; case 1 -> 64; case 2 -> 80; default -> 96; };
                 v = 64;
                 break;
-            case 4: // view type
-                u = viewType * 16; v = 112; break;
-            default: return;
+            default: { p.popPose(); return; }
         }
-        g.blit(RS_ICONS_TEX, bx + 1, by + 1, u, v, SIDE_BTN_ICON, SIDE_BTN_ICON);
+        g.blit(RS_ICONS_TEX, bx + 1, by + 1, u, v, 16, 16, 256, 256);
+        p.popPose();
     }
+
+    // ── drawScrollbar ───────────────────────────────────────────
 
     private static void drawScrollbar(GuiGraphics g) {
         int totalRows = getTotalRows();
         if (totalRows <= visibleRows) return;
-
         int maxScroll = Math.max(0, totalRows - visibleRows);
         if (maxScroll <= 0) return;
 
-        int sx = panelX + SIDE_COL_W + GRID_CONTENT_W + 3;
-        int sy = panelY + HEADER_H;
-        int trackH = visibleRows * SLOT_SIZE;
-
-        int thumbH = Math.max(12, trackH * visibleRows / Math.max(1, totalRows));
+        int sx = panelX + SCROLLBAR_X;
+        int sy = panelY + HEADER_H + 2;
+        int trackH = visibleRows * SLOT_SIZE - 4;
+        int thumbH = 15;
         int trackAvail = Math.max(1, trackH - thumbH);
         int thumbY = sy + (int) Math.round((double) trackAvail * scrollRow / maxScroll);
 
-        // Track
-        g.fill(sx, sy, sx + SCROLLBAR_W, sy + trackH, 0xFF202020);
-        // Thumb
-        g.fill(sx + 1, thumbY, sx + SCROLLBAR_W - 1, thumbY + thumbH, 0xFF9A9A9A);
+        g.blit(RS_ICONS_TEX, sx, thumbY, 232, 0, 12, 15, 256, 256);
     }
 
+    // ── drawCollapsedBar ────────────────────────────────────────
+
+    @SuppressWarnings("resource")
     private static void drawCollapsedBar(GuiGraphics g) {
-        int x = panelX, y = panelY;
-        int w = 40, h = 18;
-        // Clamp
-        var mc = Minecraft.getInstance();
-        int sw = mc.getWindow().getGuiScaledWidth();
-        int sh = mc.getWindow().getGuiScaledHeight();
-        panelX = Math.max(0, Math.min(panelX, sw - w));
-        panelY = Math.max(0, Math.min(panelY, sh - h));
-
-        g.fill(x, y, x + w, y + h, 0xCC1B1B1B);
-        g.fill(x, y, x + w, y + 1, 0xFF555555);
-        g.fill(x, y + h - 1, x + w, y + h, 0xFF555555);
-        g.fill(x, y, x + 1, y + h, 0xFF555555);
-        g.fill(x + w - 1, y, x + w, y + h, 0xFF555555);
-
         var font = Minecraft.getInstance().font;
-        // Drag dots
-        int dot = 0xFF505050;
-        g.fill(x + 4, y + 6, x + 6, y + 8, dot);
-        g.fill(x + 8, y + 6, x + 10, y + 8, dot);
-        g.fill(x + 4, y + 10, x + 6, y + 12, dot);
-        g.fill(x + 8, y + 10, x + 10, y + 12, dot);
+        // Full-width header strip — a long bar, not a tiny stub
+        g.blit(RS_GRID_TEX, panelX, panelY, 0, 0, GRID_W, HEADER_H);
+
+        String title;
+        int titleColor;
+        if (networkAvailable) {
+            title = !networkName.isEmpty() ? networkName : "Refined Storage";
+            titleColor = 0xFF7BAAF7;
+        } else {
+            title = Component.translatable("rsi.side_panel.no_network").getString();
+            titleColor = 0xFFFF5555;
+        }
+        int titleMaxW = 73;
+        g.drawString(font, font.plainSubstrByWidth(title, titleMaxW),
+                panelX + GRID_ITEM_X, panelY + 7, titleColor);
         // Expand arrow
-        int ax = x + 24;
-        g.fill(ax, y + 5, ax + 8, y + 6, 0xFF888888);
-        g.fill(ax, y + 12, ax + 8, y + 13, 0xFF888888);
-        g.fill(ax, y + 5, ax + 1, y + 13, 0xFF888888);
-        g.fill(ax + 7, y + 5, ax + 8, y + 13, 0xFF888888);
-        g.fill(ax + 3, y + 7, ax + 6, y + 8, 0xFFAAAAAA);
-        g.fill(ax + 4, y + 7, ax + 5, y + 10, 0xFFAAAAAA);
+        g.drawString(font, "▶", panelX + GRID_W - 16, panelY + 5, 0xFFAAAAAA);
     }
 
+    // ── tooltips ────────────────────────────────────────────────
+
+    @SuppressWarnings("resource")
     private static void renderItemTooltip(GuiGraphics g, net.minecraft.client.gui.Font font,
                                           ItemStack stack, int mx, int my) {
         List<Component> lines = new ArrayList<>(stack.getTooltipLines(
@@ -701,8 +821,8 @@ public final class RSSidePanelClient {
                         : net.minecraft.world.item.TooltipFlag.Default.NORMAL));
         int stored = stack.getCount();
         if (stored > 0)
-            lines.add(Component.literal("§7" + Component.translatable("rsi.side_panel.total",
-                    formatCount(stored)).getString()));
+            lines.add(Component.literal("§7" +
+                    Component.translatable("rsi.side_panel.total", formatCount(stored)).getString()));
         g.renderComponentTooltip(font, lines, mx, my);
     }
 
@@ -710,28 +830,35 @@ public final class RSSidePanelClient {
         String label, mode;
         switch (idx) {
             case 0:
-                label = Component.translatable("rsi.side_panel.btn.sort_dir").getString();
-                mode = Component.translatable(sortAsc
-                        ? "rsi.side_panel.btn.sort_dir.asc"
-                        : "rsi.side_panel.btn.sort_dir.desc").getString();
+                label = Component.translatable("rsi.side_panel.btn.view_type").getString();
+                String vk = switch (viewType) {
+                    case 1 -> "rsi.side_panel.btn.view_type.non_craftables";
+                    case 2 -> "rsi.side_panel.btn.view_type.craftables";
+                    default -> "rsi.side_panel.btn.view_type.all";
+                };
+                mode = Component.translatable(vk).getString();
                 break;
             case 1:
+                label = Component.translatable("rsi.side_panel.btn.sort_dir").getString();
+                mode = Component.translatable(sortAsc ? "rsi.side_panel.btn.sort_dir.asc" : "rsi.side_panel.btn.sort_dir.desc").getString();
+                break;
+            case 2:
                 label = Component.translatable("rsi.side_panel.btn.sort_type").getString();
                 String mk = switch (sortMode) {
-                    case 0 -> "rsi.side_panel.btn.sort_type.count";
+                    case 0 -> "rsi.side_panel.btn.sort_type.name";
+                    case 1 -> "rsi.side_panel.btn.sort_type.count";
                     case 2 -> "rsi.side_panel.btn.sort_type.id";
-                    case 3 -> "rsi.side_panel.btn.sort_type.last_modified";
-                    default -> "rsi.side_panel.btn.sort_type.name";
+                    default -> "rsi.side_panel.btn.sort_type.last_modified";
                 };
                 mode = Component.translatable(mk).getString();
                 break;
-            case 2:
+            case 3:
                 label = Component.translatable("rsi.side_panel.btn.search_mode").getString();
                 String sk = switch (searchMode) {
                     case 0 -> "rsi.side_panel.btn.search_mode.normal";
                     case 1 -> "rsi.side_panel.btn.search_mode.normal_auto";
-                    case 2 -> "rsi.side_panel.btn.search_mode.regex";
-                    case 3 -> "rsi.side_panel.btn.search_mode.regex_auto";
+                    case 2 -> "rsi.side_panel.btn.search_mode.jei";
+                    case 3 -> "rsi.side_panel.btn.search_mode.jei_auto";
                     case 4 -> "rsi.side_panel.btn.search_mode.jei_2way";
                     default -> "rsi.side_panel.btn.search_mode.jei_2way_auto";
                 };
@@ -744,7 +871,7 @@ public final class RSSidePanelClient {
                 extra.add(Component.literal("§b" + Component.translatable("rsi.side_panel.search.prefix_tooltip").getString()));
                 g.renderComponentTooltip(font, extra, lastMouseX, lastMouseY);
                 return;
-            case 3:
+            case 4:
                 label = Component.translatable("rsi.side_panel.btn.grid_size").getString();
                 String gk = switch (gridSize) {
                     case 0 -> "rsi.side_panel.btn.grid_size.stretch";
@@ -754,23 +881,14 @@ public final class RSSidePanelClient {
                 };
                 mode = Component.translatable(gk).getString();
                 break;
-            case 4:
-                label = Component.translatable("rsi.side_panel.btn.view_type").getString();
-                String vk = switch (viewType) {
-                    case 1 -> "rsi.side_panel.btn.view_type.non_craftables";
-                    case 2 -> "rsi.side_panel.btn.view_type.craftables";
-                    default -> "rsi.side_panel.btn.view_type.all";
-                };
-                mode = Component.translatable(vk).getString();
-                break;
             default: return;
         }
-        g.renderComponentTooltip(font,
-                List.of(Component.literal(label), Component.literal("§7" + mode)),
-                lastMouseX, lastMouseY);
+        g.renderComponentTooltip(font, List.of(Component.literal(label), Component.literal("§7" + mode)), lastMouseX, lastMouseY);
     }
 
-    // ── screen mouse handlers ─────────────────────────────────────
+    // ════════════════════════════════════════════════════════════
+    //  MOUSE HANDLERS
+    // ════════════════════════════════════════════════════════════
 
     @SuppressWarnings("resource")
     private static void onScreenMousePressed(ScreenEvent.MouseButtonPressed.Pre event) {
@@ -781,30 +899,35 @@ public final class RSSidePanelClient {
         double mx = event.getMouseX(), my = event.getMouseY();
         int btn = event.getButton();
 
-        // Collapsed: any click expands
         if (panelHidden) {
-            if (mx >= panelX && mx < panelX + 40 && my >= panelY && my < panelY + 18) {
-                panelHidden = false;
-                RSIntegrationConfig.RS_SIDE_PANEL_HIDDEN.set(false);
-                RSIntegrationConfig.CLIENT_SPEC.save();
-                searchText = "";
-                if (searchWidget != null) searchWidget.setValue("");
-                searchFocused = false;
-                scrollRow = 0;
-                RSSidePanelNetworkHandler.sendRequestSync();
+            if (mx >= panelX && mx < panelX + GRID_W && my >= panelY && my < panelY + HEADER_H) {
+                if (btn == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
+                    movingPanel = true;
+                    moveStartMouseX = (int) mx;
+                    moveStartMouseY = (int) my;
+                    moveStartPanelX = panelX;
+                    moveStartPanelY = panelY;
+                } else if (btn == GLFW.GLFW_MOUSE_BUTTON_RIGHT) {
+                    panelHidden = false;
+                    RSIntegrationConfig.RS_SIDE_PANEL_HIDDEN.set(false);
+                    searchText = "";
+                    if (searchWidget != null) searchWidget.setValue("");
+                    searchFocused = false;
+                    scrollRow = 0;
+                    RSSidePanelNetworkHandler.sendRequestSync();
+                }
                 event.setCanceled(true);
             }
             return;
         }
 
-        // Outside panel? ignore (but let click-lock and drag states see release)
-        if (!interactiveContains(mx, my)) return;
+        if (!anyPanelContains(mx, my)) return;
         event.setCanceled(true);
 
-        // Search bar
         if (searchBarContains(mx, my)) {
             if (!searchFocused) searchChangedSinceBlur = false;
             searchFocused = true;
+            searchOpen = true;
             if (btn == GLFW.GLFW_MOUSE_BUTTON_RIGHT) {
                 searchWidget.setValue("");
                 searchText = "";
@@ -814,19 +937,15 @@ public final class RSSidePanelClient {
             return;
         }
 
-        // Fold button
-        int foldX = panelX + panelW() - 14;
-        if (mx >= foldX && mx < foldX + 12 && my >= panelY + 2 && my < panelY + 14) {
+        int foldX = panelX + panelWidth() - 16;
+        if (mx >= foldX && mx < foldX + 14 && my >= panelY + 2 && my < panelY + 16) {
             panelHidden = true;
             RSIntegrationConfig.RS_SIDE_PANEL_HIDDEN.set(true);
-            RSIntegrationConfig.CLIENT_SPEC.save();
             onSearchBlur();
             return;
         }
 
-        // Header drag
-        if (btn == GLFW.GLFW_MOUSE_BUTTON_LEFT && headerContains(mx, my)
-                && !searchBarContains(mx, my) && !sideButtonContains(mx, my)) {
+        if (btn == GLFW.GLFW_MOUSE_BUTTON_LEFT && headerContains(mx, my) && !searchBarContains(mx, my)) {
             movingPanel = true;
             moveStartMouseX = (int) mx;
             moveStartMouseY = (int) my;
@@ -836,10 +955,9 @@ public final class RSSidePanelClient {
             return;
         }
 
-        // Side buttons
         if (btn == GLFW.GLFW_MOUSE_BUTTON_LEFT && sideButtonContains(mx, my)) {
-            int relY = (int) my - (panelY + 6);
-            int i = relY / (SIDE_BTN_SIZE + SIDE_BTN_GAP);
+            int relY = (int) my - (panelY + HEADER_H + 1);
+            int i = relY / SIDE_BTN_PITCH;
             if (i >= 0 && i < 5) handleSideButtonClick(i);
             onSearchBlur();
             return;
@@ -850,52 +968,83 @@ public final class RSSidePanelClient {
         if (clickLockTicks > 0) return;
         if (!networkAvailable) return;
 
-        // Scrollbar click
-        if (scrollbarContains(mx, my)) {
+        // Scrollbar
+        int scrollX = panelX + SCROLLBAR_X;
+        int scrollY = panelY + HEADER_H;
+        int scrollH = visibleRows * SLOT_SIZE;
+        if (needsScrollbar() && mx >= scrollX && mx < scrollX + 12
+                && my >= scrollY && my < scrollY + scrollH) {
             scrolling = true;
             updateScrollFromMouse(my);
             return;
         }
 
-        // Grid slot click
-        if (!gridSlotsContains(mx, my)) return;
+        // Grid slots
+        int itemLeft = panelX + GRID_ITEM_X;
+        int itemTop  = panelY + HEADER_H;
+        if (mx < itemLeft || mx >= itemLeft + COLUMNS * SLOT_SIZE
+                || my < itemTop || my >= itemTop + visibleRows * SLOT_SIZE) return;
 
-        int slot = getSlotAt(mx, my);
-        if (slot < 0) return;
+        int col = ((int) mx - itemLeft) / SLOT_SIZE;
+        int row = ((int) my - itemTop) / SLOT_SIZE;
+        if (col < 0 || col >= COLUMNS || row < 0 || row >= visibleRows) return;
 
+        // ── Insert carried item (server-authoritative, no client prediction) ──
         ItemStack carried = mc.player.containerMenu.getCarried();
-
         if (!carried.isEmpty()) {
-            // Insert into RS
             if (btn == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
-                RSSidePanelNetworkHandler.sendInsert(slot, carried.copy());
-                mc.player.containerMenu.setCarried(ItemStack.EMPTY);
+                RSSidePanelNetworkHandler.sendInsert(carried, false);
             } else if (btn == GLFW.GLFW_MOUSE_BUTTON_RIGHT) {
-                ItemStack one = carried.copy();
-                one.setCount(1);
-                RSSidePanelNetworkHandler.sendInsert(slot, one);
-                carried.shrink(1);
-                if (carried.isEmpty()) mc.player.containerMenu.setCarried(ItemStack.EMPTY);
+                RSSidePanelNetworkHandler.sendInsert(carried, true);
             }
-            clickLockTicks = 8;
+            clickLockTicks = 5;
             return;
         }
 
-        // Drag-distribute start (left button on empty hand)
-        if (btn == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
+        // ── Extract / drag from occupied slot ──────────────────────
+        int dIdx = (scrollRow + row) * COLUMNS + col;
+        if (dIdx < 0 || dIdx >= displayList.size()) return;
+        ItemStack clickedItem = displayList.get(dIdx);
+        if (clickedItem.isEmpty()) return;
+
+        // Left drag start (Ctrl+Click = distribute drag)
+        if (btn == GLFW.GLFW_MOUSE_BUTTON_LEFT && Screen.hasControlDown()) {
             gridDragging = true;
-            gridDragButton = 0;
-            gridDragSlots.clear();
-            gridDragSlots.add(slot);
+            gridDragKeys.clear();
+            gridDragKeys.add(keyOf(clickedItem));
             gridDragCrossedSlots = false;
             return;
         }
 
-        // Right click: extract half
-        if (btn == GLFW.GLFW_MOUSE_BUTTON_RIGHT) {
-            RSSidePanelNetworkHandler.sendClick(slot,
-                    RSSidePanelClickPacket.ACTION_EXTRACT_STACK, Screen.hasShiftDown());
-            clickLockTicks = 8;
+        // Matches RS native: left=1, right=half, shift=full-stack-to-inventory
+        int extractCount;
+        byte action;
+        if (Screen.hasShiftDown()) {
+            action = RSSidePanelClickPacket.ACTION_EXTRACT_MAX;
+            extractCount = Math.min(clickedItem.getMaxStackSize(), clickedItem.getCount());
+        } else if (btn == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
+            action = RSSidePanelClickPacket.ACTION_EXTRACT_ONE;
+            extractCount = 1;
+        } else {
+            action = RSSidePanelClickPacket.ACTION_EXTRACT_STACK;
+            extractCount = Math.max(1, clickedItem.getCount() / 2);
+        }
+        RSSidePanelNetworkHandler.sendClick(clickedItem, action, Screen.hasShiftDown());
+        clickLockTicks = 5;
+
+        if (extractCount > 0) {
+            String pk = keyOf(clickedItem);
+            ItemEntry cur = itemMap.get(pk);
+            if (cur != null) {
+                pendingExtractions.put(pk, new PendingExtraction(cur.stack, cur.timestamp, cur.craftable));
+                int remaining = cur.stack.getCount() - extractCount;
+                if (remaining <= 0) {
+                    itemMap.remove(pk);
+                } else {
+                    cur.stack.setCount(remaining);
+                }
+                displayDirty = true;
+            }
         }
     }
 
@@ -904,36 +1053,55 @@ public final class RSSidePanelClient {
         var mc = Minecraft.getInstance();
         if (mc.player == null) return;
 
-        // Commit panel move
         if (movingPanel) {
             movingPanel = false;
+            if (panelHidden) {
+                int dx = (int) event.getMouseX() - moveStartMouseX;
+                int dy = (int) event.getMouseY() - moveStartMouseY;
+                if (Math.abs(dx) < 3 && Math.abs(dy) < 3) {
+                    // Was a click, not a drag — expand
+                    panelHidden = false;
+                    RSIntegrationConfig.RS_SIDE_PANEL_HIDDEN.set(false);
+                    searchText = "";
+                    if (searchWidget != null) searchWidget.setValue("");
+                    searchFocused = false;
+                    scrollRow = 0;
+                    RSSidePanelNetworkHandler.sendRequestSync();
+                }
+            }
             savePosition();
             event.setCanceled(true);
             return;
         }
-
         if (scrolling) {
             scrolling = false;
             event.setCanceled(true);
             return;
         }
-
         if (gridDragging) {
-            if (gridDragSlots.size() > 1 || gridDragCrossedSlots) {
-                RSSidePanelNetworkHandler.sendDragDistribute(new ArrayList<>(gridDragSlots));
-            } else if (!gridDragSlots.isEmpty()) {
-                int s = gridDragSlots.iterator().next();
-                RSSidePanelNetworkHandler.sendClick(s, RSSidePanelClickPacket.ACTION_EXTRACT_ONE, false);
+            if (gridDragKeys.size() > 1 || gridDragCrossedSlots) {
+                List<ItemStack> dragItems = new ArrayList<>();
+                for (String key : gridDragKeys) {
+                    ItemEntry e = itemMap.get(key);
+                    if (e != null && !e.stack.isEmpty()) dragItems.add(e.stack);
+                }
+                if (!dragItems.isEmpty())
+                    RSSidePanelNetworkHandler.sendDragDistribute(dragItems);
+            } else if (!gridDragKeys.isEmpty()) {
+                String key = gridDragKeys.iterator().next();
+                ItemEntry e = itemMap.get(key);
+                if (e != null) {
+                    RSSidePanelNetworkHandler.sendClick(e.stack, RSSidePanelClickPacket.ACTION_EXTRACT_MAX, false);
+                }
             }
             gridDragging = false;
-            gridDragSlots.clear();
-            clickLockTicks = 8;
+            gridDragKeys.clear();
             event.setCanceled(true);
             return;
         }
 
         if (!panelVisible || panelHidden) return;
-        if (interactiveContains(event.getMouseX(), event.getMouseY()) || clickLockTicks > 0)
+        if (anyPanelContains(event.getMouseX(), event.getMouseY()) || clickLockTicks > 0)
             event.setCanceled(true);
     }
 
@@ -944,31 +1112,42 @@ public final class RSSidePanelClient {
         if (mc.player == null) return;
 
         double mx = event.getMouseX(), my = event.getMouseY();
+        if (!(movingPanel || scrolling || gridDragging || anyPanelContains(mx, my)))
+            return;
+        event.setCanceled(true);
 
         if (movingPanel) {
-            panelX = moveStartPanelX + ((int) mx - moveStartMouseX);
-            panelY = moveStartPanelY + ((int) my - moveStartMouseY);
-            event.setCanceled(true);
+            int sw = mc.getWindow().getGuiScaledWidth();
+            int sh = mc.getWindow().getGuiScaledHeight();
+            int pw = panelWidth(), ph = panelHeight();
+            panelX = Mth.clamp(moveStartPanelX + ((int) mx - moveStartMouseX), 0, sw - pw);
+            panelY = Mth.clamp(moveStartPanelY + ((int) my - moveStartMouseY), 0, sh - ph);
             return;
         }
 
         if (scrolling) {
             updateScrollFromMouse(my);
-            event.setCanceled(true);
             return;
         }
 
         if (gridDragging) {
-            int slot = getSlotAt(mx, my);
-            if (slot >= 0) {
-                if (!gridDragSlots.contains(slot)) gridDragCrossedSlots = true;
-                gridDragSlots.add(slot);
+            int itemLeft = panelX + GRID_ITEM_X;
+            int itemTop  = panelY + HEADER_H;
+            int col = ((int) mx - itemLeft) / SLOT_SIZE;
+            int row = ((int) my - itemTop) / SLOT_SIZE;
+            if (col >= 0 && col < COLUMNS && row >= 0 && row < visibleRows) {
+                int dIdx = (scrollRow + row) * COLUMNS + col;
+                if (dIdx >= 0 && dIdx < displayList.size()) {
+                    ItemStack s = displayList.get(dIdx);
+                    if (!s.isEmpty()) {
+                        String k = keyOf(s);
+                        if (!gridDragKeys.contains(k))
+                            gridDragCrossedSlots = true;
+                        gridDragKeys.add(k);
+                    }
+                }
             }
-            event.setCanceled(true);
-            return;
         }
-
-        if (interactiveContains(mx, my)) event.setCanceled(true);
     }
 
     @SuppressWarnings("resource")
@@ -979,41 +1158,42 @@ public final class RSSidePanelClient {
 
         double mx = event.getMouseX(), my = event.getMouseY();
         if (clickLockTicks > 0) { event.setCanceled(true); return; }
-        if (!interactiveContains(mx, my)) return;
+        if (!anyPanelContains(mx, my)) return;
+        event.setCanceled(true);
 
         double delta = event.getScrollDelta();
         if (delta < 0) scrollRow++;
         else if (delta > 0) scrollRow--;
         clampScroll();
+    }
+
+    // ── HUD scroll (no screen open) ─────────────────────────────
+
+    @SuppressWarnings("resource")
+    private static void onInputMouseScrolled(InputEvent.MouseScrollingEvent event) {
+        var mc = Minecraft.getInstance();
+        if (mc.player == null || !panelVisible || panelHidden) return;
+        if (mc.screen != null) return; // let ScreenEvent handler take it
+
+        double mx = lastMouseX, my = lastMouseY;
+        if (!anyPanelContains(mx, my)) return;
         event.setCanceled(true);
+
+        double delta = event.getScrollDelta();
+        if (delta < 0) scrollRow++;
+        else if (delta > 0) scrollRow--;
+        clampScroll();
     }
 
-    // ── mouse helpers ─────────────────────────────────────────────
-
-    private static int getSlotAt(double mx, double my) {
-        int gx = panelX + SIDE_COL_W + RS_GRID_LEFT;
-        int gy = panelY + HEADER_H;
-        int col = ((int) mx - gx) / SLOT_SIZE;
-        int row = ((int) my - gy) / SLOT_SIZE;
-        if (col < 0 || col >= COLUMNS || row < 0 || row >= visibleRows) return -1;
-
-        List<ItemStack> display = getFilteredAndSortedList();
-        int dIdx = (scrollRow + row) * COLUMNS + col;
-        if (dIdx < 0 || dIdx >= display.size()) return -1;
-
-        ItemStack stack = display.get(dIdx);
-        int realIdx = cachedItems.indexOf(stack);
-        return realIdx >= 0 ? realIdx : -1;
-    }
+    // ── helpers ─────────────────────────────────────────────────
 
     private static void updateScrollFromMouse(double my) {
         int totalRows = getTotalRows();
         int maxScroll = Math.max(0, totalRows - visibleRows);
         if (maxScroll <= 0) { scrollRow = 0; return; }
-
+        int trackY = panelY + HEADER_H;
         int trackH = visibleRows * SLOT_SIZE;
-        int sy = panelY + HEADER_H;
-        double t = (my - sy) / Math.max(1, trackH);
+        double t = (my - trackY) / Math.max(1, trackH);
         t = Mth.clamp(t, 0, 1);
         scrollRow = (int) Math.round(t * maxScroll);
         clampScroll();
@@ -1021,26 +1201,27 @@ public final class RSSidePanelClient {
 
     private static void handleSideButtonClick(int idx) {
         switch (idx) {
-            case 0: sortAsc = !sortAsc; break;
-            case 1: sortMode = (sortMode + 1) % 4; break;
-            case 2:
-                boolean wasJei = searchMode >= 4;
+            case 0: viewType = (viewType + 1) % 3; scrollRow = 0; break;
+            case 1: sortAsc = !sortAsc; break;
+            case 2: sortMode = (sortMode + 1) % 4; break;
+            case 3:
+                boolean wasJei = searchMode >= 2;
                 searchMode = (searchMode + 1) % 6;
-                if (searchMode >= 4) {
-                    try {
-                        Class<?> cls = Class.forName(
-                                "com.refinedmods.refinedstorage.integration.jei.RSJeiPlugin");
-                        if (cls.getMethod("getRuntime").invoke(null) == null) searchMode = 0;
-                    } catch (Exception e) { searchMode = 0; }
+                if (searchMode >= 2) {
+                    if (com.huanghuang.rsintegration.integration.RSJeiPlugin.getRuntime() == null)
+                        searchMode = 0;
                 }
-                if (!wasJei && searchMode >= 4) { lastJeiFilterText = ""; pullJeiFilter(); }
+                if (!wasJei && searchMode >= 2) {
+                    lastJeiFilterText = "";
+                    pullJeiFilter();
+                }
                 break;
-            case 3: gridSize = (gridSize + 1) % 4; scrollRow = 0; break;
-            case 4: viewType = (viewType + 1) % 3; scrollRow = 0; break;
+            case 4: gridSize = (gridSize + 1) % 4; scrollRow = 0; break;
         }
+        displayDirty = true;
     }
 
-    // ── tick ──────────────────────────────────────────────────────
+    // ── tick ────────────────────────────────────────────────────
 
     @SuppressWarnings("resource")
     private static void onClientTick(TickEvent.ClientTickEvent event) {
@@ -1051,35 +1232,60 @@ public final class RSSidePanelClient {
 
         tickCounter++;
         if (clickLockTicks > 0) clickLockTicks--;
+        // Safety: reset gridDragging if mouse button isn't held (prevents stuck sorts)
+        if (gridDragging && org.lwjgl.glfw.GLFW.glfwGetMouseButton(mc.getWindow().getWindow(), org.lwjgl.glfw.GLFW.GLFW_MOUSE_BUTTON_LEFT) == org.lwjgl.glfw.GLFW.GLFW_RELEASE)
+            gridDragging = false;
 
         int guiScale = (int) mc.getWindow().getGuiScale();
         int mx = (int) (mc.mouseHandler.xpos() / guiScale);
         int my = (int) (mc.mouseHandler.ypos() / guiScale);
         hoveredSideButton = -1;
 
-        // No-Screen fallback: handle drag states (screen events won't fire)
         if (mc.screen == null) {
-            if (scrolling) updateScrollFromMouse(my);
+            if (scrolling && !panelHidden) updateScrollFromMouse(my);
             if (movingPanel) {
-                panelX = moveStartPanelX + (mx - moveStartMouseX);
-                panelY = moveStartPanelY + (my - moveStartMouseY);
+                int sw = mc.getWindow().getGuiScaledWidth();
+                int sh = mc.getWindow().getGuiScaledHeight();
+                panelX = Mth.clamp(moveStartPanelX + (mx - moveStartMouseX), 0, sw - panelWidth());
+                panelY = Mth.clamp(moveStartPanelY + (my - moveStartMouseY), 0, sh - panelHeight());
             }
         }
 
-        if (searchMode >= 4 && tickCounter % 5 == 0) pullJeiFilter();
-        if (panelHidden) return;
+        if (searchMode >= 2 && tickCounter % 5 == 0) pullJeiFilter();
 
-        // Periodic sync
-        if (tickCounter % 10 == 0) {
+        // Periodic silent full sync to correct any client-side drift (60s)
+        if (tickCounter % 1200 == 0 && networkAvailable && !panelHidden) {
             RSSidePanelNetworkHandler.sendRequestSync();
+        }
+
+        // Timeout stale pending extractions (3s).  Reverts itemMap to the
+        // pre-prediction snapshot and marks display dirty so the HUD reflects
+        // reality even if the server delta never arrived.
+        if (!pendingExtractions.isEmpty() && tickCounter % 20 == 0) {
+            long now = System.currentTimeMillis();
+            var it = pendingExtractions.entrySet().iterator();
+            while (it.hasNext()) {
+                var pe = it.next();
+                if (now - pe.getValue().createdAt > 3000) {
+                    // Delta never arrived — revert to pre-prediction snapshot.
+                    PendingExtraction p = pe.getValue();
+                    if (p.previousStack.getCount() > 0) {
+                        itemMap.put(pe.getKey(), new ItemEntry(p.previousStack.copy(), p.timestamp, p.craftable));
+                    } else {
+                        itemMap.remove(pe.getKey());
+                    }
+                    it.remove();
+                    displayDirty = true;
+                }
+            }
         }
     }
 
-    // ── helpers ───────────────────────────────────────────────────
+    // ── data helpers ────────────────────────────────────────────
 
     private static int getTotalRows() {
-        List<ItemStack> list = getFilteredAndSortedList();
-        return (int) Math.ceil(list.size() / (double) COLUMNS);
+        ensureDisplayList();
+        return (int) Math.ceil(displayList.size() / (double) COLUMNS);
     }
 
     private static void clampScroll() {
@@ -1088,24 +1294,33 @@ public final class RSSidePanelClient {
         if (scrollRow > max) scrollRow = max;
     }
 
-    private static String formatCount(int count) {
-        if (count >= 1_000_000_000)
-            return (count / 1_000_000_000) + "." + ((count / 100_000_000) % 10) + "B";
-        if (count >= 1_000_000) {
-            if (count >= 100_000_000) return (count / 1_000_000) + "M";
-            return (count / 1_000_000) + "." + ((count / 100_000) % 10) + "M";
+    // ── lazy display list rebuild ───────────────────────────────
+
+    /** Called at the start of every render frame. Only rebuilds when dirty. */
+    private static void ensureDisplayList() {
+        if (!displayDirty) return;
+        rebuildDisplayList();
+    }
+
+    private static boolean matchesPinyin(String itemName, String query) {
+        try {
+            String pinyin = PinyinHelper.convertToPinyinString(itemName, "",
+                    PinyinFormat.WITHOUT_TONE);
+            return pinyin.toLowerCase().contains(query.toLowerCase());
+        } catch (Exception e) {
+            return false;
         }
-        if (count >= 1_000) {
-            if (count >= 100_000) return (count / 1_000) + "K";
-            return (count / 1_000) + "." + ((count / 100) % 10) + "K";
-        }
-        return String.valueOf(count);
     }
 
     @SuppressWarnings("resource")
-    private static List<ItemStack> getFilteredAndSortedList() {
-        List<ItemStack> list = new ArrayList<>(cachedItems);
+    private static void rebuildDisplayList() {
+        displayDirty = false;
+        List<ItemStack> list = new ArrayList<>();
+        for (ItemEntry e : itemMap.values()) {
+            if (!e.stack.isEmpty()) list.add(e.stack);
+        }
 
+        // Search filter
         if (!searchText.isEmpty()) {
             String query = searchText.trim();
             if (query.startsWith("@")) {
@@ -1115,7 +1330,8 @@ public final class RSSidePanelClient {
                     if (key == null) return true;
                     String modId = key.getNamespace().toLowerCase();
                     if (modId.contains(mq)) return false;
-                    String modName = ModList.get().getModContainerById(key.getNamespace())
+                    String modName = ModList.get()
+                            .getModContainerById(key.getNamespace())
                             .map(c -> c.getModInfo().getDisplayName().toLowerCase()).orElse("");
                     return !modName.contains(mq);
                 });
@@ -1133,51 +1349,87 @@ public final class RSSidePanelClient {
                     return true;
                 });
             } else {
-                String lower = query.toLowerCase();
-                list.removeIf(stack -> {
-                    if (stack.getHoverName().getString().toLowerCase().contains(lower)) return false;
-                    var key = ForgeRegistries.ITEMS.getKey(stack.getItem());
-                    return key == null || !key.getPath().contains(lower);
-                });
+                // Auto-detect regex: try compiling as pattern first; fall back to plain text
+                try {
+                    java.util.regex.Pattern p = java.util.regex.Pattern.compile(query,
+                            java.util.regex.Pattern.CASE_INSENSITIVE);
+                    list.removeIf(stack -> {
+                        String name = stack.getHoverName().getString();
+                        if (p.matcher(name).find()) return false;
+                        return !matchesPinyin(name, query);
+                    });
+                } catch (java.util.regex.PatternSyntaxException e) {
+                    String lower = query.toLowerCase();
+                    list.removeIf(stack -> {
+                        String name = stack.getHoverName().getString();
+                        if (name.toLowerCase().contains(lower)) return false;
+                        if (matchesPinyin(name, lower)) return false;
+                        var key = ForgeRegistries.ITEMS.getKey(stack.getItem());
+                        return key == null || !key.getPath().contains(lower);
+                    });
+                }
             }
         }
 
+        // View type filter
         if (viewType != 0) {
             list.removeIf(stack -> {
-                int idx = cachedItems.indexOf(stack);
-                boolean craftable = idx >= 0 && idx < cachedCraftableFlags.size()
-                        && cachedCraftableFlags.get(idx);
+                ItemEntry e = itemMap.get(keyOf(stack));
+                boolean craftable = e != null && e.craftable;
                 return viewType == 1 ? craftable : !craftable;
             });
         }
 
-        switch (sortMode) {
-            case 0 -> {
-                if (sortAsc) list.sort(Comparator.comparingInt(ItemStack::getCount));
-                else list.sort((a, b) -> Integer.compare(b.getCount(), a.getCount()));
-            }
-            case 1 -> {
-                if (sortAsc) list.sort(Comparator.comparing(s -> s.getHoverName().getString().toLowerCase()));
-                else list.sort(Comparator.comparing(
-                        (ItemStack s) -> s.getHoverName().getString().toLowerCase()).reversed());
-            }
-            case 2 -> list.sort((a, b) -> {
-                var ka = ForgeRegistries.ITEMS.getKey(a.getItem());
-                var kb = ForgeRegistries.ITEMS.getKey(b.getItem());
-                String ia = ka != null ? ka.toString() : "zzz:zzz";
-                String ib = kb != null ? kb.toString() : "zzz:zzz";
-                return sortAsc ? ia.compareToIgnoreCase(ib) : ib.compareToIgnoreCase(ia);
-            });
-            case 3 -> {
-                int idx = sortAsc ? 1 : -1;
-                list.sort((a, b) -> {
-                    int ai = cachedItems.indexOf(a), bi = cachedItems.indexOf(b);
-                    long ta = ai >= 0 && ai < cachedTimestamps.size() ? cachedTimestamps.get(ai) : 0L;
-                    long tb = bi >= 0 && bi < cachedTimestamps.size() ? cachedTimestamps.get(bi) : 0L;
-                    return idx * Long.compare(tb, ta);
+        // Sort (only when canSort)
+        if (canSort()) {
+            switch (sortMode) {
+                case 0 -> {
+                    if (sortAsc) list.sort(Comparator.comparing(s -> s.getHoverName().getString().toLowerCase()));
+                    else list.sort(Comparator.comparing((ItemStack s) -> s.getHoverName().getString().toLowerCase()).reversed());
+                }
+                case 1 -> {
+                    if (sortAsc) list.sort(Comparator.comparingInt(ItemStack::getCount));
+                    else list.sort((a, b) -> Integer.compare(b.getCount(), a.getCount()));
+                }
+                case 2 -> list.sort((a, b) -> {
+                    var ka = ForgeRegistries.ITEMS.getKey(a.getItem());
+                    var kb = ForgeRegistries.ITEMS.getKey(b.getItem());
+                    String ia = ka != null ? ka.toString() : "zzz:zzz";
+                    String ib = kb != null ? kb.toString() : "zzz:zzz";
+                    return sortAsc ? ia.compareToIgnoreCase(ib) : ib.compareToIgnoreCase(ia);
                 });
+                case 3 -> {
+                    if (sortAsc) list.sort(Comparator.comparingLong(
+                            s -> {
+                                ItemEntry e = itemMap.get(keyOf(s));
+                                return e != null ? e.timestamp : 0L;
+                            }));
+                    else list.sort((a, b) -> {
+                        ItemEntry ea = itemMap.get(keyOf(a));
+                        ItemEntry eb = itemMap.get(keyOf(b));
+                        return Long.compare(
+                                eb != null ? eb.timestamp : 0L,
+                                ea != null ? ea.timestamp : 0L);
+                    });
+                }
             }
         }
-        return list;
+
+        displayList.clear();
+        displayList.addAll(list);
+    }
+
+    private static String formatCount(int count) {
+        if (count >= 1_000_000_000)
+            return (count / 1_000_000_000) + "." + ((count / 100_000_000) % 10) + "B";
+        if (count >= 1_000_000) {
+            if (count >= 100_000_000) return (count / 1_000_000) + "M";
+            return (count / 1_000_000) + "." + ((count / 100_000) % 10) + "M";
+        }
+        if (count >= 1_000) {
+            if (count >= 100_000) return (count / 1_000) + "K";
+            return (count / 1_000) + "." + ((count / 100) % 10) + "K";
+        }
+        return String.valueOf(count);
     }
 }

@@ -48,6 +48,7 @@ public final class CraftingPlanScreen extends Screen {
     private int missingAreaHeight;
     private int materialAreaTop;
     private int materialAreaHeight;
+    private int ticksOpen;
 
     // OR-path selection state
     private record AltChoice(ResourceLocation recipeId, String modTypeId) {}
@@ -66,6 +67,7 @@ public final class CraftingPlanScreen extends Screen {
     @Override
     protected void init() {
         super.init();
+        altChoices.clear();
         Font font = minecraft.font;
         int contentW = width - 40;
 
@@ -132,6 +134,10 @@ public final class CraftingPlanScreen extends Screen {
 
     @Override
     public void render(GuiGraphics gfx, int mouseX, int mouseY, float partialTick) {
+        ticksOpen++;
+        float fade = Math.min(1f, ticksOpen / 8f);
+        float ease = 1f - (1f - fade) * (1f - fade); // easeOutQuad
+
         renderBackground(gfx);
         super.render(gfx, mouseX, mouseY, partialTick);
 
@@ -139,13 +145,14 @@ public final class CraftingPlanScreen extends Screen {
         int contentW = width - 40;
         int left = 20;
 
-        // Title
-        gfx.drawCenteredString(font, title, width / 2, 10, 0xFFFFFF);
+        // Title — slide in from top
+        int titleY = (int) (10 - (1f - ease) * 20);
+        gfx.drawCenteredString(font, title, width / 2, titleY, fadeColor(0xFFFFFF, ease));
 
         // Subtitle: result + status
         String statusKey = plan.success() ? "rsi.plan.status_ok" : "rsi.plan.status_fail";
         int statusColor = plan.success() ? 0x55FF55 : 0xFF5555;
-        gfx.drawCenteredString(font, Component.translatable(statusKey), width / 2, 22, statusColor);
+        gfx.drawCenteredString(font, Component.translatable(statusKey), width / 2, titleY + 12, fadeColor(statusColor, ease));
 
         // Steps area (scrollable) — reserve space for missing + material area
         int areaTop = STEPS_TOP;
@@ -584,6 +591,11 @@ public final class CraftingPlanScreen extends Screen {
     public boolean mouseReleased(double mx, double my, int button) {
         dragging = false;
         return super.mouseReleased(mx, my, button);
+    }
+
+    private static int fadeColor(int color, float alpha) {
+        int a = (int) (0xFF * alpha);
+        return (a << 24) | (color & 0x00FFFFFF);
     }
 
     @Override

@@ -5,7 +5,7 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 public final class WizardsRebornRSModule {
 
     public static void initCommon() {
-        WRWandNetworkHandler.register();
+        com.huanghuang.rsintegration.module.ModCraftNetworkHandlers.registerWRWand();
         RSIntegrationMod.LOGGER.debug("Wizards Reborn RS module common init done.");
     }
 }

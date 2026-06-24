@@ -11,10 +11,20 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraftforge.fml.ModList;
 import org.jetbrains.annotations.NotNull;
 
+import javax.annotation.Nullable;
+
 @JeiPlugin
 public final class RSJeiPlugin implements IModPlugin {
 
     private static final ResourceLocation UID = new ResourceLocation(RSIntegrationMod.MOD_ID, "main");
+
+    @Nullable
+    private static IJeiRuntime cachedRuntime;
+
+    @Nullable
+    public static IJeiRuntime getRuntime() {
+        return cachedRuntime;
+    }
 
     @Override
     public @NotNull ResourceLocation getPluginUid() {
@@ -23,6 +33,7 @@ public final class RSJeiPlugin implements IModPlugin {
 
     @Override
     public void onRuntimeAvailable(@NotNull IJeiRuntime jeiRuntime) {
+        cachedRuntime = jeiRuntime;
         if (!RSIntegrationConfig.ENABLE_JEI.get()) return;
         if (RSIntegrationConfig.ENABLE_GOETY.get() && ModList.get().isLoaded("goety")) {
             GoetyRSModule.onJeiRuntimeAvailable(jeiRuntime);
@@ -31,6 +42,7 @@ public final class RSJeiPlugin implements IModPlugin {
 
     @Override
     public void onRuntimeUnavailable() {
+        cachedRuntime = null;
         if (RSIntegrationConfig.ENABLE_GOETY.get() && ModList.get().isLoaded("goety")) {
             GoetyRSModule.onJeiRuntimeUnavailable();
         }

@@ -122,18 +122,40 @@ public final class GoetyGuiSelectRitualPacket {
             return false;
         }
 
-        // 2. Collect activation item
+        // 2. Validate ritual prerequisites BEFORE touching any inventory/pedestals
+        try {
+            java.lang.reflect.Method canStartMethod = ritual.getClass().getMethod("canStart",
+                    Level.class, BlockPos.class, net.minecraft.world.entity.player.Player.class);
+            boolean ok = (boolean) canStartMethod.invoke(ritual, level, pos, player);
+            if (!ok) {
+                player.displayClientMessage(Component.translatable("rsi.goety.error.ritual_prerequisites"), true);
+                return false;
+            }
+        } catch (NoSuchMethodException ignored) {
+            // Older Goety versions may not have canStart
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Goety] canStart check failed, proceeding anyway", e);
+        }
+
+        // 3. Save old pedestal items so we can restore them on failure
+        List<ItemStack> oldPedestalItems = new ArrayList<>();
+        for (PedestalBlockEntity p : pedestals) {
+            oldPedestalItems.add(extractAllFromPedestal(p));
+        }
+
+        // 4. Collect activation item
         Ingredient activationIngredient = recipe.getActivationItem();
         ItemStack activationItem = takeFromHandler(altar.itemStackHandler, 0, activationIngredient, 1);
         if (activationItem.isEmpty()) {
             activationItem = CraftPacketUtils.ensureMaterialAvailable(player, altarDim, pos, activationIngredient, 1);
         }
         if (activationItem.isEmpty()) {
+            restorePedestalItems(pedestals, oldPedestalItems);
             player.displayClientMessage(Component.translatable("rsi.goety.error.missing_activation", CraftPacketUtils.describeIngredient(activationIngredient)), true);
             return false;
         }
 
-        // 3. Collect ingredients
+        // 5. Collect ingredients
         List<ItemStack> extractedIngredients = new ArrayList<>();
         for (Ingredient ingredient : requiredIngredients) {
             ItemStack extracted = ItemStack.EMPTY;
@@ -146,42 +168,28 @@ public final class GoetyGuiSelectRitualPacket {
             }
             if (extracted.isEmpty()) {
                 refundItems(player, activationItem, extractedIngredients);
+                restorePedestalItems(pedestals, oldPedestalItems);
                 player.displayClientMessage(Component.translatable("rsi.generic.error.missing_materials", CraftPacketUtils.describeIngredient(ingredient)), true);
                 return false;
             }
             extractedIngredients.add(extracted);
         }
 
-        // 4. Place ingredients on pedestals
+        // 6. Place ingredients on pedestals
         for (int i = 0; i < requiredIngredients.size(); i++) {
             PedestalBlockEntity pedestal = pedestals.get(i);
             final int idx = i;
             pedestal.itemStackHandler.ifPresent(handler -> {
-                ItemStack existing = handler.extractItem(0, 64, false);
-                if (!existing.isEmpty()) {
-                    giveToPlayer(player, existing);
-                }
                 handler.insertItem(0, extractedIngredients.get(idx).copy(), false);
             });
         }
 
-        // 5. Validate ritual prerequisites (sacrifice, biome, time, etc.)
-        try {
-            java.lang.reflect.Method canStart = ritual.getClass().getMethod("canStart",
-                    Level.class, BlockPos.class, net.minecraft.world.entity.player.Player.class);
-            boolean ok = (boolean) canStart.invoke(ritual, level, pos, player);
-            if (!ok) {
-                refundItems(player, activationItem, extractedIngredients);
-                player.displayClientMessage(Component.translatable("rsi.goety.error.ritual_prerequisites"), true);
-                return false;
-            }
-        } catch (NoSuchMethodException ignored) {
-            // Older Goety versions may not have canStart
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Goety] canStart check failed, proceeding anyway", e);
+        // 7. Give saved old pedestal items to player
+        for (ItemStack old : oldPedestalItems) {
+            if (!old.isEmpty()) giveToPlayer(player, old);
         }
 
-        // 6. Start ritual
+        // 8. Start ritual
         altar.startRitual(player, activationItem, recipe);
         RSIntegrationMod.LOGGER.debug("Player {} started Goety ritual '{}' via remote crafting.", player.getName().getString(), recipe.getId());
         return true;
@@ -196,6 +204,24 @@ public final class GoetyGuiSelectRitualPacket {
             }
             return ItemStack.EMPTY;
         }).orElse(ItemStack.EMPTY);
+    }
+
+    private static ItemStack extractAllFromPedestal(PedestalBlockEntity pedestal) {
+        if (pedestal == null) return ItemStack.EMPTY;
+        return pedestal.itemStackHandler.map(handler ->
+                handler.extractItem(0, 64, false)
+        ).orElse(ItemStack.EMPTY);
+    }
+
+    private static void restorePedestalItems(List<PedestalBlockEntity> pedestals, List<ItemStack> items) {
+        for (int i = 0; i < pedestals.size() && i < items.size(); i++) {
+            ItemStack item = items.get(i);
+            if (!item.isEmpty()) {
+                final int idx = i;
+                pedestals.get(i).itemStackHandler.ifPresent(handler ->
+                        handler.insertItem(0, item.copy(), false));
+            }
+        }
     }
 
     private static ItemStack takeFromHandler(net.minecraftforge.common.util.LazyOptional<?> lazyHandler,

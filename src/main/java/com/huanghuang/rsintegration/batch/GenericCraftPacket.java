@@ -108,13 +108,27 @@ public final class GenericCraftPacket {
     public static GenericCraftPacket decode(FriendlyByteBuf buf) {
         ResourceLocation recipeId = buf.readResourceLocation();
         boolean preview = buf.readBoolean();
-        int forcedCount = buf.readVarInt();
+        int forcedCount = Math.min(buf.readVarInt(), 128);
         Map<String, String> forced = new HashMap<>();
         for (int i = 0; i < forcedCount; i++) {
-            forced.put(buf.readUtf(), buf.readUtf());
+            String key = buf.readUtf();
+            String value = buf.readUtf();
+            if (!key.isEmpty() && !value.isEmpty()
+                    && ResourceLocation.tryParse(key) != null
+                    && ResourceLocation.tryParse(value) != null) {
+                forced.put(key, value);
+            }
         }
         ResourceLocation dim = buf.readBoolean() ? buf.readResourceLocation() : null;
-        net.minecraft.core.BlockPos pos = buf.readBoolean() ? buf.readBlockPos() : null;
+        net.minecraft.core.BlockPos pos = null;
+        if (buf.readBoolean()) {
+            net.minecraft.core.BlockPos raw = buf.readBlockPos();
+            if (raw.getX() >= -30000000 && raw.getX() <= 30000000
+                    && raw.getY() >= -64 && raw.getY() <= 2048
+                    && raw.getZ() >= -30000000 && raw.getZ() <= 30000000) {
+                pos = raw;
+            }
+        }
         return new GenericCraftPacket(recipeId, preview, forced, dim, pos);
     }
 
@@ -238,14 +252,13 @@ public final class GenericCraftPacket {
                 if (CraftPacketUtils.executeCraftingSteps(player, stepIds, network)) {
                     ItemStack result = ModRecipeIndex.tryGetResultItem(recipe, player.serverLevel().registryAccess());
                     if (!result.isEmpty()) {
-                        // executeCraftingSteps flushes chain outputs into RS;
-                        // extract the final product for the player.
-                        ItemStack extracted = network.extractItem(result, result.getCount(),
-                                com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                        ItemStack extracted = safeExtractResult(network, result);
                         if (!extracted.isEmpty()) {
                             ItemHandlerHelper.giveItemToPlayer(player, extracted);
                             player.displayClientMessage(
                                     Component.translatable("rsi.generic.info.resolved", extracted.getCount()), true);
+                        } else {
+                            RSIntegrationMod.LOGGER.warn("[RSI-Generic] result extract returned empty for {}", recipeId);
                         }
                     }
                 } else {
@@ -283,12 +296,13 @@ public final class GenericCraftPacket {
                 if (CraftPacketUtils.executeCraftingSteps(player, stepIds, network)) {
                     ItemStack result = ModRecipeIndex.tryGetResultItem(recipe, player.serverLevel().registryAccess());
                     if (!result.isEmpty()) {
-                        ItemStack extracted = network.extractItem(result, result.getCount(),
-                                com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                        ItemStack extracted = safeExtractResult(network, result);
                         if (!extracted.isEmpty()) {
                             ItemHandlerHelper.giveItemToPlayer(player, extracted);
                             player.displayClientMessage(
                                     Component.translatable("rsi.generic.info.resolved", extracted.getCount()), true);
+                        } else {
+                            RSIntegrationMod.LOGGER.warn("[RSI-Generic] result extract returned empty for {}", recipeId);
                         }
                     }
                 } else {
@@ -478,7 +492,7 @@ public final class GenericCraftPacket {
             for (var e : available.entrySet()) {
                 ItemStack s = new ItemStack(e.getKey().item(), e.getValue());
                 if (e.getKey().tag() != null) {
-                    try { s.setTag(net.minecraft.nbt.TagParser.parseTag(e.getKey().tag())); } catch (Exception ignored) {}
+                    try { s.setTag(net.minecraft.nbt.TagParser.parseTag(e.getKey().tag())); } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] NBT parse failed for key {}: {}", e.getKey(), ex.toString()); }
                 }
                 availableStacks.add(s);
             }
@@ -776,11 +790,16 @@ public final class GenericCraftPacket {
         // Compute material availability for ALL items in the plan.
         // neededCounts: displayItem → how many needed (negative if produced > consumed)
         // itemSource: displayItem → original Ingredient (may be a tag, for aggregate counting)
+        // Use a FRESH copy of itemAvailable — displayAvailable was already
+        // mutated by the step/target display pass above, and reusing it here
+        // causes matchBestAvailable fallback to return arbitrary items from
+        // the ingredient array, producing bizarre material requirements.
+        Map<Item, Integer> matAvailable = new HashMap<>(itemAvailable);
         Map<Item, Integer> neededCounts = new LinkedHashMap<>();
         Map<Item, Ingredient> itemSource = new HashMap<>();
         for (Ingredient ing : recipeIngredients) {
             if (ing.isEmpty()) continue;
-            Item matched = matchAndConsume(ing, displayAvailable);
+            Item matched = matchAndConsume(ing, matAvailable);
             if (matched != null) {
                 neededCounts.merge(matched, 1, Integer::sum);
                 itemSource.putIfAbsent(matched, ing);
@@ -804,7 +823,7 @@ public final class GenericCraftPacket {
             if (stepIngs == null) continue;
             for (Ingredient ing : stepIngs) {
                 if (ing.isEmpty()) continue;
-                Item matched = matchAndConsume(ing, displayAvailable);
+                Item matched = matchAndConsume(ing, matAvailable);
                 if (matched != null) {
                     neededCounts.merge(matched, step.batches(), Integer::sum);
                     itemSource.putIfAbsent(matched, ing);
@@ -847,13 +866,17 @@ public final class GenericCraftPacket {
                     recipeId, steps.size(), feasible, usedTypedResolver ? "typed" : "fallback",
                     missing.size(), shortageCount);
         }
+        // Dedup missing items — the resolver may add the same ingredient
+        // name for every step that references it, producing an unreadable wall.
+        List<String> dedupedMissing = missing.stream().distinct().toList();
+
         PlanResponse plan = new PlanResponse(
                 feasible,
                 targetOutput.getHoverName().getString(),
                 targetOutput,
                 steps,
                 materials,
-                missing,
+                dedupedMissing,
                 recipeId.toString(),
                 recipeModType != null ? recipeModType.id() : null,
                 dim != null ? dim.toString() : null,
@@ -944,5 +967,27 @@ public final class GenericCraftPacket {
                 PacketDistributor.PLAYER.with(() -> player),
                 new PlanResponsePacket(new PlanResponse(false, "", ItemStack.EMPTY,
                         List.of(), Map.of(), List.of(msg), "")));
+    }
+
+    /**
+     * Extract the crafting result from RS after {@code executeCraftingSteps}
+     * has flushed the chain outputs. Uses a count-1 template (matching how
+     * every other extraction point in the mod works) and falls back to
+     * ingredient-based extraction if the exact-match fails.
+     */
+    @javax.annotation.Nullable
+    private static ItemStack safeExtractResult(INetwork network, ItemStack result) {
+        // Primary: extract with count-1 template (matches RS stored stacks correctly)
+        ItemStack template = result.copy();
+        template.setCount(1);
+        ItemStack extracted = network.extractItem(template, result.getCount(),
+                com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+        if (!extracted.isEmpty()) return extracted;
+
+        // Fallback: ingredient-based extraction (aggregates across multiple stacks)
+        extracted = RSIntegration.extractFromNetwork(network,
+                net.minecraft.world.item.crafting.Ingredient.of(result.getItem()),
+                result.getCount());
+        return extracted;
     }
 }

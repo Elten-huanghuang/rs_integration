@@ -91,9 +91,9 @@ public class RSMagnetUpgradeItem extends MagnetUpgradeItem {
 
     private static String dimDisplayName(String dimKey) {
         return switch (dimKey) {
-            case "minecraft:overworld" -> "Overworld";
-            case "minecraft:the_nether" -> "The Nether";
-            case "minecraft:the_end" -> "The End";
+            case "minecraft:overworld" -> Component.translatable("rsi.magnet.dim.overworld").getString();
+            case "minecraft:the_nether" -> Component.translatable("rsi.magnet.dim.the_nether").getString();
+            case "minecraft:the_end" -> Component.translatable("rsi.magnet.dim.the_end").getString();
             default -> dimKey;
         };
     }
@@ -101,16 +101,9 @@ public class RSMagnetUpgradeItem extends MagnetUpgradeItem {
     @Override
     public UpgradeSlotChangeResult canSwapUpgradeFor(ItemStack newStack, int slotIndex,
                                                       IStorageWrapper wrapper, boolean isClientSide) {
-        RSIntegrationMod.LOGGER.debug("[RSI-SB] canSwapUpgradeFor ENTER slot={} item={}",
-                slotIndex, newStack.getHoverName().getString());
         try {
-            UpgradeSlotChangeResult result = super.canSwapUpgradeFor(newStack, slotIndex, wrapper, isClientSide);
-            RSIntegrationMod.LOGGER.debug("[RSI-SB] canSwapUpgradeFor EXIT ok={} error={}",
-                    result.isSuccessful(),
-                    result.getErrorMessage().map(Component::getString).orElse("none"));
-            return result;
+            return super.canSwapUpgradeFor(newStack, slotIndex, wrapper, isClientSide);
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.error("[RSI-SB] canSwapUpgradeFor EXCEPTION:", e);
             return new UpgradeSlotChangeResult.Fail(Component.literal(e.toString()),
                     java.util.Set.of(), java.util.Set.of(), java.util.Set.of());
         }
@@ -120,12 +113,8 @@ public class RSMagnetUpgradeItem extends MagnetUpgradeItem {
     public UpgradeSlotChangeResult canAddUpgradeTo(IStorageWrapper wrapper, ItemStack stack,
                                                     boolean isFirstLevel, boolean isClientSide) {
         try {
-            UpgradeSlotChangeResult result = super.canAddUpgradeTo(wrapper, stack, isFirstLevel, isClientSide);
-            RSIntegrationMod.LOGGER.debug("[RSI-SB] canAddUpgradeTo item={} isFirst={} ok={}",
-                    stack.getHoverName().getString(), isFirstLevel, result.isSuccessful());
-            return result;
+            return super.canAddUpgradeTo(wrapper, stack, isFirstLevel, isClientSide);
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.error("[RSI-SB] canAddUpgradeTo EXCEPTION:", e);
             return new UpgradeSlotChangeResult.Fail(Component.literal(e.toString()),
                     java.util.Set.of(), java.util.Set.of(), java.util.Set.of());
         }

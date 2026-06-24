@@ -209,7 +209,7 @@ public final class EidolonCraftPacket {
                     available.entrySet().stream().map(e -> {
                         ItemStack s = new ItemStack(e.getKey().item(), e.getValue());
                         if (e.getKey().tag() != null) {
-                            try { s.setTag(net.minecraft.nbt.TagParser.parseTag(e.getKey().tag())); } catch (Exception ignored) {}
+                            try { s.setTag(net.minecraft.nbt.TagParser.parseTag(e.getKey().tag())); } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] NBT parse failed for key {}: {}", e.getKey(), ex.toString()); }
                         }
                         return s;
                     }).toList(),
@@ -231,7 +231,11 @@ public final class EidolonCraftPacket {
         }
 
         // Phase 1: reserve all ingredients via ledger (no physical extraction yet)
-        network = RSIntegration.resolveNetworkFromPlayer(player);
+        // Preserve the binding-resolved network from earlier; only fall back
+        // to player-inventory scan if no binding was found.
+        if (network == null) {
+            network = RSIntegration.resolveNetworkFromPlayer(player);
+        }
         ExtractionLedger ledger = new ExtractionLedger();
         List<Object> crucibleSteps = new ArrayList<>();
 

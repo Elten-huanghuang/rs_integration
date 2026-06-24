@@ -43,11 +43,11 @@ public abstract class RestockUpgradeWrapperMixin
     private ResourceKey<Level> rsi$rsDimensionKey;
 
     @Unique
-    private static boolean rsi$bcChecked;
+    private static volatile boolean rsi$bcChecked;
     @Unique
-    private static boolean rsi$bcLoaded;
+    private static volatile boolean rsi$bcLoaded;
     @Unique
-    private static java.lang.reflect.Method rsi$isTwoHandedMethod;
+    private static volatile java.lang.reflect.Method rsi$isTwoHandedMethod;
 
     protected RestockUpgradeWrapperMixin(IStorageWrapper storageWrapper, ItemStack upgrade,
                                          Consumer<ItemStack> upgradeSaveHandler) {

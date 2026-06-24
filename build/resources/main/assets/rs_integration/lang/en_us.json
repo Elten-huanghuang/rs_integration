@@ -8,7 +8,6 @@
   "item.sophisticatedbackpacks.rs_network.tooltip": "RS Network",
   "item.sophisticatedbackpacks.rs_upgrade.enabled": "RS Network Access: Enabled",
   "item.sophisticatedbackpacks.rs_upgrade.disabled": "RS Network Access: Disabled",
-  "gui.rs_integration.altar.bindings": "Bound Systems:",
   "gui.rs_integration.altar.binding.rs": "RS Network (%s)",
   "gui.rs_integration.altar.bound": "Bound §6%s §rto §e%s",
   "gui.rs_integration.altar.unbound": "Unbound §e%s",
@@ -35,7 +34,6 @@
   "rsi.generic.error.no_materials_required": "§cNo materials required for this recipe",
   "rsi.generic.error.prepare_failed": "§cMaterial preparation failed: %s",
   "rsi.generic.error.machine_not_found": "§cCannot find target machine",
-  "rsi.generic.error.ingredients_parse_failed": "§cCannot parse recipe ingredients",
   "rsi.generic.error.unsupported_machine": "§cUnsupported machine type: %s",
   "rsi.generic.error.craft_failed": "§cRS auto-craft failed: %s",
   "rsi.generic.error.no_ingredients": "§cThis recipe has no resolvable ingredients",
@@ -145,7 +143,6 @@
 
   "key.rsi.side_panel": "Toggle RS Side Panel",
   "rsi.side_panel.no_network": "No RS Network",
-  "rsi.side_panel.slots": " slots",
   "rsi.side_panel.search_hint": "Search...",
   "rsi.side_panel.search.prefix_mod": "@modname  to search by mod",
   "rsi.side_panel.search.prefix_tooltip": "#keyword  to search tooltips",
@@ -173,5 +170,9 @@
   "rsi.side_panel.btn.grid_size.small": "Small",
   "rsi.side_panel.btn.grid_size.medium": "Medium",
   "rsi.side_panel.btn.grid_size.large": "Large",
-  "rsi.side_panel.total": "%s total"
+  "rsi.side_panel.total": "%s total",
+
+  "rsi.magnet.dim.overworld": "Overworld",
+  "rsi.magnet.dim.the_nether": "The Nether",
+  "rsi.magnet.dim.the_end": "The End"
 }

@@ -47,25 +47,25 @@ public final class RSIntegrationMod {
                 "com.Polarice3.Goety.common.blocks.NecroBrazierBlock",
                 "com.Polarice3.Goety.common.blocks.CursedCageBlock",
                 "com.Polarice3.Goety.common.blocks.SoulCandlestickBlock"
-        ), null));
+        ), "goety"));
         BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
                 "malum", ModType.MALUM, RSIntegrationConfig.ENABLE_MALUM, List.of(
                 "com.sammy.malum.common.block.curiosities.spirit_altar.SpiritAltarBlock"
-        ), null));
+        ), "malum"));
         BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
                 "forbidden_arcanus", ModType.FORBIDDEN_ARCANUS, RSIntegrationConfig.ENABLE_FORBIDDEN_ARCANUS, List.of(
                 "com.stal111.forbidden_arcanus.common.block.forge.HephaestusForgeBlock"
-        ), null));
+        ), "forbidden_arcanus"));
         BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
                 "eidolon", ModType.EIDOLON, RSIntegrationConfig.ENABLE_EIDOLON, List.of(
                 "elucent.eidolon.common.block.CrucibleBlock"
-        ), null));
+        ), "eidolon"));
         BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
                 "wizards_reborn", ModType.WIZARDS_REBORN, RSIntegrationConfig.ENABLE_WIZARDS_REBORN, List.of(
                 "mod.maxbogomol.wizards_reborn.common.block.wissen_crystallizer.WissenCrystallizerBlock",
                 "mod.maxbogomol.wizards_reborn.common.block.arcane_iterator.ArcaneIteratorBlock",
                 "mod.maxbogomol.wizards_reborn.common.block.arcane_workbench.ArcaneWorkbenchBlock"
-        ), null));
+        ), "wizards_reborn"));
         // CrystalBlock uses a special key prefix for recipe lookup
         BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
                 "wizards_reborn", ModType.WIZARDS_REBORN, RSIntegrationConfig.ENABLE_WIZARDS_REBORN, List.of(
@@ -105,17 +105,17 @@ public final class RSIntegrationMod {
 
         // Malum
         if (enabled(RSIntegrationConfig.ENABLE_MALUM, "malum")) {
-            com.huanghuang.rsintegration.module.malum.MalumNetworkHandler.register();
+            com.huanghuang.rsintegration.module.ModCraftNetworkHandlers.registerMalum();
         }
 
         // Forbidden & Arcanus
         if (enabled(RSIntegrationConfig.ENABLE_FORBIDDEN_ARCANUS, "forbidden_arcanus")) {
-            com.huanghuang.rsintegration.module.forbidden.FaNetworkHandler.register();
+            com.huanghuang.rsintegration.module.ModCraftNetworkHandlers.registerFa();
         }
 
         // Eidolon Repraised
         if (enabled(RSIntegrationConfig.ENABLE_EIDOLON, "eidolon")) {
-            com.huanghuang.rsintegration.module.eidolon.EidolonNetworkHandler.register();
+            com.huanghuang.rsintegration.module.ModCraftNetworkHandlers.registerEidolon();
         }
 
         // Batch crafting (always registered — delegates validate mod availability internally)

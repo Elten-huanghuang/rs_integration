@@ -1,12 +1,16 @@
 package com.huanghuang.rsintegration.sidepanel;
 
-import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.integration.RSIntegration;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraftforge.items.ItemHandlerHelper;
+import net.minecraftforge.items.wrapper.PlayerMainInvWrapper;
 import net.minecraftforge.network.NetworkEvent;
 
 import java.util.ArrayList;
@@ -16,55 +20,55 @@ import java.util.function.Supplier;
 
 public final class RSSidePanelClickPacket {
 
-    static final byte ACTION_EXTRACT_ONE = 0;
-    static final byte ACTION_EXTRACT_STACK = 1;
-    static final byte ACTION_EXTRACT_MAX = 2;
-    static final byte ACTION_DRAG_DISTRIBUTE = 3;
-    static final byte ACTION_INSERT = 4;
+    public static final byte ACTION_EXTRACT_ONE = 0;
+    public static final byte ACTION_EXTRACT_STACK = 1;
+    public static final byte ACTION_EXTRACT_MAX = 2;
+    public static final byte ACTION_DRAG_DISTRIBUTE = 3;
+    public static final byte ACTION_INSERT = 4;
 
-    final int slotIndex;
     final byte action;
     final boolean isShift;
-    final List<Integer> dragSlots;
+    final ItemStack targetItem;    // 替代原来的 slotIndex
+    final List<ItemStack> dragItems; // 替代原来的 List<Integer>
     final ItemStack carriedItem;
 
-    // Single-slot constructor (actions 0-2)
-    RSSidePanelClickPacket(int slotIndex, byte action, boolean isShift) {
-        this.slotIndex = slotIndex;
+    // 单次点击提取
+    public RSSidePanelClickPacket(ItemStack targetItem, byte action, boolean isShift) {
         this.action = action;
         this.isShift = isShift;
-        this.dragSlots = Collections.emptyList();
+        this.targetItem = targetItem.copy();
+        this.dragItems = Collections.emptyList();
         this.carriedItem = ItemStack.EMPTY;
     }
 
-    // Drag distribute constructor
-    RSSidePanelClickPacket(List<Integer> dragSlots) {
-        this.slotIndex = -1;
+    // 拖拽分配
+    public RSSidePanelClickPacket(List<ItemStack> dragItems) {
         this.action = ACTION_DRAG_DISTRIBUTE;
         this.isShift = false;
-        this.dragSlots = new ArrayList<>(dragSlots);
+        this.targetItem = ItemStack.EMPTY;
+        this.dragItems = new ArrayList<>(dragItems);
         this.carriedItem = ItemStack.EMPTY;
     }
 
-    // Insert constructor
-    RSSidePanelClickPacket(int slotIndex, ItemStack carriedItem) {
-        this.slotIndex = slotIndex;
+    // Insert (no longer trusts client packet; server reads authoritative carried)
+    public RSSidePanelClickPacket(ItemStack carriedItem, boolean isRightClick) {
         this.action = ACTION_INSERT;
-        this.isShift = false;
-        this.dragSlots = Collections.emptyList();
+        this.isShift = isRightClick; // repurposed: true = right-click insert-single
+        this.targetItem = ItemStack.EMPTY;
+        this.dragItems = Collections.emptyList();
         this.carriedItem = carriedItem.copy();
     }
 
     void encode(FriendlyByteBuf buf) {
         buf.writeByte(action);
         if (action == ACTION_DRAG_DISTRIBUTE) {
-            buf.writeVarInt(dragSlots.size());
-            for (int slot : dragSlots) buf.writeVarInt(slot);
+            buf.writeVarInt(dragItems.size());
+            for (ItemStack stack : dragItems) writeStack(buf, stack);
         } else if (action == ACTION_INSERT) {
-            buf.writeVarInt(slotIndex);
-            buf.writeItem(carriedItem);
+            writeStack(buf, carriedItem);
+            buf.writeBoolean(isShift); // isRightClick
         } else {
-            buf.writeVarInt(slotIndex);
+            writeStack(buf, targetItem);
             buf.writeBoolean(isShift);
         }
     }
@@ -73,18 +77,39 @@ public final class RSSidePanelClickPacket {
         byte action = buf.readByte();
         if (action == ACTION_DRAG_DISTRIBUTE) {
             int count = buf.readVarInt();
-            List<Integer> slots = new ArrayList<>(count);
-            for (int i = 0; i < count; i++) slots.add(buf.readVarInt());
-            return new RSSidePanelClickPacket(slots);
+            List<ItemStack> items = new ArrayList<>(count);
+            for (int i = 0; i < count; i++) items.add(readStack(buf));
+            return new RSSidePanelClickPacket(items);
         }
         if (action == ACTION_INSERT) {
-            return new RSSidePanelClickPacket(buf.readVarInt(), buf.readItem());
+            return new RSSidePanelClickPacket(readStack(buf), buf.readBoolean());
         }
-        return new RSSidePanelClickPacket(buf.readVarInt(), action, buf.readBoolean());
+        return new RSSidePanelClickPacket(readStack(buf), action, buf.readBoolean());
     }
 
-    static void handle(RSSidePanelClickPacket packet,
-                       Supplier<NetworkEvent.Context> contextSupplier) {
+    private static void writeStack(FriendlyByteBuf buf, ItemStack stack) {
+        if (stack.isEmpty()) {
+            buf.writeBoolean(false);
+            return;
+        }
+        buf.writeBoolean(true);
+        buf.writeId(BuiltInRegistries.ITEM, stack.getItem());
+        buf.writeVarInt(stack.getCount());
+        buf.writeNbt(stack.hasTag() ? stack.getTag() : null);
+    }
+
+    private static ItemStack readStack(FriendlyByteBuf buf) {
+        if (!buf.readBoolean()) return ItemStack.EMPTY;
+        Item item = buf.readById(BuiltInRegistries.ITEM);
+        if (item == null) return ItemStack.EMPTY;
+        int count = buf.readVarInt();
+        CompoundTag tag = buf.readNbt();
+        ItemStack stack = new ItemStack(item, count);
+        if (tag != null) stack.setTag(tag);
+        return stack;
+    }
+
+    static void handle(RSSidePanelClickPacket packet, Supplier<NetworkEvent.Context> contextSupplier) {
         NetworkEvent.Context context = contextSupplier.get();
         ServerPlayer player = context.getSender();
         if (player == null) {
@@ -93,129 +118,163 @@ public final class RSSidePanelClickPacket {
         }
         context.enqueueWork(() -> {
             if (packet.action == ACTION_DRAG_DISTRIBUTE) {
-                handleDragDistribute(player, packet.dragSlots);
+                handleDragDistribute(player, packet.dragItems);
             } else if (packet.action == ACTION_INSERT) {
-                handleInsert(player, packet.slotIndex, packet.carriedItem);
+                handleInsert(player, packet.isShift); // isShift repurposed as isRightClick
             } else {
-                handleSingleClick(player, packet.slotIndex, packet.action, packet.isShift);
+                handleSingleClick(player, packet.targetItem, packet.action, packet.isShift);
             }
         });
         context.setPacketHandled(true);
     }
 
-    private static void handleSingleClick(ServerPlayer player, int slotIndex,
-                                          byte action, boolean isShift) {
-        List<ItemStack> cached = RSSidePanelNetworkHandler.getCachedItems(player.getUUID());
-        if (cached == null) return;
-        if (slotIndex < 0 || slotIndex >= cached.size()) return;
-
-        ItemStack template = cached.get(slotIndex).copy();
-        if (template.isEmpty()) return;
-        int storedCount = template.getCount();
-        template.setCount(1);
+    private static void handleSingleClick(ServerPlayer player, ItemStack targetItem, byte action, boolean isShift) {
+        INetwork network = RSIntegration.resolveNetworkFromPlayer(player);
+        if (network == null || targetItem.isEmpty()) return;
 
         int count;
         switch (action) {
             case ACTION_EXTRACT_ONE:
-                count = isShift ? template.getMaxStackSize() : 1;
+                count = 1;
                 break;
             case ACTION_EXTRACT_STACK:
-                count = Math.max(1, (storedCount + 1) / 2);
+                count = Math.min(targetItem.getMaxStackSize(), Math.max(1, targetItem.getCount() / 2));
                 break;
             case ACTION_EXTRACT_MAX:
-                count = template.getMaxStackSize();
+                count = targetItem.getMaxStackSize();
                 break;
             default:
                 return;
         }
 
-        doExtract(player, template, count);
-    }
+        ItemStack extractTemplate = targetItem.copy();
+        extractTemplate.setCount(1);
 
-    private static void handleDragDistribute(ServerPlayer player, List<Integer> slots) {
-        List<ItemStack> cached = RSSidePanelNetworkHandler.getCachedItems(player.getUUID());
-        if (cached == null || cached.isEmpty()) return;
+        // Sample total available before extraction so we can compute the
+        // remaining count afterwards for the authoritative client delta.
+        ItemStack before = network.extractItem(extractTemplate.copy(), Integer.MAX_VALUE,
+                com.refinedmods.refinedstorage.api.util.Action.SIMULATE);
+        int totalBefore = before.getCount();
 
-        INetwork network = RSIntegration.resolveNetworkFromPlayer(player);
-        if (network == null) return;
-
-        // Count total stored quantity across all dragged slots for their respective items
-        int totalStored = 0;
-        List<ItemStack> templates = new ArrayList<>();
-        for (int idx : slots) {
-            if (idx < 0 || idx >= cached.size()) continue;
-            ItemStack stack = cached.get(idx);
-            if (stack.isEmpty()) continue;
-            totalStored += stack.getCount();
-            templates.add(stack);
+        ItemStack extracted = network.extractItem(extractTemplate, count, Action.PERFORM);
+        if (extracted.isEmpty()) {
+            // Extraction failed — client may have predicted a change that didn't
+            // happen.  Send a corrective delta with the real current count.
+            ItemStack current = network.extractItem(extractTemplate.copy(), Integer.MAX_VALUE,
+                    com.refinedmods.refinedstorage.api.util.Action.SIMULATE);
+            ItemStack correctionStack = extractTemplate.copy();
+            correctionStack.setCount(current.getCount());
+            long ts = System.currentTimeMillis();
+            var tracker = network.getItemStorageTracker();
+            if (tracker != null) {
+                var te = tracker.get(extractTemplate);
+                if (te != null) ts = te.getTime();
+            }
+            RSSidePanelDeltaPacket.send(player, correctionStack, ts, false);
+            return;
         }
-        if (templates.isEmpty() || totalStored <= 0) return;
 
-        // Extract items slot by slot — distribute 1 item from each, round-robin
-        for (ItemStack template : templates) {
-            ItemStack req = template.copy();
-            req.setCount(1);
-            int allocated = totalStored / templates.size();
-            if (allocated <= 0) allocated = 1;
-            try {
-                ItemStack extracted = network.extractItem(req,
-                        Math.min(allocated, template.getCount()), Action.PERFORM);
-                if (!extracted.isEmpty()) {
-                    if (!player.getInventory().add(extracted)) {
-                        player.drop(extracted, false);
-                    }
+        if (isShift) {
+            ItemStack remainder = ItemHandlerHelper.insertItemStacked(
+                    new PlayerMainInvWrapper(player.getInventory()), extracted, false);
+            if (!remainder.isEmpty()) player.drop(remainder, false);
+        } else {
+            ItemStack currentCarried = player.containerMenu.getCarried();
+            if (currentCarried.isEmpty()) {
+                player.containerMenu.setCarried(extracted);
+            } else if (ItemHandlerHelper.canItemStacksStack(currentCarried, extracted)) {
+                int total = currentCarried.getCount() + extracted.getCount();
+                int max = currentCarried.getMaxStackSize();
+                if (total <= max) {
+                    currentCarried.setCount(total);
+                } else {
+                    currentCarried.setCount(max);
+                    ItemStack returnToNet = extracted.copy();
+                    returnToNet.setCount(total - max);
+                    network.insertItem(returnToNet, returnToNet.getCount(), Action.PERFORM);
                 }
-            } catch (Exception e) {
-                RSIntegrationMod.LOGGER.info("[RSI] SidePanel dragDistribute error: {}", e.toString());
+            } else {
+                network.insertItem(extracted, extracted.getCount(), Action.PERFORM);
             }
         }
         player.containerMenu.broadcastChanges();
-        RSSidePanelNetworkHandler.invalidateCache(player.getUUID());
-    }
+        player.connection.send(new net.minecraft.network.protocol.game.ClientboundContainerSetSlotPacket(
+                -1, player.containerMenu.getStateId(), -1, player.containerMenu.getCarried()));
 
-    private static void handleInsert(ServerPlayer player, int slotIndex, ItemStack carried) {
-        if (carried.isEmpty()) return;
+        // ── Send authoritative delta ───────────────────────────────
+        // The storage-cache listener skips empty stacks (full extraction),
+        // so we send a manual delta to keep the client display in sync.
+        int remainingCount = Math.max(0, totalBefore - extracted.getCount());
+        ItemStack deltaStack = extractTemplate.copy();
+        deltaStack.setCount(remainingCount);
 
-        INetwork network = RSIntegration.resolveNetworkFromPlayer(player);
-        if (network == null) return;
-
-        List<ItemStack> cached = RSSidePanelNetworkHandler.getCachedItems(player.getUUID());
-        ItemStack target = (cached != null && slotIndex >= 0 && slotIndex < cached.size())
-                ? cached.get(slotIndex) : ItemStack.EMPTY;
-
-        try {
-            // Insert carried item into network. If clicking a matching slot,
-            // the RS network will stack it automatically.
-            ItemStack remainder = network.insertItem(carried.copy(), carried.getCount(), Action.PERFORM);
-            if (!remainder.isEmpty()) {
-                if (!player.getInventory().add(remainder)) {
-                    player.drop(remainder, false);
-                }
-            }
-            player.containerMenu.broadcastChanges();
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.info("[RSI] SidePanel insert error: {}", e.toString());
+        long ts = System.currentTimeMillis();
+        var tracker = network.getItemStorageTracker();
+        if (tracker != null) {
+            var te = tracker.get(extractTemplate);
+            if (te != null) ts = te.getTime();
         }
 
-        RSSidePanelNetworkHandler.invalidateCache(player.getUUID());
+        boolean craftable = false;
+        try {
+            var cm = network.getCraftingManager();
+            if (cm != null) {
+                for (var pattern : cm.getPatterns()) {
+                    for (ItemStack out : pattern.getOutputs()) {
+                        if (!out.isEmpty() && ItemStack.isSameItem(out, extractTemplate)) {
+                            craftable = true;
+                            break;
+                        }
+                    }
+                    if (craftable) break;
+                }
+            }
+        } catch (Exception ignored) {}
+
+        com.huanghuang.rsintegration.sidepanel.RSSidePanelDeltaPacket.send(
+                player, deltaStack, ts, craftable);
     }
 
-    private static void doExtract(ServerPlayer player, ItemStack template, int count) {
+    private static void handleInsert(ServerPlayer player, boolean isRightClick) {
         INetwork network = RSIntegration.resolveNetworkFromPlayer(player);
         if (network == null) return;
 
-        try {
-            ItemStack extracted = network.extractItem(template, count, Action.PERFORM);
+        ItemStack serverCarried = player.containerMenu.getCarried();
+        if (serverCarried.isEmpty()) {
+            player.connection.send(new net.minecraft.network.protocol.game.ClientboundContainerSetSlotPacket(
+                    -1, player.containerMenu.getStateId(), -1, ItemStack.EMPTY));
+            return;
+        }
+
+        int count = isRightClick ? 1 : serverCarried.getCount();
+        ItemStack toInsert = serverCarried.copy();
+        toInsert.setCount(count);
+        ItemStack remainder = network.insertItem(toInsert, count, Action.PERFORM);
+
+        int inserted = count - remainder.getCount();
+        serverCarried.shrink(inserted);
+        if (serverCarried.isEmpty()) {
+            player.containerMenu.setCarried(ItemStack.EMPTY);
+        }
+
+        player.containerMenu.broadcastChanges();
+        player.connection.send(new net.minecraft.network.protocol.game.ClientboundContainerSetSlotPacket(
+                -1, player.containerMenu.getStateId(), -1, player.containerMenu.getCarried()));
+    }
+
+    private static void handleDragDistribute(ServerPlayer player, List<ItemStack> dragItems) {
+        INetwork network = RSIntegration.resolveNetworkFromPlayer(player);
+        if (network == null || dragItems.isEmpty()) return;
+
+        for (ItemStack template : dragItems) {
+            ItemStack req = template.copy();
+            req.setCount(1);
+            ItemStack extracted = network.extractItem(req, 1, Action.PERFORM);
             if (!extracted.isEmpty()) {
-                if (!player.getInventory().add(extracted)) {
-                    player.drop(extracted, false);
-                }
-                player.containerMenu.broadcastChanges();
+                ItemStack remainder = ItemHandlerHelper.insertItemStacked(new PlayerMainInvWrapper(player.getInventory()), extracted, false);
+                if (!remainder.isEmpty()) player.drop(remainder, false);
             }
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.info("[RSI] SidePanel click error: {}", e.toString());
         }
-
-        RSSidePanelNetworkHandler.invalidateCache(player.getUUID());
+        player.containerMenu.broadcastChanges();
     }
 }

@@ -17,15 +17,7 @@ public class UpgradeHandlerMixin {
 
     @Inject(method = "isItemValid", at = @At("RETURN"), cancellable = false)
     private void onIsItemValid(int slot, ItemStack stack, CallbackInfoReturnable<Boolean> cir) {
-        if (!stack.isEmpty()) {
-            Item item = stack.getItem();
-            ResourceLocation key = ForgeRegistries.ITEMS.getKey(item);
-            if (key != null && key.getNamespace().equals("rs_integration")) {
-                boolean result = cir.getReturnValue();
-                boolean isIUpgrade = item instanceof IUpgradeItem;
-                RSIntegrationMod.LOGGER.debug("[RSI-SB] isItemValid(slot={}, item={}): result={}, instanceof IUpgradeItem={}",
-                        slot, key, result, isIUpgrade);
-            }
-        }
+        // Placeholder — rs_integration namespace items are always valid
+        // via isUpgrade predicate; kept as injection point for future use.
     }
 }

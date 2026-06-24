@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.mixin.sophisticatedbackpacks;
 
+import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.util.RSUtils;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.storage.cache.IStorageCache;
@@ -50,11 +51,13 @@ public abstract class RefillUpgradeWrapperMixin
     private ResourceKey<Level> rsi$rsDimensionKey;
 
     @Unique
-    private static boolean rsi$bcChecked;
+    private static volatile boolean rsi$bcChecked;
     @Unique
-    private static boolean rsi$bcLoaded;
+    private static volatile boolean rsi$bcLoaded;
     @Unique
-    private static java.lang.reflect.Method rsi$isTwoHandedMethod;
+    private static volatile java.lang.reflect.Method rsi$isTwoHandedMethod;
+    @Unique
+    private static volatile boolean rsi$tsReflectionFailed;
 
     protected RefillUpgradeWrapperMixin(IStorageWrapper storageWrapper, ItemStack upgrade,
                                         Consumer<ItemStack> upgradeSaveHandler) {
@@ -96,13 +99,13 @@ public abstract class RefillUpgradeWrapperMixin
     }
 
     @Unique
-    private static java.lang.reflect.Field rsi$tsMcgField;
+    private static volatile java.lang.reflect.Field rsi$tsMcgField;
     @Unique
-    private static java.lang.reflect.Field rsi$tsFillerField;
+    private static volatile java.lang.reflect.Field rsi$tsFillerField;
     @Unique
-    private static java.lang.reflect.Method rsi$mcgMethod;
+    private static volatile java.lang.reflect.Method rsi$mcgMethod;
     @Unique
-    private static java.lang.reflect.Method rsi$fillerMethod;
+    private static volatile java.lang.reflect.Method rsi$fillerMethod;
 
     @Unique
     private void rsi$rsRefill(Player player, IItemHandler playerInv) {
@@ -118,6 +121,7 @@ public abstract class RefillUpgradeWrapperMixin
         Map<Integer, RefillUpgradeWrapper.TargetSlot> targetSlots = getTargetSlots();
 
         rsi$initTargetSlotReflection();
+        if (rsi$tsReflectionFailed) return;
 
         for (int filterSlot = 0; filterSlot < filterHandler.getSlots(); filterSlot++) {
             ItemStack filterStack = filterHandler.getStackInSlot(filterSlot);
@@ -191,7 +195,9 @@ public abstract class RefillUpgradeWrapperMixin
             rsi$fillerMethod = rsi$tsFillerField.getType().getMethod(
                     "fill", Player.class, IItemHandler.class, ItemStack.class);
         } catch (Exception e) {
-            throw new RuntimeException("Failed to init TargetSlot reflection", e);
+            RSIntegrationMod.LOGGER.warn("[RSI-SB] TargetSlot reflection unavailable — RS refill disabled: {}",
+                    e.toString());
+            rsi$tsReflectionFailed = true;
         }
     }
 

@@ -22,19 +22,8 @@ public class StorageUpgradeSlotMixin {
         if (stack.isEmpty()) return;
         ResourceLocation key = ForgeRegistries.ITEMS.getKey(stack.getItem());
         if (key != null && key.getNamespace().equals("rs_integration")) {
-            RSIntegrationMod.LOGGER.debug("[RSI-SB] mayPlace HEAD slot={} item={} class={} count={} - FORCE true",
-                    slotIndex, key, stack.getItem().getClass().getName(), stack.getCount());
             cir.setReturnValue(true);
             cir.cancel();
-        }
-    }
-
-    @Inject(method = "m_5857_", at = @At("RETURN"), cancellable = false)
-    private void onMayPlaceReturn(ItemStack stack, CallbackInfoReturnable<Boolean> cir) {
-        ResourceLocation key = ForgeRegistries.ITEMS.getKey(stack.getItem());
-        if (key != null && key.getNamespace().equals("rs_integration")) {
-            RSIntegrationMod.LOGGER.debug("[RSI-SB] mayPlace RETURN slot={} item={} result={}",
-                    slotIndex, key, cir.getReturnValue());
         }
     }
 }

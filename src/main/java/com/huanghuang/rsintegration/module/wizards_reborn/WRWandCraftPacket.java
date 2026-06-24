@@ -579,7 +579,7 @@ public final class WRWandCraftPacket {
                 available.entrySet().stream().map(e -> {
                     ItemStack s = new ItemStack(e.getKey().item(), e.getValue());
                     if (e.getKey().tag() != null) {
-                        try { s.setTag(net.minecraft.nbt.TagParser.parseTag(e.getKey().tag())); } catch (Exception ignored) {}
+                        try { s.setTag(net.minecraft.nbt.TagParser.parseTag(e.getKey().tag())); } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] NBT parse failed for key {}: {}", e.getKey(), ex.toString()); }
                     }
                     return s;
                 }).toList(),

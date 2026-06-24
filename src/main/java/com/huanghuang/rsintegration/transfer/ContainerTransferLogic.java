@@ -138,7 +138,7 @@ final class ContainerTransferLogic {
                     }
                 }
             }
-        } catch (Throwable e) {
+        } catch (Exception e) {
             RSIntegrationMod.LOGGER.debug("[RSI] Curios scan error in findBackpack: {}", e.toString());
         }
 

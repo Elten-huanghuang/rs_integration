@@ -8,7 +8,6 @@
   "item.sophisticatedbackpacks.rs_network.tooltip": "RS 网络",
   "item.sophisticatedbackpacks.rs_upgrade.enabled": "RS 网络访问: 已启用",
   "item.sophisticatedbackpacks.rs_upgrade.disabled": "RS 网络访问: 已禁用",
-  "gui.rs_integration.altar.bindings": "已绑定系统:",
   "gui.rs_integration.altar.binding.rs": "RS 网络 (%s)",
   "gui.rs_integration.altar.bound": "已绑定 §6%s §r到 §e%s",
   "gui.rs_integration.altar.unbound": "已解绑 §e%s",
@@ -35,7 +34,6 @@
   "rsi.generic.error.no_materials_required": "§c配方无材料需求",
   "rsi.generic.error.prepare_failed": "§c材料准备失败: %s",
   "rsi.generic.error.machine_not_found": "§c无法找到目标机器",
-  "rsi.generic.error.ingredients_parse_failed": "§c无法解析配方材料",
   "rsi.generic.error.unsupported_machine": "§c不支持的机器类型: %s",
   "rsi.generic.error.craft_failed": "§cRS 自动合成失败: %s",
   "rsi.generic.error.no_ingredients": "§c此配方无可解析的材料",
@@ -145,7 +143,6 @@
 
   "key.rsi.side_panel": "切换 RS 侧边面板",
   "rsi.side_panel.no_network": "无 RS 网络",
-  "rsi.side_panel.slots": " 个槽位",
   "rsi.side_panel.search_hint": "搜索...",
   "rsi.side_panel.search.prefix_mod": "@模组名  按模组搜索",
   "rsi.side_panel.search.prefix_tooltip": "#关键词  按物品提示搜索",
@@ -173,5 +170,9 @@
   "rsi.side_panel.btn.grid_size.small": "小",
   "rsi.side_panel.btn.grid_size.medium": "中",
   "rsi.side_panel.btn.grid_size.large": "大",
-  "rsi.side_panel.total": "共 %s 个"
+  "rsi.side_panel.total": "共 %s 个",
+
+  "rsi.magnet.dim.overworld": "主世界",
+  "rsi.magnet.dim.the_nether": "下界",
+  "rsi.magnet.dim.the_end": "末地"
 }

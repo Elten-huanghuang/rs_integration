@@ -6,10 +6,10 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 
+import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
  * Drives all active {@link AsyncCraftChain} instances every server tick
@@ -18,7 +18,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 public final class AsyncCraftManager {
 
     private static final AsyncCraftManager INSTANCE = new AsyncCraftManager();
-    private final List<AsyncCraftChain> activeChains = new CopyOnWriteArrayList<>();
+    private final List<AsyncCraftChain> activeChains = new ArrayList<>();
 
     private AsyncCraftManager() {}
 
@@ -28,38 +28,44 @@ public final class AsyncCraftManager {
         // Abort any existing chain for the same player to prevent resource
         // conflicts between independent ExtractionLedger instances.
         ServerPlayer player = chain.getPlayer();
-        if (player != null) {
-            UUID playerId = player.getUUID();
-            Iterator<AsyncCraftChain> it = activeChains.iterator();
-            while (it.hasNext()) {
-                AsyncCraftChain existing = it.next();
-                if (existing != chain && existing.belongsTo(playerId)) {
-                    existing.abort("Superseded by new chain");
-                    activeChains.remove(existing);
-                    RSIntegrationMod.LOGGER.debug("[RSI-AsyncMgr] Aborted existing chain for player {}", playerId);
+        synchronized (activeChains) {
+            if (player != null) {
+                UUID playerId = player.getUUID();
+                Iterator<AsyncCraftChain> it = activeChains.iterator();
+                while (it.hasNext()) {
+                    AsyncCraftChain existing = it.next();
+                    if (existing != chain && existing.belongsTo(playerId)) {
+                        existing.abort("Superseded by new chain");
+                        it.remove();
+                        RSIntegrationMod.LOGGER.debug("[RSI-AsyncMgr] Aborted existing chain for player {}", playerId);
+                    }
                 }
             }
+            activeChains.add(chain);
         }
-        activeChains.add(chain);
         RSIntegrationMod.LOGGER.debug("[RSI-AsyncMgr] Chain submitted: player={} steps={}",
                 player != null ? player.getName().getString() : "?", chain.stepsCount());
     }
 
     public boolean hasActiveChainFor(UUID playerId) {
-        for (AsyncCraftChain chain : activeChains) {
-            if (chain.belongsTo(playerId)) return true;
+        synchronized (activeChains) {
+            for (AsyncCraftChain chain : activeChains) {
+                if (chain.belongsTo(playerId)) return true;
+            }
         }
         return false;
     }
 
     public void cancelAllForPlayer(UUID playerId) {
-        Iterator<AsyncCraftChain> it = activeChains.iterator();
-        while (it.hasNext()) {
-            AsyncCraftChain chain = it.next();
-            if (chain.belongsTo(playerId)) {
-                chain.abort("Player disconnected");
-                activeChains.remove(chain);
-                RSIntegrationMod.LOGGER.debug("[RSI-AsyncMgr] Cancelled chain for disconnected player {}", playerId);
+        synchronized (activeChains) {
+            Iterator<AsyncCraftChain> it = activeChains.iterator();
+            while (it.hasNext()) {
+                AsyncCraftChain chain = it.next();
+                if (chain.belongsTo(playerId)) {
+                    chain.abort("Player disconnected");
+                    it.remove();
+                    RSIntegrationMod.LOGGER.debug("[RSI-AsyncMgr] Cancelled chain for disconnected player {}", playerId);
+                }
             }
         }
     }
@@ -70,17 +76,19 @@ public final class AsyncCraftManager {
         MinecraftServer server = event.getServer();
         if (server == null || server.getPlayerList() == null) return;
 
-        Iterator<AsyncCraftChain> it = activeChains.iterator();
-        while (it.hasNext()) {
-            AsyncCraftChain chain = it.next();
-            try {
-                if (chain.tick()) {
-                    activeChains.remove(chain);
+        synchronized (activeChains) {
+            Iterator<AsyncCraftChain> it = activeChains.iterator();
+            while (it.hasNext()) {
+                AsyncCraftChain chain = it.next();
+                try {
+                    if (chain.tick()) {
+                        it.remove();
+                    }
+                } catch (Exception e) {
+                    RSIntegrationMod.LOGGER.error("[RSI-AsyncMgr] Chain tick error", e);
+                    chain.abort("Internal error: " + e.getMessage());
+                    it.remove();
                 }
-            } catch (Exception e) {
-                RSIntegrationMod.LOGGER.error("[RSI-AsyncMgr] Chain tick error", e);
-                chain.abort("Internal error: " + e.getMessage());
-                activeChains.remove(chain);
             }
         }
     }

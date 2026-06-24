@@ -219,7 +219,7 @@ public final class FaCraftPacket {
                     .map(e -> {
                         ItemStack s = new ItemStack(e.getKey().item(), e.getValue());
                         if (e.getKey().tag() != null) {
-                            try { s.setTag(net.minecraft.nbt.TagParser.parseTag(e.getKey().tag())); } catch (Exception ignored) {}
+                            try { s.setTag(net.minecraft.nbt.TagParser.parseTag(e.getKey().tag())); } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] NBT parse failed for key {}: {}", e.getKey(), ex.toString()); }
                         }
                         return s;
                     })
@@ -272,7 +272,11 @@ public final class FaCraftPacket {
 
         // Phase 1: reserve all items via ledger (no physical extraction yet)
         ExtractionLedger ledger = new ExtractionLedger();
-        network = RSIntegration.resolveNetworkFromPlayer(player);
+        // Preserve the binding-resolved network from earlier; only fall back
+        // to player-inventory scan if no binding was found.
+        if (network == null) {
+            network = RSIntegration.resolveNetworkFromPlayer(player);
+        }
 
         ItemStack mainTemplate = ItemStack.EMPTY;
         if (mainIng != null && !mainIng.isEmpty()) {

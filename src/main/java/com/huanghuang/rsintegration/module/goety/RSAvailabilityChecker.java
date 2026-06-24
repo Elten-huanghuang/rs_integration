@@ -19,8 +19,6 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 
 import javax.annotation.Nullable;
-import java.lang.reflect.Field;
-import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -41,7 +39,7 @@ public final class RSAvailabilityChecker {
             ingredients.add(ritualRecipe.getActivationItem());
             ingredients.addAll(ritualRecipe.getIngredients());
         } else {
-            List<Ingredient> extracted = rsi$extractIngredients(recipe);
+            List<Ingredient> extracted = CraftPacketUtils.extractIngredients(recipe);
             if (extracted == null || extracted.isEmpty()) return null;
             for (Ingredient ing : extracted) {
                 if (ing.getItems().length > 0) {
@@ -130,98 +128,6 @@ public final class RSAvailabilityChecker {
         return false;
     }
 
-    @Nullable
-    private static List<Ingredient> rsi$extractIngredients(Recipe<?> recipe) {
-        Class<?> clazz = recipe.getClass();
-
-        List<Ingredient> result = rsi$invokeGetIngredients(recipe, "getIngredients");
-        if (result != null) return result;
-
-        result = rsi$invokeGetIngredients(recipe, "m_7527_");
-        if (result != null) return result;
-
-        result = rsi$findIngredientsField(recipe);
-        if (result != null) return result;
-
-        result = rsi$invokeGetIngredients(recipe, "getInputs");
-        if (result != null) return result;
-        result = rsi$invokeGetIngredients(recipe, "getInputItems");
-        if (result != null) return result;
-
-        result = rsi$scanAllFieldsForIngredients(recipe);
-        if (result != null) return result;
-
-        result = CraftPacketUtils.extractLodestoneIngredients(recipe);
-        return result;
-    }
-
-    @Nullable
-    @SuppressWarnings("unchecked")
-    private static List<Ingredient> rsi$invokeGetIngredients(Recipe<?> recipe, String methodName) {
-        try {
-            Object result = recipe.getClass().getMethod(methodName).invoke(recipe);
-            if (result instanceof List) {
-                List<?> list = (List<?>) result;
-                if (!list.isEmpty() && list.get(0) instanceof Ingredient) {
-                    return (List<Ingredient>) list;
-                }
-                List<Ingredient> wrapped = new ArrayList<>();
-                for (Object obj : list) {
-                    if (obj instanceof Ingredient ing) {
-                        wrapped.add(ing);
-                    } else if (obj instanceof ItemStack stack) {
-                        wrapped.add(Ingredient.of(stack));
-                    } else {
-                        return null;
-                    }
-                }
-                return wrapped.isEmpty() ? null : wrapped;
-            }
-        } catch (Exception ignored) {}
-        return null;
-    }
-
-    @Nullable
-    @SuppressWarnings("unchecked")
-    private static List<Ingredient> rsi$findIngredientsField(Recipe<?> recipe) {
-        Class<?> clazz = recipe.getClass();
-        while (clazz != null && clazz != Object.class) {
-            for (Field field : clazz.getDeclaredFields()) {
-                if (field.getName().equals("ingredients")
-                        && List.class.isAssignableFrom(field.getType())) {
-                    field.setAccessible(true);
-                    try {
-                        List<?> list = (List<?>) field.get(recipe);
-                        if (!list.isEmpty() && list.get(0) instanceof Ingredient) {
-                            return (List<Ingredient>) list;
-                        }
-                    } catch (Exception ignored) {}
-                }
-            }
-            clazz = clazz.getSuperclass();
-        }
-        return null;
-    }
-
-    @Nullable
-    @SuppressWarnings("unchecked")
-    private static List<Ingredient> rsi$scanAllFieldsForIngredients(Recipe<?> recipe) {
-        Class<?> clazz = recipe.getClass();
-        while (clazz != null && clazz != Object.class) {
-            for (Field field : clazz.getDeclaredFields()) {
-                if (!List.class.isAssignableFrom(field.getType())) continue;
-                field.setAccessible(true);
-                try {
-                    List<?> list = (List<?>) field.get(recipe);
-                    if (list != null && !list.isEmpty() && list.get(0) instanceof Ingredient) {
-                        return (List<Ingredient>) list;
-                    }
-                } catch (Exception ignored) {}
-            }
-            clazz = clazz.getSuperclass();
-        }
-        return null;
-    }
 
     private static INetwork resolveNetwork(ServerPlayer player, @Nullable ResourceLocation altarDimId, BlockPos pos) {
         ResourceKey<Level> lookupDim = altarDimId != null

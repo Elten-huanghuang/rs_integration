@@ -1,0 +1,15 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "com.ybm.betterjei.mixin",
+  "compatibilityLevel": "JAVA_17",
+  "refmap": "betterjei.refmap.json",
+  "mixins": [],
+  "client": [
+    "RecipesGuiMixin",
+    "RecipeTransferButtonMixin",
+    "RecipeGuiLayoutsMixin",
+    "GuiIconToggleButtonAccessor",
+    "GuiGraphicsAccessor"
+  ]
+}

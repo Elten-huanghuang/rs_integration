@@ -151,12 +151,17 @@ public final class ModType {
         String lower = blockKey.toLowerCase(Locale.ROOT);
         for (ModType mt : BY_ID.values()) {
             if (mt == GENERIC) continue;
+            // 1. Explicit prefix ("goety||block.goety.dark_altar")
             for (String prefix : mt.blockKeyPrefixes) {
                 if (lower.startsWith(prefix.toLowerCase(Locale.ROOT) + "||")) return mt;
             }
+            // 2. Registered keywords
             for (String kw : mt.blockKeyKeywords) {
                 if (lower.contains(kw.toLowerCase(Locale.ROOT))) return mt;
             }
+            // 3. Fallback: check if blockKey contains the mod type id itself
+            // (handles both prefixed and unprefixed bindings)
+            if (lower.contains(mt.id().toLowerCase(Locale.ROOT))) return mt;
         }
         return null;
     }

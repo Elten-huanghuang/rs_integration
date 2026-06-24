@@ -16,6 +16,7 @@ import java.util.*;
 public final class MaterialSources {
 
     private static final Map<String, Map<StackKey, Integer>> cache = new HashMap<>();
+    private static final Object cacheLock = new Object();
     private static int lastTick = -1;
 
     private MaterialSources() {}
@@ -23,12 +24,13 @@ public final class MaterialSources {
     /**
      * Count all items in a player's main inventory, keyed by
      * {@link StackKey} (item + NBT tag) for NBT-aware identity.
+     * Only counts the main inventory (36 slots) — not armor or offhand,
+     * matching what {@code ExtractionLedger.extractOne} actually extracts from.
      */
     public static Map<StackKey, Integer> countInventory(Player player) {
         Map<StackKey, Integer> map = new HashMap<>();
         Inventory inv = player.getInventory();
-        for (int i = 0; i < inv.getContainerSize(); i++) {
-            ItemStack stack = inv.getItem(i);
+        for (ItemStack stack : inv.items) {
             if (!stack.isEmpty()) {
                 map.merge(StackKey.of(stack, true), stack.getCount(), Integer::sum);
             }
@@ -58,31 +60,38 @@ public final class MaterialSources {
      * single NBT-aware counts map. Result is cached per-player per-tick to
      * avoid redundant RS storage scans (can be called 2-3 times within a
      * single craft request).
+     *
+     * <p>All cache access is synchronized on {@code cacheLock} because
+     * network-thread packet handlers and the server tick thread can both
+     * call this method concurrently.</p>
      */
     public static Map<StackKey, Integer> listAllAvailable(ServerPlayer player, @Nullable INetwork network) {
         MinecraftServer server = player.getServer();
         int currentTick = server != null ? server.getTickCount() : 0;
-        if (currentTick != lastTick) {
-            cache.clear();
-            lastTick = currentTick;
-        }
-        // Include network presence in cache key so results with/without network don't collide
         String cacheKey = player.getUUID() + ":" + (network != null);
-        return cache.computeIfAbsent(cacheKey, k -> {
-            Map<StackKey, Integer> available = countInventory(player);
-            if (network != null) {
-                addNetworkItems(available, network);
+        synchronized (cacheLock) {
+            if (currentTick != lastTick) {
+                cache.clear();
+                lastTick = currentTick;
             }
-            return available;
-        });
+            return cache.computeIfAbsent(cacheKey, k -> {
+                Map<StackKey, Integer> available = countInventory(player);
+                if (network != null) {
+                    addNetworkItems(available, network);
+                }
+                return available;
+            });
+        }
     }
 
     /** Invalidate cached counts for a player after items are consumed mid-tick. */
     public static void invalidateFor(ServerPlayer player) {
         String withNet = player.getUUID() + ":true";
         String withoutNet = player.getUUID() + ":false";
-        cache.remove(withNet);
-        cache.remove(withoutNet);
+        synchronized (cacheLock) {
+            cache.remove(withNet);
+            cache.remove(withoutNet);
+        }
     }
 
 }

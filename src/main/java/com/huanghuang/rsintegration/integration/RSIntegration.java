@@ -340,23 +340,42 @@ public final class RSIntegration {
             var list = cache.getList();
             if (list == null) return ItemStack.EMPTY;
 
-            ItemStack template = ItemStack.EMPTY;
+            // Snapshot matching entries first, then extract.
+            // Extracting inside a live for-each over list.getStacks() can
+            // trigger ConcurrentModificationException when RS removes a
+            // fully-depleted entry, causing commit to fail and abort the chain.
+            var snapshot = new java.util.ArrayList<ItemStack>();
             for (var entry : list.getStacks()) {
                 ItemStack stored = entry.getStack();
                 if (!stored.isEmpty() && ingredient.test(stored)) {
-                    template = stored.copy();
-                    template.setCount(1);
-                    break;
+                    snapshot.add(stored.copy());
                 }
             }
-            if (template.isEmpty()) return ItemStack.EMPTY;
 
-            ItemStack extracted = network.extractItem(template, count, Action.PERFORM);
-            if (!extracted.isEmpty() && extracted.getCount() >= count) {
-                return extracted;
+            int remaining = count;
+            ItemStack result = ItemStack.EMPTY;
+
+            for (ItemStack template : snapshot) {
+                if (remaining <= 0) break;
+                int take = Math.min(remaining, template.getCount());
+                ItemStack extractTemplate = template.copy();
+                extractTemplate.setCount(1);
+                ItemStack extracted = network.extractItem(extractTemplate, take, Action.PERFORM);
+                if (!extracted.isEmpty()) {
+                    remaining -= extracted.getCount();
+                    if (result.isEmpty()) {
+                        result = extracted;
+                    } else {
+                        result.grow(extracted.getCount());
+                    }
+                }
+            }
+
+            if (!result.isEmpty() && result.getCount() >= count) {
+                return result;
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.info("[RSI] extractFromNetwork error: {}", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI] extractFromNetwork error", e);
         }
         return ItemStack.EMPTY;
     }

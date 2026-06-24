@@ -233,6 +233,20 @@ public final class AsyncCraftChain {
                 for (ItemStack secondary : ModRecipeIndex.tryGetSecondaryOutputs(cr, player.serverLevel().registryAccess())) {
                     addToVirtualInventory(secondary);
                 }
+                // Handle crafting remainders (e.g. empty buckets from cake recipe)
+                for (Ingredient ing : cr.getIngredients()) {
+                    if (ing.isEmpty()) continue;
+                    for (ItemStack stack : ing.getItems()) {
+                        if (stack.isEmpty()) continue;
+                        try {
+                            ItemStack remainder = stack.getCraftingRemainingItem();
+                            if (!remainder.isEmpty() && !ItemStack.isSameItem(stack, remainder)) {
+                                addToVirtualInventory(remainder.copyWithCount(1));
+                                break;
+                            }
+                        } catch (Throwable ignored) {}
+                    }
+                }
             } else {
                 // Non-crafting GENERIC recipe (e.g. sawmill, custom mod type)
                 List<com.huanghuang.rsintegration.crafting.IngredientSpec> specs =
@@ -357,6 +371,13 @@ public final class AsyncCraftChain {
     @Nullable
     private List<ItemStack> preReserveStepMaterials(List<IngredientSpec> specs) {
         List<ItemStack> materials = new ArrayList<>();
+        // Snapshot virtual inventory so we can restore it atomically on failure.
+        // Must deep-copy: new ArrayList<>(...) only copies references, but vi.split()
+        // mutates the same ItemStack objects the snapshot points to.
+        List<ItemStack> virtualSnapshot = new ArrayList<>();
+        for (ItemStack vi : virtualInventory) {
+            virtualSnapshot.add(vi.copy());
+        }
         for (IngredientSpec spec : specs) {
             if (spec.isEmpty()) {
                 materials.add(ItemStack.EMPTY);
@@ -407,13 +428,17 @@ public final class AsyncCraftChain {
             }
 
             if (needed > 0) {
-                // Release any ledger reservations made during this partial attempt
-                // so they don't leak and inflate future availability checks.
-                ledger.releaseReservations(materials);
-                // Refund materials sourced from virtual inventory back to it.
-                for (ItemStack m : materials) {
-                    if (!m.isEmpty()) addToVirtualInventory(m);
+                // Release ledger reservations for current partially-built material
+                // (may contain ledger templates that hold network/player items).
+                if (!material.isEmpty()) {
+                    ledger.releaseReservations(List.of(material));
                 }
+                // Release ledger reservations for previously completed materials.
+                ledger.releaseReservations(materials);
+                // Restore virtual inventory from snapshot — undoes all vi.split()
+                // calls above so no intermediate outputs are lost.
+                virtualInventory.clear();
+                virtualInventory.addAll(virtualSnapshot);
                 RSIntegrationMod.LOGGER.warn("[RSI-AsyncChain] preReserveStepMaterials failed: need {} more of ingredient for step {}",
                         needed, steps.get(currentStepIdx).recipeId());
                 return null;
@@ -471,10 +496,12 @@ public final class AsyncCraftChain {
         }
 
         // Flush remaining virtual inventory into RS network
-        for (ItemStack vi : virtualInventory) {
-            if (!vi.isEmpty()) {
-                network.insertItem(vi.copy(), vi.getCount(),
-                        com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+        if (network != null) {
+            for (ItemStack vi : virtualInventory) {
+                if (!vi.isEmpty()) {
+                    network.insertItem(vi.copy(), vi.getCount(),
+                            com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                }
             }
         }
 

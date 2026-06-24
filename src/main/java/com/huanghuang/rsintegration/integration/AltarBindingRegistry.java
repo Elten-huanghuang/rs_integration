@@ -139,8 +139,6 @@ public final class AltarBindingRegistry {
                                 com.refinedmods.refinedstorage.item.NetworkItem.getY(stack),
                                 com.refinedmods.refinedstorage.item.NetworkItem.getZ(stack)));
             }
-            INetwork net = RSIntegration.resolveNetworkFromPlayer(player);
-            if (net != null) return net;
         }
         return null;
     }
@@ -194,20 +192,16 @@ public final class AltarBindingRegistry {
         for (ItemStack stack : stacks) {
             if (stack.isEmpty()) continue;
             if (!BindingStorage.hasBinding(stack, dim.location(), altarPos)) continue;
-            INetwork net = null;
             if (com.refinedmods.refinedstorage.item.NetworkItem.isValid(stack)) {
-                net = RSIntegration.resolveNetwork(player.server,
+                INetwork net = RSIntegration.resolveNetwork(player.server,
                         com.refinedmods.refinedstorage.item.NetworkItem.getDimension(stack),
                         new BlockPos(com.refinedmods.refinedstorage.item.NetworkItem.getX(stack),
                                 com.refinedmods.refinedstorage.item.NetworkItem.getY(stack),
                                 com.refinedmods.refinedstorage.item.NetworkItem.getZ(stack)));
-            }
-            if (net == null) {
-                net = RSIntegration.resolveNetworkFromPlayer(player);
-            }
-            if (net != null) {
-                ItemStack extracted = RSIntegration.extractFromNetwork(net, ingredient, count);
-                if (!extracted.isEmpty()) return extracted;
+                if (net != null) {
+                    ItemStack extracted = RSIntegration.extractFromNetwork(net, ingredient, count);
+                    if (!extracted.isEmpty()) return extracted;
+                }
             }
         }
         return ItemStack.EMPTY;
@@ -284,21 +278,42 @@ public final class AltarBindingRegistry {
      */
     public static boolean hasAnyBindingForType(ServerPlayer player, ModType type) {
         if (type == ModType.GENERIC) return true;
+        com.huanghuang.rsintegration.RSIntegrationMod.LOGGER.info(
+                "[RSI-DIAG] hasAnyBindingForType called: type={}, player={}",
+                type.id(), player.getName().getString());
         var inv = player.getInventory();
-        if (scanBindingsForType(inv.items, type)) return true;
-        if (scanBindingsForType(inv.offhand, type)) return true;
-        if (scanBindingsForType(inv.armor, type)) return true;
+        if (scanBindingsForType(inv.items, player, type)) {
+            com.huanghuang.rsintegration.RSIntegrationMod.LOGGER.info(
+                    "[RSI-DIAG] hasAnyBindingForType → TRUE (main inventory)");
+            return true;
+        }
+        if (scanBindingsForType(inv.offhand, player, type)) {
+            com.huanghuang.rsintegration.RSIntegrationMod.LOGGER.info(
+                    "[RSI-DIAG] hasAnyBindingForType → TRUE (offhand)");
+            return true;
+        }
+        if (scanBindingsForType(inv.armor, player, type)) {
+            com.huanghuang.rsintegration.RSIntegrationMod.LOGGER.info(
+                    "[RSI-DIAG] hasAnyBindingForType → TRUE (armor)");
+            return true;
+        }
         try {
             var opt = top.theillusivec4.curios.api.CuriosApi.getCuriosInventory(player).resolve();
             if (opt.isPresent()) {
                 for (var handler : opt.get().getCurios().values()) {
                     var stacks = handler.getStacks();
                     for (int s = 0; s < stacks.getSlots(); s++) {
-                        if (scanBindingsForType(List.of(stacks.getStackInSlot(s)), type)) return true;
+                        if (scanBindingsForType(List.of(stacks.getStackInSlot(s)), player, type)) {
+                            com.huanghuang.rsintegration.RSIntegrationMod.LOGGER.info(
+                                    "[RSI-DIAG] hasAnyBindingForType → TRUE (curios slot {})", s);
+                            return true;
+                        }
                     }
                 }
             }
         } catch (Throwable ignored) {}
+        com.huanghuang.rsintegration.RSIntegrationMod.LOGGER.info(
+                "[RSI-DIAG] hasAnyBindingForType → FALSE for type={}", type.id());
         return false;
     }
 
@@ -325,11 +340,27 @@ public final class AltarBindingRegistry {
         return result;
     }
 
-    private static boolean scanBindingsForType(List<ItemStack> stacks, ModType type) {
+    private static boolean scanBindingsForType(List<ItemStack> stacks, ServerPlayer player, ModType type) {
         for (ItemStack stack : stacks) {
             if (stack.isEmpty()) continue;
             for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
-                if (ModType.fromBlockKey(entry.blockKey()) == type) {
+                ModType entryType = ModType.fromBlockKey(entry.blockKey());
+                var rl = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(
+                        stack.getItem());
+                String itemId = rl != null ? rl.toString() : "unknown";
+                com.huanghuang.rsintegration.RSIntegrationMod.LOGGER.info(
+                        "[RSI-DIAG] scanBindingsForType: item={}, blockKey={}, entryType={}, lookingFor={}",
+                        itemId, entry.blockKey(),
+                        entryType != null ? entryType.id() : "null",
+                        type.id());
+                if (entryType != type) continue;
+                ResourceKey<Level> altarDim = ResourceKey.create(
+                        net.minecraft.core.registries.Registries.DIMENSION, entry.dim());
+                INetwork net = resolveNetworkForAltar(player, altarDim, entry.pos());
+                com.huanghuang.rsintegration.RSIntegrationMod.LOGGER.info(
+                        "[RSI-DIAG] scanBindingsForType: resolveNetworkForAltar({}, {}, {}) → {}",
+                        entry.dim(), entry.pos(), type.id(), net != null ? "FOUND" : "null");
+                if (net != null) {
                     return true;
                 }
             }

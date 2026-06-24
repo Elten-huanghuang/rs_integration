@@ -27,11 +27,9 @@ public final class CraftingResolver {
     private static final int MAX_DEPTH = 8;
     private static final int MAX_STEPS = 384;
     private static final int MAX_ENSURE_CALLS = 2000;
-    private static final long MAX_RESOLVE_NANOS = 150_000_000L;
+    private static final long MAX_RESOLVE_NANOS = 500_000_000L;
 
     private CraftingResolver() {}
-
-    // ── public API (vanilla-only, backward compatible) ──────────
 
     public static List<ResourceLocation> resolveStepsFor(
             List<ItemStack> needed,
@@ -99,7 +97,6 @@ public final class CraftingResolver {
         return ctx.steps.stream().map(ResolutionStep::recipeId).collect(Collectors.toList());
     }
 
-    /** Variant that merges forced recipe overrides with config preferred recipes. */
     public static List<ResourceLocation> resolveStepsForIngredients(
             List<Ingredient> needed,
             List<ItemStack> available,
@@ -123,13 +120,6 @@ public final class CraftingResolver {
         return ctx.steps.stream().map(ResolutionStep::recipeId).collect(Collectors.toList());
     }
 
-    // ── public API (typed, includes multi-block) ────────────────
-
-    /**
-     * Like {@link #resolveStepsForIngredients} but returns typed
-     * {@link ResolutionStep} entries so callers can distinguish vanilla
-     * from multi-block steps.
-     */
     public static List<ResolutionStep> resolveStepsForIngredientsWithTypes(
             List<Ingredient> needed,
             List<ItemStack> available,
@@ -156,10 +146,6 @@ public final class CraftingResolver {
         return new ArrayList<>(ctx.steps);
     }
 
-    /**
-     * Like {@link #resolveStepsForIngredientsWithTypes} but accepts pre-keyed
-     * available counts to avoid NBT String↔CompoundTag round-trip.
-     */
     public static List<ResolutionStep> resolveStepsForIngredientsWithTypes(
             List<Ingredient> needed,
             Map<StackKey, Integer> availableKeyed,
@@ -171,11 +157,6 @@ public final class CraftingResolver {
                 player, network, missingOut, null);
     }
 
-    /**
-     * Variant with forced recipe overrides (merged on top of config
-     * preferred recipes).  Used by the plan screen when the player
-     * clicks an OR badge to choose a specific recipe path.
-     */
     public static List<ResolutionStep> resolveStepsForIngredientsWithTypes(
             List<Ingredient> needed,
             Map<StackKey, Integer> availableKeyed,
@@ -205,12 +186,6 @@ public final class CraftingResolver {
         return new ArrayList<>(ctx.steps);
     }
 
-    /**
-     * Best-effort variant for plan preview.  Even when leaf ingredients
-     * (raw materials with no producing recipe) are unavailable, the
-     * resolver includes intermediate steps so the player sees the full
-     * recipe chain rather than an empty screen.
-     */
     public static List<ResolutionStep> resolveStepsForIngredientsWithTypes(
             List<Ingredient> needed,
             Map<StackKey, Integer> availableKeyed,
@@ -242,9 +217,6 @@ public final class CraftingResolver {
         return new ArrayList<>(ctx.steps);
     }
 
-    /**
-     * NBT-aware typed variant.
-     */
     public static List<ResolutionStep> resolveStepsForKeyedWithTypes(
             List<ItemStack> needed,
             Map<StackKey, Integer> available,
@@ -258,13 +230,11 @@ public final class CraftingResolver {
                 level, player, network, missingOut);
     }
 
-    // ── recursive resolution core ───────────────────────────────
-
     private static boolean planRecipeIngredients(CraftingRecipe recipe, Context ctx, int depth) {
         if (depth > MAX_DEPTH) return false;
         if (ctx.steps.size() >= MAX_STEPS) return false;
 
-        Snapshot snap = ctx.snapshot();
+        ctx.beginUndo();
 
         Map<Item, Integer> grouped = new LinkedHashMap<>();
         Map<Item, Ingredient> representatives = new HashMap<>();
@@ -281,19 +251,19 @@ public final class CraftingResolver {
         for (Map.Entry<Item, Integer> entry : grouped.entrySet()) {
             Ingredient ing = representatives.get(entry.getKey());
             if (!ensureIngredient(ing, entry.getValue(), ctx, depth + 1)) {
-                ctx.restore(snap);
+                ctx.rollback();
                 return false;
             }
         }
+        ctx.commitUndo();
         return true;
     }
 
-    /** Generic ingredient planning for any recipe type (vanilla or mod). */
     private static boolean planRecipeIngredients(List<IngredientSpec> specs, Context ctx, int depth) {
         if (depth > MAX_DEPTH) return false;
         if (ctx.steps.size() >= MAX_STEPS) return false;
 
-        Snapshot snap = ctx.snapshot();
+        ctx.beginUndo();
 
         Map<Item, Integer> grouped = new LinkedHashMap<>();
         Map<Item, Ingredient> representatives = new HashMap<>();
@@ -310,10 +280,11 @@ public final class CraftingResolver {
         for (Map.Entry<Item, Integer> entry : grouped.entrySet()) {
             Ingredient ing = representatives.get(entry.getKey());
             if (!ensureIngredient(ing, entry.getValue(), ctx, depth + 1)) {
-                ctx.restore(snap);
+                ctx.rollback();
                 return false;
             }
         }
+        ctx.commitUndo();
         return true;
     }
 
@@ -322,12 +293,12 @@ public final class CraftingResolver {
         if (ctx.timedOut()) return false;
         if (++ctx.ensureCalls > MAX_ENSURE_CALLS) return false;
 
-        Snapshot snap = ctx.snapshot();
-
+        ctx.beginUndo();
         if (ctx.consumeMatching(ingredient, count)) {
+            ctx.commitUndo();
             return true;
         }
-        ctx.restore(snap);
+        ctx.rollback();
 
         int alreadyHave = ctx.countMatching(ingredient);
         int remaining = count - alreadyHave;
@@ -338,11 +309,6 @@ public final class CraftingResolver {
 
         List<ModRecipeIndex.RecipeEntry> candidates = candidateRecipes(ingredient, ctx);
         if (candidates.isEmpty()) {
-            if (com.huanghuang.rsintegration.RSIntegrationMod.LOGGER.isDebugEnabled()) {
-                com.huanghuang.rsintegration.RSIntegrationMod.LOGGER.debug(
-                        "[RSI-Resolver] No candidate recipes for {} (needed {}), depth={}",
-                        describeFirstItem(ingredient), count, depth);
-            }
             if (ctx.bestEffort && ctx.missingOut != null) {
                 ctx.missingOut.add(describeFirstItem(ingredient));
                 return true;
@@ -353,90 +319,57 @@ public final class CraftingResolver {
         for (ModRecipeIndex.RecipeEntry candidate : candidates) {
             ItemStack output = ModRecipeIndex.tryGetResultItem(candidate.recipe(), ctx.level.registryAccess());
             if (output.isEmpty() || output.getCount() <= 0) {
-                if (com.huanghuang.rsintegration.RSIntegrationMod.LOGGER.isDebugEnabled()) {
-                    com.huanghuang.rsintegration.RSIntegrationMod.LOGGER.debug(
-                            "[RSI-Resolver]   reject {} — output empty or zero count", candidate.recipe().getId());
-                }
                 continue;
             }
 
-            if (ctx.resolving.contains(output.getItem())) {
-                if (com.huanghuang.rsintegration.RSIntegrationMod.LOGGER.isDebugEnabled()) {
-                    com.huanghuang.rsintegration.RSIntegrationMod.LOGGER.debug(
-                            "[RSI-Resolver]   reject {} — cycle (already resolving {})",
-                            candidate.recipe().getId(), describeItem(output));
-                }
+            String bk = branchKey(candidate.recipe().getId(), output);
+            if (ctx.resolving.contains(bk)) {
                 continue;
             }
 
             if (requiresMissingSelfInput(candidate, output, ctx)) {
-                if (com.huanghuang.rsintegration.RSIntegrationMod.LOGGER.isDebugEnabled()) {
-                    com.huanghuang.rsintegration.RSIntegrationMod.LOGGER.debug(
-                            "[RSI-Resolver]   reject {} — requires self-input and none available",
-                            candidate.recipe().getId());
-                }
                 continue;
             }
 
-            int batches = Math.max(1, (int) Math.ceil((double) remaining / output.getCount()));
-            Snapshot beforeCandidate = ctx.snapshot();
+            int netGain = netGainPerBatch(candidate, output);
+            if (netGain <= 0) continue; // can never produce a net positive
+            int batches = Math.max(1, (int) Math.ceil((double) remaining / netGain));
+            ctx.beginUndo();
 
-            ctx.resolving.add(output.getItem());
+            ctx.resolving.add(bk);
 
             boolean allOk = true;
             for (int b = 0; b < batches && allOk; b++) {
                 allOk = craftOnce(candidate, ctx, depth);
             }
 
-            ctx.resolving.remove(output.getItem());
+            ctx.resolving.remove(bk);
 
             if (!allOk) {
-                if (com.huanghuang.rsintegration.RSIntegrationMod.LOGGER.isDebugEnabled()) {
-                    com.huanghuang.rsintegration.RSIntegrationMod.LOGGER.debug(
-                            "[RSI-Resolver]   reject {} — craftOnce returned false (depth={})",
-                            candidate.recipe().getId(), depth);
-                }
-                ctx.restore(beforeCandidate);
+                ctx.rollback();
                 continue;
             }
 
             if (ctx.consumeMatching(ingredient, count)) {
-                if (com.huanghuang.rsintegration.RSIntegrationMod.LOGGER.isDebugEnabled()) {
-                    com.huanghuang.rsintegration.RSIntegrationMod.LOGGER.debug(
-                            "[RSI-Resolver]   ACCEPT {} — resolved {}",
-                            candidate.recipe().getId(), describeFirstItem(ingredient));
-                }
+                ctx.commitUndo();
                 return true;
             }
 
-            if (com.huanghuang.rsintegration.RSIntegrationMod.LOGGER.isDebugEnabled()) {
-                com.huanghuang.rsintegration.RSIntegrationMod.LOGGER.debug(
-                        "[RSI-Resolver]   reject {} — final consumeMatching failed (needed {} of {})",
-                        candidate.recipe().getId(), count, describeFirstItem(ingredient));
-            }
-            ctx.restore(beforeCandidate);
+            ctx.rollback();
         }
 
-        if (com.huanghuang.rsintegration.RSIntegrationMod.LOGGER.isDebugEnabled()) {
-            com.huanghuang.rsintegration.RSIntegrationMod.LOGGER.debug(
-                    "[RSI-Resolver] FAILED to ensure {} x{} after trying {} candidates (depth={})",
-                    describeFirstItem(ingredient), count, candidates.size(), depth);
-        }
-        ctx.restore(snap);
         return false;
     }
-
-    // ── craftOnce (vanilla + multi-block) ───────────────────────
 
     private static boolean craftOnce(CraftingRecipe recipe, Context ctx, int depth) {
         if (ctx.timedOut()) return false;
         if (depth > MAX_DEPTH) return false;
         if (ctx.steps.size() >= MAX_STEPS) return false;
 
-        Snapshot snap = ctx.snapshot();
+        ctx.beginUndo();
 
         if (!planRecipeIngredients(recipe, ctx, depth + 1)) {
-            ctx.restore(snap);
+            ctx.rollback();
             return false;
         }
 
@@ -448,7 +381,6 @@ public final class CraftingResolver {
         ItemStack result = recipe.getResultItem(ctx.level.registryAccess());
         ctx.add(result);
 
-        // Add secondary outputs (byproducts) to virtual inventory
         for (ItemStack secondary : ModRecipeIndex.tryGetSecondaryOutputs(recipe, ctx.level.registryAccess())) {
             ctx.add(secondary);
         }
@@ -456,6 +388,7 @@ public final class CraftingResolver {
         ctx.steps.add(new ResolutionStep(recipe.getId(), ModType.GENERIC,
                 new ResourceLocation("minecraft:crafting")));
 
+        ctx.commitUndo();
         return true;
     }
 
@@ -464,25 +397,22 @@ public final class CraftingResolver {
         if (depth > MAX_DEPTH) return false;
         if (ctx.steps.size() >= MAX_STEPS) return false;
 
-        // Delegate to vanilla path for crafting recipes
         if (entry.modType() == ModType.GENERIC && entry.recipe() instanceof CraftingRecipe cr) {
             return craftOnce(cr, ctx, depth);
         }
 
-        // Multi-block recipe
-        Snapshot snap = ctx.snapshot();
+        ctx.beginUndo();
         List<IngredientSpec> specs = CraftPacketUtils.extractIngredientSpecs(entry.recipe());
         if (specs == null || specs.isEmpty()) {
-            ctx.restore(snap);
+            ctx.rollback();
             return false;
         }
 
         if (!planRecipeIngredients(specs, ctx, depth + 1)) {
-            ctx.restore(snap);
+            ctx.rollback();
             return false;
         }
 
-        // Consume ingredients and add remainders
         for (IngredientSpec spec : specs) {
             if (spec.isEmpty()) continue;
             addCraftingRemainder(spec.ingredient(), ctx);
@@ -491,26 +421,26 @@ public final class CraftingResolver {
         ItemStack result = ModRecipeIndex.tryGetResultItem(entry.recipe(), ctx.level.registryAccess());
         ctx.add(result);
 
-        // Add secondary outputs (byproducts) to virtual inventory
         for (ItemStack secondary : ModRecipeIndex.tryGetSecondaryOutputs(entry.recipe(), ctx.level.registryAccess())) {
             ctx.add(secondary);
         }
 
         ctx.steps.add(new ResolutionStep(entry.recipe().getId(), entry.modType(), entry.recipeTypeId()));
 
+        ctx.commitUndo();
         return true;
     }
-
-    // ── candidate recipes ───────────────────────────────────────
 
     private static List<ModRecipeIndex.RecipeEntry> candidateRecipes(Ingredient ingredient, Context ctx) {
         Map<ResourceLocation, ModRecipeIndex.RecipeEntry> dedup = new LinkedHashMap<>();
 
-        for (ItemStack stack : ingredient.getItems()) {
+        ItemStack[] items = ingredient.getItems();
+        int limit = Math.min(items.length, 64);
+        for (int idx = 0; idx < limit; idx++) {
+            ItemStack stack = items[idx];
             if (stack.isEmpty()) continue;
             Item item = stack.getItem();
 
-            // 1. Vanilla crafting index
             List<CraftingRecipe> vanillaRecipes = ctx.index.get(item);
             if (vanillaRecipes != null) {
                 for (CraftingRecipe recipe : vanillaRecipes) {
@@ -521,12 +451,13 @@ public final class CraftingResolver {
                 }
             }
 
-            // 2. Multi-block mod index (if available)
             if (ctx.modIndex != null) {
                 List<ModRecipeIndex.RecipeEntry> modRecipes = ctx.modIndex.get(item);
                 if (modRecipes != null) {
                     for (ModRecipeIndex.RecipeEntry entry : modRecipes) {
-                        if (!isMachineAvailable(entry.modType(), ctx)) continue;
+                        if (!isMachineAvailable(entry.modType(), ctx)) {
+                            continue;
+                        }
                         ItemStack output = ModRecipeIndex.tryGetResultItem(
                                 entry.recipe(), ctx.level.registryAccess());
                         if (output.isEmpty() || !ingredient.test(output)) continue;
@@ -542,64 +473,46 @@ public final class CraftingResolver {
             }
         }
 
-        // Capture first item for debug logging
-        Item firstItem = null;
-        for (ItemStack stack : ingredient.getItems()) {
-            if (!stack.isEmpty()) { firstItem = stack.getItem(); break; }
-        }
-
         List<ModRecipeIndex.RecipeEntry> result = new ArrayList<>(dedup.values());
         result.sort((a, b) -> Integer.compare(scoreEntry(b, ctx), scoreEntry(a, ctx)));
-
-        if (com.huanghuang.rsintegration.RSIntegrationMod.LOGGER.isDebugEnabled()) {
-            StringBuilder sb = new StringBuilder("[RSI-Resolver] candidateRecipes for ");
-            sb.append(describeFirstItem(ingredient)).append(": found ").append(result.size()).append(" candidates");
-            for (ModRecipeIndex.RecipeEntry e : result) {
-                sb.append("\n  - ").append(e.recipe().getId()).append(" type=").append(e.modType());
-            }
-            if (result.isEmpty() && firstItem != null) {
-                sb.append("\n  index keys for item ").append(
-                        net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(firstItem));
-                sb.append(": vanilla=").append(ctx.index.containsKey(firstItem));
-                sb.append(" mod=").append(ctx.modIndex != null && ctx.modIndex.containsKey(firstItem));
-            }
-            com.huanghuang.rsintegration.RSIntegrationMod.LOGGER.debug(sb.toString());
-        }
 
         return result;
     }
 
-    // ── scoring ─────────────────────────────────────────────────
+    // 判断配方是否被玩家在计划板中设置为强制首选（OR override）
+    private static boolean isPreferred(ModRecipeIndex.RecipeEntry entry, Context ctx) {
+        if (ctx.preferredRecipes == null) return false;
+        ItemStack output = ModRecipeIndex.tryGetResultItem(entry.recipe(), ctx.level.registryAccess());
+        if (output.isEmpty()) return false;
+        ResourceLocation itemKey = ForgeRegistries.ITEMS.getKey(output.getItem());
+        if (itemKey == null) return false;
+        ResourceLocation pref = ctx.preferredRecipes.get(itemKey);
+        return pref != null && pref.equals(entry.recipe().getId());
+    }
 
     private static int scoreEntry(ModRecipeIndex.RecipeEntry entry, Context ctx) {
         if (entry.recipe() instanceof CraftingRecipe cr) {
             return scoreRecipe(cr, ctx) + (entry.modType() == ModType.GENERIC ? 10 : 0);
         }
-        // Non-crafting recipe: base score from ingredient availability
         int score = 0;
-        if (entry.modType() == ModType.GENERIC) score += 10; // prefer vanilla
+        if (entry.modType() == ModType.GENERIC) score += 10;
         List<IngredientSpec> specs = CraftPacketUtils.extractIngredientSpecs(entry.recipe());
         if (specs != null) {
+            int nonEmpty = 0;
             for (IngredientSpec spec : specs) {
-                if (!spec.isEmpty() && ctx.countMatching(spec.ingredient()) > 0) {
+                if (spec.isEmpty()) continue;
+                nonEmpty++;
+                if (ctx.countMatching(spec.ingredient()) > 0) {
                     score += 10;
                 }
             }
-            score -= specs.size();
+            score -= nonEmpty;
         }
-        // Preferred recipe bonus
         ItemStack output = ModRecipeIndex.tryGetResultItem(entry.recipe(), ctx.level.registryAccess());
         if (!output.isEmpty()) {
-            if (ctx.preferredRecipes != null) {
-                ResourceLocation itemKey = ForgeRegistries.ITEMS.getKey(output.getItem());
-                if (itemKey != null) {
-                    ResourceLocation preferred = ctx.preferredRecipes.get(itemKey);
-                    if (preferred != null && preferred.equals(entry.recipe().getId())) {
-                        score += 1000;
-                    }
-                }
+            if (isPreferred(entry, ctx)) {
+                score += 10000; // 绝对权重
             }
-            // Output divisor bonus: recipes that produce more items per craft are preferred
             if (output.getCount() > 1) {
                 score += (output.getCount() - 1) * 5;
             }
@@ -609,15 +522,12 @@ public final class CraftingResolver {
 
     private static int scoreRecipe(CraftingRecipe recipe, Context ctx) {
         int score = 0;
-
-        if (ctx.preferredRecipes != null) {
-            ResourceLocation outputKey = ForgeRegistries.ITEMS.getKey(
-                    recipe.getResultItem(ctx.level.registryAccess()).getItem());
-            if (outputKey != null) {
-                ResourceLocation preferred = ctx.preferredRecipes.get(outputKey);
-                if (preferred != null && preferred.equals(recipe.getId())) {
-                    score += 1000;
-                }
+        ResourceLocation outputKey = ForgeRegistries.ITEMS.getKey(
+                recipe.getResultItem(ctx.level.registryAccess()).getItem());
+        if (outputKey != null && ctx.preferredRecipes != null) {
+            ResourceLocation preferred = ctx.preferredRecipes.get(outputKey);
+            if (preferred != null && preferred.equals(recipe.getId())) {
+                score += 10000;
             }
         }
 
@@ -630,7 +540,6 @@ public final class CraftingResolver {
 
         score -= recipe.getIngredients().size();
 
-        // Output divisor bonus: recipes producing more items per craft are preferred
         ItemStack output = recipe.getResultItem(ctx.level.registryAccess());
         if (output.getCount() > 1) {
             score += (output.getCount() - 1) * 5;
@@ -639,31 +548,27 @@ public final class CraftingResolver {
         return score;
     }
 
-    // ── machine availability ────────────────────────────────────
-
     private static boolean isMachineAvailable(ModType type, Context ctx) {
         if (type == ModType.GENERIC) return true;
         if (ctx.player == null) return false;
         return AltarBindingRegistry.hasAnyBindingForType(ctx.player, type);
     }
 
-    // ── self-input detection ────────────────────────────────────
-
     private static boolean requiresMissingSelfInput(ModRecipeIndex.RecipeEntry entry,
-                                                     ItemStack output, Context ctx) {
+                                                    ItemStack output, Context ctx) {
         if (entry.recipe() instanceof CraftingRecipe cr) {
             return requiresMissingSelfInput(cr, output, ctx);
         }
-        // Multi-block: check if the output item is also a required input and we have none
         List<IngredientSpec> specs = CraftPacketUtils.extractIngredientSpecs(entry.recipe());
         if (specs == null || specs.isEmpty()) return false;
 
         for (IngredientSpec spec : specs) {
             if (spec.isEmpty()) continue;
-            if (!spec.ingredient().test(output)) continue;
-            if (ctx.countMatching(spec.ingredient()) <= 0) {
+            // Block self-referencing recipes only when the player has none
+            // of the self-referenced item — if they already have some, the
+            // recipe can still be useful (e.g. 1 cherry + 1 acacia = 1 acacia).
+            if (spec.ingredient().test(output) && ctx.countMatching(spec.ingredient()) <= 0)
                 return true;
-            }
         }
         return false;
     }
@@ -671,16 +576,51 @@ public final class CraftingResolver {
     private static boolean requiresMissingSelfInput(CraftingRecipe recipe, ItemStack output, Context ctx) {
         for (Ingredient ing : recipe.getIngredients()) {
             if (ing.isEmpty()) continue;
-            if (!ing.test(output)) continue;
-            ItemStack[] items = ing.getItems();
-            if (items.length == 1 && ctx.countMatching(ing) <= 0) {
-                return true;
-            }
+            if (ing.test(output) && ctx.countMatching(ing) <= 0) return true;
         }
         return false;
     }
 
-    // ── helpers ─────────────────────────────────────────────────
+    /**
+     * Net items gained per batch — output count minus how many ingredients
+     * match the output itself. For self-referencing recipes like
+     * "1 calx + 1 dust = 2 calx", net gain is 1, not 2.
+     */
+    private static int netGainPerBatch(ModRecipeIndex.RecipeEntry entry, ItemStack output) {
+        if (entry.recipe() instanceof CraftingRecipe cr) {
+            int selfConsumed = 0;
+            for (Ingredient ing : cr.getIngredients()) {
+                if (ing.isEmpty()) continue;
+                ItemStack[] items = ing.getItems();
+                // Only single-item ingredients can be reliably flagged as
+                // self-consuming.  Using ing.test(output) on a tag ingredient
+                // like #logs produces false positives when the output happens
+                // to be a log (e.g. "any log -> oak_wood").  The resolver
+                // would then underestimate netGain and skip the recipe.
+                if (items.length == 1 && !items[0].isEmpty()
+                        && ItemStack.isSameItemSameTags(items[0], output)) {
+                    selfConsumed++;
+                }
+            }
+            return output.getCount() - selfConsumed;
+        }
+        List<IngredientSpec> specs = CraftPacketUtils.extractIngredientSpecs(entry.recipe());
+        if (specs == null || specs.isEmpty()) return output.getCount();
+        int selfConsumed = 0;
+        for (IngredientSpec spec : specs) {
+            if (spec.isEmpty()) continue;
+            if (spec.ingredient().test(output))
+                selfConsumed += spec.count();
+        }
+        return output.getCount() - selfConsumed;
+    }
+
+    private static String branchKey(ResourceLocation recipeId, ItemStack output) {
+        ResourceLocation rl = ForgeRegistries.ITEMS.getKey(output.getItem());
+        String itemKey = rl != null ? rl.toString() : "unreg:" + output.getItem().hashCode();
+        String nbt = output.getTag() != null && !output.getTag().isEmpty() ? output.getTag().toString() : "";
+        return recipeId + "|" + itemKey + "|" + nbt;
+    }
 
     private static void addCraftingRemainder(Ingredient ingredient, Context ctx) {
         for (ItemStack stack : ingredient.getItems()) {
@@ -735,8 +675,6 @@ public final class CraftingResolver {
         return list;
     }
 
-    // ── preferred recipes ────────────────────────────────────────
-
     @Nullable
     private static Map<ResourceLocation, ResourceLocation> buildPreferredRecipes(Level level) {
         List<? extends String> ids = RSIntegrationConfig.PREFERRED_RECIPES.get();
@@ -766,10 +704,6 @@ public final class CraftingResolver {
         return map.isEmpty() ? null : map;
     }
 
-    /**
-     * Merges player-forced recipe overrides (from OR-badge clicks) on top
-     * of config-based preferred recipes.  Forced overrides take precedence.
-     */
     @Nullable
     private static Map<ResourceLocation, ResourceLocation> mergeForcedOverrides(
             Level level, @Nullable Map<ResourceLocation, ResourceLocation> forcedOverrides) {
@@ -779,8 +713,6 @@ public final class CraftingResolver {
         prefs.putAll(forcedOverrides);
         return prefs;
     }
-
-    // ── description helpers ──────────────────────────────────────
 
     private static String describeItem(ItemStack stack) {
         if (stack.isEmpty()) return "???";
@@ -794,8 +726,6 @@ public final class CraftingResolver {
         return "???";
     }
 
-    // ── inner types ─────────────────────────────────────────────
-
     public record ResolutionStep(
             ResourceLocation recipeId,
             ModType modType,
@@ -808,16 +738,18 @@ public final class CraftingResolver {
         @Nullable final Map<Item, List<ModRecipeIndex.RecipeEntry>> modIndex;
         final Map<StackKey, Integer> counts;
         final List<ResolutionStep> steps;
-        final Set<Item> resolving;
+        final Set<String> resolving;
         final long deadlineNanos;
         int ensureCalls;
+        final java.util.Deque<UndoEntry> undoStack = new java.util.ArrayDeque<>();
+        final java.util.Deque<Integer> undoCheckpoints = new java.util.ArrayDeque<>();
+        final java.util.Deque<Integer> stepCheckpoints = new java.util.ArrayDeque<>();
         @Nullable final Map<ResourceLocation, ResourceLocation> preferredRecipes;
         @Nullable final ServerPlayer player;
         @Nullable final INetwork network;
         final boolean bestEffort;
         @Nullable final List<String> missingOut;
 
-        /** Vanilla-only constructor (backward compatible). */
         Context(Level level,
                 Map<Item, List<CraftingRecipe>> index,
                 List<ItemStack> available,
@@ -840,7 +772,6 @@ public final class CraftingResolver {
             }
         }
 
-        /** Full constructor with multi-block support. */
         Context(Level level,
                 Map<Item, List<CraftingRecipe>> index,
                 Map<Item, List<ModRecipeIndex.RecipeEntry>> modIndex,
@@ -866,7 +797,6 @@ public final class CraftingResolver {
             }
         }
 
-        /** Full constructor that accepts pre-keyed counts (avoids NBT round-trip). */
         Context(Level level,
                 Map<Item, List<CraftingRecipe>> index,
                 Map<Item, List<ModRecipeIndex.RecipeEntry>> modIndex,
@@ -889,11 +819,6 @@ public final class CraftingResolver {
             this.missingOut = null;
         }
 
-        /** Plan-preview constructor with best-effort mode enabled.
-         *  When {@code bestEffort} is true, leaf ingredients that have no
-         *  producing recipe are added to {@code missingOut} instead of
-         *  aborting the chain, so intermediate steps are visible in the
-         *  plan even when raw materials are unavailable. */
         Context(Level level,
                 Map<Item, List<CraftingRecipe>> index,
                 Map<Item, List<ModRecipeIndex.RecipeEntry>> modIndex,
@@ -921,25 +846,51 @@ public final class CraftingResolver {
             return System.nanoTime() > deadlineNanos;
         }
 
-        Snapshot snapshot() {
-            return new Snapshot(new LinkedHashMap<>(counts), new ArrayList<>(steps));
+        void beginUndo() {
+            undoCheckpoints.push(undoStack.size());
+            stepCheckpoints.push(steps.size());
         }
 
-        void restore(Snapshot snap) {
-            counts.clear();
-            counts.putAll(snap.counts);
-            steps.clear();
-            steps.addAll(snap.steps);
+        void commitUndo() {
+            undoCheckpoints.pop();
+            stepCheckpoints.pop();
+            if (undoCheckpoints.isEmpty()) {
+                undoStack.clear();
+            }
+        }
+
+        void rollback() {
+            int ucp = undoCheckpoints.pop();
+            int scp = stepCheckpoints.pop();
+            while (undoStack.size() > ucp) {
+                UndoEntry e = undoStack.pop();
+                if (e.oldValue == null) counts.remove(e.key);
+                else counts.put(e.key, e.oldValue);
+            }
+            while (steps.size() > scp) {
+                steps.remove(steps.size() - 1);
+            }
+            if (undoCheckpoints.isEmpty()) {
+                undoStack.clear();
+            }
         }
 
         void add(ItemStack stack) {
             if (stack.isEmpty() || stack.getCount() <= 0) return;
-            counts.merge(StackKey.of(stack, true), stack.getCount(), Integer::sum);
+            StackKey key = StackKey.of(stack, true);
+            if (!undoCheckpoints.isEmpty()) {
+                undoStack.push(new UndoEntry(key, counts.get(key)));
+            }
+            counts.merge(key, stack.getCount(), Integer::sum);
         }
 
         void add(Item item, int count) {
             if (count <= 0) return;
-            counts.merge(new StackKey(item, null), count, Integer::sum);
+            StackKey key = new StackKey(item, null);
+            if (!undoCheckpoints.isEmpty()) {
+                undoStack.push(new UndoEntry(key, counts.get(key)));
+            }
+            counts.merge(key, count, Integer::sum);
         }
 
         int countMatching(Ingredient ingredient) {
@@ -958,7 +909,9 @@ public final class CraftingResolver {
         boolean consumeMatching(Ingredient ingredient, int needed) {
             int remaining = needed;
             List<StackKey> sortedKeys = new ArrayList<>(counts.keySet());
-            sortedKeys.sort(Comparator.comparing(k -> k.tag() != null));
+            // Stable sort: no-NBT first, then by registry name for determinism.
+            sortedKeys.sort(Comparator.comparing((StackKey k) -> k.tag() != null)
+                    .thenComparing(k -> ForgeRegistries.ITEMS.getKey(k.item()).toString()));
 
             for (StackKey key : sortedKeys) {
                 if (remaining <= 0) return true;
@@ -974,6 +927,9 @@ public final class CraftingResolver {
         }
 
         private void decrement(StackKey key, int amount) {
+            if (!undoCheckpoints.isEmpty()) {
+                undoStack.push(new UndoEntry(key, counts.get(key)));
+            }
             int current = counts.getOrDefault(key, 0);
             int newCount = current - amount;
             if (newCount <= 0) {
@@ -984,13 +940,13 @@ public final class CraftingResolver {
         }
     }
 
-    static final class Snapshot {
-        final Map<StackKey, Integer> counts;
-        final List<ResolutionStep> steps;
+    static final class UndoEntry {
+        final StackKey key;
+        @Nullable final Integer oldValue;
 
-        Snapshot(Map<StackKey, Integer> counts, List<ResolutionStep> steps) {
-            this.counts = counts;
-            this.steps = steps;
+        UndoEntry(StackKey key, @Nullable Integer oldValue) {
+            this.key = key;
+            this.oldValue = oldValue;
         }
     }
 
@@ -998,7 +954,7 @@ public final class CraftingResolver {
         static StackKey of(ItemStack stack, boolean includeNbt) {
             Item item = stack.getItem();
             String tag = null;
-            if (includeNbt && stack.hasTag()) {
+            if (includeNbt && stack.getTag() != null && !stack.getTag().isEmpty()) {
                 tag = stack.getTag().toString();
             }
             return new StackKey(item, tag);

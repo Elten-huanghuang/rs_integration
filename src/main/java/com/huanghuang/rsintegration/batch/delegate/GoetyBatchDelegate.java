@@ -363,11 +363,10 @@ public final class GoetyBatchDelegate implements IBatchDelegate {
 
     @Override
     public ItemStack collectResult(ServerPlayer player) {
-        // Goety auto-delivers the result to the player. Extract it from the
-        // player's inventory so the AsyncCraftChain can feed it to later steps.
-        ItemStack result = ModRecipeIndex.tryGetResultItem(recipe, player.serverLevel().registryAccess());
-        if (result.isEmpty()) return ItemStack.EMPTY;
+        ItemStack expected = ModRecipeIndex.tryGetResultItem(recipe, player.serverLevel().registryAccess());
+        if (expected.isEmpty()) return ItemStack.EMPTY;
 
+        // 1. Check player inventory (Goety auto-delivers the result to the player)
         var inv = player.getInventory();
         List<ItemStack> all = new ArrayList<>();
         all.addAll(inv.items);
@@ -386,11 +385,30 @@ public final class GoetyBatchDelegate implements IBatchDelegate {
         } catch (Throwable ignored) {}
 
         for (ItemStack stack : all) {
-            if (ItemStack.isSameItemSameTags(stack, result)) {
-                ItemStack collected = stack.split(result.getCount());
+            if (ItemStack.isSameItemSameTags(stack, expected)) {
+                ItemStack collected = stack.split(expected.getCount());
                 return collected;
             }
         }
+
+        // 2. Fallback: scan for ItemEntity near the altar (result may have spawned
+        //    in the world rather than going directly to player inventory)
+        if (myPos != null && player.serverLevel().isLoaded(myPos)) {
+            var entities = player.serverLevel().getEntitiesOfClass(
+                    net.minecraft.world.entity.item.ItemEntity.class,
+                    new net.minecraft.world.phys.AABB(myPos).inflate(3),
+                    e -> ItemStack.isSameItemSameTags(e.getItem(), expected));
+            for (var entity : entities) {
+                ItemStack collected = entity.getItem().copy();
+                if (collected.getCount() > expected.getCount()) {
+                    collected.setCount(expected.getCount());
+                }
+                entity.getItem().shrink(collected.getCount());
+                if (entity.getItem().isEmpty()) entity.discard();
+                return collected;
+            }
+        }
+
         return ItemStack.EMPTY;
     }
 

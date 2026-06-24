@@ -28,6 +28,12 @@ public record PlanStep(
         int recipeHeight,
         List<String> alternativeModTypes
 ) {
+    public PlanStep {
+        inputs = List.copyOf(inputs);
+        alternatives = List.copyOf(alternatives);
+        alternativeModTypes = List.copyOf(alternativeModTypes);
+    }
+
     public PlanStep(ResourceLocation recipeId, ItemStack output, int batches,
                     List<ItemStack> inputs, List<ResourceLocation> alternatives,
                     @Nullable ModType modType, int depth, boolean hasOrSiblings,

@@ -1,7 +1,10 @@
 package com.huanghuang.rsintegration.sidepanel;
 
 import net.minecraft.client.Minecraft;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
@@ -34,7 +37,7 @@ public final class RSSidePanelSyncPacket {
     void encode(FriendlyByteBuf buf) {
         buf.writeVarInt(items.size());
         for (int i = 0; i < items.size(); i++) {
-            buf.writeItem(items.get(i));
+            writeItemStack(buf, items.get(i));
             buf.writeVarLong(timestamps != null && i < timestamps.size() ? timestamps.get(i) : 0L);
             buf.writeBoolean(craftableFlags != null && i < craftableFlags.size() && craftableFlags.get(i));
         }
@@ -49,7 +52,7 @@ public final class RSSidePanelSyncPacket {
         List<Long> timestamps = new ArrayList<>(count);
         List<Boolean> craftable = new ArrayList<>(count);
         for (int i = 0; i < count; i++) {
-            items.add(buf.readItem());
+            items.add(readItemStack(buf));
             timestamps.add(buf.readVarLong());
             craftable.add(buf.readBoolean());
         }
@@ -57,6 +60,33 @@ public final class RSSidePanelSyncPacket {
         boolean available = buf.readBoolean();
         String name = buf.readUtf();
         return new RSSidePanelSyncPacket(items, timestamps, craftable, total, available, name);
+    }
+
+    /**
+     * Custom item serialisation that preserves full count &amp; always includes NBT.
+     * Vanilla {@code writeItem} truncates count to a byte and strips NBT for
+     * items that are neither damageable nor override-multiplayer-nbt.
+     */
+    private static void writeItemStack(FriendlyByteBuf buf, ItemStack stack) {
+        if (stack.isEmpty()) {
+            buf.writeBoolean(false);
+            return;
+        }
+        buf.writeBoolean(true);
+        buf.writeId(BuiltInRegistries.ITEM, stack.getItem());
+        buf.writeVarInt(stack.getCount());
+        buf.writeNbt(stack.hasTag() ? stack.getTag() : null);
+    }
+
+    private static ItemStack readItemStack(FriendlyByteBuf buf) {
+        if (!buf.readBoolean()) return ItemStack.EMPTY;
+        Item item = buf.readById(BuiltInRegistries.ITEM);
+        if (item == null) return ItemStack.EMPTY;
+        int count = buf.readVarInt();
+        CompoundTag tag = buf.readNbt();
+        ItemStack stack = new ItemStack(item, count);
+        if (tag != null) stack.setTag(tag);
+        return stack;
     }
 
     @SuppressWarnings("resource")

@@ -49,17 +49,24 @@ repositories {
         url = 'https://repo.spongepowered.org/repository/maven-public/'
         content { includeGroup 'org.spongepowered' }
     }
+    mavenCentral()
     flatDir { dirs 'libs' }
+}
+
+configurations {
+    shade
+    implementation.extendsFrom shade
 }
 
 dependencies {
     minecraft "net.minecraftforge:forge:1.20.1-47.3.22"
 
-    // Antientropycore (for generic interfaces: IBindingHook, AltarBinding, AltarBindingRegistry, BindingStorage)
-    compileOnly fileTree(dir: 'libs', include: ['antientropycore-*.jar'])
+    // Pinyin search
+    shade 'com.github.stuxuhai:jpinyin:1.1.8'
 
-    // Refined Storage, Sophisticated Backpacks, Goety, Wizard's Reborn, etc.
-    compileOnly fileTree(dir: 'libs', include: ['*.jar'])
+    // All mod jars in libs — must go through fg.deobf() so ForgeGradle
+    // remaps the classes to match the dev-environment mappings.
+    compileOnly fg.deobf(fileTree(dir: 'libs', include: ['*.jar']))
 
     // JEI
     compileOnly "mezz.jei:jei-${minecraft_version}-forge-api:${jei_version}"
@@ -100,6 +107,9 @@ jar {
                 "Implementation-Vendor"   : "Huanghuang",
                 "MixinConfigs"            : "rs_integration.mixins.json"
         ])
+    }
+    from {
+        configurations.shade.collect { it.isDirectory() ? it : zipTree(it) }
     }
 }
 
