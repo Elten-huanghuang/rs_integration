@@ -482,7 +482,7 @@ public final class RSSidePanelClient {
         try {
             IJeiRuntime rt = com.huanghuang.rsintegration.integration.RSJeiPlugin.getRuntime();
             if (rt != null) rt.getIngredientFilter().setFilterText(searchText);
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-SidePanel] Reflection probe failed", e); }
     }
 
     private static void pullJeiFilter() {
@@ -501,7 +501,7 @@ public final class RSSidePanelClient {
                     }
                 }
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-SidePanel] Reflection probe failed", e); }
     }
 
     /** Show JEI recipes (R) or uses (U) for the currently hovered item. */

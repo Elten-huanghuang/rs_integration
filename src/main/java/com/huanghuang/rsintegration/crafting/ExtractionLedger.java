@@ -3,10 +3,12 @@ package com.huanghuang.rsintegration.crafting;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.integration.AltarBindingRegistry;
 import com.huanghuang.rsintegration.integration.RSIntegration;
+import com.huanghuang.rsintegration.util.Diagnostics;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceKey;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
@@ -19,18 +21,53 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 public final class ExtractionLedger {
 
+    public enum State {
+        IDLE, RESERVING, RESERVED, COMMITTING, COMMITTED, ROLLED_BACK
+    }
+
     private final List<Entry> entries = new ArrayList<>();
     private final Map<CraftingResolver.StackKey, Integer> pendingNet = new HashMap<>();
     private final Map<CraftingResolver.StackKey, Integer> pendingInv = new HashMap<>();
-    private boolean committed;
+    private State state = State.IDLE;
 
     private final Map<INetwork, List<ItemStack>> networkEntryCache = new HashMap<>();
+
+    // ── state guards ─────────────────────────────────────────────
+
+    private void requireState(State... allowed) {
+        for (State s : allowed) {
+            if (state == s) return;
+        }
+        throw com.huanghuang.rsintegration.RSICraftException.ledgerStateViolation(
+                java.util.Arrays.toString(allowed), state.name());
+    }
+
+    private void transition(State to) {
+        RSIntegrationMod.LOGGER.debug("[RSI-Ledger] {} → {}", state, to);
+        Diagnostics.record(Diagnostics.Category.LEDGER_RESERVE,
+                state + "→" + to + " entries=" + entries.size());
+        state = to;
+    }
+
+    /** Record a per-entry diagnostic before adding it to the list. */
+    private void recordEntry(Entry e) {
+        ResourceLocation rl = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(e.template.getItem());
+        String itemId = rl != null ? rl.toString() : e.template.getDisplayName().getString();
+        Diagnostics.record(Diagnostics.Category.LEDGER_RESERVE,
+                "reserve item=" + itemId + " count=" + e.count + " src=" + e.source);
+        entries.add(e);
+    }
+
+    // ── reservations ─────────────────────────────────────────────
 
     public ItemStack reserve(Ingredient ingredient, int count,
                              @Nullable INetwork network, ServerPlayer player,
                              @Nullable ResourceKey<Level> altarDim, @Nullable BlockPos altarPos) {
+        requireState(State.IDLE, State.RESERVING);
         if (count <= 0) return ItemStack.EMPTY;
         if (ingredient.isEmpty()) return ItemStack.EMPTY;
+
+        if (state == State.IDLE) transition(State.RESERVING);
 
         if (network != null) {
             ItemStack matched = findAvailableInNetwork(network, ingredient, count);
@@ -38,7 +75,7 @@ public final class ExtractionLedger {
                 ItemStack result = matched.copyWithCount(count);
                 // 💡 修复点：传入原始 Ingredient 而不是用 Ingredient.of(result)，解决 Tag 无法批量跨品种提取的 Bug
                 // pendingNet already tracked inside findAvailableInNetwork
-                entries.add(new Entry(Source.NETWORK, ingredient, result.copy(), null, null, null, network));
+                recordEntry(new Entry(Source.NETWORK, ingredient, result.copy(), null, null, null, network));
                 return result;
             }
         }
@@ -50,7 +87,7 @@ public final class ExtractionLedger {
                 ItemStack matched = findAvailableInNetwork(bindingNet, ingredient, count);
                 if (!matched.isEmpty()) {
                     ItemStack result = matched.copyWithCount(count);
-                    entries.add(new Entry(Source.ALTAR_BINDING, ingredient, result.copy(),
+                    recordEntry(new Entry(Source.ALTAR_BINDING, ingredient, result.copy(),
                             null, altarDim, altarPos, bindingNet));
                     // pendingNet already tracked inside findAvailableInNetwork
                     return result;
@@ -62,7 +99,7 @@ public final class ExtractionLedger {
             ItemStack matched = findAvailableInInventory(player, ingredient, count);
             if (!matched.isEmpty()) {
                 ItemStack result = matched.copyWithCount(count);
-                entries.add(new Entry(Source.PLAYER_INVENTORY, ingredient, result.copy(), null, null, null, null));
+                recordEntry(new Entry(Source.PLAYER_INVENTORY, ingredient, result.copy(), null, null, null, null));
                 // pendingInv already tracked inside findAvailableInInventory
                 return result;
             }
@@ -72,77 +109,144 @@ public final class ExtractionLedger {
     }
 
     public ItemStack reserveFromNetwork(Ingredient ingredient, int count, INetwork network) {
+        requireState(State.IDLE, State.RESERVING);
         if (count <= 0 || ingredient.isEmpty()) return ItemStack.EMPTY;
+        if (state == State.IDLE) transition(State.RESERVING);
 
         ItemStack matched = findAvailableInNetwork(network, ingredient, count);
         if (matched.isEmpty()) return ItemStack.EMPTY;
 
         ItemStack template = matched.copyWithCount(count);
-        entries.add(new Entry(Source.NETWORK, ingredient, template.copy(), null, null, null, network));
+        recordEntry(new Entry(Source.NETWORK, ingredient, template.copy(), null, null, null, network));
         // pendingNet already tracked inside findAvailableInNetwork
         return template;
     }
 
     public ItemStack reserveFromInventory(Ingredient ingredient, int count, ServerPlayer player) {
+        requireState(State.IDLE, State.RESERVING);
         if (count <= 0 || ingredient.isEmpty()) return ItemStack.EMPTY;
+        if (state == State.IDLE) transition(State.RESERVING);
 
         ItemStack matched = findAvailableInInventory(player, ingredient, count);
         if (matched.isEmpty()) return ItemStack.EMPTY;
 
         ItemStack template = matched.copyWithCount(count);
-        entries.add(new Entry(Source.PLAYER_INVENTORY, ingredient, template.copy(), null, null, null, null));
+        recordEntry(new Entry(Source.PLAYER_INVENTORY, ingredient, template.copy(), null, null, null, null));
         // pendingInv already tracked inside findAvailableInInventory
         return template;
     }
 
+    /**
+     * Atomically commit all reservations in three phases:
+     * <ol>
+     *   <li>Pre-check — verify every entry can still be satisfied</li>
+     *   <li>Batch extract — extract all entries; if any fail, roll back everything</li>
+     *   <li>Confirm — mark committed</li>
+     * </ol>
+     */
     public boolean commit(@Nullable INetwork network, ServerPlayer player) {
-        if (committed) return true;
-        committed = true;
-
-        // Group extracted items with their source entry so rollback
-        // can return each item to the correct network / inventory.
-        List<Entry> extracted = new ArrayList<>();
-        try {
-            for (int i = 0; i < entries.size(); i++) {
-                Entry entry = entries.get(i);
-                ItemStack item = extractOne(entry, network, player);
-
-                if (item.isEmpty() || item.getCount() < entry.count) {
-                    rollbackExtracted(extracted, player);
-                    return false;
-                }
-                extracted.add(new Entry(entry.source, entry.originalIngredient, item.copy(),
-                        null, entry.altarDim, entry.altarPos, entry.sourceNetwork));
-            }
-            MaterialSources.invalidateFor(player);
+        if (state == State.COMMITTED) return true;
+        // Allow IDLE only for no-op commit (no entries)
+        if (state == State.IDLE && entries.isEmpty()) {
+            transition(State.COMMITTED);
             return true;
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Ledger] Commit exception, rolling back {} extractions", extracted.size(), e);
-            rollbackExtracted(extracted, player);
+        }
+        requireState(State.RESERVING, State.RESERVED);
+
+        if (entries.isEmpty()) {
+            transition(State.COMMITTED);
+            return true;
+        }
+
+        transition(State.COMMITTING);
+
+        // ── Phase 1: Pre-check ──────────────────────────────────
+        if (!preCheck(network, player)) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Ledger] Commit pre-check failed, rolling back");
+            transition(State.ROLLED_BACK);
             return false;
         }
+
+        // ── Phase 2: Batch extract ──────────────────────────────
+        List<ExtractRecord> extracted = new ArrayList<>(entries.size());
+        try {
+            for (Entry entry : entries) {
+                ItemStack item = extractOne(entry, network, player);
+                if (item.isEmpty() || item.getCount() < entry.count) {
+                    RSIntegrationMod.LOGGER.warn("[RSI-Ledger] Commit: extractOne returned empty/insufficient for entry {} (need {}, got {})",
+                            entry.id, entry.count, item.getCount());
+                    rollbackExtractedPhases(extracted, player);
+                    transition(State.ROLLED_BACK);
+                    return false;
+                }
+                extracted.add(new ExtractRecord(entry.source, item.copy(),
+                        entry.altarDim, entry.altarPos, entry.sourceNetwork));
+            }
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Ledger] Commit exception during extraction", e);
+            rollbackExtractedPhases(extracted, player);
+            transition(State.ROLLED_BACK);
+            return false;
+        }
+
+        // ── Phase 3: Confirm ────────────────────────────────────
+        MaterialSources.invalidateFor(player);
+        pendingNet.clear();
+        pendingInv.clear();
+        networkEntryCache.clear();
+        transition(State.COMMITTED);
+        return true;
     }
 
     /**
-     * Return already-extracted items to their original source.
-     * ALTAR_BINDING items go back to the bound network, NETWORK items
-     * to the player's RS network, PLAYER_INVENTORY items to the player.
+     * Pre-check every reserved entry before committing to extraction.
+     * Verifies that the total reserved count does not exceed physical
+     * availability (correcting for any race with other systems).
      */
-    private static void rollbackExtracted(List<Entry> extracted, ServerPlayer player) {
-        for (Entry e : extracted) {
-            ItemStack s = e.template;
+    private boolean preCheck(@Nullable INetwork network, ServerPlayer player) {
+        if (network != null) {
+            int netReserved = 0;
+            for (Entry e : entries) {
+                if (e.source == Source.NETWORK) netReserved += e.count;
+            }
+            if (netReserved > 0) {
+                // Verify the network still has enough total items to cover
+                // all reservations. This is a coarse check — individual
+                // entries are verified during the extraction phase.
+                var cache = network.getItemStorageCache();
+                if (cache == null) return false;
+                int netTotal = 0;
+                for (var s : cache.getList().getStacks()) {
+                    netTotal += s.getStack().getCount();
+                }
+                if (netTotal < netReserved) {
+                    RSIntegrationMod.LOGGER.warn("[RSI-Ledger] Pre-check: network total {} < reserved {}",
+                            netTotal, netReserved);
+                    return false;
+                }
+            }
+        }
+        // Player inventory entries are verified at extraction time
+        // since inventory can change between reservation and commit.
+        return true;
+    }
+
+    /** Return extracted items back to their original source. */
+    private static void rollbackExtractedPhases(List<ExtractRecord> extracted, ServerPlayer player) {
+        for (ExtractRecord rec : extracted) {
+            ItemStack s = rec.stack;
             if (s.isEmpty()) continue;
-            switch (e.source) {
+            switch (rec.source) {
                 case ALTAR_BINDING -> {
-                    if (e.sourceNetwork != null) {
-                        e.sourceNetwork.insertItem(s, s.getCount(), Action.PERFORM);
+                    if (rec.sourceNetwork != null) {
+                        rec.sourceNetwork.insertItem(s, s.getCount(), Action.PERFORM);
                     } else {
                         ItemHandlerHelper.giveItemToPlayer(player, s);
                     }
                 }
                 case NETWORK -> {
-                    if (e.sourceNetwork != null) {
-                        e.sourceNetwork.insertItem(s, s.getCount(), Action.PERFORM);
+                    if (rec.sourceNetwork != null) {
+                        rec.sourceNetwork.insertItem(s, s.getCount(), Action.PERFORM);
                     } else {
                         ItemHandlerHelper.giveItemToPlayer(player, s);
                     }
@@ -152,15 +256,38 @@ public final class ExtractionLedger {
         }
     }
 
+    /** Lightweight record for extracted items during commit rollback. */
+    private record ExtractRecord(Source source, ItemStack stack,
+                                  @Nullable ResourceKey<Level> altarDim,
+                                  @Nullable BlockPos altarPos,
+                                  @Nullable INetwork sourceNetwork) {}
+
+    /** Explicitly roll back all reservations without committing. */
+    public void rollback(ServerPlayer player) {
+        requireState(State.IDLE, State.RESERVING, State.RESERVED, State.COMMITTING);
+        if (state == State.IDLE || state == State.ROLLED_BACK) return;
+        releaseReservations(player);
+        transition(State.ROLLED_BACK);
+    }
+
+    private void releaseReservations(ServerPlayer player) {
+        // Pending reservations were never physically extracted — just clear the
+        // tracking maps so future reservations see accurate counts.
+        pendingNet.clear();
+        pendingInv.clear();
+        networkEntryCache.clear();
+    }
+
     public int size() { return entries.size(); }
-    public boolean isCommitted() { return committed; }
+    public boolean isCommitted() { return state == State.COMMITTED; }
+    public State state() { return state; }
 
     public void reset() {
         entries.clear();
         pendingNet.clear();
         pendingInv.clear();
         networkEntryCache.clear();
-        committed = false;
+        state = State.IDLE;
     }
 
     private enum Source { NETWORK, PLAYER_INVENTORY, ALTAR_BINDING }
@@ -378,6 +505,23 @@ public final class ExtractionLedger {
             remaining -= contrib;
         }
         return chosen;
+    }
+
+    /** Returns a read-only snapshot of ledger entries for debug commands. */
+    public List<String> describeEntries() {
+        List<String> out = new ArrayList<>();
+        for (Entry e : entries) {
+            ResourceLocation rl = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(e.template.getItem());
+            String itemName = rl != null ? rl.toString() : e.template.getDisplayName().getString();
+            out.add(String.format("#%d %s: %s x%d (source=%s)",
+                    e.id, e.source, itemName, e.count,
+                    switch (e.source) {
+                        case NETWORK -> "network";
+                        case PLAYER_INVENTORY -> "inventory";
+                        case ALTAR_BINDING -> "altar_binding";
+                    }));
+        }
+        return out;
     }
 
     public String describePending() {

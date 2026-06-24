@@ -6,6 +6,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 
+import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
@@ -42,18 +43,36 @@ public final class AsyncCraftManager {
                 }
             }
             activeChains.add(chain);
+            // Register callback so the chain notifies us when it terminates
+            chain.onDone(() -> {
+                synchronized (activeChains) {
+                    activeChains.remove(chain);
+                    RSIntegrationMod.LOGGER.debug("[RSI-AsyncMgr] Chain removed via callback: player={} state={}",
+                            player != null ? player.getName().getString() : "?", chain.state());
+                }
+            });
         }
         RSIntegrationMod.LOGGER.debug("[RSI-AsyncMgr] Chain submitted: player={} steps={}",
                 player != null ? player.getName().getString() : "?", chain.stepsCount());
     }
 
     public boolean hasActiveChainFor(UUID playerId) {
+        return getChain(playerId) != null;
+    }
+
+    @Nullable
+    public AsyncCraftChain getChain(ServerPlayer player) {
+        return getChain(player.getUUID());
+    }
+
+    @Nullable
+    public AsyncCraftChain getChain(UUID playerId) {
         synchronized (activeChains) {
             for (AsyncCraftChain chain : activeChains) {
-                if (chain.belongsTo(playerId)) return true;
+                if (chain.belongsTo(playerId)) return chain;
             }
         }
-        return false;
+        return null;
     }
 
     public void cancelAllForPlayer(UUID playerId) {
@@ -76,18 +95,20 @@ public final class AsyncCraftManager {
         MinecraftServer server = event.getServer();
         if (server == null || server.getPlayerList() == null) return;
 
+        // Snapshot to avoid CME: chain.tick() → fireOnDone() callback
+        // removes the chain from activeChains inside this synchronized block.
+        List<AsyncCraftChain> snapshot;
         synchronized (activeChains) {
-            Iterator<AsyncCraftChain> it = activeChains.iterator();
-            while (it.hasNext()) {
-                AsyncCraftChain chain = it.next();
-                try {
-                    if (chain.tick()) {
-                        it.remove();
-                    }
-                } catch (Exception e) {
-                    RSIntegrationMod.LOGGER.error("[RSI-AsyncMgr] Chain tick error", e);
-                    chain.abort("Internal error: " + e.getMessage());
-                    it.remove();
+            snapshot = new ArrayList<>(activeChains);
+        }
+        for (AsyncCraftChain chain : snapshot) {
+            try {
+                chain.tick();
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.error("[RSI-AsyncMgr] Chain tick error", e);
+                chain.abort("Internal error: " + e.getMessage());
+                synchronized (activeChains) {
+                    activeChains.remove(chain);
                 }
             }
         }

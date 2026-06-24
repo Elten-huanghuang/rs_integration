@@ -142,8 +142,8 @@ public final class RSIntegration {
                             be.getClass().getName());
                     return net;
                 }
-            } catch (Exception ignored) {
-                // Not every block entity has getNetwork()
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.debug("[RSI] resolveNetwork: getNetwork() not available on {}", be.getClass().getName());
             }
             RSIntegrationMod.LOGGER.info("[RSI] resolveNetwork: BE at {} is {} (no network accessible)",
                     controllerPos, be.getClass().getName());

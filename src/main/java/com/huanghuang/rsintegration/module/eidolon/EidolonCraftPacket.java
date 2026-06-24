@@ -152,7 +152,7 @@ public final class EidolonCraftPacket {
         boolean boiling = false;
         try {
             if (boilingField != null) boiling = boilingField.getBoolean(be);
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
 
         boolean stepsEmpty = true;
         try {
@@ -160,7 +160,7 @@ public final class EidolonCraftPacket {
                 List<?> steps = (List<?>) stepsField.get(be);
                 stepsEmpty = steps == null || steps.isEmpty();
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
 
         if (!hasWater) {
             player.sendSystemMessage(Component.translatable("rsi.eidolon.warn.needs_water"));
@@ -285,11 +285,11 @@ public final class EidolonCraftPacket {
                     .getMethod("drain", int.class, IFluidHandler.FluidAction.class)
                     .invoke(tank, 1000, IFluidHandler.FluidAction.EXECUTE);
             be.getClass().getField("hasWater").set(be, false);
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
 
         try {
             if (stepsField != null) stepsField.set(be, new ArrayList<>());
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
 
         be.setChanged();
         BlockState state = level.getBlockState(pos);

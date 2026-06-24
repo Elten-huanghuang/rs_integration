@@ -103,7 +103,7 @@ public final class GenericBatchDelegate implements IBatchDelegate {
                 if (result instanceof ItemStack stack && !stack.isEmpty()) {
                     this.pendingResult = stack.copy();
                 }
-            } catch (Exception ignored) {}
+            } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-Generic] Reflection probe failed", ex); }
         }
 
         // Extracted items have been consumed by the machine — discard templates

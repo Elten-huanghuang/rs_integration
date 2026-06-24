@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.batch.ModType;
+import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Item;
@@ -75,7 +76,7 @@ public final class ModRecipeIndex {
                 ModType type = ModType.classifyRecipe(recipe);
                 if (type == ModType.GENERIC) continue;
 
-                ItemStack result = tryGetResultItem(recipe, level.registryAccess());
+                ItemStack result = ModRecipeHandlers.tryGetResultItem(recipe, level.registryAccess());
                 if (result.isEmpty()) continue;
 
                 // 💡 修复：绝不能把未知的机器配方强制降级为 GENERIC，否则会被原版合成流瞬间白嫖！
@@ -125,7 +126,7 @@ public final class ModRecipeIndex {
                     result = m.invoke(recipe);
                 }
                 if (result instanceof ItemStack s && !s.isEmpty()) return s;
-            } catch (Exception ignored) {}
+            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
         }
         // Probe for the result accessor and cache it
         for (String methodName : new String[]{"getResultItem", "getResultItem", "getResult", "getOutput", "getOutputCopy", "getAssembledItem"}) {
@@ -144,7 +145,7 @@ public final class ModRecipeIndex {
                             resultMethodCache.put(clazz, method);
                             return s;
                         }
-                    } catch (Exception ignored) {}
+                    } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
                 }
             }
         }
@@ -166,7 +167,7 @@ public final class ModRecipeIndex {
                     try {
                         Object val = field.get(recipe);
                         if (val instanceof ItemStack s && !s.isEmpty()) return s;
-                    } catch (Exception ignored) {}
+                    } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
                 }
             }
             scan = scan.getSuperclass();
@@ -189,7 +190,7 @@ public final class ModRecipeIndex {
                     if (!s.isEmpty()) results.add(s.copy());
                 }
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
         try {
             Object obj = recipe.getClass().getMethod("getByproducts").invoke(recipe);
             if (obj instanceof List<?> list) {
@@ -197,7 +198,7 @@ public final class ModRecipeIndex {
                     if (e instanceof ItemStack s && !s.isEmpty()) results.add(s.copy());
                 }
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
         try {
             Object obj = recipe.getClass().getMethod("getRollResults").invoke(recipe);
             if (obj instanceof List<?> list) {
@@ -205,7 +206,7 @@ public final class ModRecipeIndex {
                     if (e instanceof ItemStack s && !s.isEmpty()) results.add(s.copy());
                 }
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
         try {
             Object obj = recipe.getClass().getMethod("getOutputs").invoke(recipe);
             if (obj instanceof List<?> list) {
@@ -217,7 +218,7 @@ public final class ModRecipeIndex {
                     if (!s.isEmpty()) results.add(s.copy());
                 }
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
 
         trySecondaryOutputFields(recipe, results);
         return results;
@@ -243,7 +244,7 @@ public final class ModRecipeIndex {
                     } else if (val instanceof ItemStack s && !s.isEmpty()) {
                         results.add(s.copy());
                     }
-                } catch (Exception ignored) {}
+                } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
             }
             scan = scan.getSuperclass();
         }

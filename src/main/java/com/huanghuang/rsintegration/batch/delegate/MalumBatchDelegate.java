@@ -136,7 +136,7 @@ public final class MalumBatchDelegate implements IBatchDelegate {
         try {
             boolean mainEmpty = (boolean) invMain.getClass().getMethod("isEmpty").invoke(invMain);
             if (!mainEmpty) return false;
-        } catch (Exception ignored) {}
+        } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", ex); }
 
         this.filledPedestalIndices = new ArrayList<>();
 
@@ -213,10 +213,10 @@ public final class MalumBatchDelegate implements IBatchDelegate {
 
         if (!extractionOk) {
             clearPedestals();
-            try { setIHandlerSlot(invMain, 0, ItemStack.EMPTY); } catch (Exception ignored) {}
+            try { setIHandlerSlot(invMain, 0, ItemStack.EMPTY); } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", ex); }
             if (spirits != null) {
                 for (int i = 0; i < spirits.size(); i++) {
-                    try { setIHandlerSlot(invSpirit, i, ItemStack.EMPTY); } catch (Exception ignored) {}
+                    try { setIHandlerSlot(invSpirit, i, ItemStack.EMPTY); } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", ex); }
                 }
             }
             return false;
@@ -270,7 +270,7 @@ public final class MalumBatchDelegate implements IBatchDelegate {
         try {
             boolean mainEmpty = (boolean) invMain.getClass().getMethod("isEmpty").invoke(invMain);
             if (!mainEmpty) return false;
-        } catch (Exception ignored) {}
+        } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", ex); }
 
         Object inputObj = getField(recipe, "input");
         List<?> extraItems = (List<?>) getField(recipe, "extraItems");
@@ -326,10 +326,10 @@ public final class MalumBatchDelegate implements IBatchDelegate {
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.error("[RSI-Batch-Malum] Material placement failed:", e);
             clearPedestals();
-            try { setIHandlerSlot(invMain, 0, ItemStack.EMPTY); } catch (Exception ignored) {}
+            try { setIHandlerSlot(invMain, 0, ItemStack.EMPTY); } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", ex); }
             if (spirits != null) {
                 for (int i = 0; i < spiritCount; i++) {
-                    try { setIHandlerSlot(invSpirit, i, ItemStack.EMPTY); } catch (Exception ignored) {}
+                    try { setIHandlerSlot(invSpirit, i, ItemStack.EMPTY); } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", ex); }
                 }
             }
             return false;
@@ -342,10 +342,10 @@ public final class MalumBatchDelegate implements IBatchDelegate {
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.error("[RSI-Batch-Malum] Manual completion failed:", e);
             clearPedestals();
-            try { setIHandlerSlot(invMain, 0, ItemStack.EMPTY); } catch (Exception ignored) {}
+            try { setIHandlerSlot(invMain, 0, ItemStack.EMPTY); } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", ex); }
             if (spirits != null) {
                 for (int i = 0; i < spiritCount; i++) {
-                    try { setIHandlerSlot(invSpirit, i, ItemStack.EMPTY); } catch (Exception ignored) {}
+                    try { setIHandlerSlot(invSpirit, i, ItemStack.EMPTY); } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", ex); }
                 }
             }
             return false;
@@ -372,7 +372,7 @@ public final class MalumBatchDelegate implements IBatchDelegate {
         clearPedestals();
         try {
             setIHandlerSlot(invMain, 0, ItemStack.EMPTY);
-        } catch (Exception ignored) {}
+        } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", ex); }
         try {
             List<?> spirits = (List<?>) getField(recipe, "spirits");
             if (spirits != null) {
@@ -380,7 +380,7 @@ public final class MalumBatchDelegate implements IBatchDelegate {
                     setIHandlerSlot(invSpirit, i, ItemStack.EMPTY);
                 }
             }
-        } catch (Exception ignored) {}
+        } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", ex); }
         if (!usingSharedLedger) {
             refundAll();
         }
@@ -396,7 +396,7 @@ public final class MalumBatchDelegate implements IBatchDelegate {
         clearPedestals();
         try {
             setIHandlerSlot(invMain, 0, ItemStack.EMPTY);
-        } catch (Exception ignored) {}
+        } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", ex); }
         try {
             List<?> spirits = (List<?>) getField(recipe, "spirits");
             if (spirits != null) {
@@ -404,7 +404,7 @@ public final class MalumBatchDelegate implements IBatchDelegate {
                     setIHandlerSlot(invSpirit, i, ItemStack.EMPTY);
                 }
             }
-        } catch (Exception ignored) {}
+        } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", ex); }
         ledger = null;
         sharedLedger = null;
         network = null;
@@ -468,7 +468,7 @@ public final class MalumBatchDelegate implements IBatchDelegate {
                 Object inv = ap.getClass().getMethod("getSuppliedInventory").invoke(ap);
                 boolean empty = (boolean) inv.getClass().getMethod("isEmpty").invoke(inv);
                 if (empty) count++;
-            } catch (Exception ignored) {}
+            } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", ex); }
         }
         return count;
     }
@@ -496,7 +496,7 @@ public final class MalumBatchDelegate implements IBatchDelegate {
                 Object inv = ap.getClass().getMethod("getSuppliedInventory").invoke(ap);
                 inv.getClass().getMethod("setStackInSlot", int.class, ItemStack.class)
                         .invoke(inv, 0, ItemStack.EMPTY);
-            } catch (Exception ignored) {}
+            } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", ex); }
         }
     }
 
@@ -550,7 +550,7 @@ public final class MalumBatchDelegate implements IBatchDelegate {
                     } else if (player != null) {
                         ItemHandlerHelper.giveItemToPlayer(player, refund);
                     }
-                } catch (Exception ignored) {}
+                } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", ex); }
             }
         }
     }
@@ -567,7 +567,8 @@ public final class MalumBatchDelegate implements IBatchDelegate {
                 return f.get(obj);
             } catch (NoSuchFieldException e) {
                 clazz = clazz.getSuperclass();
-            } catch (Exception ignored) {
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.debug("[RSI-Batch-Malum] getFieldValue probe failed", e);
                 return null;
             }
         }

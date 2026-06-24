@@ -6,6 +6,7 @@ import com.huanghuang.rsintegration.batch.ModType;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.integration.AltarBindingRegistry;
 import com.huanghuang.rsintegration.integration.AltarBindingRegistry.BoundMachine;
+import com.huanghuang.rsintegration.util.Diagnostics;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
@@ -31,6 +32,15 @@ import java.util.List;
  */
 public final class AsyncCraftChain {
 
+    public enum State {
+        PENDING,        // Created, not yet started
+        EXECUTING,      // Running vanilla or mod steps
+        WAITING_MOD,    // Waiting for multi-block craft to complete
+        COMPLETING,     // Final commit + flush in progress
+        COMPLETED,      // Successfully finished
+        ABORTED         // Failed
+    }
+
     private final ServerPlayer player;
     private final INetwork network;
     private final List<CraftingResolver.ResolutionStep> steps;
@@ -40,17 +50,19 @@ public final class AsyncCraftChain {
     private int currentStepIdx;
     @Nullable private IBatchDelegate currentDelegate;
     private int waitTicks;
-    private boolean aborted;
+    private State state = State.PENDING;
     private String abortReason = "";
+    @Nullable private Runnable onDoneCallback;
 
     public AsyncCraftChain(ServerPlayer player, INetwork network,
                            List<CraftingResolver.ResolutionStep> steps) {
         this.player = player;
         this.network = network;
         this.steps = steps;
+        RSIntegrationMod.LOGGER.info("[RSI-AsyncChain] Created for {}: {} steps",
+                player.getName().getString(), steps.size());
         if (RSIntegrationMod.LOGGER.isDebugEnabled()) {
-            StringBuilder sb = new StringBuilder("[RSI-AsyncChain] Created for ");
-            sb.append(player.getName().getString()).append(": ").append(steps.size()).append(" steps [");
+            StringBuilder sb = new StringBuilder("[RSI-AsyncChain] Steps: [");
             for (int i = 0; i < steps.size(); i++) {
                 if (i > 0) sb.append(", ");
                 sb.append(steps.get(i).recipeId());
@@ -67,7 +79,15 @@ public final class AsyncCraftChain {
      * (either finished successfully or aborted).
      */
     public boolean tick() {
-        if (aborted) return true;
+        if (state == State.ABORTED || state == State.COMPLETED) return true;
+
+        // First tick transition
+        if (state == State.PENDING) {
+            RSIntegrationMod.LOGGER.debug("[RSI-AsyncChain] PENDING → EXECUTING");
+            state = State.EXECUTING;
+            Diagnostics.record(Diagnostics.Category.CHAIN_STATE, "PENDING→EXECUTING steps=" + steps.size());
+        }
+
         if (player.isRemoved()) {
             abort("Player disconnected");
             return true;
@@ -91,7 +111,7 @@ public final class AsyncCraftChain {
                     Recipe<?> mbRecipe = player.serverLevel().getRecipeManager()
                             .byKey(steps.get(currentStepIdx).recipeId()).orElse(null);
                     if (mbRecipe != null) {
-                        for (ItemStack secondary : ModRecipeIndex.tryGetSecondaryOutputs(mbRecipe, player.serverLevel().registryAccess())) {
+                        for (ItemStack secondary : com.huanghuang.rsintegration.recipe.ModRecipeHandlers.tryGetSecondaryOutputs(mbRecipe, player.serverLevel().registryAccess())) {
                             addToVirtualInventory(secondary);
                         }
                     }
@@ -112,6 +132,8 @@ public final class AsyncCraftChain {
                     ledger.reset();
                     flushVirtualInventory();
                     currentStepIdx++;
+                    state = State.EXECUTING;
+                    RSIntegrationMod.LOGGER.debug("[RSI-AsyncChain] WAITING_MOD → EXECUTING");
                 }
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.error("[RSI-AsyncChain] Error polling craft completion", e);
@@ -123,6 +145,7 @@ public final class AsyncCraftChain {
 
         // All done
         if (currentStepIdx >= steps.size()) {
+            state = State.COMPLETING;
             finish();
             return true;
         }
@@ -131,7 +154,7 @@ public final class AsyncCraftChain {
         CraftingResolver.ResolutionStep step = steps.get(currentStepIdx);
         if (step.modType() == ModType.GENERIC) {
             currentStepIdx = executeVanillaBatch(currentStepIdx);
-            if (aborted) return true;
+            if (state == State.ABORTED) return true;
             if (!ledger.isCommitted() && !ledger.commit(network, player)) {
                 abort("Commit failed after vanilla batch");
                 return true;
@@ -144,15 +167,26 @@ public final class AsyncCraftChain {
                 abort("Failed to start multi-block craft: " + step.recipeId());
                 return true;
             }
+            state = State.WAITING_MOD;
+            Diagnostics.record(Diagnostics.Category.CHAIN_STATE,
+                    "EXECUTING→WAITING_MOD step=" + step.recipeId(),
+                    step.recipeId(), step.modType());
+            RSIntegrationMod.LOGGER.debug("[RSI-AsyncChain] EXECUTING → WAITING_MOD for step {}",
+                    step.recipeId());
             waitTicks = 0;
         }
         return false;
     }
 
-    public boolean isDone() { return aborted || currentStepIdx >= steps.size(); }
-    public boolean isAborted() { return aborted; }
+    public boolean isDone() { return state == State.COMPLETED || state == State.ABORTED; }
+    public boolean isAborted() { return state == State.ABORTED; }
+    public State state() { return state; }
+    public String abortReason() { return abortReason; }
     public ServerPlayer getPlayer() { return player; }
+    public int currentStep() { return currentStepIdx; }
     public int stepsCount() { return steps.size(); }
+    public ExtractionLedger ledger() { return ledger; }
+    public List<ItemStack> virtualInventory() { return virtualInventory; }
 
     public boolean belongsTo(java.util.UUID playerId) {
         return player.getUUID().equals(playerId);
@@ -230,7 +264,7 @@ public final class AsyncCraftChain {
                 if (!result.isEmpty()) {
                     addToVirtualInventory(result);
                 }
-                for (ItemStack secondary : ModRecipeIndex.tryGetSecondaryOutputs(cr, player.serverLevel().registryAccess())) {
+                for (ItemStack secondary : com.huanghuang.rsintegration.recipe.ModRecipeHandlers.tryGetSecondaryOutputs(cr, player.serverLevel().registryAccess())) {
                     addToVirtualInventory(secondary);
                 }
                 // Handle crafting remainders (e.g. empty buckets from cake recipe)
@@ -244,7 +278,7 @@ public final class AsyncCraftChain {
                                 addToVirtualInventory(remainder.copyWithCount(1));
                                 break;
                             }
-                        } catch (Throwable ignored) {}
+                        } catch (Throwable e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
                     }
                 }
             } else {
@@ -283,12 +317,12 @@ public final class AsyncCraftChain {
                     }
                 }
 
-                ItemStack result = ModRecipeIndex.tryGetResultItem(
+                ItemStack result = com.huanghuang.rsintegration.recipe.ModRecipeHandlers.tryGetResultItem(
                         recipe, player.serverLevel().registryAccess());
                 if (!result.isEmpty()) {
                     addToVirtualInventory(result);
                 }
-                for (ItemStack secondary : ModRecipeIndex.tryGetSecondaryOutputs(recipe, player.serverLevel().registryAccess())) {
+                for (ItemStack secondary : com.huanghuang.rsintegration.recipe.ModRecipeHandlers.tryGetSecondaryOutputs(recipe, player.serverLevel().registryAccess())) {
                     addToVirtualInventory(secondary);
                 }
             }
@@ -492,6 +526,8 @@ public final class AsyncCraftChain {
             RSIntegrationMod.LOGGER.warn("[RSI-AsyncChain] Commit failed for player {} after {} steps",
                     player.getName().getString(), steps.size());
             player.sendSystemMessage(Component.translatable("rsi.async.error.commit_failed"));
+            state = State.ABORTED;
+            abortReason = "Final commit failed";
             return;
         }
 
@@ -505,17 +541,34 @@ public final class AsyncCraftChain {
             }
         }
 
-        RSIntegrationMod.LOGGER.debug("[RSI-AsyncChain] Chain complete for player {}: {} steps",
+        state = State.COMPLETED;
+        Diagnostics.record(Diagnostics.Category.CHAIN_STATE, "→COMPLETED steps=" + steps.size());
+        RSIntegrationMod.LOGGER.info("[RSI-AsyncChain] COMPLETED for player {}: {} steps",
                 player.getName().getString(), steps.size());
+        fireOnDone();
+    }
+
+    private void fireOnDone() {
+        if (onDoneCallback != null) {
+            try { onDoneCallback.run(); } catch (Exception e) {
+                RSIntegrationMod.LOGGER.error("[RSI-AsyncChain] onDone callback threw", e);
+            }
+        }
+    }
+
+    /** Register a callback invoked when the chain enters a terminal state. */
+    public void onDone(@Nullable Runnable callback) {
+        this.onDoneCallback = callback;
     }
 
     public void abort(String reason) {
-        if (aborted) return;
-        aborted = true;
+        if (state == State.ABORTED || state == State.COMPLETED) return;
+        RSIntegrationMod.LOGGER.warn("[RSI-AsyncChain] Aborting chain (state={}) for {}: {}",
+                state, player.getName().getString(), reason);
+        Diagnostics.record(Diagnostics.Category.CHAIN_STATE,
+                "→ABORTED reason=" + reason + " atStep=" + currentStepIdx + "/" + steps.size());
+        state = State.ABORTED;
         abortReason = reason;
-
-        RSIntegrationMod.LOGGER.warn("[RSI-AsyncChain] Aborting chain for {}: {}",
-                player.getName().getString(), reason);
 
         // Clean up active delegate (refunds items placed in machine)
         if (currentDelegate != null) {
@@ -533,6 +586,7 @@ public final class AsyncCraftChain {
         virtualInventory.clear();
 
         player.sendSystemMessage(Component.translatable("rsi.async.chain_aborted", reason));
+        fireOnDone();
     }
 
     // ── delegate factory ─────────────────────────────────────────

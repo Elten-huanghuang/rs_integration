@@ -200,7 +200,7 @@ public final class FaCraftPacket {
                 player.sendSystemMessage(Component.translatable("rsi.fa.warn.ritual_active"));
                 return;
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
 
         // Gather needed items
         List<ItemStack> needed = collectNeededItems(ritual);
@@ -257,7 +257,7 @@ public final class FaCraftPacket {
                 if (stack.isEmpty()) {
                     emptyPedestals.add(ped);
                 }
-            } catch (Exception ignored) {}
+            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
         }
 
         // Extract and place items
@@ -398,7 +398,7 @@ public final class FaCraftPacket {
                     if (val instanceof Number n) return n.intValue();
                 }
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
         return 1;
     }
 
@@ -408,7 +408,7 @@ public final class FaCraftPacket {
             if (req != null) {
                 return (int) req.getClass().getMethod("tier").invoke(req);
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
         return 1;
     }
 
@@ -498,7 +498,7 @@ public final class FaCraftPacket {
                     }
                 }
                 ped.getClass().getMethod("setStack", ItemStack.class).invoke(ped, ItemStack.EMPTY);
-            } catch (Exception ignored) {}
+            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
         }
         try {
             int mainSlot = hephaestusForgeBEClass.getField("MAIN_SLOT").getInt(null);
@@ -512,7 +512,7 @@ public final class FaCraftPacket {
                 }
             }
             setForgeSlot(forge, mainSlot, ItemStack.EMPTY);
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
     }
 
     // ── BooleanConsumer proxy for ritual callback ──────────────

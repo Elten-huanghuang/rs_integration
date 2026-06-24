@@ -172,7 +172,7 @@ public final class WRBatchDelegate implements IBatchDelegate {
                             if (!stack.isEmpty()) return false;
                         }
                     }
-                } catch (Exception ignored) {}
+                } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
                 break;
             }
             case ARCANE_WORKBENCH: {
@@ -285,7 +285,8 @@ public final class WRBatchDelegate implements IBatchDelegate {
         craftStarted = true;
         try {
             be.getClass().getMethod("wissenWandFunction").invoke(be);
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] wissenWandFunction invoke failed, rolling back", e);
             clearFilledSlots();
             refundAll();
             return false;
@@ -348,7 +349,8 @@ public final class WRBatchDelegate implements IBatchDelegate {
         craftStarted = true;
         try {
             be.getClass().getMethod("wissenWandFunction").invoke(be);
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] wissenWandFunction invoke failed, rolling back", e);
             clearFilledPedestals();
             refundAll();
             return false;
@@ -409,7 +411,8 @@ public final class WRBatchDelegate implements IBatchDelegate {
         craftStarted = true;
         try {
             be.getClass().getMethod("wissenWandFunction").invoke(be);
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] wissenWandFunction invoke failed, rolling back", e);
             clearFilledSlotsForHandler(itemHandler);
             refundAll();
             return false;
@@ -425,7 +428,7 @@ public final class WRBatchDelegate implements IBatchDelegate {
         if (ritual == null) {
             try {
                 ritual = be.getClass().getMethod("getCrystalRitual").invoke(be);
-            } catch (Exception ignored) {}
+            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
         }
         if (ritual == null) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] Failed to extract ritual data");
@@ -579,7 +582,8 @@ public final class WRBatchDelegate implements IBatchDelegate {
         craftStarted = true;
         try {
             be.getClass().getMethod("wissenWandFunction").invoke(be);
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] wissenWandFunction invoke failed, rolling back", e);
             clearFilledSlots();
             return false;
         }
@@ -616,7 +620,8 @@ public final class WRBatchDelegate implements IBatchDelegate {
         craftStarted = true;
         try {
             be.getClass().getMethod("wissenWandFunction").invoke(be);
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] wissenWandFunction invoke failed, rolling back", e);
             clearFilledPedestals();
             return false;
         }
@@ -647,7 +652,8 @@ public final class WRBatchDelegate implements IBatchDelegate {
         craftStarted = true;
         try {
             be.getClass().getMethod("wissenWandFunction").invoke(be);
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] wissenWandFunction invoke failed, rolling back", e);
             clearFilledSlotsForHandler(itemHandler);
             return false;
         }
@@ -659,7 +665,7 @@ public final class WRBatchDelegate implements IBatchDelegate {
         if (ritual == null) {
             try {
                 ritual = be.getClass().getMethod("getCrystalRitual").invoke(be);
-            } catch (Exception ignored) {}
+            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
         }
         if (ritual == null) return false;
 
@@ -775,7 +781,7 @@ public final class WRBatchDelegate implements IBatchDelegate {
                         setContainerItem(be, 0, ItemStack.EMPTY);
                         fromMachine = result;
                     }
-                } catch (Exception ignored) {}
+                } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
                 break;
             }
             case ARCANE_WORKBENCH: {
@@ -791,7 +797,7 @@ public final class WRBatchDelegate implements IBatchDelegate {
                             break;
                         }
                     }
-                } catch (Exception ignored) {}
+                } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
                 break;
             }
             case CRYSTAL_RITUAL: {
@@ -801,7 +807,7 @@ public final class WRBatchDelegate implements IBatchDelegate {
                         setContainerItem(be, 0, ItemStack.EMPTY);
                         fromMachine = result;
                     }
-                } catch (Exception ignored) {}
+                } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
                 break;
             }
         }
@@ -828,7 +834,7 @@ public final class WRBatchDelegate implements IBatchDelegate {
                     }
                 }
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
 
         for (ItemStack stack : all) {
             if (!stack.isEmpty() && ItemStack.isSameItemSameTags(stack, expected)) {
@@ -891,10 +897,10 @@ public final class WRBatchDelegate implements IBatchDelegate {
                             ItemStackHandler handler = (ItemStackHandler) be.getClass()
                                     .getField("itemHandler").get(be);
                             handler.setStackInSlot(idx, ItemStack.EMPTY);
-                        } catch (Exception ignored) {}
+                        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
                         break;
                 }
-            } catch (Exception ignored) {}
+            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
         }
     }
 
@@ -903,7 +909,7 @@ public final class WRBatchDelegate implements IBatchDelegate {
         for (int idx : filledSlotIndices) {
             try {
                 handler.setStackInSlot(idx, ItemStack.EMPTY);
-            } catch (Exception ignored) {}
+            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
         }
     }
 
@@ -912,7 +918,7 @@ public final class WRBatchDelegate implements IBatchDelegate {
         for (Object ped : filledPedestals) {
             try {
                 setContainerItem(ped, 0, ItemStack.EMPTY);
-            } catch (Exception ignored) {}
+            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
         }
     }
 
@@ -984,7 +990,7 @@ public final class WRBatchDelegate implements IBatchDelegate {
                     field.setAccessible(true);
                     try {
                         return field.get(recipe);
-                    } catch (Exception ignored) {}
+                    } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
                 }
             }
             clazz = clazz.getSuperclass();

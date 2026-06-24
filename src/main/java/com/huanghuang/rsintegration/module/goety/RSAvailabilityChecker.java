@@ -103,7 +103,7 @@ public final class RSAvailabilityChecker {
                     ItemStack stack = (ItemStack) inv.getClass()
                             .getMethod("getStackInSlot", int.class).invoke(inv, 0);
                     if (!stack.isEmpty()) items.add(stack.copy());
-                } catch (Exception ignored) {}
+                } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
             }
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.debug("[RSI] Malum pedestal capture failed: {}", e.getMessage());

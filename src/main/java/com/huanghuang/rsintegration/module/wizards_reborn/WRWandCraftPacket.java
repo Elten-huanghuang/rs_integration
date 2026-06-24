@@ -175,7 +175,8 @@ public final class WRWandCraftPacket {
 
         try {
             be.getClass().getMethod("wissenWandFunction").invoke(be);
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-WR] wissenWandFunction invoke failed, rolling back", e);
             for (int i = 0; i < templates.size(); i++) {
                 if (!templates.get(i).isEmpty()) {
                     rsi$setContainerItem(be, i, ItemStack.EMPTY);
@@ -355,7 +356,8 @@ public final class WRWandCraftPacket {
 
         try {
             be.getClass().getMethod("wissenWandFunction").invoke(be);
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-WR] wissenWandFunction invoke failed, rolling back", e);
             for (int i = 0; i < templates.size(); i++) {
                 if (!templates.get(i).isEmpty()) {
                     itemHandler.setStackInSlot(i, ItemStack.EMPTY);
@@ -382,7 +384,7 @@ public final class WRWandCraftPacket {
         if (ritual == null) {
             try {
                 ritual = be.getClass().getMethod("getCrystalRitual").invoke(be);
-            } catch (Exception ignored) {}
+            } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", ex); }
         }
         if (ritual == null) {
             RSIntegrationMod.LOGGER.warn("Failed to extract CrystalRitual from recipe {} or CrystalBlock", recipe.getId());
@@ -488,7 +490,7 @@ public final class WRWandCraftPacket {
                 RSIntegrationMod.LOGGER.warn("Failed to place item on ArcanePedestal slot {}: {}", i, e.getMessage());
                 for (int j = 0; j < i; j++) {
                     if (!templates.get(j).isEmpty()) {
-                        try { rsi$setContainerItem(pedestals.get(j), 0, ItemStack.EMPTY); } catch (Exception ignored) {}
+                        try { rsi$setContainerItem(pedestals.get(j), 0, ItemStack.EMPTY); } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", ex); }
                     }
                 }
                 refundTemplates(network, player, templates);
@@ -502,7 +504,7 @@ public final class WRWandCraftPacket {
             RSIntegrationMod.LOGGER.warn("Failed to invoke wissenWandFunction on CrystalBlockEntity", e);
             for (int i = 0; i < templates.size(); i++) {
                 if (!templates.get(i).isEmpty()) {
-                    try { rsi$setContainerItem(pedestals.get(i), 0, ItemStack.EMPTY); } catch (Exception ignored) {}
+                    try { rsi$setContainerItem(pedestals.get(i), 0, ItemStack.EMPTY); } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", ex); }
                 }
             }
             refundTemplates(network, player, templates);
@@ -524,7 +526,7 @@ public final class WRWandCraftPacket {
                     field.setAccessible(true);
                     try {
                         return field.get(recipe);
-                    } catch (Exception ignored) {}
+                    } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", ex); }
                 }
             }
             clazz = clazz.getSuperclass();

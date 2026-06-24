@@ -35,7 +35,7 @@ public final class GoetyGuiClientEventHandler {
             Class<?> registrar = Class.forName(
                     "com.huanghuang.antientropycore.module.goety.GoetyGuiRecipeRegistrar");
             registrar.getMethod("tryRegister").invoke(null);
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
     }
 
     @SubscribeEvent
@@ -86,7 +86,7 @@ public final class GoetyGuiClientEventHandler {
             Class<?> cache = Class.forName(
                     "com.huanghuang.antientropycore.module.goety.GoetyClientRitualCache");
             cache.getMethod("clear").invoke(null);
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
     }
 
     @SubscribeEvent(priority = EventPriority.LOWEST)
@@ -107,7 +107,7 @@ public final class GoetyGuiClientEventHandler {
             Field wf = cls.getDeclaredField("currentWidgets");
             wf.setAccessible(true);
             wf.set(instance, new ArrayList<>());
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
 
         try {
             Class<?> cls = Class.forName("org.anti_ad.mc.ipnext.gui.inject.InsertWidgetHandler");
@@ -117,6 +117,6 @@ public final class GoetyGuiClientEventHandler {
             Field wf = cls.getDeclaredField("currentWidgets");
             wf.setAccessible(true);
             wf.set(instance, new ArrayList<>());
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
     }
 }

@@ -141,7 +141,7 @@ public final class CraftPacketUtils {
                                 addToVirtual(virtualInventory, remainder.copyWithCount(1));
                                 break;
                             }
-                        } catch (Throwable ignored) {}
+                        } catch (Throwable e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
                     }
                 }
             } else {
@@ -292,7 +292,7 @@ public final class CraftPacketUtils {
                         if (!list.isEmpty() && list.get(0) instanceof Ingredient) {
                             return (List<Ingredient>) list;
                         }
-                    } catch (Exception ignored) {}
+                    } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
                 }
             }
             scan = scan.getSuperclass();
@@ -305,6 +305,10 @@ public final class CraftPacketUtils {
 
         // Probe step-based recipes (Eidolon CrucibleRecipe: getSteps() → each step's matches field)
         result = tryExtractStepBasedIngredients(recipe);
+        if (result != null) return result;
+
+        // Probe ritual-based recipes (FA Ritual: mainIngredient + inputs[].ingredient)
+        result = tryExtractRitualBasedIngredients(recipe);
         if (result != null) return result;
 
         result = scanAllFieldsForIngredients(recipe);
@@ -331,7 +335,7 @@ public final class CraftPacketUtils {
                     }
                 }
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
         return null;
     }
 
@@ -348,7 +352,7 @@ public final class CraftPacketUtils {
                     if (list != null && !list.isEmpty() && list.get(0) instanceof Ingredient) {
                         return (List<Ingredient>) list;
                     }
-                } catch (Exception ignored) {}
+                } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
             }
             clazz = clazz.getSuperclass();
         }
@@ -372,11 +376,50 @@ public final class CraftPacketUtils {
                             if (!ing.isEmpty()) all.add(ing);
                         }
                     }
-                } catch (Exception ignored) {}
+                } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
             }
             if (!all.isEmpty()) return all;
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
         return null;
+    }
+
+    @Nullable
+    @SuppressWarnings("unchecked")
+    private static List<Ingredient> tryExtractRitualBasedIngredients(Object recipe) {
+        List<Ingredient> all = new ArrayList<>();
+
+        // Probe mainIngredient field (FA Ritual, generic ritual recipes)
+        try {
+            java.lang.reflect.Field mainField = findAnyField(recipe.getClass(), "mainIngredient");
+            if (mainField != null && Ingredient.class.isAssignableFrom(mainField.getType())) {
+                mainField.setAccessible(true);
+                Ingredient main = (Ingredient) mainField.get(recipe);
+                if (main != null && !main.isEmpty()) all.add(main);
+            }
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
+
+        // Probe inputs field — list of objects each with an `ingredient` sub-field
+        try {
+            java.lang.reflect.Field inputsField = findAnyField(recipe.getClass(), "inputs");
+            if (inputsField != null && List.class.isAssignableFrom(inputsField.getType())) {
+                inputsField.setAccessible(true);
+                List<?> inputs = (List<?>) inputsField.get(recipe);
+                if (inputs != null) {
+                    for (Object ri : inputs) {
+                        try {
+                            java.lang.reflect.Field ingField = findAnyField(ri.getClass(), "ingredient");
+                            if (ingField != null && Ingredient.class.isAssignableFrom(ingField.getType())) {
+                                ingField.setAccessible(true);
+                                Ingredient ing = (Ingredient) ingField.get(ri);
+                                if (ing != null && !ing.isEmpty()) all.add(ing);
+                            }
+                        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
+                    }
+                }
+            }
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
+
+        return all.isEmpty() ? null : all;
     }
 
     @Nullable
@@ -395,7 +438,20 @@ public final class CraftPacketUtils {
     @Nullable
     @SuppressWarnings("unchecked")
     public static List<IngredientSpec> extractIngredientSpecs(Object recipe) {
+        // Try registered handler first (explicit per-mod logic)
+        if (recipe instanceof net.minecraft.world.item.crafting.Recipe<?> r) {
+            var handler = com.huanghuang.rsintegration.recipe.ModRecipeHandlers.handlerFor(r);
+            if (handler != null) {
+                List<IngredientSpec> result = handler.getIngredients(r);
+                if (result != null) return result;
+            }
+        }
+
+        // Fallback probes for unrecognized recipe types
         List<IngredientSpec> result = tryExtractIngredientSpecsWithCount(recipe);
+        if (result != null) return result;
+
+        result = tryExtractRitualBasedSpecs(recipe);
         if (result != null) return result;
 
         List<Ingredient> ingredients = extractIngredients(recipe);
@@ -452,10 +508,10 @@ public final class CraftPacketUtils {
                             Object item = swc.getClass().getMethod("getItem").invoke(swc);
                             if (item instanceof net.minecraft.world.item.Item it) {
                                 int count = 1;
-                                try { count = swc.getClass().getField("count").getInt(swc); } catch (Exception ignored) {}
+                                try { count = swc.getClass().getField("count").getInt(swc); } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
                                 result.add(new IngredientSpec(Ingredient.of(it), count));
                             }
-                        } catch (Exception ignored) {}
+                        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
                     }
                 }
             }
@@ -474,18 +530,58 @@ public final class CraftPacketUtils {
      */
     public static int readIngredientCount(@Nullable Object iwcObj, int fallback) {
         if (iwcObj == null) return fallback;
-        try { return iwcObj.getClass().getField("count").getInt(iwcObj); } catch (Exception ignored) {}
+        try { return iwcObj.getClass().getField("count").getInt(iwcObj); } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
         return fallback;
     }
 
     @Nullable
+    @SuppressWarnings("unchecked")
+    private static List<IngredientSpec> tryExtractRitualBasedSpecs(Object recipe) {
+        List<IngredientSpec> specs = new ArrayList<>();
+
+        try {
+            java.lang.reflect.Field mainField = findAnyField(recipe.getClass(), "mainIngredient");
+            if (mainField != null && Ingredient.class.isAssignableFrom(mainField.getType())) {
+                mainField.setAccessible(true);
+                Ingredient main = (Ingredient) mainField.get(recipe);
+                if (main != null && !main.isEmpty()) specs.add(new IngredientSpec(main, 1));
+            }
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
+
+        try {
+            java.lang.reflect.Field inputsField = findAnyField(recipe.getClass(), "inputs");
+            if (inputsField != null && List.class.isAssignableFrom(inputsField.getType())) {
+                inputsField.setAccessible(true);
+                List<?> inputs = (List<?>) inputsField.get(recipe);
+                if (inputs != null) {
+                    for (Object ri : inputs) {
+                        try {
+                            java.lang.reflect.Field ingField = findAnyField(ri.getClass(), "ingredient");
+                            java.lang.reflect.Field amtField = findAnyField(ri.getClass(), "amount");
+                            if (ingField != null && Ingredient.class.isAssignableFrom(ingField.getType())) {
+                                ingField.setAccessible(true);
+                                Ingredient ing = (Ingredient) ingField.get(ri);
+                                if (ing != null && !ing.isEmpty()) {
+                                    int amt = 1;
+                                    if (amtField != null) {
+                                        amtField.setAccessible(true);
+                                        amt = Math.max(1, amtField.getInt(ri));
+                                    }
+                                    specs.add(new IngredientSpec(ing, amt));
+                                }
+                            }
+                        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
+                    }
+                }
+            }
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
+
+        return specs.isEmpty() ? null : specs;
+    }
+
+    @Nullable
     private static java.lang.reflect.Field findAnyField(Class<?> clazz, String name) {
-        Class<?> scan = clazz;
-        while (scan != null && scan != Object.class) {
-            try { return scan.getDeclaredField(name); }
-            catch (NoSuchFieldException e) { scan = scan.getSuperclass(); }
-        }
-        return null;
+        return com.huanghuang.rsintegration.util.Reflect.findField(clazz, name).orElse(null);
     }
 
     // ── multi-block chain helper ──────────────────────────────────

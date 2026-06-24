@@ -127,7 +127,7 @@ public final class EidolonBatchDelegate implements IBatchDelegate {
         boolean boiling = false;
         try {
             if (boilingField != null) boiling = boilingField.getBoolean(be);
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-Eidolon] Reflection probe failed", e); }
 
         boolean stepsEmpty = true;
         try {
@@ -135,7 +135,7 @@ public final class EidolonBatchDelegate implements IBatchDelegate {
                 List<?> steps = (List<?>) stepsField.get(be);
                 stepsEmpty = steps == null || steps.isEmpty();
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-Eidolon] Reflection probe failed", e); }
 
         if (!hasWater) {
             player.sendSystemMessage(Component.translatable("rsi.eidolon.warn.needs_water"));
@@ -179,7 +179,7 @@ public final class EidolonBatchDelegate implements IBatchDelegate {
         boolean boiling = false;
         try {
             if (boilingField != null) boiling = boilingField.getBoolean(crucible);
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-Eidolon] Reflection probe failed", e); }
 
         boolean stepsEmpty = true;
         try {
@@ -187,7 +187,7 @@ public final class EidolonBatchDelegate implements IBatchDelegate {
                 List<?> steps = (List<?>) stepsField.get(crucible);
                 stepsEmpty = steps == null || steps.isEmpty();
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-Eidolon] Reflection probe failed", e); }
 
         if (!hasWater) {
             try {
@@ -201,7 +201,7 @@ public final class EidolonBatchDelegate implements IBatchDelegate {
         if (!stepsEmpty) {
             try {
                 if (stepsField != null) stepsField.set(crucible, new ArrayList<>());
-            } catch (Exception ignored) {}
+            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-Eidolon] Reflection probe failed", e); }
         }
 
         // Collect needed items from recipe steps
@@ -252,15 +252,15 @@ public final class EidolonBatchDelegate implements IBatchDelegate {
                     .getMethod("drain", int.class, IFluidHandler.FluidAction.class)
                     .invoke(tank, 1000, IFluidHandler.FluidAction.EXECUTE);
             crucible.getClass().getField("hasWater").set(crucible, false);
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-Eidolon] Reflection probe failed", e); }
 
         try {
             if (stepsField != null) stepsField.set(crucible, new ArrayList<>());
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-Eidolon] Reflection probe failed", e); }
 
         try {
             crucible.getClass().getMethod("setChanged").invoke(crucible);
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-Eidolon] Reflection probe failed", e); }
 
         // Get result and store
         try {
@@ -309,14 +309,14 @@ public final class EidolonBatchDelegate implements IBatchDelegate {
         boolean boiling = false;
         try {
             if (boilingField != null) boiling = boilingField.getBoolean(crucible);
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-Eidolon] Reflection probe failed", e); }
         boolean stepsEmpty = true;
         try {
             if (stepsField != null) {
                 List<?> steps = (List<?>) stepsField.get(crucible);
                 stepsEmpty = steps == null || steps.isEmpty();
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-Eidolon] Reflection probe failed", e); }
 
         if (!hasWater) {
             try {
@@ -329,7 +329,7 @@ public final class EidolonBatchDelegate implements IBatchDelegate {
         if (!stepsEmpty) {
             try {
                 if (stepsField != null) stepsField.set(crucible, new ArrayList<>());
-            } catch (Exception ignored) {}
+            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-Eidolon] Reflection probe failed", e); }
         }
 
         // Collect steps to know counts
@@ -367,15 +367,15 @@ public final class EidolonBatchDelegate implements IBatchDelegate {
                     .getMethod("drain", int.class, IFluidHandler.FluidAction.class)
                     .invoke(tank, 1000, IFluidHandler.FluidAction.EXECUTE);
             crucible.getClass().getField("hasWater").set(crucible, false);
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-Eidolon] Reflection probe failed", e); }
 
         try {
             if (stepsField != null) stepsField.set(crucible, new ArrayList<>());
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-Eidolon] Reflection probe failed", e); }
 
         try {
             crucible.getClass().getMethod("setChanged").invoke(crucible);
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-Eidolon] Reflection probe failed", e); }
 
         // Get result and store
         try {

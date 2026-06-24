@@ -3,11 +3,11 @@ package com.huanghuang.rsintegration.batch;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
-import com.huanghuang.rsintegration.crafting.CraftingPlanManager;
 import com.huanghuang.rsintegration.crafting.CraftingResolver;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.ResolutionStep;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.crafting.ModRecipeIndex;
+import com.huanghuang.rsintegration.crafting.RecipeIndex;
 import com.huanghuang.rsintegration.integration.AltarBindingRegistry;
 import com.huanghuang.rsintegration.integration.RSIntegration;
 import com.huanghuang.rsintegration.crafting.AsyncCraftChain;
@@ -487,6 +487,21 @@ public final class GenericCraftPacket {
                     player, network, missing, forcedOverrides, true);
         }
         boolean usedTypedResolver = resolutionSteps != null && !resolutionSteps.isEmpty();
+
+        // ── OR debug: log resolution results ──
+        RSIntegrationMod.LOGGER.info("[RSI-OR] tryBuildPlan recipe={} typedResolver={} steps={} alts={}",
+                recipeId, usedTypedResolver,
+                resolutionSteps != null ? resolutionSteps.size() : -1,
+                resolutionSteps != null ? resolutionSteps.stream()
+                        .filter(rs -> !rs.alternativeIds().isEmpty()).count() : -1);
+        if (resolutionSteps != null) {
+            for (ResolutionStep rs : resolutionSteps) {
+                if (!rs.alternativeIds().isEmpty()) {
+                    RSIntegrationMod.LOGGER.info("[RSI-OR]   step {} has {} alternatives: {}",
+                            rs.recipeId(), rs.alternativeIds().size(), rs.alternativeIds());
+                }
+            }
+        }
         if (resolutionSteps == null || resolutionSteps.isEmpty()) {
             List<ItemStack> availableStacks = new ArrayList<>();
             for (var e : available.entrySet()) {
@@ -507,11 +522,13 @@ public final class GenericCraftPacket {
         Map<ResourceLocation, ModType> modTypeByRecipe = new HashMap<>();
         Map<ResourceLocation, Integer> recipeWidths = new HashMap<>();
         Map<ResourceLocation, Integer> recipeHeights = new HashMap<>();
+        Map<ResourceLocation, ResolutionStep> stepByRecipe = new HashMap<>();
         if (resolutionSteps != null) {
             for (ResolutionStep rs : resolutionSteps) {
                 if (rs.modType() != ModType.GENERIC) {
                     modTypeByRecipe.putIfAbsent(rs.recipeId(), rs.modType());
                 }
+                stepByRecipe.putIfAbsent(rs.recipeId(), rs);
             }
         }
 
@@ -521,6 +538,9 @@ public final class GenericCraftPacket {
         for (var e : available.entrySet()) {
             itemAvailable.merge(e.getKey().item(), e.getValue(), Integer::sum);
         }
+        // RecipeIndex for OR alternative material checks — allows alternatives
+        // whose ingredients are craftable (not just directly available).
+        Map<Item, List<RecipeIndex.Entry>> recipeIndex = RecipeIndex.get(player.serverLevel());
         // Display copy: decremented on each match so the same tag ingredient
         // showing up N times doesn't pick the same item N times (e.g. 1 cherry
         // + 1 acacia shown as 2 acacia when both are logs).
@@ -601,44 +621,38 @@ public final class GenericCraftPacket {
                 }
             }
 
-            // Resolve alternative recipes that produce the same output item.
-            // Look up both vanilla index (CraftingPlanManager) and mod index (ModRecipeIndex).
-            var recipeIndex = CraftingPlanManager.getRecipeIndexForLevel(player.serverLevel());
-            var modIndex = ModRecipeIndex.getRecipeIndexForLevel(player.serverLevel());
+            // Extract alternatives from the resolver's own candidate analysis.
+            // Filter by material availability so the OR badge is only shown for
+            // recipes the player can actually use.
             List<ResourceLocation> alternatives = new ArrayList<>();
             List<String> alternativeModTypes = new ArrayList<>();
-            // Vanilla alternatives (only include if player has at least
-            // some of each required ingredient, so the OR badge is actionable)
-            List<CraftingRecipe> vanillaCandidates = recipeIndex.get(output.getItem());
-            if (vanillaCandidates != null) {
-                for (CraftingRecipe alt : vanillaCandidates) {
-                    if (alt.getId().equals(entry.getKey())) continue;
-                    ItemStack altOut = alt.getResultItem(player.serverLevel().registryAccess());
-                    if (!altOut.isEmpty() && ItemStack.isSameItemSameTags(output, altOut)
-                            && recipeHasSomeMaterials(alt.getIngredients(), itemAvailable)) {
-                        alternatives.add(alt.getId());
-                        alternativeModTypes.add("minecraft:crafting");
+            ResolutionStep rs = stepByRecipe.get(entry.getKey());
+            RSIntegrationMod.LOGGER.info("[RSI-OR] buildStep {}: stepByRecipe has rs={} alternatives={}",
+                    entry.getKey(), rs != null,
+                    rs != null ? rs.alternativeIds().size() : -1);
+            if (rs != null && !rs.alternativeIds().isEmpty()) {
+                for (int i = 0; i < rs.alternativeIds().size(); i++) {
+                    ResourceLocation altId = rs.alternativeIds().get(i);
+                    String altMod = i < rs.alternativeModTypes().size()
+                            ? rs.alternativeModTypes().get(i)
+                            : rs.modType().id();
+                    Recipe<?> altRecipe = rm.byKey(altId).orElse(null);
+                    if (altRecipe == null) {
+                        RSIntegrationMod.LOGGER.info("[RSI-OR]   alt {} NOT FOUND in recipe manager", altId);
+                        continue;
                     }
-                }
-            }
-            // Multi-block alternatives — only from known magic mods we can craft.
-            // GENERIC entries in ModRecipeIndex represent vanilla recipes (already
-            // handled above) or recipes from unknown mods (Create/etc.) that our
-            // batch delegate system cannot execute — skip them.
-            List<ModRecipeIndex.RecipeEntry> modCandidates = modIndex.get(output.getItem());
-            if (modCandidates != null) {
-                for (ModRecipeIndex.RecipeEntry modEntry : modCandidates) {
-                    if (modEntry.recipe().getId().equals(entry.getKey())) continue;
-                    if (modEntry.modType() == null || modEntry.modType() == ModType.GENERIC) continue;
-                    // Skip if machine not bound
-                    if (!AltarBindingRegistry.hasAnyBindingForType(player, modEntry.modType())) continue;
-                    ItemStack modOut = ModRecipeIndex.tryGetResultItem(
-                            modEntry.recipe(), player.serverLevel().registryAccess());
-                    List<Ingredient> modIngs = CraftPacketUtils.extractIngredients(modEntry.recipe());
-                    if (!modOut.isEmpty() && ItemStack.isSameItemSameTags(output, modOut)
-                            && recipeHasSomeMaterials(modIngs != null ? modIngs : Collections.emptyList(), itemAvailable)) {
-                        alternatives.add(modEntry.recipe().getId());
-                        alternativeModTypes.add(modEntry.modType().id());
+                    List<Ingredient> altIngs;
+                    if (altRecipe instanceof CraftingRecipe cr) {
+                        altIngs = cr.getIngredients();
+                    } else {
+                        altIngs = CraftPacketUtils.extractIngredients(altRecipe);
+                    }
+                    boolean hasMats = altIngs != null && recipeHasSomeMaterials(altIngs, itemAvailable, recipeIndex);
+                    RSIntegrationMod.LOGGER.info("[RSI-OR]   alt {}: ingCount={} hasMaterials={}",
+                            altId, altIngs != null ? altIngs.size() : -1, hasMats);
+                    if (hasMats) {
+                        alternatives.add(altId);
+                        alternativeModTypes.add(altMod);
                     }
                 }
             }
@@ -668,25 +682,7 @@ public final class GenericCraftPacket {
             }
         }
 
-        // ── Compute tree depths and OR-sibling markers ────────────
-        // Map each output item to the PlanSteps that produce it
-        Map<Item, List<PlanStep>> outputToSteps = new LinkedHashMap<>();
-        for (PlanStep step : steps) {
-            outputToSteps.computeIfAbsent(step.output().getItem(), k -> new ArrayList<>()).add(step);
-        }
-        // Mark OR siblings: items with multiple producing steps
-        for (List<PlanStep> group : outputToSteps.values()) {
-            if (group.size() > 1) {
-                for (PlanStep s : group) {
-                    int idx = steps.indexOf(s);
-                    if (idx >= 0) {
-                        steps.set(idx, new PlanStep(s.recipeId(), s.output(), s.batches(),
-                                s.inputs(), s.alternatives(), s.modType(), s.depth(), true,
-                                s.recipeWidth(), s.recipeHeight(), s.alternativeModTypes()));
-                    }
-                }
-            }
-        }
+        // ── Compute tree depths ────────────────────────────────────
         // BFS depth assignment starting from target recipe ingredients.
         // Also seed raw materials (leaf items not produced by any step) as depth 0
         // so steps that consume them can propagate depth correctly.
@@ -769,9 +765,33 @@ public final class GenericCraftPacket {
             }
             int targetDepth = 0;
             for (PlanStep s : steps) targetDepth = Math.max(targetDepth, s.depth() + 1);
+
+            // Collect OR alternatives for the target recipe itself from RecipeIndex
+            List<ResourceLocation> targetAlts = new ArrayList<>();
+            List<String> targetAltModTypes = new ArrayList<>();
+            List<RecipeIndex.Entry> targetEntries = recipeIndex.get(targetOutput.getItem());
+            if (targetEntries != null) {
+                for (RecipeIndex.Entry e : targetEntries) {
+                    if (e.recipe().getId().equals(recipeId)) continue;
+                    List<Ingredient> altIngs;
+                    if (e.recipe() instanceof CraftingRecipe cr) {
+                        altIngs = cr.getIngredients();
+                    } else {
+                        altIngs = CraftPacketUtils.extractIngredients(e.recipe());
+                    }
+                    if (altIngs != null && recipeHasSomeMaterials(altIngs, itemAvailable, recipeIndex)) {
+                        targetAlts.add(e.recipe().getId());
+                        targetAltModTypes.add(e.modType().id());
+                    }
+                }
+            }
+            if (targetAlts.isEmpty()) { targetAlts = Collections.emptyList(); targetAltModTypes = Collections.emptyList(); }
+            RSIntegrationMod.LOGGER.info("[RSI-OR] target step {}: {} alternatives from index",
+                    recipeId, targetAlts.size());
+
             steps.add(new PlanStep(recipeId, targetOutput, 1, targetInputs,
-                    Collections.emptyList(), recipeModType, targetDepth, false,
-                    targetW, targetH, Collections.emptyList()));
+                    targetAlts, recipeModType, targetDepth, !targetAlts.isEmpty(),
+                    targetW, targetH, targetAltModTypes));
 
             if (RSIntegrationMod.LOGGER.isDebugEnabled()) {
                 StringBuilder sb = new StringBuilder("[RSI-Generic] Target step: ")
@@ -837,25 +857,31 @@ public final class GenericCraftPacket {
         }
 
         Map<Item, PlanResponse.Availability> materials = new LinkedHashMap<>();
+        // Track tag-based ingredient groups so multiple slots of the same tag
+        // (e.g. "2 × #logs") get merged into a single material entry instead of
+        // showing separate per-item entries with double-counted availability.
+        Set<String> mergedTagKeys = new HashSet<>();
         for (var entry : neededCounts.entrySet()) {
             if (entry.getValue() <= 0) continue; // produced >= needed
             int needed = entry.getValue();
             Item displayItem = entry.getKey();
-            // For tag ingredients (multiple matching items), aggregate across
-            // ALL items the ingredient accepts, not just the best-match display item.
-            int have;
             Ingredient source = itemSource.get(displayItem);
             if (source != null && source.getItems().length > 1) {
-                have = 0;
+                String tagKey = source.toJson().toString();
+                if (!mergedTagKeys.add(tagKey)) continue; // already merged
+                int totalNeeded = 0;
+                int totalHave = 0;
                 for (ItemStack opt : source.getItems()) {
-                    if (!opt.isEmpty()) {
-                        have += itemAvailable.getOrDefault(opt.getItem(), 0);
-                    }
+                    if (opt.isEmpty()) continue;
+                    Item optItem = opt.getItem();
+                    totalNeeded += neededCounts.getOrDefault(optItem, 0);
+                    totalHave += itemAvailable.getOrDefault(optItem, 0);
                 }
+                materials.put(displayItem, new PlanResponse.Availability(totalNeeded, totalHave));
             } else {
-                have = itemAvailable.getOrDefault(displayItem, 0);
+                int have = itemAvailable.getOrDefault(displayItem, 0);
+                materials.put(displayItem, new PlanResponse.Availability(needed, have));
             }
-            materials.put(displayItem, new PlanResponse.Availability(needed, have));
         }
 
         boolean feasible = missing.isEmpty() && materials.values().stream().allMatch(PlanResponse.Availability::isEnough);
@@ -946,16 +972,24 @@ public final class GenericCraftPacket {
         return matched;
     }
 
-    /** Returns true if at least one matching item is available for every non-empty ingredient. */
-    private static boolean recipeHasSomeMaterials(List<Ingredient> ingredients, Map<Item, Integer> itemAvailable) {
+    /**
+     * Returns true if at least one matching item is available (directly or craftable)
+     * for every non-empty ingredient. Uses RecipeIndex to check if an item can be
+     * produced even when not directly in inventory — this prevents filtering out
+     * alternatives that require one extra crafting hop (e.g. "其他原木 → 橡木原木 → 木板").
+     */
+    private static boolean recipeHasSomeMaterials(List<Ingredient> ingredients,
+                                                   Map<Item, Integer> itemAvailable,
+                                                   Map<Item, List<RecipeIndex.Entry>> recipeIndex) {
         for (Ingredient ing : ingredients) {
             if (ing.isEmpty()) continue;
             boolean any = false;
             for (ItemStack opt : ing.getItems()) {
-                if (!opt.isEmpty() && itemAvailable.getOrDefault(opt.getItem(), 0) > 0) {
-                    any = true;
-                    break;
-                }
+                if (opt.isEmpty()) continue;
+                // Direct availability
+                if (itemAvailable.getOrDefault(opt.getItem(), 0) > 0) { any = true; break; }
+                // Craftable — player can make this item from raw materials
+                if (recipeIndex.containsKey(opt.getItem())) { any = true; break; }
             }
             if (!any) return false;
         }

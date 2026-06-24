@@ -142,7 +142,7 @@ public final class GoetyBatchDelegate implements IBatchDelegate {
             Object currentRitual = getMethod(darkAltarBEClass, "getCurrentRitualRecipe")
                     .invoke(altar);
             if (currentRitual != null) return false;
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] Reflection probe failed", e); }
 
         this.filledPedestals = new ArrayList<>();
 
@@ -265,7 +265,7 @@ public final class GoetyBatchDelegate implements IBatchDelegate {
             Object currentRitual = getMethod(darkAltarBEClass, "getCurrentRitualRecipe")
                     .invoke(altar);
             if (currentRitual != null) return false;
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] Reflection probe failed", e); }
 
         this.filledPedestals = new ArrayList<>();
 
@@ -382,7 +382,7 @@ public final class GoetyBatchDelegate implements IBatchDelegate {
                     }
                 }
             }
-        } catch (Throwable ignored) {}
+        } catch (Throwable e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
 
         for (ItemStack stack : all) {
             if (ItemStack.isSameItemSameTags(stack, expected)) {
@@ -447,7 +447,8 @@ public final class GoetyBatchDelegate implements IBatchDelegate {
     private static int readSoulCost(Object recipe) {
         try {
             return (int) recipe.getClass().getMethod("getSoulCost").invoke(recipe);
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] getSoulCost probe failed", e);
             return 0;
         }
     }
@@ -498,7 +499,7 @@ public final class GoetyBatchDelegate implements IBatchDelegate {
                         net.minecraft.world.entity.player.Player.class, int.class)
                         .invoke(null, player, (int) (currentSouls + cost));
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] Reflection probe failed", e); }
     }
 
     // ── Recipe ingredient collection ─────────────────────────────
@@ -520,7 +521,7 @@ public final class GoetyBatchDelegate implements IBatchDelegate {
                 }
                 if (!result.isEmpty()) return result;
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] Reflection probe failed", e); }
 
         return new ArrayList<>();
     }
@@ -542,10 +543,10 @@ public final class GoetyBatchDelegate implements IBatchDelegate {
                         if (stack.isEmpty()) {
                             result.add(be);
                         }
-                    } catch (Exception ignored) {}
+                    } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] Reflection probe failed", e); }
                 }
             });
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] Reflection probe failed", e); }
         return result;
     }
 
@@ -555,7 +556,7 @@ public final class GoetyBatchDelegate implements IBatchDelegate {
             try {
                 ped.getClass().getMethod("setItem", int.class, ItemStack.class)
                         .invoke(ped, 0, ItemStack.EMPTY);
-            } catch (Exception ignored) {}
+            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] Reflection probe failed", e); }
         }
     }
 
@@ -647,7 +648,7 @@ public final class GoetyBatchDelegate implements IBatchDelegate {
             // Try getActivationItem()
             Object item = recipe.getClass().getMethod("getActivationItem").invoke(recipe);
             if (item instanceof ItemStack stack) return stack;
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] Reflection probe failed", e); }
         // Try reading 'activationItem' field
         try {
             java.lang.reflect.Field f = getField(recipe.getClass(), "activationItem");
@@ -655,7 +656,7 @@ public final class GoetyBatchDelegate implements IBatchDelegate {
                 f.setAccessible(true);
                 return (ItemStack) f.get(recipe);
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] Reflection probe failed", e); }
         return ItemStack.EMPTY;
     }
 

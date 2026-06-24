@@ -170,7 +170,7 @@ public final class FaBatchDelegate implements IBatchDelegate {
                 player.sendSystemMessage(Component.translatable("rsi.fa.warn.ritual_active"));
                 return false;
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Reflection probe failed", e); }
 
         this.filledPedestals = new ArrayList<>();
         this.emptyPedestals = new ArrayList<>();
@@ -189,7 +189,7 @@ public final class FaBatchDelegate implements IBatchDelegate {
         try {
             Boolean active = (Boolean) ritualManager.getClass().getMethod("isRitualActive").invoke(ritualManager);
             if (Boolean.TRUE.equals(active)) return false;
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Reflection probe failed", e); }
 
         this.filledPedestals = new ArrayList<>();
 
@@ -210,7 +210,7 @@ public final class FaBatchDelegate implements IBatchDelegate {
                 if (stack.isEmpty()) {
                     availablePedestals.add(ped);
                 }
-            } catch (Exception ignored) {}
+            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Reflection probe failed", e); }
         }
 
         // Collect recipe requirements
@@ -327,7 +327,7 @@ public final class FaBatchDelegate implements IBatchDelegate {
         try {
             Boolean active = (Boolean) ritualManager.getClass().getMethod("isRitualActive").invoke(ritualManager);
             if (Boolean.TRUE.equals(active)) return false;
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Reflection probe failed", e); }
 
         this.filledPedestals = new ArrayList<>();
 
@@ -346,7 +346,7 @@ public final class FaBatchDelegate implements IBatchDelegate {
             try {
                 ItemStack stack = (ItemStack) ped.getClass().getMethod("getStack").invoke(ped);
                 if (stack.isEmpty()) availablePedestals.add(ped);
-            } catch (Exception ignored) {}
+            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Reflection probe failed", e); }
         }
 
         // Materials order: [mainIngredient, input1, input2, ...]
@@ -402,7 +402,7 @@ public final class FaBatchDelegate implements IBatchDelegate {
                 try {
                     int mainSlot = hephaestusForgeBEClass.getField("MAIN_SLOT").getInt(null);
                     setForgeSlot(forge, mainSlot, ItemStack.EMPTY);
-                } catch (Exception ignored) {}
+                } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Reflection probe failed", e); }
                 return false;
             }
         } catch (Exception e) {
@@ -424,7 +424,7 @@ public final class FaBatchDelegate implements IBatchDelegate {
                     return false;
                 }
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Reflection probe failed", e); }
         return ritualEverSeenActive;
     }
 
@@ -451,7 +451,7 @@ public final class FaBatchDelegate implements IBatchDelegate {
             try {
                 int mainSlot = hephaestusForgeBEClass.getField("MAIN_SLOT").getInt(null);
                 setForgeSlot(forge, mainSlot, ItemStack.EMPTY);
-            } catch (Exception ignored) {}
+            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Reflection probe failed", e); }
         }
         ledger = null;
         sharedLedger = null;
@@ -466,7 +466,7 @@ public final class FaBatchDelegate implements IBatchDelegate {
         try {
             int mainSlot = hephaestusForgeBEClass.getField("MAIN_SLOT").getInt(null);
             setForgeSlot(forge, mainSlot, ItemStack.EMPTY);
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Reflection probe failed", e); }
         ledger = null;
         sharedLedger = null;
         network = null;
@@ -495,7 +495,7 @@ public final class FaBatchDelegate implements IBatchDelegate {
                 }
             }
             setForgeSlot(forge, mainSlot, ItemStack.EMPTY);
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Reflection probe failed", e); }
     }
 
     private void clearFilledPedestals() {
@@ -512,7 +512,7 @@ public final class FaBatchDelegate implements IBatchDelegate {
                     }
                 }
                 ped.getClass().getMethod("setStack", ItemStack.class).invoke(ped, ItemStack.EMPTY);
-            } catch (Exception ignored) {}
+            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Reflection probe failed", e); }
         }
     }
 
@@ -526,7 +526,7 @@ public final class FaBatchDelegate implements IBatchDelegate {
                     if (val instanceof Number n) return n.intValue();
                 }
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Reflection probe failed", e); }
         return 1;
     }
 
@@ -536,7 +536,7 @@ public final class FaBatchDelegate implements IBatchDelegate {
             if (req != null) {
                 return (int) req.getClass().getMethod("tier").invoke(req);
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Reflection probe failed", e); }
         return 1;
     }
 
@@ -566,7 +566,7 @@ public final class FaBatchDelegate implements IBatchDelegate {
     private static void setForgeSlot(Object be, int slot, ItemStack stack) {
         try {
             be.getClass().getMethod("setStackInSlot", int.class, ItemStack.class).invoke(be, slot, stack);
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Reflection probe failed", e); }
     }
 
     private static ItemStack getForgeSlot(Object be, int slot) {

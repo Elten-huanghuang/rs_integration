@@ -158,7 +158,7 @@ public final class ContainerTransferClient {
                 try {
                     var m = clazz.getMethod("isFocused");
                     if (Boolean.TRUE.equals(m.invoke(widget))) return true;
-                } catch (Exception ignored) {}
+                } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
             }
             clazz = clazz.getSuperclass();
         } while (clazz != null && clazz != Object.class);

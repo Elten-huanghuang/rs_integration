@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.sidepanel;
 
+import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.integration.RSIntegration;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;
@@ -229,7 +230,7 @@ public final class RSSidePanelClickPacket {
                     if (craftable) break;
                 }
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
 
         com.huanghuang.rsintegration.sidepanel.RSSidePanelDeltaPacket.send(
                 player, deltaStack, ts, craftable);

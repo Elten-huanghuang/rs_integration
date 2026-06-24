@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.mixin.jei;
 
+import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.batch.BatchCraftNetworkHandler;
 import com.huanghuang.rsintegration.batch.ModType;
 import com.huanghuang.rsintegration.integration.BindingStorage;
@@ -249,7 +250,7 @@ public class RecipeGuiLayoutsMixin {
             if (WR_WORKBENCH_UID.equals(uid)) return "arcane_workbench";
             if (WR_CRYSTAL_RITUAL_UID.equals(uid)) return "crystal_ritual";
             if (WR_CRYSTAL_INFUSION_UID.equals(uid)) return "crystal_ritual";
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] Reflection probe failed", e); }
 
         String recipeClassName = recipe.getClass().getName();
         if (recipeClassName.equals("com.sammy.malum.common.recipe.SpiritInfusionRecipe"))
@@ -281,7 +282,7 @@ public class RecipeGuiLayoutsMixin {
             catch (NoSuchMethodException e) { getId = recipe.getClass().getMethod("m_6423_"); }
             Object result = getId.invoke(recipe);
             if (result instanceof ResourceLocation id) return id;
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] Reflection probe failed", e); }
         return null;
     }
 
@@ -341,7 +342,7 @@ public class RecipeGuiLayoutsMixin {
                     }
                 }
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] Reflection probe failed", e); }
 
         return null;
     }

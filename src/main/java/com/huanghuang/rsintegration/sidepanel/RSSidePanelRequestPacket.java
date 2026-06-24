@@ -93,7 +93,7 @@ public final class RSSidePanelRequestPacket {
                             }
                         }
                     }
-                } catch (Exception ignored) {}
+                } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
 
                 List<ItemStack> items = new ArrayList<>();
                 List<Long> timestamps = new ArrayList<>();
@@ -124,7 +124,7 @@ public final class RSSidePanelRequestPacket {
                     if (level != null && pos != null) {
                         netName = level.getBlockState(pos).getBlock().getName().getString();
                     }
-                } catch (Exception ignored) {}
+                } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
 
                 RSSidePanelNetworkHandler.sendSync(player, items, timestamps, craftableFlags, totalCount, true, netName);
             } catch (Exception e) {

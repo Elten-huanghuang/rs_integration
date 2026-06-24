@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.integration;
 
+import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.batch.ModType;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
@@ -94,7 +95,7 @@ public final class AltarBindingRegistry {
                             data.getInt("x"), data.getInt("y"), data.getInt("z"));
                     INetwork net = RSIntegration.resolveNetwork(player.server, netDim, netPos);
                     if (net != null) return net;
-                } catch (Throwable ignored) {}
+                } catch (Throwable e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
             }
         }
         // Fallback: scan player inventory for bound NetworkItems
@@ -122,7 +123,7 @@ public final class AltarBindingRegistry {
                     }
                 }
             }
-        } catch (Throwable ignored) {}
+        } catch (Throwable e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
         return null;
     }
 
@@ -182,7 +183,7 @@ public final class AltarBindingRegistry {
                     }
                 }
             }
-        } catch (Throwable ignored) {}
+        } catch (Throwable e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
         return ItemStack.EMPTY;
     }
 
@@ -235,7 +236,7 @@ public final class AltarBindingRegistry {
                     }
                 }
             }
-        } catch (Throwable ignored) {}
+        } catch (Throwable e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
         return null;
     }
 
@@ -261,7 +262,7 @@ public final class AltarBindingRegistry {
                                 data.getInt("x"), data.getInt("y"), data.getInt("z"));
                         INetwork net = RSIntegration.resolveNetwork(player.server, netDim, netPos);
                         if (net != null) return net;
-                    } catch (Throwable ignored) {}
+                    } catch (Throwable e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
                 }
             }
         }
@@ -311,7 +312,7 @@ public final class AltarBindingRegistry {
                     }
                 }
             }
-        } catch (Throwable ignored) {}
+        } catch (Throwable e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
         com.huanghuang.rsintegration.RSIntegrationMod.LOGGER.info(
                 "[RSI-DIAG] hasAnyBindingForType → FALSE for type={}", type.id());
         return false;
@@ -336,7 +337,7 @@ public final class AltarBindingRegistry {
                     }
                 }
             }
-        } catch (Throwable ignored) {}
+        } catch (Throwable e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
         return result;
     }
 

@@ -128,7 +128,7 @@ public final class RSSidePanelNetworkHandler {
                     }
                 }
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
 
         var tracker = network.getItemStorageTracker();
 
@@ -185,7 +185,7 @@ public final class RSSidePanelNetworkHandler {
         if (old != null) {
             try {
                 old.cache.removeListener(old.listener);
-            } catch (Exception ignored) {}
+            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
         }
     }
 

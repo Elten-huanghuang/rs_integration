@@ -276,10 +276,10 @@ public final class MalumCraftPacket {
 
     private static void clearAltarSlots(Object invMain, Object invSpirit, int mainSlots, int spiritSlots) {
         for (int i = 0; i < mainSlots; i++) {
-            try { setIHandlerSlot(invMain, i, ItemStack.EMPTY); } catch (Exception ignored) {}
+            try { setIHandlerSlot(invMain, i, ItemStack.EMPTY); } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
         }
         for (int i = 0; i < spiritSlots; i++) {
-            try { setIHandlerSlot(invSpirit, i, ItemStack.EMPTY); } catch (Exception ignored) {}
+            try { setIHandlerSlot(invSpirit, i, ItemStack.EMPTY); } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
         }
     }
 
@@ -312,7 +312,7 @@ public final class MalumCraftPacket {
                     }
                     setIHandlerSlot(invMain, i, ItemStack.EMPTY);
                 }
-            } catch (Exception ignored) {}
+            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
         }
         for (int i = 0; i < spiritSlots; i++) {
             try {
@@ -327,7 +327,7 @@ public final class MalumCraftPacket {
                     }
                     setIHandlerSlot(invSpirit, i, ItemStack.EMPTY);
                 }
-            } catch (Exception ignored) {}
+            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
         }
     }
 
@@ -414,7 +414,8 @@ public final class MalumCraftPacket {
                 return f.get(obj);
             } catch (NoSuchFieldException e) {
                 clazz = clazz.getSuperclass();
-            } catch (Exception ignored) {
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.debug("[RSI-Malum] getFieldValue probe failed", e);
                 return null;
             }
         }
@@ -452,7 +453,7 @@ public final class MalumCraftPacket {
             if (result instanceof ItemStack stack && !stack.isEmpty()) {
                 return stack.getDisplayName().getString();
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
         return recipe.getId().toString();
     }
 
