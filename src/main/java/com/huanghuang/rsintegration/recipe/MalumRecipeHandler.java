@@ -39,8 +39,10 @@ final class MalumRecipeHandler implements ModRecipeHandler {
         if (iwcClass.isEmpty()) return null;
 
         try {
-            Field ingField = iwcClass.get().getField("ingredient");
-            Field countField = iwcClass.get().getField("count");
+            Field ingField = iwcClass.get().getDeclaredField("ingredient");
+            ingField.setAccessible(true);
+            Field countField = iwcClass.get().getDeclaredField("count");
+            countField.setAccessible(true);
             List<IngredientSpec> result = new ArrayList<>();
 
             // Single input field

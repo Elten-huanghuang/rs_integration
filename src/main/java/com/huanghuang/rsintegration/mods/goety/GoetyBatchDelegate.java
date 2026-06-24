@@ -39,7 +39,6 @@ public final class GoetyBatchDelegate implements IBatchDelegate {
 
     private static void ensureClasses() {
         if (classesLoaded) return;
-        classesLoaded = true;
         try {
             darkAltarBEClass = Class.forName(
                     "com.Polarice3.Goety.common.blocks.entities.DarkAltarBlockEntity");
@@ -51,6 +50,7 @@ public final class GoetyBatchDelegate implements IBatchDelegate {
                     "com.Polarice3.Goety.common.ritual.Ritual");
             seHelperClass = Class.forName(
                     "com.Polarice3.Goety.utils.SEHelper");
+            classesLoaded = true;
         } catch (ClassNotFoundException e) {
             RSIntegrationMod.LOGGER.error("[RSI-Batch-Goety] Failed to load Goety classes", e);
         }
@@ -415,9 +415,12 @@ public final class GoetyBatchDelegate implements IBatchDelegate {
     @Override
     public void onBatchFailed(ServerPlayer player, String reason) {
         ritualEverSeenActive = false;
-        clearFilledPedestals();
-        if (!usingSharedLedger) {
-            refundAll();
+        // Retrieve items from pedestals BEFORE clearing, so we return
+        // actual items instead of creating duplicate ones.
+        if (!usingSharedLedger && ledger != null && ledger.isCommitted()) {
+            recoverFromPedestals();
+        } else {
+            clearFilledPedestals();
         }
         returnSouls(player, soulCost);
         ledger = null;
@@ -554,6 +557,26 @@ public final class GoetyBatchDelegate implements IBatchDelegate {
         if (filledPedestals == null) return;
         for (Object ped : filledPedestals) {
             try {
+                ped.getClass().getMethod("setItem", int.class, ItemStack.class)
+                        .invoke(ped, 0, ItemStack.EMPTY);
+            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] Reflection probe failed", e); }
+        }
+    }
+
+    /** Retrieve items from filled pedestals and return them before clearing. */
+    private void recoverFromPedestals() {
+        if (filledPedestals == null) return;
+        for (Object ped : filledPedestals) {
+            try {
+                ItemStack stack = (ItemStack) ped.getClass().getMethod("getItem", int.class).invoke(ped, 0);
+                if (stack != null && !stack.isEmpty()) {
+                    if (network != null) {
+                        network.insertItem(stack, stack.getCount(),
+                                com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                    } else if (player != null) {
+                        ItemHandlerHelper.giveItemToPlayer(player, stack);
+                    }
+                }
                 ped.getClass().getMethod("setItem", int.class, ItemStack.class)
                         .invoke(ped, 0, ItemStack.EMPTY);
             } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] Reflection probe failed", e); }

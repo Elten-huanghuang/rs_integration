@@ -255,6 +255,19 @@ public final class RSIntegration {
 
     @Nullable
     private static INetwork resolveHeuristic(MinecraftServer server, CompoundTag tag) {
+        // Only heuristically scan tags that already contain at least one known RS
+        // key pattern — this prevents false matches against arbitrary mod NBT.
+        boolean hasRsSignal = false;
+        for (String key : tag.getAllKeys()) {
+            String lk = key.toLowerCase();
+            if (lk.equals("nodex") || lk.equals("networkdimension")
+                    || lk.equals("controllerx") || lk.equals("networkx")) {
+                hasRsSignal = true;
+                break;
+            }
+        }
+        if (!hasRsSignal) return null;
+
         // Scan for any string value that parses as a ResourceLocation (potential dim)
         // and any three int values whose keys loosely match x/y/z.
         ResourceLocation dimId = null;
@@ -262,8 +275,6 @@ public final class RSIntegration {
 
         for (String key : tag.getAllKeys()) {
             String lk = key.toLowerCase();
-            // Dimension detection: any key containing "dim" or "world" or "level"
-            // with a string value that parses as ResourceLocation
             if (dimId == null && (lk.contains("dim") || lk.contains("world") || lk.contains("level"))) {
                 var val = tag.get(key);
                 if (val instanceof net.minecraft.nbt.StringTag st) {
@@ -271,21 +282,16 @@ public final class RSIntegration {
                     if (parsed != null && !parsed.getPath().isEmpty()) {
                         dimId = parsed;
                     }
-                } else if (val instanceof net.minecraft.nbt.NumericTag) {
-                    // Not a string, can't be a dimension
                 }
             }
-            // X detection
             if (x == null && (lk.equals("x") || lk.equals("nodex") || lk.endsWith("_x")
                     || lk.equals("posx") || lk.equals("coordx") || lk.equals("blockx"))) {
                 x = tag.getInt(key);
             }
-            // Y detection
             if (y == null && (lk.equals("y") || lk.equals("nodey") || lk.endsWith("_y")
                     || lk.equals("posy") || lk.equals("coordy") || lk.equals("blocky"))) {
                 y = tag.getInt(key);
             }
-            // Z detection
             if (z == null && (lk.equals("z") || lk.equals("nodez") || lk.endsWith("_z")
                     || lk.equals("posz") || lk.equals("coordz") || lk.equals("blockz"))) {
                 z = tag.getInt(key);
@@ -341,9 +347,6 @@ public final class RSIntegration {
             if (list == null) return ItemStack.EMPTY;
 
             // Snapshot matching entries first, then extract.
-            // Extracting inside a live for-each over list.getStacks() can
-            // trigger ConcurrentModificationException when RS removes a
-            // fully-depleted entry, causing commit to fail and abort the chain.
             var snapshot = new java.util.ArrayList<ItemStack>();
             for (var entry : list.getStacks()) {
                 ItemStack stored = entry.getStack();
@@ -352,6 +355,21 @@ public final class RSIntegration {
                 }
             }
 
+            // Phase 1: SIMULATE to verify total availability before committing.
+            int simRemaining = count;
+            for (ItemStack template : snapshot) {
+                if (simRemaining <= 0) break;
+                int take = Math.min(simRemaining, template.getCount());
+                ItemStack probe = template.copy();
+                probe.setCount(1);
+                ItemStack simResult = network.extractItem(probe, take, Action.SIMULATE);
+                simRemaining -= simResult.getCount();
+            }
+            if (simRemaining > 0) {
+                return ItemStack.EMPTY; // not enough available — nothing extracted
+            }
+
+            // Phase 2: PERFORM after verified availability.
             int remaining = count;
             ItemStack result = ItemStack.EMPTY;
 
@@ -374,8 +392,16 @@ public final class RSIntegration {
             if (!result.isEmpty() && result.getCount() >= count) {
                 return result;
             }
+
+            // Partial extraction: SIMULATE said enough was available, but
+            // PERFORM returned less. Return what we got back to the network.
+            if (!result.isEmpty()) {
+                RSIntegrationMod.LOGGER.error("[RSI] extractFromNetwork: partial extraction — "
+                        + "requested {} but got {}, refunding", count, result.getCount());
+                network.insertItem(result, result.getCount(), Action.PERFORM);
+            }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI] extractFromNetwork error", e);
+            RSIntegrationMod.LOGGER.error("[RSI] extractFromNetwork error — items may have been lost", e);
         }
         return ItemStack.EMPTY;
     }

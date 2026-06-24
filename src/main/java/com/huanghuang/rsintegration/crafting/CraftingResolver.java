@@ -402,8 +402,27 @@ public final class CraftingResolver {
     private static String branchKey(ResourceLocation recipeId, ItemStack output) {
         ResourceLocation rl = ForgeRegistries.ITEMS.getKey(output.getItem());
         String itemKey = rl != null ? rl.toString() : "unreg:" + output.getItem().hashCode();
-        String nbt = output.getTag() != null && !output.getTag().isEmpty() ? output.getTag().toString() : "";
+        String nbt = stableNbtString(output.getTag());
         return recipeId + "|" + itemKey + "|" + nbt;
+    }
+
+    /** Produce a deterministic string from a CompoundTag, sorting keys at each level. */
+    private static String stableNbtString(@Nullable net.minecraft.nbt.CompoundTag tag) {
+        if (tag == null || tag.isEmpty()) return "";
+        List<String> keys = new java.util.ArrayList<>(tag.getAllKeys());
+        java.util.Collections.sort(keys);
+        StringBuilder sb = new StringBuilder();
+        for (String key : keys) {
+            if (!sb.isEmpty()) sb.append(',');
+            sb.append(key).append('=');
+            net.minecraft.nbt.Tag val = tag.get(key);
+            if (val instanceof net.minecraft.nbt.CompoundTag child) {
+                sb.append('{').append(stableNbtString(child)).append('}');
+            } else {
+                sb.append(val);
+            }
+        }
+        return sb.toString();
     }
 
 
@@ -550,7 +569,7 @@ public final class CraftingResolver {
             Item item = stack.getItem();
             String tag = null;
             if (includeNbt && stack.getTag() != null && !stack.getTag().isEmpty()) {
-                tag = stack.getTag().toString();
+                tag = stableNbtString(stack.getTag());
             }
             return new StackKey(item, tag);
         }

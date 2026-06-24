@@ -248,17 +248,12 @@ public final class RSSidePanelClickPacket {
         // Matching RS native ItemGridHandler.onInsert patterns.
         ItemStack template = serverCarried.copy();
         if (isRightClick) {
-            // Try-single: SIMULATE first to check space (using raw insertItem,
-            // not insertItemTracked which always PERFORMs), then commit via
-            // insertItemTracked so the crafting manager tracker is notified.
-            ItemStack simProbe = template.copy();
-            simProbe.setCount(1);
-            if (network.insertItem(simProbe, 1, Action.SIMULATE).isEmpty()) {
-                template.setCount(1);
-                network.insertItemTracked(template, 1);
-                serverCarried.shrink(1);
-            }
+            // Right-click: insert single item. RS does direct PERFORM.
+            template.setCount(1);
+            ItemStack remainder = network.insertItem(template.copy(), 1, Action.PERFORM);
+            if (remainder.isEmpty()) serverCarried.shrink(1);
         } else {
+            // Left-click: insert entire stack with crafting-tracker notification.
             int count = serverCarried.getCount();
             ItemStack remainder = network.insertItemTracked(template.copy(), count);
             int inserted = count - remainder.getCount();

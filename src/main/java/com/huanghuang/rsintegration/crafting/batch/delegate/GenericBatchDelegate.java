@@ -74,45 +74,62 @@ public final class GenericBatchDelegate implements IBatchDelegate {
             return false;
         }
 
-        // Phase 1: reserve all ingredients via ledger
-        List<ItemStack> templates = new ArrayList<>();
-        for (IngredientSpec spec : specs) {
-            if (spec.isEmpty()) continue;
-            ItemStack stack = CraftPacketUtils.ensureMaterialAvailable(player, myDim, myPos, spec.ingredient(), spec.count(), ledger);
-            if (stack.isEmpty()) return false;
-            templates.add(stack);
-        }
-
-        // Phase 2: commit all extractions atomically
-        if (!ledger.commit(network, player)) {
-            RSIntegrationMod.LOGGER.error("[RSI-Batch-Generic] Ledger commit failed");
+        // Phase 1: compute result first (zero side effects).  If we cannot
+        // determine the result there is no point extracting materials.
+        this.pendingResult = computeResult(player);
+        if (this.pendingResult.isEmpty()) {
+            RSIntegrationMod.LOGGER.error("[RSI-Batch-Generic] Cannot determine result for recipe {}", recipe.getId());
             return false;
         }
 
-        // Phase 3: compute result
-        try {
-            Object result = recipe.getClass().getMethod("getResultItem",
-                    net.minecraft.core.RegistryAccess.class)
-                    .invoke(recipe, player.serverLevel().registryAccess());
-            if (result instanceof ItemStack stack && !stack.isEmpty()) {
-                this.pendingResult = stack.copy();
+        // Phase 2: reserve all ingredients via ledger
+        List<ItemStack> templates = new ArrayList<>();
+        for (IngredientSpec spec : specs) {
+            if (spec.isEmpty()) continue;
+            ItemStack stack = CraftPacketUtils.ensureMaterialAvailable(player, myDim, myPos,
+                    spec.ingredient(), spec.count(), ledger);
+            if (stack.isEmpty()) {
+                this.pendingResult = ItemStack.EMPTY;
+                return false; // ledger not committed — nothing lost
             }
-        } catch (Exception e) {
-            try {
-                Object result = recipe.getClass().getMethod("getResultItem").invoke(recipe);
-                if (result instanceof ItemStack stack && !stack.isEmpty()) {
-                    this.pendingResult = stack.copy();
-                }
-            } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-Generic] Reflection probe failed", ex); }
+            templates.add(stack);
         }
 
-        // Extracted items have been consumed by the machine — discard templates
+        // Phase 3: commit all extractions atomically
+        if (!ledger.commit(network, player)) {
+            RSIntegrationMod.LOGGER.error("[RSI-Batch-Generic] Ledger commit failed");
+            this.pendingResult = ItemStack.EMPTY;
+            return false; // ledger not committed — nothing lost
+        }
+
+        // Extracted items have been consumed — discard templates
         templates.clear();
 
         // Result is collected by BatchCraftTask.tick() via collectResult() →
         // insertIntoRS(). Do NOT insert here to avoid double-inserting.
         this.craftDone = true;
         return true;
+    }
+
+    private ItemStack computeResult(ServerPlayer player) {
+        try {
+            Object result = recipe.getClass().getMethod("getResultItem",
+                    net.minecraft.core.RegistryAccess.class)
+                    .invoke(recipe, player.serverLevel().registryAccess());
+            if (result instanceof ItemStack stack && !stack.isEmpty()) {
+                return stack.copy();
+            }
+        } catch (Exception e) {
+            try {
+                Object result = recipe.getClass().getMethod("getResultItem").invoke(recipe);
+                if (result instanceof ItemStack stack && !stack.isEmpty()) {
+                    return stack.copy();
+                }
+            } catch (Exception ex) {
+                RSIntegrationMod.LOGGER.error("[RSI-Batch-Generic] Failed to get result for recipe {}", recipe.getId(), ex);
+            }
+        }
+        return ItemStack.EMPTY;
     }
 
     @Override
@@ -151,20 +168,14 @@ public final class GenericBatchDelegate implements IBatchDelegate {
     }
 
     private void refundAll() {
-        if (ledger == null || !ledger.isCommitted()) return;
-        List<IngredientSpec> specs = CraftPacketUtils.extractIngredientSpecs(recipe);
-        if (specs == null) return;
-        for (IngredientSpec spec : specs) {
-            if (spec.isEmpty()) continue;
-            ItemStack[] opts = spec.ingredient().getItems();
-            if (opts.length > 0 && !opts[0].isEmpty()) {
-                ItemStack refund = opts[0].copyWithCount(spec.count());
-                if (network != null) {
-                    network.insertItem(refund, spec.count(), com.refinedmods.refinedstorage.api.util.Action.PERFORM);
-                } else if (player != null) {
-                    ItemHandlerHelper.giveItemToPlayer(player, refund);
-                }
-            }
+        // GenericBatchDelegate has no physical machine — committed items are
+        // consumed by the virtual crafting process and cannot be recovered.
+        // tryStartSingleCraft now computes the result BEFORE committing, so
+        // this path is only reached in unexpected failure scenarios.
+        if (ledger != null && ledger.isCommitted()) {
+            RSIntegrationMod.LOGGER.error("[RSI-Batch-Generic] Batch failed after commit. "
+                    + "{} items may have been lost for recipe {}.",
+                    ledger.size(), recipe != null ? recipe.getId() : "unknown");
         }
     }
 }

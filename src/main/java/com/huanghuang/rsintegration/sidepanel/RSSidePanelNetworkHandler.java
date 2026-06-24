@@ -32,6 +32,7 @@ public final class RSSidePanelNetworkHandler {
 
     // ── Per-player server-side cache + storage-cache listener ─────
     private static final Map<UUID, ListenerEntry> playerListeners = new ConcurrentHashMap<>();
+    private static net.minecraft.server.MinecraftServer cachedServer;
 
     // ── Pending deltas per player — collected during a tick, flushed at end ──
     private static final Map<UUID, List<RSSidePanelDeltaPacket.Entry>> pendingDeltas = new ConcurrentHashMap<>();
@@ -163,6 +164,7 @@ public final class RSSidePanelNetworkHandler {
         if (cache == null) return false;
 
         UUID pid = player.getUUID();
+        if (player.getServer() != null) cachedServer = player.getServer();
         boolean isNew = !playerListeners.containsKey(pid);
         unregisterListener(pid);
 
@@ -191,6 +193,17 @@ public final class RSSidePanelNetworkHandler {
             @Override
             public void onInvalidated() {
                 playerListeners.remove(pid);
+                // Notify client immediately — matches RS GridScreen closing on network loss
+                net.minecraft.server.MinecraftServer server = cachedServer;
+                if (server != null) {
+                    ServerPlayer sp = server.getPlayerList().getPlayer(pid);
+                    if (sp != null) {
+                        sendSync(sp,
+                                Collections.emptyList(), Collections.emptyList(),
+                                Collections.emptyList(), Collections.emptyList(),
+                                0, false, "");
+                    }
+                }
             }
 
             private void queue(ItemStack stack, int change, UUID entryId) {

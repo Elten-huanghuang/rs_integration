@@ -42,7 +42,6 @@ public final class EidolonBatchDelegate implements IBatchDelegate {
 
     private static void ensureClasses() {
         if (classesLoaded) return;
-        classesLoaded = true;
         try {
             crucibleRecipeClass = Class.forName("elucent.eidolon.recipe.CrucibleRecipe");
             crucibleRecipeStepClass = Class.forName("elucent.eidolon.recipe.CrucibleRecipe$Step");
@@ -63,6 +62,8 @@ public final class EidolonBatchDelegate implements IBatchDelegate {
             } catch (NoSuchFieldException e) {
                 RSIntegrationMod.LOGGER.warn("[RSI-Batch-Eidolon] steps field not found");
             }
+
+            classesLoaded = true;
         } catch (ClassNotFoundException e) {
             RSIntegrationMod.LOGGER.error("[RSI-Batch-Eidolon] Failed to load Eidolon classes", e);
         }
@@ -122,7 +123,11 @@ public final class EidolonBatchDelegate implements IBatchDelegate {
 
         // Validate state
         boolean hasWater;
-        try { hasWater = be.getClass().getField("hasWater").getBoolean(be); } catch (Exception e) { hasWater = false; }
+        try {
+            var f = be.getClass().getDeclaredField("hasWater");
+            f.setAccessible(true);
+            hasWater = f.getBoolean(be);
+        } catch (Exception e) { hasWater = false; }
 
         boolean boiling = false;
         try {
@@ -174,7 +179,11 @@ public final class EidolonBatchDelegate implements IBatchDelegate {
 
         // Re-validate crucible state before each iteration
         boolean hasWater;
-        try { hasWater = crucible.getClass().getField("hasWater").getBoolean(crucible); } catch (Exception e) { hasWater = false; }
+                try {
+            var f = crucible.getClass().getDeclaredField("hasWater");
+            f.setAccessible(true);
+            hasWater = f.getBoolean(crucible);
+        } catch (Exception e) { hasWater = false; }
 
         boolean boiling = false;
         try {
@@ -251,7 +260,7 @@ public final class EidolonBatchDelegate implements IBatchDelegate {
             tank.getClass()
                     .getMethod("drain", int.class, IFluidHandler.FluidAction.class)
                     .invoke(tank, 1000, IFluidHandler.FluidAction.EXECUTE);
-            crucible.getClass().getField("hasWater").set(crucible, false);
+            crucible.getClass().getDeclaredField("hasWater").set(crucible, false);
         } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-Eidolon] Reflection probe failed", e); }
 
         try {
@@ -305,7 +314,11 @@ public final class EidolonBatchDelegate implements IBatchDelegate {
 
         // Re-validate crucible state
         boolean hasWater;
-        try { hasWater = crucible.getClass().getField("hasWater").getBoolean(crucible); } catch (Exception e) { hasWater = false; }
+                try {
+            var f = crucible.getClass().getDeclaredField("hasWater");
+            f.setAccessible(true);
+            hasWater = f.getBoolean(crucible);
+        } catch (Exception e) { hasWater = false; }
         boolean boiling = false;
         try {
             if (boilingField != null) boiling = boilingField.getBoolean(crucible);
@@ -366,7 +379,7 @@ public final class EidolonBatchDelegate implements IBatchDelegate {
             tank.getClass()
                     .getMethod("drain", int.class, IFluidHandler.FluidAction.class)
                     .invoke(tank, 1000, IFluidHandler.FluidAction.EXECUTE);
-            crucible.getClass().getField("hasWater").set(crucible, false);
+            crucible.getClass().getDeclaredField("hasWater").set(crucible, false);
         } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-Eidolon] Reflection probe failed", e); }
 
         try {
@@ -440,9 +453,13 @@ public final class EidolonBatchDelegate implements IBatchDelegate {
             List<?> steps = (List<?>) recipe.getClass().getMethod("getSteps").invoke(recipe);
             if (steps != null) {
                 for (Object step : steps) {
-                    int stirs = step.getClass().getField("stirs").getInt(step);
+                    var stirsField = step.getClass().getDeclaredField("stirs");
+                    stirsField.setAccessible(true);
+                    int stirs = stirsField.getInt(step);
                     @SuppressWarnings("unchecked")
-                    List<Ingredient> matches = (List<Ingredient>) step.getClass().getField("matches").get(step);
+                    var matchesField = step.getClass().getDeclaredField("matches");
+                    matchesField.setAccessible(true);
+                    List<Ingredient> matches = (List<Ingredient>) matchesField.get(step);
                     List<Ingredient> ingredients = new ArrayList<>(matches);
                     result.add(new StepInput(stirs, ingredients));
                 }
@@ -457,21 +474,15 @@ public final class EidolonBatchDelegate implements IBatchDelegate {
 
     private void refundAll() {
         if (ledger == null || !ledger.isCommitted()) return;
-        List<StepInput> stepInputs = collectSteps(recipe);
-        for (StepInput si : stepInputs) {
-            for (Ingredient ing : si.ingredients) {
-                if (ing.isEmpty()) continue;
-                ItemStack[] opts = ing.getItems();
-                if (opts.length > 0 && !opts[0].isEmpty()) {
-                    ItemStack refund = opts[0].copyWithCount(1);
-                    if (network != null) {
-                        network.insertItem(refund, 1, com.refinedmods.refinedstorage.api.util.Action.PERFORM);
-                    } else if (player != null) {
-                        ItemHandlerHelper.giveItemToPlayer(player, refund);
-                    }
-                }
-            }
-        }
+        // Items were placed in the crucible as CrucibleStep objects.
+        // We cannot safely determine which items came from RS vs player
+        // inventory, so we leave them in the crucible rather than risk
+        // duplicating.  The crucible steps are cleared by onBatchFailed's
+        // caller or will be consumed by a subsequent manual craft.
+        RSIntegrationMod.LOGGER.error("[RSI-Batch-Eidolon] Batch failed after ledger commit — "
+                + "{} ledger entries may still be in the crucible. "
+                + "They can be manually retrieved or will be consumed by the next craft.",
+                ledger.size());
     }
 
     // ── Inner types ──────────────────────────────────────────────

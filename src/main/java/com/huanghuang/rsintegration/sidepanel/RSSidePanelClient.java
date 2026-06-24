@@ -254,14 +254,10 @@ public final class RSSidePanelClient {
         int delta = count - oldCount;
 
         if (count <= 0) {
-            if (existing != null) {
-                existing.zeroed = true;
-                existing.setCount(0);
-                existing.timestamp = timestamp;
-            }
+            // Matches RS postChange: map.remove(id) when quantity ≤ 0
+            if (existing != null) removePanel(id);
         } else {
             if (existing != null) {
-                existing.zeroed = false;
                 existing.setCount(count);
                 existing.timestamp = timestamp;
                 existing.craftable = craftable;
@@ -276,6 +272,7 @@ public final class RSSidePanelClient {
 
         deltaBatch.add(id);
         deltaBatchDirty = true;
+        displayDirty = true;
     }
 
     // ── sort guard ──────────────────────────────────────────────
@@ -711,35 +708,28 @@ public final class RSSidePanelClient {
                     g.fill(ix + 1, iy + 1, ix + 17, iy + 17, animColor);
                 }
 
+                // ── Render item (stack count always ≥ 1 — matches RS) ──
+                g.renderItem(stack, ix + 1, iy + 1);
+
                 if (ps.zeroed) {
-                    // Dimmed ghost render — matches RS ItemGridStack.draw zeroed path
-                    g.renderItem(stack, ix + 1, iy + 1);
-                    g.fill(ix + 1, iy + 1, ix + 17, iy + 17, 0xA0000000);
-                    String cnt = "0";
+                    // RS IGridStack.draw zeroed path: "0" in 0xFF5555
+                    g.renderItemDecorations(font, stack, ix + 1, iy + 1, "");
+                    var p = g.pose();
+                    p.pushPose();
+                    p.translate(0, 0, 200);
+                    g.drawString(font, "0", ix + 17 - font.width("0"), iy + 10, 0xFF5555);
+                    p.popPose();
+                } else if (ps.getCount() > 1) {
+                    String cnt = formatCount(ps.getCount());
                     var p = g.pose();
                     p.pushPose();
                     p.translate(0, 0, 200);
                     int tx = ix + 17 - font.width(cnt);
                     int ty = iy + 10;
-                    g.drawString(font, cnt, tx, ty, 0xFF5555);
+                    g.drawString(font, cnt, tx, ty, 0xFFFFFF);
                     p.popPose();
                 } else {
-                    if (stack.isEmpty()) continue;
-
-                    g.renderItem(stack, ix + 1, iy + 1);
-
-                    if (ps.getCount() > 1) {
-                        String cnt = formatCount(ps.getCount());
-                        var p = g.pose();
-                        p.pushPose();
-                        p.translate(0, 0, 200);
-                        int tx = ix + 17 - font.width(cnt);
-                        int ty = iy + 10;
-                        g.drawString(font, cnt, tx, ty, 0xFFFFFF);
-                        p.popPose();
-                    } else {
-                        g.renderItemDecorations(font, stack, ix + 1, iy + 1, "");
-                    }
+                    g.renderItemDecorations(font, stack, ix + 1, iy + 1, "");
                 }
 
                 if (hovered) hoveredSlotIndex = dIdx;
@@ -1038,8 +1028,7 @@ public final class RSSidePanelClient {
                 if (existingId != null) {
                     PanelStack cur = getById(existingId);
                     if (cur != null) {
-                        cur.zeroed = false;
-                        cur.grow(insertCount);
+                        cur.grow(insertCount); // setCount handles zeroed/zeroedAt
                         cur.timestamp = System.currentTimeMillis();
                         recordSlotAnim(existingId, insertCount);
                         displayDirty = true;
@@ -1054,7 +1043,7 @@ public final class RSSidePanelClient {
         int dIdx = (scrollRow + row) * COLUMNS + col;
         if (dIdx < 0 || dIdx >= displayList.size()) return;
         PanelStack clickedPs = displayList.get(dIdx);
-        if (clickedPs == null || clickedPs.getStack().isEmpty()) return;
+        if (clickedPs == null || clickedPs.zeroed || clickedPs.getStack().isEmpty()) return;
 
         // Left drag start (Ctrl+Click = distribute drag)
         if (btn == GLFW.GLFW_MOUSE_BUTTON_LEFT && Screen.hasControlDown()) {
@@ -1087,7 +1076,6 @@ public final class RSSidePanelClient {
             recordSlotAnim(pk, -extractCount);
             int remaining = clickedPs.getCount() - extractCount;
             if (remaining <= 0) {
-                clickedPs.zeroed = true;
                 clickedPs.setCount(0);
             } else {
                 clickedPs.setCount(remaining);
@@ -1142,7 +1130,6 @@ public final class RSSidePanelClient {
                             recordSlotAnim(key, -1);
                             int remaining = ps.getCount() - 1;
                             if (remaining <= 0) {
-                                ps.zeroed = true;
                                 ps.setCount(0);
                             } else {
                                 ps.setCount(remaining);
@@ -1161,7 +1148,6 @@ public final class RSSidePanelClient {
                     recordSlotAnim(key, -extractCount);
                     int remaining = ps.getCount() - extractCount;
                     if (remaining <= 0) {
-                        ps.zeroed = true;
                         ps.setCount(0);
                     } else {
                         ps.setCount(remaining);
@@ -1182,7 +1168,8 @@ public final class RSSidePanelClient {
 
     @SuppressWarnings("resource")
     private static void onScreenMouseDragged(ScreenEvent.MouseDragged.Pre event) {
-        if (!panelVisible || panelHidden) return;
+        if (!panelVisible) return;
+        if (panelHidden && !movingPanel) return;
         var mc = Minecraft.getInstance();
         if (mc.player == null) return;
 
@@ -1362,31 +1349,32 @@ public final class RSSidePanelClient {
             RSSidePanelNetworkHandler.sendRequestSync();
         }
 
-        // Timeout stale pending extractions (5s)
+        // Timeout stale pending extractions (2s)
         if (!pendingExtractions.isEmpty() && tickCounter % 20 == 0) {
             long now = System.currentTimeMillis();
             var it = pendingExtractions.entrySet().iterator();
             while (it.hasNext()) {
                 var pe = it.next();
-                if (now - pe.getValue().createdAt > 5000) {
+                if (now - pe.getValue().createdAt > 2000) {
                     PendingExtraction p = pe.getValue();
                     if (p.previousStack.getCount() > 0) {
                         PanelStack ps = getById(pe.getKey());
                         if (ps != null) {
+                            // Server hasn't confirmed yet — item still in panels (zeroed)
                             int oldCount = ps.getCount();
-                            ps.zeroed = false;
-                            ps.setCount(p.previousStack.getCount());
+                            ps.setCount(p.previousStack.getCount()); // clears zeroed internally
                             ps.timestamp = p.timestamp;
                             ps.craftable = p.craftable;
                             recordSlotAnim(pe.getKey(), p.previousStack.getCount() - oldCount);
                         } else {
-                            // Was zeroed then cleaned by full sync, re-add
+                            // Server delta already removed it — re-add
                             PanelStack newPs = new PanelStack(pe.getKey(), p.previousStack, p.timestamp, p.craftable);
                             idToIndex.put(pe.getKey(), panels.size());
                             panels.add(newPs);
                             recordSlotAnim(pe.getKey(), p.previousStack.getCount());
                         }
                     } else {
+                        // Previous count was already 0 — server should have removed it
                         removePanel(pe.getKey());
                     }
                     it.remove();

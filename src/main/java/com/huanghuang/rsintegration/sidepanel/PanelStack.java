@@ -4,19 +4,19 @@ import net.minecraft.world.item.ItemStack;
 
 import java.util.UUID;
 
-/** Unified data model for a single item entry in the side panel display.
- *  Replaces the old {@code Map<key, ItemEntry> + List<ItemStack> displayList}
- *  dual-structure with a single self-contained object, analogous to RS
- *  native {@code IGridStack}. */
+/** Mirrors RS native {@code ItemGridStack}.  The wrapped {@link #stack}
+ *  always holds count ≥ 1 (for rendering), while {@link #getCount()}
+ *  delegates to the {@link #zeroed} flag — exactly matching RS's
+ *  {@code getQuantity() / setQuantity() / setZeroed()} pattern. */
 public final class PanelStack {
 
-    private final UUID id;       // RS StackListEntry UUID — stable identity
-    final ItemStack stack;       // item with current count
+    private final UUID id;
+    final ItemStack stack;       // count is NEVER set to 0 — matches RS final stack
     long timestamp;
     boolean craftable;
-    boolean zeroed;              // true when count dropped to 0 — stays in view, dimmed
+    boolean zeroed;
+    long zeroedAt;
 
-    // Cached lazy values
     private String cachedName;
     private String cachedModId;
     private String cachedModName;
@@ -24,14 +24,38 @@ public final class PanelStack {
     PanelStack(UUID id, ItemStack stack, long timestamp, boolean craftable) {
         this.id = id;
         this.stack = stack.copy();
+        if (this.stack.getCount() <= 0 && !this.stack.isEmpty()) {
+            this.stack.setCount(1); // ensure renderable
+        }
         this.timestamp = timestamp;
         this.craftable = craftable;
     }
 
     public UUID getId()          { return id; }
-    public int getCount()        { return stack.getCount(); }
-    public void setCount(int c)  { stack.setCount(c); }
-    public void grow(int delta)  { stack.grow(delta); }
+
+    /** Matches RS {@code IGridStack.getQuantity()}: returns 0 when zeroed. */
+    public int getCount()        { return zeroed ? 0 : stack.getCount(); }
+
+    /** Matches RS {@code IGridStack.setQuantity(int)}:
+     *  ≤0 → set zeroed (keep stack count intact for rendering);
+     *  >0 → update stack count, clear zeroed. */
+    public void setCount(int c) {
+        if (c <= 0) {
+            zeroed = true;
+            zeroedAt = System.currentTimeMillis();
+        } else {
+            zeroed = false;
+            zeroedAt = 0;
+            stack.setCount(c);
+        }
+    }
+
+    public void grow(int delta) {
+        int cur = getCount();
+        setCount(cur + delta);
+    }
+
+    /** Always returns a renderable stack (count ≥ 1). */
     public ItemStack getStack()  { return stack; }
 
     public String getName() {
@@ -41,29 +65,22 @@ public final class PanelStack {
 
     public String getModId() {
         if (cachedModId == null) {
-            var key = net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(stack.getItem());
-            cachedModId = key != null ? key.getNamespace() : "minecraft";
+            cachedModId = stack.getItem().getCreatorModId(stack);
         }
         return cachedModId;
     }
 
     public String getModName() {
         if (cachedModName == null) {
-            var key = net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(stack.getItem());
-            if (key != null) {
-                cachedModName = net.minecraftforge.fml.ModList.get()
-                        .getModContainerById(key.getNamespace())
-                        .map(c -> c.getModInfo().getDisplayName())
-                        .orElse(key.getNamespace());
-            } else {
-                cachedModName = "Minecraft";
-            }
+            String modId = getModId();
+            cachedModName = net.minecraftforge.fml.ModList.get()
+                    .getModContainerById(modId)
+                    .map(c -> c.getModInfo().getDisplayName())
+                    .orElse(modId);
         }
         return cachedModName;
     }
 
-    /** Stable NBT-independent key for search/drag matching.
-     *  Not used as primary identity — use {@link #getId()} for that. */
     public String searchKey() {
         var rl = net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(stack.getItem());
         String base = rl != null ? rl.toString() : "";

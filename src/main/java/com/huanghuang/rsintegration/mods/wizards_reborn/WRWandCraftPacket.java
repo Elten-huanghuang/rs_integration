@@ -131,7 +131,7 @@ public final class WRWandCraftPacket {
 
         if (!tryAutoCraftMissing(player, ingredients, dim, pos)) return false;
 
-        INetwork network = RSIntegration.resolveNetworkFromPlayer(player);
+        INetwork network = CraftPacketUtils.resolveNetworkForCraft(player, dim, pos);
         ExtractionLedger ledger = new ExtractionLedger();
 
         // Phase 1: reserve all ingredients + validate slots
@@ -219,7 +219,7 @@ public final class WRWandCraftPacket {
 
         if (!tryAutoCraftMissing(player, ingredients, dim, pos)) return false;
 
-        INetwork network = RSIntegration.resolveNetworkFromPlayer(player);
+        INetwork network = CraftPacketUtils.resolveNetworkForCraft(player, dim, pos);
         ExtractionLedger ledger = new ExtractionLedger();
 
         // Phase 1: reserve all ingredients
@@ -308,7 +308,7 @@ public final class WRWandCraftPacket {
 
         if (!tryAutoCraftMissing(player, ingredients, dim, pos)) return false;
 
-        INetwork network = RSIntegration.resolveNetworkFromPlayer(player);
+        INetwork network = CraftPacketUtils.resolveNetworkForCraft(player, dim, pos);
         ExtractionLedger ledger = new ExtractionLedger();
 
         // Phase 1: reserve all ingredients + validate slots
@@ -438,7 +438,7 @@ public final class WRWandCraftPacket {
 
         if (!tryAutoCraftMissing(player, ingredients, dim, pos)) return false;
 
-        INetwork network = RSIntegration.resolveNetworkFromPlayer(player);
+        INetwork network = CraftPacketUtils.resolveNetworkForCraft(player, dim, pos);
         ExtractionLedger ledger = new ExtractionLedger();
 
         // Phase 1: reserve all ingredients

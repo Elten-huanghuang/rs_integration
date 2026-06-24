@@ -42,7 +42,6 @@ public final class FaBatchDelegate implements IBatchDelegate {
 
     private static void ensureClasses() {
         if (classesLoaded) return;
-        classesLoaded = true;
         try {
             hephaestusForgeBEClass = Class.forName(
                     "com.stal111.forbidden_arcanus.common.block.entity.forge.HephaestusForgeBlockEntity");
@@ -58,6 +57,7 @@ public final class FaBatchDelegate implements IBatchDelegate {
                     "com.stal111.forbidden_arcanus.common.block.entity.forge.ritual.RitualManager");
             booleanConsumerClass = Class.forName(
                     "it.unimi.dsi.fastutil.booleans.BooleanConsumer");
+            classesLoaded = true;
         } catch (ClassNotFoundException e) {
             RSIntegrationMod.LOGGER.error("[RSI-Batch-FA] Failed to load FA classes", e);
         }

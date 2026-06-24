@@ -32,12 +32,12 @@ public final class MalumBatchDelegate implements IBatchDelegate {
 
     private static void ensureClasses() {
         if (classesLoaded) return;
-        classesLoaded = true;
         try {
             spiritAltarBEClass = Class.forName(
                     "com.sammy.malum.common.block.curiosities.spirit_altar.SpiritAltarBlockEntity");
             altarCraftingHelperClass = Class.forName(
                     "com.sammy.malum.common.block.curiosities.spirit_altar.AltarCraftingHelper");
+            classesLoaded = true;
         } catch (ClassNotFoundException e) {
             RSIntegrationMod.LOGGER.error("[RSI-Batch-Malum] Failed to load Malum classes", e);
         }
@@ -369,25 +369,85 @@ public final class MalumBatchDelegate implements IBatchDelegate {
     @Override
     public void onBatchFailed(ServerPlayer player, String reason) {
         capturedResult = ItemStack.EMPTY;
-        clearPedestals();
-        try {
-            setIHandlerSlot(invMain, 0, ItemStack.EMPTY);
-        } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", ex); }
-        try {
-            List<?> spirits = (List<?>) getField(recipe, "spirits");
-            if (spirits != null) {
-                for (int i = 0; i < spirits.size(); i++) {
-                    setIHandlerSlot(invSpirit, i, ItemStack.EMPTY);
+        // Retrieve items from altar slots before clearing, so we can return
+        // them to their source instead of creating duplicate items.
+        if (!usingSharedLedger && ledger != null && ledger.isCommitted()) {
+            recoverFromAltar();
+        } else {
+            clearPedestals();
+            try { setIHandlerSlot(invMain, 0, ItemStack.EMPTY); } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", ex); }
+            try {
+                List<?> spirits = (List<?>) getField(recipe, "spirits");
+                if (spirits != null) {
+                    for (int i = 0; i < spirits.size(); i++) {
+                        setIHandlerSlot(invSpirit, i, ItemStack.EMPTY);
+                    }
                 }
-            }
-        } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", ex); }
-        if (!usingSharedLedger) {
-            refundAll();
+            } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", ex); }
         }
         ledger = null;
         sharedLedger = null;
         network = null;
         usingSharedLedger = false;
+    }
+
+    /** Retrieve items from altar slots and return them to the network/player. */
+    private void recoverFromAltar() {
+        // Recover main slot
+        try {
+            ItemStack mainStack = (ItemStack) invMain.getClass().getMethod("getStackInSlot", int.class).invoke(invMain, 0);
+            if (mainStack != null && !mainStack.isEmpty()) {
+                returnItem(mainStack);
+            }
+            setIHandlerSlot(invMain, 0, ItemStack.EMPTY);
+        } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", ex); }
+
+        // Recover pedestal slots
+        if (pedestals != null && filledPedestalIndices != null) {
+            for (int idx : filledPedestalIndices) {
+                if (idx < 0 || idx >= pedestals.size()) continue;
+                try {
+                    Object ap = pedestals.get(idx);
+                    Object inv = ap.getClass().getMethod("getSuppliedInventory").invoke(ap);
+                    ItemStack stack = (ItemStack) inv.getClass().getMethod("getStackInSlot", int.class).invoke(inv, 0);
+                    if (stack != null && !stack.isEmpty()) {
+                        returnItem(stack);
+                    }
+                    inv.getClass().getMethod("setStackInSlot", int.class, ItemStack.class).invoke(inv, 0, ItemStack.EMPTY);
+                } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", ex); }
+            }
+        }
+
+        // Recover spirit slots
+        try {
+            List<?> spirits = (List<?>) getField(recipe, "spirits");
+            if (spirits != null) {
+                for (int i = 0; i < spirits.size(); i++) {
+                    try {
+                        ItemStack stack = (ItemStack) invSpirit.getClass().getMethod("getStackInSlot", int.class).invoke(invSpirit, i);
+                        if (stack != null && !stack.isEmpty()) {
+                            returnItem(stack);
+                        }
+                        setIHandlerSlot(invSpirit, i, ItemStack.EMPTY);
+                    } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", ex); }
+                }
+            }
+        } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", ex); }
+
+        // Reset altar state
+        try {
+            altar.getClass().getMethod("init").invoke(altar);
+            setField(altar, "isCrafting", false);
+        } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", ex); }
+    }
+
+    private void returnItem(ItemStack stack) {
+        if (network != null) {
+            network.insertItem(stack, stack.getCount(),
+                    com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+        } else if (player != null) {
+            ItemHandlerHelper.giveItemToPlayer(player, stack);
+        }
     }
 
     @Override

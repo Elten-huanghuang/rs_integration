@@ -156,15 +156,29 @@ public final class ModType {
             for (String prefix : mt.blockKeyPrefixes) {
                 if (lower.startsWith(prefix.toLowerCase(Locale.ROOT) + "||")) return mt;
             }
-            // 2. Registered keywords
+            // 2. Registered keywords — match as a dot/underscore-delimited segment
             for (String kw : mt.blockKeyKeywords) {
-                if (lower.contains(kw.toLowerCase(Locale.ROOT))) return mt;
+                if (containsSegment(lower, kw.toLowerCase(Locale.ROOT))) return mt;
             }
-            // 3. Fallback: check if blockKey contains the mod type id itself
-            // (handles both prefixed and unprefixed bindings)
-            if (lower.contains(mt.id().toLowerCase(Locale.ROOT))) return mt;
+            // 3. Fallback: check if blockKey contains the mod type id as a segment
+            if (containsSegment(lower, mt.id().toLowerCase(Locale.ROOT))) return mt;
         }
         return null;
+    }
+
+    /** Check whether {@code segment} appears in {@code lower} bounded by
+     *  dots, underscores, or string edges.  Avoids false matches like
+     *  "goety" matching "some_mod.goety_stone". */
+    private static boolean containsSegment(String lower, String segment) {
+        int idx = lower.indexOf(segment);
+        while (idx >= 0) {
+            boolean leftOk = idx == 0 || lower.charAt(idx - 1) == '.' || lower.charAt(idx - 1) == '_';
+            int end = idx + segment.length();
+            boolean rightOk = end == lower.length() || lower.charAt(end) == '.' || lower.charAt(end) == '_';
+            if (leftOk && rightOk) return true;
+            idx = lower.indexOf(segment, idx + 1);
+        }
+        return false;
     }
 
     // ── helpers ───────────────────────────────────────────────────

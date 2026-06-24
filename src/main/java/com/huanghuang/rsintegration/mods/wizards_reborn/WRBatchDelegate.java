@@ -49,7 +49,6 @@ public final class WRBatchDelegate implements IBatchDelegate {
 
     private static void ensureClasses() {
         if (classesLoaded) return;
-        classesLoaded = true;
         try {
             wissenCrystallizerBEClass = Class.forName(
                     "mod.maxbogomol.wizards_reborn.common.block.wissen_crystallizer.WissenCrystallizerBlockEntity");
@@ -78,6 +77,7 @@ public final class WRBatchDelegate implements IBatchDelegate {
             ritualAreaClass = Class.forName(
                     "mod.maxbogomol.wizards_reborn.api.crystalritual.CrystalRitualArea");
         } catch (ClassNotFoundException ignored) {}
+        classesLoaded = true;
     }
 
     // ── Instance state ───────────────────────────────────────────
@@ -854,10 +854,13 @@ public final class WRBatchDelegate implements IBatchDelegate {
 
     @Override
     public void onBatchFailed(ServerPlayer player, String reason) {
-        clearFilledSlots();
-        clearFilledPedestals();
-        if (!usingSharedLedger) {
-            refundAll();
+        // Retrieve items from machine slots BEFORE clearing, so we return
+        // actual items instead of creating duplicate ones.
+        if (!usingSharedLedger && ledger != null && ledger.isCommitted()) {
+            recoverFromMachine();
+        } else {
+            clearFilledSlots();
+            clearFilledPedestals();
         }
         ledger = null;
         sharedLedger = null;
@@ -919,6 +922,66 @@ public final class WRBatchDelegate implements IBatchDelegate {
             try {
                 setContainerItem(ped, 0, ItemStack.EMPTY);
             } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
+        }
+    }
+
+    /** Retrieve items from machine/pedestal slots and return them, then clear. */
+    private void recoverFromMachine() {
+        // Recover filled pedestal items
+        if (filledPedestals != null) {
+            for (Object ped : filledPedestals) {
+                try {
+                    ItemStack stack = getContainerItem(ped, 0);
+                    if (stack != null && !stack.isEmpty()) {
+                        returnItem(stack);
+                    }
+                    setContainerItem(ped, 0, ItemStack.EMPTY);
+                } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
+            }
+        }
+
+        // Recover filled machine slot items
+        if (filledSlotIndices != null) {
+            for (int idx : filledSlotIndices) {
+                try {
+                    ItemStack stack;
+                    switch (machineType) {
+                        case WISSEN_CRYSTALLIZER:
+                            stack = getContainerItem(be, idx);
+                            break;
+                        case ARCANE_WORKBENCH:
+                            ItemStackHandler handler = (ItemStackHandler) be.getClass()
+                                    .getField("itemHandler").get(be);
+                            stack = handler.getStackInSlot(idx);
+                            break;
+                        default:
+                            stack = ItemStack.EMPTY;
+                    }
+                    if (stack != null && !stack.isEmpty()) {
+                        returnItem(stack);
+                    }
+                    // Clear the slot
+                    switch (machineType) {
+                        case WISSEN_CRYSTALLIZER:
+                            setContainerItem(be, idx, ItemStack.EMPTY);
+                            break;
+                        case ARCANE_WORKBENCH:
+                            ItemStackHandler handler2 = (ItemStackHandler) be.getClass()
+                                    .getField("itemHandler").get(be);
+                            handler2.setStackInSlot(idx, ItemStack.EMPTY);
+                            break;
+                    }
+                } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
+            }
+        }
+    }
+
+    private void returnItem(ItemStack stack) {
+        if (network != null) {
+            network.insertItem(stack, stack.getCount(),
+                    com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+        } else if (player != null) {
+            ItemHandlerHelper.giveItemToPlayer(player, stack);
         }
     }
 
