@@ -1,9 +1,9 @@
 package com.huanghuang.rsintegration.command;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
-import com.huanghuang.rsintegration.batch.ModType;
+import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.*;
-import com.huanghuang.rsintegration.integration.RSIntegration;
+import com.huanghuang.rsintegration.network.RSIntegration;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.crafting.MaterialSources;
 import com.mojang.brigadier.CommandDispatcher;

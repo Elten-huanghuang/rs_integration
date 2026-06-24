@@ -1,9 +1,9 @@
 package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
-import com.huanghuang.rsintegration.batch.ModType;
+import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
-import com.huanghuang.rsintegration.integration.AltarBindingRegistry;
+import com.huanghuang.rsintegration.network.AltarBindingRegistry;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.TagParser;

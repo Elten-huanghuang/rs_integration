@@ -1,13 +1,13 @@
 package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
-import com.huanghuang.rsintegration.batch.ModType;
+import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
-import com.huanghuang.rsintegration.integration.AltarBindingRegistry;
-import com.huanghuang.rsintegration.integration.BindingStorage;
+import com.huanghuang.rsintegration.network.AltarBindingRegistry;
+import com.huanghuang.rsintegration.network.BindingStorage;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.ResolutionStep;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
-import com.huanghuang.rsintegration.integration.RSIntegration;
+import com.huanghuang.rsintegration.network.RSIntegration;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;

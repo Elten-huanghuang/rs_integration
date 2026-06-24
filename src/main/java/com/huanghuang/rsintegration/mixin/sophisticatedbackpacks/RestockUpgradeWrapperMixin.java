@@ -1,6 +1,6 @@
 package com.huanghuang.rsintegration.mixin.sophisticatedbackpacks;
 
-import com.huanghuang.rsintegration.util.RSUtils;
+import com.huanghuang.rsintegration.util.BackpackRSUtils;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
@@ -78,7 +78,7 @@ public abstract class RestockUpgradeWrapperMixin
             return;
         }
 
-        List<ItemStack> restocked = RSUtils.handleRSRestock(
+        List<ItemStack> restocked = BackpackRSUtils.handleRSRestock(
                 getFilterLogic(), this.storageWrapper,
                 this.rsi$rsBlockPos, this.rsi$rsDimensionKey, player.level());
 

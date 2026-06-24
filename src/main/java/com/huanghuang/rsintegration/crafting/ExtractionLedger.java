@@ -1,8 +1,8 @@
 package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
-import com.huanghuang.rsintegration.integration.AltarBindingRegistry;
-import com.huanghuang.rsintegration.integration.RSIntegration;
+import com.huanghuang.rsintegration.network.AltarBindingRegistry;
+import com.huanghuang.rsintegration.network.RSIntegration;
 import com.huanghuang.rsintegration.util.Diagnostics;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;

@@ -1,6 +1,6 @@
 package com.huanghuang.rsintegration.crafting;
 
-import com.huanghuang.rsintegration.batch.ModType;
+import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.util.Diagnostics;
 import com.refinedmods.refinedstorage.api.network.INetwork;

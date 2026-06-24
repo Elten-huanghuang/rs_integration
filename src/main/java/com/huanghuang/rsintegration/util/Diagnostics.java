@@ -1,7 +1,7 @@
 package com.huanghuang.rsintegration.util;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
-import com.huanghuang.rsintegration.batch.ModType;
+import com.huanghuang.rsintegration.ModType;
 import net.minecraft.resources.ResourceLocation;
 
 import javax.annotation.Nullable;

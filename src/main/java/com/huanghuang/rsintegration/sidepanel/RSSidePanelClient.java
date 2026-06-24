@@ -40,7 +40,7 @@ import java.util.*;
 @OnlyIn(Dist.CLIENT)
 public final class RSSidePanelClient {
 
-    // ── RS-native layout (matches GridScreen grid.png UV strips) ──
+    // ── Layout constants ──────────────────────────────────────────
     private static final int SLOT_SIZE        = 18;
     private static final int COLUMNS          = 9;
     private static final int GRID_W           = 193;
@@ -72,23 +72,20 @@ public final class RSSidePanelClient {
     static boolean networkAvailable;
     static String networkName = "";
 
-    // ---- Unified data model: one Map instead of three parallel Maps.
-    //      Atomic put/remove guarantees item/timestamp/craftable stay in sync.
-    //      LinkedHashMap preserves insertion order for sort-mode-3 (last-modified).
-    static final Map<String, ItemEntry> itemMap = new LinkedHashMap<>();
-    static int totalSlotCount;
+    // Primary data store: UUID-keyed PanelStack list + O(1) index
+    static final List<PanelStack> panels = new ArrayList<>();
+    static final Map<UUID, Integer> idToIndex = new HashMap<>();
 
-    // Pending extractions: keys that the client predicted extraction for but
-    // haven't been confirmed by a server delta yet.  On full sync or delta
-    // confirmation they are cleared.  Stale entries are reverted on tick.
-    static final Map<String, PendingExtraction> pendingExtractions = new HashMap<>();
-
-    // displayList: sorted + filtered view, rebuilt lazily when displayDirty=true
-    static final List<ItemStack> displayList = new ArrayList<>();
+    // Display list: sorted/filtered view of panels, rebuilt lazily
+    static final List<PanelStack> displayList = new ArrayList<>();
     static volatile boolean displayDirty = true;
 
+    // Pending extractions: client-side predictions awaiting server confirmation
+    static final Map<UUID, PendingExtraction> pendingExtractions = new HashMap<>();
+
+    static int totalSlotCount;
+
     static String searchText = "";
-    static boolean searchOpen;
     static int sortMode;
     static boolean sortAsc = true;
     static int searchMode;
@@ -113,8 +110,8 @@ public final class RSSidePanelClient {
     static int moveStartPanelX, moveStartPanelY;
     static boolean scrolling;
     static boolean gridDragging;
-    // Store item keys (String) instead of integer indices for O(1) identity
-    static final Set<String> gridDragKeys = new LinkedHashSet<>();
+    static boolean isShifting;
+    static final Set<UUID> gridDragKeys = new LinkedHashSet<>();
     static boolean gridDragCrossedSlots;
 
     static int hoveredSideButton = -1;
@@ -123,22 +120,28 @@ public final class RSSidePanelClient {
 
     static KeyMapping KEY_TOGGLE_PANEL;
 
-    // ── inner types ────────────────────────────────────────────────
+    // ── Animation tracking ──────────────────────────────────────
 
-    static class ItemEntry {
-        final ItemStack stack;
-        long timestamp;
-        boolean craftable;
+    static final Map<UUID, SlotAnim> slotAnims = new HashMap<>();
+    static final Set<UUID> deltaBatch = new HashSet<>();
+    static boolean deltaBatchDirty;
 
-        ItemEntry(ItemStack stack, long timestamp, boolean craftable) {
-            this.stack = stack;
-            this.timestamp = timestamp;
-            this.craftable = craftable;
-        }
+    static class SlotAnim {
+        long startTime;
+        int delta;
+        SlotAnim(long t, int d) { startTime = t; delta = d; }
+        boolean expired() { return System.currentTimeMillis() - startTime > 400; }
+        float fade() { return 1.0F - Mth.clamp((System.currentTimeMillis() - startTime) / 400F, 0F, 1F); }
     }
 
+    static void recordSlotAnim(UUID id, int delta) {
+        slotAnims.put(id, new SlotAnim(System.currentTimeMillis(), delta));
+    }
+
+    // ── Pending extraction (client-side prediction) ─────────────
+
     static class PendingExtraction {
-        final ItemStack previousStack; // snapshot before prediction
+        final ItemStack previousStack;
         final long timestamp;
         final boolean craftable;
         final long createdAt;
@@ -195,15 +198,12 @@ public final class RSSidePanelClient {
         RSIntegrationConfig.RS_SIDE_PANEL_HIDDEN.set(panelHidden);
     }
 
-    // ── item key helper ─────────────────────────────────────────
+    // ── item key helper (search/drag matching only, NOT identity) ──
 
     private static String keyOf(ItemStack stack) {
         if (stack == null || stack.getItem() == net.minecraft.world.item.Items.AIR) return "";
         var rl = ForgeRegistries.ITEMS.getKey(stack.getItem());
         String key = rl != null ? rl.toString() : "";
-        // hasTag() checks !isEmpty() internally, so it returns false when
-        // count==0 even if the tag is non-null.  Bypass via getTag() so
-        // zero-count delta packets still carry NBT and match the correct slot.
         if (stack.getTag() != null && !stack.getTag().isEmpty()) {
             key += "|" + stack.getTag().toString();
         }
@@ -213,21 +213,26 @@ public final class RSSidePanelClient {
     // ── sync (full snapshot) ────────────────────────────────────
 
     static void onSyncReceived(RSSidePanelSyncPacket packet) {
-        clickLockTicks = 0;
-        itemMap.clear();
-        pendingExtractions.clear(); // full sync overrides all predictions
+        panels.clear();
+        idToIndex.clear();
+        pendingExtractions.clear();
+
+        List<UUID> ids = packet.ids;
         List<ItemStack> items = packet.items;
         List<Long> timestamps = packet.timestamps;
         List<Boolean> flags = packet.craftableFlags;
+
         for (int i = 0; i < items.size(); i++) {
             ItemStack s = items.get(i);
             if (s.isEmpty()) continue;
-            String k = keyOf(s);
-            if (k.isEmpty()) continue;
-            itemMap.put(k, new ItemEntry(s,
-                    i < timestamps.size() ? timestamps.get(i) : 0L,
-                    i < flags.size() ? flags.get(i) : false));
+            UUID id = i < ids.size() ? ids.get(i) : UUID.randomUUID();
+            long ts = i < timestamps.size() ? timestamps.get(i) : 0L;
+            boolean cf = i < flags.size() ? flags.get(i) : false;
+            PanelStack ps = new PanelStack(id, s, ts, cf);
+            idToIndex.put(id, panels.size());
+            panels.add(ps);
         }
+
         totalSlotCount = packet.totalSlotCount;
         networkAvailable = packet.networkAvailable;
         networkName = packet.networkName;
@@ -235,37 +240,48 @@ public final class RSSidePanelClient {
         clampScroll();
     }
 
-    // ── incremental delta ───────────────────────────────────────
+    // ── incremental delta (now UUID-based) ─────────────────────
 
-    static void onDeltaReceived(ItemStack stack, long timestamp, boolean craftable) {
-        if (stack == null || stack.getItem() == null) return;
-        String k = keyOf(stack);
-        if (k.isEmpty()) return;
+    static void onDeltaReceived(UUID id, ItemStack stack, long timestamp, boolean craftable) {
+        if (stack == null || stack.getItem() == null || id == null) return;
 
-        // Server delta is authoritative — clear any pending prediction for this key
-        pendingExtractions.remove(k);
+        pendingExtractions.remove(id);
 
         int count = stack.getCount();
+        Integer idx = idToIndex.get(id);
+        PanelStack existing = idx != null && idx < panels.size() ? panels.get(idx) : null;
+        int oldCount = existing != null ? existing.getCount() : 0;
+        int delta = count - oldCount;
+
         if (count <= 0) {
-            itemMap.remove(k);
-        } else {
-            ItemEntry existing = itemMap.get(k);
             if (existing != null) {
-                existing.stack.setCount(count);
+                existing.zeroed = true;
+                existing.setCount(0);
+                existing.timestamp = timestamp;
+            }
+        } else {
+            if (existing != null) {
+                existing.zeroed = false;
+                existing.setCount(count);
                 existing.timestamp = timestamp;
                 existing.craftable = craftable;
             } else {
-                itemMap.put(k, new ItemEntry(stack.copy(), timestamp, craftable));
+                PanelStack ps = new PanelStack(id, stack, timestamp, craftable);
+                idToIndex.put(id, panels.size());
+                panels.add(ps);
             }
         }
-        displayDirty = true;
+
+        if (delta != 0) recordSlotAnim(id, delta);
+
+        deltaBatch.add(id);
+        deltaBatchDirty = true;
     }
 
-    // ── sort guard (RS native: prevent re-sort during shift operations) ──
+    // ── sort guard ──────────────────────────────────────────────
 
     private static boolean canSort() {
-        if (gridDragging) return false;
-        return true;
+        return !gridDragging && !isShifting;
     }
 
     // ── layout helpers ──────────────────────────────────────────
@@ -330,7 +346,6 @@ public final class RSSidePanelClient {
             return;
         }
         if (!panelVisible || panelHidden) return;
-        // JEI recipe/uses keys when hovering over a panel item
         if (event.getAction() == GLFW.GLFW_PRESS) {
             int key = event.getKey();
             if ((key == GLFW.GLFW_KEY_U || key == GLFW.GLFW_KEY_R) && mc.screen == null) {
@@ -352,7 +367,6 @@ public final class RSSidePanelClient {
             return;
         }
         if (anyPanelContains(lastMouseX, lastMouseY)) {
-            // JEI recipe (R) / uses (U) for hovered panel item
             int key = event.getKeyCode();
             if (key == GLFW.GLFW_KEY_U || key == GLFW.GLFW_KEY_R) {
                 showJeiForHoveredItem(key == GLFW.GLFW_KEY_U);
@@ -388,10 +402,10 @@ public final class RSSidePanelClient {
 
         if (key == GLFW.GLFW_KEY_ESCAPE) { onSearchBlur(); return; }
         if (key == GLFW.GLFW_KEY_ENTER || key == GLFW.GLFW_KEY_KP_ENTER) {
-            if ((searchMode % 2) == 1) {
-                ensureDisplayList();
+            if ((searchMode % 2) == 1 && networkAvailable) {
+                ensureDisplayReady();
                 if (!displayList.isEmpty()) {
-                    RSSidePanelNetworkHandler.sendClick(displayList.get(0),
+                    RSSidePanelNetworkHandler.sendClick(displayList.get(0).getStack(),
                             RSSidePanelClickPacket.ACTION_EXTRACT_ONE, false);
                 }
             }
@@ -480,15 +494,15 @@ public final class RSSidePanelClient {
     private static void pushJeiFilter() {
         if (searchMode < 2) return;
         try {
-            IJeiRuntime rt = com.huanghuang.rsintegration.integration.RSJeiPlugin.getRuntime();
+            IJeiRuntime rt = com.huanghuang.rsintegration.network.RSJeiPlugin.getRuntime();
             if (rt != null) rt.getIngredientFilter().setFilterText(searchText);
-        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-SidePanel] Reflection probe failed", e); }
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-SidePanel] JEI push failed", e); }
     }
 
     private static void pullJeiFilter() {
         if (searchMode < 2) return;
         try {
-            IJeiRuntime rt = com.huanghuang.rsintegration.integration.RSJeiPlugin.getRuntime();
+            IJeiRuntime rt = com.huanghuang.rsintegration.network.RSJeiPlugin.getRuntime();
             if (rt != null) {
                 String t = rt.getIngredientFilter().getFilterText();
                 if (t != null && !t.equals(lastJeiFilterText)) {
@@ -501,16 +515,15 @@ public final class RSSidePanelClient {
                     }
                 }
             }
-        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-SidePanel] Reflection probe failed", e); }
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-SidePanel] JEI pull failed", e); }
     }
 
-    /** Show JEI recipes (R) or uses (U) for the currently hovered item. */
     private static void showJeiForHoveredItem(boolean usage) {
         if (hoveredSlotIndex < 0 || hoveredSlotIndex >= displayList.size()) return;
-        ItemStack stack = displayList.get(hoveredSlotIndex);
+        ItemStack stack = displayList.get(hoveredSlotIndex).getStack();
         if (stack.isEmpty()) return;
         try {
-            IJeiRuntime runtime = com.huanghuang.rsintegration.integration.RSJeiPlugin.getRuntime();
+            IJeiRuntime runtime = com.huanghuang.rsintegration.network.RSJeiPlugin.getRuntime();
             if (runtime == null) return;
             IFocusFactory ff = runtime.getJeiHelpers().getFocusFactory();
             var focus = ff.createFocus(
@@ -526,8 +539,6 @@ public final class RSSidePanelClient {
     // ═════════════════════════════════════════════════════════════
     //  RENDERING
     // ═════════════════════════════════════════════════════════════
-
-    // ── Common render entry point ────────────────────────────────
 
     @SuppressWarnings("resource")
     private static void doRenderContext(GuiGraphics g, Minecraft mc) {
@@ -555,25 +566,19 @@ public final class RSSidePanelClient {
         pose.popPose();
     }
 
-    // ── HUD render (no screen open) ──────────────────────────────
-
     @SuppressWarnings("resource")
     private static void onRenderGuiPost(RenderGuiEvent.Post event) {
         var mc = Minecraft.getInstance();
         if (mc.player == null || !panelVisible) return;
         if (mc.screen != null) return;
-
         doRenderContext(event.getGuiGraphics(), mc);
     }
-
-    // ── Screen render (e.g. chest, furnace — after ContainerScreen) ──
 
     @SuppressWarnings("resource")
     private static void onScreenRenderPost(ScreenEvent.Render.Post event) {
         var mc = Minecraft.getInstance();
         if (mc.player == null || !panelVisible) return;
         if (RS_SCREEN_CLASSES.contains(event.getScreen().getClass().getName())) return;
-
         doRenderContext(event.getGuiGraphics(), mc);
     }
 
@@ -620,6 +625,7 @@ public final class RSSidePanelClient {
         int titleColor;
         if (networkAvailable) {
             title = !networkName.isEmpty() ? networkName : "Refined Storage";
+            if (totalSlotCount > 0) title += " (" + totalSlotCount + ")";
             titleColor = 0xFF7BAAF7;
         } else {
             title = Component.translatable("rsi.side_panel.no_network").getString();
@@ -678,8 +684,8 @@ public final class RSSidePanelClient {
             for (int col = 0; col < COLUMNS; col++) {
                 int dIdx = (scrollRow + row) * COLUMNS + col;
                 if (dIdx >= displayList.size()) break;
-                ItemStack stack = displayList.get(dIdx);
-                if (stack.isEmpty()) continue;
+                PanelStack ps = displayList.get(dIdx);
+                ItemStack stack = ps.getStack();
 
                 int ix = itemLeft + col * SLOT_SIZE;
                 int iy = itemTop + row * SLOT_SIZE;
@@ -687,7 +693,7 @@ public final class RSSidePanelClient {
                 boolean hovered = lastMouseX >= ix && lastMouseX < ix + SLOT_SIZE
                         && lastMouseY >= iy && lastMouseY < iy + SLOT_SIZE;
                 boolean dragHighlight = gridDragging
-                        && gridDragKeys.contains(keyOf(stack));
+                        && gridDragKeys.contains(ps.getId());
 
                 if (dragHighlight) {
                     g.fill(ix + 1, iy + 1, ix + 17, iy + 17, 0x806699CC);
@@ -695,19 +701,45 @@ public final class RSSidePanelClient {
                     g.fill(ix + 1, iy + 1, ix + 17, iy + 17, 0x80FFFFFF);
                 }
 
-                g.renderItem(stack, ix + 1, iy + 1);
+                // Slot change animation overlay
+                SlotAnim anim = slotAnims.get(ps.getId());
+                if (anim != null && !anim.expired()) {
+                    float fade = anim.fade();
+                    int animColor = anim.delta < 0
+                            ? ((int) (fade * 0x50) << 24) | 0xFF4444
+                            : ((int) (fade * 0x50) << 24) | 0x44FF44;
+                    g.fill(ix + 1, iy + 1, ix + 17, iy + 17, animColor);
+                }
 
-                if (stack.getCount() > 1) {
-                    String cnt = formatCount(stack.getCount());
+                if (ps.zeroed) {
+                    // Dimmed ghost render — matches RS ItemGridStack.draw zeroed path
+                    g.renderItem(stack, ix + 1, iy + 1);
+                    g.fill(ix + 1, iy + 1, ix + 17, iy + 17, 0xA0000000);
+                    String cnt = "0";
                     var p = g.pose();
                     p.pushPose();
                     p.translate(0, 0, 200);
                     int tx = ix + 17 - font.width(cnt);
                     int ty = iy + 10;
-                    g.drawString(font, cnt, tx, ty, 0xFFFFFF);
+                    g.drawString(font, cnt, tx, ty, 0xFF5555);
                     p.popPose();
                 } else {
-                    g.renderItemDecorations(font, stack, ix + 1, iy + 1, "");
+                    if (stack.isEmpty()) continue;
+
+                    g.renderItem(stack, ix + 1, iy + 1);
+
+                    if (ps.getCount() > 1) {
+                        String cnt = formatCount(ps.getCount());
+                        var p = g.pose();
+                        p.pushPose();
+                        p.translate(0, 0, 200);
+                        int tx = ix + 17 - font.width(cnt);
+                        int ty = iy + 10;
+                        g.drawString(font, cnt, tx, ty, 0xFFFFFF);
+                        p.popPose();
+                    } else {
+                        g.renderItemDecorations(font, stack, ix + 1, iy + 1, "");
+                    }
                 }
 
                 if (hovered) hoveredSlotIndex = dIdx;
@@ -720,9 +752,8 @@ public final class RSSidePanelClient {
         drawScrollbar(g);
 
         // ── 9. Tooltips ──────────────────────────────────────────
-
         if (hoveredSlotIndex >= 0 && hoveredSlotIndex < displayList.size()) {
-            ItemStack hs = displayList.get(hoveredSlotIndex);
+            ItemStack hs = displayList.get(hoveredSlotIndex).getStack();
             if (!hs.isEmpty())
                 renderItemTooltip(g, font, hs, lastMouseX, lastMouseY);
         }
@@ -790,13 +821,13 @@ public final class RSSidePanelClient {
     @SuppressWarnings("resource")
     private static void drawCollapsedBar(GuiGraphics g) {
         var font = Minecraft.getInstance().font;
-        // Full-width header strip — a long bar, not a tiny stub
         g.blit(RS_GRID_TEX, panelX, panelY, 0, 0, GRID_W, HEADER_H);
 
         String title;
         int titleColor;
         if (networkAvailable) {
             title = !networkName.isEmpty() ? networkName : "Refined Storage";
+            if (totalSlotCount > 0) title += " (" + totalSlotCount + ")";
             titleColor = 0xFF7BAAF7;
         } else {
             title = Component.translatable("rsi.side_panel.no_network").getString();
@@ -805,7 +836,6 @@ public final class RSSidePanelClient {
         int titleMaxW = 73;
         g.drawString(font, font.plainSubstrByWidth(title, titleMaxW),
                 panelX + GRID_ITEM_X, panelY + 7, titleColor);
-        // Expand arrow
         g.drawString(font, "▶", panelX + GRID_W - 16, panelY + 5, 0xFFAAAAAA);
     }
 
@@ -927,7 +957,6 @@ public final class RSSidePanelClient {
         if (searchBarContains(mx, my)) {
             if (!searchFocused) searchChangedSinceBlur = false;
             searchFocused = true;
-            searchOpen = true;
             if (btn == GLFW.GLFW_MOUSE_BUTTON_RIGHT) {
                 searchWidget.setValue("");
                 searchText = "";
@@ -989,13 +1018,33 @@ public final class RSSidePanelClient {
         int row = ((int) my - itemTop) / SLOT_SIZE;
         if (col < 0 || col >= COLUMNS || row < 0 || row >= visibleRows) return;
 
-        // ── Insert carried item (server-authoritative, no client prediction) ──
+        // ── Insert carried item ──────────────────────────────────
         ItemStack carried = mc.player.containerMenu.getCarried();
         if (!carried.isEmpty()) {
+            int insertCount = btn == GLFW.GLFW_MOUSE_BUTTON_RIGHT ? 1 : carried.getCount();
             if (btn == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
                 RSSidePanelNetworkHandler.sendInsert(carried, false);
             } else if (btn == GLFW.GLFW_MOUSE_BUTTON_RIGHT) {
                 RSSidePanelNetworkHandler.sendInsert(carried, true);
+            }
+            // Predictive update
+            String ck = keyOf(carried);
+            if (!ck.isEmpty() && insertCount > 0) {
+                // Find existing panel with matching search key
+                UUID existingId = null;
+                for (PanelStack p : panels) {
+                    if (p.searchKey().equals(ck)) { existingId = p.getId(); break; }
+                }
+                if (existingId != null) {
+                    PanelStack cur = getById(existingId);
+                    if (cur != null) {
+                        cur.zeroed = false;
+                        cur.grow(insertCount);
+                        cur.timestamp = System.currentTimeMillis();
+                        recordSlotAnim(existingId, insertCount);
+                        displayDirty = true;
+                    }
+                }
             }
             clickLockTicks = 5;
             return;
@@ -1004,47 +1053,46 @@ public final class RSSidePanelClient {
         // ── Extract / drag from occupied slot ──────────────────────
         int dIdx = (scrollRow + row) * COLUMNS + col;
         if (dIdx < 0 || dIdx >= displayList.size()) return;
-        ItemStack clickedItem = displayList.get(dIdx);
-        if (clickedItem.isEmpty()) return;
+        PanelStack clickedPs = displayList.get(dIdx);
+        if (clickedPs == null || clickedPs.getStack().isEmpty()) return;
 
         // Left drag start (Ctrl+Click = distribute drag)
         if (btn == GLFW.GLFW_MOUSE_BUTTON_LEFT && Screen.hasControlDown()) {
             gridDragging = true;
             gridDragKeys.clear();
-            gridDragKeys.add(keyOf(clickedItem));
+            gridDragKeys.add(clickedPs.getId());
             gridDragCrossedSlots = false;
             return;
         }
 
-        // Matches RS native: left=1, right=half, shift=full-stack-to-inventory
-        int extractCount;
+        ItemStack clickedItem = clickedPs.getStack();
         byte action;
+        int extractCount;
         if (Screen.hasShiftDown()) {
             action = RSSidePanelClickPacket.ACTION_EXTRACT_MAX;
-            extractCount = Math.min(clickedItem.getMaxStackSize(), clickedItem.getCount());
+            extractCount = Math.min(clickedItem.getMaxStackSize(), clickedPs.getCount());
         } else if (btn == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
             action = RSSidePanelClickPacket.ACTION_EXTRACT_ONE;
             extractCount = 1;
         } else {
             action = RSSidePanelClickPacket.ACTION_EXTRACT_STACK;
-            extractCount = Math.max(1, clickedItem.getCount() / 2);
+            extractCount = Math.max(1, clickedPs.getCount() / 2);
         }
         RSSidePanelNetworkHandler.sendClick(clickedItem, action, Screen.hasShiftDown());
         clickLockTicks = 5;
 
         if (extractCount > 0) {
-            String pk = keyOf(clickedItem);
-            ItemEntry cur = itemMap.get(pk);
-            if (cur != null) {
-                pendingExtractions.put(pk, new PendingExtraction(cur.stack, cur.timestamp, cur.craftable));
-                int remaining = cur.stack.getCount() - extractCount;
-                if (remaining <= 0) {
-                    itemMap.remove(pk);
-                } else {
-                    cur.stack.setCount(remaining);
-                }
-                displayDirty = true;
+            UUID pk = clickedPs.getId();
+            pendingExtractions.put(pk, new PendingExtraction(clickedPs.getStack(), clickedPs.timestamp, clickedPs.craftable));
+            recordSlotAnim(pk, -extractCount);
+            int remaining = clickedPs.getCount() - extractCount;
+            if (remaining <= 0) {
+                clickedPs.zeroed = true;
+                clickedPs.setCount(0);
+            } else {
+                clickedPs.setCount(remaining);
             }
+            displayDirty = true;
         }
     }
 
@@ -1059,7 +1107,6 @@ public final class RSSidePanelClient {
                 int dx = (int) event.getMouseX() - moveStartMouseX;
                 int dy = (int) event.getMouseY() - moveStartMouseY;
                 if (Math.abs(dx) < 3 && Math.abs(dy) < 3) {
-                    // Was a click, not a drag — expand
                     panelHidden = false;
                     RSIntegrationConfig.RS_SIDE_PANEL_HIDDEN.set(false);
                     searchText = "";
@@ -1081,17 +1128,45 @@ public final class RSSidePanelClient {
         if (gridDragging) {
             if (gridDragKeys.size() > 1 || gridDragCrossedSlots) {
                 List<ItemStack> dragItems = new ArrayList<>();
-                for (String key : gridDragKeys) {
-                    ItemEntry e = itemMap.get(key);
-                    if (e != null && !e.stack.isEmpty()) dragItems.add(e.stack);
+                for (UUID key : gridDragKeys) {
+                    PanelStack ps = getById(key);
+                    if (ps != null && !ps.getStack().isEmpty()) dragItems.add(ps.getStack());
                 }
-                if (!dragItems.isEmpty())
+                if (!dragItems.isEmpty()) {
                     RSSidePanelNetworkHandler.sendDragDistribute(dragItems);
+                    // Predictive update: decrement each dragged item by 1
+                    for (UUID key : gridDragKeys) {
+                        PanelStack ps = getById(key);
+                        if (ps != null && ps.getCount() > 0) {
+                            pendingExtractions.put(key, new PendingExtraction(ps.getStack(), ps.timestamp, ps.craftable));
+                            recordSlotAnim(key, -1);
+                            int remaining = ps.getCount() - 1;
+                            if (remaining <= 0) {
+                                ps.zeroed = true;
+                                ps.setCount(0);
+                            } else {
+                                ps.setCount(remaining);
+                            }
+                        }
+                    }
+                    displayDirty = true;
+                }
             } else if (!gridDragKeys.isEmpty()) {
-                String key = gridDragKeys.iterator().next();
-                ItemEntry e = itemMap.get(key);
-                if (e != null) {
-                    RSSidePanelNetworkHandler.sendClick(e.stack, RSSidePanelClickPacket.ACTION_EXTRACT_MAX, false);
+                UUID key = gridDragKeys.iterator().next();
+                PanelStack ps = getById(key);
+                if (ps != null) {
+                    int extractCount = Math.min(ps.getStack().getMaxStackSize(), ps.getCount());
+                    RSSidePanelNetworkHandler.sendClick(ps.getStack(), RSSidePanelClickPacket.ACTION_EXTRACT_MAX, false);
+                    pendingExtractions.put(key, new PendingExtraction(ps.getStack(), ps.timestamp, ps.craftable));
+                    recordSlotAnim(key, -extractCount);
+                    int remaining = ps.getCount() - extractCount;
+                    if (remaining <= 0) {
+                        ps.zeroed = true;
+                        ps.setCount(0);
+                    } else {
+                        ps.setCount(remaining);
+                    }
+                    displayDirty = true;
                 }
             }
             gridDragging = false;
@@ -1138,9 +1213,9 @@ public final class RSSidePanelClient {
             if (col >= 0 && col < COLUMNS && row >= 0 && row < visibleRows) {
                 int dIdx = (scrollRow + row) * COLUMNS + col;
                 if (dIdx >= 0 && dIdx < displayList.size()) {
-                    ItemStack s = displayList.get(dIdx);
-                    if (!s.isEmpty()) {
-                        String k = keyOf(s);
+                    PanelStack ps = displayList.get(dIdx);
+                    if (ps != null && !ps.getStack().isEmpty()) {
+                        UUID k = ps.getId();
                         if (!gridDragKeys.contains(k))
                             gridDragCrossedSlots = true;
                         gridDragKeys.add(k);
@@ -1167,13 +1242,11 @@ public final class RSSidePanelClient {
         clampScroll();
     }
 
-    // ── HUD scroll (no screen open) ─────────────────────────────
-
     @SuppressWarnings("resource")
     private static void onInputMouseScrolled(InputEvent.MouseScrollingEvent event) {
         var mc = Minecraft.getInstance();
         if (mc.player == null || !panelVisible || panelHidden) return;
-        if (mc.screen != null) return; // let ScreenEvent handler take it
+        if (mc.screen != null) return;
 
         double mx = lastMouseX, my = lastMouseY;
         if (!anyPanelContains(mx, my)) return;
@@ -1186,6 +1259,20 @@ public final class RSSidePanelClient {
     }
 
     // ── helpers ─────────────────────────────────────────────────
+
+    private static PanelStack getById(UUID id) {
+        Integer idx = idToIndex.get(id);
+        return idx != null && idx < panels.size() ? panels.get(idx) : null;
+    }
+
+    private static void removePanel(UUID id) {
+        Integer idx = idToIndex.remove(id);
+        if (idx == null) return;
+        panels.remove((int) idx);
+        for (int i = idx; i < panels.size(); i++) {
+            idToIndex.put(panels.get(i).getId(), i);
+        }
+    }
 
     private static void updateScrollFromMouse(double my) {
         int totalRows = getTotalRows();
@@ -1208,12 +1295,17 @@ public final class RSSidePanelClient {
                 boolean wasJei = searchMode >= 2;
                 searchMode = (searchMode + 1) % 6;
                 if (searchMode >= 2) {
-                    if (com.huanghuang.rsintegration.integration.RSJeiPlugin.getRuntime() == null)
+                    if (com.huanghuang.rsintegration.network.RSJeiPlugin.getRuntime() == null)
                         searchMode = 0;
                 }
                 if (!wasJei && searchMode >= 2) {
                     lastJeiFilterText = "";
                     pullJeiFilter();
+                } else if (wasJei && searchMode < 2) {
+                    try {
+                        var rt = com.huanghuang.rsintegration.network.RSJeiPlugin.getRuntime();
+                        if (rt != null) rt.getIngredientFilter().setFilterText("");
+                    } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-SidePanel] JEI clear failed", e); }
                 }
                 break;
             case 4: gridSize = (gridSize + 1) % 4; scrollRow = 0; break;
@@ -1232,8 +1324,8 @@ public final class RSSidePanelClient {
 
         tickCounter++;
         if (clickLockTicks > 0) clickLockTicks--;
-        // Safety: reset gridDragging if mouse button isn't held (prevents stuck sorts)
-        if (gridDragging && org.lwjgl.glfw.GLFW.glfwGetMouseButton(mc.getWindow().getWindow(), org.lwjgl.glfw.GLFW.GLFW_MOUSE_BUTTON_LEFT) == org.lwjgl.glfw.GLFW.GLFW_RELEASE)
+        isShifting = Screen.hasShiftDown();
+        if (gridDragging && GLFW.glfwGetMouseButton(mc.getWindow().getWindow(), GLFW.GLFW_MOUSE_BUTTON_LEFT) == GLFW.GLFW_RELEASE)
             gridDragging = false;
 
         int guiScale = (int) mc.getWindow().getGuiScale();
@@ -1251,28 +1343,51 @@ public final class RSSidePanelClient {
             }
         }
 
+        // Flush batched deltas once per tick
+        if (deltaBatchDirty) {
+            deltaBatchDirty = false;
+            deltaBatch.clear();
+            displayDirty = true;
+        }
+
+        // Clean expired slot animations
+        if (!slotAnims.isEmpty() && tickCounter % 10 == 0) {
+            slotAnims.values().removeIf(SlotAnim::expired);
+        }
+
         if (searchMode >= 2 && tickCounter % 5 == 0) pullJeiFilter();
 
-        // Periodic silent full sync to correct any client-side drift (60s)
-        if (tickCounter % 1200 == 0 && networkAvailable && !panelHidden) {
+        // Periodic full sync to correct any client-side drift (15s)
+        if (tickCounter % 300 == 0 && networkAvailable && !panelHidden) {
             RSSidePanelNetworkHandler.sendRequestSync();
         }
 
-        // Timeout stale pending extractions (3s).  Reverts itemMap to the
-        // pre-prediction snapshot and marks display dirty so the HUD reflects
-        // reality even if the server delta never arrived.
+        // Timeout stale pending extractions (5s)
         if (!pendingExtractions.isEmpty() && tickCounter % 20 == 0) {
             long now = System.currentTimeMillis();
             var it = pendingExtractions.entrySet().iterator();
             while (it.hasNext()) {
                 var pe = it.next();
-                if (now - pe.getValue().createdAt > 3000) {
-                    // Delta never arrived — revert to pre-prediction snapshot.
+                if (now - pe.getValue().createdAt > 5000) {
                     PendingExtraction p = pe.getValue();
                     if (p.previousStack.getCount() > 0) {
-                        itemMap.put(pe.getKey(), new ItemEntry(p.previousStack.copy(), p.timestamp, p.craftable));
+                        PanelStack ps = getById(pe.getKey());
+                        if (ps != null) {
+                            int oldCount = ps.getCount();
+                            ps.zeroed = false;
+                            ps.setCount(p.previousStack.getCount());
+                            ps.timestamp = p.timestamp;
+                            ps.craftable = p.craftable;
+                            recordSlotAnim(pe.getKey(), p.previousStack.getCount() - oldCount);
+                        } else {
+                            // Was zeroed then cleaned by full sync, re-add
+                            PanelStack newPs = new PanelStack(pe.getKey(), p.previousStack, p.timestamp, p.craftable);
+                            idToIndex.put(pe.getKey(), panels.size());
+                            panels.add(newPs);
+                            recordSlotAnim(pe.getKey(), p.previousStack.getCount());
+                        }
                     } else {
-                        itemMap.remove(pe.getKey());
+                        removePanel(pe.getKey());
                     }
                     it.remove();
                     displayDirty = true;
@@ -1284,7 +1399,7 @@ public final class RSSidePanelClient {
     // ── data helpers ────────────────────────────────────────────
 
     private static int getTotalRows() {
-        ensureDisplayList();
+        ensureDisplayReady();
         return (int) Math.ceil(displayList.size() / (double) COLUMNS);
     }
 
@@ -1296,10 +1411,100 @@ public final class RSSidePanelClient {
 
     // ── lazy display list rebuild ───────────────────────────────
 
-    /** Called at the start of every render frame. Only rebuilds when dirty. */
-    private static void ensureDisplayList() {
+    private static void ensureDisplayReady() {
         if (!displayDirty) return;
         rebuildDisplayList();
+    }
+
+    private static void rebuildDisplayList() {
+        displayDirty = false;
+        List<PanelStack> list = refilter(panels);
+        resort(list);
+        displayList.clear();
+        displayList.addAll(list);
+    }
+
+    /** Apply search + view-type filters. Returns a new mutable list. */
+    @SuppressWarnings("resource")
+    static List<PanelStack> refilter(List<PanelStack> source) {
+        List<PanelStack> list = new ArrayList<>(source);
+
+        if (!searchText.isEmpty()) {
+            String query = searchText.trim();
+            if (query.startsWith("@")) {
+                String mq = query.substring(1).toLowerCase();
+                list.removeIf(ps -> {
+                    String modId = ps.getModId().toLowerCase();
+                    if (modId.contains(mq)) return false;
+                    String modName = ps.getModName().toLowerCase();
+                    return !modName.contains(mq);
+                });
+            } else if (query.startsWith("#")) {
+                String tq = query.substring(1).toLowerCase();
+                var mc = Minecraft.getInstance();
+                list.removeIf(ps -> {
+                    for (Component line : ps.getStack().getTooltipLines(mc.player,
+                            mc.options.advancedItemTooltips
+                                    ? net.minecraft.world.item.TooltipFlag.Default.ADVANCED
+                                    : net.minecraft.world.item.TooltipFlag.Default.NORMAL)) {
+                        String text = ChatFormatting.stripFormatting(line.getString());
+                        if (text != null && text.toLowerCase().contains(tq)) return false;
+                    }
+                    return true;
+                });
+            } else {
+                try {
+                    java.util.regex.Pattern p = java.util.regex.Pattern.compile(query,
+                            java.util.regex.Pattern.CASE_INSENSITIVE);
+                    list.removeIf(ps -> {
+                        String name = ps.getName();
+                        if (p.matcher(name).find()) return false;
+                        return !matchesPinyin(name, query);
+                    });
+                } catch (java.util.regex.PatternSyntaxException e) {
+                    String lower = query.toLowerCase();
+                    list.removeIf(ps -> {
+                        String name = ps.getName();
+                        if (name.toLowerCase().contains(lower)) return false;
+                        if (matchesPinyin(name, lower)) return false;
+                        var key = ForgeRegistries.ITEMS.getKey(ps.getStack().getItem());
+                        return key == null || !key.getPath().contains(lower);
+                    });
+                }
+            }
+        }
+
+        if (viewType != 0) {
+            list.removeIf(ps -> viewType == 1 ? ps.craftable : !ps.craftable);
+        }
+        return list;
+    }
+
+    /** Sort list in-place according to current sortMode / sortAsc.
+     *  No-op when {@link #canSort()} is false (guards active drag/shift). */
+    static void resort(List<PanelStack> list) {
+        if (!canSort()) return;
+        switch (sortMode) {
+            case 0 -> {
+                if (sortAsc) list.sort(Comparator.comparing(ps -> ps.getName().toLowerCase()));
+                else list.sort(Comparator.comparing((PanelStack ps) -> ps.getName().toLowerCase()).reversed());
+            }
+            case 1 -> {
+                if (sortAsc) list.sort(Comparator.comparingInt(PanelStack::getCount));
+                else list.sort((a, b) -> Integer.compare(b.getCount(), a.getCount()));
+            }
+            case 2 -> list.sort((a, b) -> {
+                var ka = ForgeRegistries.ITEMS.getKey(a.getStack().getItem());
+                var kb = ForgeRegistries.ITEMS.getKey(b.getStack().getItem());
+                String ia = ka != null ? ka.toString() : "zzz:zzz";
+                String ib = kb != null ? kb.toString() : "zzz:zzz";
+                return sortAsc ? ia.compareToIgnoreCase(ib) : ib.compareToIgnoreCase(ia);
+            });
+            case 3 -> {
+                if (sortAsc) list.sort(Comparator.comparingLong(ps -> ps.timestamp));
+                else list.sort((a, b) -> Long.compare(b.timestamp, a.timestamp));
+            }
+        }
     }
 
     private static boolean matchesPinyin(String itemName, String query) {
@@ -1310,113 +1515,6 @@ public final class RSSidePanelClient {
         } catch (Exception e) {
             return false;
         }
-    }
-
-    @SuppressWarnings("resource")
-    private static void rebuildDisplayList() {
-        displayDirty = false;
-        List<ItemStack> list = new ArrayList<>();
-        for (ItemEntry e : itemMap.values()) {
-            if (!e.stack.isEmpty()) list.add(e.stack);
-        }
-
-        // Search filter
-        if (!searchText.isEmpty()) {
-            String query = searchText.trim();
-            if (query.startsWith("@")) {
-                String mq = query.substring(1).toLowerCase();
-                list.removeIf(stack -> {
-                    var key = ForgeRegistries.ITEMS.getKey(stack.getItem());
-                    if (key == null) return true;
-                    String modId = key.getNamespace().toLowerCase();
-                    if (modId.contains(mq)) return false;
-                    String modName = ModList.get()
-                            .getModContainerById(key.getNamespace())
-                            .map(c -> c.getModInfo().getDisplayName().toLowerCase()).orElse("");
-                    return !modName.contains(mq);
-                });
-            } else if (query.startsWith("#")) {
-                String tq = query.substring(1).toLowerCase();
-                var mc = Minecraft.getInstance();
-                list.removeIf(stack -> {
-                    for (Component line : stack.getTooltipLines(mc.player,
-                            mc.options.advancedItemTooltips
-                                    ? net.minecraft.world.item.TooltipFlag.Default.ADVANCED
-                                    : net.minecraft.world.item.TooltipFlag.Default.NORMAL)) {
-                        String text = ChatFormatting.stripFormatting(line.getString());
-                        if (text != null && text.toLowerCase().contains(tq)) return false;
-                    }
-                    return true;
-                });
-            } else {
-                // Auto-detect regex: try compiling as pattern first; fall back to plain text
-                try {
-                    java.util.regex.Pattern p = java.util.regex.Pattern.compile(query,
-                            java.util.regex.Pattern.CASE_INSENSITIVE);
-                    list.removeIf(stack -> {
-                        String name = stack.getHoverName().getString();
-                        if (p.matcher(name).find()) return false;
-                        return !matchesPinyin(name, query);
-                    });
-                } catch (java.util.regex.PatternSyntaxException e) {
-                    String lower = query.toLowerCase();
-                    list.removeIf(stack -> {
-                        String name = stack.getHoverName().getString();
-                        if (name.toLowerCase().contains(lower)) return false;
-                        if (matchesPinyin(name, lower)) return false;
-                        var key = ForgeRegistries.ITEMS.getKey(stack.getItem());
-                        return key == null || !key.getPath().contains(lower);
-                    });
-                }
-            }
-        }
-
-        // View type filter
-        if (viewType != 0) {
-            list.removeIf(stack -> {
-                ItemEntry e = itemMap.get(keyOf(stack));
-                boolean craftable = e != null && e.craftable;
-                return viewType == 1 ? craftable : !craftable;
-            });
-        }
-
-        // Sort (only when canSort)
-        if (canSort()) {
-            switch (sortMode) {
-                case 0 -> {
-                    if (sortAsc) list.sort(Comparator.comparing(s -> s.getHoverName().getString().toLowerCase()));
-                    else list.sort(Comparator.comparing((ItemStack s) -> s.getHoverName().getString().toLowerCase()).reversed());
-                }
-                case 1 -> {
-                    if (sortAsc) list.sort(Comparator.comparingInt(ItemStack::getCount));
-                    else list.sort((a, b) -> Integer.compare(b.getCount(), a.getCount()));
-                }
-                case 2 -> list.sort((a, b) -> {
-                    var ka = ForgeRegistries.ITEMS.getKey(a.getItem());
-                    var kb = ForgeRegistries.ITEMS.getKey(b.getItem());
-                    String ia = ka != null ? ka.toString() : "zzz:zzz";
-                    String ib = kb != null ? kb.toString() : "zzz:zzz";
-                    return sortAsc ? ia.compareToIgnoreCase(ib) : ib.compareToIgnoreCase(ia);
-                });
-                case 3 -> {
-                    if (sortAsc) list.sort(Comparator.comparingLong(
-                            s -> {
-                                ItemEntry e = itemMap.get(keyOf(s));
-                                return e != null ? e.timestamp : 0L;
-                            }));
-                    else list.sort((a, b) -> {
-                        ItemEntry ea = itemMap.get(keyOf(a));
-                        ItemEntry eb = itemMap.get(keyOf(b));
-                        return Long.compare(
-                                eb != null ? eb.timestamp : 0L,
-                                ea != null ? ea.timestamp : 0L);
-                    });
-                }
-            }
-        }
-
-        displayList.clear();
-        displayList.addAll(list);
     }
 
     private static String formatCount(int count) {

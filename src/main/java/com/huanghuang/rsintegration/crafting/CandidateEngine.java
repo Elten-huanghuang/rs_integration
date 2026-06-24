@@ -1,8 +1,8 @@
 package com.huanghuang.rsintegration.crafting;
 
-import com.huanghuang.rsintegration.batch.ModType;
+import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
-import com.huanghuang.rsintegration.integration.AltarBindingRegistry;
+import com.huanghuang.rsintegration.network.AltarBindingRegistry;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Item;

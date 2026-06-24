@@ -1,6 +1,6 @@
 package com.huanghuang.rsintegration.recipe;
 
-import com.huanghuang.rsintegration.batch.ModType;
+import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.world.item.ItemStack;

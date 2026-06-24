@@ -121,6 +121,7 @@
   "rsi.plan.status_fail": "Some materials are missing",
   "rsi.plan.missing_header": "Unavailable:",
   "rsi.plan.materials": "Materials",
+  "rsi.plan.tooltip.available": "Available",
 
   "rsi.async.chain_started": "§aMulti-step crafting chain started (%s steps). Items will be delivered to the RS network when complete.",
   "rsi.async.chain_aborted": "§cCrafting chain aborted: %s",

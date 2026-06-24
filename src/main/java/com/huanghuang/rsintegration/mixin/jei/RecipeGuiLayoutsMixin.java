@@ -1,13 +1,13 @@
 package com.huanghuang.rsintegration.mixin.jei;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
-import com.huanghuang.rsintegration.batch.BatchCraftNetworkHandler;
-import com.huanghuang.rsintegration.batch.ModType;
-import com.huanghuang.rsintegration.integration.BindingStorage;
-import com.huanghuang.rsintegration.module.goety.AltarCraftButtons;
+import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
+import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.network.BindingStorage;
+import com.huanghuang.rsintegration.mods.goety.AltarCraftButtons;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
-import com.huanghuang.rsintegration.module.goety.GoetyRSNetworkHandler;
-import com.huanghuang.rsintegration.module.goety.RSClientAvailabilityCache;
+import com.huanghuang.rsintegration.mods.goety.GoetyRSNetworkHandler;
+import com.huanghuang.rsintegration.mods.goety.RSClientAvailabilityCache;
 import mezz.jei.api.gui.IRecipeLayoutDrawable;
 import mezz.jei.common.util.ImmutableRect2i;
 import mezz.jei.gui.recipes.RecipeGuiLayouts;
@@ -291,12 +291,12 @@ public class RecipeGuiLayoutsMixin {
                                            ResourceLocation dim, BlockPos machinePos, String filter) {
         if (filter.equals("generic")) {
             return () -> BatchCraftNetworkHandler.CHANNEL.sendToServer(
-                    new com.huanghuang.rsintegration.batch.GenericCraftPacket(recipeId, true));
+                    new com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket(recipeId, true));
         }
         // All mod recipes (Goety, Malum, FA, Eidolon, WR) route through the
         // plan-preview flow so the result is properly collected and inserted back into RS.
         return () -> BatchCraftNetworkHandler.CHANNEL.sendToServer(
-                new com.huanghuang.rsintegration.batch.GenericCraftPacket(recipeId, true, dim, machinePos));
+                new com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket(recipeId, true, dim, machinePos));
     }
 
     @javax.annotation.Nullable

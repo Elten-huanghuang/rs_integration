@@ -1,6 +1,6 @@
 package com.huanghuang.rsintegration.mixin.sophisticatedbackpacks;
 
-import com.huanghuang.rsintegration.util.RSUtils;
+import com.huanghuang.rsintegration.util.BackpackRSUtils;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
@@ -74,7 +74,7 @@ public abstract class MagnetUpgradeWrapperMixin
     private void tryToInsertItem(ItemEntity itemEntity, CallbackInfoReturnable<Boolean> cir) {
         if (!this.rsi$isRs) return;
         UUID backpackUuid = this.storageWrapper.getContentsUuid().orElse(null);
-        cir.setReturnValue(RSUtils.handleRsInsertion(this.getFilterLogic(), itemEntity,
+        cir.setReturnValue(BackpackRSUtils.handleRsInsertion(this.getFilterLogic(), itemEntity,
                 backpackUuid,
                 this.rsi$rsBlockPos, this.rsi$rsDimensionKey,
                 rsi$getUpgradesOfType(VoidUpgradeWrapper.class), this.rsi$voidUpgrade));
@@ -86,7 +86,7 @@ public abstract class MagnetUpgradeWrapperMixin
                         CallbackInfoReturnable<ItemStack> cir) {
         if (!this.rsi$isRs) return;
         UUID backpackUuid = this.storageWrapper.getContentsUuid().orElse(null);
-        cir.setReturnValue(RSUtils.handleRSPickup(this.getFilterLogic(), world, stack, simulate,
+        cir.setReturnValue(BackpackRSUtils.handleRSPickup(this.getFilterLogic(), world, stack, simulate,
                 backpackUuid,
                 this.rsi$rsBlockPos, this.rsi$rsDimensionKey,
                 rsi$getUpgradesOfType(VoidUpgradeWrapper.class), this.rsi$voidUpgrade));

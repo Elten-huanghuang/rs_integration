@@ -2,7 +2,7 @@ package com.huanghuang.rsintegration.sidepanel;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
-import com.huanghuang.rsintegration.integration.RSIntegration;
+import com.huanghuang.rsintegration.network.RSIntegration;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.storage.cache.IStorageCache;
 import net.minecraft.network.FriendlyByteBuf;
@@ -13,11 +13,11 @@ import net.minecraftforge.network.NetworkEvent;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.UUID;
 import java.util.function.Supplier;
 
 public final class RSSidePanelRequestPacket {
 
-    /** If true, the server should force a full re-scan even if a listener is active. */
     final boolean forceFullSync;
 
     RSSidePanelRequestPacket() {
@@ -52,15 +52,11 @@ public final class RSSidePanelRequestPacket {
                 RSSidePanelNetworkHandler.unregisterListener(player.getUUID());
                 RSSidePanelNetworkHandler.sendSync(player,
                         Collections.emptyList(), Collections.emptyList(),
-                        Collections.emptyList(), 0, false, "");
+                        Collections.emptyList(), Collections.emptyList(),
+                        0, false, "");
                 return;
             }
 
-            // Always register/renew the push listener and perform a full
-            // snapshot.  Skipping the scan based on listener state is unsafe:
-            // a stale/detached listener would leave the client stuck with
-            // no data.  The listener handles subsequent incremental deltas,
-            // so the one-time full-scan cost is acceptable.
             RSSidePanelNetworkHandler.registerListener(player, network);
 
             try {
@@ -68,18 +64,19 @@ public final class RSSidePanelRequestPacket {
                 if (cache == null) {
                     RSSidePanelNetworkHandler.sendSync(player,
                             Collections.emptyList(), Collections.emptyList(),
-                            Collections.emptyList(), 0, true, "");
+                            Collections.emptyList(), Collections.emptyList(),
+                            0, true, "");
                     return;
                 }
                 var list = cache.getList();
                 if (list == null) {
                     RSSidePanelNetworkHandler.sendSync(player,
                             Collections.emptyList(), Collections.emptyList(),
-                            Collections.emptyList(), 0, true, "");
+                            Collections.emptyList(), Collections.emptyList(),
+                            0, true, "");
                     return;
                 }
 
-                // Build craftable item set from crafting patterns
                 var craftableKeys = new java.util.HashSet<net.minecraft.resources.ResourceLocation>();
                 try {
                     var cm = network.getCraftingManager();
@@ -93,8 +90,9 @@ public final class RSSidePanelRequestPacket {
                             }
                         }
                     }
-                } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
+                } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Craftable probe failed", e); }
 
+                List<UUID> ids = new ArrayList<>();
                 List<ItemStack> items = new ArrayList<>();
                 List<Long> timestamps = new ArrayList<>();
                 List<Boolean> craftableFlags = new ArrayList<>();
@@ -105,6 +103,7 @@ public final class RSSidePanelRequestPacket {
                     if (!(raw instanceof ItemStack stored) || stored.isEmpty()) continue;
                     totalCount++;
                     if (items.size() < maxSlots) {
+                        ids.add(entry.getId());
                         items.add(stored.copy());
                         long ts = 0L;
                         if (tracker != null) {
@@ -124,14 +123,15 @@ public final class RSSidePanelRequestPacket {
                     if (level != null && pos != null) {
                         netName = level.getBlockState(pos).getBlock().getName().getString();
                     }
-                } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
+                } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Name probe failed", e); }
 
-                RSSidePanelNetworkHandler.sendSync(player, items, timestamps, craftableFlags, totalCount, true, netName);
+                RSSidePanelNetworkHandler.sendSync(player, ids, items, timestamps, craftableFlags, totalCount, true, netName);
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.info("[RSI] SidePanel request error: {}", e.toString());
                 RSSidePanelNetworkHandler.sendSync(player,
                         Collections.emptyList(), Collections.emptyList(),
-                        Collections.emptyList(), 0, true, "");
+                        Collections.emptyList(), Collections.emptyList(),
+                        0, true, "");
             }
         });
         context.setPacketHandled(true);

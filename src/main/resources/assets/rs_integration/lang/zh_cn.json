@@ -121,6 +121,7 @@
   "rsi.plan.status_fail": "部分材料不足",
   "rsi.plan.missing_header": "无法获取:",
   "rsi.plan.materials": "材料",
+  "rsi.plan.tooltip.available": "库存",
 
   "rsi.async.chain_started": "§a已启动多方块合成链（%s 步）。完成后物品将送入 RS 网络。",
   "rsi.async.chain_aborted": "§c合成链已中止：%s",

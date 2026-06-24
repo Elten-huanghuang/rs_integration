@@ -172,6 +172,33 @@ public final class UIRenderer {
         gfx.drawString(font, text, x + (w - tw) / 2, y + (h - font.lineHeight) / 2, fg);
     }
 
+    // ── Text backdrop ───────────────────────────────────────────
+
+    /** Draws a frosted dark backdrop behind text so it's readable against
+     *  any background (netherrack, bright blocks, snow, rain).
+     *  Padding: 4px horizontal, 2px vertical. */
+    public static void textBackdrop(GuiGraphics gfx, Font font, int x, int y, String text, int bgColor) {
+        int tw = font.width(text);
+        int th = font.lineHeight;
+        rounded(gfx, x - 4, y - 1, tw + 8, th + 2, 4f, bgColor);
+    }
+
+    /** Gradient vertical line — alpha fades linearly from topColor to bottomColor.
+     *  Uses multiple fill strips for simplicity; fine for the ~18px connector gaps. */
+    public static void vLineGradient(GuiGraphics gfx, float x, float y1, float y2,
+                                     float width, int colorTop, int colorBottom) {
+        float h = y2 - y1;
+        if (h <= 0) return;
+        int steps = Math.max(1, Math.min(12, (int) h / 2));
+        for (int i = 0; i < steps; i++) {
+            float t = (float) i / steps;
+            int c = mix(colorTop, colorBottom, t);
+            float segY = y1 + t * h;
+            float segH = h / steps + 1; // slight overlap to avoid gaps
+            gfx.fill((int) x, (int) segY, (int) (x + width), (int) (segY + segH), c);
+        }
+    }
+
     // ── Higher-level widgets ─────────────────────────────────────
 
     /** Rounded card panel with subtle gradient and inner highlight. */

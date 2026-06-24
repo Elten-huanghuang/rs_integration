@@ -1,7 +1,7 @@
 package com.huanghuang.rsintegration.mixin.sophisticatedbackpacks;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
-import com.huanghuang.rsintegration.util.RSUtils;
+import com.huanghuang.rsintegration.util.BackpackRSUtils;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.storage.cache.IStorageCache;
 import com.refinedmods.refinedstorage.api.util.Action;
@@ -109,7 +109,7 @@ public abstract class RefillUpgradeWrapperMixin
 
     @Unique
     private void rsi$rsRefill(Player player, IItemHandler playerInv) {
-        INetwork network = RSUtils.getNetwork(player.level(), this.rsi$rsBlockPos, this.rsi$rsDimensionKey);
+        INetwork network = BackpackRSUtils.getNetwork(player.level(), this.rsi$rsBlockPos, this.rsi$rsDimensionKey);
         if (network == null) return;
 
         IStorageCache<ItemStack> cache = network.getItemStorageCache();

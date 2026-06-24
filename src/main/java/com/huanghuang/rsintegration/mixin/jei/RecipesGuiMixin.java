@@ -1,6 +1,6 @@
 package com.huanghuang.rsintegration.mixin.jei;
 
-import com.huanghuang.rsintegration.module.goety.AltarCraftButtons;
+import com.huanghuang.rsintegration.mods.goety.AltarCraftButtons;
 import mezz.jei.gui.recipes.RecipesGui;
 import net.minecraft.client.gui.screens.Screen;
 import org.spongepowered.asm.mixin.Mixin;

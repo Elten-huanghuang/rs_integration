@@ -1,7 +1,6 @@
 package com.huanghuang.rsintegration.sidepanel;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
-import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.refinedmods.refinedstorage.api.storage.cache.IStorageCache;
 import com.refinedmods.refinedstorage.api.storage.cache.IStorageCacheListener;
 import com.refinedmods.refinedstorage.api.util.StackListResult;
@@ -9,6 +8,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.common.MinecraftForge;
+import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.network.NetworkRegistry;
@@ -16,10 +16,11 @@ import net.minecraftforge.network.PacketDistributor;
 import net.minecraftforge.network.simple.SimpleChannel;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 public final class RSSidePanelNetworkHandler {
 
-    private static final String PROTOCOL_VERSION = "2";
+    private static final String PROTOCOL_VERSION = "3";
     public static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
             new ResourceLocation(RSIntegrationMod.MOD_ID, "rs_side_panel"),
             () -> PROTOCOL_VERSION,
@@ -30,7 +31,11 @@ public final class RSSidePanelNetworkHandler {
     private static boolean registered;
 
     // ── Per-player server-side cache + storage-cache listener ─────
-    private static final Map<UUID, ListenerEntry> playerListeners = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final Map<UUID, ListenerEntry> playerListeners = new ConcurrentHashMap<>();
+
+    // ── Pending deltas per player — collected during a tick, flushed at end ──
+    private static final Map<UUID, List<RSSidePanelDeltaPacket.Entry>> pendingDeltas = new ConcurrentHashMap<>();
+    private static boolean tickHookRegistered;
     private static boolean logoutHookRegistered;
 
     private RSSidePanelNetworkHandler() {}
@@ -63,6 +68,43 @@ public final class RSSidePanelNetworkHandler {
             MinecraftForge.EVENT_BUS.register(RSSidePanelNetworkHandler.class);
             logoutHookRegistered = true;
         }
+        if (!tickHookRegistered) {
+            MinecraftForge.EVENT_BUS.addListener(RSSidePanelNetworkHandler::onServerTickEnd);
+            tickHookRegistered = true;
+        }
+    }
+
+    // ── Tick-end delta flush ──────────────────────────────────────
+
+    private static void onServerTickEnd(TickEvent.ServerTickEvent event) {
+        if (event.phase != TickEvent.Phase.END) return;
+        if (pendingDeltas.isEmpty()) return;
+
+        // Snapshot and clear — matching RS native GridItemDeltaMessage batching
+        Map<UUID, List<RSSidePanelDeltaPacket.Entry>> snapshot = new HashMap<>(pendingDeltas);
+        pendingDeltas.clear();
+
+        for (var entry : snapshot.entrySet()) {
+            UUID playerId = entry.getKey();
+            List<RSSidePanelDeltaPacket.Entry> deltas = entry.getValue();
+            if (deltas.isEmpty()) continue;
+
+            ServerPlayer player = findPlayer(event.getServer(), playerId);
+            if (player == null) continue;
+
+            // Consolidate: if same UUID appears multiple times in this batch,
+            // only keep the last entry (most recent count wins).
+            Map<UUID, RSSidePanelDeltaPacket.Entry> consolidated = new LinkedHashMap<>();
+            for (RSSidePanelDeltaPacket.Entry d : deltas) {
+                consolidated.put(d.stackId, d);
+            }
+            RSSidePanelDeltaPacket.sendBatch(player, new ArrayList<>(consolidated.values()));
+        }
+    }
+
+    private static ServerPlayer findPlayer(net.minecraft.server.MinecraftServer server, UUID playerId) {
+        if (server == null || server.getPlayerList() == null) return null;
+        return server.getPlayerList().getPlayer(playerId);
     }
 
     // ── convenience senders ────────────────────────────────────────
@@ -71,13 +113,13 @@ public final class RSSidePanelNetworkHandler {
         CHANNEL.sendToServer(new RSSidePanelRequestPacket());
     }
 
-    public static void sendSync(ServerPlayer player, List<ItemStack> items,
+    public static void sendSync(ServerPlayer player, List<UUID> ids, List<ItemStack> items,
                                 List<Long> timestamps,
                                 List<Boolean> craftableFlags,
                                 int totalSlotCount, boolean networkAvailable,
                                 String networkName) {
         CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
-                new RSSidePanelSyncPacket(items, timestamps, craftableFlags,
+                new RSSidePanelSyncPacket(ids, items, timestamps, craftableFlags,
                         totalSlotCount, networkAvailable, networkName));
     }
 
@@ -93,17 +135,27 @@ public final class RSSidePanelNetworkHandler {
         CHANNEL.sendToServer(new RSSidePanelClickPacket(carried, isRightClick));
     }
 
+    // ── Manual delta (for sendDeltaForItem safety net) ─────────────
+
+    /** Send a single immediate delta — bypasses batching.
+     *  Used as a safety net in {@code RSSidePanelClickPacket}. */
+    public static void sendDeltaImmediate(ServerPlayer player, UUID stackId,
+                                          ItemStack stack, long timestamp, boolean craftable) {
+        RSSidePanelDeltaPacket.send(player, stackId, stack, timestamp, craftable);
+    }
+
+    // ── Queued delta (for storage-cache listener) ──────────────────
+
+    /** Queue a delta to be sent at the end of the current tick.
+     *  Multiple changes to the same stackId within a tick are consolidated. */
+    public static void queueDelta(ServerPlayer player, UUID stackId,
+                                  ItemStack stack, long timestamp, boolean craftable) {
+        pendingDeltas.computeIfAbsent(player.getUUID(), k -> new ArrayList<>())
+                .add(new RSSidePanelDeltaPacket.Entry(stackId, stack, timestamp, craftable));
+    }
+
     // ── storage cache listener management ──────────────────────────
 
-    /**
-     * Registers an {@link IStorageCacheListener} on the RS storage cache so
-     * the server pushes incremental deltas to the client instead of the client
-     * polling for full re-syncs.
-     */
-    /**
-     * Registers a push listener. Returns true if this was a fresh binding
-     * (player had no listener before), false if it replaced a stale one.
-     */
     @SuppressWarnings("unchecked")
     public static boolean registerListener(ServerPlayer player,
                                            com.refinedmods.refinedstorage.api.network.INetwork network) {
@@ -112,10 +164,10 @@ public final class RSSidePanelNetworkHandler {
 
         UUID pid = player.getUUID();
         boolean isNew = !playerListeners.containsKey(pid);
-        unregisterListener(pid); // detach stale listener first
+        unregisterListener(pid);
 
-        // Snapshot craftable item keys at registration time
-        var craftableKeys = new java.util.HashSet<net.minecraft.resources.ResourceLocation>();
+        // Snapshot craftable item keys
+        var craftableKeys = new HashSet<ResourceLocation>();
         try {
             var cm = network.getCraftingManager();
             if (cm != null) {
@@ -128,7 +180,7 @@ public final class RSSidePanelNetworkHandler {
                     }
                 }
             }
-        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Craftable probe failed", e); }
 
         var tracker = network.getItemStorageTracker();
 
@@ -137,15 +189,25 @@ public final class RSSidePanelNetworkHandler {
             public void onAttached() {}
 
             @Override
-            public void onInvalidated() {}
+            public void onInvalidated() {
+                playerListeners.remove(pid);
+            }
 
-            private void sendDelta(ItemStack stack, int change) {
-                if (stack == null) return;
-                if (stack.getItem() == null) return;
+            private void queue(ItemStack stack, int change, UUID entryId) {
+                if (stack == null || stack.getItem() == null) return;
 
-                // stack.copy() returns EMPTY for count=0 stacks because
-                // ItemStack.isEmpty() checks count <= 0.  Manually construct
-                // a count=0 copy so the delta packet carries the item identity.
+                // Get stable UUID from the storage cache entry when possible
+                UUID stackId = entryId;
+                if (stackId == null) {
+                    // Fallback: try to look up from cache list
+                    var list = cache.getList();
+                    if (list != null) {
+                        var entry = list.getEntry(stack, 1);
+                        if (entry != null) stackId = entry.getId();
+                    }
+                }
+                if (stackId == null) return;
+
                 ItemStack toSend;
                 if (stack.getCount() <= 0) {
                     toSend = new ItemStack(stack.getItem(), 0);
@@ -162,17 +224,17 @@ public final class RSSidePanelNetworkHandler {
                 var k = net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(stack.getItem());
                 boolean craftable = k != null && craftableKeys.contains(k);
 
-                RSSidePanelDeltaPacket.send(player, toSend, ts, craftable);
+                queueDelta(player, stackId, toSend, ts, craftable);
             }
 
             @Override
             public void onChanged(StackListResult<ItemStack> delta) {
-                sendDelta(delta.getStack(), delta.getChange());
+                queue(delta.getStack(), delta.getChange(), delta.getId());
             }
 
             @Override
             public void onChangedBulk(List<StackListResult<ItemStack>> deltas) {
-                for (var d : deltas) sendDelta(d.getStack(), d.getChange());
+                for (var d : deltas) queue(d.getStack(), d.getChange(), d.getId());
             }
         };
         cache.addListener(listener);
@@ -185,14 +247,15 @@ public final class RSSidePanelNetworkHandler {
         if (old != null) {
             try {
                 old.cache.removeListener(old.listener);
-            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
+            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Listener removal failed", e); }
         }
+        pendingDeltas.remove(playerId);
     }
 
     @SubscribeEvent
     public static void onPlayerLogout(PlayerEvent.PlayerLoggedOutEvent event) {
-        if (event.getEntity() instanceof ServerPlayer) {
-            unregisterListener(event.getEntity().getUUID());
+        if (event.getEntity() instanceof ServerPlayer sp) {
+            unregisterListener(sp.getUUID());
         }
     }
 

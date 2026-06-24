@@ -12,68 +12,103 @@ import net.minecraftforge.api.distmarker.OnlyIn;
 import net.minecraftforge.network.NetworkEvent;
 import net.minecraftforge.network.PacketDistributor;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.UUID;
 import java.util.function.Supplier;
 
 /**
- * Server→client incremental update: a single stack changed by {@code change} amount.
- * Positive = added to storage, negative = removed.  If the resulting count reaches
- * zero the client removes the item from its display.
- *
- * <p>Custom item serialisation — vanilla {@code writeItem} treats count=0 stacks
- * as EMPTY and drops the item reference, which prevents the client from removing
- * the entry on a full extraction.  We write the item identity even when count=0.
+ * Server→client incremental batch update.  Multiple delta entries are sent
+ * in a single packet (matching RS native {@code GridItemDeltaMessage}).
+ * Each entry carries the RS {@code StackListEntry} UUID for stable identity.
  */
 public final class RSSidePanelDeltaPacket {
 
-    final ItemStack stack;   // the item with its current total count (absolute)
-    final long timestamp;
-    final boolean craftable;
+    /** A single delta entry within a batch. */
+    public static final class Entry {
+        final UUID stackId;
+        final ItemStack stack;
+        final long timestamp;
+        final boolean craftable;
 
-    RSSidePanelDeltaPacket(ItemStack stack, long timestamp, boolean craftable) {
-        // stack.copy() returns EMPTY for count=0 stacks because
-        // ItemStack.isEmpty() ⇔ count ≤ 0.  Preserve item identity manually.
-        if (stack.getCount() <= 0 && stack.getItem() != null) {
-            this.stack = new ItemStack(stack.getItem(), 0);
-            if (stack.getTag() != null) this.stack.setTag(stack.getTag().copy());
-        } else {
-            this.stack = stack.copy();
+        public Entry(UUID stackId, ItemStack stack, long timestamp, boolean craftable) {
+            this.stackId = stackId;
+            // Preserve item identity for count=0 stacks (full extraction)
+            if (stack.getCount() <= 0 && stack.getItem() != null) {
+                this.stack = new ItemStack(stack.getItem(), 0);
+                if (stack.getTag() != null) this.stack.setTag(stack.getTag().copy());
+            } else {
+                this.stack = stack.copy();
+            }
+            this.timestamp = timestamp;
+            this.craftable = craftable;
         }
-        this.timestamp = timestamp;
-        this.craftable = craftable;
+    }
+
+    final List<Entry> entries;
+
+    RSSidePanelDeltaPacket(List<Entry> entries) {
+        this.entries = entries;
+    }
+
+    /** Convenience: single-entry packet for manual delta sends. */
+    public static void send(ServerPlayer player, UUID stackId, ItemStack stack,
+                            long timestamp, boolean craftable) {
+        RSSidePanelNetworkHandler.CHANNEL.send(
+                PacketDistributor.PLAYER.with(() -> player),
+                new RSSidePanelDeltaPacket(List.of(new Entry(stackId, stack, timestamp, craftable))));
+    }
+
+    /** Send a batch of deltas collected over a tick. */
+    public static void sendBatch(ServerPlayer player, List<Entry> entries) {
+        if (entries.isEmpty()) return;
+        RSSidePanelNetworkHandler.CHANNEL.send(
+                PacketDistributor.PLAYER.with(() -> player),
+                new RSSidePanelDeltaPacket(entries));
     }
 
     void encode(FriendlyByteBuf buf) {
-        Item item = stack.getItem();
-        if (item != null) {
-            buf.writeBoolean(true);
-            buf.writeId(BuiltInRegistries.ITEM, item);
-            buf.writeVarInt(Math.max(0, stack.getCount()));
-            buf.writeNbt(stack.getTag() != null ? stack.getTag() : null);
-        } else {
-            buf.writeBoolean(false);
+        buf.writeVarInt(entries.size());
+        for (Entry e : entries) {
+            buf.writeUUID(e.stackId);
+            Item item = e.stack.getItem();
+            if (item != null) {
+                buf.writeBoolean(true);
+                buf.writeId(BuiltInRegistries.ITEM, item);
+                buf.writeVarInt(Math.max(0, e.stack.getCount()));
+                buf.writeNbt(e.stack.getTag() != null ? e.stack.getTag() : null);
+            } else {
+                buf.writeBoolean(false);
+            }
+            buf.writeVarLong(e.timestamp);
+            buf.writeBoolean(e.craftable);
         }
-        buf.writeVarLong(timestamp);
-        buf.writeBoolean(craftable);
     }
 
     static RSSidePanelDeltaPacket decode(FriendlyByteBuf buf) {
-        ItemStack stack;
-        if (buf.readBoolean()) {
-            Item item = buf.readById(BuiltInRegistries.ITEM);
-            if (item != null) {
-                int count = buf.readVarInt();
-                CompoundTag tag = buf.readNbt();
-                stack = new ItemStack(item, count);
-                if (tag != null) stack.setTag(tag);
+        int count = buf.readVarInt();
+        List<Entry> entries = new ArrayList<>(count);
+        for (int i = 0; i < count; i++) {
+            UUID id = buf.readUUID();
+            ItemStack stack;
+            if (buf.readBoolean()) {
+                Item item = buf.readById(BuiltInRegistries.ITEM);
+                if (item != null) {
+                    int c = buf.readVarInt();
+                    CompoundTag tag = buf.readNbt();
+                    stack = new ItemStack(item, c);
+                    if (tag != null) stack.setTag(tag);
+                } else {
+                    buf.readVarInt();
+                    buf.readNbt();
+                    stack = ItemStack.EMPTY;
+                }
             } else {
-                buf.readVarInt();
-                buf.readNbt();
                 stack = ItemStack.EMPTY;
             }
-        } else {
-            stack = ItemStack.EMPTY;
+            entries.add(new Entry(id, stack, buf.readVarLong(), buf.readBoolean()));
         }
-        return new RSSidePanelDeltaPacket(stack, buf.readVarLong(), buf.readBoolean());
+        return new RSSidePanelDeltaPacket(entries);
     }
 
     @SuppressWarnings("resource")
@@ -88,13 +123,8 @@ public final class RSSidePanelDeltaPacket {
     private static void applyOnClient(RSSidePanelDeltaPacket packet) {
         var mc = Minecraft.getInstance();
         if (mc.player == null) return;
-        RSSidePanelClient.onDeltaReceived(packet.stack, packet.timestamp, packet.craftable);
-    }
-
-    /** Convenience sender. */
-    public static void send(ServerPlayer player, ItemStack stack, long timestamp, boolean craftable) {
-        RSSidePanelNetworkHandler.CHANNEL.send(
-                PacketDistributor.PLAYER.with(() -> player),
-                new RSSidePanelDeltaPacket(stack, timestamp, craftable));
+        for (Entry e : packet.entries) {
+            RSSidePanelClient.onDeltaReceived(e.stackId, e.stack, e.timestamp, e.craftable);
+        }
     }
 }

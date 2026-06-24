@@ -1,6 +1,6 @@
 package com.huanghuang.rsintegration.mixin.sophisticatedbackpacks;
 
-import com.huanghuang.rsintegration.util.RSUtils;
+import com.huanghuang.rsintegration.util.BackpackRSUtils;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.storage.cache.IStorageCache;
 import com.refinedmods.refinedstorage.api.util.Action;
@@ -72,7 +72,7 @@ public abstract class FeedingUpgradeWrapperMixin
                                              CallbackInfoReturnable<Boolean> cir) {
         if (!this.rsi$isRs) return;
 
-        INetwork network = RSUtils.getNetwork(level, this.rsi$rsBlockPos, this.rsi$rsDimensionKey);
+        INetwork network = BackpackRSUtils.getNetwork(level, this.rsi$rsBlockPos, this.rsi$rsDimensionKey);
         if (network == null) {
             cir.setReturnValue(false);
             cir.cancel();

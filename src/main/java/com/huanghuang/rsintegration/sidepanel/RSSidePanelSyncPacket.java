@@ -12,10 +12,12 @@ import net.minecraftforge.network.NetworkEvent;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 import java.util.function.Supplier;
 
 public final class RSSidePanelSyncPacket {
 
+    final List<UUID> ids;
     final List<ItemStack> items;
     final List<Long> timestamps;
     final List<Boolean> craftableFlags;
@@ -23,9 +25,10 @@ public final class RSSidePanelSyncPacket {
     final boolean networkAvailable;
     final String networkName;
 
-    RSSidePanelSyncPacket(List<ItemStack> items, List<Long> timestamps,
+    RSSidePanelSyncPacket(List<UUID> ids, List<ItemStack> items, List<Long> timestamps,
                           List<Boolean> craftableFlags,
                           int totalSlotCount, boolean networkAvailable, String networkName) {
+        this.ids = ids;
         this.items = items;
         this.timestamps = timestamps;
         this.craftableFlags = craftableFlags;
@@ -37,6 +40,7 @@ public final class RSSidePanelSyncPacket {
     void encode(FriendlyByteBuf buf) {
         buf.writeVarInt(items.size());
         for (int i = 0; i < items.size(); i++) {
+            buf.writeUUID(ids != null && i < ids.size() ? ids.get(i) : UUID.randomUUID());
             writeItemStack(buf, items.get(i));
             buf.writeVarLong(timestamps != null && i < timestamps.size() ? timestamps.get(i) : 0L);
             buf.writeBoolean(craftableFlags != null && i < craftableFlags.size() && craftableFlags.get(i));
@@ -48,10 +52,12 @@ public final class RSSidePanelSyncPacket {
 
     static RSSidePanelSyncPacket decode(FriendlyByteBuf buf) {
         int count = buf.readVarInt();
+        List<UUID> ids = new ArrayList<>(count);
         List<ItemStack> items = new ArrayList<>(count);
         List<Long> timestamps = new ArrayList<>(count);
         List<Boolean> craftable = new ArrayList<>(count);
         for (int i = 0; i < count; i++) {
+            ids.add(buf.readUUID());
             items.add(readItemStack(buf));
             timestamps.add(buf.readVarLong());
             craftable.add(buf.readBoolean());
@@ -59,14 +65,9 @@ public final class RSSidePanelSyncPacket {
         int total = buf.readVarInt();
         boolean available = buf.readBoolean();
         String name = buf.readUtf();
-        return new RSSidePanelSyncPacket(items, timestamps, craftable, total, available, name);
+        return new RSSidePanelSyncPacket(ids, items, timestamps, craftable, total, available, name);
     }
 
-    /**
-     * Custom item serialisation that preserves full count &amp; always includes NBT.
-     * Vanilla {@code writeItem} truncates count to a byte and strips NBT for
-     * items that are neither damageable nor override-multiplayer-nbt.
-     */
     private static void writeItemStack(FriendlyByteBuf buf, ItemStack stack) {
         if (stack.isEmpty()) {
             buf.writeBoolean(false);

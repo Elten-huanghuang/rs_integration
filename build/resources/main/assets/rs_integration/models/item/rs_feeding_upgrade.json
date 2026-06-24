@@ -1,6 +1,0 @@
-{
-  "parent": "item/generated",
-  "textures": {
-    "layer0": "rs_integration:item/rs_feeding_upgrade"
-  }
-}
