@@ -95,8 +95,9 @@
   "rsi.fa.error.missing_enhancer": "§c锻炉缺少必需增强器: %s",
   "rsi.fa.error.enhancer_check_failed": "§c验证锻炉增强器失败: %s",
   "rsi.fa.error.missing_starter_item": "§c背包或RS网络中无可用的仪式启动器（锻工锤）—— 启动锻炉仪式需要此物品",
-  "rsi.fa.warn.missing_enhancer": "缺少增强器: %s",
-  "rsi.fa.warn.enhancer_required": "需要增强器: %s — 绑定锻炉后可检测是否已安装",
+  "rsi.fa.warn.missing_enhancer": "§6⚠ 缺少增强器: %s",
+  "rsi.fa.warn.enhancer_required": "§6⚠ 需要增强器: %s — 绑定锻炉后可检测是否已安装",
+  "rsi.fa.warn.cant_check_enhancers": "§6⚠ 无法读取增强器需求 — 请绑定锻炉后重试",
   "rsi.fa.warn.essence_slot_empty": "精华槽位%s为空 (需要%s精华)",
 
   "rsi.wr.error.parse_failed": "§c无法解析配方材料",

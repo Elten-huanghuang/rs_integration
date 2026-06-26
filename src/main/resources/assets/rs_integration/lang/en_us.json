@@ -95,8 +95,9 @@
   "rsi.fa.error.missing_enhancer": "§cForge lacks required enhancer: %s",
   "rsi.fa.error.enhancer_check_failed": "§cFailed to verify forge enhancers: %s",
   "rsi.fa.error.missing_starter_item": "§cNo usable Ritual Starter (Gavel/Hammer) in inventory or RS network — required to start the forge ritual",
-  "rsi.fa.warn.missing_enhancer": "Missing enhancer: %s",
-  "rsi.fa.warn.enhancer_required": "Enhancer required: %s — bind a forge to check if installed",
+  "rsi.fa.warn.missing_enhancer": "§6⚠ Missing enhancer: %s",
+  "rsi.fa.warn.enhancer_required": "§6⚠ Enhancer required: %s — bind a forge to check if installed",
+  "rsi.fa.warn.cant_check_enhancers": "§6⚠ Cannot read enhancer requirements — bind a forge and retry",
   "rsi.fa.warn.essence_slot_empty": "Essence slot %s is empty (need %s essence)",
 
   "rsi.wr.error.parse_failed": "§cCannot parse recipe ingredients",

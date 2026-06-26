@@ -30,6 +30,7 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 public final class CraftPacketUtils {
@@ -607,10 +608,9 @@ public final class CraftPacketUtils {
                 if (spiritList != null) {
                     for (Object swc : spiritList) {
                         try {
-                            Object item = swc.getClass().getMethod("getItem").invoke(swc);
-                            if (item instanceof net.minecraft.world.item.Item it) {
-                                int count = 1;
-                                try { count = swc.getClass().getField("count").getInt(swc); } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
+                            Optional<Object> itemOpt = Reflect.invoke(swc, "getItem");
+                            if (itemOpt.isPresent() && itemOpt.get() instanceof net.minecraft.world.item.Item it) {
+                                int count = Reflect.getIntField(swc, "count").orElse(1);
                                 result.add(new IngredientSpec(Ingredient.of(it), count));
                             }
                         } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
@@ -632,8 +632,7 @@ public final class CraftPacketUtils {
      */
     public static int readIngredientCount(@Nullable Object iwcObj, int fallback) {
         if (iwcObj == null) return fallback;
-        try { return iwcObj.getClass().getField("count").getInt(iwcObj); } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
-        return fallback;
+        return Reflect.getIntField(iwcObj, "count").orElse(fallback);
     }
 
     @Nullable

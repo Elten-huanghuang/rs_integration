@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
+import com.huanghuang.rsintegration.util.Reflect;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
@@ -22,6 +23,7 @@ import net.minecraftforge.items.ItemHandlerHelper;
 import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 public final class MalumBatchDelegate implements IBatchDelegate {
 
@@ -193,12 +195,11 @@ public final class MalumBatchDelegate implements IBatchDelegate {
                 for (int i = 0; i < spiritCount; i++) {
                     Object swc = spirits.get(i);
                     int sCount = CraftPacketUtils.readIngredientCount(swc, 1);
-                    Item spiritItem;
-                    try {
-                        spiritItem = (Item) swc.getClass().getMethod("getItem").invoke(swc);
-                    } catch (Exception e) {
+                    Optional<Object> itemOpt = Reflect.invoke(swc, "getItem");
+                    if (itemOpt.isEmpty() || !(itemOpt.get() instanceof Item)) {
                         break extraction;
                     }
+                    Item spiritItem = (Item) itemOpt.get();
                     Ingredient spiritIng = Ingredient.of(spiritItem);
                     ItemStack stack = CraftPacketUtils.ensureMaterialAvailable(player, myDim, myPos, spiritIng, sCount, ledger);
                     if (stack.isEmpty()) break extraction;
@@ -624,9 +625,15 @@ public final class MalumBatchDelegate implements IBatchDelegate {
         List<String> spiritNames = new ArrayList<>();
         for (Object swc : spirits) {
             try {
-                Object type = swc.getClass().getField("type").get(swc);
-                int count = swc.getClass().getField("count").getInt(swc);
-                String id = (String) type.getClass().getField("identifier").get(type);
+                java.lang.reflect.Field typeF = swc.getClass().getDeclaredField("type");
+                typeF.setAccessible(true);
+                Object type = typeF.get(swc);
+                java.lang.reflect.Field countF = swc.getClass().getDeclaredField("count");
+                countF.setAccessible(true);
+                int count = countF.getInt(swc);
+                java.lang.reflect.Field idF = type.getClass().getDeclaredField("identifier");
+                idF.setAccessible(true);
+                String id = (String) idF.get(type);
                 spiritNames.add(count + "x " + id);
             } catch (Exception e) { /* skip malformed entry */ }
         }

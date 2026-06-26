@@ -276,9 +276,7 @@ public final class TlmAltarBatchDelegate implements IBatchDelegate {
             templates.add(t);
         }
 
-        // Phase 2: Place items into storage block handlers BEFORE committing ledger.
-        // Commit only after the craft starts successfully so that any failure
-        // can rollback the ledger without double-extracting.
+        // Phase 2: Place items into storage block handlers.
         try {
             int templateIdx = 0;
             for (int i = 0; i < ingredients.size(); i++) {
@@ -292,7 +290,7 @@ public final class TlmAltarBatchDelegate implements IBatchDelegate {
                     return false;
                 }
                 ItemStack placed = templates.get(templateIdx).copy();
-                ItemStackHandler handler = (ItemStackHandler) altarBEClass.getField("handler").get(storageBe);
+                ItemStackHandler handler = rsi$tlmsGetHandler(storageBe);
                 handler.setStackInSlot(0, placed);
                 slotsFilled[i] = true;
                 Reflect.invoke(storageBe, "refresh");
@@ -305,7 +303,14 @@ public final class TlmAltarBatchDelegate implements IBatchDelegate {
             return false;
         }
 
-        // Phase 3: Trigger altarCraft BEFORE committing ledger
+        // Phase 3: Commit ledger first — extract items from RS BEFORE starting craft
+        if (!ledger.commit(network, player)) {
+            RSIntegrationMod.LOGGER.error("[RSI-Batch-TLM] Ledger commit failed");
+            rollbackAll();
+            return false;
+        }
+
+        // Phase 4: Trigger altarCraft AFTER committing ledger
         if (!invokeAltarCraft(level)) {
             rollbackAll();
             ledger.rollback(player);
@@ -322,13 +327,6 @@ public final class TlmAltarBatchDelegate implements IBatchDelegate {
             return false;
         }
         this.craftEverConfirmed = true;
-
-        // Phase 4: Commit — craft started successfully, now extract items from RS
-        if (!ledger.commit(network, player)) {
-            RSIntegrationMod.LOGGER.error("[RSI-Batch-TLM] Ledger commit failed after craft start");
-            rollbackAll();
-            return false;
-        }
 
         return true;
     }
@@ -363,7 +361,7 @@ public final class TlmAltarBatchDelegate implements IBatchDelegate {
                     rollbackAll();
                     return false;
                 }
-                ItemStackHandler handler = (ItemStackHandler) altarBEClass.getField("handler").get(storageBe);
+                ItemStackHandler handler = rsi$tlmsGetHandler(storageBe);
                 handler.setStackInSlot(0, stack.copy());
                 slotsFilled[i] = true;
                 Reflect.invoke(storageBe, "refresh");
@@ -528,7 +526,7 @@ public final class TlmAltarBatchDelegate implements IBatchDelegate {
             for (int i = 0; i < storageBlockEntities.size(); i++) {
                 Object storageBe = storageBlockEntities.get(i);
                 if (storageBe == null) continue;
-                ItemStackHandler handler = (ItemStackHandler) altarBEClass.getField("handler").get(storageBe);
+                ItemStackHandler handler = rsi$tlmsGetHandler(storageBe);
                 if (!handler.getStackInSlot(0).isEmpty()) {
                     RSIntegrationMod.LOGGER.debug("[RSI-Batch-TLM] Storage block {} not empty", i);
                     return false;
@@ -547,7 +545,7 @@ public final class TlmAltarBatchDelegate implements IBatchDelegate {
             for (int i = 0; i < storageBlockEntities.size(); i++) {
                 Object storageBe = storageBlockEntities.get(i);
                 if (storageBe == null) continue;
-                ItemStackHandler handler = (ItemStackHandler) altarBEClass.getField("handler").get(storageBe);
+                ItemStackHandler handler = rsi$tlmsGetHandler(storageBe);
                 if (!handler.getStackInSlot(0).isEmpty()) return false;
             }
         } catch (Exception e) {
@@ -623,7 +621,7 @@ public final class TlmAltarBatchDelegate implements IBatchDelegate {
                 if (!slotsFilled[i]) continue;
                 Object storageBe = storageBlockEntities.get(i);
                 if (storageBe == null) continue;
-                ItemStackHandler handler = (ItemStackHandler) altarBEClass.getField("handler").get(storageBe);
+                ItemStackHandler handler = rsi$tlmsGetHandler(storageBe);
                 ItemStack stack = handler.getStackInSlot(0);
                 if (!stack.isEmpty()) {
                     if (network != null) {
@@ -657,5 +655,12 @@ public final class TlmAltarBatchDelegate implements IBatchDelegate {
         Method m = Reflect.findMethod(clazz, name, paramTypes);
         if (m == null) throw new NoSuchMethodException(clazz.getName() + "." + name);
         return m;
+    }
+
+    private static ItemStackHandler rsi$tlmsGetHandler(Object storageBe)
+            throws NoSuchFieldException, IllegalAccessException {
+        java.lang.reflect.Field f = altarBEClass.getDeclaredField("handler");
+        f.setAccessible(true);
+        return (ItemStackHandler) f.get(storageBe);
     }
 }

@@ -467,11 +467,16 @@ public final class AltarBindingRegistry {
 
     /** Map recipe-ID sub-type names to canonical machine-prefix names.
      *  Wizards Reborn names its recipe category "crystal_infusion"
-     *  but the machine prefix used during binding is "crystal_ritual". */
+     *  but the machine prefix used during binding is "crystal_ritual".
+     *  Malum names its recipe category "spirit_infusion" but the
+     *  machine prefix used during binding is "spirit_altar". */
     private static String normalizeSubType(@Nullable String hint, ModType type) {
         if (hint == null) return null;
         if (type == ModType.WIZARDS_REBORN && "crystal_infusion".equals(hint)) {
             return "crystal_ritual";
+        }
+        if (type == ModType.MALUM && "spirit_infusion".equals(hint)) {
+            return "spirit_altar";
         }
         return hint;
     }

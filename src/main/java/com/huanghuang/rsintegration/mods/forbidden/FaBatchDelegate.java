@@ -15,6 +15,7 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
@@ -1249,70 +1250,126 @@ public final class FaBatchDelegate implements IBatchDelegate {
         RSIntegrationMod.LOGGER.info("[RSI-Batch-FA] getPlanWarnings called for recipe={} dim={} pos={}",
                 recipe.getId(), dim, pos);
 
-        // Read required essences from the ritual recipe
+        // Resolve requirements once — shared by tier and enhancer checks
+        Object requirements = invoke(ritual, "requirements");
+
+        // ── Essence check ──────────────────────────────────────────
         Object ritualEssences = invoke(ritual, "essences");
-        if (ritualEssences == null) return warnings;
+        if (ritualEssences != null) {
+            int reqAureal = invokeInt(ritualEssences, "aureal");
+            int reqSouls  = invokeInt(ritualEssences, "souls");
+            int reqBlood  = invokeInt(ritualEssences, "blood");
+            int reqExp    = invokeInt(ritualEssences, "experience");
 
-        int reqAureal = invokeInt(ritualEssences, "aureal");
-        int reqSouls  = invokeInt(ritualEssences, "souls");
-        int reqBlood  = invokeInt(ritualEssences, "blood");
-        int reqExp    = invokeInt(ritualEssences, "experience");
+            // Try to read current essences from a bound forge
+            int curAureal = -1, curSouls = -1, curBlood = -1, curExp = -1;
 
-        // Try to read current essences from a bound forge
-        int curAureal = -1, curSouls = -1, curBlood = -1, curExp = -1;
+            if (dim != null && pos != null) {
+                try {
+                    ServerLevel level = CraftPacketUtils.resolveLevel(player.server, dim, player);
+                    if (level != null && level.isLoaded(pos)) {
+                        net.minecraft.world.level.block.entity.BlockEntity be = level.getBlockEntity(pos);
+                        if (be != null && hephaestusForgeBEClass.isInstance(be)) {
+                            // Apply enhancer modifiers to required essences
+                            Object ritualManager = getMethod(hephaestusForgeBEClass, "getRitualManager").invoke(be);
+                            if (ritualManager != null) {
+                                List<Object> enhancerModifiers = collectEnhancerModifiersStatic(ritualManager, ritual);
+                                if (!enhancerModifiers.isEmpty()) {
+                                    Object modified = getMethod(essencesDefinitionClass, "applyModifiers",
+                                            List.class).invoke(ritualEssences, enhancerModifiers);
+                                    reqAureal = (int) getMethod(essencesDefinitionClass, "aureal").invoke(modified);
+                                    reqSouls  = (int) getMethod(essencesDefinitionClass, "souls").invoke(modified);
+                                    reqBlood  = (int) getMethod(essencesDefinitionClass, "blood").invoke(modified);
+                                    reqExp    = (int) getMethod(essencesDefinitionClass, "experience").invoke(modified);
+                                }
+                            }
 
-        if (dim != null && pos != null) {
+                            Object curEssences = getMethod(hephaestusForgeBEClass, "getEssences").invoke(be);
+                            curAureal = (int) getMethod(essencesDefinitionClass, "aureal").invoke(curEssences);
+                            curSouls  = (int) getMethod(essencesDefinitionClass, "souls").invoke(curEssences);
+                            curBlood  = (int) getMethod(essencesDefinitionClass, "blood").invoke(curEssences);
+                            curExp    = (int) getMethod(essencesDefinitionClass, "experience").invoke(curEssences);
+                        }
+                    }
+                } catch (Exception e) {
+                    RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Plan essence read failed: {}", e.toString());
+                }
+            }
+
+            if (curAureal >= 0) {
+                // Bound forge — show current vs. needed
+                if (reqAureal > 0 && curAureal < reqAureal)
+                    warnings.add(Component.translatable("rsi.fa.warn.insufficient_aureal", reqAureal, curAureal).getString());
+                if (reqSouls > 0 && curSouls < reqSouls)
+                    warnings.add(Component.translatable("rsi.fa.warn.insufficient_souls", reqSouls, curSouls).getString());
+                if (reqBlood > 0 && curBlood < reqBlood)
+                    warnings.add(Component.translatable("rsi.fa.warn.insufficient_blood", reqBlood, curBlood).getString());
+                if (reqExp > 0 && curExp < reqExp)
+                    warnings.add(Component.translatable("rsi.fa.warn.insufficient_experience", reqExp, curExp).getString());
+            } else if (reqAureal > 0 || reqSouls > 0 || reqBlood > 0 || reqExp > 0) {
+                // No forge bound — list required essence types
+                warnings.add(Component.translatable("rsi.fa.warn.essence_required",
+                        reqAureal, reqSouls, reqBlood, reqExp).getString());
+            }
+
+            // Check essence input slots — warn if an essence type is below
+            // requirement but its dedicated forge input slot is empty (no
+            // items to burn for essence).
             try {
-                ServerLevel level = CraftPacketUtils.resolveLevel(player.server, dim, player);
-                if (level != null && level.isLoaded(pos)) {
-                    net.minecraft.world.level.block.entity.BlockEntity be = level.getBlockEntity(pos);
-                    if (be != null && hephaestusForgeBEClass.isInstance(be)) {
-                        // Apply enhancer modifiers to required essences
-                        Object ritualManager = getMethod(hephaestusForgeBEClass, "getRitualManager").invoke(be);
-                        if (ritualManager != null) {
-                            List<Object> enhancerModifiers = collectEnhancerModifiersStatic(ritualManager, ritual);
-                            if (!enhancerModifiers.isEmpty()) {
-                                ritualEssences = getMethod(essencesDefinitionClass, "applyModifiers",
-                                        List.class).invoke(ritualEssences, enhancerModifiers);
-                                reqAureal = (int) getMethod(essencesDefinitionClass, "aureal").invoke(ritualEssences);
-                                reqSouls  = (int) getMethod(essencesDefinitionClass, "souls").invoke(ritualEssences);
-                                reqBlood  = (int) getMethod(essencesDefinitionClass, "blood").invoke(ritualEssences);
-                                reqExp    = (int) getMethod(essencesDefinitionClass, "experience").invoke(ritualEssences);
+                if (dim != null && pos != null) {
+                    ServerLevel level = CraftPacketUtils.resolveLevel(player.server, dim, player);
+                    if (level != null && level.isLoaded(pos)) {
+                        BlockEntity be = level.getBlockEntity(pos);
+                        if (be != null && hephaestusForgeBEClass.isInstance(be)) {
+                            java.lang.reflect.Field slotMapField = Reflect.findField(
+                                    hephaestusForgeBEClass, "SLOT_FROM_ESSENCE_TYPE_MAP").orElse(null);
+                            if (slotMapField != null) {
+                                Object slotMap = slotMapField.get(null);
+                                if (slotMap instanceof java.util.Map<?, ?> map) {
+                                    Object curEssences = getMethod(hephaestusForgeBEClass,
+                                            "getEssences").invoke(be);
+                                    int curA = (int) getMethod(essencesDefinitionClass, "aureal").invoke(curEssences);
+                                    int curS = (int) getMethod(essencesDefinitionClass, "souls").invoke(curEssences);
+                                    int curB = (int) getMethod(essencesDefinitionClass, "blood").invoke(curEssences);
+                                    int curE = (int) getMethod(essencesDefinitionClass, "experience").invoke(curEssences);
+
+                                    for (var entry : map.entrySet()) {
+                                        String typeName = entry.getKey().toString();
+                                        int slot = ((Number) entry.getValue()).intValue();
+                                        int required, current;
+                                        if (typeName.contains("AUREAL")) {
+                                            required = reqAureal; current = curA;
+                                        } else if (typeName.contains("SOULS")) {
+                                            required = reqSouls; current = curS;
+                                        } else if (typeName.contains("BLOOD")) {
+                                            required = reqBlood; current = curB;
+                                        } else if (typeName.contains("EXPERIENCE")) {
+                                            required = reqExp; current = curE;
+                                        } else {
+                                            continue;
+                                        }
+                                        if (required > 0 && current < required) {
+                                            ItemStack slotStack = getForgeSlot(be, slot);
+                                            if (slotStack.isEmpty()) {
+                                                warnings.add(Component.translatable(
+                                                        "rsi.fa.warn.essence_slot_empty",
+                                                        slot, typeName).getString());
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
-
-                        Object curEssences = getMethod(hephaestusForgeBEClass, "getEssences").invoke(be);
-                        curAureal = (int) getMethod(essencesDefinitionClass, "aureal").invoke(curEssences);
-                        curSouls  = (int) getMethod(essencesDefinitionClass, "souls").invoke(curEssences);
-                        curBlood  = (int) getMethod(essencesDefinitionClass, "blood").invoke(curEssences);
-                        curExp    = (int) getMethod(essencesDefinitionClass, "experience").invoke(curEssences);
                     }
                 }
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Plan essence read failed: {}", e.toString());
+                RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Plan essence slot check failed: {}", e.toString());
             }
         }
 
-        if (curAureal >= 0) {
-            // Bound forge — show current vs. needed
-            if (reqAureal > 0 && curAureal < reqAureal)
-                warnings.add(Component.translatable("rsi.fa.warn.insufficient_aureal", reqAureal, curAureal).getString());
-            if (reqSouls > 0 && curSouls < reqSouls)
-                warnings.add(Component.translatable("rsi.fa.warn.insufficient_souls", reqSouls, curSouls).getString());
-            if (reqBlood > 0 && curBlood < reqBlood)
-                warnings.add(Component.translatable("rsi.fa.warn.insufficient_blood", reqBlood, curBlood).getString());
-            if (reqExp > 0 && curExp < reqExp)
-                warnings.add(Component.translatable("rsi.fa.warn.insufficient_experience", reqExp, curExp).getString());
-        } else if (reqAureal > 0 || reqSouls > 0 || reqBlood > 0 || reqExp > 0) {
-            // No forge bound — list required essence types
-            warnings.add(Component.translatable("rsi.fa.warn.essence_required",
-                    reqAureal, reqSouls, reqBlood, reqExp).getString());
-        }
-
-        // Check forge tier
-        try {
-            Object requirements = invoke(ritual, "requirements");
-            if (requirements != null) {
+        // ── Forge tier check ───────────────────────────────────────
+        if (requirements != null) {
+            try {
                 int requiredTier = (int) getMethod(requirements.getClass(), "tier").invoke(requirements);
                 if (requiredTier > 1) {
                     if (dim != null && pos != null) {
@@ -1331,33 +1388,24 @@ public final class FaBatchDelegate implements IBatchDelegate {
                                 "rsi.fa.warn.tier_required", requiredTier).getString());
                     }
                 }
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Plan tier check failed: {}", e.toString());
             }
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Plan tier check failed: {}", e.toString());
         }
 
-        // Check enhancer requirements
-        try {
-            Object requirements = invoke(ritual, "requirements");
-            RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Plan enhancer: requirements={}", requirements);
-            if (requirements != null) {
+        // ── Enhancer check ─────────────────────────────────────────
+        if (requirements != null) {
+            try {
                 List<?> requiredEnhancers = invokeList(requirements, "enhancers");
-                RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Plan enhancer: enhancers list={}, size={}",
-                        requiredEnhancers, requiredEnhancers != null ? requiredEnhancers.size() : 0);
                 if (requiredEnhancers != null && !requiredEnhancers.isEmpty()) {
                     // Resolve required enhancer names
                     List<String> reqNames = new ArrayList<>();
                     for (Object holder : requiredEnhancers) {
-                        RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Plan enhancer: holder={} class={}",
-                                holder, holder != null ? holder.getClass().getName() : "null");
                         Object reqDef = unwrapHolderValue(holder);
-                        RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Plan enhancer: reqDef={}", reqDef);
                         if (reqDef != null) {
-                            reqNames.add(reqDef.toString());
+                            reqNames.add(enhancerDefName(reqDef));
                         }
                     }
-                    RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Plan enhancer: reqNames={} dim={} pos={}",
-                            reqNames, dim, pos);
                     if (dim != null && pos != null) {
                         // Bound forge — check which enhancers are installed
                         ServerLevel level = CraftPacketUtils.resolveLevel(player.server, dim, player);
@@ -1393,7 +1441,7 @@ public final class FaBatchDelegate implements IBatchDelegate {
                                         if (!found) {
                                             warnings.add(Component.translatable(
                                                     "rsi.fa.warn.missing_enhancer",
-                                                    reqDef.toString()).getString());
+                                                    enhancerDefName(reqDef)).getString());
                                         }
                                     }
                                 }
@@ -1406,63 +1454,20 @@ public final class FaBatchDelegate implements IBatchDelegate {
                                     "rsi.fa.warn.enhancer_required", name).getString());
                         }
                     }
+                } else if (requiredEnhancers == null) {
+                    // Can't read enhancers — reflection failed on requirements.enhancers()
+                    warnings.add(Component.translatable(
+                            "rsi.fa.warn.cant_check_enhancers").getString());
                 }
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Plan enhancer check failed: {}", e.toString());
+                warnings.add(Component.translatable(
+                        "rsi.fa.warn.cant_check_enhancers").getString());
             }
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Plan enhancer check failed: {}", e.toString());
-        }
-
-        // Check essence input slots — warn if an essence type is below requirement
-        // but its dedicated forge input slot is empty (no items to burn for essence).
-        try {
-            if (dim != null && pos != null) {
-                ServerLevel level = CraftPacketUtils.resolveLevel(player.server, dim, player);
-                if (level != null && level.isLoaded(pos)) {
-                    BlockEntity be = level.getBlockEntity(pos);
-                    if (be != null && hephaestusForgeBEClass.isInstance(be)) {
-                        java.lang.reflect.Field slotMapField = Reflect.findField(
-                                hephaestusForgeBEClass, "SLOT_FROM_ESSENCE_TYPE_MAP").orElse(null);
-                        if (slotMapField != null) {
-                            Object slotMap = slotMapField.get(null);
-                            if (slotMap instanceof java.util.Map<?, ?> map) {
-                                Object curEssences = getMethod(hephaestusForgeBEClass,
-                                        "getEssences").invoke(be);
-                                int curA = (int) getMethod(essencesDefinitionClass, "aureal").invoke(curEssences);
-                                int curS = (int) getMethod(essencesDefinitionClass, "souls").invoke(curEssences);
-                                int curB = (int) getMethod(essencesDefinitionClass, "blood").invoke(curEssences);
-                                int curE = (int) getMethod(essencesDefinitionClass, "experience").invoke(curEssences);
-
-                                for (var entry : map.entrySet()) {
-                                    String typeName = entry.getKey().toString();
-                                    int slot = ((Number) entry.getValue()).intValue();
-                                    int required, current;
-                                    if (typeName.contains("AUREAL")) {
-                                        required = reqAureal; current = curA;
-                                    } else if (typeName.contains("SOULS")) {
-                                        required = reqSouls; current = curS;
-                                    } else if (typeName.contains("BLOOD")) {
-                                        required = reqBlood; current = curB;
-                                    } else if (typeName.contains("EXPERIENCE")) {
-                                        required = reqExp; current = curE;
-                                    } else {
-                                        continue;
-                                    }
-                                    if (required > 0 && current < required) {
-                                        ItemStack slotStack = getForgeSlot(be, slot);
-                                        if (slotStack.isEmpty()) {
-                                            warnings.add(Component.translatable(
-                                                    "rsi.fa.warn.essence_slot_empty",
-                                                    slot, typeName).getString());
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Plan essence slot check failed: {}", e.toString());
+        } else {
+            // Can't read requirements at all — reflection failed on ritual.requirements()
+            warnings.add(Component.translatable(
+                    "rsi.fa.warn.cant_check_enhancers").getString());
         }
 
         return warnings;
@@ -1475,6 +1480,20 @@ public final class FaBatchDelegate implements IBatchDelegate {
             Object v = m.invoke(obj);
             return v instanceof Number n ? n.intValue() : 0;
         } catch (Exception e) { return 0; }
+    }
+
+    private static String enhancerDefName(Object enhancerDef) {
+        // Extract display name from EnhancerDefinition: try item.description first
+        Optional<Object> item = Reflect.getField(enhancerDef, "item");
+        if (item.isPresent() && item.get() instanceof Item it) {
+            return it.getDescription().getString();
+        }
+        // Fallback: try description Component directly
+        Optional<Object> desc = Reflect.invoke(enhancerDef, "getDescription");
+        if (desc.isPresent() && desc.get() instanceof Component c) {
+            return c.getString();
+        }
+        return enhancerDef.toString();
     }
 
     // ── Pedestal finding ─────────────────────────────────────────

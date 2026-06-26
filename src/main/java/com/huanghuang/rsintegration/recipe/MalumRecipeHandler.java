@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.util.Reflect;
 import net.minecraft.core.RegistryAccess;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
@@ -45,7 +46,7 @@ final class MalumRecipeHandler implements ModRecipeHandler {
             countField.setAccessible(true);
             List<IngredientSpec> result = new ArrayList<>();
 
-            // Single input field
+            // Single input field (IngredientWithCount)
             Reflect.findField(recipe.getClass(), "input").ifPresent(inputField -> {
                 if (iwcClass.get().isAssignableFrom(inputField.getType())) {
                     inputField.setAccessible(true);
@@ -60,11 +61,13 @@ final class MalumRecipeHandler implements ModRecipeHandler {
                 }
             });
 
-            // extraItems list
+            // extraItems list (IngredientWithCount objects)
             readIwcList(recipe, "extraItems", iwcClass.get(), ingField, countField, result);
 
-            // spirits list
-            readIwcList(recipe, "spirits", iwcClass.get(), ingField, countField, result);
+            // spirits list — SpiritWithCount implements IRecipeComponent, NOT IngredientWithCount.
+            // SpiritWithCount has: public final MalumSpiritType type, public final int count,
+            // public Item getItem() → type.spiritShard.get()
+            readSpiritList(recipe, "spirits", result);
 
             return result.isEmpty() ? null : result;
         } catch (Exception e) {
@@ -87,6 +90,25 @@ final class MalumRecipeHandler implements ModRecipeHandler {
                         int count = countField.getInt(iwc);
                         if (ing != null && count > 0) out.add(new IngredientSpec(ing, count));
                     }
+                }
+            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
+        });
+    }
+
+    @SuppressWarnings("unchecked")
+    private void readSpiritList(Object recipe, String fieldName, List<IngredientSpec> out) {
+        Reflect.findField(recipe.getClass(), fieldName).ifPresent(f -> {
+            if (!List.class.isAssignableFrom(f.getType())) return;
+            f.setAccessible(true);
+            try {
+                List<?> list = (List<?>) f.get(recipe);
+                if (list == null) return;
+                for (Object swc : list) {
+                    // SpiritWithCount.getItem() returns the spirit shard Item
+                    Optional<Object> itemOpt = Reflect.invoke(swc, "getItem");
+                    if (itemOpt.isEmpty() || !(itemOpt.get() instanceof Item it)) continue;
+                    int count = Reflect.getIntField(swc, "count").orElse(1);
+                    if (count > 0) out.add(new IngredientSpec(Ingredient.of(it), count));
                 }
             } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
         });
