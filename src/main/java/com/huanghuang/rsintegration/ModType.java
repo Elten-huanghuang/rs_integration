@@ -36,6 +36,7 @@ public final class ModType {
     public static final ModType FORBIDDEN_ARCANUS;
     public static final ModType EIDOLON;
     public static final ModType WIZARDS_REBORN;
+    public static final ModType TOUHOU_LITTLE_MAID;
 
     static {
         GENERIC = register("generic",
@@ -72,6 +73,12 @@ public final class ModType {
                 new String[]{"wizards_reborn"},
                 new String[]{"crystal_ritual"},
                 delegateSupplier("com.huanghuang.rsintegration.mods.wizards_reborn.WRBatchDelegate"));
+
+        TOUHOU_LITTLE_MAID = register("touhou_little_maid",
+                new String[]{"com.github.tartaricacid.touhoulittlemaid."},
+                new String[]{"touhou_little_maid"},
+                new String[0],
+                delegateSupplier("com.huanghuang.rsintegration.mods.touhoulittlemaid.TlmAltarBatchDelegate"));
     }
 
     // ── constructors ──────────────────────────────────────────────
@@ -132,6 +139,9 @@ public final class ModType {
      */
     @Nullable
     public static ModType classifyRecipe(Recipe<?> recipe) {
+        if (recipe instanceof com.huanghuang.rsintegration.mods.forbidden.FaRitualWrapper) {
+            return FORBIDDEN_ARCANUS;
+        }
         String cn = recipe.getClass().getName();
         for (ModType mt : BY_ID.values()) {
             if (mt == GENERIC) continue;

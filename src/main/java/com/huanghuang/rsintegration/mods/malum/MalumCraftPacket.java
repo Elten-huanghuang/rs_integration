@@ -305,8 +305,11 @@ public final class MalumCraftPacket {
                         .getMethod("getStackInSlot", int.class).invoke(invMain, i);
                 if (!stack.isEmpty()) {
                     if (network != null) {
-                        network.insertItem(stack.copy(), stack.getCount(),
+                        ItemStack leftover = network.insertItem(stack.copy(), stack.getCount(),
                                 com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                        if (!leftover.isEmpty() && player != null) {
+                            net.minecraftforge.items.ItemHandlerHelper.giveItemToPlayer(player, leftover);
+                        }
                     } else if (player != null) {
                         net.minecraftforge.items.ItemHandlerHelper.giveItemToPlayer(player, stack.copy());
                     }
@@ -320,8 +323,11 @@ public final class MalumCraftPacket {
                         .getMethod("getStackInSlot", int.class).invoke(invSpirit, i);
                 if (!stack.isEmpty()) {
                     if (network != null) {
-                        network.insertItem(stack.copy(), stack.getCount(),
+                        ItemStack leftover = network.insertItem(stack.copy(), stack.getCount(),
                                 com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                        if (!leftover.isEmpty() && player != null) {
+                            net.minecraftforge.items.ItemHandlerHelper.giveItemToPlayer(player, leftover);
+                        }
                     } else if (player != null) {
                         net.minecraftforge.items.ItemHandlerHelper.giveItemToPlayer(player, stack.copy());
                     }
@@ -342,8 +348,11 @@ public final class MalumCraftPacket {
                         .getMethod("getStackInSlot", int.class).invoke(inv, 0);
                 if (!stack.isEmpty()) {
                     if (network != null) {
-                        network.insertItem(stack.copy(), stack.getCount(),
+                        ItemStack leftover = network.insertItem(stack.copy(), stack.getCount(),
                                 com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                        if (!leftover.isEmpty() && player != null) {
+                            net.minecraftforge.items.ItemHandlerHelper.giveItemToPlayer(player, leftover);
+                        }
                     } else if (player != null) {
                         net.minecraftforge.items.ItemHandlerHelper.giveItemToPlayer(player, stack.copy());
                     }

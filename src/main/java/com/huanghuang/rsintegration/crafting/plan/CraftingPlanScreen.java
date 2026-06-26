@@ -118,10 +118,12 @@ public final class CraftingPlanScreen extends Screen {
         Font font = minecraft.font;
         int contentW = width - 40;
 
-        // Compute missing items area
+        // Compute missing items area (material shortages + mod validation warnings)
         int missingCount = plan.missing() != null ? plan.missing().size() : 0;
-        if (missingCount > 0) {
-            missingAreaHeight = font.lineHeight + 6 + missingCount * (font.lineHeight + 4) + 4;
+        int modWarnCount = plan.modWarnings() != null ? plan.modWarnings().size() : 0;
+        int totalMissingLines = missingCount + modWarnCount;
+        if (totalMissingLines > 0) {
+            missingAreaHeight = font.lineHeight + 6 + totalMissingLines * (font.lineHeight + 4) + 4;
         } else {
             missingAreaHeight = 0;
         }
@@ -256,8 +258,10 @@ public final class CraftingPlanScreen extends Screen {
             gfx.disableScissor();
         }
 
-        // Missing items
-        if (missingAreaHeight > 0 && plan.missing() != null && !plan.missing().isEmpty()) {
+        // Missing items + mod warnings
+        if (missingAreaHeight > 0 && (
+                (plan.missing() != null && !plan.missing().isEmpty()) ||
+                (plan.modWarnings() != null && !plan.modWarnings().isEmpty()))) {
             renderMissingArea(gfx, font, left, missingAreaTop, contentW);
         }
 
@@ -302,6 +306,8 @@ public final class CraftingPlanScreen extends Screen {
         }
         int orBadgeH = (step != null && !step.alternatives().isEmpty()) ? font.lineHeight + 10 : 0;
         cardH += orBadgeH;
+        int warnH = (step != null && !step.warnings().isEmpty()) ? step.warnings().size() * (font.lineHeight + 3) + 6 : 0;
+        cardH += warnH;
 
         // ── Card background ───────────────────────────────────
         if (fade < 1f) {
@@ -465,6 +471,20 @@ public final class CraftingPlanScreen extends Screen {
             }
         }
 
+        // ── Warnings (research, structure, etc.) ──────────────
+        if (step != null && !step.warnings().isEmpty()) {
+            int warnY = y + cardH - warnH + 3;
+            for (String warn : step.warnings()) {
+                // Truncate to 2 lines max per warning
+                String display = font.plainSubstrByWidth(warn, cardW - CARD_PAD * 2 - 4);
+                if (display.length() < warn.length()) {
+                    display = display.substring(0, Math.max(0, display.length() - 3)) + "...";
+                }
+                gfx.drawString(font, display, x + CARD_PAD + 2, warnY, 0xFFDDAA00);
+                warnY += font.lineHeight + 3;
+            }
+        }
+
         if (fade < 1f) gfx.pose().popPose();
 
         return y + cardH + 8;
@@ -606,8 +626,15 @@ public final class CraftingPlanScreen extends Screen {
         RSIntegrationMod.LOGGER.info("[RSI-OR-UI]   sending forced={}", forced);
         ResourceLocation rid = ResourceLocation.tryParse(plan.recipeId());
         if (rid != null) {
+            ResourceLocation execDim = null;
+            net.minecraft.core.BlockPos execPos = null;
+            if (plan.executionDim() != null && !plan.executionDim().isEmpty()) {
+                execDim = ResourceLocation.tryParse(plan.executionDim());
+                execPos = new net.minecraft.core.BlockPos(
+                        plan.executionPosX(), plan.executionPosY(), plan.executionPosZ());
+            }
             BatchCraftNetworkHandler.CHANNEL.sendToServer(
-                    new GenericCraftPacket(rid, true, forced));
+                    new GenericCraftPacket(rid, true, forced, execDim, execPos));
         }
     }
 
@@ -751,22 +778,38 @@ public final class CraftingPlanScreen extends Screen {
     // ── Missing area ──────────────────────────────────────────────
 
     private void renderMissingArea(GuiGraphics gfx, Font font, int left, int top, int contentW) {
-        // Background — dark warm tone, red accent for warnings
+        boolean hasMissing = plan.missing() != null && !plan.missing().isEmpty();
+        boolean hasModWarnings = plan.modWarnings() != null && !plan.modWarnings().isEmpty();
+
+        // Background — dark warm tone, red accent
         UIRenderer.roundedGradient(gfx, left, top, contentW, missingAreaHeight, 6f,
                 0xE61E1814, 0xE6181410);
-        // Left accent — warning red
-        gfx.fill(left + 1, top + 2, left + 4, top + missingAreaHeight - 2, C_ACCENT_MISSING);
+        // Left accent — red when materials are missing, orange when only mod warnings
+        int accentColor = hasMissing ? C_ACCENT_MISSING : C_ORANGE;
+        gfx.fill(left + 1, top + 2, left + 4, top + missingAreaHeight - 2, accentColor);
 
         int my = top + 4;
-        String hdr = Component.translatable("rsi.plan.missing_header").getString();
-        UIRenderer.textBackdrop(gfx, font, left + 10, my, hdr, C_TEXT_BACKDROP);
-        gfx.drawString(font, hdr, left + 10, my, 0xFFFF6666);
-        my += font.lineHeight + 4;
-        for (String msg : plan.missing()) {
-            String line = "  " + msg;
-            UIRenderer.textBackdrop(gfx, font, left + 10, my, line, C_TEXT_BACKDROP);
-            gfx.drawString(font, line, left + 10, my, 0xFFCC8888);
+        if (hasMissing) {
+            String hdr = Component.translatable("rsi.plan.missing_header").getString();
+            UIRenderer.textBackdrop(gfx, font, left + 10, my, hdr, C_TEXT_BACKDROP);
+            gfx.drawString(font, hdr, left + 10, my, 0xFFFF6666);
             my += font.lineHeight + 4;
+            for (String msg : plan.missing()) {
+                String line = "  " + msg;
+                UIRenderer.textBackdrop(gfx, font, left + 10, my, line, C_TEXT_BACKDROP);
+                gfx.drawString(font, line, left + 10, my, 0xFFCC8888);
+                my += font.lineHeight + 4;
+            }
+        }
+        // Render mod warnings (Goety research/structure, FA essences) in orange
+        if (hasModWarnings) {
+            if (!hasMissing) my += 4; // no header, add padding
+            for (String warn : plan.modWarnings()) {
+                String display = font.plainSubstrByWidth(warn, contentW - 24);
+                UIRenderer.textBackdrop(gfx, font, left + 10, my, display, C_TEXT_BACKDROP);
+                gfx.drawString(font, display, left + 10, my, 0xFFDDAA00);
+                my += font.lineHeight + 4;
+            }
         }
     }
 

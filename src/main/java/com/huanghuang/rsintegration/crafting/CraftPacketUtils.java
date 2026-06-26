@@ -8,6 +8,7 @@ import com.huanghuang.rsintegration.network.BindingStorage;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.ResolutionStep;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.network.RSIntegration;
+import com.huanghuang.rsintegration.util.Reflect;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
@@ -279,7 +280,7 @@ public final class CraftPacketUtils {
         Class<?> clazz = recipe.getClass();
 
         List<Ingredient> result = tryGetIngredients(recipe, "getIngredients");
-        if (result != null) return result;
+        if (result != null) return filterWRCrystal(recipe, result);
 
         Class<?> scan = clazz;
         while (scan != null && scan != Object.class) {
@@ -300,7 +301,7 @@ public final class CraftPacketUtils {
 
         for (String name : new String[]{"getInputs", "getInputItems"}) {
             result = tryGetIngredients(recipe, name);
-            if (result != null) return result;
+            if (result != null) return filterWRCrystal(recipe, result);
         }
 
         // Probe step-based recipes (Eidolon CrucibleRecipe: getSteps() → each step's matches field)
@@ -312,10 +313,111 @@ public final class CraftPacketUtils {
         if (result != null) return result;
 
         result = scanAllFieldsForIngredients(recipe);
-        if (result != null) return result;
+        if (result != null) return filterWRCrystal(recipe, result);
 
         result = extractLodestoneIngredients(recipe);
+        if (result != null) result = filterWRCrystal(recipe, result);
         return result;
+    }
+
+    /**
+     * WR crystal infusion/ritual recipes: the crystal stays in the ritual block
+     * as a catalyst and must NOT be extracted from RS as a material.
+     * <p>
+     * Primary strategy: use the ritual's {@code getCrystalType(ItemStack)} which
+     * does {@code item instanceof CrystalItem} internally — the same check WR
+     * uses at runtime.
+     * <p>
+     * Fallback (no ritual available): detect crystal items by their class
+     * (CrystalItem / FracturedCrystalItem / PrecisionCrystalItem).
+     */
+    @Nullable
+    private static List<Ingredient> filterWRCrystal(Object recipe, List<Ingredient> ingredients) {
+        String className = recipe.getClass().getName();
+        boolean isWR = className.startsWith("mod.maxbogomol.wizards_reborn.");
+
+        // Only filter WR recipes; for everything else return unfiltered
+        if (!isWR) return ingredients;
+
+        java.util.Set<Item> crystalItems = new java.util.HashSet<>();
+
+        // Primary: use ritual.getCrystalType(ItemStack) — the WR API for
+        // testing whether an item is a crystal (does instanceof CrystalItem).
+        // CrystalRitualRecipe has getRitual(); CrystalInfusionRecipe does not.
+        Object ritual = null;
+        java.lang.reflect.Method getCrystalType = null;
+        try {
+            java.lang.reflect.Method getRitual = Reflect.findMethod(
+                    recipe.getClass(), "getRitual", new Class<?>[0]);
+            if (getRitual != null) {
+                ritual = getRitual.invoke(recipe);
+                if (ritual != null) {
+                    getCrystalType = Reflect.findMethod(ritual.getClass(),
+                            "getCrystalType", new Class<?>[]{ItemStack.class});
+                }
+            }
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI] WR ritual access failed: {}", e.toString());
+        }
+
+        if (getCrystalType != null && ritual != null) {
+            // Use the official WR API to identify crystal items
+            for (Ingredient ing : ingredients) {
+                for (ItemStack is : ing.getItems()) {
+                    try {
+                        Object ct = getCrystalType.invoke(ritual, is);
+                        if (ct != null) {
+                            crystalItems.add(is.getItem());
+                        }
+                    } catch (Exception ignored) {}
+                }
+            }
+        }
+
+        // Class-based detection — catches any WR crystal item regardless
+        // of recipe type (CrystalRitualRecipe, WissenCrystallizerRecipe,
+        // CrystalInfusionRecipe, etc.). Some CrystalInfusionRecipes include
+        // the crystal in getIngredients(), others don't — this handles both.
+        if (crystalItems.isEmpty()) {
+            try {
+                Class<?> crystalItemClass = Class.forName(
+                        "mod.maxbogomol.wizards_reborn.common.item.CrystalItem");
+                Class<?> fracturedClass = Class.forName(
+                        "mod.maxbogomol.wizards_reborn.common.item.FracturedCrystalItem");
+                Class<?> precisionClass = Class.forName(
+                        "mod.maxbogomol.wizards_reborn.common.item.PrecisionCrystalItem");
+                for (Ingredient ing : ingredients) {
+                    for (ItemStack is : ing.getItems()) {
+                        Item item = is.getItem();
+                        if (crystalItemClass.isInstance(item)
+                                || fracturedClass.isInstance(item)
+                                || precisionClass.isInstance(item)) {
+                            crystalItems.add(item);
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.debug("[RSI] WR crystal class detection failed: {}", e.toString());
+            }
+        }
+
+        if (crystalItems.isEmpty()) {
+            RSIntegrationMod.LOGGER.debug("[RSI] filterWRCrystal: no crystal items identified for recipe class {}, returning {} unfiltered ingredients",
+                    className, ingredients.size());
+            return ingredients;
+        }
+
+        List<Ingredient> filtered = new ArrayList<>();
+        for (Ingredient ing : ingredients) {
+            boolean isCrystal = false;
+            for (ItemStack is : ing.getItems()) {
+                if (crystalItems.contains(is.getItem())) { isCrystal = true; break; }
+            }
+            if (!isCrystal) filtered.add(ing);
+        }
+        RSIntegrationMod.LOGGER.info("[RSI] filterWRCrystal: recipe={}, removed {} crystal ingredient(s), kept {} material ingredient(s)",
+                className, ingredients.size() - filtered.size(), filtered.size());
+        return filtered;
     }
 
     @Nullable

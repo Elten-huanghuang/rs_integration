@@ -9,6 +9,7 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.Optional;
 import java.util.OptionalInt;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Reflection toolbox — replaces scattered {@code getMethod/getField/invoke} patterns.
@@ -19,6 +20,9 @@ public final class Reflect {
 
     private static final Logger LOG = RSIntegrationMod.LOGGER;
     private static final String TAG = "[RSI-Reflect]";
+
+    private static final ConcurrentHashMap<String, Optional<Field>> fieldCache = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<String, Method> methodCache = new ConcurrentHashMap<>();
 
     private Reflect() {}
 
@@ -115,29 +119,39 @@ public final class Reflect {
 
     // ── Field discovery ──────────────────────────────────────────
 
-    /** Walk the class hierarchy to find a declared field by name. */
+    /** Walk the class hierarchy to find a declared field by name. Results are cached. */
     public static Optional<Field> findField(Class<?> clazz, String name) {
-        Class<?> scan = clazz;
-        while (scan != null && scan != Object.class) {
-            try {
-                return Optional.of(scan.getDeclaredField(name));
-            } catch (NoSuchFieldException e) {
-                scan = scan.getSuperclass();
+        String key = clazz.getName() + "." + name;
+        return fieldCache.computeIfAbsent(key, k -> {
+            Class<?> scan = clazz;
+            while (scan != null && scan != Object.class) {
+                try {
+                    Field f = scan.getDeclaredField(name);
+                    f.setAccessible(true);
+                    return Optional.of(f);
+                } catch (NoSuchFieldException e) {
+                    scan = scan.getSuperclass();
+                }
             }
-        }
-        LOG.debug("{} Field not found in hierarchy: {}.{}", TAG, clazz.getName(), name);
-        return Optional.empty();
+            LOG.debug("{} Field not found in hierarchy: {}.{}", TAG, clazz.getName(), name);
+            return Optional.empty();
+        });
     }
 
     // ── Method discovery ───────────────────────────────────────────
 
-    /** Walk the class hierarchy to find a declared method by name and parameter types. */
+    /** Walk the class hierarchy to find a declared method by name and parameter types. Results are cached. */
     public static Method findMethod(Class<?> clazz, String name, Class<?>[] paramTypes) {
+        String key = methodKey(clazz, name, paramTypes);
+        Method cached = methodCache.get(key);
+        if (cached != null) return cached;
+
         Class<?> scan = clazz;
         while (scan != null && scan != Object.class) {
             try {
                 Method m = scan.getDeclaredMethod(name, paramTypes);
                 m.setAccessible(true);
+                methodCache.put(key, m);
                 return m;
             } catch (NoSuchMethodException e) {
                 // Try with auto-unboxing tolerance: if a param is Integer.class, also try int.class
@@ -147,6 +161,7 @@ public final class Reflect {
                         if (relaxed != paramTypes) {
                             Method m = scan.getDeclaredMethod(name, relaxed);
                             m.setAccessible(true);
+                            methodCache.put(key, m);
                             return m;
                         }
                     } catch (NoSuchMethodException ignored) {}
@@ -155,6 +170,15 @@ public final class Reflect {
             }
         }
         return null;
+    }
+
+    private static String methodKey(Class<?> clazz, String name, Class<?>[] paramTypes) {
+        StringBuilder sb = new StringBuilder(clazz.getName()).append('.').append(name).append('(');
+        for (int i = 0; i < paramTypes.length; i++) {
+            if (i > 0) sb.append(',');
+            sb.append(paramTypes[i].getName());
+        }
+        return sb.append(')').toString();
     }
 
     /**

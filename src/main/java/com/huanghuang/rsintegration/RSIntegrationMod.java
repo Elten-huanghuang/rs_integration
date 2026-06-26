@@ -47,6 +47,10 @@ public final class RSIntegrationMod {
         if (enabled(RSIntegrationConfig.ENABLE_EIDOLON, "eidolon"))
             com.huanghuang.rsintegration.mods.eidolon.EidolonRSModule.initCommon();
 
+        // --- Touhou Little Maid -------------------------------------------
+        if (enabled(RSIntegrationConfig.ENABLE_TOUHOU_LITTLE_MAID, "touhou_little_maid"))
+            com.huanghuang.rsintegration.mods.touhoulittlemaid.TlmRSModule.initCommon();
+
         // Subsystems
         if (RSIntegrationConfig.ENABLE_CONTAINER_TRANSFER.get()) {
             com.huanghuang.rsintegration.transfer.ContainerTransferNetworkHandler.register();

@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.network;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.mods.goety.GoetyRSModule;
+import com.huanghuang.rsintegration.sidepanel.RSInventoryTransferHandler;
 import mezz.jei.api.IModPlugin;
 import mezz.jei.api.JeiPlugin;
 import mezz.jei.api.registration.IRecipeTransferRegistration;
@@ -52,6 +53,11 @@ public final class RSJeiPlugin implements IModPlugin {
     public void registerRecipeTransferHandlers(IRecipeTransferRegistration registration) {
         if (RSIntegrationConfig.ENABLE_GOETY.get() && ModList.get().isLoaded("goety")) {
             GoetyRSModule.registerRecipeTransferHandlers(registration);
+        }
+        if (RSIntegrationConfig.ENABLE_RS_SIDE_PANEL.get()
+                && ModList.get().isLoaded("refinedstorage")) {
+            registration.addUniversalRecipeTransferHandler(
+                    new RSInventoryTransferHandler());
         }
     }
 }

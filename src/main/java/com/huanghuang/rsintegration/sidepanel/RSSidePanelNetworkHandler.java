@@ -63,6 +63,11 @@ public final class RSSidePanelNetworkHandler {
                 RSSidePanelDeltaPacket::encode,
                 RSSidePanelDeltaPacket::decode,
                 RSSidePanelDeltaPacket::handle);
+        CHANNEL.registerMessage(4,
+                RSInventoryTransferPacket.class,
+                RSInventoryTransferPacket::encode,
+                RSInventoryTransferPacket::decode,
+                RSInventoryTransferPacket::handle);
         registered = true;
 
         if (!logoutHookRegistered) {
@@ -111,7 +116,11 @@ public final class RSSidePanelNetworkHandler {
     // ── convenience senders ────────────────────────────────────────
 
     public static void sendRequestSync() {
-        CHANNEL.sendToServer(new RSSidePanelRequestPacket());
+        CHANNEL.sendToServer(new RSSidePanelRequestPacket(true, false));
+    }
+
+    public static void sendCloseRequest() {
+        CHANNEL.sendToServer(new RSSidePanelRequestPacket(false, true));
     }
 
     public static void sendSync(ServerPlayer player, List<UUID> ids, List<ItemStack> items,
@@ -124,8 +133,8 @@ public final class RSSidePanelNetworkHandler {
                         totalSlotCount, networkAvailable, networkName));
     }
 
-    public static void sendClick(ItemStack targetItem, byte action, boolean isShift) {
-        CHANNEL.sendToServer(new RSSidePanelClickPacket(targetItem, action, isShift));
+    public static void sendClick(ItemStack targetItem, byte action, boolean isShift, UUID panelId) {
+        CHANNEL.sendToServer(new RSSidePanelClickPacket(targetItem, action, isShift, panelId));
     }
 
     public static void sendDragDistribute(List<ItemStack> items) {
@@ -209,24 +218,38 @@ public final class RSSidePanelNetworkHandler {
             private void queue(ItemStack stack, int change, UUID entryId) {
                 if (stack == null || stack.getItem() == null) return;
 
-                // Get stable UUID from the storage cache entry when possible
+                // Query the real remaining count from the storage cache.
+                // RS fires onChanged with the pre-extraction stack, so
+                // stack.getCount() may be stale (e.g. 1 when the last item
+                // was just extracted).  Always read the cache for ground truth.
+                var list = cache.getList();
+                int absoluteCount = 0;
                 UUID stackId = entryId;
-                if (stackId == null) {
-                    // Fallback: try to look up from cache list
-                    var list = cache.getList();
-                    if (list != null) {
+
+                if (list != null) {
+                    ItemStack cached = stackId != null ? list.get(stackId) : null;
+                    if (cached != null && !cached.isEmpty()) {
+                        absoluteCount = cached.getCount();
+                    } else {
                         var entry = list.getEntry(stack, 1);
-                        if (entry != null) stackId = entry.getId();
+                        if (entry != null) {
+                            var es = entry.getStack();
+                            if (es != null) absoluteCount = es.getCount();
+                            if (stackId == null) stackId = entry.getId();
+                        }
                     }
                 }
-                if (stackId == null) return;
+                if (stackId == null) {
+                    stackId = UUID.randomUUID();
+                }
 
                 ItemStack toSend;
-                if (stack.getCount() <= 0) {
+                if (absoluteCount <= 0) {
                     toSend = new ItemStack(stack.getItem(), 0);
                     if (stack.getTag() != null) toSend.setTag(stack.getTag().copy());
                 } else {
                     toSend = stack.copy();
+                    toSend.setCount(absoluteCount);
                 }
 
                 long ts = System.currentTimeMillis();

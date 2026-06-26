@@ -239,14 +239,20 @@ public final class ExtractionLedger {
             switch (rec.source) {
                 case ALTAR_BINDING -> {
                     if (rec.sourceNetwork != null) {
-                        rec.sourceNetwork.insertItem(s, s.getCount(), Action.PERFORM);
+                        ItemStack leftover = rec.sourceNetwork.insertItem(s, s.getCount(), Action.PERFORM);
+                        if (!leftover.isEmpty()) {
+                            ItemHandlerHelper.giveItemToPlayer(player, leftover);
+                        }
                     } else {
                         ItemHandlerHelper.giveItemToPlayer(player, s);
                     }
                 }
                 case NETWORK -> {
                     if (rec.sourceNetwork != null) {
-                        rec.sourceNetwork.insertItem(s, s.getCount(), Action.PERFORM);
+                        ItemStack leftover = rec.sourceNetwork.insertItem(s, s.getCount(), Action.PERFORM);
+                        if (!leftover.isEmpty()) {
+                            ItemHandlerHelper.giveItemToPlayer(player, leftover);
+                        }
                     } else {
                         ItemHandlerHelper.giveItemToPlayer(player, s);
                     }
@@ -264,8 +270,8 @@ public final class ExtractionLedger {
 
     /** Explicitly roll back all reservations without committing. */
     public void rollback(ServerPlayer player) {
-        requireState(State.IDLE, State.RESERVING, State.RESERVED, State.COMMITTING);
         if (state == State.IDLE || state == State.ROLLED_BACK) return;
+        requireState(State.RESERVING, State.RESERVED, State.COMMITTING);
         releaseReservations(player);
         transition(State.ROLLED_BACK);
     }
@@ -522,6 +528,35 @@ public final class ExtractionLedger {
                     }));
         }
         return out;
+    }
+
+    /**
+     * Refund all committed entries by re-inserting their templates back to
+     * the original source (network, altar binding, or player inventory).
+     * Best-effort: individual failures are logged but do not abort the loop.
+     */
+    public void refundCommitted(@Nullable INetwork network, ServerPlayer player) {
+        if (state != State.COMMITTED) return;
+        for (Entry e : entries) {
+            if (e.template.isEmpty()) continue;
+            ItemStack refund = e.template.copyWithCount(e.count);
+            switch (e.source) {
+                case NETWORK, ALTAR_BINDING -> {
+                    INetwork net = e.sourceNetwork != null ? e.sourceNetwork : network;
+                    if (net != null) {
+                        ItemStack leftover = net.insertItem(refund, refund.getCount(), Action.PERFORM);
+                        if (!leftover.isEmpty()) {
+                            RSIntegrationMod.LOGGER.warn("[RSI-Ledger] Refund: RS insert had leftover for {} x{}",
+                                    refund.getDisplayName().getString(), refund.getCount());
+                            ItemHandlerHelper.giveItemToPlayer(player, leftover);
+                        }
+                    } else {
+                        ItemHandlerHelper.giveItemToPlayer(player, refund);
+                    }
+                }
+                case PLAYER_INVENTORY -> ItemHandlerHelper.giveItemToPlayer(player, refund);
+            }
+        }
     }
 
     public String describePending() {

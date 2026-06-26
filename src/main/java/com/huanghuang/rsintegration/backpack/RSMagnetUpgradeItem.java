@@ -6,6 +6,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
@@ -90,12 +91,20 @@ public class RSMagnetUpgradeItem extends MagnetUpgradeItem {
     }
 
     private static String dimDisplayName(String dimKey) {
-        return switch (dimKey) {
-            case "minecraft:overworld" -> Component.translatable("rsi.magnet.dim.overworld").getString();
-            case "minecraft:the_nether" -> Component.translatable("rsi.magnet.dim.the_nether").getString();
-            case "minecraft:the_end" -> Component.translatable("rsi.magnet.dim.the_end").getString();
-            default -> dimKey;
-        };
+        ResourceLocation rl = ResourceLocation.tryParse(dimKey);
+        if (rl == null) return dimKey;
+        String path = rl.getPath();
+        // Convert snake_case to Title Case: "the_nether" → "The Nether"
+        String[] parts = path.split("_");
+        StringBuilder sb = new StringBuilder();
+        for (String part : parts) {
+            if (!part.isEmpty()) {
+                if (sb.length() > 0) sb.append(' ');
+                sb.append(Character.toUpperCase(part.charAt(0)));
+                if (part.length() > 1) sb.append(part.substring(1));
+            }
+        }
+        return sb.toString();
     }
 
     @Override

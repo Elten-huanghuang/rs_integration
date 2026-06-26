@@ -31,17 +31,19 @@ public final class RSSidePanelClickPacket {
 
     final byte action;
     final boolean isShift;
-    final ItemStack targetItem;    // 替代原来的 slotIndex
-    final List<ItemStack> dragItems; // 替代原来的 List<Integer>
+    final ItemStack targetItem;
+    final List<ItemStack> dragItems;
     final ItemStack carriedItem;
+    final UUID panelId; // matches RS onExtract(player, UUID id, ...)
 
     // 单次点击提取
-    public RSSidePanelClickPacket(ItemStack targetItem, byte action, boolean isShift) {
+    public RSSidePanelClickPacket(ItemStack targetItem, byte action, boolean isShift, UUID panelId) {
         this.action = action;
         this.isShift = isShift;
         this.targetItem = targetItem.copy();
         this.dragItems = Collections.emptyList();
         this.carriedItem = ItemStack.EMPTY;
+        this.panelId = panelId;
     }
 
     // 拖拽分配
@@ -51,15 +53,17 @@ public final class RSSidePanelClickPacket {
         this.targetItem = ItemStack.EMPTY;
         this.dragItems = new ArrayList<>(dragItems);
         this.carriedItem = ItemStack.EMPTY;
+        this.panelId = null;
     }
 
-    // Insert (no longer trusts client packet; server reads authoritative carried)
+    // Insert
     public RSSidePanelClickPacket(ItemStack carriedItem, boolean isRightClick) {
         this.action = ACTION_INSERT;
-        this.isShift = isRightClick; // repurposed: true = right-click insert-single
+        this.isShift = isRightClick;
         this.targetItem = ItemStack.EMPTY;
         this.dragItems = Collections.emptyList();
         this.carriedItem = carriedItem.copy();
+        this.panelId = null;
     }
 
     void encode(FriendlyByteBuf buf) {
@@ -69,10 +73,12 @@ public final class RSSidePanelClickPacket {
             for (ItemStack stack : dragItems) writeStack(buf, stack);
         } else if (action == ACTION_INSERT) {
             writeStack(buf, carriedItem);
-            buf.writeBoolean(isShift); // isRightClick
+            buf.writeBoolean(isShift);
         } else {
             writeStack(buf, targetItem);
             buf.writeBoolean(isShift);
+            buf.writeBoolean(panelId != null);
+            if (panelId != null) buf.writeUUID(panelId);
         }
     }
 
@@ -87,7 +93,10 @@ public final class RSSidePanelClickPacket {
         if (action == ACTION_INSERT) {
             return new RSSidePanelClickPacket(readStack(buf), buf.readBoolean());
         }
-        return new RSSidePanelClickPacket(readStack(buf), action, buf.readBoolean());
+        ItemStack item = readStack(buf);
+        boolean shift = buf.readBoolean();
+        UUID id = buf.readBoolean() ? buf.readUUID() : null;
+        return new RSSidePanelClickPacket(item, action, shift, id);
     }
 
     private static void writeStack(FriendlyByteBuf buf, ItemStack stack) {
@@ -125,7 +134,7 @@ public final class RSSidePanelClickPacket {
             } else if (packet.action == ACTION_INSERT) {
                 handleInsert(player, packet.isShift); // isShift repurposed as isRightClick
             } else {
-                handleSingleClick(player, packet.targetItem, packet.action, packet.isShift);
+                handleSingleClick(player, packet.targetItem, packet.action, packet.isShift, packet.panelId);
             }
         });
         context.setPacketHandled(true);
@@ -135,11 +144,11 @@ public final class RSSidePanelClickPacket {
     private static final int EXTRACT_HALF  = 1;
     private static final int EXTRACT_SHIFT = 4;
 
-    private static void handleSingleClick(ServerPlayer player, ItemStack targetItem, byte action, boolean isShift) {
+    private static void handleSingleClick(ServerPlayer player, ItemStack targetItem,
+                                           byte action, boolean isShift, UUID panelId) {
         INetwork network = RSIntegration.resolveNetworkFromPlayer(player);
         if (network == null || targetItem.isEmpty()) return;
 
-        // Security check — matches RS ItemGridHandler.onExtract
         if (network.getSecurityManager() != null
                 && !network.getSecurityManager().hasPermission(Permission.EXTRACT, player)) {
             RSIntegrationMod.LOGGER.debug("[RSI] Extract blocked by security manager for {}", player.getGameProfile().getName());
@@ -151,11 +160,30 @@ public final class RSSidePanelClickPacket {
         if (cache == null) return;
         var list = cache.getList();
         if (list == null) return;
-        var entry = list.getEntry(targetItem, 1);
-        if (entry == null) return;
-        UUID stackId = entry.getId();
-        ItemStack stored = list.get(stackId);
-        if (stored == null || stored.isEmpty()) return;
+
+        // Use the client-supplied UUID first (matches RS onExtract(player, UUID, ...))
+        // falling back to ItemStack lookup for older/unknown clients.
+        UUID stackId = panelId;
+        ItemStack stored;
+        if (stackId != null) {
+            stored = list.get(stackId);
+            if (stored == null || stored.isEmpty()) stackId = null;
+        } else {
+            stored = null;
+        }
+        if (stackId == null) {
+            var entry = list.getEntry(targetItem, 1);
+            if (entry == null) {
+                forceSyncZero(player, targetItem, panelId);
+                return;
+            }
+            stackId = entry.getId();
+            stored = list.get(stackId);
+        }
+        if (stored == null || stored.isEmpty()) {
+            forceSyncZero(player, targetItem, stackId);
+            return;
+        }
 
         int available = stored.getCount();
         int maxStack = stored.getMaxStackSize();
@@ -166,11 +194,9 @@ public final class RSSidePanelClickPacket {
                 count = 1;
                 break;
             case ACTION_EXTRACT_STACK:
-                if (available <= 1) { count = 1; }
-                else {
-                    count = available / 2;
-                    if (maxStack > 1 && count > maxStack / 2) count = maxStack / 2;
-                }
+                count = available / 2;
+                if (maxStack > 1 && count > maxStack / 2) count = maxStack / 2;
+                if (count < 1) count = 1;
                 break;
             case ACTION_EXTRACT_MAX:
                 count = maxStack;
@@ -196,17 +222,27 @@ public final class RSSidePanelClickPacket {
 
         ItemStack extractTemplate = stored.copy();
         extractTemplate.setCount(1);
-        int totalBefore = available;
 
-        ItemStack extracted = network.extractItem(extractTemplate, count, Action.PERFORM);
-        if (extracted.isEmpty()) {
-            sendDeltaForItem(player, network, extractTemplate, stackId);
+        // SIMULATE first — matches RS ItemGridHandler.onExtract
+        ItemStack simulated = network.extractItem(extractTemplate, count, Action.SIMULATE);
+        if (simulated.isEmpty()) {
+            forceSyncZero(player, targetItem, stackId);
             return;
         }
 
+        // Record modification time — matches RS tracker.changed() before extract
+        var tracker = network.getItemStorageTracker();
+        if (tracker != null) {
+            tracker.changed(player, stored.copy());
+        }
+
+        // PERFORM extract
+        ItemStack extracted = network.extractItem(extractTemplate, count, Action.PERFORM);
+        if (extracted.isEmpty()) return;
+
         if (isShift) {
             ItemStack remainder = ItemHandlerHelper.insertItemStacked(
-                    new PlayerMainInvWrapper(player.getInventory()), extracted, false);
+                    playerFullInv(player), extracted, false);
             if (!remainder.isEmpty()) player.drop(remainder, false);
         } else {
             if (cursor.isEmpty()) {
@@ -219,11 +255,18 @@ public final class RSSidePanelClickPacket {
         player.connection.send(new net.minecraft.network.protocol.game.ClientboundContainerSetSlotPacket(
                 -1, player.containerMenu.getStateId(), -1, player.containerMenu.getCarried()));
 
-        // Authoritative delta with UUID
-        int remainingCount = Math.max(0, totalBefore - extracted.getCount());
-        ItemStack deltaStack = extractTemplate.copy();
-        deltaStack.setCount(remainingCount);
-        sendCraftableDelta(player, network, deltaStack, extractTemplate, stackId);
+        // Energy drain — matches RS onExtract for wireless grid
+        try {
+            var nim = network.getNetworkItemManager();
+            if (nim != null) {
+                var cfg = com.refinedmods.refinedstorage.RS.SERVER_CONFIG.getWirelessGrid();
+                nim.drainEnergy(player, cfg.getExtractUsage());
+            }
+        } catch (Exception e) { RSIntegrationMod.LOGGER.warn("[RSI] Energy drain failed", e); }
+
+        // Delta is handled by the storage-cache listener registered in
+        // RSSidePanelNetworkHandler — matches RS native pattern where
+        // GridItemDeltaMessage is sent by the listener, not the handler.
     }
 
     private static void handleInsert(ServerPlayer player, boolean isRightClick) {
@@ -245,17 +288,23 @@ public final class RSSidePanelClickPacket {
             return;
         }
 
-        // Matching RS native ItemGridHandler.onInsert patterns.
         ItemStack template = serverCarried.copy();
+
+        // Record modification time — matches RS tracker.changed() before insert
+        var tracker = network.getItemStorageTracker();
+        if (tracker != null) {
+            tracker.changed(player, template.copy());
+        }
+
         if (isRightClick) {
-            // Right-click: insert single item. RS does direct PERFORM.
+            // Right-click: insert single item — matches RS onInsert single path
             template.setCount(1);
             ItemStack remainder = network.insertItem(template.copy(), 1, Action.PERFORM);
             if (remainder.isEmpty()) serverCarried.shrink(1);
         } else {
-            // Left-click: insert entire stack with crafting-tracker notification.
+            // Left-click: insert entire stack — matches RS onInsert full-stack path
             int count = serverCarried.getCount();
-            ItemStack remainder = network.insertItemTracked(template.copy(), count);
+            ItemStack remainder = network.insertItem(template.copy(), count, Action.PERFORM);
             int inserted = count - remainder.getCount();
             if (inserted > 0) serverCarried.shrink(inserted);
         }
@@ -274,9 +323,10 @@ public final class RSSidePanelClickPacket {
                 var cfg = com.refinedmods.refinedstorage.RS.SERVER_CONFIG.getWirelessGrid();
                 nim.drainEnergy(player, cfg.getInsertUsage());
             }
-        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Energy drain skipped", e); }
+        } catch (Exception e) { RSIntegrationMod.LOGGER.warn("[RSI] Energy drain failed", e); }
 
-        sendDeltaForItem(player, network, template, null);
+        // Delta is handled by the storage-cache listener registered in
+        // RSSidePanelNetworkHandler — matches RS native pattern.
     }
 
     private static void handleDragDistribute(ServerPlayer player, List<ItemStack> dragItems) {
@@ -290,82 +340,50 @@ public final class RSSidePanelClickPacket {
         }
         if (!network.canRun()) return;
 
-        var cache = network.getItemStorageCache();
-        var list = cache != null ? cache.getList() : null;
+        var tracker = network.getItemStorageTracker();
 
         for (ItemStack template : dragItems) {
             ItemStack req = template.copy();
             req.setCount(1);
+
+            // SIMULATE first — matches RS pattern
+            ItemStack sim = network.extractItem(req, 1, Action.SIMULATE);
+            if (sim.isEmpty()) continue;
+
+            if (tracker != null) tracker.changed(player, req.copy());
+
             ItemStack extracted = network.extractItem(req, 1, Action.PERFORM);
             if (!extracted.isEmpty()) {
-                ItemStack remainder = ItemHandlerHelper.insertItemStacked(new PlayerMainInvWrapper(player.getInventory()), extracted, false);
+                ItemStack remainder = ItemHandlerHelper.insertItemStacked(
+                        playerFullInv(player), extracted, false);
                 if (!remainder.isEmpty()) player.drop(remainder, false);
-                // Try to get UUID from storage cache for accurate delta
-                UUID sid = null;
-                if (list != null) {
-                    var e = list.getEntry(template, 1);
-                    if (e != null) sid = e.getId();
-                }
-                sendDeltaForItem(player, network, template, sid);
             }
         }
         player.containerMenu.broadcastChanges();
-    }
 
-    /** Query current count of {@code template} from the RS network and send an
-     *  authoritative delta with UUID to the client. */
-    private static void sendDeltaForItem(ServerPlayer player, INetwork network,
-                                         ItemStack template, UUID stackId) {
-        ItemStack probe = template.copy();
-        probe.setCount(1);
-        ItemStack current = network.extractItem(probe, Integer.MAX_VALUE, Action.SIMULATE);
-        int count = current.getCount();
-
-        ItemStack deltaStack = probe.copy();
-        deltaStack.setCount(count);
-
-        // If no UUID provided, try to find it from the storage cache
-        UUID sid = stackId;
-        if (sid == null) {
-            var cache = network.getItemStorageCache();
-            if (cache != null) {
-                var list = cache.getList();
-                if (list != null) {
-                    var entry = list.getEntry(probe, 1);
-                    if (entry != null) sid = entry.getId();
-                }
-            }
-        }
-        if (sid == null) sid = UUID.randomUUID(); // last resort
-
-        sendCraftableDelta(player, network, deltaStack, probe, sid);
-    }
-
-    private static void sendCraftableDelta(ServerPlayer player, INetwork network,
-                                           ItemStack deltaStack, ItemStack probe, UUID stackId) {
-        long ts = System.currentTimeMillis();
-        var tracker = network.getItemStorageTracker();
-        if (tracker != null) {
-            var te = tracker.get(probe);
-            if (te != null) ts = te.getTime();
-        }
-
-        boolean craftable = false;
+        // Energy drain per extracted item — matches RS onExtract
         try {
-            var cm = network.getCraftingManager();
-            if (cm != null) {
-                for (var pattern : cm.getPatterns()) {
-                    for (ItemStack out : pattern.getOutputs()) {
-                        if (!out.isEmpty() && ItemStack.isSameItem(out, probe)) {
-                            craftable = true;
-                            break;
-                        }
-                    }
-                    if (craftable) break;
-                }
+            var nim = network.getNetworkItemManager();
+            if (nim != null) {
+                var cfg = com.refinedmods.refinedstorage.RS.SERVER_CONFIG.getWirelessGrid();
+                nim.drainEnergy(player, cfg.getExtractUsage() * dragItems.size());
             }
-        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Craftable probe failed", e); }
+        } catch (Exception e) { RSIntegrationMod.LOGGER.warn("[RSI] Energy drain failed", e); }
 
-        RSSidePanelDeltaPacket.send(player, stackId, deltaStack, ts, craftable);
+        // Delta is handled by the storage-cache listener.
+    }
+
+    /** Full player inventory including main (36), armor (4), and offhand (1) slots.
+     *  Matches RS native {@code ItemGridHandler} behavior for shift-click extraction. */
+    private static net.minecraftforge.items.IItemHandler playerFullInv(ServerPlayer player) {
+        return new PlayerMainInvWrapper(player.getInventory());
+    }
+
+    private static void forceSyncZero(ServerPlayer player, ItemStack targetItem, UUID panelId) {
+        ItemStack zeroStack = targetItem.copy();
+        zeroStack.setCount(0);
+        RSSidePanelNetworkHandler.sendDeltaImmediate(player,
+                panelId != null ? panelId : UUID.randomUUID(),
+                zeroStack, System.currentTimeMillis(), false);
     }
 }

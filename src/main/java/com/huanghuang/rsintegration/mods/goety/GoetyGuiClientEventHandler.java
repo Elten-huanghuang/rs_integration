@@ -68,7 +68,7 @@ public final class GoetyGuiClientEventHandler {
                 event.getToolTip().add(
                         Component.translatable("gui.rs_integration.altar.bound_item_header"));
                 for (BindingStorage.BindingEntry entry : bindings) {
-                    Component blockName = Component.translatable(entry.blockKey());
+                    Component blockName = com.huanghuang.rsintegration.network.BindingEventHandler.resolveBlockName(entry.blockKey());
                     event.getToolTip().add(
                             Component.literal("  ").append(blockName)
                                     .append(" @ " + entry.pos().toShortString()));

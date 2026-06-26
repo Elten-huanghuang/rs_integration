@@ -109,6 +109,7 @@ public final class BatchCraftStartPacket {
             }
 
             if (!delegate.validateAndInit(player, packet.recipeId, packet.dim, packet.pos)) {
+                player.sendSystemMessage(Component.translatable("rsi.generic.error.machine_not_found"));
                 return;
             }
 

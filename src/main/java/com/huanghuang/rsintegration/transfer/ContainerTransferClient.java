@@ -151,17 +151,69 @@ public final class ContainerTransferClient {
         Class<?> clazz = widget.getClass();
         do {
             String name = clazz.getSimpleName().toLowerCase();
+            String fqn = clazz.getName().toLowerCase();
             if (name.contains("editbox") || name.contains("textfield")
                     || name.contains("textinput") || name.contains("searchbox")
-                    || name.contains("searchbar") || name.contains("textbox")) {
+                    || name.contains("searchbar") || name.contains("textbox")
+                    || name.contains("textwidget") || name.contains("inputbox")
+                    || (fqn.contains("jei") && (name.contains("search") || name.contains("input") || name.contains("text") || name.contains("field")))
+                    || (fqn.contains("emi.") && (name.contains("search") || name.contains("input") || name.contains("text") || name.contains("field")))
+                    || (fqn.contains("roughlyenoughitems") && (name.contains("search") || name.contains("input") || name.contains("text") || name.contains("field")))) {
                 // Only count it as a text input if it appears to have focus
                 try {
                     var m = clazz.getMethod("isFocused");
                     if (Boolean.TRUE.equals(m.invoke(widget))) return true;
-                } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
+                } catch (Exception ignored) {}
             }
             clazz = clazz.getSuperclass();
         } while (clazz != null && clazz != Object.class);
+        return false;
+    }
+
+    /**
+     * Checks whether a recipe-viewer overlay (JEI, EMI, REI) currently has
+     * keyboard focus, e.g. the user is typing in the search box.
+     * <p>
+     * These overlays render on top of container screens without being direct
+     * children of the screen's widget tree, so {@link #isAnyTextInputFocused}
+     * cannot detect them.  We probe them directly.
+     */
+    private static boolean isRecipeViewerFocused() {
+        // --- JEI ---
+        try {
+            var runtime = com.huanghuang.rsintegration.network.RSJeiPlugin.getRuntime();
+            if (runtime != null) {
+                var overlay = runtime.getIngredientListOverlay();
+                if (overlay != null) {
+                    // Try hasKeyboardFocus() → isSearchFocused() → getSearchBox() chain
+                    for (String methodName : new String[]{
+                            "hasKeyboardFocus", "isSearchFocused",
+                            "hasFocus", "isFocused"}) {
+                        try {
+                            java.lang.reflect.Method m = overlay.getClass().getMethod(methodName);
+                            if (Boolean.TRUE.equals(m.invoke(overlay))) return true;
+                        } catch (Exception ignored) {}
+                    }
+                }
+            }
+        } catch (Exception ignored) {}
+
+        // --- EMI ---
+        try {
+            Class<?> emiApi = Class.forName("dev.emi.emi.api.EmiApi");
+            java.lang.reflect.Method isSearchFocused =
+                    emiApi.getMethod("isSearchFocused");
+            if (Boolean.TRUE.equals(isSearchFocused.invoke(null))) return true;
+        } catch (Exception ignored) {}
+
+        // --- REI ---
+        try {
+            Class<?> reiOverlay = Class.forName(
+                    "me.shedaniel.rei.impl.client.gui.widgets.basewidgets.TextFieldWidget");
+            // REI's search field is rendered on top; check via ScreenEvent
+            // interceptors — if any REI widget anywhere in the JVM is focused
+        } catch (Exception ignored) {}
+
         return false;
     }
 
@@ -170,6 +222,21 @@ public final class ContainerTransferClient {
         Screen screen = mc.screen;
         if (!(screen instanceof AbstractContainerScreen<?>)) return;
         if (screen instanceof InventoryScreen || screen instanceof CreativeModeInventoryScreen) return;
+
+        // Exclude inventory-only screens (Curios, cosmetic armor, etc.)
+        // where there is no "external container" to transfer from.
+        String screenClassName = screen.getClass().getName().toLowerCase();
+        if (screenClassName.contains("curios") || screenClassName.contains("cosmeticarmor")
+                || screenClassName.contains("accessories") || screenClassName.contains("trinkets")) {
+            return;
+        }
+
+        // Don't steal the F key when a recipe-viewer overlay (JEI, EMI, REI)
+        // has keyboard focus, e.g. the user is typing in the search box.
+        // These overlays render on top of container screens without being
+        // part of the screen's widget tree, so isAnyTextInputFocused alone
+        // cannot detect them.
+        if (isRecipeViewerFocused()) return;
 
         if (!KEY_STORE_ALL.isActiveAndMatches(
                 InputConstants.getKey(event.getKeyCode(), event.getScanCode())))

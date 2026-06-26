@@ -52,7 +52,8 @@ public final class BatchCraftManager {
                 task.tick(server);
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.error("[RSI-Batch] Task tick error for recipe {}:", task.getRecipeId(), e);
-                task.markFailed("Internal error: " + e.getMessage());
+                String msg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+                task.markFailed("Internal error: " + msg);
                 removeTask(task);
             }
         }

@@ -413,14 +413,17 @@ public final class FaBatchDelegate implements IBatchDelegate {
         // Phase 3: require a RitualStarterItem (gavel/hammer) — FA
         // enforces this through its right-click handler; calling
         // tryStartRitual directly bypasses that requirement.
+        RSIntegrationMod.LOGGER.info("[RSI-Batch-FA] (single) Searching for RitualStarterItem...");
         final ItemStack starterStack = findRitualStarterItem(player, network);
         if (starterStack.isEmpty()) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] tryStartSingleCraft: no usable RitualStarterItem in inventory or RS");
+            RSIntegrationMod.LOGGER.warn("[RSI-Batch-FA] tryStartSingleCraft: no usable RitualStarterItem in inventory or RS");
             player.sendSystemMessage(Component.translatable("rsi.fa.error.missing_starter_item"));
             rollbackAll();
             ledger.rollback(player);
             return false;
         }
+        RSIntegrationMod.LOGGER.info("[RSI-Batch-FA] (single) Found starter '{}' from {}",
+                starterStack.getHoverName().getString(), starterFromRS != null ? "RS" : "inventory");
 
         // Phase 4: start the ritual BEFORE committing ledger
         try {
@@ -432,11 +435,15 @@ public final class FaBatchDelegate implements IBatchDelegate {
                     new Class<?>[]{booleanConsumerClass},
                     callback);
 
+            RSIntegrationMod.LOGGER.info("[RSI-Batch-FA] (single) Invoking tryStartRitual with starter='{}'",
+                    starterStack.getHoverName().getString());
             getMethod(ritualManagerClass, "tryStartRitual", essencesStorageClass, booleanConsumerClass)
                     .invoke(ritualManager, essencesStorage, proxy);
+            RSIntegrationMod.LOGGER.info("[RSI-Batch-FA] (single) tryStartRitual returned: wasCalled={} accepted={}",
+                    callback.wasCalled, callback.accepted);
 
             if (callback.wasCalled && !callback.accepted) {
-                RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] tryStartSingleCraft: ritual rejected by forge");
+                RSIntegrationMod.LOGGER.warn("[RSI-Batch-FA] tryStartSingleCraft: ritual rejected by forge");
                 rollbackAll();
                 ledger.rollback(player);
                 returnStarterToSource(starterStack);
@@ -636,13 +643,16 @@ public final class FaBatchDelegate implements IBatchDelegate {
         // Require a RitualStarterItem (gavel/hammer) — FA enforces this
         // through its right-click handler; calling tryStartRitual directly
         // bypasses that requirement.
+        RSIntegrationMod.LOGGER.info("[RSI-Batch-FA] Searching for RitualStarterItem...");
         final ItemStack starterStack = findRitualStarterItem(player, network);
         if (starterStack.isEmpty()) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] tryStartWithMaterials: no usable RitualStarterItem in inventory or RS");
+            RSIntegrationMod.LOGGER.warn("[RSI-Batch-FA] tryStartWithMaterials: no usable RitualStarterItem in inventory or RS");
             player.sendSystemMessage(Component.translatable("rsi.fa.error.missing_starter_item"));
             rollbackAll();
             return false;
         }
+        RSIntegrationMod.LOGGER.info("[RSI-Batch-FA] Found starter '{}' from {}",
+                starterStack.getHoverName().getString(), starterFromRS != null ? "RS" : "inventory");
 
         // Start the ritual using forge's actual essence storage
         try {
@@ -654,12 +664,14 @@ public final class FaBatchDelegate implements IBatchDelegate {
                     new Class<?>[]{booleanConsumerClass},
                     callback);
 
+            RSIntegrationMod.LOGGER.info("[RSI-Batch-FA] Invoking tryStartRitual (withMaterials) with starter='{}'",
+                    starterStack.getHoverName().getString());
             getMethod(ritualManagerClass, "tryStartRitual", essencesStorageClass, booleanConsumerClass)
                     .invoke(ritualManager, essencesStorage, proxy);
+            RSIntegrationMod.LOGGER.info("[RSI-Batch-FA] tryStartRitual (withMaterials) returned: wasCalled={} accepted={}",
+                    callback.wasCalled, callback.accepted);
 
             if (callback.wasCalled && !callback.accepted) {
-                // Ritual rejected — most likely essences or ingredient mismatch
-                RSIntegrationMod.LOGGER.warn("[RSI-Batch-FA] tryStartWithMaterials: ritual rejected by forge");
                 // Diagnostic: dump state to help trace the rejection reason
                 try {
                     Object vR = getValidRitualSafe(ritualManager);
@@ -780,6 +792,17 @@ public final class FaBatchDelegate implements IBatchDelegate {
 
     @Override
     public void onBatchFailed(ServerPlayer player, String reason) {
+        // Defensive: if starterFromRS still holds an extracted item that was
+        // never consumed or returned (e.g. chain failed between extraction
+        // and consumeRitualStarterUse), return it now.
+        if (starterFromRS != null && network != null) {
+            ItemStack leftover = network.insertItem(starterFromRS, starterFromRS.getCount(),
+                    com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+            if (!leftover.isEmpty()) {
+                ItemHandlerHelper.giveItemToPlayer(player, leftover);
+            }
+            starterFromRS = null;
+        }
         rollbackAll();
         ledger = null;
         sharedLedger = null;
@@ -818,8 +841,11 @@ public final class FaBatchDelegate implements IBatchDelegate {
             ItemStack stack = getForgeSlot(forge, mainSlot);
             if (!stack.isEmpty()) {
                 if (network != null) {
-                    network.insertItem(stack, stack.getCount(),
+                    ItemStack leftover = network.insertItem(stack, stack.getCount(),
                             com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                    if (!leftover.isEmpty()) {
+                        ItemHandlerHelper.giveItemToPlayer(player, leftover);
+                    }
                 } else if (player != null) {
                     ItemHandlerHelper.giveItemToPlayer(player, stack);
                 }
@@ -835,8 +861,11 @@ public final class FaBatchDelegate implements IBatchDelegate {
                 ItemStack stack = (ItemStack) getMethod(pedestalBEClass, "getStack").invoke(ped);
                 if (stack != null && !stack.isEmpty()) {
                     if (network != null) {
-                        network.insertItem(stack, stack.getCount(),
+                        ItemStack leftover = network.insertItem(stack, stack.getCount(),
                                 com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                        if (!leftover.isEmpty()) {
+                            ItemHandlerHelper.giveItemToPlayer(player, leftover);
+                        }
                     } else if (player != null) {
                         ItemHandlerHelper.giveItemToPlayer(player, stack);
                     }
@@ -857,12 +886,16 @@ public final class FaBatchDelegate implements IBatchDelegate {
     private void returnStarterToSource(ItemStack stack) {
         if (stack.isEmpty()) return;
         if (starterFromRS != null && network != null) {
-            network.insertItem(stack, stack.getCount(),
+            ItemStack leftover = network.insertItem(stack, stack.getCount(),
                     com.refinedmods.refinedstorage.api.util.Action.PERFORM);
             starterFromRS = null;
+            if (!leftover.isEmpty() && player != null) {
+                RSIntegrationMod.LOGGER.warn("[RSI-Batch-FA] returnStarterToSource: RS insert failed, giving '{}' to player",
+                        stack.getHoverName().getString());
+                ItemHandlerHelper.giveItemToPlayer(player, leftover);
+            }
         }
-        // If the starter was from the player's inventory, we didn't modify it
-        // (consumption only happens on success now), so no action needed.
+        starterFromRS = null; // always clear, even if we couldn't re-insert
     }
 
     /**
@@ -881,13 +914,19 @@ public final class FaBatchDelegate implements IBatchDelegate {
         // 1. Check player inventory + offhand
         for (ItemStack stack : player.getInventory().items) {
             if (!stack.isEmpty() && ritualStarterItemClass.isInstance(stack.getItem())
-                    && canStartRitual(stack))
+                    && canStartRitual(stack)) {
+                RSIntegrationMod.LOGGER.info("[RSI-Batch-FA] Found RitualStarterItem '{}' in player inventory",
+                        stack.getHoverName().getString());
                 return stack;
+            }
         }
         ItemStack offhand = player.getOffhandItem();
         if (!offhand.isEmpty() && ritualStarterItemClass.isInstance(offhand.getItem())
-                && canStartRitual(offhand))
+                && canStartRitual(offhand)) {
+            RSIntegrationMod.LOGGER.info("[RSI-Batch-FA] Found RitualStarterItem '{}' in player offhand",
+                    offhand.getHoverName().getString());
             return offhand;
+        }
 
         // 2. Fall back to RS network
         if (network != null) {
@@ -898,7 +937,11 @@ public final class FaBatchDelegate implements IBatchDelegate {
                         ItemStack rsStack = entry.getStack();
                         if (rsStack.isEmpty()) continue;
                         if (!ritualStarterItemClass.isInstance(rsStack.getItem())) continue;
-                        if (!canStartRitual(rsStack)) continue;
+                        if (!canStartRitual(rsStack)) {
+                            RSIntegrationMod.LOGGER.info("[RSI-Batch-FA] RS has RitualStarterItem '{}' but canStartRitual=false",
+                                    rsStack.getHoverName().getString());
+                            continue;
+                        }
 
                         // Extract 1 from RS
                         ItemStack req = rsStack.copy();
@@ -906,13 +949,15 @@ public final class FaBatchDelegate implements IBatchDelegate {
                         ItemStack extracted = network.extractItem(req, 1,
                                 com.refinedmods.refinedstorage.api.util.Action.PERFORM);
                         if (!extracted.isEmpty()) {
+                            RSIntegrationMod.LOGGER.info("[RSI-Batch-FA] Extracted RitualStarterItem '{}' from RS",
+                                    extracted.getHoverName().getString());
                             starterFromRS = extracted;
                             return extracted;
                         }
                     }
                 }
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] RS starter search failed: {}", e.toString());
+                RSIntegrationMod.LOGGER.warn("[RSI-Batch-FA] RS starter search failed: {}", e.toString());
             }
         }
 
@@ -934,34 +979,47 @@ public final class FaBatchDelegate implements IBatchDelegate {
      * it after modifying durability.
      */
     private void consumeRitualStarterUse(ItemStack starterStack, ServerPlayer player) {
-        if (player.isCreative()) return;
+        boolean isCreative = player.isCreative();
         String source = starterFromRS != null ? "RS" : "inventory";
-        try {
-            Object item = starterStack.getItem();
-            int remaining = (int) getMethod(ritualStarterItemClass,
-                    "getRemainingUses", ItemStack.class).invoke(item, starterStack);
-            RSIntegrationMod.LOGGER.info("[RSI-Batch-FA] Starter '{}' uses before: {} (source: {})",
-                    starterStack.getHoverName().getString(), remaining, source);
-            if (remaining > 0) {
-                int newRemaining = remaining - 1;
-                getMethod(ritualStarterItemClass,
-                        "setRemainingUses", ItemStack.class, int.class)
-                        .invoke(item, starterStack, newRemaining);
-                RSIntegrationMod.LOGGER.info("[RSI-Batch-FA] Starter '{}' uses after: {}",
-                        starterStack.getHoverName().getString(), newRemaining);
-            } else {
-                RSIntegrationMod.LOGGER.warn("[RSI-Batch-FA] Starter '{}' has {} remaining uses — cannot consume",
-                        starterStack.getHoverName().getString(), remaining);
+        RSIntegrationMod.LOGGER.info("[RSI-Batch-FA] consumeRitualStarterUse ENTRY: item='{}' creative={} source={}",
+                starterStack.getHoverName().getString(), isCreative, source);
+
+        if (!isCreative) {
+            try {
+                Object item = starterStack.getItem();
+                int remaining = (int) getMethod(ritualStarterItemClass,
+                        "getRemainingUses", ItemStack.class).invoke(item, starterStack);
+                RSIntegrationMod.LOGGER.info("[RSI-Batch-FA] Starter '{}' uses before: {} (source: {})",
+                        starterStack.getHoverName().getString(), remaining, source);
+                if (remaining > 0) {
+                    int newRemaining = remaining - 1;
+                    getMethod(ritualStarterItemClass,
+                            "setRemainingUses", ItemStack.class, int.class)
+                            .invoke(item, starterStack, newRemaining);
+                    RSIntegrationMod.LOGGER.info("[RSI-Batch-FA] Starter '{}' uses after: {}",
+                            starterStack.getHoverName().getString(), newRemaining);
+                } else {
+                    RSIntegrationMod.LOGGER.warn("[RSI-Batch-FA] Starter '{}' has {} remaining uses — cannot consume",
+                            starterStack.getHoverName().getString(), remaining);
+                }
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.warn("[RSI-Batch-FA] consumeRitualStarterUse failed for '{}': {}",
+                        starterStack.getHoverName().getString(), e.toString());
             }
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Batch-FA] consumeRitualStarterUse failed for '{}': {}",
-                    starterStack.getHoverName().getString(), e.toString());
+        } else {
+            RSIntegrationMod.LOGGER.info("[RSI-Batch-FA] consumeRitualStarterUse: player is creative, not consuming durability");
         }
-        // Re-insert to RS if it came from there
+
+        // Always re-insert to RS if it came from there — even in creative mode
         if (starterFromRS != null && network != null) {
-            network.insertItem(starterStack, starterStack.getCount(),
+            ItemStack leftover = network.insertItem(starterStack, starterStack.getCount(),
                     com.refinedmods.refinedstorage.api.util.Action.PERFORM);
             starterFromRS = null;
+            if (!leftover.isEmpty()) {
+                RSIntegrationMod.LOGGER.warn("[RSI-Batch-FA] consumeRitualStarterUse: RS insert failed, giving '{}' to player",
+                        starterStack.getHoverName().getString());
+                ItemHandlerHelper.giveItemToPlayer(player, leftover);
+            }
         }
     }
 

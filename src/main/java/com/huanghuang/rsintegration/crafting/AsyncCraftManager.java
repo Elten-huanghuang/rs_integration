@@ -8,7 +8,6 @@ import net.minecraftforge.eventbus.api.SubscribeEvent;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
-import java.util.Iterator;
 import java.util.List;
 import java.util.UUID;
 
@@ -32,14 +31,18 @@ public final class AsyncCraftManager {
         synchronized (activeChains) {
             if (player != null) {
                 UUID playerId = player.getUUID();
-                Iterator<AsyncCraftChain> it = activeChains.iterator();
-                while (it.hasNext()) {
-                    AsyncCraftChain existing = it.next();
+                // Collect first, then abort outside the iterator —
+                // abort() → fireOnDone() callback removes from activeChains.
+                List<AsyncCraftChain> toAbort = new ArrayList<>();
+                for (AsyncCraftChain existing : activeChains) {
                     if (existing != chain && existing.belongsTo(playerId)) {
-                        existing.abort("Superseded by new chain");
-                        it.remove();
-                        RSIntegrationMod.LOGGER.debug("[RSI-AsyncMgr] Aborted existing chain for player {}", playerId);
+                        toAbort.add(existing);
                     }
+                }
+                for (AsyncCraftChain existing : toAbort) {
+                    existing.abort("Superseded by new chain");
+                    activeChains.remove(existing);
+                    RSIntegrationMod.LOGGER.debug("[RSI-AsyncMgr] Aborted existing chain for player {}", playerId);
                 }
             }
             activeChains.add(chain);
@@ -76,16 +79,20 @@ public final class AsyncCraftManager {
     }
 
     public void cancelAllForPlayer(UUID playerId) {
+        // Collect first, then abort outside the lock — abort() → fireOnDone()
+        // callback removes from activeChains, which confuses the iterator.
+        List<AsyncCraftChain> toAbort;
         synchronized (activeChains) {
-            Iterator<AsyncCraftChain> it = activeChains.iterator();
-            while (it.hasNext()) {
-                AsyncCraftChain chain = it.next();
-                if (chain.belongsTo(playerId)) {
-                    chain.abort("Player disconnected");
-                    it.remove();
-                    RSIntegrationMod.LOGGER.debug("[RSI-AsyncMgr] Cancelled chain for disconnected player {}", playerId);
-                }
+            toAbort = activeChains.stream()
+                    .filter(c -> c.belongsTo(playerId))
+                    .collect(java.util.stream.Collectors.toList());
+        }
+        for (AsyncCraftChain chain : toAbort) {
+            chain.abort("Player disconnected");
+            synchronized (activeChains) {
+                activeChains.remove(chain);
             }
+            RSIntegrationMod.LOGGER.debug("[RSI-AsyncMgr] Cancelled chain for disconnected player {}", playerId);
         }
     }
 
@@ -106,7 +113,8 @@ public final class AsyncCraftManager {
                 chain.tick();
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.error("[RSI-AsyncMgr] Chain tick error", e);
-                chain.abort("Internal error: " + e.getMessage());
+                String msg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+                chain.abort("Internal error: " + msg);
                 synchronized (activeChains) {
                     activeChains.remove(chain);
                 }

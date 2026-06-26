@@ -84,6 +84,12 @@ public final class ModRecipeIndex {
                     continue; // 忽略不支持的多方块配方
                 }
 
+                // Verify handler still accepts this specific recipe.
+                // classifyRecipe uses class-name prefixes (broad match);
+                // handler.canHandle applies finer filtering (e.g. Goety
+                // excludes Summon/Convert/Teleport rituals).
+                if (ModRecipeHandlers.handlerFor(recipe) == null) continue;
+
                 ResourceLocation typeId = recipe.getType() != null
                         ? ForgeRegistries.RECIPE_TYPES.getKey(recipe.getType())
                         : null;

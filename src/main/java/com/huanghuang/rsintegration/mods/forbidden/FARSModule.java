@@ -14,7 +14,7 @@ public final class FARSModule {
         BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
                 "forbidden_arcanus", ModType.FORBIDDEN_ARCANUS,
                 RSIntegrationConfig.ENABLE_FORBIDDEN_ARCANUS, List.of(
-                "com.stal111.forbidden_arcanus.common.block.forge.HephaestusForgeBlock"
+                "com.stal111.forbidden_arcanus.common.block.HephaestusForgeBlock"
         ), "forbidden_arcanus"));
 
         ModCraftNetworkHandlers.registerFa();

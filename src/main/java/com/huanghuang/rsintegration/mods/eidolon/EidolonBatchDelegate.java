@@ -254,12 +254,25 @@ public final class EidolonBatchDelegate implements IBatchDelegate {
             return false;
         }
 
+        // Get result first — validate before consuming resources
+        try {
+            this.pendingResult = ((ItemStack) recipe.getClass().getMethod("getResult")
+                    .invoke(recipe)).copy();
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.error("[RSI-Batch-Eidolon] Failed to get result:", e);
+            refundAll();
+            ledger = null;
+            return false;
+        }
+
         // Drain water, stop boiling, clear steps (consume resources)
         try {
-            Object tank = crucible.getClass().getField("tank").get(crucible);
+            java.lang.reflect.Field tankField = crucible.getClass().getDeclaredField("tank");
+            tankField.setAccessible(true);
+            Object tank = tankField.get(crucible);
             tank.getClass()
                     .getMethod("drain", int.class, IFluidHandler.FluidAction.class)
-                    .invoke(tank, 1000, IFluidHandler.FluidAction.EXECUTE);
+                    .invoke(tank, readWaterAmount(), IFluidHandler.FluidAction.EXECUTE);
             crucible.getClass().getDeclaredField("hasWater").set(crucible, false);
         } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-Eidolon] Reflection probe failed", e); }
 
@@ -270,17 +283,6 @@ public final class EidolonBatchDelegate implements IBatchDelegate {
         try {
             crucible.getClass().getMethod("setChanged").invoke(crucible);
         } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-Eidolon] Reflection probe failed", e); }
-
-        // Get result and store
-        try {
-            this.pendingResult = ((ItemStack) recipe.getClass().getMethod("getResult")
-                    .invoke(recipe)).copy();
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.error("[RSI-Batch-Eidolon] Failed to get result:", e);
-            refundAll();
-            ledger = null;
-            return false;
-        }
 
         this.craftCompleted = true;
         return true;
@@ -373,12 +375,23 @@ public final class EidolonBatchDelegate implements IBatchDelegate {
             return false;
         }
 
+        // Get result first — validate before consuming resources
+        try {
+            this.pendingResult = ((ItemStack) recipe.getClass().getMethod("getResult")
+                    .invoke(recipe)).copy();
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.error("[RSI-Batch-Eidolon] Failed to get result:", e);
+            return false;
+        }
+
         // Drain water, stop boiling, clear steps
         try {
-            Object tank = crucible.getClass().getField("tank").get(crucible);
+            java.lang.reflect.Field tankField = crucible.getClass().getDeclaredField("tank");
+            tankField.setAccessible(true);
+            Object tank = tankField.get(crucible);
             tank.getClass()
                     .getMethod("drain", int.class, IFluidHandler.FluidAction.class)
-                    .invoke(tank, 1000, IFluidHandler.FluidAction.EXECUTE);
+                    .invoke(tank, readWaterAmount(), IFluidHandler.FluidAction.EXECUTE);
             crucible.getClass().getDeclaredField("hasWater").set(crucible, false);
         } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-Eidolon] Reflection probe failed", e); }
 
@@ -389,15 +402,6 @@ public final class EidolonBatchDelegate implements IBatchDelegate {
         try {
             crucible.getClass().getMethod("setChanged").invoke(crucible);
         } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-Eidolon] Reflection probe failed", e); }
-
-        // Get result and store
-        try {
-            this.pendingResult = ((ItemStack) recipe.getClass().getMethod("getResult")
-                    .invoke(recipe)).copy();
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.error("[RSI-Batch-Eidolon] Failed to get result:", e);
-            return false;
-        }
 
         this.craftCompleted = true;
         return true;
@@ -470,19 +474,100 @@ public final class EidolonBatchDelegate implements IBatchDelegate {
         return result;
     }
 
+    // ── Water amount ──────────────────────────────────────────────
+
+    private int readWaterAmount() {
+        try {
+            var m = recipe.getClass().getMethod("getWaterAmount");
+            return (int) m.invoke(recipe);
+        } catch (Exception e) { /* fall through */ }
+        try {
+            var f = recipe.getClass().getDeclaredField("waterAmount");
+            f.setAccessible(true);
+            return f.getInt(recipe);
+        } catch (Exception e) { /* fall through */ }
+        try {
+            var m = recipe.getClass().getMethod("getWater");
+            return (int) m.invoke(recipe);
+        } catch (Exception e) { /* fall through */ }
+        return 1000; // sensible default
+    }
+
     // ── Refund ───────────────────────────────────────────────────
 
     private void refundAll() {
         if (ledger == null || !ledger.isCommitted()) return;
-        // Items were placed in the crucible as CrucibleStep objects.
-        // We cannot safely determine which items came from RS vs player
-        // inventory, so we leave them in the crucible rather than risk
-        // duplicating.  The crucible steps are cleared by onBatchFailed's
-        // caller or will be consumed by a subsequent manual craft.
-        RSIntegrationMod.LOGGER.error("[RSI-Batch-Eidolon] Batch failed after ledger commit — "
-                + "{} ledger entries may still be in the crucible. "
-                + "They can be manually retrieved or will be consumed by the next craft.",
-                ledger.size());
+        ledger.refundCommitted(network, player);
+    }
+
+    // ── Plan warnings ─────────────────────────────────────────────
+
+    public static List<String> getPlanWarnings(ServerPlayer player, Recipe<?> recipe,
+                                               @Nullable ResourceLocation dim,
+                                               @Nullable BlockPos pos) {
+        List<String> warnings = new ArrayList<>();
+        ensureClasses();
+        if (crucibleRecipeClass == null || !crucibleRecipeClass.isInstance(recipe))
+            return warnings;
+
+        // Water amount warning
+        int water = readWaterAmountStatic(recipe);
+        if (water > 0) {
+            warnings.add(Component.translatable(
+                    "rsi.eidolon.warn.water_required", water).getString());
+        }
+
+        // Boiling requirement warning
+        warnings.add(Component.translatable("rsi.eidolon.warn.boiling_required").getString());
+
+        // If crucible is bound, check current state
+        if (dim != null && pos != null) {
+            try {
+                ServerLevel level = CraftPacketUtils.resolveLevel(player.server, dim, player);
+                if (level != null && level.isLoaded(pos)) {
+                    BlockEntity be = level.getBlockEntity(pos);
+                    if (be != null && crucibleTileEntityClass.isInstance(be)) {
+                        boolean hasWater = false;
+                        try {
+                            java.lang.reflect.Field f = be.getClass().getDeclaredField("hasWater");
+                            f.setAccessible(true);
+                            hasWater = f.getBoolean(be);
+                        } catch (Exception ignored) {}
+                        if (!hasWater) {
+                            warnings.add(Component.translatable("rsi.eidolon.warn.needs_water_fill").getString());
+                        }
+                        boolean boiling = false;
+                        try {
+                            if (boilingField != null) boiling = boilingField.getBoolean(be);
+                        } catch (Exception ignored) {}
+                        if (!boiling) {
+                            warnings.add(Component.translatable("rsi.eidolon.warn.needs_heat").getString());
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.debug("[RSI-Batch-Eidolon] Plan warning check failed", e);
+            }
+        }
+
+        return warnings;
+    }
+
+    static int readWaterAmountStatic(Recipe<?> recipe) {
+        try {
+            java.lang.reflect.Method m = recipe.getClass().getMethod("getWaterAmount");
+            return (int) m.invoke(recipe);
+        } catch (Exception ignored) {}
+        try {
+            java.lang.reflect.Field f = recipe.getClass().getDeclaredField("waterAmount");
+            f.setAccessible(true);
+            return f.getInt(recipe);
+        } catch (Exception ignored) {}
+        try {
+            java.lang.reflect.Method m = recipe.getClass().getMethod("getWater");
+            return (int) m.invoke(recipe);
+        } catch (Exception ignored) {}
+        return 1000;
     }
 
     // ── Inner types ──────────────────────────────────────────────

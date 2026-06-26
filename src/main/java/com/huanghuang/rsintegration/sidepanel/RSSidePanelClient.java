@@ -91,6 +91,7 @@ public final class RSSidePanelClient {
     static int searchMode;
     static int gridSize = 3;
     static int viewType;
+    private static boolean prefsLoaded;
     static int visibleRows = 5;
 
     static final List<String> searchHistory = new ArrayList<>();
@@ -204,10 +205,21 @@ public final class RSSidePanelClient {
         if (stack == null || stack.getItem() == net.minecraft.world.item.Items.AIR) return "";
         var rl = ForgeRegistries.ITEMS.getKey(stack.getItem());
         String key = rl != null ? rl.toString() : "";
-        if (stack.getTag() != null && !stack.getTag().isEmpty()) {
-            key += "|" + stack.getTag().toString();
-        }
+        String nbt = PanelStack.stableNbtString(stack.getTag());
+        if (!nbt.isEmpty()) key += "|" + nbt;
         return key;
+    }
+
+    /** Remove all pending extractions whose stack matches {@code searchKey},
+     *  preventing stale timeouts from overwriting a corrected count. */
+    private static void clearPendingBySearchKey(String searchKey) {
+        var it = pendingExtractions.entrySet().iterator();
+        while (it.hasNext()) {
+            var e = it.next();
+            if (keyOf(e.getValue().previousStack).equals(searchKey)) {
+                it.remove();
+            }
+        }
     }
 
     // ── sync (full snapshot) ────────────────────────────────────
@@ -253,22 +265,57 @@ public final class RSSidePanelClient {
         int oldCount = existing != null ? existing.getCount() : 0;
         int delta = count - oldCount;
 
+        // Track which UUID the animation should target — the actual PanelStack's
+        // UUID, not the delta's (which may be a random fallback from the server
+        // when RS already deleted the cache entry).
+        UUID animId = id;
+
         if (count <= 0) {
-            // Matches RS postChange: map.remove(id) when quantity ≤ 0
-            if (existing != null) removePanel(id);
+            if (existing != null) {
+                existing.setCount(0);
+                existing.craftable = craftable;
+                animId = existing.getId();
+            } else {
+                // UUID mismatch — RS assigned a new/random id for a zeroed stack.
+                // Match by item identity and zero the existing PanelStack.
+                String deadKey = keyOf(stack);
+                clearPendingBySearchKey(deadKey);
+                for (PanelStack p : panels) {
+                    if (p.searchKey().equals(deadKey)) {
+                        p.setCount(0);
+                        animId = p.getId();
+                        break;
+                    }
+                }
+            }
         } else {
             if (existing != null) {
                 existing.setCount(count);
                 existing.timestamp = timestamp;
                 existing.craftable = craftable;
+                animId = existing.getId();
             } else {
-                PanelStack ps = new PanelStack(id, stack, timestamp, craftable);
-                idToIndex.put(id, panels.size());
-                panels.add(ps);
+                String newKey = keyOf(stack);
+                clearPendingBySearchKey(newKey);
+                PanelStack mergeTarget = null;
+                for (PanelStack p : panels) {
+                    if (p.searchKey().equals(newKey)) { mergeTarget = p; break; }
+                }
+                if (mergeTarget != null) {
+                    mergeTarget.setCount(count);
+                    mergeTarget.timestamp = timestamp;
+                    mergeTarget.craftable = craftable;
+                    animId = mergeTarget.getId();
+                } else {
+                    PanelStack ps = new PanelStack(id, stack, timestamp, craftable);
+                    idToIndex.put(id, panels.size());
+                    panels.add(ps);
+                    animId = id;
+                }
             }
         }
 
-        if (delta != 0) recordSlotAnim(id, delta);
+        if (delta != 0) recordSlotAnim(animId, delta);
 
         deltaBatch.add(id);
         deltaBatchDirty = true;
@@ -288,6 +335,9 @@ public final class RSSidePanelClient {
     private static int panelHeight() {
         return HEADER_H + visibleRows * SLOT_SIZE + BOTTOM_H;
     }
+
+    private static int itemLeft() { return panelX + GRID_ITEM_X; }
+    private static int itemTop()  { return panelY + HEADER_H; }
 
     private static boolean needsScrollbar() {
         return getTotalRows() > visibleRows;
@@ -339,6 +389,8 @@ public final class RSSidePanelClient {
             if (panelVisible && !panelHidden) {
                 RSSidePanelNetworkHandler.sendRequestSync();
                 scrollRow = 0;
+            } else {
+                RSSidePanelNetworkHandler.sendCloseRequest();
             }
             return;
         }
@@ -402,8 +454,9 @@ public final class RSSidePanelClient {
             if ((searchMode % 2) == 1 && networkAvailable) {
                 ensureDisplayReady();
                 if (!displayList.isEmpty()) {
-                    RSSidePanelNetworkHandler.sendClick(displayList.get(0).getStack(),
-                            RSSidePanelClickPacket.ACTION_EXTRACT_ONE, false);
+                    var first = displayList.get(0);
+                    RSSidePanelNetworkHandler.sendClick(first.getStack(),
+                            RSSidePanelClickPacket.ACTION_EXTRACT_ONE, false, first.getId());
                 }
             }
             onSearchBlur();
@@ -594,10 +647,12 @@ public final class RSSidePanelClient {
 
     @SuppressWarnings("resource")
     private static void drawPanel(GuiGraphics g, Minecraft mc) {
+        // No RenderSystem.enableDepthTest() — RS grid rendering uses
+        // GuiGraphics methods that manage their own depth/pipeline state.
+        // Enabling depth test in the GUI overlay breaks all rendering.
         RenderSystem.setShaderColor(1.0F, 1.0F, 1.0F, 1.0F);
         RenderSystem.enableBlend();
         RenderSystem.defaultBlendFunc();
-        RenderSystem.enableDepthTest();
 
         var font = mc.font;
         int gy = panelY + HEADER_H;
@@ -668,13 +723,13 @@ public final class RSSidePanelClient {
                 && lastMouseY >= foldY && lastMouseY < foldY + 14;
         g.blit(RS_ICONS_TEX, foldX, foldY, foldHovered ? 16 : 0, 128, 14, 14, 256, 256);
 
-        // ── 7. Grid items (SCISSOR CLIPPED) ──────────────────────
-        int itemLeft = panelX + GRID_ITEM_X;
-        int itemTop  = gy;
-        int itemRight = itemLeft + COLUMNS * SLOT_SIZE;
-        int itemBottom = itemTop + gridH;
-        g.enableScissor(itemLeft, itemTop, itemRight, itemBottom);
-
+        // ── 7. Grid items ────────────────────────────────────────
+        // Render items matching RS GridScreen.renderForeground pattern:
+        //   BaseScreen.renderItem → GuiGraphics.renderItem +
+        //   GuiGraphics.renderItemDecorations + renderQuantity
+        // Hover highlight uses the same pattern as RS:
+        //   PoseStack.push + translate(0,0,300) + disableDepthTest +
+        //   colorMask + fill + colorMask + PoseStack.pop
         hoveredSlotIndex = -1;
 
         for (int row = 0; row < visibleRows; row++) {
@@ -684,59 +739,64 @@ public final class RSSidePanelClient {
                 PanelStack ps = displayList.get(dIdx);
                 ItemStack stack = ps.getStack();
 
-                int ix = itemLeft + col * SLOT_SIZE;
-                int iy = itemTop + row * SLOT_SIZE;
+                int ix = itemLeft() + col * SLOT_SIZE + 1;
+                int iy = itemTop() + row * SLOT_SIZE + 1;
 
-                boolean hovered = lastMouseX >= ix && lastMouseX < ix + SLOT_SIZE
-                        && lastMouseY >= iy && lastMouseY < iy + SLOT_SIZE;
-                boolean dragHighlight = gridDragging
-                        && gridDragKeys.contains(ps.getId());
+                boolean hovered = lastMouseX >= ix - 1 && lastMouseX < ix + 17
+                        && lastMouseY >= iy - 1 && lastMouseY < iy + 17;
+                if (hovered) hoveredSlotIndex = dIdx;
 
-                if (dragHighlight) {
-                    g.fill(ix + 1, iy + 1, ix + 17, iy + 17, 0x806699CC);
-                } else if (hovered) {
-                    g.fill(ix + 1, iy + 1, ix + 17, iy + 17, 0x80FFFFFF);
-                }
-
-                // Slot change animation overlay
+                // Animation overlay
                 SlotAnim anim = slotAnims.get(ps.getId());
                 if (anim != null && !anim.expired()) {
                     float fade = anim.fade();
                     int animColor = anim.delta < 0
                             ? ((int) (fade * 0x50) << 24) | 0xFF4444
                             : ((int) (fade * 0x50) << 24) | 0x44FF44;
-                    g.fill(ix + 1, iy + 1, ix + 17, iy + 17, animColor);
+                    g.fill(ix - 1, iy - 1, ix + 17, iy + 17, animColor);
                 }
 
-                // ── Render item (stack count always ≥ 1 — matches RS) ──
-                g.renderItem(stack, ix + 1, iy + 1);
+                // ── RS pattern: renderItem + renderItemDecorations + renderQuantity ──
+                try {
+                    // 1. Item icon (same as graphics.renderItem)
+                    g.renderItem(stack, ix, iy);
 
-                if (ps.zeroed) {
-                    // RS IGridStack.draw zeroed path: "0" in 0xFF5555
-                    g.renderItemDecorations(font, stack, ix + 1, iy + 1, "");
-                    var p = g.pose();
-                    p.pushPose();
-                    p.translate(0, 0, 200);
-                    g.drawString(font, "0", ix + 17 - font.width("0"), iy + 10, 0xFF5555);
-                    p.popPose();
-                } else if (ps.getCount() > 1) {
-                    String cnt = formatCount(ps.getCount());
-                    var p = g.pose();
-                    p.pushPose();
-                    p.translate(0, 0, 200);
-                    int tx = ix + 17 - font.width(cnt);
-                    int ty = iy + 10;
-                    g.drawString(font, cnt, tx, ty, 0xFFFFFF);
-                    p.popPose();
-                } else {
-                    g.renderItemDecorations(font, stack, ix + 1, iy + 1, "");
+                    // 2. Item decorations (durability bar) — always drawn by RS
+                    g.renderItemDecorations(font, stack, ix, iy, "");
+
+                    // 3. Quantity/craft label (RS renderQuantity pattern)
+                    String label = null;
+                    int labelColor = 0xFFFFFF;
+                    if (ps.zeroed && !ps.craftable) {
+                        label = "0";
+                        labelColor = 0xFF5555;
+                    } else if (ps.craftable) {
+                        label = net.minecraft.client.resources.language.I18n.get(
+                                "gui.refinedstorage.grid.craft");
+                    } else if (ps.getCount() > 1) {
+                        label = formatCount(ps.getCount());
+                    }
+                    if (label != null) {
+                        renderSlotQuantity(g, font, ix, iy, label, labelColor);
+                    }
+                } catch (Throwable t) {
+                    RSIntegrationMod.LOGGER.warn("[RSI-SidePanel] Failed render stack {}: {}",
+                            ForgeRegistries.ITEMS.getKey(stack.getItem()), t.toString());
                 }
 
-                if (hovered) hoveredSlotIndex = dIdx;
+                boolean dragHighlight = gridDragging
+                        && gridDragKeys.contains(ps.getId());
+                if (dragHighlight || hovered) {
+                    var pose = g.pose();
+                    pose.pushPose();
+                    pose.translate(0, 0, 300);
+                    RenderSystem.enableBlend();
+                    int hlColor = dragHighlight ? 0x806699CC : 0x60FFFFFF;
+                    g.fill(ix, iy, ix + 16, iy + 16, hlColor);
+                    pose.popPose();
+                }
             }
         }
-
-        g.disableScissor();
 
         // ── 8. Scrollbar ─────────────────────────────────────────
         drawScrollbar(g);
@@ -961,6 +1021,7 @@ public final class RSSidePanelClient {
             panelHidden = true;
             RSIntegrationConfig.RS_SIDE_PANEL_HIDDEN.set(true);
             onSearchBlur();
+            RSSidePanelNetworkHandler.sendCloseRequest();
             return;
         }
 
@@ -1014,8 +1075,13 @@ public final class RSSidePanelClient {
             int insertCount = btn == GLFW.GLFW_MOUSE_BUTTON_RIGHT ? 1 : carried.getCount();
             if (btn == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
                 RSSidePanelNetworkHandler.sendInsert(carried, false);
+                mc.player.containerMenu.setCarried(ItemStack.EMPTY);
             } else if (btn == GLFW.GLFW_MOUSE_BUTTON_RIGHT) {
                 RSSidePanelNetworkHandler.sendInsert(carried, true);
+                carried.shrink(1);
+                if (carried.isEmpty()) {
+                    mc.player.containerMenu.setCarried(ItemStack.EMPTY);
+                }
             }
             // Predictive update
             String ck = keyOf(carried);
@@ -1067,7 +1133,7 @@ public final class RSSidePanelClient {
             action = RSSidePanelClickPacket.ACTION_EXTRACT_STACK;
             extractCount = Math.max(1, clickedPs.getCount() / 2);
         }
-        RSSidePanelNetworkHandler.sendClick(clickedItem, action, Screen.hasShiftDown());
+        RSSidePanelNetworkHandler.sendClick(clickedItem, action, Screen.hasShiftDown(), clickedPs.getId());
         clickLockTicks = 5;
 
         if (extractCount > 0) {
@@ -1080,6 +1146,7 @@ public final class RSSidePanelClient {
             } else {
                 clickedPs.setCount(remaining);
             }
+            clickedPs.timestamp = System.currentTimeMillis();
             displayDirty = true;
         }
     }
@@ -1134,6 +1201,7 @@ public final class RSSidePanelClient {
                             } else {
                                 ps.setCount(remaining);
                             }
+                            ps.timestamp = System.currentTimeMillis();
                         }
                     }
                     displayDirty = true;
@@ -1143,7 +1211,7 @@ public final class RSSidePanelClient {
                 PanelStack ps = getById(key);
                 if (ps != null) {
                     int extractCount = Math.min(ps.getStack().getMaxStackSize(), ps.getCount());
-                    RSSidePanelNetworkHandler.sendClick(ps.getStack(), RSSidePanelClickPacket.ACTION_EXTRACT_MAX, false);
+                    RSSidePanelNetworkHandler.sendClick(ps.getStack(), RSSidePanelClickPacket.ACTION_EXTRACT_MAX, false, ps.getId());
                     pendingExtractions.put(key, new PendingExtraction(ps.getStack(), ps.timestamp, ps.craftable));
                     recordSlotAnim(key, -extractCount);
                     int remaining = ps.getCount() - extractCount;
@@ -1152,6 +1220,7 @@ public final class RSSidePanelClient {
                     } else {
                         ps.setCount(remaining);
                     }
+                    ps.timestamp = System.currentTimeMillis();
                     displayDirty = true;
                 }
             }
@@ -1297,13 +1366,68 @@ public final class RSSidePanelClient {
                 break;
             case 4: gridSize = (gridSize + 1) % 4; scrollRow = 0; break;
         }
+        savePanelPreferences();
         displayDirty = true;
+    }
+
+    // ── preference persistence ──────────────────────────────────
+    private static final java.nio.file.Path PANEL_PREFS_PATH =
+            net.minecraftforge.fml.loading.FMLPaths.CONFIGDIR.get()
+                    .resolve("rs_integration").resolve("side_panel.json");
+    private static final com.google.gson.Gson PREFS_GSON = new com.google.gson.Gson();
+
+    private static void loadPanelPreferences() {
+        if (prefsLoaded) return;
+        prefsLoaded = true;
+        try {
+            var file = PANEL_PREFS_PATH.toFile();
+            if (!file.exists()) return;
+            var json = PREFS_GSON.fromJson(
+                    new java.io.FileReader(file),
+                    com.google.gson.JsonObject.class);
+            if (json == null) return;
+            sortMode   = json.has("sm") ? json.get("sm").getAsInt() : 0;
+            sortAsc    = json.has("sa") ? json.get("sa").getAsBoolean() : true;
+            searchMode = json.has("qm") ? json.get("qm").getAsInt() : 0;
+            gridSize   = json.has("gs") ? json.get("gs").getAsInt() : 3;
+            viewType   = json.has("vt") ? json.get("vt").getAsInt() : 0;
+            clampLoadedPrefs();
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-SidePanel] Failed to load prefs", e);
+        }
+    }
+
+    private static void savePanelPreferences() {
+        if (!prefsLoaded) return;
+        try {
+            var json = new com.google.gson.JsonObject();
+            json.addProperty("sm", sortMode);
+            json.addProperty("sa", sortAsc);
+            json.addProperty("qm", searchMode);
+            json.addProperty("gs", gridSize);
+            json.addProperty("vt", viewType);
+            var parent = PANEL_PREFS_PATH.getParent().toFile();
+            if (!parent.exists()) parent.mkdirs();
+            try (var w = new java.io.FileWriter(PANEL_PREFS_PATH.toFile())) {
+                PREFS_GSON.toJson(json, w);
+            }
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-SidePanel] Failed to save prefs", e);
+        }
+    }
+
+    private static void clampLoadedPrefs() {
+        if (sortMode   < 0 || sortMode   > 3) sortMode   = 0;
+        if (searchMode < 0 || searchMode > 5) searchMode = 0;
+        if (gridSize   < 0 || gridSize   > 3) gridSize   = 3;
+        if (viewType   < 0 || viewType   > 2) viewType   = 0;
     }
 
     // ── tick ────────────────────────────────────────────────────
 
     @SuppressWarnings("resource")
     private static void onClientTick(TickEvent.ClientTickEvent event) {
+        loadPanelPreferences();
         var mc = Minecraft.getInstance();
         if (mc.player == null) return;
         if (event.phase == TickEvent.Phase.START) return;
@@ -1360,19 +1484,15 @@ public final class RSSidePanelClient {
                     if (p.previousStack.getCount() > 0) {
                         PanelStack ps = getById(pe.getKey());
                         if (ps != null) {
-                            // Server hasn't confirmed yet — item still in panels (zeroed)
+                            // Server hasn't confirmed yet — undo prediction
                             int oldCount = ps.getCount();
-                            ps.setCount(p.previousStack.getCount()); // clears zeroed internally
+                            ps.setCount(p.previousStack.getCount());
                             ps.timestamp = p.timestamp;
                             ps.craftable = p.craftable;
                             recordSlotAnim(pe.getKey(), p.previousStack.getCount() - oldCount);
-                        } else {
-                            // Server delta already removed it — re-add
-                            PanelStack newPs = new PanelStack(pe.getKey(), p.previousStack, p.timestamp, p.craftable);
-                            idToIndex.put(pe.getKey(), panels.size());
-                            panels.add(newPs);
-                            recordSlotAnim(pe.getKey(), p.previousStack.getCount());
                         }
+                        // If ps is null, the server delta already removed it —
+                        // do NOT re-add. The periodic sync will correct if needed.
                     } else {
                         // Previous count was already 0 — server should have removed it
                         removePanel(pe.getKey());
@@ -1382,6 +1502,16 @@ public final class RSSidePanelClient {
                 }
             }
         }
+
+        boolean removedAny = false;
+        for (int i = panels.size() - 1; i >= 0; i--) {
+            PanelStack ps = panels.get(i);
+            if (ps.zeroed && !ps.craftable) {
+                removePanel(ps.getId());
+                removedAny = true;
+            }
+        }
+        if (removedAny) displayDirty = true;
     }
 
     // ── data helpers ────────────────────────────────────────────
@@ -1400,6 +1530,18 @@ public final class RSSidePanelClient {
     // ── lazy display list rebuild ───────────────────────────────
 
     private static void ensureDisplayReady() {
+        if (!displayDirty) {
+            // Flush zeroed predictions that outlived the animation window.
+            // Otherwise items linger as ghosts until the next unrelated event
+            // happens to set displayDirty.
+            long now = System.currentTimeMillis();
+            for (PanelStack ps : panels) {
+                if (ps.zeroed && now - ps.zeroedAt > 200) {
+                    displayDirty = true;
+                    break;
+                }
+            }
+        }
         if (!displayDirty) return;
         rebuildDisplayList();
     }
@@ -1465,6 +1607,9 @@ public final class RSSidePanelClient {
         if (viewType != 0) {
             list.removeIf(ps -> viewType == 1 ? ps.craftable : !ps.craftable);
         }
+
+        list.removeIf(ps -> ps.zeroed && !ps.craftable);
+
         return list;
     }
 
@@ -1497,12 +1642,46 @@ public final class RSSidePanelClient {
 
     private static boolean matchesPinyin(String itemName, String query) {
         try {
+            String lowerQuery = query.toLowerCase();
+            // Full pinyin: "石剑" → "shijian", matches query "shijian" or "shi"
             String pinyin = PinyinHelper.convertToPinyinString(itemName, "",
                     PinyinFormat.WITHOUT_TONE);
-            return pinyin.toLowerCase().contains(query.toLowerCase());
+            if (pinyin.toLowerCase().contains(lowerQuery)) return true;
+            // Short pinyin (initials): "石剑" → "sj", matches query "sj"
+            String shortPinyin = PinyinHelper.getShortPinyin(itemName);
+            if (shortPinyin != null && shortPinyin.toLowerCase().contains(lowerQuery))
+                return true;
+            return false;
         } catch (Exception e) {
             return false;
         }
+    }
+
+    /** RS BaseScreen.renderQuantity pattern: bottom-right aligned
+     *  quantity label rendered on top of the item icon.  Scales down
+     *  for long labels so they always fit within the 16×16 slot. */
+    private static void renderSlotQuantity(GuiGraphics g, net.minecraft.client.gui.Font font,
+                                           int ix, int iy, String label, int color) {
+        var pose = g.pose();
+        pose.pushPose();
+        pose.translate(0, 0, 200);
+
+        int textW = font.width(label);
+        if (textW > 16) {
+            float scale = 14.0F / textW;
+            pose.scale(scale, scale, 1);
+            g.drawString(font, label,
+                    (int) ((ix + 16) / scale - textW),
+                    (int) ((iy + 14) / scale - font.lineHeight),
+                    color);
+        } else {
+            g.drawString(font, label,
+                    ix + 17 - textW,
+                    iy + 14 - font.lineHeight + 2,
+                    color);
+        }
+
+        pose.popPose();
     }
 
     private static String formatCount(int count) {

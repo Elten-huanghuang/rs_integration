@@ -50,8 +50,8 @@ public final class RSAvailabilityChecker {
         }
 
         List<ItemStack> pedestalItems = new ArrayList<>();
-        if (recipe instanceof RitualRecipe) {
-            pedestalItems.addAll(rsi$collectGoetyPedestalItems(player, pos));
+        if (recipe instanceof RitualRecipe ritualRecipe) {
+            pedestalItems.addAll(rsi$collectGoetyPedestalItems(player, pos, ritualRecipe));
         } else if (recipe.getClass().getName().equals("com.sammy.malum.common.recipe.SpiritInfusionRecipe")) {
             pedestalItems.addAll(rsi$collectMalumPedestalItems(player, pos));
         }
@@ -69,9 +69,30 @@ public final class RSAvailabilityChecker {
         return results;
     }
 
-    private static List<ItemStack> rsi$collectGoetyPedestalItems(ServerPlayer player, BlockPos altarPos) {
+    private static List<ItemStack> rsi$collectGoetyPedestalItems(ServerPlayer player, BlockPos altarPos,
+                                                                 RitualRecipe recipe) {
         List<ItemStack> items = new ArrayList<>();
         var level = player.level();
+
+        // Use Goety's ritual.getPedestals() which respects configurable range (default 16)
+        try {
+            var ritual = recipe.getRitual();
+            @SuppressWarnings("unchecked")
+            List<PedestalBlockEntity> pedestals = (List<PedestalBlockEntity>)
+                    ritual.getClass().getMethod("getPedestals", Level.class, BlockPos.class)
+                            .invoke(ritual, level, altarPos);
+            for (PedestalBlockEntity pedestal : pedestals) {
+                pedestal.itemStackHandler.ifPresent(handler -> {
+                    ItemStack stack = handler.getStackInSlot(0);
+                    if (!stack.isEmpty()) items.add(stack.copy());
+                });
+            }
+            return items;
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI] ritual.getPedestals() failed, using fallback scan", e);
+        }
+
+        // Fallback: hardcoded range scan
         int range = 6;
         for (BlockPos p : BlockPos.betweenClosed(
                 altarPos.offset(-range, -range, -range),

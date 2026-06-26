@@ -130,14 +130,14 @@ public final class AsyncCraftChain {
                         return true;
                     }
                     ledger.reset();
-                    flushVirtualInventory();
                     currentStepIdx++;
                     state = State.EXECUTING;
                     RSIntegrationMod.LOGGER.debug("[RSI-AsyncChain] WAITING_MOD → EXECUTING");
                 }
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.error("[RSI-AsyncChain] Error polling craft completion", e);
-                abort("Craft polling error: " + e.getMessage());
+                String msg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+                abort("Craft polling error: " + msg);
                 return true;
             }
             return false; // still waiting
@@ -160,7 +160,6 @@ public final class AsyncCraftChain {
                 return true;
             }
             ledger.reset();
-            flushVirtualInventory();
         } else {
             currentDelegate = startModStep(step);
             if (currentDelegate == null) {
@@ -232,6 +231,12 @@ public final class AsyncCraftChain {
             RSIntegrationMod.LOGGER.debug("[RSI-AsyncChain]   processing step: {}", stepId);
 
             if (recipe instanceof net.minecraft.world.item.crafting.CraftingRecipe cr) {
+                // Snapshot virtual inventory before consuming — if this step fails
+                // we must restore it so intermediate products from prior committed
+                // steps survive the abort and are flushed to RS.
+                List<ItemStack> viSnapshot = new ArrayList<>(virtualInventory.size());
+                for (ItemStack vi : virtualInventory) viSnapshot.add(vi.copy());
+
                 for (Ingredient ing : cr.getIngredients()) {
                     if (ing.isEmpty()) continue;
                     int stillNeeded = 1;
@@ -254,6 +259,10 @@ public final class AsyncCraftChain {
                             logMissingIngredient(ing, stepId);
                             logVirtualInventory("at failure for step " + stepId);
                             logLedgerState();
+                            // Restore virtual inventory snapshot so prior-step
+                            // outputs survive the abort flush.
+                            virtualInventory.clear();
+                            virtualInventory.addAll(viSnapshot);
                             abort("Missing: " + describeIngredientSafe(ing));
                             return false;
                         }
@@ -334,23 +343,57 @@ public final class AsyncCraftChain {
 
     @Nullable
     private IBatchDelegate startModStep(CraftingResolver.ResolutionStep step) {
-        BoundMachine machine = findBoundMachine(step.modType());
-        if (machine == null) {
-            RSIntegrationMod.LOGGER.warn("[RSI-AsyncChain] No bound machine for mod type {}",
-                    step.modType());
+        // Extract machine sub-type from recipe ID (e.g. "wissen_crystallizer"
+        // from "wizards_reborn:wissen_crystallizer/earth_crystal_seed") so we
+        // only probe machines of the correct type, not every binding for the mod.
+        String path = step.recipeId().getPath();
+        int slash = path.indexOf('/');
+        String subTypeHint = slash > 0 ? path.substring(0, slash).toLowerCase() : null;
+
+        List<BoundMachine> machines = AltarBindingRegistry.getBoundMachinesForType(
+                player, step.modType(), subTypeHint);
+        if (machines.isEmpty()) {
+            // Diagnostic: also check how many bindings exist for this mod type
+            // (without sub-type filter) so we can tell if sub-type mismatch or
+            // no binding at all.
+            int totalForMod = AltarBindingRegistry.getBoundMachinesForType(
+                    player, step.modType()).size();
+            RSIntegrationMod.LOGGER.warn("[RSI-AsyncChain] No bound machine for mod type {} subType={} (total {} bindings for this mod)",
+                    step.modType(), subTypeHint != null ? subTypeHint : "*", totalForMod);
+            player.sendSystemMessage(Component.translatable(
+                    "rsi.async.error.wrong_machine_type", step.recipeId(), 0));
             return null;
         }
 
         IBatchDelegate delegate = createDelegate(step.modType());
         if (delegate == null) return null;
 
-        try {
-            if (!delegate.validateAndInit(player, step.recipeId(), machine.dim(), machine.pos())) {
-                RSIntegrationMod.LOGGER.warn("[RSI-AsyncChain] Delegate validateAndInit failed for {}",
-                        step.recipeId());
-                return null;
+        // Try each bound machine until one validates successfully.
+        // This handles mods with multiple machine sub-types (e.g. WR has
+        // crystallizer, workbench, iterator, and crystal ritual — all share
+        // WIZARDS_REBORN mod type but each recipe only works on one machine).
+        BoundMachine matchedMachine = null;
+        for (BoundMachine m : machines) {
+            try {
+                if (delegate.validateAndInit(player, step.recipeId(), m.dim(), m.pos())) {
+                    matchedMachine = m;
+                    break;
+                }
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.debug("[RSI-AsyncChain] validateAndInit failed for machine at {}: {}",
+                        m.pos(), e.toString());
             }
+        }
+        if (matchedMachine == null) {
+            // validateAndInit already sent a specific player-facing message
+            // (e.g. "crystal ritual has no crystal", "machine not empty").
+            // Don't overwrite it with a generic "wrong machine type" message.
+            RSIntegrationMod.LOGGER.warn("[RSI-AsyncChain] No compatible machine among {} bound for mod type {}: recipe={}",
+                    machines.size(), step.modType(), step.recipeId());
+            return null;
+        }
 
+        try {
             // Pre-reserve materials from chain's virtual inventory + master ledger,
             // then pass the pre-extracted stacks to the delegate so all multi-block
             // steps in the chain share the same ledger (fixes resource exhaustion
@@ -361,21 +404,22 @@ public final class AsyncCraftChain {
                 if (materials == null) {
                     RSIntegrationMod.LOGGER.warn("[RSI-AsyncChain] Failed to pre-reserve materials for {}",
                             step.recipeId());
-                    // No items placed in machine slots yet, but clean up delegate state
-                    try { delegate.onBatchFailed(player, "pre-reserve failed"); } catch (Exception fe) {}
+                    player.sendSystemMessage(Component.translatable(
+                            "rsi.generic.error.missing_materials", step.recipeId()));
+                    try { delegate.onBatchFailed(player, "pre-reserve failed"); } catch (Exception fe) {
+    RSIntegrationMod.LOGGER.error("[RSI-AsyncChain] onBatchFailed threw during pre-reserve cleanup", fe);
+}
                     return null;
                 }
                 if (!delegate.tryStartWithMaterials(player, materials, ledger)) {
                     RSIntegrationMod.LOGGER.warn("[RSI-AsyncChain] Delegate tryStartWithMaterials failed for {}",
                             step.recipeId());
-                    // Clean up items already placed in machine slots BEFORE refunding
-                    try { delegate.onBatchFailed(player, "tryStartWithMaterials failed"); } catch (Exception fe) {}
-                    // Release ledger reservations so they don't inflate future availability checks
+                    player.sendSystemMessage(Component.translatable(
+                            "rsi.generic.error.craft_failed", step.recipeId()));
+                    try { delegate.onBatchFailed(player, "tryStartWithMaterials failed"); } catch (Exception fe) {
+    RSIntegrationMod.LOGGER.error("[RSI-AsyncChain] onBatchFailed threw during tryStartWithMaterials cleanup", fe);
+}
                     ledger.releaseReservations(materials);
-                    // Refund pre-reserved materials back to chain resources
-                    for (ItemStack m : materials) {
-                        if (!m.isEmpty()) addToVirtualInventory(m);
-                    }
                     return null;
                 }
             } else {
@@ -383,17 +427,22 @@ public final class AsyncCraftChain {
                 if (!delegate.tryStartSingleCraft(player, ledger)) {
                     RSIntegrationMod.LOGGER.warn("[RSI-AsyncChain] Delegate tryStartSingleCraft failed for {}",
                             step.recipeId());
-                    // Clean up items already placed in machine slots
-                    try { delegate.onBatchFailed(player, "tryStartSingleCraft failed"); } catch (Exception fe) {}
+                    try { delegate.onBatchFailed(player, "tryStartSingleCraft failed"); } catch (Exception fe) {
+    RSIntegrationMod.LOGGER.error("[RSI-AsyncChain] onBatchFailed threw during tryStartSingleCraft cleanup", fe);
+}
                     return null;
                 }
             }
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.error("[RSI-AsyncChain] Error starting multi-block step", e);
-            try { delegate.onBatchFailed(player, "exception in startModStep"); } catch (Exception fe) {}
+            try { delegate.onBatchFailed(player, "exception in startModStep"); } catch (Exception fe) {
+    RSIntegrationMod.LOGGER.error("[RSI-AsyncChain] onBatchFailed threw during exception cleanup", fe);
+}
             return null;
         }
 
+        RSIntegrationMod.LOGGER.info("[RSI-AsyncChain] Multi-block step started OK: recipe={} delegate={}",
+                step.recipeId(), delegate.getClass().getSimpleName());
         return delegate;
     }
 
@@ -482,12 +531,6 @@ public final class AsyncCraftChain {
         return materials;
     }
 
-    @Nullable
-    private BoundMachine findBoundMachine(ModType type) {
-        List<BoundMachine> machines = AltarBindingRegistry.getBoundMachinesForType(player, type);
-        return machines.isEmpty() ? null : machines.get(0);
-    }
-
     // ── virtual inventory ────────────────────────────────────────
 
     private void addToVirtualInventory(ItemStack stack) {
@@ -511,8 +554,11 @@ public final class AsyncCraftChain {
         while (iter.hasNext()) {
             ItemStack vi = iter.next();
             if (!vi.isEmpty()) {
-                network.insertItem(vi.copy(), vi.getCount(),
+                ItemStack leftover = network.insertItem(vi.copy(), vi.getCount(),
                         com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                if (!leftover.isEmpty()) {
+                    net.minecraftforge.items.ItemHandlerHelper.giveItemToPlayer(player, leftover);
+                }
                 iter.remove();
             }
         }
@@ -526,8 +572,7 @@ public final class AsyncCraftChain {
             RSIntegrationMod.LOGGER.warn("[RSI-AsyncChain] Commit failed for player {} after {} steps",
                     player.getName().getString(), steps.size());
             player.sendSystemMessage(Component.translatable("rsi.async.error.commit_failed"));
-            state = State.ABORTED;
-            abortReason = "Final commit failed";
+            abort("Final commit failed");
             return;
         }
 
@@ -535,8 +580,11 @@ public final class AsyncCraftChain {
         if (network != null) {
             for (ItemStack vi : virtualInventory) {
                 if (!vi.isEmpty()) {
-                    network.insertItem(vi.copy(), vi.getCount(),
+                    ItemStack leftover = network.insertItem(vi.copy(), vi.getCount(),
                             com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                    if (!leftover.isEmpty()) {
+                        net.minecraftforge.items.ItemHandlerHelper.giveItemToPlayer(player, leftover);
+                    }
                 }
             }
         }
@@ -580,9 +628,24 @@ public final class AsyncCraftChain {
             currentDelegate = null;
         }
 
-        // Discard virtual inventory — the ledger was never committed,
-        // so inputs were never extracted. Flushing virtual items to RS
-        // would create free items out of nothing.
+        // Release any uncommitted ledger reservations — items were
+        // reserved but never physically extracted from RS.
+        ledger.rollback(player);
+
+        // Flush virtual inventory — prior steps' ledgers were committed,
+        // so their outputs are legitimate. Discarding would lose items
+        // whose inputs were already extracted from RS.
+        if (network != null) {
+            for (ItemStack vi : virtualInventory) {
+                if (!vi.isEmpty()) {
+                    ItemStack leftover = network.insertItem(vi.copy(), vi.getCount(),
+                            com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                    if (!leftover.isEmpty()) {
+                        net.minecraftforge.items.ItemHandlerHelper.giveItemToPlayer(player, leftover);
+                    }
+                }
+            }
+        }
         virtualInventory.clear();
 
         player.sendSystemMessage(Component.translatable("rsi.async.chain_aborted", reason));

@@ -49,8 +49,10 @@ public final class AltarBindingRegistry {
         GlobalPos key = GlobalPos.of(dim, altarPos);
         List<AltarBinding> list = BINDINGS.get(key);
         if (list != null) {
-            list.removeIf(b -> b.type().equals(type));
-            if (list.isEmpty()) BINDINGS.remove(key);
+            synchronized (list) {
+                list.removeIf(b -> b.type().equals(type));
+                if (list.isEmpty()) BINDINGS.remove(key);
+            }
         }
     }
 
@@ -274,6 +276,70 @@ public final class AltarBindingRegistry {
     public record BoundMachine(ResourceLocation dim, BlockPos pos, ModType type) {}
 
     /**
+     * Check whether the player has a bound machine compatible with the given
+     * recipe. For mods with multiple machine sub-types (e.g. WR has crystallizer,
+     * workbench, iterator, crystal ritual — all under WIZARDS_REBORN), this
+     * extracts the machine hint from the recipe ID path and matches it against
+     * the block key of each bound machine.
+     */
+    public static boolean hasBindingForRecipe(ServerPlayer player, net.minecraft.world.item.crafting.Recipe<?> recipe) {
+        ModType type = ModType.classifyRecipe(recipe);
+        if (type == null || type == ModType.GENERIC) return true;
+
+        String recipePath = recipe.getId().getPath();
+        String subType = null;
+        int slashIdx = recipePath.indexOf('/');
+        if (slashIdx > 0) {
+            subType = recipePath.substring(0, slashIdx).toLowerCase(java.util.Locale.ROOT);
+        }
+
+        // Normalize recipe sub-type names to canonical machine prefixes.
+        // e.g. "crystal_infusion" recipe type → "crystal_ritual" binding prefix.
+        subType = normalizeSubType(subType, type);
+
+        return scanBindingsForRecipe(player, type, subType);
+    }
+
+    private static boolean scanBindingsForRecipe(ServerPlayer player, ModType type,
+                                                  @Nullable String subType) {
+        var inv = player.getInventory();
+        if (scanForRecipe(inv.items, type, subType)) return true;
+        if (scanForRecipe(inv.offhand, type, subType)) return true;
+        if (scanForRecipe(inv.armor, type, subType)) return true;
+        try {
+            var opt = top.theillusivec4.curios.api.CuriosApi.getCuriosInventory(player).resolve();
+            if (opt.isPresent()) {
+                for (var handler : opt.get().getCurios().values()) {
+                    var stacks = handler.getStacks();
+                    for (int s = 0; s < stacks.getSlots(); s++) {
+                        if (scanForRecipe(List.of(stacks.getStackInSlot(s)), type, subType))
+                            return true;
+                    }
+                }
+            }
+        } catch (Throwable e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
+        return false;
+    }
+
+    private static boolean scanForRecipe(List<ItemStack> stacks, ModType type,
+                                          @Nullable String subType) {
+        for (ItemStack stack : stacks) {
+            if (stack.isEmpty()) continue;
+            for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
+                if (ModType.fromBlockKey(entry.blockKey()) != type) continue;
+                // If we can't determine sub-type, accept any machine of this mod
+                if (subType == null) return true;
+                // Match sub-type against block key (e.g. block key contains "wissen_crystallizer")
+                if (entry.blockKey() != null
+                        && entry.blockKey().toLowerCase(java.util.Locale.ROOT).contains(subType)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
      * Check whether the player has at least one binding to a machine of the
      * given mod type. Scans main inventory, offhand, armor, and Curios slots.
      */
@@ -323,17 +389,27 @@ public final class AltarBindingRegistry {
      * suitable machine for executing a multi-block craft step.
      */
     public static List<BoundMachine> getBoundMachinesForType(ServerPlayer player, ModType type) {
+        return getBoundMachinesForType(player, type, null);
+    }
+
+    /**
+     * Enumerate all bound machines of a given mod type, optionally filtered
+     * by a machine sub-type hint (e.g. "wissen_crystallizer" for WR recipes).
+     * This avoids probing machines of the wrong sub-type during async chains.
+     */
+    public static List<BoundMachine> getBoundMachinesForType(ServerPlayer player, ModType type,
+                                                              @Nullable String subTypeHint) {
         List<BoundMachine> result = new ArrayList<>();
-        collectBindingsForType(player.getInventory().items, type, result);
-        collectBindingsForType(player.getInventory().offhand, type, result);
-        collectBindingsForType(player.getInventory().armor, type, result);
+        collectBindingsForType(player.getInventory().items, type, subTypeHint, result);
+        collectBindingsForType(player.getInventory().offhand, type, subTypeHint, result);
+        collectBindingsForType(player.getInventory().armor, type, subTypeHint, result);
         try {
             var opt = top.theillusivec4.curios.api.CuriosApi.getCuriosInventory(player).resolve();
             if (opt.isPresent()) {
                 for (var handler : opt.get().getCurios().values()) {
                     var stacks = handler.getStacks();
                     for (int s = 0; s < stacks.getSlots(); s++) {
-                        collectBindingsForType(List.of(stacks.getStackInSlot(s)), type, result);
+                        collectBindingsForType(List.of(stacks.getStackInSlot(s)), type, subTypeHint, result);
                     }
                 }
             }
@@ -370,15 +446,34 @@ public final class AltarBindingRegistry {
     }
 
     private static void collectBindingsForType(List<ItemStack> stacks, ModType type,
+                                                @Nullable String subTypeHint,
                                                 List<BoundMachine> out) {
+        // Normalize recipe sub-type hint to canonical machine prefix.
+        // Recipe IDs use a different naming scheme than blockKey prefixes
+        // (e.g. "crystal_infusion" recipe type vs "crystal_ritual" machine prefix).
+        String normalized = normalizeSubType(subTypeHint, type);
+
         for (ItemStack stack : stacks) {
             if (stack.isEmpty()) continue;
             for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
-                if (ModType.fromBlockKey(entry.blockKey()) == type) {
-                    out.add(new BoundMachine(entry.dim(), entry.pos(), type));
-                }
+                if (ModType.fromBlockKey(entry.blockKey()) != type) continue;
+                if (normalized != null && entry.blockKey() != null
+                        && !entry.blockKey().toLowerCase(java.util.Locale.ROOT).contains(normalized))
+                    continue;
+                out.add(new BoundMachine(entry.dim(), entry.pos(), type));
             }
         }
+    }
+
+    /** Map recipe-ID sub-type names to canonical machine-prefix names.
+     *  Wizards Reborn names its recipe category "crystal_infusion"
+     *  but the machine prefix used during binding is "crystal_ritual". */
+    private static String normalizeSubType(@Nullable String hint, ModType type) {
+        if (hint == null) return null;
+        if (type == ModType.WIZARDS_REBORN && "crystal_infusion".equals(hint)) {
+            return "crystal_ritual";
+        }
+        return hint;
     }
 
 }

@@ -147,7 +147,7 @@ public final class EidolonCraftPacket {
 
         // Validate crucible state
         boolean hasWater;
-        try { hasWater = be.getClass().getField("hasWater").getBoolean(be); } catch (Exception e) { hasWater = false; }
+        try { java.lang.reflect.Field hwField = be.getClass().getDeclaredField("hasWater"); hwField.setAccessible(true); hasWater = hwField.getBoolean(be); } catch (Exception e) { hasWater = false; }
 
         boolean boiling = false;
         try {
@@ -238,6 +238,7 @@ public final class EidolonCraftPacket {
         }
         ExtractionLedger ledger = new ExtractionLedger();
         List<Object> crucibleSteps = new ArrayList<>();
+        List<ItemStack> allExtracted = new ArrayList<>(); // actual items extracted, for refund
 
         try {
             for (CrucibleStepInput si : stepInputs) {
@@ -250,6 +251,7 @@ public final class EidolonCraftPacket {
                         return;
                     }
                     stepItems.add(stack);
+                    allExtracted.add(stack.copy());
                 }
 
                 Constructor<?> ctor = crucibleStepInnerClass.getConstructor(int.class, List.class);
@@ -257,9 +259,10 @@ public final class EidolonCraftPacket {
                 crucibleSteps.add(step);
             }
 
-            boolean matches = (boolean) recipe.getClass()
-                    .getMethod("matches", List.class)
-                    .invoke(recipe, crucibleSteps);
+            java.lang.reflect.Method matchesMethod = com.huanghuang.rsintegration.util.Reflect.findMethod(
+                    recipe.getClass(), "matches", new Class<?>[]{List.class});
+            if (matchesMethod == null) throw new NoSuchMethodException(recipe.getClass().getName() + ".matches");
+            boolean matches = (boolean) matchesMethod.invoke(recipe, crucibleSteps);
             if (!matches) {
                 player.sendSystemMessage(Component.translatable("rsi.eidolon.error.match_failed"));
                 return;
@@ -278,26 +281,12 @@ public final class EidolonCraftPacket {
             return;
         }
 
-        // Drain water, stop boiling, clear steps (consume resources)
+        // Get result first — validate before consuming resources
         try {
-            Object tank = be.getClass().getField("tank").get(be);
-            tank.getClass()
-                    .getMethod("drain", int.class, IFluidHandler.FluidAction.class)
-                    .invoke(tank, 1000, IFluidHandler.FluidAction.EXECUTE);
-            be.getClass().getField("hasWater").set(be, false);
-        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
-
-        try {
-            if (stepsField != null) stepsField.set(be, new ArrayList<>());
-        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
-
-        be.setChanged();
-        BlockState state = level.getBlockState(pos);
-        level.sendBlockUpdated(pos, state, state, 3);
-
-        // Get result and spawn item entity
-        try {
-            ItemStack result = ((ItemStack) recipe.getClass().getMethod("getResult").invoke(recipe)).copy();
+            java.lang.reflect.Method getResultMethod = com.huanghuang.rsintegration.util.Reflect.findMethod(
+                    recipe.getClass(), "getResult", new Class<?>[0]);
+            if (getResultMethod == null) throw new NoSuchMethodException(recipe.getClass().getName() + ".getResult");
+            ItemStack result = ((ItemStack) getResultMethod.invoke(recipe)).copy();
             double x = pos.getX() + 0.5;
             double y = pos.getY() + 0.75;
             double z = pos.getZ() + 0.5;
@@ -316,22 +305,42 @@ public final class EidolonCraftPacket {
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.error("[RSI-Eidolon] Failed to spawn result for {}:", recipeId, e);
             player.sendSystemMessage(Component.translatable("rsi.eidolon.error.result_failed", e.getMessage()));
-            // Refund committed items
-            for (CrucibleStepInput si : stepInputs) {
-                for (Ingredient ing : si.ingredients) {
-                    if (ing.isEmpty()) continue;
-                    ItemStack[] opts = ing.getItems();
-                    if (opts.length > 0 && !opts[0].isEmpty()) {
-                        ItemStack refund = opts[0].copyWithCount(1);
-                        if (network != null) {
-                            network.insertItem(refund, 1, com.refinedmods.refinedstorage.api.util.Action.PERFORM);
-                        } else {
-                            ItemHandlerHelper.giveItemToPlayer(player, refund);
-                        }
+            // Refund committed items — use actual extracted items, not ingredient.getItems()[0]
+            for (ItemStack refundStack : allExtracted) {
+                if (refundStack.isEmpty()) continue;
+                if (network != null) {
+                    ItemStack leftover = network.insertItem(refundStack.copy(), refundStack.getCount(),
+                            com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                    if (!leftover.isEmpty()) {
+                        ItemHandlerHelper.giveItemToPlayer(player, leftover);
                     }
+                } else {
+                    ItemHandlerHelper.giveItemToPlayer(player, refundStack.copy());
                 }
             }
+            return;
         }
+
+        // Drain water, stop boiling, clear steps (consume resources)
+        try {
+            java.lang.reflect.Field tankField = be.getClass().getDeclaredField("tank");
+            tankField.setAccessible(true);
+            Object tank = tankField.get(be);
+            tank.getClass()
+                    .getMethod("drain", int.class, IFluidHandler.FluidAction.class)
+                    .invoke(tank, EidolonBatchDelegate.readWaterAmountStatic(recipe), IFluidHandler.FluidAction.EXECUTE);
+            java.lang.reflect.Field hwField2 = be.getClass().getDeclaredField("hasWater");
+            hwField2.setAccessible(true);
+            hwField2.set(be, false);
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
+
+        try {
+            if (stepsField != null) stepsField.set(be, new ArrayList<>());
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
+
+        be.setChanged();
+        BlockState state = level.getBlockState(pos);
+        level.sendBlockUpdated(pos, state, state, 3);
     }
 
     // ── helpers ────────────────────────────────────────────────

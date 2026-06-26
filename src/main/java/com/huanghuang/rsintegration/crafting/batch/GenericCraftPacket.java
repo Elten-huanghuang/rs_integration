@@ -9,6 +9,11 @@ import com.huanghuang.rsintegration.crafting.CraftingResolver.ResolutionStep;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.crafting.ModRecipeIndex;
 import com.huanghuang.rsintegration.crafting.RecipeIndex;
+import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
+import com.huanghuang.rsintegration.crafting.plan.PlanResponse;
+import com.huanghuang.rsintegration.crafting.plan.PlanResponsePacket;
+import com.huanghuang.rsintegration.crafting.plan.PlanStep;
+import com.huanghuang.rsintegration.mods.forbidden.FaRitualWrapper;
 import com.huanghuang.rsintegration.network.AltarBindingRegistry;
 import com.huanghuang.rsintegration.network.RSIntegration;
 import com.huanghuang.rsintegration.crafting.AsyncCraftChain;
@@ -16,13 +21,13 @@ import com.huanghuang.rsintegration.crafting.AsyncCraftManager;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.MaterialSources;
-import com.huanghuang.rsintegration.crafting.plan.PlanResponse;
-import com.huanghuang.rsintegration.crafting.plan.PlanResponsePacket;
-import com.huanghuang.rsintegration.crafting.plan.PlanStep;
+import com.huanghuang.rsintegration.util.Reflect;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -34,6 +39,7 @@ import net.minecraftforge.network.NetworkEvent;
 import net.minecraftforge.network.PacketDistributor;
 
 import javax.annotation.Nullable;
+import java.lang.reflect.Method;
 import java.util.*;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -150,7 +156,8 @@ public final class GenericCraftPacket {
                 }
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.error("[RSI-Generic] Failed for {}:", packet.recipeId, e);
-                player.sendSystemMessage(Component.translatable("rsi.generic.error.craft_failed", e.getMessage()));
+                String reason = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+                player.sendSystemMessage(Component.translatable("rsi.generic.error.craft_failed", reason));
             }
         });
         context.setPacketHandled(true);
@@ -158,10 +165,130 @@ public final class GenericCraftPacket {
 
     // ── execute: resolve ingredients, craft result, give result to player ──
 
+    // ── FA ritual lookup ──────────────────────────────────────
+
+    private static volatile boolean faProbed;
+    private static volatile boolean faOk;
+    private static volatile ResourceKey<?> faRitualKey;
+    private static volatile Class<?> faCreateItemResultClass;
+    private static volatile Class<?> faUpgradeTierResultClass;
+    private static volatile java.lang.reflect.Method faSetTierOnStack;
+    private static volatile net.minecraft.world.item.Item faForgeBlockItem;
+
+    private static void probeFa() {
+        if (faProbed) return;
+        faProbed = true;
+        try {
+            Class<?> faRegistries = Class.forName(
+                    "com.stal111.forbidden_arcanus.core.registry.FARegistries");
+            java.lang.reflect.Field f = faRegistries.getField("RITUAL");
+            f.setAccessible(true);
+            faRitualKey = (ResourceKey<?>) f.get(null);
+            faCreateItemResultClass = Class.forName(
+                    "com.stal111.forbidden_arcanus.common.block.entity.forge.ritual.result.CreateItemResult");
+            faUpgradeTierResultClass = Class.forName(
+                    "com.stal111.forbidden_arcanus.common.block.entity.forge.ritual.result.UpgradeTierResult");
+            faOk = true;
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-Generic] FA not available: {}", e.toString());
+            faOk = false;
+        }
+    }
+
+    /** Create a HephaestusForgeBlock ItemStack with {@code upgradedTier}
+     *  applied via {@code setTierOnStack}, matching FA's own JEI display. */
+    @Nullable
+    private static ItemStack rsi$makeFaUpgradeOutput(int upgradedTier) {
+        try {
+            if (faForgeBlockItem == null) {
+                net.minecraft.world.level.block.Block block =
+                        net.minecraftforge.registries.ForgeRegistries.BLOCKS.getValue(
+                                new ResourceLocation("forbidden_arcanus", "hephaestus_forge"));
+                if (block == null) return ItemStack.EMPTY;
+                faForgeBlockItem = block.asItem();
+            }
+            if (faSetTierOnStack == null) {
+                Class<?> hfbClass = Class.forName(
+                        "com.stal111.forbidden_arcanus.common.block.HephaestusForgeBlock");
+                faSetTierOnStack = Reflect.findMethod(hfbClass, "setTierOnStack",
+                        new Class<?>[]{ItemStack.class, int.class});
+            }
+            if (faSetTierOnStack == null) return ItemStack.EMPTY;
+            ItemStack stack = new ItemStack(faForgeBlockItem);
+            return (ItemStack) faSetTierOnStack.invoke(null, stack, upgradedTier);
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-Generic] FA upgrade output failed", e);
+            return ItemStack.EMPTY;
+        }
+    }
+
+    /**
+     * Look up a recipe from RecipeManager first, then fall back to
+     * FARegistries.RITUAL (wrapping the FA Ritual in a FaRitualWrapper).
+     */
+    @Nullable
+    private static Recipe<?> resolveRecipe(ServerLevel level, ResourceLocation recipeId) {
+        Recipe<?> recipe = level.getRecipeManager().byKey(recipeId).orElse(null);
+        if (recipe != null) return recipe;
+        return resolveFARitual(level, recipeId);
+    }
+
+    @Nullable
+    @SuppressWarnings("unchecked")
+    private static Recipe<?> resolveFARitual(ServerLevel level, ResourceLocation recipeId) {
+        probeFa();
+        if (!faOk || faRitualKey == null) return null;
+        try {
+            net.minecraft.core.Registry<Object> faRegistry =
+                    (net.minecraft.core.Registry<Object>)
+                    level.registryAccess().registryOrThrow(
+                            (ResourceKey<? extends net.minecraft.core.Registry<Object>>)
+                            (Object) faRitualKey);
+            Object ritual = faRegistry.get(recipeId);
+            if (ritual == null) return null;
+
+            // Get ritual result and determine output
+            Method getResult = Reflect.findMethod(ritual.getClass(),
+                    "result", new Class<?>[0]);
+            if (getResult == null) return null;
+            Object result = getResult.invoke(ritual);
+            if (result == null) return null;
+
+            ItemStack output = ItemStack.EMPTY;
+            if (faCreateItemResultClass.isInstance(result)) {
+                Method getStack = Reflect.findMethod(result.getClass(),
+                        "getResult", new Class<?>[0]);
+                if (getStack != null) {
+                    Object s = getStack.invoke(result);
+                    if (s instanceof ItemStack st && !st.isEmpty())
+                        output = st;
+                }
+            } else if (faUpgradeTierResultClass != null
+                    && faUpgradeTierResultClass.isInstance(result)) {
+                // Read tier info from result
+                Method getFrom = Reflect.findMethod(result.getClass(), "getRequiredTier", new Class<?>[0]);
+                Method getTo = Reflect.findMethod(result.getClass(), "getUpgradedTier", new Class<?>[0]);
+                int from = 0, to = 0;
+                try { if (getFrom != null) from = (int) getFrom.invoke(result); } catch (Exception ignored) {}
+                try { if (getTo != null) to = (int) getTo.invoke(result); } catch (Exception ignored) {}
+                output = rsi$makeFaUpgradeOutput(to);
+                if (output.isEmpty()) return null;
+                return new FaRitualWrapper(recipeId, ritual, output, from, to);
+            }
+            if (output.isEmpty()) return null;
+
+            return new FaRitualWrapper(recipeId, ritual, output);
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-Generic] FA ritual lookup failed for {}: {}",
+                    recipeId, e.toString());
+            return null;
+        }
+    }
+
     private static void tryResolve(ServerPlayer player, ResourceLocation recipeId,
                                    @Nullable ResourceLocation dim,
                                    @Nullable net.minecraft.core.BlockPos pos) {
-        Recipe<?> recipe = player.serverLevel().getRecipeManager().byKey(recipeId).orElse(null);
+        Recipe<?> recipe = resolveRecipe(player.serverLevel(), recipeId);
         if (recipe == null) {
             player.sendSystemMessage(Component.translatable("rsi.generic.error.recipe_not_found", recipeId.toString()));
             return;
@@ -329,6 +456,7 @@ public final class GenericCraftPacket {
                 : CraftPacketUtils.resolveNetworkForCraft(player,
                         player.serverLevel().dimension(), player.blockPosition());
 
+        List<ItemStack> allExtracted = new ArrayList<>();
         ExtractionLedger ledger = new ExtractionLedger();
 
         // Plan all extractions atomically — nothing physically moved yet
@@ -345,6 +473,7 @@ public final class GenericCraftPacket {
                         CraftPacketUtils.describeIngredient(need.ingredient)));
                 return;
             }
+            allExtracted.add(reserved.copy());
         }
 
         // Commit all extractions atomically
@@ -369,12 +498,16 @@ public final class GenericCraftPacket {
             player.displayClientMessage(
                     Component.translatable("rsi.generic.info.resolved", result.getCount()), true);
         } else {
-            // Failed to get result — refund extracted materials
+            // Failed to get result — refund actual extracted materials
             if (network != null) {
-                for (IngredientNeed need : grouped.values()) {
-                    ItemStack refund = need.ingredient.getItems()[0].copyWithCount(need.count);
-                    network.insertItem(refund, need.count,
+                for (ItemStack refundStack : allExtracted) {
+                    if (refundStack.isEmpty()) continue;
+                    ItemStack refund = refundStack.copy();
+                    ItemStack leftover = network.insertItem(refund, refund.getCount(),
                             com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                    if (!leftover.isEmpty()) {
+                        ItemHandlerHelper.giveItemToPlayer(player, leftover);
+                    }
                 }
             }
             player.sendSystemMessage(Component.translatable(
@@ -399,7 +532,7 @@ public final class GenericCraftPacket {
                                       Map<String, String> forcedRecipes,
                                       @Nullable ResourceLocation dim,
                                       @Nullable net.minecraft.core.BlockPos pos) {
-        Recipe<?> recipe = player.serverLevel().getRecipeManager().byKey(recipeId).orElse(null);
+        Recipe<?> recipe = resolveRecipe(player.serverLevel(), recipeId);
         if (recipe == null) {
             sendPlanError(player, Component.translatable("rsi.generic.error.recipe_not_found", recipeId.toString()).getString());
             return;
@@ -555,7 +688,6 @@ public final class GenericCraftPacket {
 
         // Group step IDs into PlanSteps (batch identical consecutive steps)
         List<PlanStep> steps = new ArrayList<>();
-        var rm = player.serverLevel().getRecipeManager();
 
         // Count occurrences
         Map<ResourceLocation, Integer> stepCounts = new LinkedHashMap<>();
@@ -564,7 +696,7 @@ public final class GenericCraftPacket {
         }
 
         for (var entry : stepCounts.entrySet()) {
-            Recipe<?> stepRecipe = rm.byKey(entry.getKey()).orElse(null);
+            Recipe<?> stepRecipe = resolveRecipe(player.serverLevel(), entry.getKey());
             if (stepRecipe == null) {
                 RSIntegrationMod.LOGGER.warn("[RSI-Generic] Plan step recipe not found: {}",
                         entry.getKey());
@@ -611,13 +743,18 @@ public final class GenericCraftPacket {
                     }
                 }
             } else {
-                // Multi-block recipe: extract ingredients via reflection
-                List<Ingredient> modIngs = CraftPacketUtils.extractIngredients(stepRecipe);
-                if (modIngs != null) {
-                    for (Ingredient ing : modIngs) {
-                        if (ing.isEmpty()) continue;
-                        Item matched = matchAndConsume(ing, displayAvailable);
-                        inputs.add(matched != null ? new ItemStack(matched, 1) : firstValidDisplayItem(ing));
+                // Multi-block recipe: use extractIngredientSpecs to preserve
+                // per-ingredient counts (extractIngredients drops counts and
+                // returns empty for wrappers like FaRitualWrapper).
+                List<IngredientSpec> modSpecs = CraftPacketUtils.extractIngredientSpecs(stepRecipe);
+                if (modSpecs != null) {
+                    for (IngredientSpec spec : modSpecs) {
+                        if (spec.isEmpty()) continue;
+                        for (int c = 0; c < spec.count(); c++) {
+                            Item matched = matchAndConsume(spec.ingredient(), displayAvailable);
+                            inputs.add(matched != null ? new ItemStack(matched, 1)
+                                    : firstValidDisplayItem(spec.ingredient()));
+                        }
                     }
                 }
             }
@@ -637,7 +774,7 @@ public final class GenericCraftPacket {
                     String altMod = i < rs.alternativeModTypes().size()
                             ? rs.alternativeModTypes().get(i)
                             : rs.modType().id();
-                    Recipe<?> altRecipe = rm.byKey(altId).orElse(null);
+                    Recipe<?> altRecipe = resolveRecipe(player.serverLevel(), altId);
                     if (altRecipe == null) {
                         RSIntegrationMod.LOGGER.info("[RSI-OR]   alt {} NOT FOUND in recipe manager", altId);
                         continue;
@@ -649,9 +786,16 @@ public final class GenericCraftPacket {
                         altIngs = CraftPacketUtils.extractIngredients(altRecipe);
                     }
                     boolean hasMats = altIngs != null && recipeHasSomeMaterials(altIngs, itemAvailable, recipeIndex);
-                    RSIntegrationMod.LOGGER.info("[RSI-OR]   alt {}: ingCount={} hasMaterials={}",
-                            altId, altIngs != null ? altIngs.size() : -1, hasMats);
-                    if (hasMats) {
+                    boolean hasMachine = true;
+                    if (hasMats && altMod != null) {
+                        ModType altType = ModType.byId(altMod);
+                        if (altType != null && altType != ModType.GENERIC) {
+                            hasMachine = AltarBindingRegistry.hasAnyBindingForType(player, altType);
+                        }
+                    }
+                    RSIntegrationMod.LOGGER.info("[RSI-OR]   alt {}: ingCount={} hasMaterials={} hasMachine={}",
+                            altId, altIngs != null ? altIngs.size() : -1, hasMats, hasMachine);
+                    if (hasMats && hasMachine) {
                         alternatives.add(altId);
                         alternativeModTypes.add(altMod);
                     }
@@ -728,6 +872,7 @@ public final class GenericCraftPacket {
         }
 
         // ── Add the target recipe itself as the last step so its grid is visible ──
+        List<String> modWarnings = new ArrayList<>();
         {
             List<ItemStack> targetInputs = new ArrayList<>();
             int targetW = 0, targetH = 0;
@@ -790,9 +935,28 @@ public final class GenericCraftPacket {
             RSIntegrationMod.LOGGER.info("[RSI-OR] target step {}: {} alternatives from index",
                     recipeId, targetAlts.size());
 
+            // Collect plan-time mod warnings (Goety research/structure, FA essences).
+            // These render in the "unavailable" area, not inside step cards.
+            if (recipeModType == ModType.GOETY) {
+                modWarnings.addAll(com.huanghuang.rsintegration.mods.goety.GoetyBatchDelegate
+                        .getPlanWarnings(player, recipe, dim, pos));
+            } else if (recipeModType == ModType.FORBIDDEN_ARCANUS) {
+                modWarnings.addAll(com.huanghuang.rsintegration.mods.forbidden.FaBatchDelegate
+                        .getPlanWarnings(player, recipe, dim, pos));
+            } else if (recipeModType == ModType.WIZARDS_REBORN) {
+                modWarnings.addAll(com.huanghuang.rsintegration.mods.wizards_reborn.WRBatchDelegate
+                        .getPlanWarnings(player, recipe, dim, pos));
+            } else if (recipeModType == ModType.MALUM) {
+                modWarnings.addAll(com.huanghuang.rsintegration.mods.malum.MalumBatchDelegate
+                        .getPlanWarnings(player, recipe, dim, pos));
+            } else if (recipeModType == ModType.EIDOLON) {
+                modWarnings.addAll(com.huanghuang.rsintegration.mods.eidolon.EidolonBatchDelegate
+                        .getPlanWarnings(player, recipe, dim, pos));
+            }
+
             steps.add(new PlanStep(recipeId, targetOutput, 1, targetInputs,
                     targetAlts, recipeModType, targetDepth, !targetAlts.isEmpty(),
-                    targetW, targetH, targetAltModTypes));
+                    targetW, targetH, targetAltModTypes, Collections.emptyList()));
 
             if (RSIntegrationMod.LOGGER.isDebugEnabled()) {
                 StringBuilder sb = new StringBuilder("[RSI-Generic] Target step: ")
@@ -833,7 +997,7 @@ public final class GenericCraftPacket {
                 neededCounts.merge(step.output().getItem(), -step.totalOutputCount(), Integer::sum);
                 continue;
             }
-            Recipe<?> stepRecipe = rm.byKey(step.recipeId()).orElse(null);
+            Recipe<?> stepRecipe = resolveRecipe(player.serverLevel(), step.recipeId());
             if (stepRecipe == null) continue;
             List<Ingredient> stepIngs;
             if (stepRecipe instanceof CraftingRecipe scr) {
@@ -897,9 +1061,11 @@ public final class GenericCraftPacket {
         // name for every step that references it, producing an unreadable wall.
         List<String> dedupedMissing = missing.stream().distinct().toList();
 
+        String targetName = targetOutput.getHoverName().getString();
+
         PlanResponse plan = new PlanResponse(
                 feasible,
-                targetOutput.getHoverName().getString(),
+                targetName,
                 targetOutput,
                 steps,
                 materials,
@@ -909,7 +1075,8 @@ public final class GenericCraftPacket {
                 dim != null ? dim.toString() : null,
                 pos != null ? pos.getX() : 0,
                 pos != null ? pos.getY() : 0,
-                pos != null ? pos.getZ() : 0
+                pos != null ? pos.getZ() : 0,
+                modWarnings
         );
 
         // Cache the plan with the same tick-bucket captured earlier

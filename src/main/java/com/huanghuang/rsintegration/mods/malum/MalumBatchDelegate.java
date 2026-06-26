@@ -240,8 +240,7 @@ public final class MalumBatchDelegate implements IBatchDelegate {
             capturedResult = completeManually();
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.error("[RSI-Batch-Malum] Manual completion failed:", e);
-            clearPedestals();
-            refundAll();
+            recoverFromAltar(); // recovers actual items from all altar slots, not template items
             return false;
         }
 
@@ -442,11 +441,17 @@ public final class MalumBatchDelegate implements IBatchDelegate {
     }
 
     private void returnItem(ItemStack stack) {
+        if (stack.isEmpty()) return;
         if (network != null) {
-            network.insertItem(stack, stack.getCount(),
+            ItemStack leftover = network.insertItem(stack, stack.getCount(),
                     com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+            if (!leftover.isEmpty()) {
+                ItemHandlerHelper.giveItemToPlayer(player, leftover);
+            }
         } else if (player != null) {
-            ItemHandlerHelper.giveItemToPlayer(player, stack);
+            if (!player.getInventory().add(stack)) {
+                player.drop(stack, false);
+            }
         }
     }
 
@@ -560,61 +565,6 @@ public final class MalumBatchDelegate implements IBatchDelegate {
         }
     }
 
-    // ── Refund ───────────────────────────────────────────────────
-
-    private void refundAll() {
-        if (ledger == null || !ledger.isCommitted()) return;
-        // Refund center ingredient
-        Object inputObj = getField(recipe, "input");
-        if (inputObj != null) {
-            Ingredient centerIng = (Ingredient) getField(inputObj, "ingredient");
-            if (centerIng != null && !centerIng.isEmpty()) {
-                ItemStack[] opts = centerIng.getItems();
-                if (opts.length > 0 && !opts[0].isEmpty()) {
-                    ItemStack refund = opts[0].copyWithCount(CraftPacketUtils.readIngredientCount(inputObj, 1));
-                    if (network != null) {
-                        network.insertItem(refund, refund.getCount(), com.refinedmods.refinedstorage.api.util.Action.PERFORM);
-                    } else if (player != null) {
-                        ItemHandlerHelper.giveItemToPlayer(player, refund);
-                    }
-                }
-            }
-        }
-        // Refund extra items
-        List<?> extraItems = (List<?>) getField(recipe, "extraItems");
-        if (extraItems != null) {
-            for (Object eItem : extraItems) {
-                Ingredient ing = (Ingredient) getField(eItem, "ingredient");
-                if (ing == null || ing.isEmpty()) continue;
-                ItemStack[] opts = ing.getItems();
-                if (opts.length > 0 && !opts[0].isEmpty()) {
-                    ItemStack refund = opts[0].copyWithCount(CraftPacketUtils.readIngredientCount(eItem, 1));
-                    if (network != null) {
-                        network.insertItem(refund, refund.getCount(), com.refinedmods.refinedstorage.api.util.Action.PERFORM);
-                    } else if (player != null) {
-                        ItemHandlerHelper.giveItemToPlayer(player, refund);
-                    }
-                }
-            }
-        }
-        // Refund spirits
-        List<?> spirits = (List<?>) getField(recipe, "spirits");
-        if (spirits != null) {
-            for (Object swc : spirits) {
-                try {
-                    Item spiritItem = (Item) swc.getClass().getMethod("getItem").invoke(swc);
-                    int sCount = CraftPacketUtils.readIngredientCount(swc, 1);
-                    ItemStack refund = new ItemStack(spiritItem, sCount); // spiritItem from reflection, no template ItemStack available
-                    if (network != null) {
-                        network.insertItem(refund, refund.getCount(), com.refinedmods.refinedstorage.api.util.Action.PERFORM);
-                    } else if (player != null) {
-                        ItemHandlerHelper.giveItemToPlayer(player, refund);
-                    }
-                } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", ex); }
-            }
-        }
-    }
-
     // ── Reflection helpers ───────────────────────────────────────
 
     @Nullable
@@ -652,5 +602,78 @@ public final class MalumBatchDelegate implements IBatchDelegate {
 
     private static void setIHandlerSlot(Object handler, int slot, ItemStack stack) throws Exception {
         handler.getClass().getMethod("setStackInSlot", int.class, ItemStack.class).invoke(handler, slot, stack);
+    }
+
+    // ── Plan warnings ─────────────────────────────────────────────
+
+    public static List<String> getPlanWarnings(ServerPlayer player, Recipe<?> recipe,
+                                               @Nullable ResourceLocation dim,
+                                               @Nullable BlockPos pos) {
+        List<String> warnings = new ArrayList<>();
+        ensureClasses();
+
+        // Check for spirit requirements on the recipe
+        List<?> spirits = null;
+        try {
+            java.lang.reflect.Field f = recipe.getClass().getDeclaredField("spirits");
+            f.setAccessible(true);
+            spirits = (List<?>) f.get(recipe);
+        } catch (Exception e) { /* recipe has no spirit requirements */ }
+        if (spirits == null) return warnings;
+
+        List<String> spiritNames = new ArrayList<>();
+        for (Object swc : spirits) {
+            try {
+                Object type = swc.getClass().getField("type").get(swc);
+                int count = swc.getClass().getField("count").getInt(swc);
+                String id = (String) type.getClass().getField("identifier").get(type);
+                spiritNames.add(count + "x " + id);
+            } catch (Exception e) { /* skip malformed entry */ }
+        }
+
+        // If altar is bound, check actual spirit inventory
+        if (dim != null && pos != null && spiritAltarBEClass != null) {
+            try {
+                ServerLevel level = CraftPacketUtils.resolveLevel(player.server, dim, player);
+                if (level != null && level.isLoaded(pos)) {
+                    BlockEntity be = level.getBlockEntity(pos);
+                    if (be != null && spiritAltarBEClass.isInstance(be)) {
+                        Object spiritInv = getFieldStatic(be, "spiritInventory");
+                        if (spiritInv != null) {
+                            int slots = (int) spiritInv.getClass().getMethod("getSlots").invoke(spiritInv);
+                            if (slots < spirits.size()) {
+                                warnings.add(Component.translatable(
+                                        "rsi.malum.warn.spirit_slots_insufficient",
+                                        spirits.size(), slots).getString());
+                            }
+                        }
+                    }
+                }
+            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-Malum] Plan spirit check failed", e); }
+        }
+
+        if (!spiritNames.isEmpty()) {
+            warnings.add(Component.translatable(
+                    "rsi.malum.warn.spirit_required",
+                    String.join(", ", spiritNames)).getString());
+        }
+
+        return warnings;
+    }
+
+    private static Object getFieldStatic(Object obj, String name) {
+        Class<?> clazz = obj.getClass();
+        while (clazz != null && clazz != Object.class) {
+            try {
+                java.lang.reflect.Field f = clazz.getDeclaredField(name);
+                f.setAccessible(true);
+                return f.get(obj);
+            } catch (NoSuchFieldException e) {
+                clazz = clazz.getSuperclass();
+            } catch (Exception e) {
+                return null;
+            }
+        }
+        return null;
     }
 }

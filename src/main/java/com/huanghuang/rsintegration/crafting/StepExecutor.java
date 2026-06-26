@@ -122,7 +122,11 @@ final class StepExecutor {
             if (items.length == 0) continue;
             Item item = items[0].getItem();
             grouped.merge(item, 1, Integer::sum);
-            representatives.putIfAbsent(item, ing);
+            // Prefer broader (tag-based) Ingredient as representative
+            // so ensureIngredient doesn't fail on exact-match mismatch
+            // when multiple Ingredient types share the same first item.
+            representatives.merge(item, ing, (prev, next) ->
+                    next.getItems().length >= prev.getItems().length ? next : prev);
         }
 
         for (Map.Entry<Item, Integer> entry : grouped.entrySet()) {
@@ -151,7 +155,8 @@ final class StepExecutor {
             if (items.length == 0) continue;
             Item item = items[0].getItem();
             grouped.merge(item, spec.count(), Integer::sum);
-            representatives.putIfAbsent(item, spec.ingredient());
+            representatives.merge(item, spec.ingredient(), (prev, next) ->
+                    next.getItems().length >= prev.getItems().length ? next : prev);
         }
 
         for (Map.Entry<Item, Integer> entry : grouped.entrySet()) {

@@ -225,8 +225,11 @@ public final class WRBatchDelegate implements IBatchDelegate {
                         setContainerItem(be, i, ItemStack.EMPTY);
                         collectedCount++;
                         if (network != null) {
-                            network.insertItem(outStack, outStack.getCount(),
+                            ItemStack leftover = network.insertItem(outStack, outStack.getCount(),
                                     com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                            if (!leftover.isEmpty()) {
+                                ItemHandlerHelper.giveItemToPlayer(player, leftover);
+                            }
                         } else if (player != null) {
                             ItemHandlerHelper.giveItemToPlayer(player, outStack);
                         }
@@ -1176,8 +1179,11 @@ public final class WRBatchDelegate implements IBatchDelegate {
                         } else {
                             // Multiple outputs — insert extras directly into RS
                             if (network != null) {
-                                network.insertItem(stack, stack.getCount(),
+                                ItemStack leftover = network.insertItem(stack, stack.getCount(),
                                         com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                                if (!leftover.isEmpty()) {
+                                    ItemHandlerHelper.giveItemToPlayer(player, leftover);
+                                }
                             } else {
                                 ItemHandlerHelper.giveItemToPlayer(player, stack);
                             }
@@ -1209,8 +1215,11 @@ public final class WRBatchDelegate implements IBatchDelegate {
                             fromMachine = stack;
                         } else {
                             if (network != null) {
-                                network.insertItem(stack, stack.getCount(),
+                                ItemStack leftover = network.insertItem(stack, stack.getCount(),
                                         com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                                if (!leftover.isEmpty()) {
+                                    ItemHandlerHelper.giveItemToPlayer(player, leftover);
+                                }
                             } else {
                                 ItemHandlerHelper.giveItemToPlayer(player, stack);
                             }
@@ -1260,8 +1269,11 @@ public final class WRBatchDelegate implements IBatchDelegate {
                                         fromMachine = taken;
                                     } else {
                                         if (network != null) {
-                                            network.insertItem(taken, taken.getCount(),
+                                            ItemStack leftover = network.insertItem(taken, taken.getCount(),
                                                     com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                                            if (!leftover.isEmpty()) {
+                                                ItemHandlerHelper.giveItemToPlayer(player, leftover);
+                                            }
                                         } else {
                                             ItemHandlerHelper.giveItemToPlayer(player, taken);
                                         }
@@ -1467,8 +1479,11 @@ public final class WRBatchDelegate implements IBatchDelegate {
     private void returnItem(ItemStack stack) {
         if (stack.isEmpty()) return;
         if (network != null) {
-            network.insertItem(stack, stack.getCount(),
+            ItemStack leftover = network.insertItem(stack, stack.getCount(),
                     com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+            if (!leftover.isEmpty()) {
+                ItemHandlerHelper.giveItemToPlayer(player, leftover);
+            }
         } else if (player != null) {
             if (!player.getInventory().add(stack)) {
                 player.drop(stack, false);

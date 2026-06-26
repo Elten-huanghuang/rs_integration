@@ -335,6 +335,7 @@ public final class RSIntegration {
             ItemStack stack = (ItemStack) getStack.invoke(grid);
             return resolveFromNetworkItem(player, stack);
         } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI] Container terminal resolve failed: {}", e.toString());
             return null;
         }
     }
@@ -355,21 +356,8 @@ public final class RSIntegration {
                 }
             }
 
-            // Phase 1: SIMULATE to verify total availability before committing.
-            int simRemaining = count;
-            for (ItemStack template : snapshot) {
-                if (simRemaining <= 0) break;
-                int take = Math.min(simRemaining, template.getCount());
-                ItemStack probe = template.copy();
-                probe.setCount(1);
-                ItemStack simResult = network.extractItem(probe, take, Action.SIMULATE);
-                simRemaining -= simResult.getCount();
-            }
-            if (simRemaining > 0) {
-                return ItemStack.EMPTY; // not enough available — nothing extracted
-            }
-
-            // Phase 2: PERFORM after verified availability.
+            // Single-phase PERFORM extraction — avoids TOCTOU race between
+            // SIMULATE and PERFORM. If we get less than requested, refund.
             int remaining = count;
             ItemStack result = ItemStack.EMPTY;
 
@@ -393,12 +381,15 @@ public final class RSIntegration {
                 return result;
             }
 
-            // Partial extraction: SIMULATE said enough was available, but
-            // PERFORM returned less. Return what we got back to the network.
+            // Partial extraction: refund what we got back to the network.
             if (!result.isEmpty()) {
                 RSIntegrationMod.LOGGER.error("[RSI] extractFromNetwork: partial extraction — "
                         + "requested {} but got {}, refunding", count, result.getCount());
-                network.insertItem(result, result.getCount(), Action.PERFORM);
+                ItemStack leftover = network.insertItem(result, result.getCount(), Action.PERFORM);
+                if (!leftover.isEmpty()) {
+                    RSIntegrationMod.LOGGER.error("[RSI] extractFromNetwork: refund insert also failed, "
+                            + "{} items may be lost", leftover.getCount());
+                }
             }
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.error("[RSI] extractFromNetwork error — items may have been lost", e);

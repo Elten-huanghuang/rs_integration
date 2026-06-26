@@ -170,10 +170,16 @@ public abstract class RefillUpgradeWrapperMixin
                 if (filled < toFill.getCount()) {
                     ItemStack unplaced = toFill.copy();
                     unplaced.setCount(toFill.getCount() - filled);
-                    network.insertItem(unplaced, unplaced.getCount(), Action.PERFORM);
+                    ItemStack leftover = network.insertItem(unplaced, unplaced.getCount(), Action.PERFORM);
+                    if (!leftover.isEmpty()) {
+                        ItemHandlerHelper.giveItemToPlayer(player, leftover);
+                    }
                 }
                 if (!remainder.isEmpty()) {
-                    network.insertItem(remainder, remainder.getCount(), Action.PERFORM);
+                    ItemStack leftover = network.insertItem(remainder, remainder.getCount(), Action.PERFORM);
+                    if (!leftover.isEmpty()) {
+                        ItemHandlerHelper.giveItemToPlayer(player, leftover);
+                    }
                 }
                 if (missing <= 0) break;
             }

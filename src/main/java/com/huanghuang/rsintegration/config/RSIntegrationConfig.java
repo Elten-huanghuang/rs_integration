@@ -27,6 +27,7 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.BooleanValue ENABLE_WIZARDS_REBORN;
     public static ForgeConfigSpec.BooleanValue ENABLE_FORBIDDEN_ARCANUS;
     public static ForgeConfigSpec.BooleanValue ENABLE_EIDOLON;
+    public static ForgeConfigSpec.BooleanValue ENABLE_TOUHOU_LITTLE_MAID;
     public static ForgeConfigSpec.BooleanValue ENABLE_SOPHISTICATED_BACKPACKS;
     public static ForgeConfigSpec.BooleanValue ENABLE_JEI;
     public static ForgeConfigSpec.BooleanValue DEPOSIT_UPGRADE_RS;
@@ -74,6 +75,9 @@ public final class RSIntegrationConfig {
         ENABLE_EIDOLON = b
                 .comment("Enable RS integration with Eidolon Repraised (Crucible remote crafting).")
                 .define("enableEidolon", true);
+        ENABLE_TOUHOU_LITTLE_MAID = b
+                .comment("Enable RS integration with Touhou Little Maid (Maid Altar remote crafting).")
+                .define("enableTouhouLittleMaid", true);
         ENABLE_SOPHISTICATED_BACKPACKS = b
                 .comment("Enable RS integration with Sophisticated Backpacks (RS-based upgrade items).")
                 .define("enableSophisticatedBackpacks", true);

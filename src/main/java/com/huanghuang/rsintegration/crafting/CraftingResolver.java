@@ -432,7 +432,7 @@ public final class CraftingResolver {
             try {
                 CompoundTag tag = TagParser.parseTag(key.tag());
                 stack.setTag(tag);
-            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
+            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] NBT parse failed: {}", e.toString()); }
         }
         return stack;
     }
@@ -458,7 +458,7 @@ public final class CraftingResolver {
                 if (key.tag() != null) {
                     try {
                         stack.setTag(net.minecraft.nbt.TagParser.parseTag(key.tag()));
-                    } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
+                    } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] NBT parse failed: {}", e.toString()); }
                 }
                 list.add(stack);
             }
@@ -579,7 +579,7 @@ public final class CraftingResolver {
             if (tag != null) {
                 try {
                     stack.setTag(TagParser.parseTag(tag));
-                } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
+                } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] NBT parse failed: {}", e.toString()); }
             }
             return stack;
         }

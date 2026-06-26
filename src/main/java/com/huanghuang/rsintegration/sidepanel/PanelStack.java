@@ -84,9 +84,28 @@ public final class PanelStack {
     public String searchKey() {
         var rl = net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(stack.getItem());
         String base = rl != null ? rl.toString() : "";
-        if (stack.getTag() != null && !stack.getTag().isEmpty()) {
-            base += "|" + stack.getTag().toString();
-        }
+        String nbt = stableNbtString(stack.getTag());
+        if (!nbt.isEmpty()) base += "|" + nbt;
         return base;
+    }
+
+    /** Produce a deterministic string from a CompoundTag by sorting keys at each level.
+     *  Avoids the non-deterministic {@code CompoundTag.toString()} from HashMap iteration. */
+    public static String stableNbtString(net.minecraft.nbt.CompoundTag tag) {
+        if (tag == null || tag.isEmpty()) return "";
+        var keys = new java.util.ArrayList<>(tag.getAllKeys());
+        java.util.Collections.sort(keys);
+        StringBuilder sb = new StringBuilder();
+        for (String key : keys) {
+            if (!sb.isEmpty()) sb.append(',');
+            sb.append(key).append('=');
+            net.minecraft.nbt.Tag val = tag.get(key);
+            if (val instanceof net.minecraft.nbt.CompoundTag child) {
+                sb.append('{').append(stableNbtString(child)).append('}');
+            } else {
+                sb.append(val);
+            }
+        }
+        return sb.toString();
     }
 }

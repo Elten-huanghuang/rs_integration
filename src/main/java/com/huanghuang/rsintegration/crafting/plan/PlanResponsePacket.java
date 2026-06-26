@@ -56,6 +56,10 @@ public final class PlanResponsePacket {
             for (String mt : step.alternativeModTypes()) {
                 buf.writeUtf(mt);
             }
+            buf.writeVarInt(step.warnings().size());
+            for (String w : step.warnings()) {
+                buf.writeUtf(w);
+            }
         }
         // Materials
         buf.writeVarInt(plan.materials().size());
@@ -77,6 +81,9 @@ public final class PlanResponsePacket {
         buf.writeVarInt(plan.executionPosX());
         buf.writeVarInt(plan.executionPosY());
         buf.writeVarInt(plan.executionPosZ());
+        // Mod warnings (Goety research/structure, FA essences)
+        buf.writeVarInt(plan.modWarnings().size());
+        for (String w : plan.modWarnings()) buf.writeUtf(w);
     }
 
     public static PlanResponsePacket decode(FriendlyByteBuf buf) {
@@ -117,8 +124,14 @@ public final class PlanResponsePacket {
             for (int j = 0; j < altModCount; j++) {
                 alternativeModTypes.add(buf.readUtf());
             }
+            int warnCount = buf.readVarInt();
+            List<String> warnings = new ArrayList<>(warnCount);
+            for (int j = 0; j < warnCount; j++) {
+                warnings.add(buf.readUtf());
+            }
             steps.add(new PlanStep(rid, output, batches, inputs, alternatives, modType,
-                    depth, hasOrSiblings, recipeWidth, recipeHeight, alternativeModTypes));
+                    depth, hasOrSiblings, recipeWidth, recipeHeight, alternativeModTypes,
+                    warnings));
         }
         // Materials
         int matCount = buf.readVarInt();
@@ -139,9 +152,13 @@ public final class PlanResponsePacket {
         int execX = buf.readVarInt();
         int execY = buf.readVarInt();
         int execZ = buf.readVarInt();
+        // Mod warnings
+        int modWarnCount = buf.readVarInt();
+        List<String> modWarnings = new ArrayList<>(modWarnCount);
+        for (int i = 0; i < modWarnCount; i++) modWarnings.add(buf.readUtf());
         return new PlanResponsePacket(new PlanResponse(success, targetName, targetResult,
                 steps, materials, missing, recipeId,
-                execModType, execDim, execX, execY, execZ));
+                execModType, execDim, execX, execY, execZ, modWarnings));
     }
 
     @SuppressWarnings("resource")

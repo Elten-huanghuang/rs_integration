@@ -63,14 +63,14 @@ public final class BindingEventHandler {
         BlockPos pos = event.getPos();
         ResourceLocation dim = event.getLevel().dimension().location();
         String blockKey = matched.blockKey(block);
+        Component blockName = resolveBlockName(blockKey);
 
         synchronized (BINDING_LOCK) {
         if (BindingStorage.hasBinding(held, dim, pos)) {
             BindingStorage.removeBinding(held, dim, pos);
             AltarBindingRegistry.unbind(event.getLevel().dimension(), pos, AltarBinding.RS_NETWORK);
             player.displayClientMessage(
-                    Component.translatable("gui.rs_integration.altar.unbound",
-                            Component.translatable(block.getDescriptionId())),
+                    Component.translatable("gui.rs_integration.altar.unbound", blockName),
                     true);
         } else {
             Optional<AltarBinding> binding = hook.get().createBinding(held);
@@ -79,7 +79,7 @@ public final class BindingEventHandler {
                 BindingStorage.addBinding(held, dim, pos, blockKey);
                 player.displayClientMessage(
                         Component.translatable("gui.rs_integration.altar.bound",
-                                Component.translatable(blockKey), binding.get().displayName()),
+                                blockName, binding.get().displayName()),
                         true);
             }
         }
@@ -119,6 +119,19 @@ public final class BindingEventHandler {
             }
             return block.getDescriptionId();
         }
+    }
+
+    /**
+     * Parse a blockKey of the form "{prefix}||block.description.id" or
+     * "block.description.id" and return a translatable component for the
+     * actual block name (skipping the internal prefix).
+     */
+    public static Component resolveBlockName(String blockKey) {
+        int sep = blockKey.indexOf("||");
+        if (sep >= 0 && sep < blockKey.length() - 2) {
+            return Component.translatable(blockKey.substring(sep + 2));
+        }
+        return Component.translatable(blockKey);
     }
 
     // ── class name → MachineBindingTarget lookup ───────────────

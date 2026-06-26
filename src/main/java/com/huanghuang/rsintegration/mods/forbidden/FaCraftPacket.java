@@ -133,6 +133,7 @@ public final class FaCraftPacket {
                     (ResourceKey<? extends net.minecraft.core.Registry<?>>) (Object) key);
             return registry.get(id);
         } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-FA] Registry key lookup failed: {}", e.toString());
             return null;
         }
     }
@@ -459,7 +460,9 @@ public final class FaCraftPacket {
         // Phase 3: require a RitualStarterItem (gavel/hammer) — FA
         // enforces this through its right-click handler; calling
         // tryStartRitual directly bypasses that requirement.
-        final ItemStack starterStack = findRitualStarterItem(player, network);
+        final StarterResult starterResult = findRitualStarterItem(player, network);
+        final ItemStack starterStack = starterResult.stack();
+        final INetwork starterNetwork = starterResult.sourceNetwork();
         if (starterStack.isEmpty()) {
             RSIntegrationMod.LOGGER.debug("[RSI-FA] tryCraft: no usable RitualStarterItem in inventory or RS");
             player.sendSystemMessage(Component.translatable("rsi.fa.error.missing_starter_item"));
@@ -468,7 +471,16 @@ public final class FaCraftPacket {
             return;
         }
 
-        // Phase 4: start the ritual BEFORE committing ledger
+        // Phase 4: commit ledger first — extract items from RS BEFORE starting ritual
+        if (!ledger.commit(network, player)) {
+            RSIntegrationMod.LOGGER.error("[RSI-FA] Ledger commit failed for ritual {}", ritualId);
+            rollbackAll(player, be, filledPedestals, network);
+            returnStarterToSource(starterStack, player, starterNetwork);
+            player.sendSystemMessage(Component.translatable("rsi.fa.error.craft_failed", "commit failed"));
+            return;
+        }
+
+        // Phase 5: start the ritual AFTER committing ledger
         try {
             Object essenceMgr = getMethod(hephaestusForgeBEClass, "getEssenceManager").invoke(be);
             Object essencesStorage = getMethod(essenceManagerClass, "getStorage").invoke(essenceMgr);
@@ -486,7 +498,7 @@ public final class FaCraftPacket {
                 RSIntegrationMod.LOGGER.debug("[RSI-FA] tryStartRitual: ritual rejected by forge");
                 rollbackAll(player, be, filledPedestals, network);
                 ledger.rollback(player);
-                returnStarterToSource(starterStack);
+                returnStarterToSource(starterStack, player, starterNetwork);
                 player.sendSystemMessage(Component.translatable("rsi.fa.warn.ritual_rejected"));
                 return;
             }
@@ -495,29 +507,20 @@ public final class FaCraftPacket {
             RSIntegrationMod.LOGGER.error("[RSI-FA] tryStartRitual failed — forge rejected: {}", root.toString());
             rollbackAll(player, be, filledPedestals, network);
             ledger.rollback(player);
-            returnStarterToSource(starterStack);
+            returnStarterToSource(starterStack, player, starterNetwork);
             player.sendSystemMessage(Component.translatable("rsi.fa.error.craft_failed", root.getMessage()));
             return;
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.error("[RSI-FA] Failed to start ritual {}:", ritualId, e);
             rollbackAll(player, be, filledPedestals, network);
             ledger.rollback(player);
-            returnStarterToSource(starterStack);
+            returnStarterToSource(starterStack, player, starterNetwork);
             player.sendSystemMessage(Component.translatable("rsi.fa.error.craft_failed", e.getMessage()));
             return;
         }
 
-        // Phase 4: commit — ritual started successfully, now extract items from RS
-        if (!ledger.commit(network, player)) {
-            RSIntegrationMod.LOGGER.error("[RSI-FA] Ledger commit failed for ritual {}", ritualId);
-            rollbackAll(player, be, filledPedestals, network);
-            returnStarterToSource(starterStack);
-            player.sendSystemMessage(Component.translatable("rsi.fa.error.craft_failed", "commit failed"));
-            return;
-        }
-
         // Only consume the starter AFTER everything succeeded
-        consumeRitualStarterUse(starterStack, player);
+        consumeRitualStarterUse(starterStack, player, starterNetwork);
 
         Object result = invoke(invoke(ritual, "result"), "getResult");
         String resultName = "???";
@@ -916,37 +919,23 @@ public final class FaCraftPacket {
 
     // ── RitualStarterItem helpers ──────────────────────────────────
 
-    /**
-     * When the starter item was extracted from RS (rather than found in the
-     * player inventory), this holds the network so {@link #consumeRitualStarterUse}
-     * can re-insert the modified stack.  Cleared after use.
-     */
-    @javax.annotation.Nullable
-    private static INetwork starterFromRSNetwork;
+    private record StarterResult(ItemStack stack, @Nullable INetwork sourceNetwork) {}
 
-    /**
-     * Finds a valid RitualStarterItem (gavel/hammer) that has at least one
-     * remaining use.  Checks the player inventory first, then falls back to
-     * extracting from the RS network.  FA requires a right-click with such
-     * an item to start any ritual — calling {@code tryStartRitual} directly
-     * bypasses that requirement.
-     */
-    @javax.annotation.Nullable
-    private static ItemStack findRitualStarterItem(ServerPlayer player,
-                                                    @Nullable INetwork network) {
+    private static StarterResult findRitualStarterItem(ServerPlayer player,
+                                                       @Nullable INetwork network) {
         ensureClasses();
-        if (ritualStarterItemClass == null) return ItemStack.EMPTY;
+        if (ritualStarterItemClass == null) return new StarterResult(ItemStack.EMPTY, null);
 
         // 1. Player inventory + offhand
         for (ItemStack stack : player.getInventory().items) {
             if (!stack.isEmpty() && ritualStarterItemClass.isInstance(stack.getItem())
                     && canStartRitual(stack))
-                return stack;
+                return new StarterResult(stack, null);
         }
         ItemStack offhand = player.getOffhandItem();
         if (!offhand.isEmpty() && ritualStarterItemClass.isInstance(offhand.getItem())
                 && canStartRitual(offhand))
-            return offhand;
+            return new StarterResult(offhand, null);
 
         // 2. RS network fallback
         if (network != null) {
@@ -964,8 +953,7 @@ public final class FaCraftPacket {
                         ItemStack extracted = network.extractItem(req, 1,
                                 com.refinedmods.refinedstorage.api.util.Action.PERFORM);
                         if (!extracted.isEmpty()) {
-                            starterFromRSNetwork = network;
-                            return extracted;
+                            return new StarterResult(extracted, network);
                         }
                     }
                 }
@@ -973,7 +961,7 @@ public final class FaCraftPacket {
                 RSIntegrationMod.LOGGER.debug("[RSI-FA] RS starter search failed: {}", e.toString());
             }
         }
-        return ItemStack.EMPTY;
+        return new StarterResult(ItemStack.EMPTY, null);
     }
 
     private static boolean canStartRitual(ItemStack stack) {
@@ -985,36 +973,46 @@ public final class FaCraftPacket {
         }
     }
 
-    private static void consumeRitualStarterUse(ItemStack starterStack, ServerPlayer player) {
-        if (player.isCreative()) return;
-        String source = starterFromRSNetwork != null ? "RS" : "inventory";
-        try {
-            Object item = starterStack.getItem();
-            int remaining = (int) getMethod(ritualStarterItemClass,
-                    "getRemainingUses", ItemStack.class).invoke(item, starterStack);
-            RSIntegrationMod.LOGGER.info("[RSI-FA] Starter '{}' uses before: {} (source: {})",
-                    starterStack.getHoverName().getString(), remaining, source);
-            if (remaining > 0) {
-                int newRemaining = remaining - 1;
-                getMethod(ritualStarterItemClass,
-                        "setRemainingUses", ItemStack.class, int.class)
-                        .invoke(item, starterStack, newRemaining);
-                RSIntegrationMod.LOGGER.info("[RSI-FA] Starter '{}' uses after: {}",
-                        starterStack.getHoverName().getString(), newRemaining);
-            } else {
-                RSIntegrationMod.LOGGER.warn("[RSI-FA] Starter '{}' has {} remaining uses — cannot consume",
-                        starterStack.getHoverName().getString(), remaining);
+    private static void consumeRitualStarterUse(ItemStack starterStack, ServerPlayer player,
+                                                @Nullable INetwork starterNetwork) {
+        boolean isCreative = player.isCreative();
+        String source = starterNetwork != null ? "RS" : "inventory";
+
+        if (!isCreative) {
+            try {
+                Object item = starterStack.getItem();
+                int remaining = (int) getMethod(ritualStarterItemClass,
+                        "getRemainingUses", ItemStack.class).invoke(item, starterStack);
+                RSIntegrationMod.LOGGER.info("[RSI-FA] Starter '{}' uses before: {} (source: {})",
+                        starterStack.getHoverName().getString(), remaining, source);
+                if (remaining > 0) {
+                    int newRemaining = remaining - 1;
+                    getMethod(ritualStarterItemClass,
+                            "setRemainingUses", ItemStack.class, int.class)
+                            .invoke(item, starterStack, newRemaining);
+                    RSIntegrationMod.LOGGER.info("[RSI-FA] Starter '{}' uses after: {}",
+                            starterStack.getHoverName().getString(), newRemaining);
+                } else {
+                    RSIntegrationMod.LOGGER.warn("[RSI-FA] Starter '{}' has {} remaining uses — cannot consume",
+                            starterStack.getHoverName().getString(), remaining);
+                }
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.warn("[RSI-FA] consumeRitualStarterUse failed for '{}': {}",
+                        starterStack.getHoverName().getString(), e.toString());
             }
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-FA] consumeRitualStarterUse failed for '{}': {}",
-                    starterStack.getHoverName().getString(), e.toString());
+        } else {
+            RSIntegrationMod.LOGGER.info("[RSI-FA] consumeRitualStarterUse: player is creative, not consuming durability");
         }
-        // Re-insert if the starter was extracted from RS
-        INetwork net = starterFromRSNetwork;
-        if (net != null) {
-            starterFromRSNetwork = null;
-            net.insertItem(starterStack, starterStack.getCount(),
+
+        // Always re-insert if the starter was extracted from RS — even in creative mode
+        if (starterNetwork != null) {
+            ItemStack leftover = starterNetwork.insertItem(starterStack, starterStack.getCount(),
                     com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+            if (!leftover.isEmpty()) {
+                RSIntegrationMod.LOGGER.warn("[RSI-FA] consumeRitualStarterUse: RS insert failed, giving '{}' to player",
+                        starterStack.getHoverName().getString());
+                ItemHandlerHelper.giveItemToPlayer(player, leftover);
+            }
         }
     }
 
@@ -1027,8 +1025,11 @@ public final class FaCraftPacket {
                 ItemStack stack = (ItemStack) getMethod(pedestalBEClass, "getStack").invoke(ped);
                 if (stack != null && !stack.isEmpty()) {
                     if (network != null) {
-                        network.insertItem(stack, stack.getCount(),
+                        ItemStack leftover = network.insertItem(stack, stack.getCount(),
                                 com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                        if (!leftover.isEmpty()) {
+                            ItemHandlerHelper.giveItemToPlayer(player, leftover);
+                        }
                     } else {
                         ItemHandlerHelper.giveItemToPlayer(player, stack);
                     }
@@ -1042,8 +1043,11 @@ public final class FaCraftPacket {
             ItemStack stack = getForgeSlot(forge, mainSlot);
             if (!stack.isEmpty()) {
                 if (network != null) {
-                    network.insertItem(stack, stack.getCount(),
+                    ItemStack leftover = network.insertItem(stack, stack.getCount(),
                             com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                    if (!leftover.isEmpty()) {
+                        ItemHandlerHelper.giveItemToPlayer(player, leftover);
+                    }
                 } else {
                     ItemHandlerHelper.giveItemToPlayer(player, stack);
                 }
@@ -1091,13 +1095,17 @@ public final class FaCraftPacket {
         }
     }
 
-    private static void returnStarterToSource(ItemStack stack) {
+    private static void returnStarterToSource(ItemStack stack, ServerPlayer player,
+                                              @Nullable INetwork starterNetwork) {
         if (stack.isEmpty()) return;
-        INetwork net = starterFromRSNetwork;
-        if (net != null) {
-            starterFromRSNetwork = null;
-            net.insertItem(stack, stack.getCount(),
+        if (starterNetwork != null) {
+            ItemStack leftover = starterNetwork.insertItem(stack, stack.getCount(),
                     com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+            if (!leftover.isEmpty()) {
+                RSIntegrationMod.LOGGER.warn("[RSI-FA] returnStarterToSource: RS insert failed, giving '{}' to player",
+                        stack.getHoverName().getString());
+                ItemHandlerHelper.giveItemToPlayer(player, leftover);
+            }
         }
     }
 }

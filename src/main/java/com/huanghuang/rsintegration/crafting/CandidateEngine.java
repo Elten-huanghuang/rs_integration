@@ -52,7 +52,7 @@ final class CandidateEngine {
 
             for (RecipeIndex.Entry entry : recipes) {
                 if (entry.modType() != ModType.GENERIC) {
-                    if (!isMachineAvailable(entry.modType(), ctx)) {
+                    if (!isMachineAvailable(entry, ctx)) {
                         if (diag != null) logDiag(diag, item, entry, 0, entry.modType(), true, "Machine not available");
                         continue;
                     }
@@ -118,10 +118,10 @@ final class CandidateEngine {
         diag.add(new CandidateDiagnostic(id, score, mt != null ? mt : ModType.GENERIC, skipped, reason));
     }
 
-    private static boolean isMachineAvailable(ModType type, ResolutionContext ctx) {
-        if (type == ModType.GENERIC) return true;
+    private static boolean isMachineAvailable(RecipeIndex.Entry entry, ResolutionContext ctx) {
+        if (entry.modType() == ModType.GENERIC) return true;
         if (ctx.player == null) return false;
-        return AltarBindingRegistry.hasAnyBindingForType(ctx.player, type);
+        return AltarBindingRegistry.hasBindingForRecipe(ctx.player, entry.recipe());
     }
 
     private static boolean isPreferred(RecipeIndex.Entry entry, ResolutionContext ctx) {

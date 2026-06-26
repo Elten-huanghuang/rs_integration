@@ -3,12 +3,14 @@ package com.huanghuang.rsintegration.mods.goety;
 import com.Polarice3.Goety.common.blocks.entities.DarkAltarBlockEntity;
 import com.Polarice3.Goety.common.blocks.entities.PedestalBlockEntity;
 import com.Polarice3.Goety.common.crafting.RitualRecipe;
+import com.Polarice3.Goety.common.research.Research;
 import com.Polarice3.Goety.common.ritual.Ritual;
 import com.Polarice3.Goety.utils.SEHelper;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
@@ -16,6 +18,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
@@ -115,26 +118,72 @@ public final class GoetyGuiSelectRitualPacket {
         }
 
         // 1. Check soul energy FIRST (before any extraction)
+        // Souls come from the CursedCageBlockEntity attached to the altar, not the player.
         int soulCost = recipe.getSoulCost();
-        int playerSouls = SEHelper.getSESouls(player);
-        if (playerSouls < soulCost) {
-            player.displayClientMessage(Component.translatable("rsi.goety.error.soul_insufficient", soulCost, playerSouls), true);
-            return false;
+        if (soulCost > 0) {
+            try {
+                var cageField = DarkAltarBlockEntity.class.getDeclaredField("cursedCageTile");
+                cageField.setAccessible(true);
+                Object cage = cageField.get(altar);
+                if (cage != null) {
+                    int available = (int) cage.getClass().getMethod("getSouls").invoke(cage);
+                    if (available < soulCost) {
+                        player.displayClientMessage(Component.translatable(
+                                "rsi.goety.error.insufficient_souls", soulCost, available), true);
+                        return false;
+                    }
+                }
+                // If cage is null (link gem/Arca), skip validation
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.debug("[RSI-Goety] Soul check failed, skipping", e);
+            }
         }
 
         // 2. Validate ritual prerequisites BEFORE touching any inventory/pedestals
-        try {
-            java.lang.reflect.Method canStartMethod = ritual.getClass().getMethod("canStart",
-                    Level.class, BlockPos.class, net.minecraft.world.entity.player.Player.class);
-            boolean ok = (boolean) canStartMethod.invoke(ritual, level, pos, player);
-            if (!ok) {
-                player.displayClientMessage(Component.translatable("rsi.goety.error.ritual_prerequisites"), true);
+        // 2a. Filter unsupported ritual subtypes
+        if (ritual instanceof com.Polarice3.Goety.common.ritual.ConvertRitual
+                || ritual instanceof com.Polarice3.Goety.common.ritual.TeleportRitual) {
+            player.displayClientMessage(Component.translatable(
+                    "rsi.goety.error.unsupported_ritual_type", ritual.getClass().getSimpleName()), true);
+            return false;
+        }
+        // 2b. Reject sacrifice-requiring rituals
+        if (recipe.requiresSacrifice()) {
+            player.displayClientMessage(Component.translatable(
+                    "rsi.goety.error.requires_sacrifice", recipe.getEntityToSacrificeDisplayName()), true);
+            return false;
+        }
+        // 2c. Research check
+        String researchId = recipe.getResearch();
+        if (researchId != null && !researchId.isEmpty()) {
+            try {
+                var researchList = Class.forName("com.Polarice3.Goety.common.research.ResearchList");
+                Research research = (Research) researchList
+                        .getMethod("getResearch", String.class).invoke(null, researchId);
+                if (research != null && !SEHelper.hasResearch(player, research)) {
+                    player.displayClientMessage(Component.translatable(
+                            "rsi.goety.error.research_required",
+                            resolveResearchName(researchId)), true);
+                    return false;
+                }
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.debug("[RSI-Goety] Research check failed, skipping", e);
+            }
+        }
+        // 2d. Enchant XP check
+        if (ritual instanceof com.Polarice3.Goety.common.ritual.EnchantItemRitual) {
+            int xpCost = recipe.getXPLevelCost();
+            if (xpCost > 0 && player.experienceLevel < xpCost) {
+                player.displayClientMessage(Component.translatable(
+                        "rsi.goety.error.insufficient_xp", xpCost, player.experienceLevel), true);
                 return false;
             }
-        } catch (NoSuchMethodException ignored) {
-            // Older Goety versions may not have canStart
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Goety] canStart check failed, proceeding anyway", e);
+        }
+        // 2e. Ritual.isValid() pre-flight — validate BEFORE any extraction
+        if (!ritual.isValid(level, pos, altar, player, ItemStack.EMPTY, requiredIngredients)) {
+            player.displayClientMessage(Component.translatable("rsi.goety.error.one_click_failed"), true);
+            RSIntegrationMod.LOGGER.warn("[RSI-Goety] ritual.isValid() returned false before extraction for {}", recipe.getId());
+            return false;
         }
 
         // 3. Save old pedestal items so we can restore them on failure
@@ -190,7 +239,15 @@ public final class GoetyGuiSelectRitualPacket {
         }
 
         // 8. Start ritual
-        altar.startRitual(player, activationItem, recipe);
+        try {
+            altar.startRitual(player, activationItem, recipe);
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.error("[RSI-Goety] startRitual threw after extraction — refunding activation item", e);
+            if (!activationItem.isEmpty()) {
+                ItemHandlerHelper.giveItemToPlayer(player, activationItem.copy());
+            }
+            return false;
+        }
         RSIntegrationMod.LOGGER.debug("Player {} started Goety ritual '{}' via remote crafting.", player.getName().getString(), recipe.getId());
         return true;
     }
@@ -283,6 +340,20 @@ public final class GoetyGuiSelectRitualPacket {
         for (ItemStack ingredient : ingredients) {
             ItemHandlerHelper.giveItemToPlayer(player, ingredient);
         }
+    }
+
+    private static String resolveResearchName(String researchId) {
+        try {
+            Item item = BuiltInRegistries.ITEM.get(
+                    new ResourceLocation("goety", researchId + "_scroll"));
+            if (item != null && item != net.minecraft.world.item.Items.AIR) {
+                return item.getDefaultInstance().getDisplayName().getString();
+            }
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-Goety] resolveResearchName failed for {}: {}", researchId, e.toString());
+            /* fall through */
+        }
+        return researchId;
     }
 
 }

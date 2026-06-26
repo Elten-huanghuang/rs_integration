@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.util;
 
+import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.mojang.authlib.GameProfile;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.storage.cache.IStorageCache;
@@ -136,7 +137,11 @@ public final class BackpackRSUtils {
                 restocked.add(result);
             }
             if (!remaining.isEmpty()) {
-                network.insertItem(remaining, remaining.getCount(), Action.PERFORM);
+                ItemStack leftover2 = network.insertItem(remaining, remaining.getCount(), Action.PERFORM);
+                if (!leftover2.isEmpty()) {
+                    RSIntegrationMod.LOGGER.warn("[RSI-Backpack] Restock return to RS failed: {}x{} lost",
+                            leftover2.getCount(), leftover2.getDisplayName().getString());
+                }
             }
         }
         return restocked;

@@ -30,7 +30,8 @@ public final class ModRecipeHandlers {
             new EidolonRecipeHandler(),
             new FaRecipeHandler(),
             new GoetyRecipeHandler(),
-            new WRRecipeHandler()
+            new WRRecipeHandler(),
+            new TlmAltarRecipeHandler()
     );
 
     private ModRecipeHandlers() {}

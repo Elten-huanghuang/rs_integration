@@ -14,6 +14,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.food.FoodProperties;
 import net.minecraft.world.item.ItemStack;
+import net.minecraftforge.items.ItemHandlerHelper;
 import net.minecraft.world.level.Level;
 import net.p3pp3rf1y.sophisticatedcore.api.IStorageWrapper;
 import net.p3pp3rf1y.sophisticatedcore.upgrades.FilterLogic;
@@ -113,7 +114,10 @@ public abstract class FeedingUpgradeWrapperMixin
 
             ItemStack remainder = extracted.getCraftingRemainingItem();
             if (!remainder.isEmpty()) {
-                network.insertItem(remainder, remainder.getCount(), Action.PERFORM);
+                ItemStack leftover = network.insertItem(remainder, remainder.getCount(), Action.PERFORM);
+                if (!leftover.isEmpty()) {
+                    ItemHandlerHelper.giveItemToPlayer(player, leftover);
+                }
             }
 
             cir.setReturnValue(true);

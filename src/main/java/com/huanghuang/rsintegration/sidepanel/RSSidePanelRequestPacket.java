@@ -19,21 +19,24 @@ import java.util.function.Supplier;
 public final class RSSidePanelRequestPacket {
 
     final boolean forceFullSync;
+    final boolean isClosing;
 
     RSSidePanelRequestPacket() {
-        this(false);
+        this(false, false);
     }
 
-    RSSidePanelRequestPacket(boolean forceFullSync) {
+    RSSidePanelRequestPacket(boolean forceFullSync, boolean isClosing) {
         this.forceFullSync = forceFullSync;
+        this.isClosing = isClosing;
     }
 
     void encode(FriendlyByteBuf buf) {
         buf.writeBoolean(forceFullSync);
+        buf.writeBoolean(isClosing);
     }
 
     static RSSidePanelRequestPacket decode(FriendlyByteBuf buf) {
-        return new RSSidePanelRequestPacket(buf.readBoolean());
+        return new RSSidePanelRequestPacket(buf.readBoolean(), buf.readBoolean());
     }
 
     static void handle(RSSidePanelRequestPacket packet,
@@ -45,6 +48,11 @@ public final class RSSidePanelRequestPacket {
             return;
         }
         context.enqueueWork(() -> {
+            if (packet.isClosing) {
+                RSSidePanelNetworkHandler.unregisterListener(player.getUUID());
+                return;
+            }
+
             int maxSlots = RSIntegrationConfig.RS_SIDE_PANEL_MAX_SLOTS.get();
 
             INetwork network = RSIntegration.resolveNetworkFromPlayer(player);
