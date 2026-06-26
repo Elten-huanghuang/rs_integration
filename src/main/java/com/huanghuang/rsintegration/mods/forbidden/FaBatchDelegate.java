@@ -251,14 +251,51 @@ public final class FaBatchDelegate implements IBatchDelegate {
             return false;
         }
 
-        // Validate idle
+        // Validate idle — check ritual active state AND physical slots
         try {
             Boolean active = (Boolean) getMethod(ritualManagerClass, "isRitualActive").invoke(ritualManager);
             if (Boolean.TRUE.equals(active)) {
                 player.sendSystemMessage(Component.translatable("rsi.fa.warn.ritual_active"));
                 return false;
             }
-        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Reflection probe failed", e); }
+        } catch (Exception e) {
+            // Can't read active state → assume busy to prevent item duping
+            RSIntegrationMod.LOGGER.warn("[RSI-Batch-FA] Cannot check isRitualActive — assuming forge is busy", e);
+            player.sendSystemMessage(Component.translatable("rsi.fa.warn.ritual_active"));
+            return false;
+        }
+
+        // Check forge main slot is empty
+        try {
+            int mainSlot = getMainSlot();
+            ItemStack mainStack = getForgeSlot(forge, mainSlot);
+            if (!mainStack.isEmpty()) {
+                player.sendSystemMessage(Component.translatable("rsi.fa.warn.ritual_active"));
+                return false;
+            }
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Batch-FA] Cannot read forge main slot — assuming busy", e);
+            player.sendSystemMessage(Component.translatable("rsi.fa.warn.ritual_active"));
+            return false;
+        }
+
+        // Check pedestals are empty
+        try {
+            List<Object> foundPedestals = findPedestals(level);
+            if (foundPedestals != null) {
+                for (Object ped : foundPedestals) {
+                    ItemStack ps = (ItemStack) getMethod(pedestalBEClass, "getStack").invoke(ped);
+                    if (!ps.isEmpty()) {
+                        player.sendSystemMessage(Component.translatable("rsi.fa.warn.ritual_active"));
+                        return false;
+                    }
+                }
+            }
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Batch-FA] Cannot scan pedestals — assuming busy", e);
+            player.sendSystemMessage(Component.translatable("rsi.fa.warn.ritual_active"));
+            return false;
+        }
 
         this.filledPedestals = new ArrayList<>();
         this.emptyPedestals = new ArrayList<>();
@@ -796,7 +833,7 @@ public final class FaBatchDelegate implements IBatchDelegate {
         // Defensive: if starterFromRS still holds an extracted item that was
         // never consumed or returned (e.g. chain failed between extraction
         // and consumeRitualStarterUse), return it now.
-        if (starterFromRS != null && network != null) {
+        if (!usingSharedLedger && starterFromRS != null && network != null) {
             ItemStack leftover = network.insertItem(starterFromRS, starterFromRS.getCount(),
                     com.refinedmods.refinedstorage.api.util.Action.PERFORM);
             if (!leftover.isEmpty()) {
@@ -837,6 +874,7 @@ public final class FaBatchDelegate implements IBatchDelegate {
 
     void rollbackAll() {
         clearFilledPedestals();
+        if (usingSharedLedger) return; // refund is centralized via ledger.refundCommitted()
         try {
             int mainSlot = hephaestusForgeBEClass.getField("MAIN_SLOT").getInt(null);
             ItemStack stack = getForgeSlot(forge, mainSlot);

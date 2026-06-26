@@ -103,7 +103,7 @@ public final class GoetyGuiSelectRitualPacket {
         BlockPos pos = altar.getBlockPos();
         ResourceKey<Level> altarDim = level.dimension();
 
-        if (altar.getCurrentRitualRecipe() != null) {
+        if (altar.currentRitualRecipe != null) {
             player.displayClientMessage(Component.translatable("rsi.goety.warn.ritual_running"), true);
             return false;
         }

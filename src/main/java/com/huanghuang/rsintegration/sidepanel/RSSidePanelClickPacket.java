@@ -132,7 +132,7 @@ public final class RSSidePanelClickPacket {
             if (packet.action == ACTION_DRAG_DISTRIBUTE) {
                 handleDragDistribute(player, packet.dragItems);
             } else if (packet.action == ACTION_INSERT) {
-                handleInsert(player, packet.isShift); // isShift repurposed as isRightClick
+                handleInsert(player, packet.isShift, packet.carriedItem);
             } else {
                 handleSingleClick(player, packet.targetItem, packet.action, packet.isShift, packet.panelId);
             }
@@ -146,6 +146,18 @@ public final class RSSidePanelClickPacket {
 
     private static void handleSingleClick(ServerPlayer player, ItemStack targetItem,
                                            byte action, boolean isShift, UUID panelId) {
+        try {
+            handleSingleClickImpl(player, targetItem, action, isShift, panelId);
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI] handleSingleClick failed for {}: {}",
+                    player.getGameProfile().getName(), e.toString());
+        } finally {
+            syncCursorSlot(player);
+        }
+    }
+
+    private static void handleSingleClickImpl(ServerPlayer player, ItemStack targetItem,
+                                               byte action, boolean isShift, UUID panelId) {
         INetwork network = RSIntegration.resolveNetworkFromPlayer(player);
         if (network == null || targetItem.isEmpty()) return;
 
@@ -207,9 +219,14 @@ public final class RSSidePanelClickPacket {
         count = Math.min(count, available);
         if (count <= 0) return;
 
-        // Cursor-merging check — matches RS ItemGridHandler.onExtract
+        // Cursor-merging check — matches RS ItemGridHandler.onExtract.
+        // Creative mode: Mojang's ClientPacketListener.handleContainerSetSlot drops
+        // ClientboundContainerSetSlotPacket (containerId=-1) when the screen is a
+        // CreativeModeInventoryScreen, so the server cursor can never be synced to
+        // the client.  Therefore creative-mode extractions always route items to the
+        // player inventory directly (the isShift path).
         ItemStack cursor = player.containerMenu.getCarried();
-        if (!isShift) {
+        if (!isShift && !player.isCreative()) {
             if (!cursor.isEmpty()) {
                 if (!ItemHandlerHelper.canItemStacksStack(cursor, stored)) {
                     return; // cursor holds a different item — deny extraction
@@ -240,10 +257,16 @@ public final class RSSidePanelClickPacket {
         ItemStack extracted = network.extractItem(extractTemplate, count, Action.PERFORM);
         if (extracted.isEmpty()) return;
 
-        if (isShift) {
+        if (isShift || player.isCreative()) {
             ItemStack remainder = ItemHandlerHelper.insertItemStacked(
                     playerFullInv(player), extracted, false);
             if (!remainder.isEmpty()) player.drop(remainder, false);
+            // Creative mode: server cursor is a ghost that cannot be synced
+            // (ClientboundContainerSetSlotPacket is dropped by vanilla).
+            // Clear it immediately so it never blocks subsequent extractions.
+            if (player.isCreative()) {
+                player.containerMenu.setCarried(ItemStack.EMPTY);
+            }
         } else {
             if (cursor.isEmpty()) {
                 player.containerMenu.setCarried(extracted);
@@ -251,9 +274,7 @@ public final class RSSidePanelClickPacket {
                 cursor.grow(extracted.getCount());
             }
         }
-        player.containerMenu.broadcastChanges();
-        player.connection.send(new net.minecraft.network.protocol.game.ClientboundContainerSetSlotPacket(
-                -1, player.containerMenu.getStateId(), -1, player.containerMenu.getCarried()));
+        syncCursorSlot(player);
 
         // Energy drain — matches RS onExtract for wireless grid
         try {
@@ -269,64 +290,80 @@ public final class RSSidePanelClickPacket {
         // GridItemDeltaMessage is sent by the listener, not the handler.
     }
 
-    private static void handleInsert(ServerPlayer player, boolean isRightClick) {
-        INetwork network = RSIntegration.resolveNetworkFromPlayer(player);
-        if (network == null) return;
-
-        // Security check — matches RS ItemGridHandler.onInsert
-        if (network.getSecurityManager() != null
-                && !network.getSecurityManager().hasPermission(Permission.INSERT, player)) {
-            RSIntegrationMod.LOGGER.debug("[RSI] Insert blocked by security manager for {}", player.getGameProfile().getName());
-            return;
-        }
-        if (!network.canRun()) return;
-
-        ItemStack serverCarried = player.containerMenu.getCarried();
-        if (serverCarried.isEmpty()) {
-            player.connection.send(new net.minecraft.network.protocol.game.ClientboundContainerSetSlotPacket(
-                    -1, player.containerMenu.getStateId(), -1, ItemStack.EMPTY));
-            return;
-        }
-
-        ItemStack template = serverCarried.copy();
-
-        // Record modification time — matches RS tracker.changed() before insert
-        var tracker = network.getItemStorageTracker();
-        if (tracker != null) {
-            tracker.changed(player, template.copy());
-        }
-
-        if (isRightClick) {
-            // Right-click: insert single item — matches RS onInsert single path
-            template.setCount(1);
-            ItemStack remainder = network.insertItem(template.copy(), 1, Action.PERFORM);
-            if (remainder.isEmpty()) serverCarried.shrink(1);
-        } else {
-            // Left-click: insert entire stack — matches RS onInsert full-stack path
-            int count = serverCarried.getCount();
-            ItemStack remainder = network.insertItem(template.copy(), count, Action.PERFORM);
-            int inserted = count - remainder.getCount();
-            if (inserted > 0) serverCarried.shrink(inserted);
-        }
-        if (serverCarried.isEmpty()) {
-            player.containerMenu.setCarried(ItemStack.EMPTY);
-        }
-
-        player.containerMenu.broadcastChanges();
-        player.connection.send(new net.minecraft.network.protocol.game.ClientboundContainerSetSlotPacket(
-                -1, player.containerMenu.getStateId(), -1, player.containerMenu.getCarried()));
-
-        // Drain energy for wireless-grid users — matches RS ItemGridHandler.onInsert
+    private static void handleInsert(ServerPlayer player, boolean isRightClick, ItemStack clientCarried) {
         try {
-            var nim = network.getNetworkItemManager();
-            if (nim != null) {
-                var cfg = com.refinedmods.refinedstorage.RS.SERVER_CONFIG.getWirelessGrid();
-                nim.drainEnergy(player, cfg.getInsertUsage());
-            }
-        } catch (Exception e) { RSIntegrationMod.LOGGER.warn("[RSI] Energy drain failed", e); }
+            INetwork network = RSIntegration.resolveNetworkFromPlayer(player);
+            if (network == null) return;
 
-        // Delta is handled by the storage-cache listener registered in
-        // RSSidePanelNetworkHandler — matches RS native pattern.
+            // Security check — matches RS ItemGridHandler.onInsert
+            if (network.getSecurityManager() != null
+                    && !network.getSecurityManager().hasPermission(Permission.INSERT, player)) {
+                RSIntegrationMod.LOGGER.debug("[RSI] Insert blocked by security manager for {}", player.getGameProfile().getName());
+                return;
+            }
+            if (!network.canRun()) return;
+
+            ItemStack serverCarried = player.containerMenu.getCarried();
+
+            // Recover from cursor desync: if the server thinks the cursor is empty but the
+            // client sent a non-empty item, trust the client's report. This prevents items
+            // from being permanently lost when a prior desync leaves the server cursor empty.
+            if (serverCarried.isEmpty() && !clientCarried.isEmpty()) {
+                RSIntegrationMod.LOGGER.debug("[RSI] Cursor desync recovery: server empty, client has {}x{}",
+                        clientCarried.getHoverName().getString(), clientCarried.getCount());
+                serverCarried = clientCarried.copy();
+                player.containerMenu.setCarried(serverCarried);
+            }
+
+            if (serverCarried.isEmpty()) {
+                syncCursorSlot(player, ItemStack.EMPTY);
+                return;
+            }
+
+            ItemStack template = serverCarried.copy();
+
+            // Record modification time — matches RS tracker.changed() before insert
+            var tracker = network.getItemStorageTracker();
+            if (tracker != null) {
+                tracker.changed(player, template.copy());
+            }
+
+            if (isRightClick) {
+                // Right-click: insert single item — matches RS onInsert single path
+                template.setCount(1);
+                ItemStack remainder = network.insertItem(template.copy(), 1, Action.PERFORM);
+                if (remainder.isEmpty()) serverCarried.shrink(1);
+            } else {
+                // Left-click: insert entire stack — matches RS onInsert full-stack path
+                int count = serverCarried.getCount();
+                ItemStack remainder = network.insertItem(template.copy(), count, Action.PERFORM);
+                int inserted = count - remainder.getCount();
+                if (inserted > 0) serverCarried.shrink(inserted);
+            }
+            if (serverCarried.isEmpty()) {
+                player.containerMenu.setCarried(ItemStack.EMPTY);
+            }
+
+            // Drain energy for wireless-grid users — matches RS ItemGridHandler.onInsert
+            try {
+                var nim = network.getNetworkItemManager();
+                if (nim != null) {
+                    var cfg = com.refinedmods.refinedstorage.RS.SERVER_CONFIG.getWirelessGrid();
+                    nim.drainEnergy(player, cfg.getInsertUsage());
+                }
+            } catch (Exception e) { RSIntegrationMod.LOGGER.warn("[RSI] Energy drain failed", e); }
+
+            // Delta is handled by the storage-cache listener registered in
+            // RSSidePanelNetworkHandler — matches RS native pattern.
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI] handleInsert failed for {}: {}",
+                    player.getGameProfile().getName(), e.toString());
+        } finally {
+            // Always sync cursor — the client clears it optimistically before
+            // sending the packet. Every server path (success, early return,
+            // or exception) must restore it or confirm empty.
+            syncCursorSlot(player);
+        }
     }
 
     private static void handleDragDistribute(ServerPlayer player, List<ItemStack> dragItems) {
@@ -359,7 +396,6 @@ public final class RSSidePanelClickPacket {
                 if (!remainder.isEmpty()) player.drop(remainder, false);
             }
         }
-        player.containerMenu.broadcastChanges();
 
         // Energy drain per extracted item — matches RS onExtract
         try {
@@ -385,5 +421,17 @@ public final class RSSidePanelClickPacket {
         RSSidePanelNetworkHandler.sendDeltaImmediate(player,
                 panelId != null ? panelId : UUID.randomUUID(),
                 zeroStack, System.currentTimeMillis(), false);
+    }
+
+    /** Sync the cursor slot to the client.  The client optimistically clears
+     *  the carried item on insert/extract, so every server-side path — including
+     *  early returns — must send a cursor sync so the client doesn't lose items. */
+    private static void syncCursorSlot(ServerPlayer player) {
+        syncCursorSlot(player, player.containerMenu.getCarried());
+    }
+
+    private static void syncCursorSlot(ServerPlayer player, ItemStack stack) {
+        player.connection.send(new net.minecraft.network.protocol.game.ClientboundContainerSetSlotPacket(
+                -1, player.containerMenu.getStateId(), -1, stack));
     }
 }

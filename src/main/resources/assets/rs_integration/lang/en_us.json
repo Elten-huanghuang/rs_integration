@@ -22,6 +22,7 @@
   "gui.rs_integration.jei.malum_spirit_craft": "Remote Infuse via Spirit Altar",
   "gui.rs_integration.jei.wr_crystal_craft": "Remote Infusion via Crystal",
   "gui.rs_integration.jei.eidolon_crucible_craft": "Remote Craft via Crucible",
+  "gui.rs_integration.jei.eidolon_worktable_craft": "Remote Craft via Worktable",
   "gui.rs_integration.jei.fa_ritual_craft": "Remote Ritual via Forge",
   "gui.rs_integration.jei.tlm_maid_altar_craft": "Remote Craft via Maid Altar",
   "gui.rs_integration.jei.rs_auto_craft": "RS Auto-Craft (recursive)",
@@ -120,6 +121,7 @@
   "rsi.wr.error.runic_pedestal_missing": "§cCrystal Infusion requires a Runic Pedestal directly underneath",
   "rsi.wr.error.no_runic_plate": "§cRunic Pedestal is missing a Runic Plate",
   "rsi.wr.error.crystallizer_busy": "§cCrystallizer is currently crafting, please wait",
+  "rsi.wr.error.machine_busy": "§cMachine is currently crafting — wait for it to finish",
   "rsi.wr.error.insufficient_wissen": "§cInsufficient Wissen energy (have %,d, need %,d)",
   "rsi.wr.warn.insufficient_wissen_plan": "§eWissen may be insufficient (have %,s, need %,s)",
   "rsi.wr.warn.wissen_cost": "§7Requires %,s Wissen energy",
@@ -159,6 +161,7 @@
   "rsi.tlm.error.no_power": "Cannot access P-Power",
   "rsi.tlm.error.insufficient_power": "Insufficient P-Power (have %s, need %s)",
   "rsi.tlm.warn.insufficient_power_bind": "§e⚠ P-Power insufficient (have %s, need %s) — craft will fail",
+  "rsi.tlm.error.handler_not_empty": "Altar storage slots occupied — another task may be running",
 
   "rsi.plan.title": "Craft Plan: %s",
   "rsi.plan.confirm": "Craft",
@@ -168,6 +171,7 @@
   "rsi.plan.missing_header": "Unavailable:",
   "rsi.plan.materials": "Materials",
   "rsi.plan.tooltip.available": "Available",
+  "rsi.plan.repeat_count": "Repeat:",
 
   "rsi.async.chain_started": "§aMulti-step crafting chain started (%s steps). Items will be delivered to the RS network when complete.",
   "rsi.async.chain_aborted": "§cCrafting chain aborted: %s",
@@ -186,6 +190,8 @@
   "rsi.goety.warn.research_missing": "§6⚠ Scroll not read: %s",
   "rsi.goety.warn.structure_mismatch": "§6⚠ Bound altar does not satisfy ritual structure (%s)",
   "rsi.goety.warn.no_bound_altar": "§6⚠ No altar bound, cannot verify structure (%s)",
+  "rsi.goety.error.brazier_wrong_biome": "§cNecroBrazier must be placed in a Deep Dark biome to function",
+  "rsi.goety.error.brazier_no_candlesticks": "§cNo Soul Candlesticks nearby — brazier needs candlestick souls to operate",
 
   "key.categories.rsi": "RS Integration",
   "key.rsi.store_all": "Transfer to RS",
@@ -198,6 +204,7 @@
   "rsi.transfer.mode.rs": "Transfer Mode: RS Network",
   "rsi.transfer.no_backpack": "No backpack found — equip a backpack first",
   "rsi.transfer.backpack_success": "Transferred %s item(s) across %s stack(s) to backpack",
+  "rsi.transfer.backpack_self": "§cCannot transfer backpack items into itself — switch to RS mode first",
 
   "key.rsi.side_panel": "Toggle RS Side Panel",
   "rsi.side_panel.no_network": "No RS Network",

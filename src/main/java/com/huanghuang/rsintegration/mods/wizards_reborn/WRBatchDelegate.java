@@ -198,67 +198,68 @@ public final class WRBatchDelegate implements IBatchDelegate {
         if (subType.contains("crystallizer")) return MachineType.WISSEN_CRYSTALLIZER;
         if (subType.contains("workbench")) return MachineType.ARCANE_WORKBENCH;
         if (subType.contains("iterator")) return MachineType.ARCANE_ITERATOR;
+        if (subType.contains("focus")) return MachineType.WISSEN_CRYSTALLIZER;
         if (subType.contains("crystal")) return MachineType.CRYSTAL_RITUAL;
         return MachineType.UNKNOWN;
     }
 
     private boolean validateIdle(ServerPlayer player, ServerLevel level) {
+        // ── Every machine type must pass an "is crafting?" check first.
+        //     Even if all slots / pedestals appear empty (some machines
+        //     consume items immediately when the craft starts), the ticking
+        //     craft state should still be detectable.
+        // ────────────────────────────────────────────────────────────────
+        if (isMachineCrafting()) {
+            player.sendSystemMessage(Component.translatable("rsi.wr.error.machine_busy"));
+            return false;
+        }
+
         switch (machineType) {
             case WISSEN_CRYSTALLIZER: {
-                // Guard: don't touch a crystallizer mid-craft.
-                if (isCrystallizerCrafting()) {
-                    player.sendSystemMessage(Component.translatable("rsi.wr.error.crystallizer_busy"));
-                    return false;
-                }
                 int size = getContainerSize(be);
                 if (size < 0) {
                     RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] Cannot determine crystallizer container size for {}",
                             be.getClass().getName());
                     return false;
                 }
-                // Auto-collect leftover outputs from ALL slots before checking inputs.
-                // Some crystallizer recipes produce multiple outputs in different slots.
-                int collectedCount = 0;
+                // Reject if ANY slot has items — the owning task is responsible
+                // for collecting results. Auto-collecting here would steal items
+                // from another running task, causing item duping.
                 for (int i = 0; i < size; i++) {
-                    ItemStack outStack = getContainerItem(be, i);
-                    if (!outStack.isEmpty()) {
-                        setContainerItem(be, i, ItemStack.EMPTY);
-                        collectedCount++;
-                        if (network != null) {
-                            ItemStack leftover = network.insertItem(outStack, outStack.getCount(),
-                                    com.refinedmods.refinedstorage.api.util.Action.PERFORM);
-                            if (!leftover.isEmpty()) {
-                                ItemHandlerHelper.giveItemToPlayer(player, leftover);
-                            }
-                        } else if (player != null) {
-                            ItemHandlerHelper.giveItemToPlayer(player, outStack);
-                        }
+                    if (!getContainerItem(be, i).isEmpty()) {
+                        player.sendSystemMessage(Component.translatable("rsi.wr.error.machine_busy"));
+                        return false;
                     }
-                }
-                if (collectedCount > 0) {
-                    RSIntegrationMod.LOGGER.debug("[RSI-Batch-WR] validateIdle collected {} leftover stacks from crystallizer", collectedCount);
                 }
                 break;
             }
             case ARCANE_ITERATOR: {
                 try {
                     pedestalRefs = (List<?>) getMethod(be.getClass(), "getPedestals").invoke(be);
-                    if (pedestalRefs != null) {
-                        for (int i = 0; i < pedestalRefs.size(); i++) {
-                            ItemStack stack = getContainerItem(pedestalRefs.get(i), 0);
-                            if (!stack.isEmpty()) {
-                                player.sendSystemMessage(Component.translatable(
-                                        "rsi.wr.error.pedestal_not_empty", i));
-                                return false;
-                            }
-                        }
+                } catch (Exception e) {
+                    RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] Failed to get iterator pedestals", e);
+                    return false;
+                }
+                if (pedestalRefs == null) {
+                    RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] getPedestals() returned null for ArcaneIterator at {}", myPos);
+                    return false;
+                }
+                for (int i = 0; i < pedestalRefs.size(); i++) {
+                    ItemStack stack = getContainerItem(pedestalRefs.get(i), 0);
+                    if (!stack.isEmpty()) {
+                        player.sendSystemMessage(Component.translatable(
+                                "rsi.wr.error.pedestal_not_empty", i));
+                        return false;
                     }
-                } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
+                }
                 break;
             }
             case ARCANE_WORKBENCH: {
                 ItemStackHandler handler = getWorkbenchItemHandler(be);
-                if (handler == null) break;
+                if (handler == null) {
+                    RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] Cannot get itemHandler for ArcaneWorkbench at {}", myPos);
+                    return false;
+                }
                 int slots = handler.getSlots();
                 // Only check input slots (0..slots-2), skip probable output slot
                 for (int i = 0; i < slots - 1; i++) {
@@ -282,21 +283,43 @@ public final class WRBatchDelegate implements IBatchDelegate {
 
     /** Check whether the crystallizer is actively processing a craft. */
     private boolean isCrystallizerCrafting() {
+        return isMachineCrafting();
+    }
+
+    /** Check whether the arcane workbench is actively processing a craft. */
+    private boolean isWorkbenchCrafting() {
+        return isMachineCrafting();
+    }
+
+    /**
+     * Returns true if any WR machine's internal crafting-state flag is set,
+     * regardless of machine sub-type.  Covers startCraft / wissenInCraft
+     * and several common variant field names so a rename in a WR update
+     * won't silently defeat the check.
+     */
+    private boolean isMachineCrafting() {
         if (be == null) return false;
-        try {
-            java.lang.reflect.Field f = Reflect.findField(be.getClass(), "startCraft").orElse(null);
-            if (f != null) {
-                f.setAccessible(true);
-                if ((boolean) f.get(be)) return true;
-            }
-        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
-        try {
-            java.lang.reflect.Field f = Reflect.findField(be.getClass(), "wissenInCraft").orElse(null);
-            if (f != null) {
-                f.setAccessible(true);
-                if (f.getInt(be) > 0) return true;
-            }
-        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
+        Class<?> bc = be.getClass();
+        // Boolean flags — set during processing
+        for (String name : new String[]{"startCraft", "isCrafting", "crafting", "active", "workStarted"}) {
+            try {
+                java.lang.reflect.Field f = Reflect.findField(bc, name).orElse(null);
+                if (f != null) {
+                    f.setAccessible(true);
+                    if ((boolean) f.get(be)) return true;
+                }
+            } catch (Exception e) { /* field not present or wrong type */ }
+        }
+        // Int timers — >0 means craft in progress
+        for (String name : new String[]{"wissenInCraft", "craftTick", "progress", "craftTime", "craftTimer"}) {
+            try {
+                java.lang.reflect.Field f = Reflect.findField(bc, name).orElse(null);
+                if (f != null) {
+                    f.setAccessible(true);
+                    if (f.getInt(be) > 0) return true;
+                }
+            } catch (Exception e) { /* field not present or wrong type */ }
+        }
         return false;
     }
 
@@ -1119,12 +1142,15 @@ public final class WRBatchDelegate implements IBatchDelegate {
                 return true;
 
             case ARCANE_WORKBENCH:
-                for (int idx : filledSlotIndices) {
-                    ItemStackHandler handler = getWorkbenchItemHandler(be);
-                    if (handler == null) return false;
-                    if (!handler.getStackInSlot(idx).isEmpty()) return false;
-                }
-                return true;
+                // Check output slot first — the workbench places the result
+                // into itemOutputHandler when the craft finishes.
+                ItemStackHandler outHandler = getWorkbenchOutputHandler(be);
+                if (outHandler != null && !outHandler.getStackInSlot(0).isEmpty())
+                    return true;
+                // If the workbench stopped crafting without producing output,
+                // recover after a short grace period.
+                if (!isWorkbenchCrafting() && waitTicks > 40) return true;
+                return false;
 
             case ARCANE_ITERATOR:
             case CRYSTAL_RITUAL:
@@ -1394,7 +1420,9 @@ public final class WRBatchDelegate implements IBatchDelegate {
     // every clear MUST recover the actual items back to RS/player.
     // Failure to do so loses items that were already extracted from RS.
 
-    /** Recover items from Wissen Crystallizer / Arcane Workbench slots, then clear. */
+    /** Recover items from Wissen Crystallizer / Arcane Workbench slots, then clear.
+     * When using a shared committed ledger, items are template copies —
+     * return them via returnItem() only for private ledgers. */
     private void clearFilledSlots() {
         if (filledSlotIndices == null) return;
         for (int idx : filledSlotIndices) {
@@ -1410,7 +1438,7 @@ public final class WRBatchDelegate implements IBatchDelegate {
                         break;
                     }
                 }
-                if (!stack.isEmpty()) returnItem(stack);
+                if (!stack.isEmpty() && !usingSharedLedger) returnItem(stack);
                 switch (machineType) {
                     case WISSEN_CRYSTALLIZER:
                         setContainerItem(be, idx, ItemStack.EMPTY);
@@ -1429,7 +1457,7 @@ public final class WRBatchDelegate implements IBatchDelegate {
                 if (outHandler != null) {
                     ItemStack result = outHandler.getStackInSlot(0);
                     if (!result.isEmpty()) {
-                        returnItem(result);
+                        if (!usingSharedLedger) returnItem(result);
                         outHandler.setStackInSlot(0, ItemStack.EMPTY);
                     }
                 }
@@ -1443,7 +1471,7 @@ public final class WRBatchDelegate implements IBatchDelegate {
                     if (isInputSlot(i)) continue;
                     ItemStack stack = getContainerItem(be, i);
                     if (!stack.isEmpty()) {
-                        returnItem(stack);
+                        if (!usingSharedLedger) returnItem(stack);
                         setContainerItem(be, i, ItemStack.EMPTY);
                     }
                 }
@@ -1457,7 +1485,7 @@ public final class WRBatchDelegate implements IBatchDelegate {
         for (int idx : filledSlotIndices) {
             try {
                 ItemStack stack = handler.getStackInSlot(idx);
-                if (!stack.isEmpty()) returnItem(stack);
+                if (!stack.isEmpty() && !usingSharedLedger) returnItem(stack);
                 handler.setStackInSlot(idx, ItemStack.EMPTY);
             } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
         }
@@ -1469,7 +1497,7 @@ public final class WRBatchDelegate implements IBatchDelegate {
         for (Object ped : filledPedestals) {
             try {
                 ItemStack stack = getContainerItem(ped, 0);
-                if (!stack.isEmpty()) returnItem(stack);
+                if (!stack.isEmpty() && !usingSharedLedger) returnItem(stack);
                 setContainerItem(ped, 0, ItemStack.EMPTY);
                 syncBlockEntity(ped);
             } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }

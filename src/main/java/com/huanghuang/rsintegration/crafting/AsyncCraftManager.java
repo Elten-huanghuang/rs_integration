@@ -78,6 +78,13 @@ public final class AsyncCraftManager {
         return null;
     }
 
+    /** Remove a specific chain instance from the active list without aborting. */
+    public void remove(AsyncCraftChain chain) {
+        synchronized (activeChains) {
+            activeChains.remove(chain);
+        }
+    }
+
     public void cancelAllForPlayer(UUID playerId) {
         // Collect first, then abort outside the lock — abort() → fireOnDone()
         // callback removes from activeChains, which confuses the iterator.

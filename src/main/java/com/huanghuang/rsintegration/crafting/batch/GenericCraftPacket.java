@@ -62,16 +62,17 @@ public final class GenericCraftPacket {
     private final Map<String, String> forcedRecipes;
     @Nullable private final ResourceLocation dim;
     @Nullable private final net.minecraft.core.BlockPos pos;
+    private final int repeatCount;
 
     /** Preview mode: compute plan and send GUI to client. */
     public GenericCraftPacket(ResourceLocation recipeId, boolean preview) {
-        this(recipeId, preview, Collections.emptyMap(), null, null);
+        this(recipeId, preview, Collections.emptyMap(), null, null, 1);
     }
 
     /** Preview mode with forced recipe overrides (for OR-path selection). */
     public GenericCraftPacket(ResourceLocation recipeId, boolean preview,
                               Map<String, String> forcedRecipes) {
-        this(recipeId, preview, forcedRecipes, null, null);
+        this(recipeId, preview, forcedRecipes, null, null, 1);
     }
 
     /** Full constructor with optional machine binding for mod recipes. */
@@ -79,23 +80,33 @@ public final class GenericCraftPacket {
                               Map<String, String> forcedRecipes,
                               @Nullable ResourceLocation dim,
                               @Nullable net.minecraft.core.BlockPos pos) {
+        this(recipeId, preview, forcedRecipes, dim, pos, 1);
+    }
+
+    /** Full constructor with repeat count for batch execution. */
+    public GenericCraftPacket(ResourceLocation recipeId, boolean preview,
+                              Map<String, String> forcedRecipes,
+                              @Nullable ResourceLocation dim,
+                              @Nullable net.minecraft.core.BlockPos pos,
+                              int repeatCount) {
         this.recipeId = recipeId;
         this.preview = preview;
         this.forcedRecipes = forcedRecipes != null ? forcedRecipes : Collections.emptyMap();
         this.dim = dim;
         this.pos = pos;
+        this.repeatCount = Math.max(1, Math.min(repeatCount, 64));
     }
 
     /** Convenience: execute mode. */
     public GenericCraftPacket(ResourceLocation recipeId) {
-        this(recipeId, false, Collections.emptyMap(), null, null);
+        this(recipeId, false, Collections.emptyMap(), null, null, 1);
     }
 
     /** JEI-initiated preview for a mod recipe with known machine location. */
     public GenericCraftPacket(ResourceLocation recipeId, boolean preview,
                               @Nullable ResourceLocation dim,
                               @Nullable net.minecraft.core.BlockPos pos) {
-        this(recipeId, preview, Collections.emptyMap(), dim, pos);
+        this(recipeId, preview, Collections.emptyMap(), dim, pos, 1);
     }
 
     public void encode(FriendlyByteBuf buf) {
@@ -110,6 +121,7 @@ public final class GenericCraftPacket {
         if (dim != null) buf.writeResourceLocation(dim);
         buf.writeBoolean(pos != null);
         if (pos != null) buf.writeBlockPos(pos);
+        buf.writeVarInt(repeatCount);
     }
 
     public static GenericCraftPacket decode(FriendlyByteBuf buf) {
@@ -136,7 +148,8 @@ public final class GenericCraftPacket {
                 pos = raw;
             }
         }
-        return new GenericCraftPacket(recipeId, preview, forced, dim, pos);
+        int repeatCount = Math.max(1, Math.min(buf.readVarInt(), 64));
+        return new GenericCraftPacket(recipeId, preview, forced, dim, pos, repeatCount);
     }
 
     public static void handle(GenericCraftPacket packet, Supplier<NetworkEvent.Context> contextSupplier) {
@@ -150,9 +163,10 @@ public final class GenericCraftPacket {
             try {
                 if (packet.preview) {
                     tryBuildPlan(player, packet.recipeId, packet.forcedRecipes,
-                            packet.dim, packet.pos);
+                            packet.dim, packet.pos, packet.repeatCount);
                 } else {
-                    tryResolve(player, packet.recipeId, packet.dim, packet.pos);
+                    tryResolve(player, packet.recipeId, packet.dim, packet.pos,
+                            packet.repeatCount);
                 }
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.error("[RSI-Generic] Failed for {}:", packet.recipeId, e);
@@ -287,7 +301,8 @@ public final class GenericCraftPacket {
 
     private static void tryResolve(ServerPlayer player, ResourceLocation recipeId,
                                    @Nullable ResourceLocation dim,
-                                   @Nullable net.minecraft.core.BlockPos pos) {
+                                   @Nullable net.minecraft.core.BlockPos pos,
+                                   int repeatCount) {
         Recipe<?> recipe = resolveRecipe(player.serverLevel(), recipeId);
         if (recipe == null) {
             player.sendSystemMessage(Component.translatable("rsi.generic.error.recipe_not_found", recipeId.toString()));
@@ -301,13 +316,11 @@ public final class GenericCraftPacket {
         }
 
         // Group non-empty ingredients by item type with total count
-        Map<Item, IngredientNeed> grouped = new LinkedHashMap<>();
+        Map<String, IngredientNeed> grouped = new LinkedHashMap<>();
         for (IngredientSpec spec : specs) {
             if (spec.isEmpty()) continue;
-            ItemStack[] opts = spec.ingredient().getItems();
-            if (opts.length == 0) continue;
-            Item item = opts[0].getItem();
-            grouped.computeIfAbsent(item, k -> new IngredientNeed(spec.ingredient(), 0)).count += spec.count();
+            String key = spec.ingredient().toJson().toString();
+            grouped.computeIfAbsent(key, k -> new IngredientNeed(spec.ingredient(), 0)).count += spec.count();
         }
 
         // Resolve network via machine binding when available — the player may
@@ -347,7 +360,15 @@ public final class GenericCraftPacket {
                 // Append the mod recipe itself as the final multi-block step
                 modSteps.add(new ResolutionStep(recipeId, modType, recipeId));
                 AsyncCraftChain chain = new AsyncCraftChain(player, network, modSteps);
+                final INetwork netForDone = network;
                 AsyncCraftManager.getInstance().submit(chain);
+                chain.onDone(() -> {
+                    if (chain.isAborted()) return;
+                    AsyncCraftManager.getInstance().remove(chain);
+                    if (repeatCount > 1) {
+                        tryResolve(player, recipeId, dim, pos, repeatCount - 1);
+                    }
+                });
                 player.sendSystemMessage(Component.translatable(
                         "rsi.async.chain_started", modSteps.size()));
                 return;
@@ -367,32 +388,30 @@ public final class GenericCraftPacket {
                     allSteps.add(new ResolutionStep(recipeId, ModType.GENERIC,
                             new ResourceLocation("minecraft:crafting")));
                     AsyncCraftChain chain = new AsyncCraftChain(player, network, allSteps);
+                    final INetwork netForDone2 = network;
                     AsyncCraftManager.getInstance().submit(chain);
+                    chain.onDone(() -> {
+                        if (chain.isAborted()) return;
+                        AsyncCraftManager.getInstance().remove(chain);
+                        if (repeatCount > 1) {
+                            tryResolve(player, recipeId, dim, pos, repeatCount - 1);
+                        }
+                    });
                     player.sendSystemMessage(Component.translatable(
                             "rsi.async.chain_started", allSteps.size()));
                     return;
                 }
-                // All GENERIC steps → execute sync chain (virtual inventory
-                // forward-feed, atomic extraction, final product to player)
+                // All GENERIC steps → execute sync chain
                 List<ResourceLocation> stepIds = allSteps.stream()
                         .map(ResolutionStep::recipeId).collect(Collectors.toList());
                 stepIds.add(recipeId);
-                if (CraftPacketUtils.executeCraftingSteps(player, stepIds, network)) {
-                    ItemStack result = ModRecipeIndex.tryGetResultItem(recipe, player.serverLevel().registryAccess());
-                    if (!result.isEmpty()) {
-                        ItemStack extracted = safeExtractResult(network, result);
-                        if (!extracted.isEmpty()) {
-                            ItemHandlerHelper.giveItemToPlayer(player, extracted);
-                            player.displayClientMessage(
-                                    Component.translatable("rsi.generic.info.resolved", extracted.getCount()), true);
-                        } else {
-                            RSIntegrationMod.LOGGER.warn("[RSI-Generic] result extract returned empty for {}", recipeId);
-                        }
+                for (int r = 0; r < repeatCount; r++) {
+                    if (!CraftPacketUtils.executeCraftingSteps(player, stepIds, network)) {
+                        RSIntegrationMod.LOGGER.warn("[RSI-Generic] executeCraftingSteps (Path1) returned false for {} (iteration {}/{})", recipeId, r + 1, repeatCount);
+                        player.sendSystemMessage(Component.translatable(
+                                "rsi.generic.error.craft_failed", "Intermediate crafting failed"));
+                        break;
                     }
-                } else {
-                    RSIntegrationMod.LOGGER.warn("[RSI-Generic] executeCraftingSteps (Path1) returned false for {} with {} steps", recipeId, stepIds.size());
-                    player.sendSystemMessage(Component.translatable(
-                            "rsi.generic.error.craft_failed", "Intermediate crafting failed"));
                 }
                 return;
             }
@@ -413,7 +432,15 @@ public final class GenericCraftPacket {
                     planSteps.add(new ResolutionStep(recipeId, ModType.GENERIC,
                             new ResourceLocation("minecraft:crafting")));
                     AsyncCraftChain chain = new AsyncCraftChain(player, network, planSteps);
+                    final INetwork netForDone3 = network;
                     AsyncCraftManager.getInstance().submit(chain);
+                    chain.onDone(() -> {
+                        if (chain.isAborted()) return;
+                        AsyncCraftManager.getInstance().remove(chain);
+                        if (repeatCount > 1) {
+                            tryResolve(player, recipeId, dim, pos, repeatCount - 1);
+                        }
+                    });
                     player.sendSystemMessage(Component.translatable(
                             "rsi.async.chain_started", planSteps.size()));
                     return;
@@ -421,22 +448,13 @@ public final class GenericCraftPacket {
                 List<ResourceLocation> stepIds = planSteps.stream()
                         .map(ResolutionStep::recipeId).collect(Collectors.toList());
                 stepIds.add(recipeId);
-                if (CraftPacketUtils.executeCraftingSteps(player, stepIds, network)) {
-                    ItemStack result = ModRecipeIndex.tryGetResultItem(recipe, player.serverLevel().registryAccess());
-                    if (!result.isEmpty()) {
-                        ItemStack extracted = safeExtractResult(network, result);
-                        if (!extracted.isEmpty()) {
-                            ItemHandlerHelper.giveItemToPlayer(player, extracted);
-                            player.displayClientMessage(
-                                    Component.translatable("rsi.generic.info.resolved", extracted.getCount()), true);
-                        } else {
-                            RSIntegrationMod.LOGGER.warn("[RSI-Generic] result extract returned empty for {}", recipeId);
-                        }
+                for (int r = 0; r < repeatCount; r++) {
+                    if (!CraftPacketUtils.executeCraftingSteps(player, stepIds, network)) {
+                        RSIntegrationMod.LOGGER.warn("[RSI-Generic] executeCraftingSteps (Path2) returned false for {} (iteration {}/{})", recipeId, r + 1, repeatCount);
+                        player.sendSystemMessage(Component.translatable(
+                                "rsi.generic.error.craft_failed", "Intermediate crafting failed"));
+                        break;
                     }
-                } else {
-                    RSIntegrationMod.LOGGER.warn("[RSI-Generic] executeCraftingSteps (Path2) returned false for {} with {} steps", recipeId, stepIds.size());
-                    player.sendSystemMessage(Component.translatable(
-                            "rsi.generic.error.craft_failed", "Intermediate crafting failed"));
                 }
                 return;
             }
@@ -452,69 +470,70 @@ public final class GenericCraftPacket {
         // Re-resolve network in case the top-level resolution failed but
         // ensureMaterialAvailable succeeded via binding/NBT fallback internally.
         // The ledger's NETWORK entries need a valid network for commit extraction.
-        INetwork commitNetwork = network != null ? network
+        network = network != null ? network
                 : CraftPacketUtils.resolveNetworkForCraft(player,
                         player.serverLevel().dimension(), player.blockPosition());
 
-        List<ItemStack> allExtracted = new ArrayList<>();
-        ExtractionLedger ledger = new ExtractionLedger();
+        for (int r = 0; r < repeatCount; r++) {
+            List<ItemStack> allExtracted = new ArrayList<>();
+            ExtractionLedger ledger = new ExtractionLedger();
 
-        // Plan all extractions atomically — nothing physically moved yet
-        for (IngredientNeed need : grouped.values()) {
-            ItemStack reserved = CraftPacketUtils.ensureMaterialAvailable(
-                    player, player.serverLevel().dimension(),
-                    player.blockPosition(), need.ingredient, need.count, ledger);
-            if (reserved.isEmpty()) {
-                // No items moved — safe to abort without refund
-                RSIntegrationMod.LOGGER.warn("[RSI-Generic] Grouped extraction failed for {}: missing {} (needed {})",
-                        recipeId, CraftPacketUtils.describeIngredient(need.ingredient), need.count);
-                player.sendSystemMessage(Component.translatable(
-                        "rsi.generic.error.missing_materials",
-                        CraftPacketUtils.describeIngredient(need.ingredient)));
-                return;
+            // Plan all extractions atomically — nothing physically moved yet
+            for (IngredientNeed need : grouped.values()) {
+                ItemStack reserved = CraftPacketUtils.ensureMaterialAvailable(
+                        player, player.serverLevel().dimension(),
+                        player.blockPosition(), need.ingredient, need.count, ledger);
+                if (reserved.isEmpty()) {
+                    RSIntegrationMod.LOGGER.warn("[RSI-Generic] Grouped extraction failed for {}: missing {} (needed {}) (iteration {}/{})",
+                            recipeId, CraftPacketUtils.describeIngredient(need.ingredient), need.count, r + 1, repeatCount);
+                    player.sendSystemMessage(Component.translatable(
+                            "rsi.generic.error.missing_materials",
+                            CraftPacketUtils.describeIngredient(need.ingredient)));
+                    break;
+                }
+                allExtracted.add(reserved.copy());
             }
-            allExtracted.add(reserved.copy());
-        }
 
-        // Commit all extractions atomically
-        if (!ledger.commit(commitNetwork, player)) {
-            player.sendSystemMessage(Component.translatable(
-                    "rsi.generic.error.craft_failed", "Extraction commit failed"));
-            return;
-        }
+            // Commit all extractions atomically
+            if (!ledger.commit(network, player)) {
+                player.sendSystemMessage(Component.translatable(
+                        "rsi.generic.error.craft_failed", "Extraction commit failed"));
+                break;
+            }
 
-        // Use the resolved network for refund path too
-        network = commitNetwork;
+            // Craft the final recipe — materials were paid from RS, give the result
+            ItemStack result = ModRecipeIndex.tryGetResultItem(recipe, player.serverLevel().registryAccess());
+            if (result.isEmpty()) {
+                RSIntegrationMod.LOGGER.debug("[RSI-Generic] Result unavailable for {} ({})",
+                        recipeId, recipe.getClass().getSimpleName());
+            }
 
-        // Craft the final recipe — materials were paid from RS, give the result
-        ItemStack result = ModRecipeIndex.tryGetResultItem(recipe, player.serverLevel().registryAccess());
-        if (result.isEmpty()) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Generic] Result unavailable for {} ({})",
-                    recipeId, recipe.getClass().getSimpleName());
-        }
-
-        if (!result.isEmpty()) {
-            ItemHandlerHelper.giveItemToPlayer(player, result);
-            player.displayClientMessage(
-                    Component.translatable("rsi.generic.info.resolved", result.getCount()), true);
-        } else {
-            // Failed to get result — refund actual extracted materials
-            if (network != null) {
-                for (ItemStack refundStack : allExtracted) {
-                    if (refundStack.isEmpty()) continue;
-                    ItemStack refund = refundStack.copy();
-                    ItemStack leftover = network.insertItem(refund, refund.getCount(),
-                            com.refinedmods.refinedstorage.api.util.Action.PERFORM);
-                    if (!leftover.isEmpty()) {
-                        ItemHandlerHelper.giveItemToPlayer(player, leftover);
+            if (!result.isEmpty()) {
+                ItemHandlerHelper.giveItemToPlayer(player, result);
+                player.displayClientMessage(
+                        Component.translatable("rsi.generic.info.resolved", result.getCount()), true);
+            } else {
+                // Failed to get result — refund actual extracted materials
+                if (network != null) {
+                    for (ItemStack refundStack : allExtracted) {
+                        if (refundStack.isEmpty()) continue;
+                        ItemStack refund = refundStack.copy();
+                        var tracker = network.getItemStorageTracker();
+                        if (tracker != null) tracker.changed(player, refund.copy());
+                        ItemStack leftover = network.insertItem(refund, refund.getCount(),
+                                com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                        if (!leftover.isEmpty()) {
+                            ItemHandlerHelper.giveItemToPlayer(player, leftover);
+                        }
                     }
                 }
+                player.sendSystemMessage(Component.translatable(
+                        "rsi.generic.error.craft_failed", "Result unavailable"));
+                break;
             }
-            player.sendSystemMessage(Component.translatable(
-                    "rsi.generic.error.craft_failed", "Result unavailable"));
+            RSIntegrationMod.LOGGER.debug("[RSI-Generic] Crafted {} (iteration {}/{}) for {}",
+                    result.getCount(), r + 1, repeatCount, recipeId);
         }
-        RSIntegrationMod.LOGGER.debug("[RSI-Generic] Crafted {} ({} types) for {}",
-                result.getCount(), grouped.size(), recipeId);
     }
 
     private static final class IngredientNeed {
@@ -531,7 +550,8 @@ public final class GenericCraftPacket {
     private static void tryBuildPlan(ServerPlayer player, ResourceLocation recipeId,
                                       Map<String, String> forcedRecipes,
                                       @Nullable ResourceLocation dim,
-                                      @Nullable net.minecraft.core.BlockPos pos) {
+                                      @Nullable net.minecraft.core.BlockPos pos,
+                                      int repeatCount) {
         Recipe<?> recipe = resolveRecipe(player.serverLevel(), recipeId);
         if (recipe == null) {
             sendPlanError(player, Component.translatable("rsi.generic.error.recipe_not_found", recipeId.toString()).getString());
@@ -549,7 +569,9 @@ public final class GenericCraftPacket {
         ModType recipeModType = null;
 
         if (recipe instanceof CraftingRecipe cr) {
-            recipeIngredients = cr.getIngredients();
+            List<Ingredient> raw = cr.getIngredients();
+            recipeIngredients = new ArrayList<>(raw.size() * repeatCount);
+            for (int r = 0; r < repeatCount; r++) recipeIngredients.addAll(raw);
             targetOutput = cr.getResultItem(player.serverLevel().registryAccess());
         } else {
             List<IngredientSpec> specs = CraftPacketUtils.extractIngredientSpecs(recipe);
@@ -560,7 +582,7 @@ public final class GenericCraftPacket {
             List<Ingredient> expanded = new ArrayList<>();
             for (IngredientSpec spec : specs) {
                 if (spec.isEmpty()) continue;
-                for (int i = 0; i < spec.count(); i++) {
+                for (int i = 0; i < spec.count() * repeatCount; i++) {
                     expanded.add(spec.ingredient());
                 }
             }
@@ -590,6 +612,7 @@ public final class GenericCraftPacket {
         final long tickBucket = player.serverLevel().getServer().getTickCount() / 20;
         final String cacheKey = player.getUUID() + ":" + recipeId + ":"
                 + (forcedOverrides != null ? forcedOverrides.hashCode() : "0") + ":"
+                + repeatCount + ":"
                 + tickBucket;
         PlanResponse cached = PLAN_CACHE.get(cacheKey);
         if (cached != null) {
@@ -1076,7 +1099,8 @@ public final class GenericCraftPacket {
                 pos != null ? pos.getX() : 0,
                 pos != null ? pos.getY() : 0,
                 pos != null ? pos.getZ() : 0,
-                modWarnings
+                modWarnings,
+                repeatCount
         );
 
         // Cache the plan with the same tick-bucket captured earlier
@@ -1168,28 +1192,7 @@ public final class GenericCraftPacket {
         BatchCraftNetworkHandler.CHANNEL.send(
                 PacketDistributor.PLAYER.with(() -> player),
                 new PlanResponsePacket(new PlanResponse(false, "", ItemStack.EMPTY,
-                        List.of(), Map.of(), List.of(msg), "")));
+                        List.of(), Map.of(), List.of(msg), "", null, null, 0, 0, 0, Collections.emptyList(), 1)));
     }
 
-    /**
-     * Extract the crafting result from RS after {@code executeCraftingSteps}
-     * has flushed the chain outputs. Uses a count-1 template (matching how
-     * every other extraction point in the mod works) and falls back to
-     * ingredient-based extraction if the exact-match fails.
-     */
-    @javax.annotation.Nullable
-    private static ItemStack safeExtractResult(INetwork network, ItemStack result) {
-        // Primary: extract with count-1 template (matches RS stored stacks correctly)
-        ItemStack template = result.copy();
-        template.setCount(1);
-        ItemStack extracted = network.extractItem(template, result.getCount(),
-                com.refinedmods.refinedstorage.api.util.Action.PERFORM);
-        if (!extracted.isEmpty()) return extracted;
-
-        // Fallback: ingredient-based extraction (aggregates across multiple stacks)
-        extracted = RSIntegration.extractFromNetwork(network,
-                net.minecraft.world.item.crafting.Ingredient.of(result.getItem()),
-                result.getCount());
-        return extracted;
-    }
 }

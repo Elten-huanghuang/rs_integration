@@ -1,7 +1,6 @@
 package com.huanghuang.rsintegration;
 
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
-import com.huanghuang.rsintegration.crafting.batch.BatchCraftManager;
 import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
 import com.huanghuang.rsintegration.network.AltarBinding;
 import com.huanghuang.rsintegration.network.AltarBindingRegistry;
@@ -38,8 +37,11 @@ public final class RSIntegrationMod {
                     () -> com.huanghuang.rsintegration.mods.goety.GoetyRSModule::initClient);
             com.huanghuang.rsintegration.mods.goety.GoetyRSModule.initCommon();
         }
-        if (enabled(RSIntegrationConfig.ENABLE_WIZARDS_REBORN, "wizards_reborn"))
+        if (enabled(RSIntegrationConfig.ENABLE_WIZARDS_REBORN, "wizards_reborn")) {
+            DistExecutor.safeRunWhenOn(Dist.CLIENT,
+                    () -> com.huanghuang.rsintegration.mods.wizards_reborn.WizardsRebornRSModule::initClient);
             com.huanghuang.rsintegration.mods.wizards_reborn.WizardsRebornRSModule.initCommon();
+        }
         if (enabled(RSIntegrationConfig.ENABLE_MALUM, "malum"))
             com.huanghuang.rsintegration.mods.malum.MalumRSModule.initCommon();
         if (enabled(RSIntegrationConfig.ENABLE_FORBIDDEN_ARCANUS, "forbidden_arcanus"))
@@ -67,13 +69,8 @@ public final class RSIntegrationMod {
                     .init(FMLJavaModLoadingContext.get().getModEventBus());
         }
 
-        // Batch crafting (always registered)
+        // Crafting
         BatchCraftNetworkHandler.register();
-        MinecraftForge.EVENT_BUS.addListener(BatchCraftManager.getInstance()::onServerTick);
-        MinecraftForge.EVENT_BUS.addListener((PlayerEvent.PlayerLoggedOutEvent event) -> {
-            if (event.getEntity() instanceof ServerPlayer sp)
-                BatchCraftManager.getInstance().cancelAllForPlayer(sp.getUUID());
-        });
 
         // Async craft chains
         MinecraftForge.EVENT_BUS.register(com.huanghuang.rsintegration.crafting.AsyncCraftManager.getInstance());

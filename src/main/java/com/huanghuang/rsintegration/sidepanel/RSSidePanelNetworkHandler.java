@@ -201,12 +201,33 @@ public final class RSSidePanelNetworkHandler {
 
             @Override
             public void onInvalidated() {
+                RSIntegrationMod.LOGGER.warn("[RSI] Storage cache invalidated for player {} — attempting re-registration", pid);
                 playerListeners.remove(pid);
-                // Notify client immediately — matches RS GridScreen closing on network loss
+                pendingDeltas.remove(pid);
+
+                // Attempt immediate re-registration on the new cache.
+                // Some RS storage implementations rebuild the cache on certain
+                // operations and fire onInvalidated spuriously.  If the network
+                // is still alive, grab the fresh cache and re-attach — otherwise
+                // the panel would stay blank until the next periodic sync (15s).
                 net.minecraft.server.MinecraftServer server = cachedServer;
                 if (server != null) {
                     ServerPlayer sp = server.getPlayerList().getPlayer(pid);
                     if (sp != null) {
+                        try {
+                            IStorageCache<ItemStack> freshCache = network.getItemStorageCache();
+                            if (freshCache != null && freshCache != cache) {
+                                RSIntegrationMod.LOGGER.info("[RSI] Cache rebuilt — re-registering listener for {}", pid);
+                                cache.addListener(this); // will be re-wrapped by registerListener
+                                // Delegate to registerListener to rebuild craftableKeys etc.
+                                registerListener(sp, network);
+                                return;
+                            }
+                        } catch (Exception ex) {
+                            RSIntegrationMod.LOGGER.warn("[RSI] Re-registration attempt failed for {}: {}", pid, ex.toString());
+                        }
+                        // Network is truly gone — notify client
+                        RSIntegrationMod.LOGGER.info("[RSI] Network unavailable for {} — clearing panel", pid);
                         sendSync(sp,
                                 Collections.emptyList(), Collections.emptyList(),
                                 Collections.emptyList(), Collections.emptyList(),
@@ -274,7 +295,7 @@ public final class RSSidePanelNetworkHandler {
             }
         };
         cache.addListener(listener);
-        playerListeners.put(pid, new ListenerEntry(listener, cache));
+        playerListeners.put(pid, new ListenerEntry(listener, cache, network));
         return isNew;
     }
 
@@ -300,11 +321,14 @@ public final class RSSidePanelNetworkHandler {
     private static class ListenerEntry {
         final IStorageCacheListener<ItemStack> listener;
         final IStorageCache<ItemStack> cache;
+        final com.refinedmods.refinedstorage.api.network.INetwork network;
 
         ListenerEntry(IStorageCacheListener<ItemStack> listener,
-                      IStorageCache<ItemStack> cache) {
+                      IStorageCache<ItemStack> cache,
+                      com.refinedmods.refinedstorage.api.network.INetwork network) {
             this.listener = listener;
             this.cache = cache;
+            this.network = network;
         }
     }
 }

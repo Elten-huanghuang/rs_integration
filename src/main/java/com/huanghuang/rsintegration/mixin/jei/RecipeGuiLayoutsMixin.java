@@ -58,6 +58,8 @@ public class RecipeGuiLayoutsMixin {
             new ResourceLocation("forbidden_arcanus", "hephaestus_forge_upgrading");
     private static final ResourceLocation EIDOLON_CRUCIBLE_UID =
             new ResourceLocation("eidolon", "crucible");
+    private static final ResourceLocation EIDOLON_WORKTABLE_UID =
+            new ResourceLocation("eidolon", "worktable");
 
     @Shadow
     private List<RecipeLayoutWithButtons<?>> recipeLayoutsWithButtons;
@@ -196,6 +198,8 @@ public class RecipeGuiLayoutsMixin {
                 tooltipKey = "gui.rs_integration.jei.fa_ritual_craft";
             } else if (filter.equals("crucible")) {
                 tooltipKey = "gui.rs_integration.jei.eidolon_crucible_craft";
+            } else if (filter.equals("worktable")) {
+                tooltipKey = "gui.rs_integration.jei.eidolon_worktable_craft";
             } else if (filter.equals("touhou_little_maid")) {
                 tooltipKey = "gui.rs_integration.jei.tlm_maid_altar_craft";
             } else if (filter.equals("generic")) {
@@ -333,6 +337,7 @@ public class RecipeGuiLayoutsMixin {
             if (FA_HEPHAESTUS_SMITHING_UID.equals(uid)) return "hephaestus_forge";
             if (FA_HEPHAESTUS_UPGRADING_UID.equals(uid)) return "hephaestus_forge";
             if (EIDOLON_CRUCIBLE_UID.equals(uid)) return "crucible";
+            if (EIDOLON_WORKTABLE_UID.equals(uid)) return "worktable";
         } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] Reflection probe failed", e); }
 
         String recipeClassName = recipe.getClass().getName();
@@ -352,6 +357,8 @@ public class RecipeGuiLayoutsMixin {
             return "hephaestus_forge";
         if (recipeClassName.startsWith("com.github.tartaricacid.touhoulittlemaid."))
             return "touhou_little_maid";
+        if (recipeClassName.equals("elucent.eidolon.recipe.WorktableRecipe"))
+            return "worktable";
         if (recipeClassName.startsWith("elucent.eidolon"))
             return "crucible";
 

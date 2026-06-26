@@ -53,12 +53,6 @@ public final class GoetyGuiClientEventHandler {
                     || block instanceof SoulCandlestickBlock) {
                 event.getToolTip().add(
                         Component.translatable("gui.rs_integration.altar.binding.rs_bind_hint"));
-            } else if (RSIntegrationConfig.ENABLE_WIZARDS_REBORN.get()
-                    && net.minecraftforge.fml.ModList.get().isLoaded("wizards_reborn")
-                    && (blockClassName.equals("mod.maxbogomol.wizards_reborn.common.block.wissen_crystallizer.WissenCrystallizerBlock")
-                    || blockClassName.equals("mod.maxbogomol.wizards_reborn.common.block.arcane_iterator.ArcaneIteratorBlock"))) {
-                event.getToolTip().add(
-                        Component.translatable("gui.rs_integration.wr.binding.rs_bind_hint"));
             }
         }
 

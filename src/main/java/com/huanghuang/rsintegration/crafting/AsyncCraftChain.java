@@ -122,13 +122,8 @@ public final class AsyncCraftChain {
                     }
                     currentDelegate = null;
                     waitTicks = 0;
-                    // Commit this step's extractions now so the next step
-                    // starts with a clean ledger (no stale pending entries
-                    // that reduce availability for subsequent reservations).
-                    if (!ledger.commit(network, player)) {
-                        abort("Commit failed after step completion");
-                        return true;
-                    }
+                    // Ledger was committed before placement in startModStep.
+                    // Reset for the next step.
                     ledger.reset();
                     currentStepIdx++;
                     state = State.EXECUTING;
@@ -411,15 +406,37 @@ public final class AsyncCraftChain {
 }
                     return null;
                 }
+                // Commit ledger BEFORE placing items in the machine.
+                // Previously the commit was deferred until craft completion,
+                // which meant items in the machine were template copies and
+                // onBatchFailed returned those copies to RS while the originals
+                // were never extracted — causing item duplication.
+                if (!ledger.commit(network, player)) {
+                    RSIntegrationMod.LOGGER.warn("[RSI-AsyncChain] Ledger commit failed for {}",
+                            step.recipeId());
+                    player.sendSystemMessage(Component.translatable(
+                            "rsi.generic.error.missing_materials", step.recipeId()));
+                    try { delegate.onBatchFailed(player, "commit failed"); } catch (Exception fe) {
+    RSIntegrationMod.LOGGER.error("[RSI-AsyncChain] onBatchFailed threw during commit cleanup", fe);
+}
+                    return null;
+                }
                 if (!delegate.tryStartWithMaterials(player, materials, ledger)) {
                     RSIntegrationMod.LOGGER.warn("[RSI-AsyncChain] Delegate tryStartWithMaterials failed for {}",
                             step.recipeId());
                     player.sendSystemMessage(Component.translatable(
                             "rsi.generic.error.craft_failed", step.recipeId()));
+                    // Delegate's internal error handling (clearFilledSlots etc.)
+                    // may have already returned items to RS when using its own
+                    // ledger. With shared committed ledger, onBatchFailed must
+                    // NOT return items to avoid double-refund. The single refund
+                    // path is refundCommitted below.
                     try { delegate.onBatchFailed(player, "tryStartWithMaterials failed"); } catch (Exception fe) {
     RSIntegrationMod.LOGGER.error("[RSI-AsyncChain] onBatchFailed threw during tryStartWithMaterials cleanup", fe);
 }
-                    ledger.releaseReservations(materials);
+                    // Refund committed extractions — items in machine were
+                    // template copies, the real items were extracted from RS.
+                    ledger.refundCommitted(network, player);
                     return null;
                 }
             } else {
@@ -554,6 +571,8 @@ public final class AsyncCraftChain {
         while (iter.hasNext()) {
             ItemStack vi = iter.next();
             if (!vi.isEmpty()) {
+                var tracker = network.getItemStorageTracker();
+                if (tracker != null) tracker.changed(player, vi.copy());
                 ItemStack leftover = network.insertItem(vi.copy(), vi.getCount(),
                         com.refinedmods.refinedstorage.api.util.Action.PERFORM);
                 if (!leftover.isEmpty()) {
@@ -580,6 +599,8 @@ public final class AsyncCraftChain {
         if (network != null) {
             for (ItemStack vi : virtualInventory) {
                 if (!vi.isEmpty()) {
+                    var tracker = network.getItemStorageTracker();
+                    if (tracker != null) tracker.changed(player, vi.copy());
                     ItemStack leftover = network.insertItem(vi.copy(), vi.getCount(),
                             com.refinedmods.refinedstorage.api.util.Action.PERFORM);
                     if (!leftover.isEmpty()) {
@@ -618,7 +639,9 @@ public final class AsyncCraftChain {
         state = State.ABORTED;
         abortReason = reason;
 
-        // Clean up active delegate (refunds items placed in machine)
+        // Clean up active delegate. Its onBatchFailed clears machine slots
+        // but must NOT return items to RS when using a shared committed ledger
+        // (the items were template copies). Refund is handled centrally below.
         if (currentDelegate != null) {
             try {
                 currentDelegate.onBatchFailed(player, reason);
@@ -628,9 +651,13 @@ public final class AsyncCraftChain {
             currentDelegate = null;
         }
 
-        // Release any uncommitted ledger reservations — items were
-        // reserved but never physically extracted from RS.
-        ledger.rollback(player);
+        // If the ledger was committed (extracted from RS), refund to undo.
+        // If not committed, just clear reservations — items were never extracted.
+        if (ledger.isCommitted()) {
+            ledger.refundCommitted(network, player);
+        } else {
+            ledger.rollback(player);
+        }
 
         // Flush virtual inventory — prior steps' ledgers were committed,
         // so their outputs are legitimate. Discarding would lose items
@@ -638,6 +665,8 @@ public final class AsyncCraftChain {
         if (network != null) {
             for (ItemStack vi : virtualInventory) {
                 if (!vi.isEmpty()) {
+                    var tracker = network.getItemStorageTracker();
+                    if (tracker != null) tracker.changed(player, vi.copy());
                     ItemStack leftover = network.insertItem(vi.copy(), vi.getCount(),
                             com.refinedmods.refinedstorage.api.util.Action.PERFORM);
                     if (!leftover.isEmpty()) {

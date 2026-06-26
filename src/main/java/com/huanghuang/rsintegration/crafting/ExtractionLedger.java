@@ -239,6 +239,8 @@ public final class ExtractionLedger {
             switch (rec.source) {
                 case ALTAR_BINDING -> {
                     if (rec.sourceNetwork != null) {
+                        var tracker = rec.sourceNetwork.getItemStorageTracker();
+                        if (tracker != null) tracker.changed(player, s.copy());
                         ItemStack leftover = rec.sourceNetwork.insertItem(s, s.getCount(), Action.PERFORM);
                         if (!leftover.isEmpty()) {
                             ItemHandlerHelper.giveItemToPlayer(player, leftover);
@@ -249,6 +251,8 @@ public final class ExtractionLedger {
                 }
                 case NETWORK -> {
                     if (rec.sourceNetwork != null) {
+                        var tracker = rec.sourceNetwork.getItemStorageTracker();
+                        if (tracker != null) tracker.changed(player, s.copy());
                         ItemStack leftover = rec.sourceNetwork.insertItem(s, s.getCount(), Action.PERFORM);
                         if (!leftover.isEmpty()) {
                             ItemHandlerHelper.giveItemToPlayer(player, leftover);
@@ -544,6 +548,8 @@ public final class ExtractionLedger {
                 case NETWORK, ALTAR_BINDING -> {
                     INetwork net = e.sourceNetwork != null ? e.sourceNetwork : network;
                     if (net != null) {
+                        var tracker = net.getItemStorageTracker();
+                        if (tracker != null) tracker.changed(player, refund.copy());
                         ItemStack leftover = net.insertItem(refund, refund.getCount(), Action.PERFORM);
                         if (!leftover.isEmpty()) {
                             RSIntegrationMod.LOGGER.warn("[RSI-Ledger] Refund: RS insert had leftover for {} x{}",
@@ -576,6 +582,25 @@ public final class ExtractionLedger {
             }
         }
         return sb.toString();
+    }
+
+    /**
+     * Remove and undo the most recently added reservation entry.
+     * Used when an availability check passes but the item should not
+     * actually be extracted (e.g. catalyst items that survive crafting).
+     */
+    public void cancelLastReservation() {
+        if (entries.isEmpty()) return;
+        Entry last = entries.remove(entries.size() - 1);
+        CraftingResolver.StackKey key = CraftingResolver.StackKey.of(last.template, true);
+        pendingNet.computeIfPresent(key, (k, v) -> {
+            int nv = v - last.count;
+            return nv <= 0 ? null : nv;
+        });
+        pendingInv.computeIfPresent(key, (k, v) -> {
+            int nv = v - last.count;
+            return nv <= 0 ? null : nv;
+        });
     }
 
     public void releaseReservations(List<ItemStack> stacks) {

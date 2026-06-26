@@ -24,7 +24,8 @@ public record PlanResponse(
         int executionPosX,
         int executionPosY,
         int executionPosZ,
-        List<String> modWarnings  // mod-specific validation warnings (Goety research/structure, FA essences)
+        List<String> modWarnings,  // mod-specific validation warnings (Goety research/structure, FA essences)
+        int repeatCount
 ) {
     public record Availability(int needed, int available) {
         public boolean isEnough() { return available >= needed; }
@@ -36,7 +37,7 @@ public record PlanResponse(
                         List<PlanStep> steps, Map<Item, Availability> materials,
                         List<String> missing, String recipeId) {
         this(success, targetName, targetResult, steps, materials, missing, recipeId,
-                null, null, 0, 0, 0, Collections.emptyList());
+                null, null, 0, 0, 0, Collections.emptyList(), 1);
     }
 
     /** Backward-compat: no mod warnings. */
@@ -48,6 +49,6 @@ public record PlanResponse(
                         int executionPosX, int executionPosY, int executionPosZ) {
         this(success, targetName, targetResult, steps, materials, missing, recipeId,
                 executionModTypeId, executionDim, executionPosX, executionPosY, executionPosZ,
-                Collections.emptyList());
+                Collections.emptyList(), 1);
     }
 }

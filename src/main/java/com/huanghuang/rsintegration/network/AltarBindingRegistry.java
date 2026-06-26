@@ -468,15 +468,30 @@ public final class AltarBindingRegistry {
     /** Map recipe-ID sub-type names to canonical machine-prefix names.
      *  Wizards Reborn names its recipe category "crystal_infusion"
      *  but the machine prefix used during binding is "crystal_ritual".
+     *  WR recipes registered by third-party mods (e.g. Goety Cataclysm)
+     *  may use their own path prefixes like "focus" — these are still
+     *  crystal ritual recipes executed on the same Wissen Crystallizer.
      *  Malum names its recipe category "spirit_infusion" but the
      *  machine prefix used during binding is "spirit_altar". */
     private static String normalizeSubType(@Nullable String hint, ModType type) {
         if (hint == null) return null;
-        if (type == ModType.WIZARDS_REBORN && "crystal_infusion".equals(hint)) {
-            return "crystal_ritual";
+        if (type == ModType.WIZARDS_REBORN) {
+            if ("crystal_infusion".equals(hint)) {
+                return "crystal_ritual";
+            }
+            // Third-party WR recipes (e.g. goety_cataclysm:focus/xxx) use
+            // the Wissen Crystallizer — let validateAndInit filter by machine type.
+            if ("focus".equals(hint)) {
+                return null;
+            }
         }
         if (type == ModType.MALUM && "spirit_infusion".equals(hint)) {
             return "spirit_altar";
+        }
+        // Goety recipe categories (focus, ritual) don't map to machine sub-types.
+        // All Goety machines (Dark Altar, Necro Brazier) can process all recipes.
+        if (type == ModType.GOETY) {
+            return null;
         }
         return hint;
     }

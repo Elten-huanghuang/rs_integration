@@ -21,7 +21,9 @@ import net.minecraftforge.items.wrapper.PlayerMainInvWrapper;
 import net.minecraftforge.items.wrapper.PlayerOffhandInvWrapper;
 import net.minecraftforge.network.NetworkEvent;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.function.Supplier;
 
 /**
@@ -88,6 +90,15 @@ public final class RSInventoryTransferPacket {
                 RSIntegrationMod.LOGGER.debug("[RSI-InvTransfer]   spec[{}]: count={}, items={}",
                         i, s.count(), items.length > 0 ? items[0].getDescriptionId() : "(empty)");
             }
+        }
+        // Safety filter: strip WR crystal items from the transfer specs.
+        // WR crystal infusion/ritual recipes should not extract the crystal
+        // (it stays in-world as a catalyst).  filterWRCrystal covers most
+        // paths but this is a defense-in-depth check at the transfer boundary.
+        String recipeClassName = recipe.getClass().getName();
+        if (recipeClassName.startsWith("mod.maxbogomol.wizards_reborn.")
+                && !recipeClassName.endsWith("WissenCrystallizerRecipe")) {
+            specs = filterCrystalSpecs(specs, recipe);
         }
         if (specs == null || specs.isEmpty()) {
             player.sendSystemMessage(Component.translatable(
@@ -157,5 +168,83 @@ public final class RSInventoryTransferPacket {
             player.sendSystemMessage(Component.translatable(
                     "rsi.side_panel.transfer_missing", missing));
         }
+    }
+
+    /**
+     * Strip crystal items from ingredient specs for WR recipes.
+     * Uses the same class-based detection as {@link CraftPacketUtils#filterWRCrystal}
+     * but operates on the spec list directly, serving as a safety net at the
+     * transfer boundary.
+     */
+    private static List<IngredientSpec> filterCrystalSpecs(List<IngredientSpec> specs, Object recipe) {
+        Set<net.minecraft.world.item.Item> crystalItems = new java.util.HashSet<>();
+
+        // Try to use the ritual's getCrystalType API first.
+        // CrystalRitualRecipe has getRitual(); ArcaneIteratorRecipe has getCrystalRitual().
+        try {
+            Object ritual = null;
+            for (String methodName : new String[]{"getRitual", "getCrystalRitual"}) {
+                java.lang.reflect.Method m = com.huanghuang.rsintegration.util.Reflect
+                        .findMethod(recipe.getClass(), methodName, new Class<?>[0]);
+                if (m != null) {
+                    Object r = m.invoke(recipe);
+                    if (r != null) { ritual = r; break; }
+                }
+            }
+            if (ritual != null) {
+                java.lang.reflect.Method getCrystalType = com.huanghuang.rsintegration.util.Reflect
+                        .findMethod(ritual.getClass(), "getCrystalType",
+                                new Class<?>[]{net.minecraft.world.item.ItemStack.class});
+                if (getCrystalType != null) {
+                    for (IngredientSpec spec : specs) {
+                        for (net.minecraft.world.item.ItemStack is : spec.ingredient().getItems()) {
+                            try {
+                                if (getCrystalType.invoke(ritual, is) != null) {
+                                    crystalItems.add(is.getItem());
+                                }
+                            } catch (Exception ignored) {}
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) { /* fall through to class-based detection */ }
+
+        // Fallback: class-based crystal detection
+        if (crystalItems.isEmpty()) {
+            try {
+                Class<?> crystalItemClass = Class.forName(
+                        "mod.maxbogomol.wizards_reborn.common.item.CrystalItem");
+                Class<?> fracturedClass = Class.forName(
+                        "mod.maxbogomol.wizards_reborn.common.item.FracturedCrystalItem");
+                Class<?> precisionClass = Class.forName(
+                        "mod.maxbogomol.wizards_reborn.common.item.PrecisionCrystalItem");
+                for (IngredientSpec spec : specs) {
+                    for (net.minecraft.world.item.ItemStack is : spec.ingredient().getItems()) {
+                        net.minecraft.world.item.Item item = is.getItem();
+                        if (crystalItemClass.isInstance(item)
+                                || fracturedClass.isInstance(item)
+                                || precisionClass.isInstance(item)) {
+                            crystalItems.add(item);
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.debug("[RSI-InvTransfer] WR crystal class detection failed: {}", e.toString());
+            }
+        }
+
+        if (crystalItems.isEmpty()) return specs;
+
+        List<IngredientSpec> filtered = new ArrayList<>();
+        for (IngredientSpec spec : specs) {
+            boolean isCrystal = false;
+            for (net.minecraft.world.item.ItemStack is : spec.ingredient().getItems()) {
+                if (crystalItems.contains(is.getItem())) { isCrystal = true; break; }
+            }
+            if (!isCrystal) filtered.add(spec);
+        }
+        RSIntegrationMod.LOGGER.info("[RSI-InvTransfer] WR crystal filter: {} specs → {} ({} crystal specs removed)",
+                specs.size(), filtered.size(), specs.size() - filtered.size());
+        return filtered;
     }
 }

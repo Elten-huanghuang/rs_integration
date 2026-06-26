@@ -10,6 +10,7 @@ import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
+import org.lwjgl.glfw.GLFW;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
@@ -60,6 +61,7 @@ public final class CraftingPlanScreen extends Screen {
     private static final int C_PILL_ORANGE_FG = 0xFFFFE0B2;
 
     private final PlanResponse plan;
+    private int currentRepeat = 1;
     private int scrollOffset;
     private int maxScroll;
     private boolean dragging;
@@ -67,6 +69,15 @@ public final class CraftingPlanScreen extends Screen {
     private int missingAreaHeight;
     private int materialAreaTop;
     private int materialAreaHeight;
+    private int repeatRowY;
+    // repeat button hitboxes — set during render
+    private int btnMinusX, btnMinusY, btnMinusW, btnMinusH;
+    private int btnPlusX, btnPlusY, btnPlusW, btnPlusH;
+    private int countPillX, countPillY, countPillW, countPillH;
+    private String repeatBuf = "1";
+    private long lastKeyTime;
+    private int planRefreshTick = -1;
+    private int lastRefreshCount = 1;
     private int ticksOpen;
     private int mouseX, mouseY;
 
@@ -114,6 +125,8 @@ public final class CraftingPlanScreen extends Screen {
     @Override
     protected void init() {
         super.init();
+        currentRepeat = Math.max(1, Math.min(plan.repeatCount(), 64));
+        lastRefreshCount = currentRepeat;
         altChoices.clear();
         Font font = minecraft.font;
         int contentW = width - 40;
@@ -139,8 +152,10 @@ public final class CraftingPlanScreen extends Screen {
         int matRows = (int) Math.ceil((double) plan.materials().size() / matCols);
         int matGridH = matRows * (SLOT_SIZE + 8) + 4;
         materialAreaHeight = (plan.materials().isEmpty() ? 0 : font.lineHeight + 6 + matGridH + 8);
-        materialAreaTop = height - 28 - materialAreaHeight;
+        int repeatAreaH = 24;
+        materialAreaTop = height - 28 - repeatAreaH - materialAreaHeight;
         missingAreaTop = materialAreaTop - missingAreaHeight;
+        repeatRowY = height - 28 - repeatAreaH;
 
         int btnW = 80;
         int btnY = height - 24;
@@ -164,6 +179,7 @@ public final class CraftingPlanScreen extends Screen {
         if (plan.recipeId() != null && !plan.recipeId().isEmpty()) {
             ResourceLocation id = ResourceLocation.tryParse(plan.recipeId());
             if (id != null) {
+                int repeatCount = Math.max(1, Math.min(currentRepeat, 64));
                 ResourceLocation execDim = null;
                 net.minecraft.core.BlockPos execPos = null;
                 if (plan.executionDim() != null && !plan.executionDim().isEmpty()) {
@@ -172,10 +188,39 @@ public final class CraftingPlanScreen extends Screen {
                             plan.executionPosX(), plan.executionPosY(), plan.executionPosZ());
                 }
                 BatchCraftNetworkHandler.CHANNEL.sendToServer(
-                        new GenericCraftPacket(id, false, Collections.emptyMap(), execDim, execPos));
+                        new GenericCraftPacket(id, false, Collections.emptyMap(), execDim, execPos, repeatCount));
             }
         }
         onClose();
+    }
+
+    private void requestPlanRefresh() {
+        if (currentRepeat == lastRefreshCount) return;
+        lastRefreshCount = currentRepeat;
+        planRefreshTick = ticksOpen + 10;
+    }
+
+    @Override
+    public void tick() {
+        super.tick();
+        ticksOpen++;
+        if (planRefreshTick >= 0 && ticksOpen >= planRefreshTick) {
+            planRefreshTick = -1;
+            ResourceLocation id = ResourceLocation.tryParse(plan.recipeId());
+            if (id != null) {
+                ResourceLocation execDim = null;
+                net.minecraft.core.BlockPos execPos = null;
+                if (plan.executionDim() != null && !plan.executionDim().isEmpty()) {
+                    execDim = ResourceLocation.tryParse(plan.executionDim());
+                    execPos = new net.minecraft.core.BlockPos(
+                            plan.executionPosX(), plan.executionPosY(), plan.executionPosZ());
+                }
+                Map<String, String> forced = LAST_FORCED.isEmpty() ? Collections.emptyMap()
+                        : new HashMap<>(LAST_FORCED);
+                BatchCraftNetworkHandler.CHANNEL.sendToServer(
+                        new GenericCraftPacket(id, true, forced, execDim, execPos, currentRepeat));
+            }
+        }
     }
 
     @Override
@@ -183,7 +228,6 @@ public final class CraftingPlanScreen extends Screen {
         this.mouseX = mouseX;
         this.mouseY = mouseY;
         hoveredItemForTooltip = ItemStack.EMPTY;
-        ticksOpen++;
         float fade = Math.min(1f, ticksOpen / 8f);
         float ease = UIRenderer.easeOutCubic(fade);
 
@@ -228,7 +272,7 @@ public final class CraftingPlanScreen extends Screen {
             int cardW0 = contentW - 8;
             y = drawStepCard(gfx, font, left + 4, y, cardW0,
                     plan.targetResult(), plan.targetResult().getHoverName().getString(),
-                    null, -1, stepIdx++, 0f);
+                    null, plan.repeatCount(), stepIdx++, 0f);
             int prevCardBottom = y;
             int prevStepX = left + 4;
 
@@ -270,9 +314,85 @@ public final class CraftingPlanScreen extends Screen {
             renderMaterialArea(gfx, font, left, materialAreaTop, contentW);
         }
 
+        // ── Repeat count row ─────────────────────────────────────────
+        drawRepeatRow(gfx, font);
+
         // Deferred tooltip — rendered AFTER all scissors, so Legendary
         // Tooltips' boundary avoidance works without scissor clipping.
         renderDeferredTooltip(gfx, font);
+    }
+
+    // ── Repeat count row ─────────────────────────────────────────────
+
+    private void drawRepeatRow(GuiGraphics gfx, Font font) {
+        int rowW = 180;
+        int rowX = width / 2 - rowW / 2;
+        int rowH = 24;
+
+        // Card background — match material area style
+        UIRenderer.roundedGradient(gfx, rowX, repeatRowY, rowW, rowH, 6f, 0xE6141E18, 0xE6101814);
+        // Left emerald accent
+        gfx.fill(rowX + 1, repeatRowY + 2, rowX + 4, repeatRowY + rowH - 2, 0xFF44AA66);
+
+        // Label
+        String label = Component.translatable("rsi.plan.repeat_count").getString();
+        UIRenderer.textBackdrop(gfx, font, rowX + 10, repeatRowY + 5, label, C_TEXT_BACKDROP);
+        gfx.drawString(font, label, rowX + 10, repeatRowY + 5, 0xFFCCCCCC);
+
+        // ── Control group (right side): [◀] [count] [▶] ──
+        int btnSize = 16;
+        int gap = 4;
+        String countStr = Integer.toString(currentRepeat);
+        int pillW = Math.max(24, font.width(countStr) + 16);
+        int pillH = font.lineHeight + 6;
+        int groupW = btnSize * 2 + gap * 2 + pillW;
+        int groupX = rowX + rowW - 8 - groupW;
+        int btnTop = repeatRowY + (rowH - btnSize) / 2;
+
+        // Store hitboxes
+        btnMinusX = groupX; btnMinusY = btnTop; btnMinusW = btnSize; btnMinusH = btnSize;
+        int pillX = groupX + btnSize + gap;
+        countPillX = pillX; countPillY = repeatRowY + (rowH - pillH) / 2; countPillW = pillW; countPillH = pillH;
+        btnPlusX = pillX + pillW + gap; btnPlusY = btnTop; btnPlusW = btnSize; btnPlusH = btnSize;
+
+        // ── Draw minus button ──
+        boolean hoverMinus = mouseX >= btnMinusX && mouseX <= btnMinusX + btnMinusW
+                && mouseY >= btnMinusY && mouseY <= btnMinusY + btnMinusH;
+        int btnBgMinus = hoverMinus ? 0x88338855 : 0x661A221E;
+        int btnArrowMinus = hoverMinus ? 0xFFAAFFAA : 0xFF558855;
+        UIRenderer.rounded(gfx, btnMinusX, btnMinusY, btnMinusW, btnMinusH, 4f, btnBgMinus);
+        UIRenderer.rounded(gfx, btnMinusX + 1, btnMinusY + 1, btnMinusW - 2, btnMinusH - 2, 3f, 0x881A221E);
+        // Left-pointing chevron (mirrored)
+        drawChevronLeft(gfx, btnMinusX + btnSize / 2, btnMinusY + btnSize / 2, btnArrowMinus);
+
+        // ── Draw count pill ──
+        UIRenderer.pillBadge(gfx, font, countPillX, countPillY, pillW, pillH,
+                0xCC1B5E20, 0xFFC8E6C9, countStr);
+
+        // ── Draw plus button ──
+        boolean hoverPlus = mouseX >= btnPlusX && mouseX <= btnPlusX + btnPlusW
+                && mouseY >= btnPlusY && mouseY <= btnPlusY + btnPlusH;
+        int btnBgPlus = hoverPlus ? 0x88338855 : 0x661A221E;
+        int btnArrowPlus = hoverPlus ? 0xFFAAFFAA : 0xFF558855;
+        UIRenderer.rounded(gfx, btnPlusX, btnPlusY, btnPlusW, btnPlusH, 4f, btnBgPlus);
+        UIRenderer.rounded(gfx, btnPlusX + 1, btnPlusY + 1, btnPlusW - 2, btnPlusH - 2, 3f, 0x881A221E);
+        UIRenderer.chevron(gfx, btnPlusX + btnSize / 2 - 1, btnPlusY + btnSize / 2, btnArrowPlus);
+    }
+
+    private void drawChevronLeft(GuiGraphics gfx, int cx, int cy, int color) {
+        // Mirror of UIRenderer.chevron — left-pointing
+        for (int i = 0; i < 5; i++) {
+            gfx.fill(cx + 1 - i, cy - 3 + i, cx + 2 - i, cy - 2 + i, color);
+        }
+        for (int i = 0; i < 5; i++) {
+            gfx.fill(cx - 2 - i, cy - 3 + i, cx - 1 - i, cy - 2 + i, color);
+        }
+        for (int i = 0; i < 5; i++) {
+            gfx.fill(cx + 1 - i, cy + 2 - i, cx + 2 - i, cy + 3 - i, color);
+        }
+        for (int i = 0; i < 5; i++) {
+            gfx.fill(cx - 2 - i, cy + 2 - i, cx - 1 - i, cy + 3 - i, color);
+        }
     }
 
     // ── Step card ─────────────────────────────────────────────────
@@ -634,7 +754,7 @@ public final class CraftingPlanScreen extends Screen {
                         plan.executionPosX(), plan.executionPosY(), plan.executionPosZ());
             }
             BatchCraftNetworkHandler.CHANNEL.sendToServer(
-                    new GenericCraftPacket(rid, true, forced, execDim, execPos));
+                    new GenericCraftPacket(rid, true, forced, execDim, execPos, currentRepeat));
         }
     }
 
@@ -832,6 +952,20 @@ public final class CraftingPlanScreen extends Screen {
     @Override
     public boolean mouseClicked(double mx, double my, int button) {
         if (button == 0) {
+            // Repeat row: minus button
+            if (mx >= btnMinusX && mx <= btnMinusX + btnMinusW
+                    && my >= btnMinusY && my <= btnMinusY + btnMinusH) {
+                currentRepeat = Math.max(1, currentRepeat - 1);
+                requestPlanRefresh();
+                return true;
+            }
+            // Repeat row: plus button
+            if (mx >= btnPlusX && mx <= btnPlusX + btnPlusW
+                    && my >= btnPlusY && my <= btnPlusY + btnPlusH) {
+                currentRepeat = Math.min(64, currentRepeat + 1);
+                requestPlanRefresh();
+                return true;
+            }
             if (my >= STEPS_TOP) {
                 for (ORHitbox hb : orHitboxes) {
                     if (mx >= hb.x && mx <= hb.x + hb.w
@@ -850,6 +984,27 @@ public final class CraftingPlanScreen extends Screen {
     public boolean mouseReleased(double mx, double my, int button) {
         dragging = false;
         return super.mouseReleased(mx, my, button);
+    }
+
+    @Override
+    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        if (keyCode >= GLFW.GLFW_KEY_0 && keyCode <= GLFW.GLFW_KEY_9) {
+            long now = System.currentTimeMillis();
+            if (now - lastKeyTime > 600) repeatBuf = "";
+            lastKeyTime = now;
+            repeatBuf += (char)('0' + (keyCode - GLFW.GLFW_KEY_0));
+            try { currentRepeat = Math.max(1, Math.min(Integer.parseInt(repeatBuf), 64)); }
+            catch (NumberFormatException ignored) { currentRepeat = 1; repeatBuf = "1"; }
+            requestPlanRefresh();
+            return true;
+        }
+        if (keyCode == GLFW.GLFW_KEY_BACKSPACE || keyCode == GLFW.GLFW_KEY_DELETE) {
+            repeatBuf = "1";
+            currentRepeat = 1;
+            lastKeyTime = 0;
+            return true;
+        }
+        return super.keyPressed(keyCode, scanCode, modifiers);
     }
 
     // ── Status helpers ────────────────────────────────────────────
@@ -894,7 +1049,7 @@ public final class CraftingPlanScreen extends Screen {
 
         lines.add(Component.literal(
                 Component.translatable("rsi.plan.tooltip.available").getString()
-                + ": " + availStr).withStyle(net.minecraft.ChatFormatting.GRAY));
+                + ": " + availStr).withStyle(style -> style.withColor(statusColor)));
 
         // This single call triggers Forge's RenderTooltipEvent — Legendary
         // Tooltips intercepts it to draw its polished gradient-bordered cards

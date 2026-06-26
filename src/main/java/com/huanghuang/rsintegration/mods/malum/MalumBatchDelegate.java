@@ -60,7 +60,8 @@ public final class MalumBatchDelegate implements IBatchDelegate {
     private List<Integer> filledPedestalIndices;
     private List<?> pedestals;           // captured pedestal list
     private boolean usingSharedLedger;
-    private ItemStack capturedResult = ItemStack.EMPTY; // recipe result from completeManually()
+    private boolean craftStarted;
+    private boolean craftWasSeenActive;
 
     // ── IBatchDelegate impl ───────────────────────────────────────
 
@@ -106,9 +107,9 @@ public final class MalumBatchDelegate implements IBatchDelegate {
             return false;
         }
 
-        // Validate idle
+        // Validate idle — null means we couldn't read the field; assume busy
         Boolean crafting = (Boolean) getField(altar, "isCrafting");
-        if (Boolean.TRUE.equals(crafting)) {
+        if (crafting == null || Boolean.TRUE.equals(crafting)) {
             player.sendSystemMessage(Component.translatable("rsi.malum.warn.already_crafting"));
             return false;
         }
@@ -119,7 +120,25 @@ public final class MalumBatchDelegate implements IBatchDelegate {
                 return false;
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Batch-Malum] isEmpty() check failed", e);
+            RSIntegrationMod.LOGGER.warn("[RSI-Batch-Malum] isEmpty() check failed — assuming busy", e);
+            player.sendSystemMessage(Component.translatable("rsi.malum.warn.not_empty"));
+            return false;
+        }
+
+        // Check pedestals are empty
+        try {
+            this.pedestals = capturePedestals();
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Batch-Malum] Cannot capture pedestals — assuming busy", e);
+            player.sendSystemMessage(Component.translatable("rsi.malum.warn.not_empty"));
+            return false;
+        }
+        if (pedestals != null) {
+            int emptyPedCount = countEmptyPedestalSlots(pedestals);
+            if (emptyPedCount < pedestals.size()) {
+                player.sendSystemMessage(Component.translatable("rsi.malum.warn.not_empty"));
+                return false;
+            }
         }
 
         RSIntegrationMod.LOGGER.debug("[RSI-Batch-Malum] validateAndInit OK: recipe={}", recipeId);
@@ -133,12 +152,15 @@ public final class MalumBatchDelegate implements IBatchDelegate {
         this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
 
         Boolean crafting = (Boolean) getField(altar, "isCrafting");
-        if (Boolean.TRUE.equals(crafting)) return false;
+        if (crafting == null || Boolean.TRUE.equals(crafting)) return false;
 
         try {
             boolean mainEmpty = (boolean) invMain.getClass().getMethod("isEmpty").invoke(invMain);
             if (!mainEmpty) return false;
-        } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", ex); }
+        } catch (Exception ex) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Batch-Malum] isEmpty() check failed in re-validation", ex);
+            return false;
+        }
 
         this.filledPedestalIndices = new ArrayList<>();
 
@@ -230,21 +252,30 @@ public final class MalumBatchDelegate implements IBatchDelegate {
             return false;
         }
 
-        // Phase 3: manually complete the craft (Eidolon-style).
-        // We never call altar.craft() because it spawns the result as an
-        // ItemEntity.  Instead we consume the placed items and read the
-        // result directly from the recipe, leaving the altar ready for
-        // the next operation — whether that is another delegated craft or
-        // a manual player interaction.
-        capturedResult = ItemStack.EMPTY;
+        // Phase 3: let the altar's native tick() drive the crafting animation.
+        // We call init() to force recipe recalculation so the altar recognizes
+        // the items we just placed; its tick() will then set isCrafting=true,
+        // increment progress, call consume(), and eventually call craft() which
+        // spawns the result as an ItemEntity at the altar position.
         try {
-            capturedResult = completeManually();
+            altar.getClass().getMethod("init").invoke(altar);
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.error("[RSI-Batch-Malum] Manual completion failed:", e);
-            recoverFromAltar(); // recovers actual items from all altar slots, not template items
+            RSIntegrationMod.LOGGER.error("[RSI-Batch-Malum] init() after placement failed:", e);
+            recoverFromAltar();
             return false;
         }
 
+        Object recipeObj = getField(altar, "recipe");
+        if (recipeObj == null) {
+            RSIntegrationMod.LOGGER.error("[RSI-Batch-Malum] Altar did not recognize recipe after placement");
+            player.sendSystemMessage(Component.translatable("rsi.batch.error.machine_mismatch"));
+            recoverFromAltar();
+            return false;
+        }
+
+        craftStarted = true;
+        craftWasSeenActive = false;
+        RSIntegrationMod.LOGGER.debug("[RSI-Batch-Malum] Craft started via native tick: recipe={}", recipe.getId());
         return true;
     }
 
@@ -265,12 +296,15 @@ public final class MalumBatchDelegate implements IBatchDelegate {
         this.usingSharedLedger = true;
 
         Boolean crafting = (Boolean) getField(altar, "isCrafting");
-        if (Boolean.TRUE.equals(crafting)) return false;
+        if (crafting == null || Boolean.TRUE.equals(crafting)) return false;
 
         try {
             boolean mainEmpty = (boolean) invMain.getClass().getMethod("isEmpty").invoke(invMain);
             if (!mainEmpty) return false;
-        } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", ex); }
+        } catch (Exception ex) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Batch-Malum] isEmpty() check failed in re-validation", ex);
+            return false;
+        }
 
         Object inputObj = getField(recipe, "input");
         List<?> extraItems = (List<?>) getField(recipe, "extraItems");
@@ -335,12 +369,11 @@ public final class MalumBatchDelegate implements IBatchDelegate {
             return false;
         }
 
-        // Manually complete the craft (same as tryStartSingleCraft phase 3)
-        capturedResult = ItemStack.EMPTY;
+        // Let the altar's native tick() drive the crafting animation
         try {
-            capturedResult = completeManually();
+            altar.getClass().getMethod("init").invoke(altar);
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.error("[RSI-Batch-Malum] Manual completion failed:", e);
+            RSIntegrationMod.LOGGER.error("[RSI-Batch-Malum] init() after placement failed:", e);
             clearPedestals();
             try { setIHandlerSlot(invMain, 0, ItemStack.EMPTY); } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", ex); }
             if (spirits != null) {
@@ -351,24 +384,109 @@ public final class MalumBatchDelegate implements IBatchDelegate {
             return false;
         }
 
+        Object recipeObj = getField(altar, "recipe");
+        if (recipeObj == null) {
+            RSIntegrationMod.LOGGER.error("[RSI-Batch-Malum] Altar did not recognize recipe after placement");
+            player.sendSystemMessage(Component.translatable("rsi.batch.error.machine_mismatch"));
+            clearPedestals();
+            try { setIHandlerSlot(invMain, 0, ItemStack.EMPTY); } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", ex); }
+            if (spirits != null) {
+                for (int i = 0; i < spiritCount; i++) {
+                    try { setIHandlerSlot(invSpirit, i, ItemStack.EMPTY); } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", ex); }
+                }
+            }
+            return false;
+        }
+
+        craftStarted = true;
+        craftWasSeenActive = false;
+        RSIntegrationMod.LOGGER.debug("[RSI-Batch-Malum] Craft (with materials) started via native tick: recipe={}", recipe.getId());
         return true;
     }
 
     @Override
     public boolean isCraftComplete(ServerLevel level) {
-        return !capturedResult.isEmpty();
+        if (!craftStarted) return false;
+
+        // The altar's tick() sets isCrafting=true when recipe is active,
+        // and sets isCrafting=false when recipe becomes null (items consumed).
+        // We detect the true→false transition to know the craft finished.
+        Boolean crafting = (Boolean) getField(altar, "isCrafting");
+        if (Boolean.TRUE.equals(crafting)) {
+            craftWasSeenActive = true;
+            return false;
+        }
+
+        if (craftWasSeenActive) {
+            craftWasSeenActive = false;
+            RSIntegrationMod.LOGGER.debug("[RSI-Batch-Malum] Native craft finished (isCrafting false transition)");
+            return true;
+        }
+
+        // Fallback: scan for ItemEntity near the altar (it may have finished
+        // between our poll ticks and we missed the transition)
+        ItemStack expected = com.huanghuang.rsintegration.crafting.ModRecipeIndex
+                .tryGetResultItem(recipe, level.registryAccess());
+        if (!expected.isEmpty() && myPos != null && level.isLoaded(myPos)) {
+            var entities = level.getEntitiesOfClass(
+                    net.minecraft.world.entity.item.ItemEntity.class,
+                    new net.minecraft.world.phys.AABB(myPos).inflate(3),
+                    e -> ItemStack.isSameItemSameTags(e.getItem(), expected)
+                            || ItemStack.isSameItem(e.getItem(), expected));
+            if (!entities.isEmpty()) return true;
+        }
+
+        return false;
     }
 
     @Override
     public ItemStack collectResult(ServerPlayer player) {
-        ItemStack result = capturedResult.copy();
-        capturedResult = ItemStack.EMPTY;
-        return result;
+        ItemStack expected = com.huanghuang.rsintegration.crafting.ModRecipeIndex
+                .tryGetResultItem(recipe, player.serverLevel().registryAccess());
+        if (expected.isEmpty()) return ItemStack.EMPTY;
+
+        // 1. Scan for ItemEntity spawned by altar's craft() method
+        if (myPos != null && player.serverLevel().isLoaded(myPos)) {
+            var entities = player.serverLevel().getEntitiesOfClass(
+                    net.minecraft.world.entity.item.ItemEntity.class,
+                    new net.minecraft.world.phys.AABB(myPos).inflate(3),
+                    e -> ItemStack.isSameItemSameTags(e.getItem(), expected)
+                            || ItemStack.isSameItem(e.getItem(), expected));
+            for (var entity : entities) {
+                ItemStack collected = entity.getItem().copy();
+                if (collected.getCount() > expected.getCount()) {
+                    collected.setCount(expected.getCount());
+                }
+                entity.getItem().shrink(collected.getCount());
+                if (entity.getItem().isEmpty()) entity.discard();
+                RSIntegrationMod.LOGGER.debug("[RSI-Batch-Malum] Collected ItemEntity: {} x{}",
+                        collected.getHoverName().getString(), collected.getCount());
+                return collected;
+            }
+        }
+
+        // 2. Fallback: check player inventory
+        var inv = player.getInventory();
+        for (ItemStack stack : inv.items) {
+            if (ItemStack.isSameItemSameTags(stack, expected)
+                    || ItemStack.isSameItem(stack, expected)) {
+                return stack.split(expected.getCount());
+            }
+        }
+        for (ItemStack stack : inv.offhand) {
+            if (ItemStack.isSameItemSameTags(stack, expected)
+                    || ItemStack.isSameItem(stack, expected)) {
+                return stack.split(expected.getCount());
+            }
+        }
+
+        return ItemStack.EMPTY;
     }
 
     @Override
     public void onBatchFailed(ServerPlayer player, String reason) {
-        capturedResult = ItemStack.EMPTY;
+        craftStarted = false;
+        craftWasSeenActive = false;
         // Retrieve items from altar slots before clearing, so we can return
         // them to their source instead of creating duplicate items.
         if (!usingSharedLedger && ledger != null && ledger.isCommitted()) {
@@ -458,7 +576,8 @@ public final class MalumBatchDelegate implements IBatchDelegate {
 
     @Override
     public void onBatchFinished(ServerPlayer player) {
-        capturedResult = ItemStack.EMPTY;
+        craftStarted = false;
+        craftWasSeenActive = false;
         clearPedestals();
         try {
             setIHandlerSlot(invMain, 0, ItemStack.EMPTY);
@@ -480,44 +599,6 @@ public final class MalumBatchDelegate implements IBatchDelegate {
     @Override
     public BlockPos getMachinePos() {
         return myPos;
-    }
-
-    // ── Manual craft completion ────────────────────────────────────
-
-    /**
-     * Consumes the placed items from the altar and returns the recipe result
-     * directly, without ever calling {@code altar.craft()}.  This avoids the
-     * altar spawning an ItemEntity and keeps the altar ready for subsequent
-     * operations — delegated or manual.
-     */
-    private ItemStack completeManually() throws Exception {
-        ItemStack result = com.huanghuang.rsintegration.crafting.ModRecipeIndex
-                .tryGetResultItem(recipe, myLevel.registryAccess()).copy();
-        if (result.isEmpty()) {
-            throw new IllegalStateException("Recipe has no output");
-        }
-
-        // Consume center slot
-        setIHandlerSlot(invMain, 0, ItemStack.EMPTY);
-
-        // Consume spirit slots
-        List<?> spirits = (List<?>) getField(recipe, "spirits");
-        if (spirits != null) {
-            for (int i = 0; i < spirits.size(); i++) {
-                setIHandlerSlot(invSpirit, i, ItemStack.EMPTY);
-            }
-        }
-
-        // Consume pedestal slots
-        clearPedestals();
-
-        // Reset altar state — init() recalculates available recipes
-        altar.getClass().getMethod("init").invoke(altar);
-        setField(altar, "isCrafting", false);
-
-        RSIntegrationMod.LOGGER.debug("[RSI-Batch-Malum] Manual completion produced: {} x{}",
-                result.getHoverName().getString(), result.getCount());
-        return result;
     }
 
     // ── Pedestal helpers ─────────────────────────────────────────

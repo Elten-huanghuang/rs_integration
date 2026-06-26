@@ -84,6 +84,7 @@ public final class PlanResponsePacket {
         // Mod warnings (Goety research/structure, FA essences)
         buf.writeVarInt(plan.modWarnings().size());
         for (String w : plan.modWarnings()) buf.writeUtf(w);
+        buf.writeVarInt(plan.repeatCount());
     }
 
     public static PlanResponsePacket decode(FriendlyByteBuf buf) {
@@ -156,9 +157,10 @@ public final class PlanResponsePacket {
         int modWarnCount = buf.readVarInt();
         List<String> modWarnings = new ArrayList<>(modWarnCount);
         for (int i = 0; i < modWarnCount; i++) modWarnings.add(buf.readUtf());
+        int repeatCount = buf.readVarInt();
         return new PlanResponsePacket(new PlanResponse(success, targetName, targetResult,
                 steps, materials, missing, recipeId,
-                execModType, execDim, execX, execY, execZ, modWarnings));
+                execModType, execDim, execX, execY, execZ, modWarnings, repeatCount));
     }
 
     @SuppressWarnings("resource")

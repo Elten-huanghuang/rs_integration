@@ -22,6 +22,7 @@
   "gui.rs_integration.jei.malum_spirit_craft": "通过精魂祭坛远程注入",
   "gui.rs_integration.jei.wr_crystal_craft": "通过水晶灌注远程合成",
   "gui.rs_integration.jei.eidolon_crucible_craft": "通过幻之坩锅远程炼药",
+  "gui.rs_integration.jei.eidolon_worktable_craft": "通过魔力工作台远程合成",
   "gui.rs_integration.jei.fa_ritual_craft": "通过锻炉远程仪式",
   "gui.rs_integration.jei.tlm_maid_altar_craft": "通过女仆祭坛远程合成",
   "gui.rs_integration.jei.rs_auto_craft": "RS 自动合成（递归）",
@@ -120,6 +121,7 @@
   "rsi.wr.error.runic_pedestal_missing": "§c水晶灌注需要在下方放置符文基座",
   "rsi.wr.error.no_runic_plate": "§c符文基座上缺少符文板",
   "rsi.wr.error.crystallizer_busy": "§c水晶结晶器正在合成中，请稍候",
+  "rsi.wr.error.machine_busy": "§c机器正在合成中，请等待完成后再启动新配方",
   "rsi.wr.error.insufficient_wissen": "§c秘蕴能量不足 (当前 %,d，需要 %,d)",
   "rsi.wr.warn.insufficient_wissen_plan": "§e秘蕴能量可能不足 (当前 %s，需要 %s)",
   "rsi.wr.warn.wissen_cost": "§7需要 %s 秘蕴能量",
@@ -160,6 +162,7 @@
   "rsi.tlm.error.no_power": "无法获取P点能力",
   "rsi.tlm.error.insufficient_power": "P点不足（当前 %s，需要 %s）",
   "rsi.tlm.warn.insufficient_power_bind": "§e⚠ 当前P点不足（当前 %s，需要 %s）— 合成时将失败",
+  "rsi.tlm.error.handler_not_empty": "祭坛存储槽位已被占用 — 可能另有任务正在运行",
 
   "rsi.plan.title": "合成方案: %s",
   "rsi.plan.confirm": "合成",
@@ -169,6 +172,7 @@
   "rsi.plan.missing_header": "无法获取:",
   "rsi.plan.materials": "材料",
   "rsi.plan.tooltip.available": "库存",
+  "rsi.plan.repeat_count": "次数:",
 
   "rsi.async.chain_started": "§a已启动多方块合成链（%s 步）。完成后物品将送入 RS 网络。",
   "rsi.async.chain_aborted": "§c合成链已中止：%s",
@@ -187,6 +191,8 @@
   "rsi.goety.warn.research_missing": "§6⚠ 未阅读卷轴: %s",
   "rsi.goety.warn.structure_mismatch": "§6⚠ 绑定祭坛不满足仪式结构 (%s)",
   "rsi.goety.warn.no_bound_altar": "§6⚠ 未绑定祭坛，无法验证结构 (%s)",
+  "rsi.goety.error.brazier_wrong_biome": "§c亡灵火炉必须放置在深暗群系才能工作",
+  "rsi.goety.error.brazier_no_candlesticks": "§c附近没有灵魂烛台 — 亡灵火炉需要烛台提供灵魂能量",
 
   "key.categories.rsi": "RS Integration",
   "key.rsi.store_all": "一键存入RS",
@@ -199,6 +205,7 @@
   "rsi.transfer.mode.rs": "传输模式: RS网络",
   "rsi.transfer.no_backpack": "未找到精妙背包 — 请先装备背包",
   "rsi.transfer.backpack_success": "已转移 %s 个物品 (共 %s 组) 到精妙背包",
+  "rsi.transfer.backpack_self": "§c不能将背包物品转移到自身 — 请先切换到 RS 模式",
 
   "key.rsi.side_panel": "切换 RS 侧边面板",
   "rsi.side_panel.no_network": "无 RS 网络",

@@ -216,6 +216,8 @@ public final class CraftPacketUtils {
         // any remainder that doesn't fit goes to the player
         for (ItemStack vi : virtualInventory) {
             if (!vi.isEmpty()) {
+                var tracker = network.getItemStorageTracker();
+                if (tracker != null) tracker.changed(player, vi.copy());
                 ItemStack remainder = network.insertItem(vi.copy(), vi.getCount(),
                         com.refinedmods.refinedstorage.api.util.Action.PERFORM);
                 if (!remainder.isEmpty()) {
@@ -339,6 +341,10 @@ public final class CraftPacketUtils {
 
         // Only filter WR recipes; for everything else return unfiltered
         if (!isWR) return ingredients;
+
+        // WissenCrystallizerRecipe: fractured crystals are the actual
+        // consumed input materials, not catalysts. Do NOT strip them.
+        if (className.endsWith("WissenCrystallizerRecipe")) return ingredients;
 
         java.util.Set<Item> crystalItems = new java.util.HashSet<>();
 

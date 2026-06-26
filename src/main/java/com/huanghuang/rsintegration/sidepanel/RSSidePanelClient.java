@@ -225,6 +225,12 @@ public final class RSSidePanelClient {
     // ── sync (full snapshot) ────────────────────────────────────
 
     static void onSyncReceived(RSSidePanelSyncPacket packet) {
+        int prevSize = panels.size();
+        boolean wasAvailable = networkAvailable;
+        if (packet.items.isEmpty() && prevSize > 0) {
+            RSIntegrationMod.LOGGER.warn("[RSI] Received empty sync — clearing {} panel entries. networkAvailable was {}, now {}",
+                    prevSize, wasAvailable, packet.networkAvailable);
+        }
         panels.clear();
         idToIndex.clear();
         pendingExtractions.clear();
@@ -264,6 +270,11 @@ public final class RSSidePanelClient {
         PanelStack existing = idx != null && idx < panels.size() ? panels.get(idx) : null;
         int oldCount = existing != null ? existing.getCount() : 0;
         int delta = count - oldCount;
+
+        if (count <= 0 && existing == null) {
+            RSIntegrationMod.LOGGER.debug("[RSI] Delta zero for unknown UUID {} (item={} key={}) — searchKey matching",
+                    id, stack.getHoverName().getString(), keyOf(stack));
+        }
 
         // Track which UUID the animation should target — the actual PanelStack's
         // UUID, not the delta's (which may be a random fallback from the server
@@ -614,6 +625,22 @@ public final class RSSidePanelClient {
             drawPanel(g, mc);
 
         pose.popPose();
+
+        // Re-render carried item on top of the panel.
+        // The Screen renders the cursor at default z-depth; the panel at
+        // z=150 covers it, making the cursor invisible when overlapping.
+        // Drawing it again at z=300 ensures it's always visible.
+        ItemStack carried = mc.player.containerMenu.getCarried();
+        if (!carried.isEmpty()) {
+            int cx = lastMouseX - 8;
+            int cy = lastMouseY - 8;
+            pose.pushPose();
+            pose.translate(0, 0, 300.0F);
+            g.renderItem(carried, cx, cy);
+            g.renderItemDecorations(mc.font, carried, cx, cy,
+                    carried.getCount() > 1 ? String.valueOf(carried.getCount()) : null);
+            pose.popPose();
+        }
     }
 
     @SuppressWarnings("resource")
@@ -1506,7 +1533,11 @@ public final class RSSidePanelClient {
         boolean removedAny = false;
         for (int i = panels.size() - 1; i >= 0; i--) {
             PanelStack ps = panels.get(i);
-            if (ps.zeroed && !ps.craftable) {
+            // Never delete an item that still has an unconfirmed client prediction.
+            // If the prediction zeroed it and the server hasn't responded yet, the
+            // pendingExtractions timeout (2s) is responsible for recovery.  Deleting
+            // it here would orphan the pending entry, making recovery impossible.
+            if (ps.zeroed && !ps.craftable && !pendingExtractions.containsKey(ps.getId())) {
                 removePanel(ps.getId());
                 removedAny = true;
             }
@@ -1550,6 +1581,15 @@ public final class RSSidePanelClient {
         displayDirty = false;
         List<PanelStack> list = refilter(panels);
         resort(list);
+        if (list.isEmpty() && !panels.isEmpty()) {
+            int zeroedCnt = 0, craftableCnt = 0;
+            for (PanelStack ps : panels) {
+                if (ps.zeroed) zeroedCnt++;
+                if (ps.craftable) craftableCnt++;
+            }
+            RSIntegrationMod.LOGGER.warn("[RSI] rebuildDisplayList: panels={} display=0 zeroed={} craftable={} viewType={} search='{}'",
+                    panels.size(), zeroedCnt, craftableCnt, viewType, searchText);
+        }
         displayList.clear();
         displayList.addAll(list);
     }

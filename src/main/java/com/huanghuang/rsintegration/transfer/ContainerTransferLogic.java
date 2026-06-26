@@ -75,6 +75,14 @@ final class ContainerTransferLogic {
     }
 
     private static void transferToBackpack(ServerPlayer player, AbstractContainerMenu menu) {
+        // If the open container IS a backpack, transferring "backpack → backpack"
+        // is a no-op at best and item-destroying at worst. Tell the user.
+        if (isBackpackMenu(menu)) {
+            player.sendSystemMessage(
+                    Component.translatable("rsi.transfer.backpack_self"), true);
+            return;
+        }
+
         IItemHandler backpackHandler = findBackpack(player);
         if (backpackHandler == null) {
             player.sendSystemMessage(
@@ -93,21 +101,29 @@ final class ContainerTransferLogic {
             if (!slot.mayPickup(player)) continue;
 
             int count = stack.getCount();
-            ItemStack remaining = stack.copy();
+            ItemStack toMove = stack.copy();
 
+            // Remove from source BEFORE inserting into destination.
+            // This is safe even if source == destination: removal creates
+            // room, insertion fills it, and any remainder goes back.
+            slot.set(ItemStack.EMPTY);
+
+            ItemStack remaining = toMove;
             for (int bSlot = 0; bSlot < backpackHandler.getSlots() && !remaining.isEmpty(); bSlot++) {
                 remaining = backpackHandler.insertItem(bSlot, remaining, false);
             }
 
             int inserted = count - remaining.getCount();
-            if (inserted == count) {
-                slot.set(ItemStack.EMPTY);
+            if (remaining.isEmpty()) {
                 totalItems += count;
                 totalStacks++;
             } else if (inserted > 0) {
                 slot.set(remaining);
                 totalItems += inserted;
                 totalStacks++;
+            } else {
+                // Nothing was inserted — put everything back
+                slot.set(toMove);
             }
         }
 
@@ -158,6 +174,13 @@ final class ContainerTransferLogic {
         }
 
         return null;
+    }
+
+    // Returns true when the open menu is a sophisticated-backpacks container,
+    // meaning the player is looking at the inside of a backpack.
+    private static boolean isBackpackMenu(AbstractContainerMenu menu) {
+        String name = menu.getClass().getName();
+        return name.contains("sophisticatedbackpacks") || name.contains("sophisticated");
     }
 
     @Nullable

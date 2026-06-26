@@ -201,6 +201,12 @@ public final class TlmAltarBatchDelegate implements IBatchDelegate {
 
         this.slotsFilled = new boolean[storagePositions.size()];
 
+        // Reject if any storage handler has items — another task may be running.
+        if (!checkAllHandlersEmpty(player)) {
+            player.sendSystemMessage(Component.translatable("rsi.tlm.error.handler_not_empty"));
+            return false;
+        }
+
         // Pre-check power so the player knows before attempting to craft
         float powerCost = readPowerCost();
         if (powerCost > 0) {
@@ -579,6 +585,9 @@ public final class TlmAltarBatchDelegate implements IBatchDelegate {
     /** Clear items from handlers we filled, return them to RS network. */
     private void rollbackAll() {
         clearHandlers();
+        // Entity output cleanup: skip item recovery when using shared committed
+        // ledger — refund is centralized via ledger.refundCommitted().
+        if (usingSharedLedger) return;
         // Also clear any output entity near the altar (match expected output)
         try {
             ServerLevel level = player != null ? player.serverLevel() : null;
@@ -613,7 +622,8 @@ public final class TlmAltarBatchDelegate implements IBatchDelegate {
         }
     }
 
-    /** Clear items from storage block handlers, return them to RS network. */
+    /** Clear items from storage block handlers. When using shared committed
+     *  ledger, items are template copies — clear slots without returning. */
     private void clearHandlers() {
         if (storageBlockEntities == null || slotsFilled == null) return;
         try {
@@ -624,14 +634,16 @@ public final class TlmAltarBatchDelegate implements IBatchDelegate {
                 ItemStackHandler handler = rsi$tlmsGetHandler(storageBe);
                 ItemStack stack = handler.getStackInSlot(0);
                 if (!stack.isEmpty()) {
-                    if (network != null) {
-                        ItemStack leftover = network.insertItem(stack, stack.getCount(),
-                                com.refinedmods.refinedstorage.api.util.Action.PERFORM);
-                        if (!leftover.isEmpty()) {
-                            ItemHandlerHelper.giveItemToPlayer(player, leftover);
+                    if (!usingSharedLedger) {
+                        if (network != null) {
+                            ItemStack leftover = network.insertItem(stack, stack.getCount(),
+                                    com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                            if (!leftover.isEmpty()) {
+                                ItemHandlerHelper.giveItemToPlayer(player, leftover);
+                            }
+                        } else if (player != null) {
+                            ItemHandlerHelper.giveItemToPlayer(player, stack);
                         }
-                    } else if (player != null) {
-                        ItemHandlerHelper.giveItemToPlayer(player, stack);
                     }
                     handler.setStackInSlot(0, ItemStack.EMPTY);
                     Reflect.invoke(storageBe, "refresh");

@@ -1,8 +1,7 @@
 package com.huanghuang.rsintegration.mods.goety;
 
-import com.huanghuang.rsintegration.crafting.batch.BatchQuantityScreen;
 import com.huanghuang.rsintegration.ModType;
-import net.minecraft.client.Minecraft;
+
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraftforge.api.distmarker.Dist;
@@ -97,13 +96,6 @@ public final class AltarCraftButtons {
                 MOD_TYPES.get(index),
                 TOOLTIPS.get(index)
         );
-    }
-
-    public static void openBatchScreen(int index) {
-        CraftButtonData data = getButtonData(index);
-        if (data == null) return;
-        Minecraft.getInstance().setScreen(new BatchQuantityScreen(
-                data.recipeId, data.dim, data.machinePos, data.modType, data.tooltip));
     }
 
     public record CraftButtonData(

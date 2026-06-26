@@ -5,6 +5,9 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.mods.ModCraftNetworkHandlers;
 import com.huanghuang.rsintegration.network.BindingEventHandler;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.common.MinecraftForge;
 
 import java.util.List;
 
@@ -26,5 +29,10 @@ public final class WizardsRebornRSModule {
 
         ModCraftNetworkHandlers.registerWRWand();
         RSIntegrationMod.LOGGER.debug("Wizards Reborn RS module common init done.");
+    }
+
+    @OnlyIn(Dist.CLIENT)
+    public static void initClient() {
+        MinecraftForge.EVENT_BUS.register(WRGuiClientEventHandler.class);
     }
 }

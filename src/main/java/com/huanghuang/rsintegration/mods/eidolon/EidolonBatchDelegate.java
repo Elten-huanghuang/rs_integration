@@ -22,7 +22,6 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 
 import net.minecraftforge.fluids.capability.IFluidHandler;
 import net.minecraftforge.items.ItemHandlerHelper;
-
 import javax.annotation.Nullable;
 import java.lang.reflect.Constructor;
 import java.util.ArrayList;
@@ -37,11 +36,14 @@ public final class EidolonBatchDelegate implements IBatchDelegate {
     private static volatile Class<?> crucibleRecipeStepClass;
     private static volatile Class<?> crucibleTileEntityClass;
     private static volatile Class<?> crucibleStepInnerClass;
+    private static volatile Class<?> worktableBlockClass;
+    private static volatile Class<?> worktableRecipeClass;
     private static volatile java.lang.reflect.Field boilingField;
     private static volatile java.lang.reflect.Field stepsField;
 
     private static void ensureClasses() {
         if (classesLoaded) return;
+        classesLoaded = true;
         try {
             crucibleRecipeClass = Class.forName("elucent.eidolon.recipe.CrucibleRecipe");
             crucibleRecipeStepClass = Class.forName("elucent.eidolon.recipe.CrucibleRecipe$Step");
@@ -62,19 +64,24 @@ public final class EidolonBatchDelegate implements IBatchDelegate {
             } catch (NoSuchFieldException e) {
                 RSIntegrationMod.LOGGER.warn("[RSI-Batch-Eidolon] steps field not found");
             }
-
-            classesLoaded = true;
         } catch (ClassNotFoundException e) {
             RSIntegrationMod.LOGGER.error("[RSI-Batch-Eidolon] Failed to load Eidolon classes", e);
         }
+        try {
+            worktableBlockClass = Class.forName("elucent.eidolon.common.block.WorktableBlock");
+        } catch (ClassNotFoundException ignored) {}
+        try {
+            worktableRecipeClass = Class.forName("elucent.eidolon.recipe.WorktableRecipe");
+        } catch (ClassNotFoundException ignored) {}
     }
 
     // ── Instance state ───────────────────────────────────────────
     private ServerPlayer player;
     private ResourceKey<Level> myDim;
     private BlockPos myPos;
-    private Object crucible;             // CrucibleTileEntity
-    private Recipe<?> recipe;            // CrucibleRecipe
+    private Object crucible;             // CrucibleTileEntity (null for worktable)
+    private Recipe<?> recipe;            // CrucibleRecipe or WorktableRecipe
+    private boolean isWorktable;         // true = worktable mode, no BE interaction
     private ExtractionLedger ledger;
     private ExtractionLedger sharedLedger;
     private INetwork network;
@@ -88,10 +95,6 @@ public final class EidolonBatchDelegate implements IBatchDelegate {
     public boolean validateAndInit(ServerPlayer player, ResourceLocation recipeId,
                                    @Nullable ResourceLocation dim, BlockPos pos) {
         ensureClasses();
-        if (crucibleTileEntityClass == null || crucibleRecipeClass == null) {
-            player.sendSystemMessage(Component.translatable("rsi.batch.error.mod_missing", "Eidolon"));
-            return false;
-        }
 
         ServerLevel level = CraftPacketUtils.resolveLevel(player.server, dim, player);
         if (level == null) {
@@ -102,19 +105,43 @@ public final class EidolonBatchDelegate implements IBatchDelegate {
         this.myPos = pos;
         this.player = player;
 
+        if (!level.isLoaded(pos)) level.getChunk(pos);
+        BlockEntity be = level.getBlockEntity(pos);
+        var blockState = level.getBlockState(pos);
+
         Recipe<?> foundRecipe = level.getRecipeManager().byKey(recipeId).orElse(null);
         if (foundRecipe == null) {
             player.sendSystemMessage(Component.translatable("rsi.generic.error.recipe_not_found", recipeId.toString()));
+            return false;
+        }
+        this.recipe = foundRecipe;
+
+        // Detect worktable mode
+        boolean isWtRecipe = worktableRecipeClass != null && worktableRecipeClass.isInstance(foundRecipe);
+        boolean isWtBlock = worktableBlockClass != null && worktableBlockClass.isInstance(blockState.getBlock());
+        this.isWorktable = isWtRecipe || isWtBlock;
+
+        if (isWorktable) {
+            if (!isWtRecipe) {
+                player.sendSystemMessage(Component.translatable("rsi.generic.error.wrong_recipe_type"));
+                return false;
+            }
+            this.crucible = null;
+            this.pendingResult = ItemStack.EMPTY;
+            this.craftCompleted = false;
+            RSIntegrationMod.LOGGER.debug("[RSI-Batch-Eidolon] validateAndInit OK (worktable): recipe={}", recipeId);
+            return true;
+        }
+
+        // Crucible mode
+        if (crucibleTileEntityClass == null || crucibleRecipeClass == null) {
+            player.sendSystemMessage(Component.translatable("rsi.batch.error.mod_missing", "Eidolon"));
             return false;
         }
         if (!crucibleRecipeClass.isInstance(foundRecipe)) {
             player.sendSystemMessage(Component.translatable("rsi.generic.error.wrong_recipe_type"));
             return false;
         }
-        this.recipe = foundRecipe;
-
-        if (!level.isLoaded(pos)) level.getChunk(pos);
-        BlockEntity be = level.getBlockEntity(pos);
         if (be == null || !crucibleTileEntityClass.isInstance(be)) {
             player.sendSystemMessage(Component.translatable("rsi.eidolon.error.crucible_not_found"));
             return false;
@@ -134,13 +161,18 @@ public final class EidolonBatchDelegate implements IBatchDelegate {
             if (boilingField != null) boiling = boilingField.getBoolean(be);
         } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-Eidolon] Reflection probe failed", e); }
 
-        boolean stepsEmpty = true;
+        // Default to NOT empty: if we can't read the field we must assume
+        // the crucible is busy to avoid starting a second craft on top of
+        // an already-running one.
+        boolean stepsEmpty = false;
         try {
             if (stepsField != null) {
                 List<?> steps = (List<?>) stepsField.get(be);
                 stepsEmpty = steps == null || steps.isEmpty();
             }
-        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-Eidolon] Reflection probe failed", e); }
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Batch-Eidolon] Cannot read steps field — assuming crucible is busy", e);
+        }
 
         if (!hasWater) {
             player.sendSystemMessage(Component.translatable("rsi.eidolon.warn.needs_water"));
@@ -176,6 +208,11 @@ public final class EidolonBatchDelegate implements IBatchDelegate {
         this.player = player;
         this.ledger = new ExtractionLedger();
         this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+
+        // Worktable mode: extract ingredients, produce output directly
+        if (isWorktable) {
+            return tryStartWorktableCraft();
+        }
 
         // Re-validate crucible state before each iteration
         boolean hasWater;
@@ -288,12 +325,122 @@ public final class EidolonBatchDelegate implements IBatchDelegate {
         return true;
     }
 
+    // ── Worktable crafting ───────────────────────────────────────
+
+    private boolean tryStartWorktableCraft() {
+        // WorktableRecipe uses vanilla's hasCraftingRemainingItem() / getCraftingRemainingItem()
+        // for both core (3x3) and extras (4 corners). Items are consumed by default;
+        // only items with a crafting remainder (e.g. water_bucket→bucket, or tools
+        // that survive crafting) leave something behind.
+        List<Ingredient> coreIngs = getWorktableCoreIngredients();
+        List<Ingredient> extraIngs = getWorktableOuterIngredients();
+
+        if (coreIngs == null || coreIngs.isEmpty()) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Batch-Eidolon] No core ingredients in worktable recipe: {}", recipe.getId());
+            return false;
+        }
+
+        // Phase 1: Reserve all ingredients (core + extras)
+        List<ItemStack> extracted = new ArrayList<>();
+        List<Ingredient> allIngs = new ArrayList<>(coreIngs);
+        if (extraIngs != null) {
+            for (Ingredient ing : extraIngs) {
+                if (!ing.isEmpty()) allIngs.add(ing);
+            }
+        }
+        for (Ingredient ing : allIngs) {
+            ItemStack taken = CraftPacketUtils.ensureMaterialAvailable(player, myDim, myPos, ing, 1, ledger);
+            if (taken.isEmpty()) return false;
+            extracted.add(taken);
+        }
+
+        // Phase 2: Commit
+        if (!ledger.commit(network, player)) {
+            RSIntegrationMod.LOGGER.error("[RSI-Batch-Eidolon] Worktable ledger commit failed");
+            return false;
+        }
+
+        // Phase 3: Handle crafting remainders before getting result.
+        // Vanilla WorktableRecipe.getRemainingItems() checks hasCraftingRemainingItem()
+        // on every slot in both core and extras containers; items without a remainder
+        // are consumed, items with a remainder leave getCraftingRemainingItem() behind.
+        for (ItemStack stack : extracted) {
+            if (stack.hasCraftingRemainingItem()) {
+                ItemStack remainder = stack.getCraftingRemainingItem();
+                if (!remainder.isEmpty()) {
+                    if (network != null) {
+                        network.insertItem(remainder, remainder.getCount(),
+                                com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                    } else {
+                        ItemHandlerHelper.giveItemToPlayer(player, remainder);
+                    }
+                }
+            }
+        }
+
+        // Get result
+        try {
+            this.pendingResult = recipe.getResultItem(player.serverLevel().registryAccess()).copy();
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.error("[RSI-Batch-Eidolon] Failed to get worktable result:", e);
+            refundAll();
+            ledger = null;
+            return false;
+        }
+
+        this.craftCompleted = true;
+        return true;
+    }
+
+    // ── Worktable ingredient helpers ────────────────────────────
+
+    @Nullable
+    private List<Ingredient> getWorktableCoreIngredients() {
+        try {
+            Ingredient[] core = (Ingredient[]) recipe.getClass()
+                    .getMethod("getCore").invoke(recipe);
+            return core != null ? java.util.Arrays.asList(core) : null;
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-Batch-Eidolon] getCore failed", e);
+            return null;
+        }
+    }
+
+    @Nullable
+    private List<Ingredient> getWorktableOuterIngredients() {
+        try {
+            Ingredient[] outer = (Ingredient[]) recipe.getClass()
+                    .getMethod("getOuter").invoke(recipe);
+            return outer != null ? java.util.Arrays.asList(outer) : null;
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-Batch-Eidolon] getOuter failed", e);
+            return null;
+        }
+    }
+
     // ── Chain support: pre-reserved materials ────────────────────
 
     @Override
     @Nullable
     public List<IngredientSpec> getRequiredMaterials() {
         if (recipe == null) return null;
+        if (isWorktable) {
+            // Both core and extras are consumed by default;
+            // hasCraftingRemainingItem() determines what remains.
+            List<Ingredient> core = getWorktableCoreIngredients();
+            List<Ingredient> extra = getWorktableOuterIngredients();
+            if (core == null || core.isEmpty()) return null;
+            List<IngredientSpec> specs = new ArrayList<>();
+            for (Ingredient ing : core) {
+                if (!ing.isEmpty()) specs.add(new IngredientSpec(ing, 1));
+            }
+            if (extra != null) {
+                for (Ingredient ing : extra) {
+                    if (!ing.isEmpty()) specs.add(new IngredientSpec(ing, 1));
+                }
+            }
+            return specs.isEmpty() ? null : specs;
+        }
         List<StepInput> stepInputs = collectSteps(recipe);
         if (stepInputs.isEmpty()) return null;
         List<IngredientSpec> specs = new ArrayList<>();
@@ -313,6 +460,34 @@ public final class EidolonBatchDelegate implements IBatchDelegate {
         this.player = player;
         this.sharedLedger = sharedLedger;
         this.usingSharedLedger = true;
+
+        // Worktable mode: materials (core + extras) were pre-extracted by chain.
+        // Apply crafting remainders: items with hasCraftingRemainingItem() leave
+        // getCraftingRemainingItem() behind; everything else is consumed.
+        if (isWorktable) {
+            INetwork net = RSIntegration.resolveNetworkFromPlayer(player);
+            for (ItemStack mat : materials) {
+                if (mat.hasCraftingRemainingItem()) {
+                    ItemStack remainder = mat.getCraftingRemainingItem();
+                    if (!remainder.isEmpty()) {
+                        if (net != null) {
+                            net.insertItem(remainder, remainder.getCount(),
+                                    com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                        } else {
+                            ItemHandlerHelper.giveItemToPlayer(player, remainder);
+                        }
+                    }
+                }
+            }
+            try {
+                this.pendingResult = recipe.getResultItem(player.serverLevel().registryAccess()).copy();
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.error("[RSI-Batch-Eidolon] Failed to get worktable result:", e);
+                return false;
+            }
+            this.craftCompleted = true;
+            return true;
+        }
 
         // Re-validate crucible state
         boolean hasWater;
