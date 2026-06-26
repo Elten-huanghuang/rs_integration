@@ -1243,9 +1243,61 @@ public final class WRBatchDelegate implements IBatchDelegate {
                 break;
             }
             case CRYSTAL_RITUAL: {
-                // Crystal slot is not where results land —
-                // wissenWandFunction delivers output to the player inventory.
-                // The player-inventory fallback below handles collection.
+                // 1) Try getItemsResult() — the ritual places output into the
+                //    crystal block's result slots (IItemResultBlockEntity).
+                try {
+                    java.lang.reflect.Method getResults = Reflect.findMethod(
+                            be.getClass(), "getItemsResult", new Class<?>[0]);
+                    if (getResults != null) {
+                        @SuppressWarnings("unchecked")
+                        List<ItemStack> results = (List<ItemStack>) getResults.invoke(be);
+                        if (results != null && !results.isEmpty()) {
+                            for (ItemStack s : results) {
+                                if (s != null && !s.isEmpty()) {
+                                    ItemStack taken = s.copy();
+                                    s.setCount(0); // clear the result slot
+                                    if (fromMachine.isEmpty()) {
+                                        fromMachine = taken;
+                                    } else {
+                                        if (network != null) {
+                                            network.insertItem(taken, taken.getCount(),
+                                                    com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                                        } else {
+                                            ItemHandlerHelper.giveItemToPlayer(player, taken);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } catch (Exception e) {
+                    RSIntegrationMod.LOGGER.debug("[RSI-Batch-WR] getItemsResult failed", e);
+                }
+                if (!fromMachine.isEmpty()) break;
+
+                // 2) Scan for ItemEntity dropped near the crystal block.
+                //    Some WR rituals spawn the output as a world item entity
+                //    rather than delivering to the player.
+                ServerLevel slevel = player.serverLevel();
+                var aabb = new net.minecraft.world.phys.AABB(
+                        myPos.offset(-2, -1, -2), myPos.offset(2, 3, 2));
+                for (var entity : slevel.getEntitiesOfClass(
+                        net.minecraft.world.entity.item.ItemEntity.class, aabb)) {
+                    ItemStack stack = entity.getItem();
+                    if (stack.isEmpty()) continue;
+                    if (fromMachine.isEmpty()) {
+                        fromMachine = stack.copy();
+                        entity.discard();
+                    } else if (ItemStack.isSameItemSameTags(stack, fromMachine)) {
+                        int canTake = Math.min(stack.getCount(),
+                                fromMachine.getMaxStackSize() - fromMachine.getCount());
+                        if (canTake > 0) {
+                            fromMachine.grow(canTake);
+                            stack.shrink(canTake);
+                            if (stack.isEmpty()) entity.discard();
+                        }
+                    }
+                }
                 break;
             }
         }
