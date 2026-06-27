@@ -522,17 +522,33 @@ public final class CraftingResolver {
             ModType modType,
             @Nullable ResourceLocation recipeTypeId,
             List<ResourceLocation> alternativeIds,
-            List<String> alternativeModTypes
+            List<String> alternativeModTypes,
+            boolean inferMode
     ) {
         public ResolutionStep {
             alternativeIds = List.copyOf(alternativeIds);
             alternativeModTypes = List.copyOf(alternativeModTypes);
         }
 
-        /** Backward-compatible constructor — no alternatives. */
+        /** Backward-compatible constructor — no alternatives, no infer. */
         public ResolutionStep(ResourceLocation recipeId, ModType modType,
                               @Nullable ResourceLocation recipeTypeId) {
-            this(recipeId, modType, recipeTypeId, List.of(), List.of());
+            this(recipeId, modType, recipeTypeId, List.of(), List.of(), false);
+        }
+
+        /** Constructor with infer mode only (Embers Mode 1). */
+        public ResolutionStep(ResourceLocation recipeId, ModType modType,
+                              @Nullable ResourceLocation recipeTypeId,
+                              boolean inferMode) {
+            this(recipeId, modType, recipeTypeId, List.of(), List.of(), inferMode);
+        }
+
+        /** Constructor with alternatives only. */
+        public ResolutionStep(ResourceLocation recipeId, ModType modType,
+                              @Nullable ResourceLocation recipeTypeId,
+                              List<ResourceLocation> alternativeIds,
+                              List<String> alternativeModTypes) {
+            this(recipeId, modType, recipeTypeId, alternativeIds, alternativeModTypes, false);
         }
     }
 

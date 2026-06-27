@@ -31,7 +31,8 @@ public final class ModRecipeHandlers {
             new FaRecipeHandler(),
             new GoetyRecipeHandler(),
             new WRRecipeHandler(),
-            new TlmAltarRecipeHandler()
+            new TlmAltarRecipeHandler(),
+            new EreAlchemyRecipeHandler()
     );
 
     private ModRecipeHandlers() {}

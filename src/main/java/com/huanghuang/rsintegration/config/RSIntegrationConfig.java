@@ -28,6 +28,8 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.BooleanValue ENABLE_FORBIDDEN_ARCANUS;
     public static ForgeConfigSpec.BooleanValue ENABLE_EIDOLON;
     public static ForgeConfigSpec.BooleanValue ENABLE_TOUHOU_LITTLE_MAID;
+    public static ForgeConfigSpec.BooleanValue ENABLE_EMBERS_ALCHEMY;
+    public static ForgeConfigSpec.BooleanValue ENABLE_EMBERS_ALCHEMY_CALC;
     public static ForgeConfigSpec.BooleanValue ENABLE_SOPHISTICATED_BACKPACKS;
     public static ForgeConfigSpec.BooleanValue ENABLE_JEI;
     public static ForgeConfigSpec.BooleanValue DEPOSIT_UPGRADE_RS;
@@ -78,6 +80,14 @@ public final class RSIntegrationConfig {
         ENABLE_TOUHOU_LITTLE_MAID = b
                 .comment("Enable RS integration with Touhou Little Maid (Maid Altar remote crafting).")
                 .define("enableTouhouLittleMaid", true);
+        ENABLE_EMBERS_ALCHEMY = b
+                .comment("Enable RS integration with Embers Rekindled (Alchemy Tablet remote crafting).")
+                .define("enableEmbersAlchemy", true);
+        ENABLE_EMBERS_ALCHEMY_CALC = b
+                .comment("Enable Calculate mode for Embers Alchemy — shows the deterministic pedestal layout.",
+                        "When disabled, only Infer (trial-and-error) mode is available.",
+                        "Requires enableEmbersAlchemy=true.")
+                .define("enableEmbersAlchemyCalculate", false);
         ENABLE_SOPHISTICATED_BACKPACKS = b
                 .comment("Enable RS integration with Sophisticated Backpacks (RS-based upgrade items).")
                 .define("enableSophisticatedBackpacks", true);

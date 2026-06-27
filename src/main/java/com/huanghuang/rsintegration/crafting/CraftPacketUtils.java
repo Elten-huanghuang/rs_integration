@@ -11,12 +11,16 @@ import com.huanghuang.rsintegration.network.RSIntegration;
 import com.huanghuang.rsintegration.util.Reflect;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.NonNullList;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.SimpleContainer;
+import net.minecraft.world.entity.player.StackedContents;
+import net.minecraft.world.inventory.CraftingContainer;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.CraftingRecipe;
@@ -132,19 +136,8 @@ public final class CraftPacketUtils {
                 for (ItemStack secondary : ModRecipeIndex.tryGetSecondaryOutputs(craftingRecipe, player.serverLevel().registryAccess())) {
                     addToVirtual(virtualInventory, secondary);
                 }
-                // Handle crafting remainders (e.g. empty buckets from cake recipe)
-                for (Ingredient ing : craftingRecipe.getIngredients()) {
-                    if (ing.isEmpty()) continue;
-                    for (ItemStack stack : ing.getItems()) {
-                        if (stack.isEmpty()) continue;
-                        try {
-                            ItemStack remainder = stack.getCraftingRemainingItem();
-                            if (!remainder.isEmpty() && !ItemStack.isSameItem(stack, remainder)) {
-                                addToVirtual(virtualInventory, remainder.copyWithCount(1));
-                                break;
-                            }
-                        } catch (Throwable e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
-                    }
+                for (ItemStack remainder : getRecipeRemainders(craftingRecipe)) {
+                    addToVirtual(virtualInventory, remainder);
                 }
             } else {
                 // Non-crafting recipe (sawmill, custom mod type, etc.)
@@ -237,6 +230,56 @@ public final class CraftPacketUtils {
             }
         }
         virtualInventory.add(result.copy());
+    }
+
+    /**
+     * Get crafting remainders from a {@link CraftingRecipe} using the Forge-patched
+     * {@code recipe.getRemainingItems(CraftingContainer)} method, which fires
+     * CraftTweaker hooks for {@code .reuse()}, {@code .transformDamage()},
+     * {@code .transformReplace()} etc.
+     *
+     * <p>{@link ItemStack#getCraftingRemainingItem()} only returns vanilla
+     * Item-level remainders and misses CT Ingredient-level modifications.</p>
+     */
+    public static List<ItemStack> getRecipeRemainders(CraftingRecipe recipe) {
+        List<Ingredient> ingredients = recipe.getIngredients();
+        var container = new DummyCraftingContainer(3, 3);
+        for (int i = 0; i < Math.min(ingredients.size(), 9); i++) {
+            Ingredient ing = ingredients.get(i);
+            if (!ing.isEmpty()) {
+                ItemStack[] items = ing.getItems();
+                if (items.length > 0 && !items[0].isEmpty()) {
+                    container.setItem(i, items[0].copy());
+                }
+            }
+        }
+        NonNullList<ItemStack> allRemainders = recipe.getRemainingItems(container);
+        List<ItemStack> result = new ArrayList<>();
+        for (ItemStack r : allRemainders) {
+            if (!r.isEmpty()) result.add(r.copy());
+        }
+        return result;
+    }
+
+    private static class DummyCraftingContainer extends SimpleContainer
+            implements CraftingContainer {
+        private final int width;
+        private final int height;
+
+        DummyCraftingContainer(int width, int height) {
+            super(width * height);
+            this.width = width;
+            this.height = height;
+        }
+
+        @Override public int getWidth() { return width; }
+        @Override public int getHeight() { return height; }
+        @Override public List<ItemStack> getItems() {
+            NonNullList<ItemStack> list = NonNullList.withSize(getContainerSize(), ItemStack.EMPTY);
+            for (int i = 0; i < getContainerSize(); i++) list.set(i, getItem(i));
+            return list;
+        }
+        @Override public void fillStackedContents(StackedContents c) { /* no-op */ }
     }
 
     /**

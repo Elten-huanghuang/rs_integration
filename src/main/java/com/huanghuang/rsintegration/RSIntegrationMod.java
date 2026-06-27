@@ -53,6 +53,10 @@ public final class RSIntegrationMod {
         if (enabled(RSIntegrationConfig.ENABLE_TOUHOU_LITTLE_MAID, "touhou_little_maid"))
             com.huanghuang.rsintegration.mods.touhoulittlemaid.TlmRSModule.initCommon();
 
+        // --- Embers Rekindled ------------------------------------------
+        if (enabled(RSIntegrationConfig.ENABLE_EMBERS_ALCHEMY, "embers"))
+            com.huanghuang.rsintegration.mods.embers.EreAlchemyRSModule.initCommon();
+
         // Subsystems
         if (RSIntegrationConfig.ENABLE_CONTAINER_TRANSFER.get()) {
             com.huanghuang.rsintegration.transfer.ContainerTransferNetworkHandler.register();

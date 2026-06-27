@@ -25,7 +25,14 @@ public record PlanResponse(
         int executionPosY,
         int executionPosZ,
         List<String> modWarnings,  // mod-specific validation warnings (Goety research/structure, FA essences)
-        int repeatCount
+        int repeatCount,
+        // ── Embers Alchemy pedestal layout (null/missing when not applicable) ──
+        @Nullable int[] embersCode,           // code[i] = aspect index for pedestal i
+        @Nullable String[] embersAspectNames,  // translated aspect item names (per code index)
+        @Nullable String[] embersInputNames,   // translated input item names (per pedestal)
+        long embersSeed,                      // world seed used for calculation (0 = not set)
+        boolean embersCanInfer,               // true when a tablet is bound and Mode 1 is available
+        boolean embersCodeFromCache           // true when embersCode was loaded from KnownCodeSavedData (previously inferred)
 ) {
     public record Availability(int needed, int available) {
         public boolean isEnough() { return available >= needed; }
@@ -37,7 +44,8 @@ public record PlanResponse(
                         List<PlanStep> steps, Map<Item, Availability> materials,
                         List<String> missing, String recipeId) {
         this(success, targetName, targetResult, steps, materials, missing, recipeId,
-                null, null, 0, 0, 0, Collections.emptyList(), 1);
+                null, null, 0, 0, 0, Collections.emptyList(), 1,
+                null, null, null, 0, false, false);
     }
 
     /** Backward-compat: no mod warnings. */
@@ -49,6 +57,21 @@ public record PlanResponse(
                         int executionPosX, int executionPosY, int executionPosZ) {
         this(success, targetName, targetResult, steps, materials, missing, recipeId,
                 executionModTypeId, executionDim, executionPosX, executionPosY, executionPosZ,
-                Collections.emptyList(), 1);
+                Collections.emptyList(), 1,
+                null, null, null, 0, false, false);
+    }
+
+    /** Backward-compat: no embers data. */
+    public PlanResponse(boolean success, String targetName, ItemStack targetResult,
+                        List<PlanStep> steps, Map<Item, Availability> materials,
+                        List<String> missing, String recipeId,
+                        @Nullable String executionModTypeId,
+                        @Nullable String executionDim,
+                        int executionPosX, int executionPosY, int executionPosZ,
+                        List<String> modWarnings, int repeatCount) {
+        this(success, targetName, targetResult, steps, materials, missing, recipeId,
+                executionModTypeId, executionDim, executionPosX, executionPosY, executionPosZ,
+                modWarnings, repeatCount,
+                null, null, null, 0, false, false);
     }
 }

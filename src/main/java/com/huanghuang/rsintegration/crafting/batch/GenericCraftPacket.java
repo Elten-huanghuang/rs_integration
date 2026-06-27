@@ -63,6 +63,7 @@ public final class GenericCraftPacket {
     @Nullable private final ResourceLocation dim;
     @Nullable private final net.minecraft.core.BlockPos pos;
     private final int repeatCount;
+    private final boolean inferMode;
 
     /** Preview mode: compute plan and send GUI to client. */
     public GenericCraftPacket(ResourceLocation recipeId, boolean preview) {
@@ -89,12 +90,22 @@ public final class GenericCraftPacket {
                               @Nullable ResourceLocation dim,
                               @Nullable net.minecraft.core.BlockPos pos,
                               int repeatCount) {
+        this(recipeId, preview, forcedRecipes, dim, pos, repeatCount, false);
+    }
+
+    /** Full constructor with repeat count and infer mode. */
+    public GenericCraftPacket(ResourceLocation recipeId, boolean preview,
+                              Map<String, String> forcedRecipes,
+                              @Nullable ResourceLocation dim,
+                              @Nullable net.minecraft.core.BlockPos pos,
+                              int repeatCount, boolean inferMode) {
         this.recipeId = recipeId;
         this.preview = preview;
         this.forcedRecipes = forcedRecipes != null ? forcedRecipes : Collections.emptyMap();
         this.dim = dim;
         this.pos = pos;
         this.repeatCount = Math.max(1, Math.min(repeatCount, 64));
+        this.inferMode = inferMode;
     }
 
     /** Convenience: execute mode. */
@@ -122,6 +133,7 @@ public final class GenericCraftPacket {
         buf.writeBoolean(pos != null);
         if (pos != null) buf.writeBlockPos(pos);
         buf.writeVarInt(repeatCount);
+        buf.writeBoolean(inferMode);
     }
 
     public static GenericCraftPacket decode(FriendlyByteBuf buf) {
@@ -149,7 +161,8 @@ public final class GenericCraftPacket {
             }
         }
         int repeatCount = Math.max(1, Math.min(buf.readVarInt(), 64));
-        return new GenericCraftPacket(recipeId, preview, forced, dim, pos, repeatCount);
+        boolean inferMode = buf.readBoolean();
+        return new GenericCraftPacket(recipeId, preview, forced, dim, pos, repeatCount, inferMode);
     }
 
     public static void handle(GenericCraftPacket packet, Supplier<NetworkEvent.Context> contextSupplier) {
@@ -166,7 +179,7 @@ public final class GenericCraftPacket {
                             packet.dim, packet.pos, packet.repeatCount);
                 } else {
                     tryResolve(player, packet.recipeId, packet.dim, packet.pos,
-                            packet.repeatCount);
+                            packet.repeatCount, packet.inferMode);
                 }
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.error("[RSI-Generic] Failed for {}:", packet.recipeId, e);
@@ -302,7 +315,7 @@ public final class GenericCraftPacket {
     private static void tryResolve(ServerPlayer player, ResourceLocation recipeId,
                                    @Nullable ResourceLocation dim,
                                    @Nullable net.minecraft.core.BlockPos pos,
-                                   int repeatCount) {
+                                   int repeatCount, boolean inferMode) {
         Recipe<?> recipe = resolveRecipe(player.serverLevel(), recipeId);
         if (recipe == null) {
             player.sendSystemMessage(Component.translatable("rsi.generic.error.recipe_not_found", recipeId.toString()));
@@ -336,9 +349,10 @@ public final class GenericCraftPacket {
         }
 
         // Mod recipe with machine binding → async chain via plan preview path
+        ModType modType = ModType.classifyRecipe(recipe);
+
         if (!(recipe instanceof CraftingRecipe) && dim != null && pos != null
                 && network != null && RSIntegrationConfig.ENABLE_MULTIBLOCK_AUTO_CRAFTING.get()) {
-            ModType modType = ModType.classifyRecipe(recipe);
             if (modType != null) {
                 // Expand ingredient specs into flat list for typed resolver
                 List<Ingredient> expanded = new ArrayList<>();
@@ -358,7 +372,7 @@ public final class GenericCraftPacket {
                     return;
                 }
                 // Append the mod recipe itself as the final multi-block step
-                modSteps.add(new ResolutionStep(recipeId, modType, recipeId));
+                modSteps.add(new ResolutionStep(recipeId, modType, recipeId, inferMode));
                 AsyncCraftChain chain = new AsyncCraftChain(player, network, modSteps);
                 final INetwork netForDone = network;
                 AsyncCraftManager.getInstance().submit(chain);
@@ -366,7 +380,7 @@ public final class GenericCraftPacket {
                     if (chain.isAborted()) return;
                     AsyncCraftManager.getInstance().remove(chain);
                     if (repeatCount > 1) {
-                        tryResolve(player, recipeId, dim, pos, repeatCount - 1);
+                        tryResolve(player, recipeId, dim, pos, repeatCount - 1, inferMode);
                     }
                 });
                 player.sendSystemMessage(Component.translatable(
@@ -394,7 +408,7 @@ public final class GenericCraftPacket {
                         if (chain.isAborted()) return;
                         AsyncCraftManager.getInstance().remove(chain);
                         if (repeatCount > 1) {
-                            tryResolve(player, recipeId, dim, pos, repeatCount - 1);
+                            tryResolve(player, recipeId, dim, pos, repeatCount - 1, inferMode);
                         }
                     });
                     player.sendSystemMessage(Component.translatable(
@@ -438,7 +452,7 @@ public final class GenericCraftPacket {
                         if (chain.isAborted()) return;
                         AsyncCraftManager.getInstance().remove(chain);
                         if (repeatCount > 1) {
-                            tryResolve(player, recipeId, dim, pos, repeatCount - 1);
+                            tryResolve(player, recipeId, dim, pos, repeatCount - 1, inferMode);
                         }
                     });
                     player.sendSystemMessage(Component.translatable(
@@ -462,6 +476,9 @@ public final class GenericCraftPacket {
             if (!missingCheck.isEmpty()) {
                 RSIntegrationMod.LOGGER.warn("[RSI-Generic] Unified resolver failed for {}: planSteps={} missing={}",
                         recipeId, planSteps != null ? planSteps.size() : "null", missingCheck);
+                player.sendSystemMessage(Component.translatable(
+                        "rsi.generic.error.missing_materials", String.join(", ", missingCheck)));
+                return;
             } else {
                 RSIntegrationMod.LOGGER.debug("[RSI-Generic] Unified resolver: nothing to resolve for {}, falling through to direct extraction", recipeId);
             }
@@ -477,6 +494,7 @@ public final class GenericCraftPacket {
         for (int r = 0; r < repeatCount; r++) {
             List<ItemStack> allExtracted = new ArrayList<>();
             ExtractionLedger ledger = new ExtractionLedger();
+            boolean extractionIncomplete = false;
 
             // Plan all extractions atomically — nothing physically moved yet
             for (IngredientNeed need : grouped.values()) {
@@ -489,9 +507,15 @@ public final class GenericCraftPacket {
                     player.sendSystemMessage(Component.translatable(
                             "rsi.generic.error.missing_materials",
                             CraftPacketUtils.describeIngredient(need.ingredient)));
+                    extractionIncomplete = true;
                     break;
                 }
                 allExtracted.add(reserved.copy());
+            }
+
+            if (extractionIncomplete) {
+                ledger.rollback(player);
+                break;
             }
 
             // Commit all extractions atomically
@@ -512,6 +536,21 @@ public final class GenericCraftPacket {
                 ItemHandlerHelper.giveItemToPlayer(player, result);
                 player.displayClientMessage(
                         Component.translatable("rsi.generic.info.resolved", result.getCount()), true);
+                // Return CT catalyst items (e.g. .reuse(), .transformDamage()) to RS
+                if (recipe instanceof CraftingRecipe cr && network != null) {
+                    for (ItemStack remainder : CraftPacketUtils.getRecipeRemainders(cr)) {
+                        if (!remainder.isEmpty()) {
+                            var tracker = network.getItemStorageTracker();
+                            if (tracker != null) tracker.changed(player, remainder.copy());
+                            ItemStack leftover = network.insertItem(remainder.copy(),
+                                    remainder.getCount(),
+                                    com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                            if (!leftover.isEmpty()) {
+                                ItemHandlerHelper.giveItemToPlayer(player, leftover);
+                            }
+                        }
+                    }
+                }
             } else {
                 // Failed to get result — refund actual extracted materials
                 if (network != null) {
@@ -975,6 +1014,9 @@ public final class GenericCraftPacket {
             } else if (recipeModType == ModType.EIDOLON) {
                 modWarnings.addAll(com.huanghuang.rsintegration.mods.eidolon.EidolonBatchDelegate
                         .getPlanWarnings(player, recipe, dim, pos));
+            } else if (recipeModType == ModType.EMBERS_ALCHEMY) {
+                modWarnings.addAll(com.huanghuang.rsintegration.mods.embers.EreAlchemyBatchDelegate
+                        .getPlanWarnings(player, recipe, dim, pos));
             }
 
             steps.add(new PlanStep(recipeId, targetOutput, 1, targetInputs,
@@ -1086,6 +1128,89 @@ public final class GenericCraftPacket {
 
         String targetName = targetOutput.getHoverName().getString();
 
+        // ── Embers Alchemy: lookup cached codes from prior inference ──
+        // Always consult KnownCodeSavedData — even when the calculation config is off,
+        // a previously inferred code should be shown and reused.
+        int[] embersCode = null;
+        String[] embersAspectNames = null;
+        String[] embersInputNames = null;
+        long embersSeed = 0;
+        boolean embersCodeFromCache = false;
+        if (recipeModType == ModType.EMBERS_ALCHEMY && network != null) {
+            embersSeed = player.serverLevel().getSeed();
+            var savedData = com.huanghuang.rsintegration.mods.embers.KnownCodeSavedData
+                    .get(player.serverLevel());
+            savedData.setWorldSeed(embersSeed);
+            int[] code = savedData.getCode(recipeId.toString());
+            if (code != null) {
+                embersCodeFromCache = true; // from prior inference
+            } else if (RSIntegrationConfig.ENABLE_EMBERS_ALCHEMY_CALC.get()) {
+                // Compute deterministically only when config allows
+                try {
+                    var aspectsField = Reflect.findField(recipe.getClass(), "aspects");
+                    var inputsField = Reflect.findField(recipe.getClass(), "inputs");
+                    if (aspectsField.isPresent() && inputsField.isPresent()) {
+                        aspectsField.get().setAccessible(true);
+                        @SuppressWarnings("unchecked")
+                        var aspects = (List<Ingredient>) aspectsField.get().get(recipe);
+                        inputsField.get().setAccessible(true);
+                        @SuppressWarnings("unchecked")
+                        var inputs = (List<Ingredient>) inputsField.get().get(recipe);
+                        if (aspects != null && inputs != null && !aspects.isEmpty()) {
+                            code = com.huanghuang.rsintegration.mods.embers.EreAlchemyCalcDelegate
+                                    .computeCode(embersSeed, recipeId, aspects.size(), inputs.size());
+                        }
+                    }
+                } catch (Exception ex) {
+                    RSIntegrationMod.LOGGER.debug("[RSI-Embers] Cannot compute code for preview: {}", ex.toString());
+                }
+            }
+            if (code != null) {
+                embersCode = code;
+                // Build display names from recipe fields
+                try {
+                    var aspectsField = Reflect.findField(recipe.getClass(), "aspects");
+                    var inputsField = Reflect.findField(recipe.getClass(), "inputs");
+                    if (aspectsField.isPresent() && inputsField.isPresent()) {
+                        aspectsField.get().setAccessible(true);
+                        @SuppressWarnings("unchecked")
+                        var aspects = (List<Ingredient>) aspectsField.get().get(recipe);
+                        inputsField.get().setAccessible(true);
+                        @SuppressWarnings("unchecked")
+                        var inputs = (List<Ingredient>) inputsField.get().get(recipe);
+                        if (aspects != null && inputs != null) {
+                            embersAspectNames = new String[code.length];
+                            for (int i = 0; i < code.length; i++) {
+                                int idx = code[i];
+                                if (idx < aspects.size()) {
+                                    Ingredient aspectIng = aspects.get(idx);
+                                    ItemStack first = firstValidDisplayItem(aspectIng);
+                                    embersAspectNames[i] = first.isEmpty() ? "?" : first.getHoverName().getString();
+                                } else {
+                                    embersAspectNames[i] = "?";
+                                }
+                            }
+                            embersInputNames = new String[code.length];
+                            for (int i = 0; i < code.length; i++) {
+                                if (i < inputs.size()) {
+                                    Ingredient inputIng = inputs.get(i);
+                                    ItemStack first = firstValidDisplayItem(inputIng);
+                                    embersInputNames[i] = first.isEmpty() ? "?" : first.getHoverName().getString();
+                                } else {
+                                    embersInputNames[i] = "?";
+                                }
+                            }
+                        }
+                    }
+                } catch (Exception ex) {
+                    RSIntegrationMod.LOGGER.debug("[RSI-Embers] Cannot resolve display names: {}", ex.toString());
+                }
+            }
+        }
+
+        boolean embersCanInfer = recipeModType == ModType.EMBERS_ALCHEMY
+                && dim != null && pos != null;
+
         PlanResponse plan = new PlanResponse(
                 feasible,
                 targetName,
@@ -1100,7 +1225,13 @@ public final class GenericCraftPacket {
                 pos != null ? pos.getY() : 0,
                 pos != null ? pos.getZ() : 0,
                 modWarnings,
-                repeatCount
+                repeatCount,
+                embersCode,
+                embersAspectNames,
+                embersInputNames,
+                embersSeed,
+                embersCanInfer,
+                embersCodeFromCache
         );
 
         // Cache the plan with the same tick-bucket captured earlier

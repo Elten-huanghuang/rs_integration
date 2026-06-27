@@ -27,6 +27,7 @@ public final class ModType {
     private final String[] blockKeyKeywords;
     private final String[] blockKeyPrefixes;
     private final Supplier<IBatchDelegate> delegateFactory;
+    @Nullable private final Supplier<IBatchDelegate> inferDelegateFactory;
 
     // ── built-in constants (registered in static {}) ──────────────
 
@@ -37,6 +38,7 @@ public final class ModType {
     public static final ModType EIDOLON;
     public static final ModType WIZARDS_REBORN;
     public static final ModType TOUHOU_LITTLE_MAID;
+    public static final ModType EMBERS_ALCHEMY;
 
     static {
         GENERIC = register("generic",
@@ -79,17 +81,26 @@ public final class ModType {
                 new String[]{"touhou_little_maid"},
                 new String[0],
                 delegateSupplier("com.huanghuang.rsintegration.mods.touhoulittlemaid.TlmAltarBatchDelegate"));
+
+        EMBERS_ALCHEMY = register("embers_alchemy",
+                new String[]{"com.rekindled.embers."},
+                new String[]{"embers"},
+                new String[0],
+                delegateSupplier("com.huanghuang.rsintegration.mods.embers.EreAlchemyBatchDelegate"),
+                delegateSupplier("com.huanghuang.rsintegration.mods.embers.EreAlchemyInferDelegate"));
     }
 
     // ── constructors ──────────────────────────────────────────────
 
     private ModType(String id, String[] recipePrefixes, String[] blockKeyKeywords,
-                    String[] blockKeyPrefixes, Supplier<IBatchDelegate> delegateFactory) {
+                    String[] blockKeyPrefixes, Supplier<IBatchDelegate> delegateFactory,
+                    @Nullable Supplier<IBatchDelegate> inferDelegateFactory) {
         this.id = id;
         this.recipePrefixes = recipePrefixes;
         this.blockKeyKeywords = blockKeyKeywords;
         this.blockKeyPrefixes = blockKeyPrefixes;
         this.delegateFactory = delegateFactory;
+        this.inferDelegateFactory = inferDelegateFactory;
     }
 
     // ── public API ────────────────────────────────────────────────
@@ -99,6 +110,13 @@ public final class ModType {
     @Nullable
     public IBatchDelegate createDelegate() {
         return delegateFactory.get();
+    }
+
+    /** Create the infer-mode delegate (Mode 1 trial-and-error), if available. */
+    @Nullable
+    public IBatchDelegate createInferDelegate() {
+        if (inferDelegateFactory != null) return inferDelegateFactory.get();
+        return createDelegate();
     }
 
     // ── registry ──────────────────────────────────────────────────
@@ -116,8 +134,17 @@ public final class ModType {
                                     String[] blockKeyKeywords,
                                     String[] blockKeyPrefixes,
                                     Supplier<IBatchDelegate> delegateFactory) {
+        return register(id, recipePrefixes, blockKeyKeywords, blockKeyPrefixes,
+                delegateFactory, null);
+    }
+
+    public static ModType register(String id, String[] recipePrefixes,
+                                    String[] blockKeyKeywords,
+                                    String[] blockKeyPrefixes,
+                                    Supplier<IBatchDelegate> delegateFactory,
+                                    @Nullable Supplier<IBatchDelegate> inferDelegateFactory) {
         ModType type = new ModType(id, recipePrefixes, blockKeyKeywords,
-                blockKeyPrefixes, delegateFactory);
+                blockKeyPrefixes, delegateFactory, inferDelegateFactory);
         BY_ID.put(id, type);
         return type;
     }

@@ -82,9 +82,20 @@ public final class RSSidePanelNetworkHandler {
 
     // ── Tick-end delta flush ──────────────────────────────────────
 
+    private static volatile boolean tickFiringConfirmed;
+
     private static void onServerTickEnd(TickEvent.ServerTickEvent event) {
         if (event.phase != TickEvent.Phase.END) return;
+
+        if (!tickFiringConfirmed) {
+            tickFiringConfirmed = true;
+            RSIntegrationMod.LOGGER.info("[RSI-Delta] onServerTickEnd is firing (listener registered OK)");
+        }
+
         if (pendingDeltas.isEmpty()) return;
+
+        RSIntegrationMod.LOGGER.debug("[RSI-Delta] Tick-end flush: {} players with pending deltas",
+                pendingDeltas.size());
 
         // Snapshot and clear — matching RS native GridItemDeltaMessage batching
         Map<UUID, List<RSSidePanelDeltaPacket.Entry>> snapshot = new HashMap<>(pendingDeltas);
@@ -96,7 +107,11 @@ public final class RSSidePanelNetworkHandler {
             if (deltas.isEmpty()) continue;
 
             ServerPlayer player = findPlayer(event.getServer(), playerId);
-            if (player == null) continue;
+            if (player == null) {
+                RSIntegrationMod.LOGGER.warn("[RSI-Delta] Tick-end flush: player {} not found, dropping {} deltas",
+                        playerId, deltas.size());
+                continue;
+            }
 
             // Consolidate: if same UUID appears multiple times in this batch,
             // only keep the last entry (most recent count wins).
@@ -218,8 +233,7 @@ public final class RSSidePanelNetworkHandler {
                             IStorageCache<ItemStack> freshCache = network.getItemStorageCache();
                             if (freshCache != null && freshCache != cache) {
                                 RSIntegrationMod.LOGGER.info("[RSI] Cache rebuilt — re-registering listener for {}", pid);
-                                cache.addListener(this); // will be re-wrapped by registerListener
-                                // Delegate to registerListener to rebuild craftableKeys etc.
+                                // registerListener will add the listener to the freshCache
                                 registerListener(sp, network);
                                 return;
                             }
@@ -239,6 +253,9 @@ public final class RSSidePanelNetworkHandler {
             private void queue(ItemStack stack, int change, UUID entryId) {
                 if (stack == null || stack.getItem() == null) return;
 
+                RSIntegrationMod.LOGGER.debug("[RSI-Delta] Cache onChanged: item={} change={} id={}",
+                        stack.getHoverName().getString(), change, entryId);
+
                 // Query the real remaining count from the storage cache.
                 // RS fires onChanged with the pre-extraction stack, so
                 // stack.getCount() may be stale (e.g. 1 when the last item
@@ -252,7 +269,7 @@ public final class RSSidePanelNetworkHandler {
                     if (cached != null && !cached.isEmpty()) {
                         absoluteCount = cached.getCount();
                     } else {
-                        var entry = list.getEntry(stack, 1);
+                        var entry = list.getEntry(stack, com.refinedmods.refinedstorage.api.util.IComparer.COMPARE_NBT);
                         if (entry != null) {
                             var es = entry.getStack();
                             if (es != null) absoluteCount = es.getCount();
@@ -281,6 +298,10 @@ public final class RSSidePanelNetworkHandler {
                 var k = net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(stack.getItem());
                 boolean craftable = k != null && craftableKeys.contains(k);
 
+                RSIntegrationMod.LOGGER.debug("[RSI-Delta] Queueing delta: player={} id={} item={} count={} craftable={}",
+                        player.getName().getString(), stackId,
+                        net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(toSend.getItem()),
+                        absoluteCount, craftable);
                 queueDelta(player, stackId, toSend, ts, craftable);
             }
 

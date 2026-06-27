@@ -271,19 +271,8 @@ public final class AsyncCraftChain {
                 for (ItemStack secondary : com.huanghuang.rsintegration.recipe.ModRecipeHandlers.tryGetSecondaryOutputs(cr, player.serverLevel().registryAccess())) {
                     addToVirtualInventory(secondary);
                 }
-                // Handle crafting remainders (e.g. empty buckets from cake recipe)
-                for (Ingredient ing : cr.getIngredients()) {
-                    if (ing.isEmpty()) continue;
-                    for (ItemStack stack : ing.getItems()) {
-                        if (stack.isEmpty()) continue;
-                        try {
-                            ItemStack remainder = stack.getCraftingRemainingItem();
-                            if (!remainder.isEmpty() && !ItemStack.isSameItem(stack, remainder)) {
-                                addToVirtualInventory(remainder.copyWithCount(1));
-                                break;
-                            }
-                        } catch (Throwable e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
-                    }
+                for (ItemStack remainder : CraftPacketUtils.getRecipeRemainders(cr)) {
+                    addToVirtualInventory(remainder);
                 }
             } else {
                 // Non-crafting GENERIC recipe (e.g. sawmill, custom mod type)
@@ -360,7 +349,9 @@ public final class AsyncCraftChain {
             return null;
         }
 
-        IBatchDelegate delegate = createDelegate(step.modType());
+        IBatchDelegate delegate = step.inferMode()
+                ? step.modType().createInferDelegate()
+                : createDelegate(step.modType());
         if (delegate == null) return null;
 
         // Try each bound machine until one validates successfully.

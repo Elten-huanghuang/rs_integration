@@ -85,6 +85,25 @@ public final class PlanResponsePacket {
         buf.writeVarInt(plan.modWarnings().size());
         for (String w : plan.modWarnings()) buf.writeUtf(w);
         buf.writeVarInt(plan.repeatCount());
+        // Embers alchemy pedestal data
+        buf.writeBoolean(plan.embersCode() != null);
+        if (plan.embersCode() != null) {
+            buf.writeVarInt(plan.embersCode().length);
+            for (int c : plan.embersCode()) buf.writeVarInt(c);
+        }
+        buf.writeBoolean(plan.embersAspectNames() != null);
+        if (plan.embersAspectNames() != null) {
+            buf.writeVarInt(plan.embersAspectNames().length);
+            for (String s : plan.embersAspectNames()) buf.writeUtf(s);
+        }
+        buf.writeBoolean(plan.embersInputNames() != null);
+        if (plan.embersInputNames() != null) {
+            buf.writeVarInt(plan.embersInputNames().length);
+            for (String s : plan.embersInputNames()) buf.writeUtf(s);
+        }
+        buf.writeVarLong(plan.embersSeed());
+        buf.writeBoolean(plan.embersCanInfer());
+        buf.writeBoolean(plan.embersCodeFromCache());
     }
 
     public static PlanResponsePacket decode(FriendlyByteBuf buf) {
@@ -158,9 +177,33 @@ public final class PlanResponsePacket {
         List<String> modWarnings = new ArrayList<>(modWarnCount);
         for (int i = 0; i < modWarnCount; i++) modWarnings.add(buf.readUtf());
         int repeatCount = buf.readVarInt();
+        // Embers alchemy pedestal data
+        int[] embersCode = null;
+        if (buf.readBoolean()) {
+            int len = buf.readVarInt();
+            embersCode = new int[len];
+            for (int i = 0; i < len; i++) embersCode[i] = buf.readVarInt();
+        }
+        String[] embersAspectNames = null;
+        if (buf.readBoolean()) {
+            int len = buf.readVarInt();
+            embersAspectNames = new String[len];
+            for (int i = 0; i < len; i++) embersAspectNames[i] = buf.readUtf();
+        }
+        String[] embersInputNames = null;
+        if (buf.readBoolean()) {
+            int len = buf.readVarInt();
+            embersInputNames = new String[len];
+            for (int i = 0; i < len; i++) embersInputNames[i] = buf.readUtf();
+        }
+        long embersSeed = buf.readVarLong();
+        boolean embersCanInfer = buf.readBoolean();
+        boolean embersCodeFromCache = buf.readBoolean();
         return new PlanResponsePacket(new PlanResponse(success, targetName, targetResult,
                 steps, materials, missing, recipeId,
-                execModType, execDim, execX, execY, execZ, modWarnings, repeatCount));
+                execModType, execDim, execX, execY, execZ, modWarnings, repeatCount,
+                embersCode, embersAspectNames, embersInputNames, embersSeed, embersCanInfer,
+                embersCodeFromCache));
     }
 
     @SuppressWarnings("resource")

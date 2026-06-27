@@ -263,6 +263,9 @@ public final class RSSidePanelClient {
     static void onDeltaReceived(UUID id, ItemStack stack, long timestamp, boolean craftable) {
         if (stack == null || stack.getItem() == null || id == null) return;
 
+        RSIntegrationMod.LOGGER.debug("[RSI-Delta] Client received: id={} item={} count={} craftable={}",
+                id, ForgeRegistries.ITEMS.getKey(stack.getItem()), stack.getCount(), craftable);
+
         pendingExtractions.remove(id);
 
         int count = stack.getCount();
@@ -321,6 +324,7 @@ public final class RSSidePanelClient {
                     PanelStack ps = new PanelStack(id, stack, timestamp, craftable);
                     idToIndex.put(id, panels.size());
                     panels.add(ps);
+                    totalSlotCount++; // new item type added via delta
                     animId = id;
                 }
             }
@@ -1352,6 +1356,7 @@ public final class RSSidePanelClient {
         Integer idx = idToIndex.remove(id);
         if (idx == null) return;
         panels.remove((int) idx);
+        totalSlotCount = Math.max(0, totalSlotCount - 1);
         for (int i = idx; i < panels.size(); i++) {
             idToIndex.put(panels.get(i).getId(), i);
         }

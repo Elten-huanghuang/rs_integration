@@ -38,9 +38,8 @@ final class StepExecutor {
             return false;
         }
 
-        for (Ingredient ing : recipe.getIngredients()) {
-            if (ing.isEmpty()) continue;
-            addCraftingRemainder(ing, ctx);
+        for (ItemStack remainder : CraftPacketUtils.getRecipeRemainders(recipe)) {
+            ctx.add(remainder);
         }
 
         ItemStack result = recipe.getResultItem(ctx.level.registryAccess());
@@ -79,9 +78,15 @@ final class StepExecutor {
             return false;
         }
 
-        for (IngredientSpec spec : specs) {
-            if (spec.isEmpty()) continue;
-            addCraftingRemainder(spec.ingredient(), ctx);
+        if (entry.recipe() instanceof CraftingRecipe cr) {
+            for (ItemStack remainder : CraftPacketUtils.getRecipeRemainders(cr)) {
+                ctx.add(remainder);
+            }
+        } else {
+            for (IngredientSpec spec : specs) {
+                if (spec.isEmpty()) continue;
+                addCraftingRemainder(spec.ingredient(), ctx);
+            }
         }
 
         var handler = ModRecipeHandlers.handlerFor(entry.recipe());

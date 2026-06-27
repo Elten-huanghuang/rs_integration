@@ -56,7 +56,11 @@ public final class DebugCommand {
                         .then(Commands.argument("item", StringArgumentType.greedyString())
                                 .executes(DebugCommand::traceItem)))
                 .then(Commands.literal("audit")
-                        .executes(DebugCommand::audit)));
+                        .executes(DebugCommand::audit))
+                .then(Commands.literal("embers_clearcache")
+                        .executes(DebugCommand::embersClearCache))
+                .then(Commands.literal("embers_clearlocks")
+                        .executes(DebugCommand::embersClearLocks)));
     }
 
     // ── dump chain ───────────────────────────────────────────────
@@ -364,6 +368,27 @@ public final class DebugCommand {
                 "Audit: " + fTotal + " mod recipes, " + fHandled + " handled, " + fUnhandled + " unhandled"), false);
         ctx.getSource().sendSuccess(() -> Component.literal(
                 "Check logs for unhandled recipe details."), false);
+        return 1;
+    }
+
+    // ── embers clearcache ───────────────────────────────────────────
+
+    private static int embersClearCache(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
+        var level = ctx.getSource().getServer().overworld();
+        var data = com.huanghuang.rsintegration.mods.embers.KnownCodeSavedData.get(level);
+        int count = data.size();
+        data.clearAll();
+        ctx.getSource().sendSuccess(() -> Component.literal(
+                "Cleared " + count + " Embers alchemy code cache entries."), true);
+        return 1;
+    }
+
+    // ── embers clearlocks ──────────────────────────────────────────
+
+    private static int embersClearLocks(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
+        int count = com.huanghuang.rsintegration.mods.embers.EreAlchemyLock.clearAll();
+        ctx.getSource().sendSuccess(() -> Component.literal(
+                "Cleared " + count + " Embers tablet lock(s)."), true);
         return 1;
     }
 }

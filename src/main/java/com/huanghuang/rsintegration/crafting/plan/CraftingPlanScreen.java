@@ -81,6 +81,14 @@ public final class CraftingPlanScreen extends Screen {
     private int ticksOpen;
     private int mouseX, mouseY;
 
+    private int embersPedestalY;
+    private int embersPedestalH;
+    private boolean embersInferMode;   // current mode toggle state
+    private boolean showEmbersModeToggle; // config-gated: only when Calculate is enabled
+    private int embersModeY;           // mode toggle row Y
+    private int embersModeCalcX, embersModeCalcY, embersModeCalcW, embersModeCalcH;
+    private int embersModeInferX, embersModeInferY, embersModeInferW, embersModeInferH;
+
     // OR-path selection state — equality is by recipeId only, modTypeId is
     // purely cosmetic (badge color).
     private static final class AltChoice {
@@ -131,6 +139,26 @@ public final class CraftingPlanScreen extends Screen {
         Font font = minecraft.font;
         int contentW = width - 40;
 
+        // Embers alchemy pedestal layout height
+        boolean hasEmbers = plan.embersCode() != null
+                && plan.embersAspectNames() != null
+                && plan.embersInputNames() != null;
+        boolean canInfer = plan.embersCanInfer();
+        boolean codeFromCache = plan.embersCodeFromCache();
+        int embersCardsH;
+        if (hasEmbers) {
+            int pedestalCount = plan.embersCode().length;
+            int cardsPerRow = Math.min(pedestalCount, 8);
+            embersCardsH = font.lineHeight + 10 + 52 * ((pedestalCount + cardsPerRow - 1) / cardsPerRow) + 8;
+        } else {
+            embersCardsH = 0;
+        }
+        // Show mode toggle only when both modes are available (calc enabled AND tablet bound)
+        int embersModeH = (showEmbersModeToggle = canInfer && com.huanghuang.rsintegration.config.RSIntegrationConfig.ENABLE_EMBERS_ALCHEMY_CALC.get()) ? 28 : 0;
+        embersPedestalH = embersCardsH + embersModeH;
+        // Default mode: Calculate if code is known (from cache or computed), Infer otherwise
+        embersInferMode = !hasEmbers;
+
         // Compute missing items area (material shortages + mod validation warnings)
         int missingCount = plan.missing() != null ? plan.missing().size() : 0;
         int modWarnCount = plan.modWarnings() != null ? plan.modWarnings().size() : 0;
@@ -156,6 +184,10 @@ public final class CraftingPlanScreen extends Screen {
         materialAreaTop = height - 28 - repeatAreaH - materialAreaHeight;
         missingAreaTop = materialAreaTop - missingAreaHeight;
         repeatRowY = height - 28 - repeatAreaH;
+        embersPedestalY = missingAreaHeight > 0 ? missingAreaTop - embersPedestalH
+                : materialAreaTop - embersPedestalH;
+        if (embersPedestalH == 0) embersPedestalY = missingAreaHeight > 0 ? missingAreaTop : materialAreaTop;
+        embersModeY = embersPedestalY + embersCardsH;
 
         int btnW = 80;
         int btnY = height - 24;
@@ -188,7 +220,7 @@ public final class CraftingPlanScreen extends Screen {
                             plan.executionPosX(), plan.executionPosY(), plan.executionPosZ());
                 }
                 BatchCraftNetworkHandler.CHANNEL.sendToServer(
-                        new GenericCraftPacket(id, false, Collections.emptyMap(), execDim, execPos, repeatCount));
+                        new GenericCraftPacket(id, false, Collections.emptyMap(), execDim, execPos, repeatCount, embersInferMode));
             }
         }
         onClose();
@@ -256,9 +288,10 @@ public final class CraftingPlanScreen extends Screen {
 
         // Steps area (scrollable)
         int areaTop = STEPS_TOP;
-        int bottomReserved = missingAreaHeight > 0 ? missingAreaTop : materialAreaTop;
+        int bottomReserved = embersPedestalH > 0 ? embersPedestalY
+                : (missingAreaHeight > 0 ? missingAreaTop : materialAreaTop);
         int areaBottom = bottomReserved - 4;
-        if (missingAreaHeight == 0 && materialAreaHeight == 0) areaBottom = height - 30;
+        if (embersPedestalH == 0 && missingAreaHeight == 0 && materialAreaHeight == 0) areaBottom = height - 30;
 
         gfx.enableScissor(left, areaTop, left + contentW, areaBottom);
         try {
@@ -300,6 +333,11 @@ public final class CraftingPlanScreen extends Screen {
             maxScroll = Math.max(0, y - areaBottom + scrollOffset);
         } finally {
             gfx.disableScissor();
+        }
+
+        // Embers alchemy pedestal layout
+        if (embersPedestalH > 0) {
+            renderEmbersPedestalArea(gfx, font, left);
         }
 
         // Missing items + mod warnings
@@ -895,6 +933,138 @@ public final class CraftingPlanScreen extends Screen {
         }
     }
 
+    // ── Embers alchemy pedestal layout ──────────────────────────────
+
+    private void renderEmbersPedestalArea(GuiGraphics gfx, Font font, int left) {
+        int contentW = width - 40;
+        int top = embersPedestalY;
+
+        // Background with emerald left accent
+        UIRenderer.roundedGradient(gfx, left, top, contentW, embersPedestalH, 6f,
+                0xE6141E18, 0xE6101814);
+        gfx.fill(left + 1, top + 2, left + 4, top + embersPedestalH - 2, 0xFF44AA66);
+
+        int[] code = plan.embersCode();
+        String[] aspects = plan.embersAspectNames();
+        String[] inputs = plan.embersInputNames();
+        boolean hasCards = code != null && aspects != null && inputs != null;
+
+        int y = top + 4;
+        if (hasCards) {
+            String hdr = Component.translatable("rsi.embers.pedestal_layout").getString();
+            UIRenderer.textBackdrop(gfx, font, left + 10, y, hdr, C_TEXT_BACKDROP);
+            gfx.drawString(font, hdr, left + 10, y, 0xFF88CC99);
+            // Show "from prior inference" badge when code was loaded from cache
+            if (plan.embersCodeFromCache()) {
+                String cachedNote = Component.translatable("rsi.embers.code_from_cache").getString();
+                int noteW = font.width(cachedNote);
+                gfx.drawString(font, cachedNote, left + contentW - noteW - 12, y, 0xFF77AA77);
+            }
+            y += font.lineHeight + 6;
+        }
+
+        if (hasCards) {
+            int cardW = 64;
+            int cardH = 44;
+            int cardGap = 4;
+            int cardsPerRow = Math.max(1, Math.min(code.length, (contentW - 16) / (cardW + cardGap)));
+            int cx = left + 8 + (contentW - 16 - cardsPerRow * (cardW + cardGap) + cardGap) / 2;
+
+            for (int i = 0; i < code.length; i++) {
+                int col = i % cardsPerRow;
+                int row = i / cardsPerRow;
+                int px = cx + col * (cardW + cardGap);
+                int py = y + row * (cardH + cardGap);
+
+                // Card background
+                UIRenderer.rounded(gfx, px, py, cardW, cardH, 4f, 0xCC1A221E);
+
+                // Input name (top)
+                String inputName = i < inputs.length ? inputs[i] : "?";
+                int maxNameW = cardW - 8;
+                if (font.width(inputName) > maxNameW) {
+                    inputName = font.plainSubstrByWidth(inputName, maxNameW - font.width("...")) + "...";
+                }
+                int nameX = px + cardW / 2 - font.width(inputName) / 2;
+                gfx.drawString(font, inputName, nameX, py + 2, 0xFFCCCCCC);
+
+                // Aspect name (bottom)
+                String aspectName = i < aspects.length ? aspects[i] : "?";
+                if (font.width(aspectName) > maxNameW) {
+                    aspectName = font.plainSubstrByWidth(aspectName, maxNameW - font.width("...")) + "...";
+                }
+                int aspX = px + cardW / 2 - font.width(aspectName) / 2;
+                gfx.drawString(font, aspectName, aspX, py + cardH - font.lineHeight - 2, 0xFF88CC88);
+
+                // Separator line
+                int sepY = py + cardH / 2;
+                gfx.fill(px + 6, sepY - 1, px + cardW - 6, sepY, 0x33338844);
+
+                // Pedestal number
+                String num = String.valueOf(i + 1);
+                gfx.drawString(font, num, px + cardW - font.width(num) - 3, py + cardH - font.lineHeight - 1, 0xFF558855);
+            }
+        }
+
+        // Seed indicator at bottom-right (only with cards, so it doesn't overlap toggle)
+        if (hasCards && plan.embersSeed() != 0) {
+            String seedStr = Component.translatable("rsi.embers.seed_label", plan.embersSeed()).getString();
+            int seedW = font.width(seedStr);
+            int seedX = left + contentW - seedW - 12;
+            int seedY = top + embersPedestalH - font.lineHeight - 4;
+            gfx.drawString(font, seedStr, seedX, seedY, 0xFF556644);
+        }
+
+        // ── Mode toggle (Calculate / Infer) ──────────────────────────
+        if (showEmbersModeToggle) {
+            String modeLabel = Component.translatable("rsi.embers.mode_label").getString();
+            int labelW = font.width(modeLabel);
+            int rowCenterX = left + contentW / 2;
+            int btnW = 52;
+            int btnH = 16;
+            int gap = 6;
+            int totalW = labelW + 6 + btnW * 2 + gap;
+            int rowStartX = rowCenterX - totalW / 2;
+            int btnTop = embersModeY + 6;
+
+            // Label — match section header color
+            gfx.drawString(font, modeLabel, rowStartX, btnTop + (btnH - font.lineHeight) / 2, 0xFF88CC99);
+
+            // Calculate button — same color scheme as repeat row buttons
+            int calcX = rowStartX + labelW + 6;
+            embersModeCalcX = calcX; embersModeCalcY = btnTop;
+            embersModeCalcW = btnW; embersModeCalcH = btnH;
+            boolean hoverCalc = mouseX >= calcX && mouseX <= calcX + btnW
+                    && mouseY >= btnTop && mouseY <= btnTop + btnH;
+            boolean isCalc = !embersInferMode;
+            int calcBg = isCalc ? 0xCC338855 : (hoverCalc ? 0x88338855 : 0x661A221E);
+            int calcFg = isCalc ? 0xFFFFFFFF : (hoverCalc ? 0xFFAAFFAA : 0xFF558855);
+            // Double-layer inset (matching repeat row buttons)
+            UIRenderer.rounded(gfx, calcX, btnTop, btnW, btnH, 4f, calcBg);
+            UIRenderer.rounded(gfx, calcX + 1, btnTop + 1, btnW - 2, btnH - 2, 3f, 0x881A221E);
+            String calcLabel = Component.translatable("rsi.embers.mode_calc").getString();
+            gfx.drawString(font, calcLabel,
+                    calcX + btnW / 2 - font.width(calcLabel) / 2,
+                    btnTop + (btnH - font.lineHeight) / 2, calcFg);
+
+            // Infer button
+            int inferX = calcX + btnW + gap;
+            embersModeInferX = inferX; embersModeInferY = btnTop;
+            embersModeInferW = btnW; embersModeInferH = btnH;
+            boolean hoverInfer = mouseX >= inferX && mouseX <= inferX + btnW
+                    && mouseY >= btnTop && mouseY <= btnTop + btnH;
+            boolean isInfer = embersInferMode;
+            int inferBg = isInfer ? 0xCC338855 : (hoverInfer ? 0x88338855 : 0x661A221E);
+            int inferFg = isInfer ? 0xFFFFFFFF : (hoverInfer ? 0xFFAAFFAA : 0xFF558855);
+            UIRenderer.rounded(gfx, inferX, btnTop, btnW, btnH, 4f, inferBg);
+            UIRenderer.rounded(gfx, inferX + 1, btnTop + 1, btnW - 2, btnH - 2, 3f, 0x881A221E);
+            String inferLabel = Component.translatable("rsi.embers.mode_infer").getString();
+            gfx.drawString(font, inferLabel,
+                    inferX + btnW / 2 - font.width(inferLabel) / 2,
+                    btnTop + (btnH - font.lineHeight) / 2, inferFg);
+        }
+    }
+
     // ── Missing area ──────────────────────────────────────────────
 
     private void renderMissingArea(GuiGraphics gfx, Font font, int left, int top, int contentW) {
@@ -964,6 +1134,20 @@ public final class CraftingPlanScreen extends Screen {
                     && my >= btnPlusY && my <= btnPlusY + btnPlusH) {
                 currentRepeat = Math.min(64, currentRepeat + 1);
                 requestPlanRefresh();
+                return true;
+            }
+            // Embers mode toggle: Calculate
+            if (showEmbersModeToggle
+                    && mx >= embersModeCalcX && mx <= embersModeCalcX + embersModeCalcW
+                    && my >= embersModeCalcY && my <= embersModeCalcY + embersModeCalcH) {
+                embersInferMode = false;
+                return true;
+            }
+            // Embers mode toggle: Infer
+            if (showEmbersModeToggle
+                    && mx >= embersModeInferX && mx <= embersModeInferX + embersModeInferW
+                    && my >= embersModeInferY && my <= embersModeInferY + embersModeInferH) {
+                embersInferMode = true;
                 return true;
             }
             if (my >= STEPS_TOP) {
