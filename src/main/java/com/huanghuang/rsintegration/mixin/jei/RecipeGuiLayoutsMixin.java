@@ -64,8 +64,14 @@ public class RecipeGuiLayoutsMixin {
             new ResourceLocation("eidolon", "crucible");
     private static final ResourceLocation EIDOLON_WORKTABLE_UID =
             new ResourceLocation("eidolon", "worktable");
+    private static final ResourceLocation EIDOLON_RITUAL_UID =
+            new ResourceLocation("eidolon", "rituals");
     private static final ResourceLocation EMBER_ALCHEMY_UID =
             new ResourceLocation("embers", "alchemy");
+    private static final ResourceLocation AETHERWORKS_ANVIL_UID =
+            new ResourceLocation("aetherworks", "anvil");
+    private static final ResourceLocation GOETY_BRAZIER_UID =
+            new ResourceLocation("goety", "brazier");
     private static final ResourceLocation SMELTING_UID =
             new ResourceLocation("minecraft", "smelting");
     private static final ResourceLocation BLASTING_UID =
@@ -215,6 +221,8 @@ public class RecipeGuiLayoutsMixin {
             String tooltipKey;
             if (rsi$isGoetyRitual(recipe)) {
                 tooltipKey = "gui.rs_integration.jei.altar_craft";
+            } else if (rsi$isGoetyBrazierRecipe(recipe)) {
+                tooltipKey = "gui.rs_integration.jei.goety_brazier_craft";
             } else if (filter.equals("spirit_altar")) {
                 tooltipKey = "gui.rs_integration.jei.malum_spirit_craft";
             } else if (filter.equals("spirit_crucible")) {
@@ -227,6 +235,8 @@ public class RecipeGuiLayoutsMixin {
                 tooltipKey = "gui.rs_integration.jei.eidolon_crucible_craft";
             } else if (filter.equals("worktable")) {
                 tooltipKey = "gui.rs_integration.jei.eidolon_worktable_craft";
+            } else if (filter.equals("ritual")) {
+                tooltipKey = "gui.rs_integration.jei.eidolon_ritual_craft";
             } else if (filter.equals("touhou_little_maid")) {
                 tooltipKey = "gui.rs_integration.jei.tlm_maid_altar_craft";
             } else if (filter.equals("embers")) {
@@ -270,7 +280,7 @@ public class RecipeGuiLayoutsMixin {
 
             buttonsAdded++;
 
-            if (rsi$isGoetyRitual(recipe)) {
+            if (rsi$isGoetyRitual(recipe) || rsi$isGoetyBrazierRecipe(recipe)) {
                 GoetyRSNetworkHandler.sendCheckRS(recipeId, bindingDim, machinePos);
             }
         }
@@ -430,7 +440,10 @@ public class RecipeGuiLayoutsMixin {
             if (FA_HEPHAESTUS_UPGRADING_UID.equals(uid)) return "hephaestus_forge";
             if (EIDOLON_CRUCIBLE_UID.equals(uid)) return "crucible";
             if (EIDOLON_WORKTABLE_UID.equals(uid)) return "worktable";
+            if (EIDOLON_RITUAL_UID.equals(uid)) return "ritual";
             if (EMBER_ALCHEMY_UID.equals(uid)) return "embers";
+            if (AETHERWORKS_ANVIL_UID.equals(uid)) return "aetherworks";
+            if (GOETY_BRAZIER_UID.equals(uid)) return "goety";
             if (SMELTING_UID.equals(uid)) return "block.minecraft.furnace";
             if (BLASTING_UID.equals(uid)) return "block.minecraft.blast_furnace";
             if (SMOKING_UID.equals(uid)) return "block.minecraft.smoker";
@@ -440,6 +453,8 @@ public class RecipeGuiLayoutsMixin {
         } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] Reflection probe failed", e); }
 
         String recipeClassName = recipe.getClass().getName();
+        if (recipeClassName.equals("com.Polarice3.Goety.common.crafting.BrazierRecipe"))
+            return "goety";
         if (recipeClassName.equals("com.sammy.malum.common.recipe.SpiritInfusionRecipe"))
             return "spirit_altar";
         if (recipeClassName.startsWith("com.sammy.malum.common.recipe.SpiritFocusingRecipe"))
@@ -460,8 +475,13 @@ public class RecipeGuiLayoutsMixin {
             return "touhou_little_maid";
         if (recipeClassName.startsWith("com.rekindled.embers."))
             return "embers";
+        if (recipeClassName.startsWith("net.sirplop.aetherworks."))
+            return "aetherworks";
         if (recipeClassName.equals("elucent.eidolon.recipe.WorktableRecipe"))
             return "worktable";
+        if (recipeClassName.equals("elucent.eidolon.recipe.ItemRitualRecipe")
+                || recipeClassName.equals("elucent.eidolon.recipe.GenericRitualRecipe"))
+            return "ritual";
         if (recipeClassName.startsWith("elucent.eidolon"))
             return "crucible";
 
@@ -930,6 +950,12 @@ public class RecipeGuiLayoutsMixin {
     private static boolean rsi$isGoetyRitual(Object recipe) {
         return ModList.get().isLoaded("goety")
                 && recipe.getClass().getName().equals("com.Polarice3.Goety.common.crafting.RitualRecipe");
+    }
+
+    @Unique
+    private static boolean rsi$isGoetyBrazierRecipe(Object recipe) {
+        return ModList.get().isLoaded("goety")
+                && recipe.getClass().getName().equals("com.Polarice3.Goety.common.crafting.BrazierRecipe");
     }
 
     @Unique

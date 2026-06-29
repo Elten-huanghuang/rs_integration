@@ -42,6 +42,7 @@ public final class ModType {
     public static final ModType EMBERS_ALCHEMY;
     public static final ModType VANILLA_MACHINE;
     public static final ModType MALUM_SPIRIT_CRUCIBLE;
+    public static final ModType AETHERWORKS_ANVIL;
 
     static {
         GENERIC = register("generic",
@@ -59,8 +60,8 @@ public final class ModType {
         // SpiritFocusingRecipe prefix before the generic com.sammy.malum. prefix.
         MALUM_SPIRIT_CRUCIBLE = register("malum_spirit_crucible",
                 new String[]{"com.sammy.malum.common.recipe.SpiritFocusingRecipe"},
-                new String[]{"malum"},
                 new String[]{"spirit_crucible"},
+                new String[]{"malum_spirit_crucible"},
                 delegateSupplier("com.huanghuang.rsintegration.mods.malum.MalumSpiritCrucibleBatchDelegate"));
 
         MALUM = register("malum",
@@ -113,6 +114,12 @@ public final class ModType {
                 new String[]{"furnace", "smoker", "campfire", "stonecutter", "smithing_table"},
                 new String[]{"vanilla_machine"},
                 delegateSupplier("com.huanghuang.rsintegration.mods.vanilla.VanillaMachineBatchDelegate"));
+
+        AETHERWORKS_ANVIL = register("aetherworks_anvil",
+                new String[]{"net.sirplop.aetherworks."},
+                new String[]{"aetherworks", "aetherium", "anvil"},
+                new String[0],
+                delegateSupplier("com.huanghuang.rsintegration.mods.aetherworks.AetherworksBatchDelegate"));
     }
 
     // ── constructors ──────────────────────────────────────────────

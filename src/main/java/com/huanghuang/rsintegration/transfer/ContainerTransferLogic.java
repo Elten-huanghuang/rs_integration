@@ -141,15 +141,21 @@ final class ContainerTransferLogic {
 
     @Nullable
     private static IItemHandler findBackpack(ServerPlayer player) {
-        // Priority 1: Curios "back" slot (reflective — Curios is optional)
+        // Priority 1: Curios slots (reflective — Curios is optional)
         IItemHandler bh = findBackpackInCurios(player);
         if (bh != null) return bh;
 
-        // Priority 2: Offhand
+        // Priority 2: Armor slots
+        for (ItemStack armor : player.getInventory().armor) {
+            bh = getBackpackHandler(armor);
+            if (bh != null) return bh;
+        }
+
+        // Priority 3: Offhand
         bh = getBackpackHandler(player.getOffhandItem());
         if (bh != null) return bh;
 
-        // Priority 3: Main inventory (hotbar first, then rest)
+        // Priority 4: Main inventory (hotbar first, then rest)
         var inv = player.getInventory();
         for (int i = 0; i < 9; i++) {
             bh = getBackpackHandler(inv.getItem(i));
@@ -164,7 +170,7 @@ final class ContainerTransferLogic {
     }
 
     /**
-     * Use reflection to scan the Curios "back" slot for a backpack.
+     * Use reflection to scan ALL Curios slots for a backpack.
      * Curios is an optional dependency — this must not link directly.
      */
     @Nullable
@@ -179,17 +185,19 @@ final class ContainerTransferLogic {
             if (opt == null) return null;
             Object handler = ((java.util.Optional<?>) opt).orElse(null);
             if (handler == null) return null;
-            // handler.getCurios()
+            // handler.getCurios() -> Map<String, ICurioStacksHandler>
             Object curios = handler.getClass().getMethod("getCurios").invoke(handler);
-            // curios.get("back")
-            Object backHandler = ((java.util.Map<?, ?>) curios).get("back");
-            if (backHandler == null) return null;
-            // backHandler.getStacks()
-            Object stacks = backHandler.getClass().getMethod("getStacks").invoke(backHandler);
-            if (!(stacks instanceof net.minecraftforge.items.IItemHandler itemHandler)) return null;
-            for (int s = 0; s < itemHandler.getSlots(); s++) {
-                IItemHandler bh = getBackpackHandler(itemHandler.getStackInSlot(s));
-                if (bh != null) return bh;
+            @SuppressWarnings("unchecked")
+            java.util.Map<String, ?> curiosMap = (java.util.Map<String, ?>) curios;
+            // Scan every curio slot type (back, belt, charm, necklace, ring, head, etc.)
+            for (var entry : curiosMap.values()) {
+                Object stacks = entry.getClass().getMethod("getStacks").invoke(entry);
+                if (stacks instanceof net.minecraftforge.items.IItemHandler itemHandler) {
+                    for (int s = 0; s < itemHandler.getSlots(); s++) {
+                        IItemHandler bh = getBackpackHandler(itemHandler.getStackInSlot(s));
+                        if (bh != null) return bh;
+                    }
+                }
             }
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.debug("[RSI] Curios scan error in findBackpack: {}", e.toString());

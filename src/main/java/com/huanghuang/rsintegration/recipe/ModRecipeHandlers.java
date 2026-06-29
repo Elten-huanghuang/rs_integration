@@ -44,7 +44,8 @@ public final class ModRecipeHandlers {
             new GoetyRecipeHandler(),
             new WRRecipeHandler(),
             new TlmAltarRecipeHandler(),
-            new EreAlchemyRecipeHandler()
+            new EreAlchemyRecipeHandler(),
+            new AetherworksRecipeHandler()
     );
 
     private ModRecipeHandlers() {}

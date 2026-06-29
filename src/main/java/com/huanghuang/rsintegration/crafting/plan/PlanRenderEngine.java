@@ -304,6 +304,7 @@ public final class PlanRenderEngine {
             case "wizards_reborn"     -> "Wizards Reborn";
             case "touhou_little_maid" -> "TLM";
             case "embers_alchemy"     -> "Embers Alchemy";
+            case "aetherworks_anvil" -> "Aetherworks Anvil";
             default                   -> capitalizeWords(modType.id().replace('_', ' '));
         };
     }

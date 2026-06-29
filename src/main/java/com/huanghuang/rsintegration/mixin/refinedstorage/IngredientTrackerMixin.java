@@ -178,10 +178,14 @@ public abstract class IngredientTrackerMixin {
     )
     private boolean rsi$redirectIsEqual(IComparer comparer, ItemStack a, ItemStack b, int flags) {
         if (!RSIntegrationConfig.ENABLE_BINDING.get()) return comparer.isEqual(a, b, flags);
-        // If the recipe ingredient has NBT, require exact match — prevents
-        // wrongly accepting NBT-mutated items as "already present" in the grid.
-        // If the ingredient has no NBT (generic recipe), NBT-agnostic is fine.
-        if (a.hasTag()) return comparer.isEqual(a, b, flags);
-        return comparer.isEqual(a, b, flags & ~IComparer.COMPARE_NBT);
+        // Only require exact NBT when BOTH sides carry meaningful NBT.
+        // If either side lacks NBT, force NBT-agnostic comparison.
+        // This prevents items with dynamic NBT (soulbound, durability,
+        // timestamps added by holding/using) from breaking recipe
+        // availability checks and making recipes appear as empty/air.
+        if (!a.hasTag() || !b.hasTag()) {
+            return comparer.isEqual(a, b, flags & ~IComparer.COMPARE_NBT);
+        }
+        return comparer.isEqual(a, b, flags);
     }
 }

@@ -40,6 +40,8 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
     private static volatile Class<?> worktableRecipeClass;
     private static volatile java.lang.reflect.Field boilingField;
     private static volatile java.lang.reflect.Field stepsField;
+    private static volatile Class<?> ritualRecipeClass;
+    private static volatile Class<?> brazierTileEntityClass;
 
     private static void ensureClasses() {
         if (!com.huanghuang.rsintegration.util.ModClassLoader.ensureClasses("eidolon",
@@ -78,15 +80,23 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
         try {
             worktableRecipeClass = Class.forName("elucent.eidolon.recipe.WorktableRecipe");
         } catch (ClassNotFoundException ignored) {}
+        try {
+            ritualRecipeClass = Class.forName("elucent.eidolon.recipe.RitualRecipe");
+        } catch (ClassNotFoundException ignored) {}
+        try {
+            brazierTileEntityClass = Class.forName("elucent.eidolon.common.tile.BrazierTileEntity");
+        } catch (ClassNotFoundException ignored) {}
     }
 
     // ── Instance state ───────────────────────────────────────────
     private ServerPlayer player;
     private ResourceKey<Level> myDim;
     private BlockPos myPos;
-    private Object crucible;             // CrucibleTileEntity (null for worktable)
-    private Recipe<?> recipe;            // CrucibleRecipe or WorktableRecipe
+    private Object crucible;             // CrucibleTileEntity (null for worktable/ritual)
+    private Recipe<?> recipe;            // CrucibleRecipe or WorktableRecipe or RitualRecipe
     private boolean isWorktable;         // true = worktable mode, no BE interaction
+    private boolean isRitual;            // true = brazier ritual mode
+    private Object brazier;              // BrazierTileEntity (null except ritual mode)
     private ItemStack pendingResult;      // Stored result for collectResult()
     private boolean craftCompleted;       // Flag set after instant craft
 
@@ -124,14 +134,50 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
 
         if (isWorktable) {
             if (!isWtRecipe) {
-                player.sendSystemMessage(Component.literal("§c" + Component.translatable("rsi.generic.error.wrong_recipe_type").getString()
-                        + " [" + recipeId + " expected=WorktableRecipe got=" + foundRecipe.getClass().getSimpleName() + "]"));
+                RSIntegrationMod.LOGGER.debug("[RSI-Batch-Eidolon] Machine-type mismatch: recipe={} is {} but bound machine is Worktable — trying next binding",
+                        recipeId, foundRecipe.getClass().getSimpleName());
                 return false;
             }
+            this.isRitual = false;
+            this.brazier = null;
             this.crucible = null;
             this.pendingResult = ItemStack.EMPTY;
             this.craftCompleted = false;
             RSIntegrationMod.LOGGER.debug("[RSI-Batch-Eidolon] validateAndInit OK (worktable): recipe={}", recipeId);
+            return true;
+        }
+
+        // Ritual mode (Brazier)
+        boolean isRitualRecipe = ritualRecipeClass != null && ritualRecipeClass.isInstance(foundRecipe);
+        boolean isBrazier = brazierTileEntityClass != null && be != null && brazierTileEntityClass.isInstance(be);
+        if (isRitualRecipe && isBrazier) {
+            Object currentRitual = null;
+            try {
+                java.lang.reflect.Field f = brazierTileEntityClass.getDeclaredField("ritual");
+                f.setAccessible(true);
+                currentRitual = f.get(be);
+            } catch (Exception ignored) {}
+            if (currentRitual != null) {
+                player.sendSystemMessage(Component.translatable("rsi.eidolon.error.ritual_busy"));
+                return false;
+            }
+            boolean burning = false;
+            try {
+                java.lang.reflect.Field f = brazierTileEntityClass.getDeclaredField("burning");
+                f.setAccessible(true);
+                burning = f.getBoolean(be);
+            } catch (Exception ignored) {}
+            if (burning) {
+                player.sendSystemMessage(Component.translatable("rsi.eidolon.error.ritual_busy"));
+                return false;
+            }
+            this.isRitual = true;
+            this.brazier = be;
+            this.isWorktable = false;
+            this.crucible = null;
+            this.pendingResult = ItemStack.EMPTY;
+            this.craftCompleted = false;
+            RSIntegrationMod.LOGGER.debug("[RSI-Batch-Eidolon] validateAndInit OK (ritual): recipe={}", recipeId);
             return true;
         }
 
@@ -141,14 +187,16 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
             return false;
         }
         if (!crucibleRecipeClass.isInstance(foundRecipe)) {
-            player.sendSystemMessage(Component.literal("§c" + Component.translatable("rsi.generic.error.wrong_recipe_type").getString()
-                    + " [" + recipeId + " expected=CrucibleRecipe got=" + foundRecipe.getClass().getSimpleName() + "]"));
+            RSIntegrationMod.LOGGER.debug("[RSI-Batch-Eidolon] Machine-type mismatch: recipe={} is {} but bound machine is Crucible — trying next binding",
+                    recipeId, foundRecipe.getClass().getSimpleName());
             return false;
         }
         if (be == null || !crucibleTileEntityClass.isInstance(be)) {
             player.sendSystemMessage(Component.translatable("rsi.eidolon.error.crucible_not_found"));
             return false;
         }
+        this.isRitual = false;
+        this.brazier = null;
         this.crucible = be;
 
         // Validate state
@@ -211,6 +259,11 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
         this.player = player;
         this.ledger = new ExtractionLedger();
         this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+
+        // Ritual mode
+        if (isRitual) {
+            return tryStartRitualCraft();
+        }
 
         // Worktable mode: extract ingredients, produce output directly
         if (isWorktable) {
@@ -410,6 +463,172 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
         return true;
     }
 
+    // ── Ritual (Brazier / Crystal Ritual) crafting ──────────────
+
+    private boolean tryStartRitualCraft() {
+        if (brazier == null || recipe == null) return false;
+
+        ServerLevel level = player.serverLevel();
+        if (myPos != null && level.isLoaded(myPos)) {
+            BlockEntity current = level.getBlockEntity(myPos);
+            if (current == null || current.isRemoved()
+                    || !brazierTileEntityClass.isInstance(current)) {
+                player.sendSystemMessage(Component.translatable("rsi.error.machine_missing"));
+                return false;
+            }
+            this.brazier = current;
+        }
+
+        // Check brazier is not busy
+        try {
+            java.lang.reflect.Field f = brazierTileEntityClass.getDeclaredField("ritual");
+            f.setAccessible(true);
+            if (f.get(brazier) != null) return false;
+            java.lang.reflect.Field bf = brazierTileEntityClass.getDeclaredField("burning");
+            bf.setAccessible(true);
+            if (bf.getBoolean(brazier)) return false;
+        } catch (Exception e) { return false; }
+
+        // Extract reagent from RS
+        Ingredient reagent = getRitualReagent();
+        if (reagent == null || reagent.isEmpty()) {
+            RSIntegrationMod.LOGGER.error("[RSI-Batch-Eidolon] No reagent in ritual recipe: {}", recipe.getId());
+            return false;
+        }
+        ItemStack reagentStack = CraftPacketUtils.ensureMaterialAvailable(
+                player, myDim, myPos, reagent, 1, ledger);
+        if (reagentStack.isEmpty()) return false;
+
+        if (!ledger.commit(network, player)) {
+            RSIntegrationMod.LOGGER.error("[RSI-Batch-Eidolon] Ritual ledger commit failed");
+            return false;
+        }
+
+        // Place reagent on brazier
+        try {
+            java.lang.reflect.Method setStack = brazier.getClass().getMethod("setStack", ItemStack.class);
+            setStack.invoke(brazier, reagentStack.copy());
+            brazier.getClass().getMethod("setChanged").invoke(brazier);
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.error("[RSI-Batch-Eidolon] Failed to place reagent on brazier", e);
+            refundAll();
+            ledger = null;
+            return false;
+        }
+
+        // Start burning
+        try {
+            java.lang.reflect.Method startBurning = brazierTileEntityClass.getMethod(
+                    "startBurning", net.minecraft.world.entity.player.Player.class,
+                    Level.class, BlockPos.class);
+            startBurning.invoke(brazier, player, level, myPos);
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.error("[RSI-Batch-Eidolon] Failed to start brazier burning", e);
+            refundAll();
+            ledger = null;
+            return false;
+        }
+
+        // Store expected result (fallback in case ItemEntity collection fails)
+        try {
+            this.pendingResult = recipe.getResultItem(level.registryAccess()).copy();
+        } catch (Exception ex) {
+            this.pendingResult = ItemStack.EMPTY;
+        }
+
+        this.craftCompleted = false;
+        RSIntegrationMod.LOGGER.debug("[RSI-Batch-Eidolon] Ritual started: recipe={} reagent={}",
+                recipe.getId(), reagentStack.getHoverName().getString());
+        return true;
+    }
+
+    @Nullable
+    private Ingredient getRitualReagent() {
+        try {
+            java.lang.reflect.Field f = ritualRecipeClass.getField("reagent");
+            return (Ingredient) f.get(recipe);
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-Batch-Eidolon] getRitualReagent failed", e);
+            return null;
+        }
+    }
+
+    @Nullable
+    private List<Ingredient> getRitualPedestalItems() {
+        try {
+            java.lang.reflect.Field f = ritualRecipeClass.getField("pedestalItems");
+            @SuppressWarnings("unchecked")
+            List<Ingredient> items = (List<Ingredient>) f.get(recipe);
+            return items;
+        } catch (Exception e) { return null; }
+    }
+
+    @Nullable
+    private List<Ingredient> getRitualFocusItems() {
+        try {
+            java.lang.reflect.Field f = ritualRecipeClass.getField("focusItems");
+            @SuppressWarnings("unchecked")
+            List<Ingredient> items = (List<Ingredient>) f.get(recipe);
+            return items;
+        } catch (Exception e) { return null; }
+    }
+
+    private boolean tryStartRitualWithMaterials(ServerPlayer player, List<ItemStack> materials) {
+        if (brazier == null || recipe == null || materials.isEmpty()) return false;
+
+        ServerLevel level = player.serverLevel();
+        if (myPos != null && level.isLoaded(myPos)) {
+            BlockEntity current = level.getBlockEntity(myPos);
+            if (current == null || current.isRemoved()
+                    || !brazierTileEntityClass.isInstance(current)) {
+                player.sendSystemMessage(Component.translatable("rsi.error.machine_missing"));
+                return false;
+            }
+            this.brazier = current;
+        }
+
+        // Check brazier not busy
+        try {
+            java.lang.reflect.Field f = brazierTileEntityClass.getDeclaredField("ritual");
+            f.setAccessible(true);
+            if (f.get(brazier) != null) return false;
+            java.lang.reflect.Field bf = brazierTileEntityClass.getDeclaredField("burning");
+            bf.setAccessible(true);
+            if (bf.getBoolean(brazier)) return false;
+        } catch (Exception e) { return false; }
+
+        // First material is reagent
+        ItemStack reagentStack = materials.get(0).copy();
+        reagentStack.setCount(1);
+        try {
+            java.lang.reflect.Method setStack = brazier.getClass().getMethod("setStack", ItemStack.class);
+            setStack.invoke(brazier, reagentStack);
+            brazier.getClass().getMethod("setChanged").invoke(brazier);
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.error("[RSI-Batch-Eidolon] Failed to place reagent on brazier", e);
+            return false;
+        }
+
+        // Start burning
+        try {
+            java.lang.reflect.Method startBurning = brazierTileEntityClass.getMethod(
+                    "startBurning", net.minecraft.world.entity.player.Player.class,
+                    Level.class, BlockPos.class);
+            startBurning.invoke(brazier, player, level, myPos);
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.error("[RSI-Batch-Eidolon] Failed to start brazier burning", e);
+            return false;
+        }
+
+        try {
+            this.pendingResult = recipe.getResultItem(level.registryAccess()).copy();
+        } catch (Exception ex) {
+            this.pendingResult = ItemStack.EMPTY;
+        }
+        this.craftCompleted = false;
+        return true;
+    }
+
     // ── Worktable ingredient helpers ────────────────────────────
 
     @Nullable
@@ -442,6 +661,22 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
     @Nullable
     public List<IngredientSpec> getRequiredMaterials() {
         if (recipe == null) return null;
+        if (isRitual) {
+            List<IngredientSpec> specs = new ArrayList<>();
+            Ingredient reagent = getRitualReagent();
+            if (reagent != null && !reagent.isEmpty()) specs.add(new IngredientSpec(reagent, 1));
+            List<Ingredient> pedestal = getRitualPedestalItems();
+            if (pedestal != null) {
+                for (Ingredient ing : pedestal)
+                    if (!ing.isEmpty()) specs.add(new IngredientSpec(ing, 1));
+            }
+            List<Ingredient> focus = getRitualFocusItems();
+            if (focus != null) {
+                for (Ingredient ing : focus)
+                    if (!ing.isEmpty()) specs.add(new IngredientSpec(ing, 1));
+            }
+            return specs.isEmpty() ? null : specs;
+        }
         if (isWorktable) {
             // Both core and extras are consumed by default;
             // hasCraftingRemainingItem() determines what remains.
@@ -478,6 +713,12 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
         this.player = player;
         this.sharedLedger = sharedLedger;
         this.usingSharedLedger = true;
+
+        // Ritual mode: materials were pre-extracted by chain.
+        // First item is reagent, rest are pedestal/focus items (not consumed).
+        if (isRitual) {
+            return tryStartRitualWithMaterials(player, materials);
+        }
 
         // Worktable mode: materials (core + extras) were pre-extracted by chain.
         // Apply crafting remainders: items with hasCraftingRemainingItem() leave
@@ -617,15 +858,69 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public boolean isCraftComplete(ServerLevel level) {
-        // Eidolon crafts are instant
+        if (isRitual) return isRitualComplete(level);
+        // Crucible & worktable crafts are instant
         return craftCompleted;
+    }
+
+    private boolean isRitualComplete(ServerLevel level) {
+        if (brazier == null) return true;
+        if (craftCompleted) return true;
+        // Check ritualDone flag on brazier
+        try {
+            java.lang.reflect.Field f = brazierTileEntityClass.getDeclaredField("ritualDone");
+            f.setAccessible(true);
+            if (f.getBoolean(brazier)) return true;
+        } catch (Exception ignored) {}
+        // Check item entity above brazier
+        if (myPos != null) {
+            for (net.minecraft.world.entity.item.ItemEntity entity :
+                    level.getEntitiesOfClass(net.minecraft.world.entity.item.ItemEntity.class,
+                            new net.minecraft.world.phys.AABB(
+                                    myPos.getX() - 0.5, myPos.getY() + 2.0, myPos.getZ() - 0.5,
+                                    myPos.getX() + 1.5, myPos.getY() + 3.5, myPos.getZ() + 1.5))) {
+                if (!entity.getItem().isEmpty()) return true;
+            }
+        }
+        return false;
     }
 
     @Override
     public ItemStack collectResult(ServerPlayer player) {
+        if (isRitual) return collectRitualResult(player);
         ItemStack result = pendingResult.copy();
         pendingResult = ItemStack.EMPTY;
         craftCompleted = false;
+        return result;
+    }
+
+    private ItemStack collectRitualResult(ServerPlayer player) {
+        // Priority 1: Collect ItemEntity above brazier
+        ServerLevel level = player.serverLevel();
+        if (myPos != null) {
+            List<net.minecraft.world.entity.item.ItemEntity> entities =
+                    level.getEntitiesOfClass(net.minecraft.world.entity.item.ItemEntity.class,
+                            new net.minecraft.world.phys.AABB(
+                                    myPos.getX() - 0.5, myPos.getY() + 2.0, myPos.getZ() - 0.5,
+                                    myPos.getX() + 1.5, myPos.getY() + 3.5, myPos.getZ() + 1.5));
+            for (net.minecraft.world.entity.item.ItemEntity entity : entities) {
+                ItemStack stack = entity.getItem().copy();
+                if (!stack.isEmpty()) {
+                    entity.discard();
+                    RSIntegrationMod.LOGGER.debug("[RSI-Batch-Eidolon] Collected ritual ItemEntity: {} x{}",
+                            stack.getHoverName().getString(), stack.getCount());
+                    craftCompleted = false;
+                    pendingResult = ItemStack.EMPTY;
+                    return stack;
+                }
+            }
+        }
+        // Priority 2: Fall back to recipe result
+        ItemStack result = pendingResult.copy();
+        pendingResult = ItemStack.EMPTY;
+        craftCompleted = false;
+        RSIntegrationMod.LOGGER.debug("[RSI-Batch-Eidolon] Collected ritual result from recipe: {}",
+                result.isEmpty() ? "EMPTY" : result.getHoverName().getString());
         return result;
     }
 
@@ -634,6 +929,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
         if (!usingSharedLedger) {
             refundAll();
         }
+        if (isRitual) cleanupBrazier();
         pendingResult = ItemStack.EMPTY;
         craftCompleted = false;
         resetState();
@@ -641,9 +937,35 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public void onBatchFinished(ServerPlayer player) {
+        if (isRitual) cleanupBrazier();
         pendingResult = ItemStack.EMPTY;
         craftCompleted = false;
         resetState();
+    }
+
+    private void cleanupBrazier() {
+        if (brazier == null || myPos == null) return;
+        try {
+            // Clear reagent from brazier if ritual didn't consume it
+            java.lang.reflect.Method setStack = brazier.getClass().getMethod("setStack", ItemStack.class);
+            setStack.invoke(brazier, ItemStack.EMPTY);
+            brazier.getClass().getMethod("setChanged").invoke(brazier);
+
+            java.lang.reflect.Field f = brazierTileEntityClass.getDeclaredField("ritualDone");
+            f.setAccessible(true);
+            f.setBoolean(brazier, false);
+
+            java.lang.reflect.Field rf = brazierTileEntityClass.getDeclaredField("ritual");
+            rf.setAccessible(true);
+            rf.set(brazier, null);
+
+            java.lang.reflect.Field bf = brazierTileEntityClass.getDeclaredField("burning");
+            bf.setAccessible(true);
+            bf.setBoolean(brazier, false);
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-Batch-Eidolon] cleanupBrazier failed", e);
+        }
+        brazier = null;
     }
 
     @Override
@@ -761,46 +1083,88 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
                                                @Nullable BlockPos pos) {
         List<String> warnings = new ArrayList<>();
         ensureClasses();
-        if (crucibleRecipeClass == null || !crucibleRecipeClass.isInstance(recipe))
-            return warnings;
 
-        // Water amount warning
-        int water = readWaterAmountStatic(recipe);
-        if (water > 0) {
-            warnings.add(Component.translatable(
-                    "rsi.eidolon.warn.water_required", water).getString());
-        }
+        boolean isCrucible = crucibleRecipeClass != null && crucibleRecipeClass.isInstance(recipe);
+        boolean isRitual = ritualRecipeClass != null && ritualRecipeClass.isInstance(recipe);
+        if (!isCrucible && !isRitual) return warnings;
 
-        // Boiling requirement warning
-        warnings.add(Component.translatable("rsi.eidolon.warn.boiling_required").getString());
+        if (isCrucible) {
+            // Water amount warning
+            int water = readWaterAmountStatic(recipe);
+            if (water > 0) {
+                warnings.add(Component.translatable(
+                        "rsi.eidolon.warn.water_required", water).getString());
+            }
 
-        // If crucible is bound, check current state
-        if (dim != null && pos != null) {
-            try {
-                ServerLevel level = CraftPacketUtils.resolveLevel(player.server, dim, player);
-                if (level != null && level.isLoaded(pos)) {
-                    BlockEntity be = level.getBlockEntity(pos);
-                    if (be != null && crucibleTileEntityClass.isInstance(be)) {
-                        boolean hasWater = false;
-                        try {
-                            java.lang.reflect.Field f = be.getClass().getDeclaredField("hasWater");
-                            f.setAccessible(true);
-                            hasWater = f.getBoolean(be);
-                        } catch (Exception ignored) {}
-                        if (!hasWater) {
-                            warnings.add(Component.translatable("rsi.eidolon.warn.needs_water_fill").getString());
-                        }
-                        boolean boiling = false;
-                        try {
-                            if (boilingField != null) boiling = boilingField.getBoolean(be);
-                        } catch (Exception ignored) {}
-                        if (!boiling) {
-                            warnings.add(Component.translatable("rsi.eidolon.warn.needs_heat").getString());
+            // Boiling requirement warning
+            warnings.add(Component.translatable("rsi.eidolon.warn.boiling_required").getString());
+
+            // If crucible is bound, check current state
+            if (dim != null && pos != null) {
+                try {
+                    ServerLevel level = CraftPacketUtils.resolveLevel(player.server, dim, player);
+                    if (level != null && level.isLoaded(pos)) {
+                        BlockEntity be = level.getBlockEntity(pos);
+                        if (be != null && crucibleTileEntityClass.isInstance(be)) {
+                            boolean hasWater = false;
+                            try {
+                                java.lang.reflect.Field f = be.getClass().getDeclaredField("hasWater");
+                                f.setAccessible(true);
+                                hasWater = f.getBoolean(be);
+                            } catch (Exception ignored) {}
+                            if (!hasWater) {
+                                warnings.add(Component.translatable("rsi.eidolon.warn.needs_water_fill").getString());
+                            }
+                            boolean boiling = false;
+                            try {
+                                if (boilingField != null) boiling = boilingField.getBoolean(be);
+                            } catch (Exception ignored) {}
+                            if (!boiling) {
+                                warnings.add(Component.translatable("rsi.eidolon.warn.needs_heat").getString());
+                            }
                         }
                     }
+                } catch (Exception e) {
+                    RSIntegrationMod.LOGGER.debug("[RSI-Batch-Eidolon] Plan warning check failed", e);
                 }
-            } catch (Exception e) {
-                RSIntegrationMod.LOGGER.debug("[RSI-Batch-Eidolon] Plan warning check failed", e);
+            }
+        }
+
+        if (isRitual) {
+            // Number of pedestal / focus items required
+            try {
+                java.lang.reflect.Field pf = ritualRecipeClass.getField("pedestalItems");
+                @SuppressWarnings("unchecked")
+                List<Ingredient> pi = (List<Ingredient>) pf.get(recipe);
+                if (pi != null && !pi.isEmpty()) {
+                    warnings.add(Component.translatable(
+                            "rsi.eidolon.warn.pedestal_items", pi.size()).getString());
+                }
+            } catch (Exception ignored) {}
+
+            warnings.add(Component.translatable("rsi.eidolon.warn.needs_focus").getString());
+
+            if (dim != null && pos != null) {
+                try {
+                    ServerLevel level = CraftPacketUtils.resolveLevel(player.server, dim, player);
+                    if (level != null && level.isLoaded(pos)) {
+                        BlockEntity be = level.getBlockEntity(pos);
+                        if (be != null && brazierTileEntityClass != null
+                                && brazierTileEntityClass.isInstance(be)) {
+                            boolean burning = false;
+                            try {
+                                java.lang.reflect.Field bf = brazierTileEntityClass.getDeclaredField("burning");
+                                bf.setAccessible(true);
+                                burning = bf.getBoolean(be);
+                            } catch (Exception ignored) {}
+                            if (burning) {
+                                warnings.add(Component.translatable("rsi.eidolon.error.ritual_busy").getString());
+                            }
+                        }
+                    }
+                } catch (Exception e) {
+                    RSIntegrationMod.LOGGER.debug("[RSI-Batch-Eidolon] Plan warning check failed", e);
+                }
             }
         }
 

@@ -37,6 +37,7 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.BooleanValue ENABLE_EIDOLON;
     public static ForgeConfigSpec.BooleanValue ENABLE_TOUHOU_LITTLE_MAID;
     public static ForgeConfigSpec.BooleanValue ENABLE_EMBERS_ALCHEMY;
+    public static ForgeConfigSpec.BooleanValue ENABLE_AETHERWORKS;
     public static ForgeConfigSpec.BooleanValue ENABLE_EMBERS_ALCHEMY_CALC;
     public static ForgeConfigSpec.BooleanValue ENABLE_VANILLA_MACHINES;
     public static ForgeConfigSpec.IntValue EMBERS_INFER_MAX_ATTEMPTS;
@@ -103,6 +104,10 @@ public final class RSIntegrationConfig {
         ENABLE_TOUHOU_LITTLE_MAID = b
                 .comment("Enable RS integration with Touhou Little Maid (Maid Altar remote crafting).")
                 .define("enableTouhouLittleMaid", true);
+        ENABLE_AETHERWORKS = b
+                .comment("Enable RS integration with Embers Aetherworks Addon",
+                        "(Aetherium Anvil remote crafting with auto-hammer support).")
+                .define("enableAetherworks", true);
         ENABLE_EMBERS_ALCHEMY = b
                 .comment("Enable RS integration with Embers Rekindled (Alchemy Tablet remote crafting).")
                 .define("enableEmbersAlchemy", true);

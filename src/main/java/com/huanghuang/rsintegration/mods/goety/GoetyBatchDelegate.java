@@ -529,16 +529,33 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
 
         // Place items and start recipe BEFORE committing — so we can rollback if setup fails
         Reflect.invoke(brazier, "setItems", toPlace);
+        // Set recipe directly (bypass updateRecipe) — yzzzfix overrides
+        // updateRecipe to call stopBrazier(false) when recipe is null,
+        // which ejects items prematurely.
         Reflect.setField(brazier, "recipeId", ((Recipe<?>) brazierRecipeObj).getId());
-        Reflect.invoke(brazier, "updateRecipe", level);
+        Reflect.setField(brazier, "recipe", brazierRecipeObj);
 
         Object bzrRecipe = Reflect.getField(brazier, "recipe").orElse(null);
         if (bzrRecipe == null) {
-            RSIntegrationMod.LOGGER.error("[RSI-Batch-Goety] Brazier recipe not set after updateRecipe: {}",
+            RSIntegrationMod.LOGGER.error("[RSI-Batch-Goety] Brazier recipe not set: {}",
                     ((Recipe<?>) brazierRecipeObj).getId());
             Reflect.invoke(brazier, "setItems",
                     NonNullList.withSize(containerSize, ItemStack.EMPTY));
             Reflect.setField(brazier, "recipeId", null);
+            ledger.rollback(player);
+            return false;
+        }
+
+        // Start the brazier — activate() validates soul energy and begins processing
+        boolean activated = Reflect.<Boolean>invoke(brazier, "activate", level).orElse(false);
+        if (!activated) {
+            RSIntegrationMod.LOGGER.error("[RSI-Batch-Goety] Brazier activate returned false for recipe: {}",
+                    ((Recipe<?>) brazierRecipeObj).getId());
+            Reflect.invoke(brazier, "setItems",
+                    NonNullList.withSize(containerSize, ItemStack.EMPTY));
+            Reflect.setField(brazier, "recipe", null);
+            Reflect.setField(brazier, "recipeId", null);
+            Reflect.setField(brazier, "currentTime", 0);
             ledger.rollback(player);
             return false;
         }
@@ -723,8 +740,11 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         }
 
         Reflect.invoke(brazier, "setItems", toPlace);
+        // Set recipe directly (bypass updateRecipe) — yzzzfix overrides
+        // updateRecipe to call stopBrazier(false) when recipe is null,
+        // which ejects items prematurely.
         Reflect.setField(brazier, "recipeId", ((Recipe<?>) brazierRecipeObj).getId());
-        Reflect.invoke(brazier, "updateRecipe", level);
+        Reflect.setField(brazier, "recipe", brazierRecipeObj);
 
         Object bzrRecipe = Reflect.getField(brazier, "recipe").orElse(null);
         if (bzrRecipe == null) {
@@ -733,6 +753,20 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             Reflect.invoke(brazier, "setItems",
                     NonNullList.withSize(containerSize, ItemStack.EMPTY));
             Reflect.setField(brazier, "recipeId", null);
+            player.sendSystemMessage(Component.translatable("rsi.goety.error.one_click_failed"));
+            return false;
+        }
+
+        // Start the brazier — activate() validates soul energy and begins processing
+        boolean activated = Reflect.<Boolean>invoke(brazier, "activate", level).orElse(false);
+        if (!activated) {
+            RSIntegrationMod.LOGGER.error("[RSI-Batch-Goety] Brazier activate returned false in tryStartWithMaterials: {}",
+                    ((Recipe<?>) brazierRecipeObj).getId());
+            Reflect.invoke(brazier, "setItems",
+                    NonNullList.withSize(containerSize, ItemStack.EMPTY));
+            Reflect.setField(brazier, "recipe", null);
+            Reflect.setField(brazier, "recipeId", null);
+            Reflect.setField(brazier, "currentTime", 0);
             player.sendSystemMessage(Component.translatable("rsi.goety.error.one_click_failed"));
             return false;
         }
@@ -913,10 +947,23 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
     @Override
     public void onBatchFailed(ServerPlayer player, String reason) {
         if (isBrazier) {
+            if (usingSharedLedger) {
+                // Chain will refund via ledger.refundCommitted() — clearing
+                // here would double-return. Reset state without touching slots.
+                resetState();
+                return;
+            }
             recoverBrazierItems();
         } else {
             ritualEverSeenActive = false;
             refundActivationToPlayer();
+            if (usingSharedLedger) {
+                // Chain will refund via ledger.refundCommitted() — clearing
+                // pedestals would double-return. Reset state without touching them.
+                resetState();
+                activationExtractedFromPlayer = null;
+                return;
+            }
             recoverFromPedestals();
         }
         resetState();
@@ -949,13 +996,9 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         }
         if (!hasItems) return;
 
-        if (usingSharedLedger && network != null) {
-            // Shared committed ledger: items are template copies.
-            // Only CLEAR the slots — refund is centralized via ledger.refundCommitted().
-            for (ItemStack stack : items) {
-                if (!stack.isEmpty()) stack.setCount(0);
-            }
-        } else if (player != null) {
+        // Always return items — Goety commits ledger before placement, so
+        // every item in the brazier was already extracted from RS.
+        if (player != null) {
             for (ItemStack stack : items) {
                 if (!stack.isEmpty()) {
                     if (network != null) {
@@ -1130,6 +1173,18 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
     private void clearFilledPedestals() {
         if (filledPedestals == null) return;
         for (Object ped : filledPedestals) {
+            ItemStack stack = readPedestalItem(ped);
+            if (stack != null && !stack.isEmpty()) {
+                if (network != null) {
+                    ItemStack leftover = network.insertItem(stack, stack.getCount(),
+                            com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                    if (!leftover.isEmpty()) {
+                        ItemHandlerHelper.giveItemToPlayer(player, leftover);
+                    }
+                } else if (player != null) {
+                    ItemHandlerHelper.giveItemToPlayer(player, stack);
+                }
+            }
             writePedestalItem(ped, ItemStack.EMPTY);
         }
     }
@@ -1139,16 +1194,14 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         for (Object ped : filledPedestals) {
             ItemStack stack = readPedestalItem(ped);
             if (stack != null && !stack.isEmpty()) {
-                if (!usingSharedLedger) {
-                    if (network != null) {
-                        ItemStack leftover = network.insertItem(stack, stack.getCount(),
-                                com.refinedmods.refinedstorage.api.util.Action.PERFORM);
-                        if (!leftover.isEmpty()) {
-                            ItemHandlerHelper.giveItemToPlayer(player, leftover);
-                        }
-                    } else if (player != null) {
-                        ItemHandlerHelper.giveItemToPlayer(player, stack);
+                if (network != null) {
+                    ItemStack leftover = network.insertItem(stack, stack.getCount(),
+                            com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                    if (!leftover.isEmpty()) {
+                        ItemHandlerHelper.giveItemToPlayer(player, leftover);
                     }
+                } else if (player != null) {
+                    ItemHandlerHelper.giveItemToPlayer(player, stack);
                 }
             }
             writePedestalItem(ped, ItemStack.EMPTY);

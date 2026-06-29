@@ -24,6 +24,7 @@
   "gui.rs_integration.jei.wr_crystal_craft": "通过水晶灌注远程合成",
   "gui.rs_integration.jei.eidolon_crucible_craft": "通过幻之坩锅远程炼药",
   "gui.rs_integration.jei.eidolon_worktable_craft": "通过魔力工作台远程合成",
+  "gui.rs_integration.jei.eidolon_ritual_craft": "通过仪式火盆远程合成",
   "gui.rs_integration.jei.fa_ritual_craft": "通过锻炉远程仪式",
   "gui.rs_integration.jei.tlm_maid_altar_craft": "通过女仆祭坛远程合成",
   "gui.rs_integration.jei.embers_alchemy_craft": "通过炼金台远程合成",
@@ -104,6 +105,9 @@
   "rsi.eidolon.warn.water_required": "§7需要 %s mB 水",
   "rsi.eidolon.warn.boiling_required": "§7坩埚需要处于沸腾状态（下方需热源）",
   "rsi.eidolon.warn.needs_water_fill": "§e坩埚无水 — 将自动装水",
+  "rsi.eidolon.error.ritual_busy": "§c仪式正在运行中，请等待完成",
+  "rsi.eidolon.warn.pedestal_items": "§7需要 %s 个基座物品",
+  "rsi.eidolon.warn.needs_focus": "§7请确保附近已安放魔力基座并放置所需物品",
 
   "rsi.malum.error.craft_failed": "§c精魂灌注失败: %s",
   "rsi.malum.error.altar_not_found": "§c无法找到精魂祭坛方块实体",
@@ -178,7 +182,9 @@
   "rsi.wr.error.no_runic_plate": "§c符文基座上缺少符文板",
   "rsi.wr.error.crystallizer_busy": "§c水晶结晶器正在合成中，请稍候",
   "rsi.wr.error.machine_busy": "§c机器正在合成中，请等待完成后再启动新配方",
-  "rsi.wr.error.insufficient_wissen": "§c秘蕴能量不足 (当前 %,d，需要 %,d)",
+  "rsi.wr.error.insufficient_wissen": "§c秘蕴能量不足 (当前 %s，需要 %s)",
+  "rsi.wr.error.insufficient_xp": "§c经验等级不足 (当前 %s 级，需要 %s 级) — Arcane Iterator 合成过程中会吸取玩家经验",
+  "rsi.wr.error.insufficient_health": "§c生命值不足 (当前 %s，需要 >%s) — Arcane Iterator 合成过程中会伤害玩家",
   "rsi.wr.warn.insufficient_wissen_plan": "§e秘蕴能量可能不足 (当前 %s，需要 %s)",
   "rsi.wr.warn.wissen_cost": "§7需要 %s 秘蕴能量",
 
@@ -198,6 +204,7 @@
   "rsi.batch.mod.wizards_reborn": "巫师重生远程合成",
   "rsi.batch.mod.touhou_little_maid": "女仆祭坛合成",
   "rsi.batch.mod.embers_alchemy": "炼金术台合成",
+  "rsi.batch.mod.aetherworks_anvil": "天华砧合成",
   "rsi.batch.mod.generic": "RS 自动合成",
   "rsi.tlm.error.altar_not_found": "无法找到女仆祭坛",
   "rsi.tlm.error.multiblock_incomplete": "女仆祭坛多方块结构不完整",
@@ -339,6 +346,20 @@
   "rsi.machine.error.not_fuel": "§c此物品不能作为燃料。",
   "rsi.machine.error.slot_mismatch": "§c此物品与槽位中已有的物品不匹配。",
   "rsi.machine.error.slot_full": "§c目标槽位已满。",
-  "rsi.machine.collected": "§a已收取 %s× %s。"
+  "rsi.machine.collected": "§a已收取 %s× %s。",
+
+  "rsi.aetherworks.error.not_anvil": "§c绑定位置没有天华砧。",
+  "rsi.aetherworks.error.slot_occupied": "§c天华砧槽位已被占用。",
+  "rsi.aetherworks.warn.temp_range": "§7温度要求: %s° — %s°",
+  "rsi.aetherworks.info.hits_required": "§7需要 %s 次锤击",
+  "rsi.aetherworks.info.ember_per_hit": "§7每次锤击消耗 %s 余烬",
+  "rsi.aetherworks.warn.no_forge": "§6附近未找到天华锻造炉。",
+  "rsi.aetherworks.hud.empty": "空",
+  "rsi.aetherworks.hud.progress": "进度: %s 次锤击",
+  "rsi.aetherworks.hud.temp": "温度: %s°",
+  "rsi.aetherworks.hud.mistakes": "错误: %s/%s",
+  "rsi.aetherworks.hud.no_recipe": "无有效配方",
+  "gui.rs_integration.jei.aetherworks_anvil_craft": "通过天华砧合成",
+  "gui.rs_integration.jei.goety_brazier_craft": "通过亡灵火炉远程合成"
 
 }

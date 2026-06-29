@@ -120,7 +120,18 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
     private java.util.Map<Object, ItemStack> placedPedestalItems;
     private int waitTicks;
     private boolean craftStarted;
-    private static final int MAX_WAIT_TICKS = 600;
+    // For ARCANE_ITERATOR: tracks whether wissenInCraft was observed > 0,
+    // meaning the craft actually started processing (not just warm-up).
+    private boolean iteratorCraftProcessing;
+    // Stall detection: if progress freezes (wissen/XP/health exhausted),
+    // abort early instead of waiting for MAX_WAIT_TICKS.
+    private int lastCraftProgress = -1;
+    private int stallTicks;
+    // Timeout: max of 7200 ticks (6 min) or wissenCost/5*2 (double the
+    // theoretical time, accounting for XP/health drain cooldowns).
+    // Stall threshold kicks in at 5 seconds of no progress.
+    private static final int MAX_WAIT_TICKS = 7200;
+    private static final int STALL_THRESHOLD = 100; // 5 seconds
 
     // ── IBatchDelegate impl ───────────────────────────────────────
 
@@ -137,6 +148,9 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         this.pedestalRefs = null;
         this.waitTicks = 0;
         this.craftStarted = false;
+        this.iteratorCraftProcessing = false;
+        this.lastCraftProgress = -1;
+        this.stallTicks = 0;
         this.filledSlotIndices = null;
         this.filledPedestals = null;
         this.placedInputs = null;
@@ -229,7 +243,10 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         //     consume items immediately when the craft starts), the ticking
         //     craft state should still be detectable.
         // ────────────────────────────────────────────────────────────────
-        if (isMachineCrafting()) {
+        // ARCANE_ITERATOR has its own crafting check below (wissenInCraft).
+        // isMachineCrafting() scans for "startCraft"/"active" which can be
+        // stuck true on iterators even when idle (parent BlockEntityBase).
+        if (machineType != MachineType.ARCANE_ITERATOR && isMachineCrafting()) {
             player.sendSystemMessage(Component.translatable("rsi.wr.error.machine_busy"));
             return false;
         }
@@ -254,6 +271,15 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
                 break;
             }
             case ARCANE_ITERATOR: {
+                // Use the same check as isCraftComplete: both startCraft AND
+                // wissenInCraft must be set for the machine to be truly busy.
+                // wissenInCraft can still be draining (>0) after startCraft
+                // flips to false, which would block the next craft if we only
+                // checked wissenInCraft alone.
+                if (isIteratorCraftRunning()) {
+                    player.sendSystemMessage(Component.translatable("rsi.wr.error.machine_busy"));
+                    return false;
+                }
                 try {
                     pedestalRefs = (List<?>) Reflect.getMethodOrThrow(be.getClass(), "getPedestals", "getPedestals").invoke(be);
                 } catch (Exception e) {
@@ -264,13 +290,30 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
                     RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] getPedestals() returned null for ArcaneIterator at {}", myPos);
                     return false;
                 }
+                // If pedestals hold items but the iterator isn't actively
+                // crafting (startCraft=false), recover them to RS instead of
+                // leaving them to be consumed by a stray tick detection.
+                boolean hadStray = false;
                 for (int i = 0; i < pedestalRefs.size(); i++) {
                     ItemStack stack = getContainerItem(pedestalRefs.get(i), 0);
                     if (!stack.isEmpty()) {
-                        player.sendSystemMessage(Component.translatable(
-                                "rsi.wr.error.pedestal_not_empty", i));
-                        return false;
+                        // Recover to RS network or player inventory
+                        if (network != null) {
+                            ItemStack leftover = network.insertItem(stack.copy(), stack.getCount(),
+                                    com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                            if (!leftover.isEmpty()) {
+                                net.minecraftforge.items.ItemHandlerHelper.giveItemToPlayer(player, leftover);
+                            }
+                        } else {
+                            net.minecraftforge.items.ItemHandlerHelper.giveItemToPlayer(player, stack.copy());
+                        }
+                        setContainerItem(pedestalRefs.get(i), 0, ItemStack.EMPTY);
+                        syncBlockEntity(pedestalRefs.get(i));
+                        hadStray = true;
                     }
+                }
+                if (hadStray) {
+                    RSIntegrationMod.LOGGER.info("[RSI-Batch-WR] Recovered stray pedestal items for iterator at {}", myPos);
                 }
                 break;
             }
@@ -644,6 +687,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         }
 
         craftStarted = true;
+        iteratorCraftProcessing = false;
         try {
             Reflect.getMethodOrThrow(be.getClass(), "wissenWandFunction", "wissenWandFunction").invoke(be);
             syncBlockEntity(be);
@@ -962,6 +1006,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         }
 
         craftStarted = true;
+        iteratorCraftProcessing = false;
         try {
             Reflect.getMethodOrThrow(be.getClass(), "wissenWandFunction", "wissenWandFunction").invoke(be);
             syncBlockEntity(be);
@@ -1125,6 +1170,35 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
                 return false;
 
             case ARCANE_ITERATOR:
+                // Arcane Iterator reads but does NOT consume input pedestal
+                // items. Output is placed on the main pedestal (index 0).
+                // Detect completion by watching startCraft/wissenInCraft.
+                for (Object ped : filledPedestals) {
+                    syncBlockEntity(ped);
+                }
+                if (isIteratorCraftRunning()) {
+                    iteratorCraftProcessing = true;
+                    // Stall detection: if progress freezes (wissen/XP/health
+                    // exhausted), abort early instead of waiting for timeout.
+                    int progress = readIteratorProgress();
+                    if (progress == lastCraftProgress) {
+                        stallTicks++;
+                        if (stallTicks > STALL_THRESHOLD) {
+                            RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] Arcane Iterator craft stalled (progress={}), aborting", progress);
+                            return true;
+                        }
+                    } else {
+                        lastCraftProgress = progress;
+                        stallTicks = 0;
+                    }
+                    return false;
+                }
+                // Not running. If it was processing, craft just finished.
+                if (iteratorCraftProcessing) return true;
+                // Never saw the craft actually process — wait a few ticks
+                // for wissenWandFunction to propagate, then timeout.
+                return false;
+
             case CRYSTAL_RITUAL:
                 for (Object ped : filledPedestals) {
                     syncBlockEntity(ped);
@@ -1139,17 +1213,68 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
                         if (!current.isEmpty() && ItemStack.isSameItemSameTags(current, e.getValue()))
                             return false;
                     }
+                    // Pedestal items consumed. For crystal rituals the result
+                    // may not be ready yet: ritual.start() consumes items but
+                    // ritual.end() runs ticks later. Wait for startRitual=false.
+                    if (isCrystalRitualRunning())
+                        return false;
                     return true;
                 }
                 // fallback: original empty-slot check
                 for (Object ped : filledPedestals) {
                     if (!getContainerItem(ped, 0).isEmpty()) return false;
                 }
+                if (isCrystalRitualRunning())
+                    return false;
                 return true;
 
             default:
                 return false;
         }
+    }
+
+    /** Check whether the Arcane Iterator is actively processing a craft. */
+    private boolean isIteratorCraftRunning() {
+        if (be == null) return false;
+        try {
+            java.lang.reflect.Field sc = be.getClass().getDeclaredField("startCraft");
+            sc.setAccessible(true);
+            if (!sc.getBoolean(be)) return false;
+            java.lang.reflect.Field wic = be.getClass().getDeclaredField("wissenInCraft");
+            wic.setAccessible(true);
+            return wic.getInt(be) > 0;
+        } catch (Exception e) { /* ignore */ }
+        return false;
+    }
+
+    /** Read the combined craft progress from the arcane iterator.
+     *  Sums wissenIsCraft + experienceIsCraft + healthIsCraft so stall
+     *  detection catches a freeze in any one of them. */
+    private int readIteratorProgress() {
+        if (be == null) return -1;
+        try {
+            int total = 0;
+            for (String name : new String[]{"wissenIsCraft", "experienceIsCraft", "healthIsCraft"}) {
+                java.lang.reflect.Field f = be.getClass().getDeclaredField(name);
+                f.setAccessible(true);
+                total += f.getInt(be);
+            }
+            return total;
+        } catch (Exception e) { /* ignore */ }
+        return -1;
+    }
+
+    /** Check whether the crystal block's ritual is still in progress. */
+    private boolean isCrystalRitualRunning() {
+        if (be == null) return false;
+        try {
+            java.lang.reflect.Field f = Reflect.findField(be.getClass(), "startRitual").orElse(null);
+            if (f != null) {
+                f.setAccessible(true);
+                return f.getBoolean(be);
+            }
+        } catch (Exception e) { /* ignore */ }
+        return false;
     }
 
     @Override
@@ -1191,15 +1316,37 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
                 break;
             }
             case ARCANE_ITERATOR: {
-                // The output appears on an arcane_pedestal (typically the bottom one),
-                // NOT inside the Iterator block entity. Scan all known pedestals.
-                if (pedestalRefs != null) {
+                // The Arcane Iterator places output on the main pedestal
+                // (two blocks below). Durability-based recipes leave tools
+                // on input pedestals with reduced durability — those are NOT
+                // outputs and must not be collected.
+                ItemStack expectedOut = com.huanghuang.rsintegration.crafting.ModRecipeIndex
+                        .tryGetResultItem(recipe, player.serverLevel().registryAccess());
+
+                // 1. Check main pedestal (canonical output location)
+                try {
+                    java.lang.reflect.Method getMain = Reflect.findMethod(
+                            be.getClass(), "getMainPedestal", new Class<?>[0]);
+                    if (getMain != null) {
+                        Object mainPed = getMain.invoke(be);
+                        if (mainPed != null) {
+                            ItemStack mainStack = getContainerItem(mainPed, 0);
+                            if (!mainStack.isEmpty()) {
+                                setContainerItem(mainPed, 0, ItemStack.EMPTY);
+                                syncBlockEntity(mainPed);
+                                fromMachine = mainStack;
+                            }
+                        }
+                    }
+                } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] mainPedestal probe failed", e); }
+
+                // 2. Scan input pedestals — only collect items that match
+                //    the expected recipe output (not durability-modified inputs).
+                if (fromMachine.isEmpty() && pedestalRefs != null) {
                     for (Object ped : pedestalRefs) {
                         ItemStack stack = getContainerItem(ped, 0);
                         if (stack.isEmpty()) continue;
-                        // Skip only if this pedestal still holds the unchanged
-                        // input we placed.  If the item changed, it's an output —
-                        // even if the pedestal is in filledPedestals.
+                        // Skip unchanged inputs
                         if (placedPedestalItems != null) {
                             ItemStack original = placedPedestalItems.get(ped);
                             if (original != null && ItemStack.isSameItemSameTags(stack, original))
@@ -1207,6 +1354,11 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
                         } else if (filledPedestals != null && filledPedestals.contains(ped)) {
                             continue;
                         }
+                        // This item differs from what was placed — but it could be
+                        // a durability-reduced tool, not an output. Only collect
+                        // if it matches the recipe's expected result.
+                        if (!expectedOut.isEmpty() && !ItemStack.isSameItem(stack, expectedOut))
+                            continue;
                         setContainerItem(ped, 0, ItemStack.EMPTY);
                         syncBlockEntity(ped);
                         if (fromMachine.isEmpty()) {
@@ -1215,16 +1367,45 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
                             if (network != null) {
                                 ItemStack leftover = network.insertItem(stack, stack.getCount(),
                                         com.refinedmods.refinedstorage.api.util.Action.PERFORM);
-                                if (!leftover.isEmpty()) {
+                                if (!leftover.isEmpty())
                                     ItemHandlerHelper.giveItemToPlayer(player, leftover);
-                                }
                             } else {
                                 ItemHandlerHelper.giveItemToPlayer(player, stack);
                             }
                         }
                     }
                 }
-                // Fallback: check the iterator itself
+
+                // 3. Fallback: getItemsResult() — handles durability-only /
+                //    enchantment recipes where output is computed by the BE.
+                if (fromMachine.isEmpty()) {
+                    try {
+                        var getResults = Reflect.findMethod(be.getClass(), "getItemsResult", new Class<?>[0]);
+                        if (getResults != null) {
+                            @SuppressWarnings("unchecked")
+                            List<ItemStack> results = (List<ItemStack>) getResults.invoke(be);
+                            if (results != null) {
+                                for (ItemStack r : results) {
+                                    if (r.isEmpty()) continue;
+                                    if (fromMachine.isEmpty()) {
+                                        fromMachine = r;
+                                    } else {
+                                        if (network != null) {
+                                            ItemStack leftover = network.insertItem(r, r.getCount(),
+                                                    com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                                            if (!leftover.isEmpty())
+                                                ItemHandlerHelper.giveItemToPlayer(player, leftover);
+                                        } else {
+                                            ItemHandlerHelper.giveItemToPlayer(player, r);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] getItemsResult fallback failed", e); }
+                }
+
+                // 4. Last fallback: check the iterator's own slot
                 if (fromMachine.isEmpty()) {
                     try {
                         ItemStack result = getContainerItem(be, 0);
@@ -1358,6 +1539,13 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         // extracted from RS. Always recover actual items from machine
         // slots/pedestals before clearing.
         this.player = player;
+        if (usingSharedLedger) {
+            // Chain will refund via ledger.refundCommitted() — clearing
+            // here would double-return.  Reset state without touching slots.
+            resetState();
+            craftStarted = false;
+            return;
+        }
         clearFilledSlots();
         clearFilledPedestals();
         resetState();
@@ -1387,8 +1575,8 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
     // Failure to do so loses items that were already extracted from RS.
 
     /** Recover items from Wissen Crystallizer / Arcane Workbench slots, then clear.
-     * When using a shared committed ledger, items are template copies —
-     * return them via returnItem() only for private ledgers. */
+     * Items are always returned — WR commits ledger BEFORE placement so
+     * every item in a machine slot/pedestal was already extracted from RS. */
     private void clearFilledSlots() {
         if (filledSlotIndices == null) return;
         for (int idx : filledSlotIndices) {
@@ -1404,7 +1592,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
                         break;
                     }
                 }
-                if (!stack.isEmpty() && !usingSharedLedger) returnItem(stack);
+                if (!stack.isEmpty()) returnItem(stack);
                 switch (machineType) {
                     case WISSEN_CRYSTALLIZER:
                         setContainerItem(be, idx, ItemStack.EMPTY);
@@ -1423,7 +1611,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
                 if (outHandler != null) {
                     ItemStack result = outHandler.getStackInSlot(0);
                     if (!result.isEmpty()) {
-                        if (!usingSharedLedger) returnItem(result);
+                        returnItem(result);
                         outHandler.setStackInSlot(0, ItemStack.EMPTY);
                     }
                 }
@@ -1437,7 +1625,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
                     if (isInputSlot(i)) continue;
                     ItemStack stack = getContainerItem(be, i);
                     if (!stack.isEmpty()) {
-                        if (!usingSharedLedger) returnItem(stack);
+                        returnItem(stack);
                         setContainerItem(be, i, ItemStack.EMPTY);
                     }
                 }
@@ -1451,7 +1639,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         for (int idx : filledSlotIndices) {
             try {
                 ItemStack stack = handler.getStackInSlot(idx);
-                if (!stack.isEmpty() && !usingSharedLedger) returnItem(stack);
+                if (!stack.isEmpty()) returnItem(stack);
                 handler.setStackInSlot(idx, ItemStack.EMPTY);
             } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
         }
@@ -1463,7 +1651,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         for (Object ped : filledPedestals) {
             try {
                 ItemStack stack = getContainerItem(ped, 0);
-                if (!stack.isEmpty() && !usingSharedLedger) returnItem(stack);
+                if (!stack.isEmpty()) returnItem(stack);
                 setContainerItem(ped, 0, ItemStack.EMPTY);
                 syncBlockEntity(ped);
             } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
@@ -1583,7 +1771,35 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
                     String.format("%,d", current), String.format("%,d", cost)));
             return false;
         }
+
+        // ARCANE_ITERATOR also drains XP levels and health from the player
+        // during the craft.  If the player doesn't have enough, the craft
+        // will stall mid-way and eventually time out.
+        if (machineType == MachineType.ARCANE_ITERATOR) {
+            int xpNeeded = readRecipeInt("getExperience");
+            if (xpNeeded > 0 && player.experienceLevel < xpNeeded) {
+                player.sendSystemMessage(Component.translatable(
+                        "rsi.wr.error.insufficient_xp",
+                        player.experienceLevel, xpNeeded));
+                return false;
+            }
+            int hpNeeded = readRecipeInt("getHealth");
+            if (hpNeeded > 0 && player.getHealth() <= hpNeeded) {
+                player.sendSystemMessage(Component.translatable(
+                        "rsi.wr.error.insufficient_health",
+                        (int) player.getHealth(), hpNeeded));
+                return false;
+            }
+        }
         return true;
+    }
+
+    private int readRecipeInt(String methodName) {
+        try {
+            java.lang.reflect.Method m = Reflect.findMethod(recipe.getClass(), methodName, new Class<?>[0]);
+            if (m != null) return (int) m.invoke(recipe);
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-WR] Failed to read recipe {}", methodName, e); }
+        return 0;
     }
 
     private int readWissenCost() {

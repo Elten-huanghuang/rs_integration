@@ -26,7 +26,8 @@ public enum MachineInteractType {
         if (blockKey == null) return GUI;
         String lower = blockKey.toLowerCase();
         if (lower.contains("furnace") || lower.contains("smoker")
-                || lower.contains("blast_furnace") || lower.contains("campfire"))
+                || lower.contains("blast_furnace") || lower.contains("campfire")
+                || lower.contains("aetherium_anvil"))
             return QUICK;
         return GUI;
     }

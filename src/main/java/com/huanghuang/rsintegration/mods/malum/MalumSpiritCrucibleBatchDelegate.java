@@ -18,6 +18,7 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.phys.AABB;
 import net.minecraftforge.items.IItemHandler;
+import net.minecraftforge.items.ItemHandlerHelper;
 
 import javax.annotation.Nullable;
 import java.lang.reflect.Field;
@@ -157,6 +158,10 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
             return false;
         }
 
+        // Resolve network early for stray item recovery
+        this.network = com.huanghuang.rsintegration.crafting.CraftPacketUtils
+                .resolveNetworkForCraft(player, level.dimension(), pos);
+
         // Check crucible is idle (no active recipe)
         Object currentRecipe = Reflect.getField(be, "recipe").orElse(null);
         if (currentRecipe != null) {
@@ -165,31 +170,50 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
             return false;
         }
 
-        // Catalyst slot must be empty or match the recipe input
+        boolean hadStray = false;
+
+        // ── Catalyst slot: auto-recover stray items ──
         ItemStack existing = invCatalyst.getStackInSlot(0);
-        if (!existing.isEmpty() && iwcClass != null && iwcIngField != null) {
+        if (!existing.isEmpty()) {
             Field inputField = Reflect.findField(recipe.getClass(), "input").orElse(null);
-            if (inputField != null && iwcClass.isAssignableFrom(inputField.getType())) {
+            boolean matches = false;
+            if (inputField != null) {
                 inputField.setAccessible(true);
                 try {
-                    Object iwc = inputField.get(recipe);
-                    if (iwc != null) {
-                        Object ing = iwcIngField.get(iwc);
-                        if (ing instanceof net.minecraft.world.item.crafting.Ingredient ri
-                                && ri.test(existing)) {
-                            // Matching catalyst already present — reuse
-                        } else {
-                            player.sendSystemMessage(net.minecraft.network.chat.Component.translatable(
-                                    "rsi.malum_crucible.warn.catalyst_mismatch"));
-                            return false;
+                    Object val = inputField.get(recipe);
+                    if (val != null) {
+                        net.minecraft.world.item.crafting.Ingredient ri = null;
+                        if (iwcClass != null && iwcClass.isInstance(val)) {
+                            Object ing = iwcIngField.get(val);
+                            if (ing instanceof net.minecraft.world.item.crafting.Ingredient r) ri = r;
+                        } else if (val instanceof net.minecraft.world.item.crafting.Ingredient r) {
+                            ri = r;
+                        }
+                        if (ri != null && ri.test(existing)) {
+                            matches = true; // reuse matching catalyst
                         }
                     }
-                } catch (Exception e) {
-                    player.sendSystemMessage(net.minecraft.network.chat.Component.translatable(
-                            "rsi.malum_crucible.warn.catalyst_mismatch"));
-                    return false;
-                }
+                } catch (Exception ignored) {}
             }
+            if (!matches) {
+                returnCrucibleItem(existing);
+                setSlot(invCatalyst, 0, ItemStack.EMPTY);
+                hadStray = true;
+            }
+        }
+
+        // ── Spirit slots: auto-recover any leftover spirits ──
+        for (int i = 0; i < invSpirits.getSlots(); i++) {
+            ItemStack spirit = invSpirits.getStackInSlot(i);
+            if (!spirit.isEmpty()) {
+                returnCrucibleItem(spirit);
+                setSlot(invSpirits, i, ItemStack.EMPTY);
+                hadStray = true;
+            }
+        }
+
+        if (hadStray) {
+            RSIntegrationMod.LOGGER.info("[RSI-Crucible] Recovered stray items from crucible at {}", pos);
         }
 
         this.craftStarted = false;
@@ -226,23 +250,26 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
         ensureClasses();
         List<IngredientSpec> result = new ArrayList<>();
 
-        // 1. Catalyst (input) — use cached IngredientWithCount fields
-        if (iwcClass != null && iwcIngField != null) {
-            Field inputField = Reflect.findField(recipe.getClass(), "input").orElse(null);
-            if (inputField != null && iwcClass.isAssignableFrom(inputField.getType())) {
-                inputField.setAccessible(true);
-                try {
-                    Object iwc = inputField.get(recipe);
-                    if (iwc != null) {
-                        Object ing = iwcIngField.get(iwc);
-                        int count = iwcCountField.getInt(iwc);
+        // 1. Catalyst (input) — handle both IngredientWithCount (older Malum)
+        //    and plain Ingredient (SpiritFocusingRecipe in malum 1.6.6+).
+        Field inputField = Reflect.findField(recipe.getClass(), "input").orElse(null);
+        if (inputField != null) {
+            inputField.setAccessible(true);
+            try {
+                Object val = inputField.get(recipe);
+                if (val != null) {
+                    if (iwcClass != null && iwcClass.isInstance(val)) {
+                        Object ing = iwcIngField.get(val);
+                        int count = iwcCountField.getInt(val);
                         if (ing instanceof net.minecraft.world.item.crafting.Ingredient ri && count > 0) {
                             result.add(new IngredientSpec(ri, count));
                         }
+                    } else if (val instanceof net.minecraft.world.item.crafting.Ingredient ri) {
+                        result.add(new IngredientSpec(ri, 1));
                     }
-                } catch (Exception e) {
-                    RSIntegrationMod.LOGGER.debug("[RSI-Crucible] getRequiredMaterials input probe failed", e);
                 }
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.debug("[RSI-Crucible] getRequiredMaterials input probe failed", e);
             }
         }
 
@@ -307,19 +334,18 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
             this.usingSharedLedger = true;
         }
 
-        // ── Extraction phase ──
-        extraction:
-        {
-            // 1. Place catalyst (if not already present) — use cached IngredientWithCount fields
-            if (invCatalyst.getStackInSlot(0).isEmpty() && iwcClass != null && iwcIngField != null) {
-                Field inputField = Reflect.findField(recipe.getClass(), "input").orElse(null);
-                if (inputField != null && iwcClass.isAssignableFrom(inputField.getType())) {
-                    inputField.setAccessible(true);
-                    try {
-                        Object iwc = inputField.get(recipe);
-                        if (iwc != null) {
-                            Object ing = iwcIngField.get(iwc);
-                            int count = iwcCountField.getInt(iwc);
+        // ── 1. Place catalyst (MUST succeed before spirits are placed) ──
+        if (invCatalyst.getStackInSlot(0).isEmpty()) {
+            Field inputField = Reflect.findField(recipe.getClass(), "input").orElse(null);
+            if (inputField != null) {
+                inputField.setAccessible(true);
+                try {
+                    Object val = inputField.get(recipe);
+                    if (val != null) {
+                        if (iwcClass != null && iwcClass.isInstance(val)) {
+                            // IngredientWithCount path (older Malum recipes)
+                            Object ing = iwcIngField.get(val);
+                            int count = iwcCountField.getInt(val);
                             if (ing instanceof net.minecraft.world.item.crafting.Ingredient ri && count > 0) {
                                 ItemStack extracted = extractFromRS(player, ri, count,
                                         localLedger, usingSharedLedger);
@@ -327,49 +353,55 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
                                     setSlot(invCatalyst, 0, extracted);
                                 }
                             }
-                        }
-                    } catch (Exception e) {
-                        RSIntegrationMod.LOGGER.debug("[RSI-Crucible] catalyst extract failed", e);
-                    }
-                }
-            }
-
-            // 2. Place spirits
-            Reflect.findField(recipe.getClass(), "spirits").ifPresent(f -> {
-                try {
-                    List<?> spirits = (List<?>) f.get(recipe);
-                    if (spirits == null) return;
-                    int slot = 0;
-                    for (Object swc : spirits) {
-                        if (slot >= invSpirits.getSlots()) break;
-                        int count = Reflect.getIntField(swc, "count").orElse(1);
-                        Object itemObj = Reflect.invoke(swc, "getItem").orElse(null);
-                        if (itemObj instanceof net.minecraft.world.item.Item it && count > 0) {
-                            net.minecraft.world.item.crafting.Ingredient si =
-                                    net.minecraft.world.item.crafting.Ingredient.of(it);
-                            // Extract actual count needed
-                            for (int c = 0; c < count && slot < invSpirits.getSlots(); c++) {
-                                ItemStack extracted = extractFromRS(player, si, 1,
-                                        localLedger, usingSharedLedger);
-                                if (!extracted.isEmpty()) {
-                                    setSlot(invSpirits, slot, extracted);
-                                }
+                        } else if (val instanceof net.minecraft.world.item.crafting.Ingredient ri) {
+                            // Plain Ingredient path (SpiritFocusingRecipe)
+                            ItemStack extracted = extractFromRS(player, ri, 1,
+                                    localLedger, usingSharedLedger);
+                            if (!extracted.isEmpty()) {
+                                setSlot(invCatalyst, 0, extracted);
                             }
                         }
-                        slot++;
                     }
                 } catch (Exception e) {
-                    RSIntegrationMod.LOGGER.debug("[RSI-Crucible] spirits extract failed", e);
+                    RSIntegrationMod.LOGGER.debug("[RSI-Crucible] catalyst extract failed", e);
                 }
-            });
+            }
         }
 
-        // Check catalyst was placed
+        // Verify catalyst was placed before touching spirits
         if (invCatalyst.getStackInSlot(0).isEmpty()) {
             player.sendSystemMessage(net.minecraft.network.chat.Component.translatable(
                     "rsi.malum_crucible.error.no_catalyst"));
             return false;
         }
+
+        // ── 2. Place spirits ──
+        Reflect.findField(recipe.getClass(), "spirits").ifPresent(f -> {
+            try {
+                List<?> spirits = (List<?>) f.get(recipe);
+                if (spirits == null) return;
+                int slot = 0;
+                for (Object swc : spirits) {
+                    if (slot >= invSpirits.getSlots()) break;
+                    int count = Reflect.getIntField(swc, "count").orElse(1);
+                    Object itemObj = Reflect.invoke(swc, "getItem").orElse(null);
+                    if (itemObj instanceof net.minecraft.world.item.Item it && count > 0) {
+                        net.minecraft.world.item.crafting.Ingredient si =
+                                net.minecraft.world.item.crafting.Ingredient.of(it);
+                        for (int c = 0; c < count && slot < invSpirits.getSlots(); c++) {
+                            ItemStack extracted = extractFromRS(player, si, 1,
+                                    localLedger, usingSharedLedger);
+                            if (!extracted.isEmpty()) {
+                                setSlot(invSpirits, slot, extracted);
+                            }
+                        }
+                    }
+                    slot++;
+                }
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.debug("[RSI-Crucible] spirits extract failed", e);
+            }
+        });
 
         // ── Commit ──
         if (!usingSharedLedger) {
@@ -512,6 +544,12 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
     @Override
     public void onBatchFailed(ServerPlayer player, String reason) {
         RSIntegrationMod.LOGGER.debug("[RSI-Crucible] Batch failed: {}", reason);
+        if (usingSharedLedger) {
+            // Chain will refund via ledger.refundCommitted() — clearing
+            // here would double-return. Reset state without touching slots.
+            resetState();
+            return;
+        }
         clearAllSlots();
         resetState();
     }
@@ -550,14 +588,37 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
         if (invCatalyst != null) {
             for (int i = 0; i < invCatalyst.getSlots(); i++) {
                 ItemStack s = invCatalyst.getStackInSlot(i);
-                if (!s.isEmpty()) setSlot(invCatalyst, i, ItemStack.EMPTY);
+                if (!s.isEmpty()) {
+                    returnCrucibleItem(s);
+                    setSlot(invCatalyst, i, ItemStack.EMPTY);
+                }
             }
         }
         if (invSpirits != null) {
             for (int i = 0; i < invSpirits.getSlots(); i++) {
                 ItemStack s = invSpirits.getStackInSlot(i);
-                if (!s.isEmpty()) setSlot(invSpirits, i, ItemStack.EMPTY);
+                if (!s.isEmpty()) {
+                    returnCrucibleItem(s);
+                    setSlot(invSpirits, i, ItemStack.EMPTY);
+                }
             }
+        }
+    }
+
+    private void returnCrucibleItem(ItemStack stack) {
+        if (stack.isEmpty()) return;
+        if (network == null) {
+            network = com.huanghuang.rsintegration.crafting.CraftPacketUtils
+                    .resolveNetworkForCraft(player, myLevel.dimension(), myPos);
+        }
+        if (network != null) {
+            ItemStack leftover = network.insertItem(stack.copy(), stack.getCount(),
+                    com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+            if (!leftover.isEmpty() && player != null) {
+                net.minecraftforge.items.ItemHandlerHelper.giveItemToPlayer(player, leftover);
+            }
+        } else if (player != null) {
+            net.minecraftforge.items.ItemHandlerHelper.giveItemToPlayer(player, stack.copy());
         }
     }
 

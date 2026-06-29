@@ -584,6 +584,11 @@ public final class AltarBindingRegistry {
         if (type == ModType.MALUM && "spirit_infusion".equals(hint)) {
             return "spirit_altar";
         }
+        // Aetherworks names its recipe category "aetherium_anvil" but the
+        // block description ID uses "forge_anvil".
+        if (type == ModType.AETHERWORKS_ANVIL && "aetherium_anvil".equals(hint)) {
+            return "forge_anvil";
+        }
         // Goety recipe categories (focus, ritual) don't map to machine sub-types.
         // All Goety machines (Dark Altar, Necro Brazier) can process all recipes.
         if (type == ModType.GOETY) {

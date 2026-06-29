@@ -1129,6 +1129,9 @@ public final class GenericCraftPacket {
             } else if (recipeModType == ModType.EMBERS_ALCHEMY) {
                 modWarnings.addAll(com.huanghuang.rsintegration.mods.embers.EreAlchemyBatchDelegate
                         .getPlanWarnings(player, recipe, dim, pos));
+            } else if (recipeModType == ModType.AETHERWORKS_ANVIL) {
+                modWarnings.addAll(com.huanghuang.rsintegration.mods.aetherworks.AetherworksBatchDelegate
+                        .getPlanWarnings(player, recipe, dim, pos));
             }
 
             steps.add(new PlanStep(recipeId, targetOutput, repeatCount, targetInputs,

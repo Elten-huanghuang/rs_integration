@@ -27,7 +27,8 @@ final class EidolonRecipeHandler implements ModRecipeHandler {
 
     @Override
     public ItemStack getResultItem(Recipe<?> recipe, RegistryAccess access) {
-        return ItemStack.EMPTY;
+        // RitualRecipe (ItemRitualRecipe) has getResultItem() returning the actual result
+        return recipe.getResultItem(access);
     }
 
     @Nullable
@@ -54,6 +55,36 @@ final class EidolonRecipeHandler implements ModRecipeHandler {
                 return result.isEmpty() ? null : result;
             }
         }
+
+        // RitualRecipe: public fields reagent, pedestalItems, focusItems, invariantItems
+        try {
+            Class<?> ritualClass = Class.forName("elucent.eidolon.recipe.RitualRecipe");
+            if (ritualClass.isInstance(recipe)) {
+                List<IngredientSpec> result = new ArrayList<>();
+                try {
+                    java.lang.reflect.Field f = ritualClass.getField("reagent");
+                    Ingredient ing = (Ingredient) f.get(recipe);
+                    if (ing != null && !ing.isEmpty()) result.add(new IngredientSpec(ing, 1));
+                } catch (Exception ignored) {}
+                try {
+                    java.lang.reflect.Field f = ritualClass.getField("pedestalItems");
+                    @SuppressWarnings("unchecked")
+                    List<Ingredient> items = (List<Ingredient>) f.get(recipe);
+                    if (items != null)
+                        for (Ingredient ing : items)
+                            if (!ing.isEmpty()) result.add(new IngredientSpec(ing, 1));
+                } catch (Exception ignored) {}
+                try {
+                    java.lang.reflect.Field f = ritualClass.getField("focusItems");
+                    @SuppressWarnings("unchecked")
+                    List<Ingredient> items = (List<Ingredient>) f.get(recipe);
+                    if (items != null)
+                        for (Ingredient ing : items)
+                            if (!ing.isEmpty()) result.add(new IngredientSpec(ing, 1));
+                } catch (Exception ignored) {}
+                if (!result.isEmpty()) return result;
+            }
+        } catch (ClassNotFoundException ignored) {}
 
         // WorktableRecipe: Ingredient[] core + Ingredient[] extras
         // (getIngredients/m_7527_ is not reliably accessible in SRG)

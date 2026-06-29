@@ -24,6 +24,7 @@
   "gui.rs_integration.jei.wr_crystal_craft": "Remote Infusion via Crystal",
   "gui.rs_integration.jei.eidolon_crucible_craft": "Remote Craft via Crucible",
   "gui.rs_integration.jei.eidolon_worktable_craft": "Remote Craft via Worktable",
+  "gui.rs_integration.jei.eidolon_ritual_craft": "Remote Craft via Brazier Ritual",
   "gui.rs_integration.jei.fa_ritual_craft": "Remote Ritual via Forge",
   "gui.rs_integration.jei.tlm_maid_altar_craft": "Remote Craft via Maid Altar",
   "gui.rs_integration.jei.embers_alchemy_craft": "Remote Craft via Alchemy Tablet",
@@ -103,6 +104,9 @@
   "rsi.eidolon.warn.water_required": "§7Requires %s mB of water",
   "rsi.eidolon.warn.boiling_required": "§7Crucible must be boiling (heat source underneath)",
   "rsi.eidolon.warn.needs_water_fill": "§eCrucible is empty — will auto-fill water",
+  "rsi.eidolon.error.ritual_busy": "§cRitual is already in progress, please wait",
+  "rsi.eidolon.warn.pedestal_items": "§7Requires %s pedestal items",
+  "rsi.eidolon.warn.needs_focus": "§7Ensure nearby pedestals are placed with required items",
 
   "rsi.malum.error.craft_failed": "§cSpirit infusion failed: %s",
   "rsi.malum.error.altar_not_found": "§cCannot find Spirit Altar block entity",
@@ -177,9 +181,11 @@
   "rsi.wr.error.no_runic_plate": "§cRunic Pedestal is missing a Runic Plate",
   "rsi.wr.error.crystallizer_busy": "§cCrystallizer is currently crafting, please wait",
   "rsi.wr.error.machine_busy": "§cMachine is currently crafting — wait for it to finish",
-  "rsi.wr.error.insufficient_wissen": "§cInsufficient Wissen energy (have %,d, need %,d)",
-  "rsi.wr.warn.insufficient_wissen_plan": "§eWissen may be insufficient (have %,s, need %,s)",
-  "rsi.wr.warn.wissen_cost": "§7Requires %,s Wissen energy",
+  "rsi.wr.error.insufficient_wissen": "§cInsufficient Wissen energy (have %s, need %s)",
+  "rsi.wr.error.insufficient_xp": "§cNot enough XP levels (have %s, need %s) — Arcane Iterator drains XP during craft",
+  "rsi.wr.error.insufficient_health": "§cHealth too low (have %s, need >%s) — Arcane Iterator damages player during craft",
+  "rsi.wr.warn.insufficient_wissen_plan": "§eWissen may be insufficient (have %s, need %s)",
+  "rsi.wr.warn.wissen_cost": "§7Requires %s Wissen energy",
 
   "rsi.goety.error.altar_not_found": "§cCannot find Dark Altar block entity",
   "rsi.goety.error.one_click_failed": "§cOne-click craft failed, check materials and pedestals",
@@ -197,6 +203,7 @@
   "rsi.batch.mod.wizards_reborn": "WR Remote Craft",
   "rsi.batch.mod.touhou_little_maid": "Maid Altar Craft",
   "rsi.batch.mod.embers_alchemy": "Embers Alchemy",
+  "rsi.batch.mod.aetherworks_anvil": "Aetherworks Anvil",
   "rsi.batch.mod.generic": "RS Auto-Craft",
   "rsi.tlm.error.altar_not_found": "Maid Altar not found",
   "rsi.tlm.error.multiblock_incomplete": "Maid Altar multiblock structure incomplete",
@@ -338,6 +345,20 @@
   "rsi.machine.error.not_fuel": "§cThis item cannot be used as fuel.",
   "rsi.machine.error.slot_mismatch": "§cThis item does not match what is already in the slot.",
   "rsi.machine.error.slot_full": "§cThe target slot is full.",
-  "rsi.machine.collected": "§aCollected %s× %s."
+  "rsi.machine.collected": "§aCollected %s× %s.",
+
+  "rsi.aetherworks.error.not_anvil": "§cNo Aetherium Anvil at the bound position.",
+  "rsi.aetherworks.error.slot_occupied": "§cAetherium Anvil slot is already occupied.",
+  "rsi.aetherworks.warn.temp_range": "§7Temperature: %s° — %s°",
+  "rsi.aetherworks.info.hits_required": "§7Requires %s hammer hits",
+  "rsi.aetherworks.info.ember_per_hit": "§7Consumes %s ember per hit",
+  "rsi.aetherworks.warn.no_forge": "§6No Aether Forge found nearby.",
+  "rsi.aetherworks.hud.empty": "Empty",
+  "rsi.aetherworks.hud.progress": "Progress: %s hits",
+  "rsi.aetherworks.hud.temp": "Temp: %s°",
+  "rsi.aetherworks.hud.mistakes": "Mistakes: %s/%s",
+  "rsi.aetherworks.hud.no_recipe": "No valid recipe",
+  "gui.rs_integration.jei.aetherworks_anvil_craft": "Craft via Aetherium Anvil",
+  "gui.rs_integration.jei.goety_brazier_craft": "Remote Craft via Necro Brazier"
 
 }

@@ -14,7 +14,8 @@ public final class EidolonRSModule {
         BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
                 "eidolon", ModType.EIDOLON, RSIntegrationConfig.ENABLE_EIDOLON, List.of(
                 "elucent.eidolon.common.block.CrucibleBlock",
-                "elucent.eidolon.common.block.WorktableBlock"
+                "elucent.eidolon.common.block.WorktableBlock",
+                "elucent.eidolon.common.block.BrazierBlock"
         ), "eidolon"));
 
         ModCraftNetworkHandlers.registerEidolon();

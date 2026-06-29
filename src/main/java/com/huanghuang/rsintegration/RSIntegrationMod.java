@@ -65,6 +65,14 @@ public final class RSIntegrationMod {
         if (enabled(RSIntegrationConfig.ENABLE_EMBERS_ALCHEMY, ModIds.EMBERS))
             com.huanghuang.rsintegration.mods.embers.EreAlchemyRSModule.initCommon();
 
+        // --- Aetherworks (Embers addon) ---------------------------------
+        if (enabled(RSIntegrationConfig.ENABLE_AETHERWORKS, ModIds.AETHERWORKS)) {
+            DistExecutor.safeRunWhenOn(Dist.CLIENT,
+                    () -> () -> com.huanghuang.rsintegration.mods.aetherworks.client.AetherworksClientSetup
+                            .init(FMLJavaModLoadingContext.get().getModEventBus()));
+            com.huanghuang.rsintegration.mods.aetherworks.AetherworksRSModule.initCommon();
+        }
+
         // --- Vanilla Machines ------------------------------------------
         if (RSIntegrationConfig.ENABLE_VANILLA_MACHINES.get()) {
             com.huanghuang.rsintegration.network.BindingEventHandler.registerTarget(

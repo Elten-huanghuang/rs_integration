@@ -525,9 +525,16 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
     public void onBatchFailed(ServerPlayer player, String reason) {
         craftStarted = false;
         craftWasSeenActive = false;
+        if (usingSharedLedger) {
+            // Chain will refund via ledger.refundCommitted() — clearing
+            // pedestals here would double-return. Reset state without
+            // touching them.
+            resetState();
+            return;
+        }
         // Retrieve items from altar slots before clearing, so we can return
         // them to their source instead of creating duplicate items.
-        if (!usingSharedLedger && ledger != null && ledger.isCommitted()) {
+        if (ledger != null && ledger.isCommitted()) {
             recoverFromAltar();
         } else {
             clearPedestals();
@@ -676,7 +683,7 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
                 // Extract item before clearing -- if items were committed from
                 // our own ledger, refund them to RS/player instead of destroying.
                 ItemStack stack = (ItemStack) inv.getClass().getMethod("getStackInSlot", int.class).invoke(inv, 0);
-                boolean isReal = (ledger != null && ledger.isCommitted()) && !usingSharedLedger;
+                boolean isReal = (ledger != null && ledger.isCommitted());
                 if (stack != null && !stack.isEmpty() && isReal) {
                     returnItem(stack);
                 }

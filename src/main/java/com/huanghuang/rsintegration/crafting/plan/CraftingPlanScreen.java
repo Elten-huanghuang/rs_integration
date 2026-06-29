@@ -65,8 +65,8 @@ public final class CraftingPlanScreen extends Screen {
     private int materialAreaHeight;
     private int repeatRowY;
     // repeat button hitboxes — set during render
-    private int btnMinusX, btnMinusY, btnMinusW, btnMinusH;
-    private int btnPlusX, btnPlusY, btnPlusW, btnPlusH;
+    private final int[] repeatBtnX = new int[8], repeatBtnY = new int[8];
+    private final int[] repeatBtnW = new int[8], repeatBtnH = new int[8];
     private int countPillX, countPillY, countPillW, countPillH;
     private String repeatBuf = "1";
     private long lastKeyTime;
@@ -186,7 +186,7 @@ public final class CraftingPlanScreen extends Screen {
         int matRows = (int) Math.ceil((double) plan.materials().size() / matCols);
         int matGridH = matRows * (SLOT_SIZE + 8) + 4;
         materialAreaHeight = (plan.materials().isEmpty() ? 0 : font.lineHeight + 6 + matGridH + 8);
-        int repeatAreaH = 24;
+        int repeatAreaH = 38;
         materialAreaTop = height - 28 - repeatAreaH - materialAreaHeight;
         missingAreaTop = materialAreaTop - missingAreaHeight;
         repeatRowY = height - 28 - repeatAreaH;
@@ -402,73 +402,70 @@ public final class CraftingPlanScreen extends Screen {
     // ── Repeat count row ─────────────────────────────────────────────
 
     private void drawRepeatRow(GuiGraphics gfx, Font font) {
-        int rowW = 180;
-        int rowX = width / 2 - rowW / 2;
-        int rowH = 24;
+        String[] leftLabels = {"1", "-10", "-5", "-"};
+        String[] rightLabels = {"+", "+5", "+10", "64"};
 
-        // Card background — match material area style
-        UIRenderer.roundedGradient(gfx, rowX, repeatRowY, rowW, rowH, 6f, 0xE6141E18, 0xE6101814);
-        // Left emerald accent
-        gfx.fill(rowX + 1, repeatRowY + 2, rowX + 4, repeatRowY + rowH - 2, 0xFF44AA66);
-
-        // Label
-        String label = Component.translatable("rsi.plan.repeat_count").getString();
-        UIRenderer.textBackdrop(gfx, font, rowX + 10, repeatRowY + 5, label, C_TEXT_BACKDROP);
-        gfx.drawString(font, label, rowX + 10, repeatRowY + 5, 0xFFCCCCCC);
-
-        // ── Control group (right side): [◀] [count] [▶] ──
-        int btnSize = 16;
-        int gap = 4;
+        int btnW = 22, btnH = 14;
+        int gap = 3;
         String countStr = Integer.toString(currentRepeat);
-        int pillW = Math.max(24, font.width(countStr) + 16);
+        int pillW = Math.max(32, font.width(countStr) + 20);
         int pillH = font.lineHeight + 6;
-        int groupW = btnSize * 2 + gap * 2 + pillW;
-        int groupX = rowX + rowW - 8 - groupW;
-        int btnTop = repeatRowY + (rowH - btnSize) / 2;
+        int innerGap = 12;
 
-        // Store hitboxes
-        btnMinusX = groupX; btnMinusY = btnTop; btnMinusW = btnSize; btnMinusH = btnSize;
-        int pillX = groupX + btnSize + gap;
-        countPillX = pillX; countPillY = repeatRowY + (rowH - pillH) / 2; countPillW = pillW; countPillH = pillH;
-        btnPlusX = pillX + pillW + gap; btnPlusY = btnTop; btnPlusW = btnSize; btnPlusH = btnSize;
+        int leftGroupW = leftLabels.length * btnW + (leftLabels.length - 1) * gap;
+        int rightGroupW = rightLabels.length * btnW + (rightLabels.length - 1) * gap;
+        int contentW = leftGroupW + innerGap + pillW + innerGap + rightGroupW;
+        int rowW = contentW + 28;
+        int rowX = width / 2 - rowW / 2;
 
-        // ── Draw minus button ──
-        boolean hoverMinus = mouseX >= btnMinusX && mouseX <= btnMinusX + btnMinusW
-                && mouseY >= btnMinusY && mouseY <= btnMinusY + btnMinusH;
-        int btnBgMinus = hoverMinus ? 0x88338855 : 0x661A221E;
-        int btnArrowMinus = hoverMinus ? 0xFFAAFFAA : 0xFF558855;
-        UIRenderer.rounded(gfx, btnMinusX, btnMinusY, btnMinusW, btnMinusH, 4f, btnBgMinus);
-        UIRenderer.rounded(gfx, btnMinusX + 1, btnMinusY + 1, btnMinusW - 2, btnMinusH - 2, 3f, 0x881A221E);
-        // Left-pointing chevron (mirrored)
-        drawChevronLeft(gfx, btnMinusX + btnSize / 2, btnMinusY + btnSize / 2, btnArrowMinus);
+        // ── Label row ──
+        String label = Component.translatable("rsi.plan.repeat_count").getString();
+        int labelW = font.width(label);
+        UIRenderer.textBackdrop(gfx, font, rowX + (rowW - labelW) / 2, repeatRowY, label, C_TEXT_BACKDROP);
+        gfx.drawString(font, label, rowX + (rowW - labelW) / 2, repeatRowY, 0xFFCCCCCC);
 
-        // ── Draw count pill ──
+        // ── Button card ──
+        int cardY = repeatRowY + font.lineHeight + 4;
+        int cardH = 22;
+        UIRenderer.roundedGradient(gfx, rowX, cardY, rowW, cardH, 5f, 0xE6141E18, 0xE6101814);
+        gfx.fill(rowX + 1, cardY + 2, rowX + 4, cardY + cardH - 2, 0xFF44AA66);
+
+        int startX = rowX + 14;
+        int btnY = cardY + (cardH - btnH) / 2;
+
+        // ── Left buttons: 1, -10, -5, - ──
+        int bx = startX;
+        for (int i = 0; i < leftLabels.length; i++) {
+            repeatBtnX[i] = bx; repeatBtnY[i] = btnY; repeatBtnW[i] = btnW; repeatBtnH[i] = btnH;
+            boolean hover = mouseX >= bx && mouseX <= bx + btnW && mouseY >= btnY && mouseY <= btnY + btnH;
+            int bg = hover ? 0xAA338855 : 0x771A221E;
+            int fg = hover ? 0xFFFFFFFF : 0xFF88AA88;
+            UIRenderer.rounded(gfx, bx, btnY, btnW, btnH, 3f, bg);
+            UIRenderer.rounded(gfx, bx + 1, btnY + 1, btnW - 2, btnH - 2, 2f, 0x881A221E);
+            int tw = font.width(leftLabels[i]);
+            gfx.drawString(font, leftLabels[i], bx + (btnW - tw) / 2, btnY + (btnH - font.lineHeight) / 2, fg);
+            bx += btnW + gap;
+        }
+
+        // ── Count pill ──
+        int pillX = bx + innerGap - gap;
+        countPillX = pillX; countPillY = cardY + (cardH - pillH) / 2; countPillW = pillW; countPillH = pillH;
         UIRenderer.pillBadge(gfx, font, countPillX, countPillY, pillW, pillH,
                 0xCC1B5E20, 0xFFC8E6C9, countStr);
 
-        // ── Draw plus button ──
-        boolean hoverPlus = mouseX >= btnPlusX && mouseX <= btnPlusX + btnPlusW
-                && mouseY >= btnPlusY && mouseY <= btnPlusY + btnPlusH;
-        int btnBgPlus = hoverPlus ? 0x88338855 : 0x661A221E;
-        int btnArrowPlus = hoverPlus ? 0xFFAAFFAA : 0xFF558855;
-        UIRenderer.rounded(gfx, btnPlusX, btnPlusY, btnPlusW, btnPlusH, 4f, btnBgPlus);
-        UIRenderer.rounded(gfx, btnPlusX + 1, btnPlusY + 1, btnPlusW - 2, btnPlusH - 2, 3f, 0x881A221E);
-        UIRenderer.chevron(gfx, btnPlusX + btnSize / 2 - 1, btnPlusY + btnSize / 2, btnArrowPlus);
-    }
-
-    private void drawChevronLeft(GuiGraphics gfx, int cx, int cy, int color) {
-        // Mirror of UIRenderer.chevron — left-pointing
-        for (int i = 0; i < 5; i++) {
-            gfx.fill(cx + 1 - i, cy - 3 + i, cx + 2 - i, cy - 2 + i, color);
-        }
-        for (int i = 0; i < 5; i++) {
-            gfx.fill(cx - 2 - i, cy - 3 + i, cx - 1 - i, cy - 2 + i, color);
-        }
-        for (int i = 0; i < 5; i++) {
-            gfx.fill(cx + 1 - i, cy + 2 - i, cx + 2 - i, cy + 3 - i, color);
-        }
-        for (int i = 0; i < 5; i++) {
-            gfx.fill(cx - 2 - i, cy + 2 - i, cx - 1 - i, cy + 3 - i, color);
+        // ── Right buttons: +, +5, +10, 64 ──
+        bx = pillX + pillW + innerGap - gap;
+        for (int i = 0; i < rightLabels.length; i++) {
+            int idx = leftLabels.length + i;
+            repeatBtnX[idx] = bx; repeatBtnY[idx] = btnY; repeatBtnW[idx] = btnW; repeatBtnH[idx] = btnH;
+            boolean hover = mouseX >= bx && mouseX <= bx + btnW && mouseY >= btnY && mouseY <= btnY + btnH;
+            int bg = hover ? 0xAA338855 : 0x771A221E;
+            int fg = hover ? 0xFFFFFFFF : 0xFF88AA88;
+            UIRenderer.rounded(gfx, bx, btnY, btnW, btnH, 3f, bg);
+            UIRenderer.rounded(gfx, bx + 1, btnY + 1, btnW - 2, btnH - 2, 2f, 0x881A221E);
+            int tw = font.width(rightLabels[i]);
+            gfx.drawString(font, rightLabels[i], bx + (btnW - tw) / 2, btnY + (btnH - font.lineHeight) / 2, fg);
+            bx += btnW + gap;
         }
     }
 
@@ -1042,19 +1039,23 @@ public final class CraftingPlanScreen extends Screen {
     @Override
     public boolean mouseClicked(double mx, double my, int button) {
         if (button == 0) {
-            // Repeat row: minus button
-            if (mx >= btnMinusX && mx <= btnMinusX + btnMinusW
-                    && my >= btnMinusY && my <= btnMinusY + btnMinusH) {
-                currentRepeat = Math.max(1, currentRepeat - 1);
-                requestPlanRefresh();
-                return true;
-            }
-            // Repeat row: plus button
-            if (mx >= btnPlusX && mx <= btnPlusX + btnPlusW
-                    && my >= btnPlusY && my <= btnPlusY + btnPlusH) {
-                currentRepeat = Math.min(64, currentRepeat + 1);
-                requestPlanRefresh();
-                return true;
+            // Repeat row quick-set buttons (8 total)
+            for (int i = 0; i < 8; i++) {
+                if (mx >= repeatBtnX[i] && mx <= repeatBtnX[i] + repeatBtnW[i]
+                        && my >= repeatBtnY[i] && my <= repeatBtnY[i] + repeatBtnH[i]) {
+                    switch (i) {
+                        case 0: currentRepeat = 1; break;
+                        case 1: currentRepeat = Math.max(1, currentRepeat - 10); break;
+                        case 2: currentRepeat = Math.max(1, currentRepeat - 5); break;
+                        case 3: currentRepeat = Math.max(1, currentRepeat - 1); break;
+                        case 4: currentRepeat = Math.min(64, currentRepeat + 1); break;
+                        case 5: currentRepeat = Math.min(64, currentRepeat + 5); break;
+                        case 6: currentRepeat = Math.min(64, currentRepeat + 10); break;
+                        case 7: currentRepeat = 64; break;
+                    }
+                    requestPlanRefresh();
+                    return true;
+                }
             }
             // Embers mode toggle: Calculate
             if (showEmbersModeToggle
