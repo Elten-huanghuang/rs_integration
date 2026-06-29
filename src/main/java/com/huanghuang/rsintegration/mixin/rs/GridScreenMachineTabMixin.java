@@ -38,9 +38,9 @@ public abstract class GridScreenMachineTabMixin {
         int leftPos = acc.getLeftPos();
         int topPos = acc.getTopPos();
         List<BindingInfo> machines = MachineTabHandler.getVisibleTabs();
-        int tabX = leftPos + 174 - MachineTabRenderer.getTotalWidth(machines.size());
-        int tabY = topPos + 6;                  // Aligned with RS tabs
-        int maxX = leftPos + 174;
+        int tabX = leftPos - MachineTabRenderer.getTotalWidth(machines.size()) - 2;
+        int tabY = topPos + 6;
+        int maxX = leftPos;
 
         if (machines.isEmpty()) {
             // Hub mode: render a single "Hub" button instead of individual tabs.

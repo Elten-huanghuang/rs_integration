@@ -54,6 +54,21 @@ public abstract class GridScreenMouseMixin {
             }
         }
 
+        // Hub button click — must be before individual tab hover check,
+        // since hovered == -1 when hub button is showing (tabs collapsed).
+        // hoveredTabIndex is set to 0 by renderForeground when mouse is over the hub.
+        if (button == 0 && MachineTabHandler.getHoveredTabIndex() == 0) {
+            List<BindingInfo> visibleTabs = MachineTabHandler.getVisibleTabs();
+            if (visibleTabs.isEmpty()) {
+                List<BindingInfo> allMachines = MachineTabHandler.getAllMachines();
+                if (MachineHub.shouldUseHub(allMachines.size())) {
+                    MachineHub.toggle(allMachines);
+                    cir.setReturnValue(true);
+                    return;
+                }
+            }
+        }
+
         int hovered = MachineTabHandler.getHoveredTabIndex();
         if (hovered < 0) return;
 
@@ -101,14 +116,6 @@ public abstract class GridScreenMouseMixin {
             }
         }
 
-        // Hub button clicked
-        if (visibleTabs.isEmpty() && button == 0) {
-            List<BindingInfo> allMachines = MachineTabHandler.getAllMachines();
-            if (MachineHub.shouldUseHub(allMachines.size())) {
-                MachineHub.toggle(allMachines);
-                cir.setReturnValue(true);
-            }
-        }
     }
 
     @Inject(method = "m_6050_", at = @At("HEAD"), cancellable = true, remap = false)
