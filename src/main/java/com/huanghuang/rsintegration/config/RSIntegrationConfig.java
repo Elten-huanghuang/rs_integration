@@ -237,7 +237,7 @@ public final class RSIntegrationConfig {
         ENABLE_MACHINE_GUI_TABS = b
                 .comment("Enable remote machine shortcut tabs on RS GridScreen.",
                         "When disabled, players cannot open remote machine GUIs from terminals.")
-                .define("enableMachineGuiTabs", false);
+                .define("enableMachineGuiTabs", true);
         MACHINE_GUI_WHITELIST = b
                 .comment("Whitelist of mod type IDs that support the \"Open Machine\" GUI button.",
                         "Only mod types in this list will show the button in crafting plan screens.",
