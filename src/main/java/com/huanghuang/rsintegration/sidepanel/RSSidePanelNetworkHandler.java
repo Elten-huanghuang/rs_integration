@@ -293,16 +293,9 @@ public final class RSSidePanelNetworkHandler {
     private static String resolveDisplayName(String blockKey) {
         if (blockKey == null || blockKey.isEmpty()) return "?";
         // Strip optional prefix: "{prefix}||block.modid.name"
+        // The remainder is already a block description ID, usable directly by I18n.
         int sep = blockKey.indexOf("||");
-        String regKey = sep >= 0 ? blockKey.substring(sep + 2) : blockKey;
-        var rl = net.minecraft.resources.ResourceLocation.tryParse(regKey);
-        if (rl != null) {
-            var block = net.minecraft.core.registries.BuiltInRegistries.BLOCK.get(rl);
-            if (block != null) {
-                return block.getDescriptionId();
-            }
-        }
-        return regKey;
+        return sep >= 0 ? blockKey.substring(sep + 2) : blockKey;
     }
 
     public static void sendClick(ItemStack targetItem, byte action, boolean isShift, UUID panelId) {

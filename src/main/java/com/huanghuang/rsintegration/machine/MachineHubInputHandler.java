@@ -26,6 +26,15 @@ public final class MachineHubInputHandler {
     public static boolean mouseClicked(double mouseX, double mouseY, int button) {
         if (!MachineHub.isVisible()) return false;
 
+        // Only consume clicks within the hub panel bounds
+        if (!MachineHub.isWithinBounds((int) mouseX, (int) mouseY)) {
+            // Click outside hub — hide on left-click, but DON'T consume the event
+            if (button == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
+                MachineHub.hide();
+            }
+            return false;
+        }
+
         // Title bar drag
         if (button == GLFW.GLFW_MOUSE_BUTTON_LEFT && MachineHub.tryStartDrag(mouseX, mouseY)) {
             return true;
@@ -39,10 +48,7 @@ public final class MachineHubInputHandler {
 
         int idx = MachineHub.getHoveredIndex();
         if (idx < 0 || idx >= MachineHub.getMachines().size()) {
-            // Clicked outside the grid — hide the hub
-            if (button == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
-                MachineHub.hide();
-            }
+            // Clicked inside hub but outside the machine grid — ignore
             return true;
         }
 
@@ -145,6 +151,7 @@ public final class MachineHubInputHandler {
      */
     public static boolean mouseScrolled(double mouseX, double mouseY, double delta) {
         if (!MachineHub.isVisible()) return false;
+        if (!MachineHub.isWithinBounds((int) mouseX, (int) mouseY)) return false;
         int newOffset = MachineHub.getScrollOffset() - (int) delta * 16;
         if (newOffset < 0) newOffset = 0;
         MachineHub.setScrollOffset(newOffset);

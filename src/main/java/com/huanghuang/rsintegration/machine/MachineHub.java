@@ -67,6 +67,9 @@ public final class MachineHub {
     public static int getDragOffsetY() { return dragOffsetY; }
     public static boolean isDragging() { return isDragging; }
     public static void setHubBounds(int x, int y, int w, int h) { hubX = x; hubY = y; hubW = w; hubH = h; }
+    public static boolean isWithinBounds(int mouseX, int mouseY) {
+        return mouseX >= hubX && mouseX < hubX + hubW && mouseY >= hubY && mouseY < hubY + hubH;
+    }
 
     /** Start a drag from the title bar. */
     public static boolean tryStartDrag(double mouseX, double mouseY) {
