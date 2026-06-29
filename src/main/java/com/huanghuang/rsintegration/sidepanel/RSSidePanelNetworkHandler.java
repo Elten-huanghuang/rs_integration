@@ -292,14 +292,17 @@ public final class RSSidePanelNetworkHandler {
 
     private static String resolveDisplayName(String blockKey) {
         if (blockKey == null || blockKey.isEmpty()) return "?";
-        var rl = net.minecraft.resources.ResourceLocation.tryParse(blockKey);
+        // Strip optional prefix: "{prefix}||block.modid.name"
+        int sep = blockKey.indexOf("||");
+        String regKey = sep >= 0 ? blockKey.substring(sep + 2) : blockKey;
+        var rl = net.minecraft.resources.ResourceLocation.tryParse(regKey);
         if (rl != null) {
             var block = net.minecraft.core.registries.BuiltInRegistries.BLOCK.get(rl);
             if (block != null) {
                 return block.getDescriptionId();
             }
         }
-        return blockKey;
+        return regKey;
     }
 
     public static void sendClick(ItemStack targetItem, byte action, boolean isShift, UUID panelId) {

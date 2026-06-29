@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.sidepanel.client;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraftforge.api.distmarker.Dist;
@@ -70,9 +71,14 @@ public final class GuiNavStack {
             return;
         }
 
-        // A different screen (the machine GUI) closed — restore RS GridScreen.
+        // A different screen (the machine GUI) closed — restore RS GridScreen
+        // if the user has enabled return-to-RS in config.
         pendingRestore = false;
         cachedScreen.clear();
+        if (!RSIntegrationConfig.RETURN_TO_RS_AFTER_MACHINE_GUI.get()) {
+            RSIntegrationMod.LOGGER.info("[RSI-GuiNav] Not restoring (returnToRsAfterMachineGui=false)");
+            return;
+        }
         RSIntegrationMod.LOGGER.info("[RSI-GuiNav] Restoring cached screen: {} (removed={})",
                 cached.getClass().getSimpleName(), removed.getClass().getSimpleName());
         Minecraft.getInstance().getInstance().setScreen(cached);

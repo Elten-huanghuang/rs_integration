@@ -67,6 +67,7 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.IntValue RS_SIDE_PANEL_WIDTH;
     public static ForgeConfigSpec.IntValue RS_SIDE_PANEL_HEIGHT;
     public static ForgeConfigSpec.BooleanValue RS_SIDE_PANEL_HIDDEN;
+    public static ForgeConfigSpec.BooleanValue RETURN_TO_RS_AFTER_MACHINE_GUI;
     public static ForgeConfigSpec.IntValue SIDE_PANEL_SYNC_INTERVAL;
     public static ForgeConfigSpec.IntValue SIDE_PANEL_EXTRACTION_TIMEOUT;
     public static ForgeConfigSpec.BooleanValue DIAGNOSTIC_VERBOSE_LOGGING;
@@ -251,8 +252,8 @@ public final class RSIntegrationConfig {
                 .defineInRange("machineTabThreshold", 0, 0, 64);
         MACHINE_HUB_TOGGLE_KEY = b
                 .comment("Key code for toggling the Machine Hub overlay on the RS Grid screen.",
-                        "Default Y = 89. See GLFW key codes: https://www.glfw.org/docs/latest/group__keys.html")
-                .defineInRange("machineHubToggleKey", 89, 32, 348);
+                        "Default H = 72. See GLFW key codes: https://www.glfw.org/docs/latest/group__keys.html")
+                .defineInRange("machineHubToggleKey", 72, 32, 348);
         MACHINE_GUI_MAX_DISTANCE = b
                 .comment("Maximum distance (in blocks) for wirelessly opening a bound machine's GUI.",
                         "Set to 0 to disable distance checks (unlimited range).",
@@ -292,6 +293,13 @@ public final class RSIntegrationConfig {
         RS_SIDE_PANEL_HIDDEN = cb
                 .comment("Collapse the side panel to a small bar.")
                 .define("hidden", false);
+        cb.pop();
+        cb.push("machineHub");
+        RETURN_TO_RS_AFTER_MACHINE_GUI = cb
+                .comment("When opening a remote machine GUI from the RS terminal,",
+                        "automatically return to the RS Grid screen after closing the machine GUI.",
+                        "Disable this if you prefer to return to the game world instead.")
+                .define("returnToRsAfterMachineGui", true);
         cb.pop();
         CLIENT_SPEC = cb.build();
     }

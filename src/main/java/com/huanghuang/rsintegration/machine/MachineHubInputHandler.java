@@ -26,6 +26,11 @@ public final class MachineHubInputHandler {
     public static boolean mouseClicked(double mouseX, double mouseY, int button) {
         if (!MachineHub.isVisible()) return false;
 
+        // Title bar drag
+        if (button == GLFW.GLFW_MOUSE_BUTTON_LEFT && MachineHub.tryStartDrag(mouseX, mouseY)) {
+            return true;
+        }
+
         // Close button takes priority
         if (MachineHub.isCloseButtonHovered() && button == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
             MachineHub.hide();
@@ -144,6 +149,15 @@ public final class MachineHubInputHandler {
         if (newOffset < 0) newOffset = 0;
         MachineHub.setScrollOffset(newOffset);
         return true;
+    }
+
+    /** Handle mouse release to end drag. */
+    public static boolean mouseReleased(double mouseX, double mouseY, int button) {
+        if (MachineHub.isDragging()) {
+            MachineHub.endDrag();
+            return true;
+        }
+        return false;
     }
 
     /** Hub consumes all mouse events while visible. */

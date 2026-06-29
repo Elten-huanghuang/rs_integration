@@ -319,6 +319,15 @@
   "rsi.hub.no_machines": "No machines match filter.",
   "rsi.hub.key_toggle": "%s: Toggle Hub",
 
+  "rsi.hub.state.has_output": "Output Ready",
+  "rsi.hub.state.working": "Working %s%%",
+  "rsi.hub.state.idle": "Idle",
+  "rsi.hub.state.unknown": "Unknown",
+  "rsi.hub.type.gui_machine": "GUI Machine",
+  "rsi.hub.controls.quick_has_output": "L: Collect  Shift: →RS  R: Open",
+  "rsi.hub.controls.quick_normal": "L: Insert  Shift: Fuel  R: Open",
+  "rsi.hub.controls.gui": "L/R: Open GUI",
+
   "rsi.plan.open_machine": "Open Machine",
   "rsi.jei.open_machine": "Open bound machine GUI",
 

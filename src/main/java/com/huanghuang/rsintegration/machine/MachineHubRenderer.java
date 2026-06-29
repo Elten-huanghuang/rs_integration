@@ -66,14 +66,28 @@ public final class MachineHubRenderer {
         int sw = Minecraft.getInstance().getWindow().getGuiScaledWidth();
         int sh = Minecraft.getInstance().getWindow().getGuiScaledHeight();
 
-        int x = gridX - totalW - 4;  // 4px gap from grid left edge
-        int y = gridY + 30;          // below the RS tabs/search bar
+        int x = gridX - totalW - 4 + MachineHub.getDragOffsetX();
+        int y = gridY + 30 + MachineHub.getDragOffsetY();
 
         // Clamp to screen bounds — never flip to the right/JEI side
         if (x < 2) x = 2;
         if (x + totalW > sw - 2) x = sw - totalW - 2;
         if (y + totalH > sh - 2) y = sh - totalH - 2;
         if (y < 2) y = 2;
+
+        // Update drag: track mouse delta while button held
+        if (MachineHub.isDragging()) {
+            if (org.lwjgl.glfw.GLFW.glfwGetMouseButton(
+                    Minecraft.getInstance().getWindow().getWindow(),
+                    org.lwjgl.glfw.GLFW.GLFW_MOUSE_BUTTON_LEFT) != org.lwjgl.glfw.GLFW.GLFW_PRESS) {
+                MachineHub.endDrag();
+            } else {
+                MachineHub.updateDrag(mouseX, mouseY);
+            }
+        }
+
+        // Store bounds for title-bar hit testing
+        MachineHub.setHubBounds(x, y, totalW, totalH);
 
         float alpha = MachineHub.getAnimProgress();
         if (alpha <= 0f) return -1;
@@ -226,26 +240,31 @@ public final class MachineHubRenderer {
                         net.minecraft.client.resources.language.I18n.get(info.displayName())));
                 if (iType == MachineInteractType.QUICK) {
                     String stateText = switch (iStatus.state()) {
-                        case HAS_OUTPUT -> "§bOutput Ready";
-                        case WORKING -> "§6Working " + (int)(iStatus.progressFraction() * 100) + "%";
-                        case IDLE -> "§aIdle";
-                        case UNKNOWN -> "§7Unknown";
+                        case HAS_OUTPUT -> "§b" + Component.translatable("rsi.hub.state.has_output").getString();
+                        case WORKING -> "§6" + Component.translatable("rsi.hub.state.working",
+                                (int)(iStatus.progressFraction() * 100)).getString();
+                        case IDLE -> "§a" + Component.translatable("rsi.hub.state.idle").getString();
+                        case UNKNOWN -> "§7" + Component.translatable("rsi.hub.state.unknown").getString();
                     };
                     tipLines.add(Component.literal(stateText));
                 } else {
-                    tipLines.add(Component.literal("§dGUI Machine"));
+                    tipLines.add(Component.translatable("rsi.hub.type.gui_machine").withStyle(
+                            net.minecraft.ChatFormatting.LIGHT_PURPLE));
                 }
                 if (info.dim() != null) {
                     tipLines.add(Component.literal("§7" + info.dim() + " " + info.pos().toShortString()));
                 }
                 if (iType == MachineInteractType.QUICK) {
                     if (iStatus.state() == MachineState.HAS_OUTPUT) {
-                        tipLines.add(Component.literal("§bL: Collect  §bShift: →RS  §7R: Open"));
+                        tipLines.add(Component.translatable("rsi.hub.controls.quick_has_output")
+                                .withStyle(net.minecraft.ChatFormatting.AQUA));
                     } else {
-                        tipLines.add(Component.literal("§7L: Insert  §7Shift: Fuel  §7R: Open"));
+                        tipLines.add(Component.translatable("rsi.hub.controls.quick_normal")
+                                .withStyle(net.minecraft.ChatFormatting.GRAY));
                     }
                 } else {
-                    tipLines.add(Component.literal("§7L/R: Open GUI"));
+                    tipLines.add(Component.translatable("rsi.hub.controls.gui")
+                            .withStyle(net.minecraft.ChatFormatting.GRAY));
                 }
                 g.renderTooltip(font, tipLines, java.util.Optional.empty(), mouseX, mouseY);
             }

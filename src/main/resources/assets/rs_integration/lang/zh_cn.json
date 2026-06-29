@@ -320,6 +320,15 @@
   "rsi.hub.no_machines": "没有匹配的机器。",
   "rsi.hub.key_toggle": "%s: 开关面板",
 
+  "rsi.hub.state.has_output": "产物就绪",
+  "rsi.hub.state.working": "工作中 %s%%",
+  "rsi.hub.state.idle": "空闲",
+  "rsi.hub.state.unknown": "未知",
+  "rsi.hub.type.gui_machine": "GUI机器",
+  "rsi.hub.controls.quick_has_output": "左键:收取  Shift:→RS  右键:打开",
+  "rsi.hub.controls.quick_normal": "左键:放入  Shift:燃料  右键:打开",
+  "rsi.hub.controls.gui": "左键/右键:打开GUI",
+
   "rsi.plan.open_machine": "打开机器",
   "rsi.jei.open_machine": "打开绑定的机器界面",
 

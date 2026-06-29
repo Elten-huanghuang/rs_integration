@@ -35,6 +35,15 @@ public final class MachineHub {
     private static String filterText = "";
     private static int scrollOffset;
 
+    // ── Drag state ─────────────────────────────────────────────────
+    private static int dragOffsetX, dragOffsetY;
+    private static boolean isDragging;
+    private static int dragStartMouseX, dragStartMouseY;
+    private static int dragStartOffsetX, dragStartOffsetY;
+
+    // store last-rendered hub bounds for title-bar hit testing
+    private static int hubX, hubY, hubW, hubH;
+
     private MachineHub() {}
 
     // ── State queries ─────────────────────────────────────────────
@@ -51,6 +60,37 @@ public final class MachineHub {
     public static String getFilterText() { return filterText; }
     public static int getScrollOffset() { return scrollOffset; }
     public static void setScrollOffset(int off) { scrollOffset = off; }
+
+    // ── Drag ───────────────────────────────────────────────────────
+
+    public static int getDragOffsetX() { return dragOffsetX; }
+    public static int getDragOffsetY() { return dragOffsetY; }
+    public static boolean isDragging() { return isDragging; }
+    public static void setHubBounds(int x, int y, int w, int h) { hubX = x; hubY = y; hubW = w; hubH = h; }
+
+    /** Start a drag from the title bar. */
+    public static boolean tryStartDrag(double mouseX, double mouseY) {
+        // title bar area: top PADDING + TITLE_H
+        int titleBottom = hubY + 4 + 12 + 4; // PADDING + TITLE_H + margin
+        if (mouseX >= hubX && mouseX < hubX + hubW
+                && mouseY >= hubY && mouseY < titleBottom) {
+            isDragging = true;
+            dragStartMouseX = (int) mouseX;
+            dragStartMouseY = (int) mouseY;
+            dragStartOffsetX = dragOffsetX;
+            dragStartOffsetY = dragOffsetY;
+            return true;
+        }
+        return false;
+    }
+
+    public static void endDrag() { isDragging = false; }
+
+    public static void updateDrag(int mouseX, int mouseY) {
+        if (!isDragging) return;
+        dragOffsetX = dragStartOffsetX + (mouseX - dragStartMouseX);
+        dragOffsetY = dragStartOffsetY + (mouseY - dragStartMouseY);
+    }
 
     public static void appendFilterChar(char c) {
         filterText += c;
