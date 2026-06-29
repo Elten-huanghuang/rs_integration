@@ -1,12 +1,11 @@
 package com.huanghuang.rsintegration.machine;
 
-import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.sidepanel.data.BindingInfo;
 import com.huanghuang.rsintegration.sidepanel.data.MachineStatusCache;
-import com.mojang.blaze3d.systems.RenderSystem;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.resources.language.I18n;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
@@ -17,65 +16,55 @@ import java.util.List;
 
 /**
  * Renders the Terminal Hub overlay — a grid of machine icons displayed
- * anchored to the RS Grid screen rather than full-screen centered.
+ * anchored to the RS Grid screen, styled to match the RS dark-terminal aesthetic.
  */
 public final class MachineHubRenderer {
 
     private static final int SLOT_SIZE = 18;
     private static final int COLS = 6;
-    private static final int PADDING = 4;
-    private static final int TITLE_H = 12;
+    private static final int PADDING = 5;
+    private static final int TITLE_H = 14;
     private static final int FILTER_H = 14;
     private static final int FOOTER_H = 10;
-    private static final int BG_COLOR = 0xC0101010;
-    private static final int HOVER_COLOR = 0x40FFFFFF;
+
+    // ── Style (dark terminal theme) ──────────────────────────────────
+    private static final int PANEL_BORDER  = 0xFF3B4A5C;
+    private static final int PANEL_BG      = 0xFF121820;
+    private static final int HEADER_BG     = 0xFF1C2834;
+    private static final int SEPARATOR     = 0xFF2A3848;
+    private static final int FILTER_BG     = 0xFF0A1016;
+    private static final int FILTER_BORDER = 0xFF2A3848;
+    private static final int SLOT_BG       = 0xFF1A2430;
+    private static final int SLOT_HOVER    = 0x30FFFFFF;
+    private static final int SCROLL_TRACK  = 0x20FFFFFF;
+    private static final int SCROLL_THUMB  = 0x60FFFFFF;
+    private static final int TEXT_PRIMARY  = 0xFFE0E8F0;
+    private static final int TEXT_DIM      = 0xFF8899AA;
 
     private MachineHubRenderer() {}
 
-    /**
-     * Render the hub overlay anchored to the RS grid screen.
-     *
-     * @param g        graphics context (in screen-absolute pose)
-     * @param gridX    RS grid screen left edge
-     * @param gridY    RS grid screen top edge
-     * @param gridW    RS grid screen width (used to anchor hub to the right)
-     * @param mouseX   mouse X (screen-absolute)
-     * @param mouseY   mouse Y (screen-absolute)
-     * @return the index of the hovered machine, or -1
-     */
     public static int render(GuiGraphics g, int gridX, int gridY, int gridW, int mouseX, int mouseY) {
         var machines = MachineHub.getMachines();
         var allMachines = MachineHub.getAllMachines();
         if (allMachines.isEmpty()) return -1;
 
-        int rows = (int) Math.ceil((double) machines.size() / COLS);
-        if (rows < 1) rows = 1;
-        int gridW_ = COLS * SLOT_SIZE;
-        int gridH = rows * SLOT_SIZE;
-
+        int rows = Math.max(1, (int) Math.ceil((double) machines.size() / COLS));
+        int slotGridW = COLS * SLOT_SIZE;
         int maxVisibleRows = 12;
         int visibleRows = Math.min(rows, maxVisibleRows);
         int visibleGridH = visibleRows * SLOT_SIZE;
+        int totalW = slotGridW + PADDING * 2;
+        int totalH = visibleGridH + TITLE_H + FILTER_H + FOOTER_H + PADDING * 3 + 2;
 
-        int totalW = gridW_ + PADDING * 2;
-        int totalH = visibleGridH + TITLE_H + FILTER_H + FOOTER_H + PADDING * 3;
-
-        // Anchor to the LEFT of the RS grid (avoids JEI on the right).
-        // If there's no room on the left, clamp to the screen edge instead
-        // of flipping to the right side.
         int sw = Minecraft.getInstance().getWindow().getGuiScaledWidth();
         int sh = Minecraft.getInstance().getWindow().getGuiScaledHeight();
-
         int x = gridX - totalW - 4 + MachineHub.getDragOffsetX();
         int y = gridY + 30 + MachineHub.getDragOffsetY();
-
-        // Clamp to screen bounds — never flip to the right/JEI side
         if (x < 2) x = 2;
         if (x + totalW > sw - 2) x = sw - totalW - 2;
         if (y + totalH > sh - 2) y = sh - totalH - 2;
         if (y < 2) y = 2;
 
-        // Update drag: track mouse delta while button held
         if (MachineHub.isDragging()) {
             if (org.lwjgl.glfw.GLFW.glfwGetMouseButton(
                     Minecraft.getInstance().getWindow().getWindow(),
@@ -85,8 +74,6 @@ public final class MachineHubRenderer {
                 MachineHub.updateDrag(mouseX, mouseY);
             }
         }
-
-        // Store bounds for title-bar hit testing
         MachineHub.setHubBounds(x, y, totalW, totalH);
 
         float alpha = MachineHub.getAnimProgress();
@@ -95,51 +82,60 @@ public final class MachineHubRenderer {
         var pose = g.pose();
         pose.pushPose();
         pose.translate(0, 0, 400f);
-
-        // Background
-        int bgAlpha = (int) (0xC0 * alpha) << 24;
-        g.fill(x, y, x + totalW, y + totalH, bgAlpha | 0x101010);
-
         var font = Minecraft.getInstance().font;
-        int titleColor = (int) (0xFF * alpha) << 24 | 0xFFFFFF;
-        int dimColor = (int) (0xFF * alpha) << 24 | 0xAAAAAA;
 
-        // Title line with close button
-        int closeSize = 10;
-        int closeX = x + totalW - PADDING - closeSize;
-        int closeY = y + PADDING;
-        boolean closeHovered = mouseX >= closeX && mouseX < closeX + closeSize
-                && mouseY >= closeY && mouseY < closeY + closeSize;
+        // ── Outer shadow ──────────────────────────────────────────────
+        g.fill(x + 2, y + 2, x + totalW + 2, y + totalH + 2, 0x40000000);
+
+        // ── Panel background + border ────────────────────────────────
+        g.fill(x, y, x + totalW, y + totalH, PANEL_BORDER);
+        g.fill(x + 1, y + 1, x + totalW - 1, y + totalH - 1, PANEL_BG);
+
+        // ── Header ───────────────────────────────────────────────────
+        int headerBottom = y + 1 + TITLE_H + PADDING * 2 - 2;
+        g.fill(x + 1, y + 1, x + totalW - 1, headerBottom, HEADER_BG);
+        g.fill(x + 1, headerBottom, x + totalW - 1, headerBottom + 1, SEPARATOR);
+
+        // Title text
+        String title = Component.translatable("rsi.hub.title", allMachines.size()).getString();
+        int titleX = x + PADDING + 2;
+        int titleY = y + PADDING + 1;
+        g.drawString(font, title, titleX, titleY, TEXT_PRIMARY);
+
+        // Close button (drawn with lines, not text)
+        int closeR = 5; // radius
+        int closeCx = x + totalW - PADDING - closeR - 3;
+        int closeCy = y + PADDING + TITLE_H / 2;
+        boolean closeHovered = mouseX >= closeCx - closeR - 2 && mouseX < closeCx + closeR + 2
+                && mouseY >= closeCy - closeR - 2 && mouseY < closeCy + closeR + 2;
         MachineHub.setCloseButtonHovered(closeHovered);
 
-        String title = Component.translatable("rsi.hub.title", allMachines.size()).getString();
-        int maxTitleW = closeX - x - PADDING - 4;
-        if (font.width(title) > maxTitleW) {
-            title = font.plainSubstrByWidth(title, maxTitleW - font.width("…")) + "…";
-        }
-        g.drawString(font, title, x + PADDING, y + PADDING, titleColor);
+        int closeColor = closeHovered ? 0xFFFF5555 : TEXT_DIM;
+        g.fill(closeCx - closeR, closeCy - 1, closeCx + closeR + 1, closeCy + 1, closeColor);   // horizontal bar
+        g.fill(closeCx - 1, closeCy - closeR, closeCx + 1, closeCy + closeR + 1, closeColor);   // vertical bar
 
-        // Close button (×)
-        int closeColor = closeHovered ? 0xFFFF4444 : 0xFF888888;
-        g.drawString(font, "×", closeX + 1, closeY, closeColor);
+        // ── Filter bar ───────────────────────────────────────────────
+        int filterX = x + PADDING;
+        int filterY = headerBottom + PADDING - 1;
+        int filterW = totalW - PADDING * 2;
+        g.fill(filterX, filterY, filterX + filterW, filterY + FILTER_H, FILTER_BORDER);
+        g.fill(filterX + 1, filterY + 1, filterX + filterW - 1, filterY + FILTER_H - 1, FILTER_BG);
 
-        // Filter bar
-        int filterY = y + PADDING + TITLE_H;
         String filterText = MachineHub.getFilterText();
-        int filterColor = filterText.isEmpty() ? dimColor : titleColor;
-        g.fill(x + PADDING, filterY, x + totalW - PADDING, filterY + FILTER_H, 0x30000000 | (bgAlpha & 0xFF000000));
-        String filterDisplay = filterText.isEmpty()
-                ? Component.translatable("rsi.hub.filter_hint").getString()
-                : filterText + (System.currentTimeMillis() % 1000 < 500 ? "_" : " ");
-        g.drawString(font, filterDisplay,
-                x + PADDING + 2, filterY + 3, filterColor);
+        if (filterText.isEmpty()) {
+            String hint = Component.translatable("rsi.hub.filter_hint").getString();
+            g.drawString(font, hint, filterX + 4, filterY + 3, TEXT_DIM);
+        } else {
+            String display = filterText + (System.currentTimeMillis() % 1000 < 500 ? "|" : " ");
+            g.drawString(font, display, filterX + 4, filterY + 3, TEXT_PRIMARY);
+        }
 
-        // Machine count
+        // Count badge (right side of filter)
         String countStr = machines.size() + "/" + allMachines.size();
         int countW = font.width(countStr);
-        g.drawString(font, countStr, x + totalW - PADDING - countW - 2, filterY + 3, dimColor);
+        g.drawString(font, countStr, filterX + filterW - countW - 5, filterY + 3, TEXT_DIM);
 
-        // Scroll clamping
+        // ── Machine grid ─────────────────────────────────────────────
         int gridY_ = filterY + FILTER_H + PADDING;
         int totalRowsHeight = rows * SLOT_SIZE;
         int maxScroll = Math.max(0, totalRowsHeight - visibleGridH);
@@ -165,155 +161,132 @@ public final class MachineHubRenderer {
             MachineInteractType iType = MachineInteractType.fromBlockKey(info.blockKey());
             MachineStatus iStatus = MachineStatusCache.getInstance().get(info);
 
-            int borderColor, slotBg;
-            if (iType == MachineInteractType.QUICK) {
-                switch (iStatus.state()) {
-                    case HAS_OUTPUT:
-                        borderColor = isHovered ? 0xFF88CCFF : 0xFF4488FF;
-                        slotBg = 0xFF223355;
-                        break;
-                    case WORKING:
-                        borderColor = isHovered ? 0xFFFFCC44 : 0xFFFFAA00;
-                        slotBg = 0xFF332211;
-                        break;
-                    case IDLE:
-                        borderColor = isHovered ? 0xFF66DD66 : 0xFF22AA22;
-                        slotBg = 0xFF113311;
-                        break;
-                    default:
-                        borderColor = isHovered ? 0xFFAAAAAA : 0xFF666666;
-                        slotBg = 0xFF222222;
-                        break;
-                }
-            } else {
-                borderColor = isHovered ? 0xFFCC99FF : 0xFF8855CC;
-                slotBg = 0xFF221133;
-            }
+            // Slot background
+            g.fill(sx, sy, sx + SLOT_SIZE, sy + SLOT_SIZE, SLOT_BG);
 
-            g.fill(sx, sy, sx + SLOT_SIZE, sy + SLOT_SIZE, slotBg);
+            // Status-derived accent (left edge indicator)
+            int accentColor = switch (iStatus.state()) {
+                case HAS_OUTPUT -> 0xFF4488FF;
+                case WORKING   -> 0xFFFFAA00;
+                case IDLE      -> 0xFF22AA22;
+                default        -> 0xFF666666;
+            };
+            if (iType == MachineInteractType.GUI) accentColor = 0xFF8855CC;
+            g.fill(sx, sy, sx + 2, sy + SLOT_SIZE, accentColor);
 
+            // Hover highlight
             if (isHovered) {
-                g.fill(sx, sy, sx + SLOT_SIZE, sy + SLOT_SIZE, 0x30FFFFFF);
+                g.fill(sx, sy, sx + SLOT_SIZE, sy + SLOT_SIZE, SLOT_HOVER);
                 hovered = i;
             }
 
-            g.renderOutline(sx, sy, SLOT_SIZE, SLOT_SIZE, borderColor);
-
+            // Icon
             ItemStack icon = resolveIcon(info);
             if (!icon.isEmpty()) {
                 g.renderItem(icon, sx + 1, sy + 1);
                 g.renderItemDecorations(font, icon, sx + 1, sy + 1);
             }
 
+            // Working progress bar
             if (iType == MachineInteractType.QUICK
                     && iStatus.state() == MachineState.WORKING
                     && iStatus.maxProgress() > 0) {
                 int barW = Math.max(1, (int) ((SLOT_SIZE - 4) * iStatus.progressFraction()));
-                g.fill(sx + 2, sy + SLOT_SIZE - 4, sx + 2 + barW, sy + SLOT_SIZE - 2, 0xFFFFCC00);
+                g.fill(sx + 2, sy + SLOT_SIZE - 3, sx + 2 + barW, sy + SLOT_SIZE - 1, 0xFFFFCC00);
             }
 
+            // Output count badge
             if (iType == MachineInteractType.QUICK
                     && iStatus.state() == MachineState.HAS_OUTPUT
                     && !iStatus.outputItem().isEmpty()) {
-                int count = iStatus.outputItem().getCount();
-                String cnt = count > 99 ? "…" : String.valueOf(count);
-                int textW = font.width(cnt);
-                g.fill(sx + SLOT_SIZE - textW - 3, sy + 1,
-                       sx + SLOT_SIZE - 1, sy + 9, 0xCC3366CC);
-                g.drawString(font, cnt, sx + SLOT_SIZE - textW - 2, sy + 2, 0xFFFFFF);
+                int cnt = iStatus.outputItem().getCount();
+                String cntStr = cnt > 99 ? "…" : String.valueOf(cnt);
+                int tw = font.width(cntStr);
+                g.fill(sx + SLOT_SIZE - tw - 3, sy + 1, sx + SLOT_SIZE - 1, sy + 9, 0xCC335599);
+                g.drawString(font, cntStr, sx + SLOT_SIZE - tw - 2, sy + 2, 0xFFFFFF);
             }
 
+            // GUI-type indicator (gear dots)
             if (iType == MachineInteractType.GUI) {
-                int dotX = sx + SLOT_SIZE - 5;
-                int dotY = sy + 2;
-                for (int r = 0; r < 2; r++) {
-                    for (int c = 0; c < 2; c++) {
-                        g.fill(dotX + c * 2, dotY + r * 2,
-                               dotX + c * 2 + 1, dotY + r * 2 + 1, 0xFFBB88EE);
-                    }
-                }
+                int dx = sx + SLOT_SIZE - 6;
+                int dy = sy + 1;
+                for (int r = 0; r < 2; r++)
+                    for (int c = 0; c < 2; c++)
+                        g.fill(dx + c * 3, dy + r * 3, dx + c * 3 + 2, dy + r * 3 + 2, 0xFFBB88EE);
             }
 
+            // Tooltip
             if (isHovered) {
-                var tipLines = new java.util.ArrayList<Component>();
-                tipLines.add(Component.literal(
-                        net.minecraft.client.resources.language.I18n.get(info.displayName())));
+                var tip = new java.util.ArrayList<Component>();
+                tip.add(Component.literal(I18n.get(info.displayName())));
                 if (iType == MachineInteractType.QUICK) {
-                    String stateText = switch (iStatus.state()) {
+                    String st = switch (iStatus.state()) {
                         case HAS_OUTPUT -> "§b" + Component.translatable("rsi.hub.state.has_output").getString();
-                        case WORKING -> "§6" + Component.translatable("rsi.hub.state.working",
+                        case WORKING   -> "§6" + Component.translatable("rsi.hub.state.working",
                                 (int)(iStatus.progressFraction() * 100)).getString();
-                        case IDLE -> "§a" + Component.translatable("rsi.hub.state.idle").getString();
-                        case UNKNOWN -> "§7" + Component.translatable("rsi.hub.state.unknown").getString();
+                        case IDLE      -> "§a" + Component.translatable("rsi.hub.state.idle").getString();
+                        case UNKNOWN   -> "§7" + Component.translatable("rsi.hub.state.unknown").getString();
                     };
-                    tipLines.add(Component.literal(stateText));
+                    tip.add(Component.literal(st));
                 } else {
-                    tipLines.add(Component.translatable("rsi.hub.type.gui_machine").withStyle(
-                            net.minecraft.ChatFormatting.LIGHT_PURPLE));
+                    tip.add(Component.translatable("rsi.hub.type.gui_machine")
+                            .withStyle(net.minecraft.ChatFormatting.LIGHT_PURPLE));
                 }
                 if (info.dim() != null) {
-                    tipLines.add(Component.literal("§7" + info.dim() + " " + info.pos().toShortString()));
+                    tip.add(Component.literal("§7" + info.dim() + " " + info.pos().toShortString()));
                 }
                 if (iType == MachineInteractType.QUICK) {
                     if (iStatus.state() == MachineState.HAS_OUTPUT) {
-                        tipLines.add(Component.translatable("rsi.hub.controls.quick_has_output")
+                        tip.add(Component.translatable("rsi.hub.controls.quick_has_output")
                                 .withStyle(net.minecraft.ChatFormatting.AQUA));
                     } else {
-                        tipLines.add(Component.translatable("rsi.hub.controls.quick_normal")
+                        tip.add(Component.translatable("rsi.hub.controls.quick_normal")
                                 .withStyle(net.minecraft.ChatFormatting.GRAY));
                     }
                 } else {
-                    tipLines.add(Component.translatable("rsi.hub.controls.gui")
+                    tip.add(Component.translatable("rsi.hub.controls.gui")
                             .withStyle(net.minecraft.ChatFormatting.GRAY));
                 }
-                g.renderTooltip(font, tipLines, java.util.Optional.empty(), mouseX, mouseY);
+                g.renderTooltip(font, tip, java.util.Optional.empty(), mouseX, mouseY);
             }
         }
 
-        // Scrollbar
+        // ── Scrollbar ────────────────────────────────────────────────
         if (maxScroll > 0) {
-            int scrollbarX = x + totalW - 3;
-            int scrollbarH = Math.max(16, visibleGridH * visibleGridH / totalRowsHeight);
-            int scrollbarY = gridY_ + (int) ((long) scrollOffset * visibleGridH / totalRowsHeight);
-            g.fill(scrollbarX, gridY_, scrollbarX + 2, gridY_ + visibleGridH, 0x30FFFFFF);
-            g.fill(scrollbarX, scrollbarY, scrollbarX + 2, scrollbarY + scrollbarH, 0x80FFFFFF);
+            int sbX = x + totalW - 3;
+            int sbTop = gridY_;
+            int sbH = visibleGridH;
+            int thumbH = Math.max(16, sbH * sbH / totalRowsHeight);
+            int thumbY = sbTop + (int) ((long) scrollOffset * (sbH - thumbH) / maxScroll);
+            g.fill(sbX, sbTop, sbX + 2, sbTop + sbH, SCROLL_TRACK);
+            g.fill(sbX, thumbY, sbX + 2, thumbY + thumbH, SCROLL_THUMB);
         }
 
-        // Footer
+        // ── Footer ───────────────────────────────────────────────────
         int footerY = gridY_ + visibleGridH + 2;
-        String footer = Component.translatable("rsi.hub.machine_count", allMachines.size()).getString();
-        g.drawString(font, footer, x + PADDING, footerY, dimColor);
+        g.fill(x + PADDING, footerY, x + totalW - PADDING, footerY + 1, SEPARATOR);
+        int footerTextY = footerY + 3;
+        String footer = Component.translatable("rsi.hub.back_to_grid").getString()
+                + "  |  " + Component.translatable("rsi.hub.machine_count", allMachines.size()).getString();
+        g.drawString(font, footer, x + PADDING + 2, footerTextY, TEXT_DIM);
 
         pose.popPose();
 
-        if (hovered >= 0) {
-            MachineHub.setHoveredIndex(hovered);
-        }
-
+        if (hovered >= 0) MachineHub.setHoveredIndex(hovered);
         return hovered;
     }
 
-    /**
-     * Resolves a block item icon from the binding's blockKey.
-     * blockKey is a description ID (e.g. "block.goety.dark_altar") or
-     * "{prefix}||block.modid.name".  Convert it to a registry key to
-     * look up the block, falling back to the crafting table icon.
-     */
     static ItemStack resolveIcon(BindingInfo info) {
         String key = info.blockKey();
         if (key == null || key.isEmpty()) return new ItemStack(Items.CRAFTING_TABLE);
-
-        // Strip optional prefix:  "crystal_ritual||block.wizards_reborn.crystal"
         int sep = key.indexOf("||");
         String descId = sep >= 0 ? key.substring(sep + 2) : key;
-
-        // Convert "block.modid.name" → "modid:name"
         if (descId.startsWith("block.")) {
-            String rest = descId.substring(6); // "modid.name"
+            String rest = descId.substring(6);
             int dot = rest.indexOf('.');
             if (dot > 0) {
-                String registryKey = rest.substring(0, dot) + ":" + rest.substring(dot + 1);
-                var rl = ResourceLocation.tryParse(registryKey);
+                String regKey = rest.substring(0, dot) + ":" + rest.substring(dot + 1);
+                var rl = ResourceLocation.tryParse(regKey);
                 if (rl != null) {
                     var block = ForgeRegistries.BLOCKS.getValue(rl);
                     if (block != null) return new ItemStack(block.asItem());
