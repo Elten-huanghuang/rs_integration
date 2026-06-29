@@ -51,6 +51,7 @@ public final class MachineHubInputHandler {
         if (MachineHub.isConfigButtonHovered() && button == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
             boolean current = RSIntegrationConfig.RETURN_TO_RS_AFTER_MACHINE_GUI.get();
             RSIntegrationConfig.RETURN_TO_RS_AFTER_MACHINE_GUI.set(!current);
+            RSIntegrationConfig.CLIENT_SPEC.save();
             return true;
         }
 

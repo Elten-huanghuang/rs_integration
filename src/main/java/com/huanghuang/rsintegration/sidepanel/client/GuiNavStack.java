@@ -10,8 +10,6 @@ import net.minecraftforge.client.event.ClientPlayerNetworkEvent;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 
-import java.lang.ref.WeakReference;
-
 /**
  * Caches the RS GridScreen before opening a bound machine GUI, so that
  * pressing ESC in the machine GUI returns to the RS terminal instead of
@@ -25,7 +23,7 @@ import java.lang.ref.WeakReference;
  */
 @OnlyIn(Dist.CLIENT)
 public final class GuiNavStack {
-    private static WeakReference<Screen> cachedScreen = new WeakReference<>(null);
+    private static Screen cachedScreen;
     private static boolean pendingRestore;
     private static boolean hookRegistered;
 
@@ -35,7 +33,7 @@ public final class GuiNavStack {
     public static void pushCurrent() {
         Screen current = Minecraft.getInstance().getInstance().screen;
         if (current != null) {
-            cachedScreen = new WeakReference<>(current);
+            cachedScreen = current;
             pendingRestore = true;
             registerLogoutHook();
             RSIntegrationMod.LOGGER.debug("[RSI-GuiNav] Pushed screen: {}",
@@ -51,10 +49,9 @@ public final class GuiNavStack {
     public static void onScreenRemoved(Screen removed) {
         if (!pendingRestore || removed == null) return;
 
-        Screen cached = cachedScreen.get();
+        Screen cached = cachedScreen;
         if (cached == null) {
             pendingRestore = false;
-            RSIntegrationMod.LOGGER.debug("[RSI-GuiNav] pendingRestore cleared: cached screen GC'd");
             return;
         }
 
@@ -66,21 +63,17 @@ public final class GuiNavStack {
         Screen current = Minecraft.getInstance().getInstance().screen;
         if (current == cached) {
             pendingRestore = false;
-            cachedScreen.clear();
-            RSIntegrationMod.LOGGER.debug("[RSI-GuiNav] pendingRestore cleared: cached already on top");
+            cachedScreen = null;
             return;
         }
 
         // A different screen (the machine GUI) closed — restore RS GridScreen
         // if the user has enabled return-to-RS in config.
         pendingRestore = false;
-        cachedScreen.clear();
+        cachedScreen = null;
         if (!RSIntegrationConfig.RETURN_TO_RS_AFTER_MACHINE_GUI.get()) {
-            RSIntegrationMod.LOGGER.info("[RSI-GuiNav] Not restoring (returnToRsAfterMachineGui=false)");
             return;
         }
-        RSIntegrationMod.LOGGER.info("[RSI-GuiNav] Restoring cached screen: {} (removed={})",
-                cached.getClass().getSimpleName(), removed.getClass().getSimpleName());
         Minecraft.getInstance().getInstance().setScreen(cached);
     }
 
@@ -93,8 +86,7 @@ public final class GuiNavStack {
 
     @SubscribeEvent
     public static void onClientLogout(ClientPlayerNetworkEvent.LoggingOut event) {
-        cachedScreen.clear();
+        cachedScreen = null;
         pendingRestore = false;
-        RSIntegrationMod.LOGGER.debug("[RSI-GuiNav] Cleared on logout");
     }
 }

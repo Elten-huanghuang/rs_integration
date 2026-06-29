@@ -1,7 +1,6 @@
 package com.huanghuang.rsintegration.mixin.rs;
 
 import com.huanghuang.rsintegration.machine.MachineHub;
-import com.huanghuang.rsintegration.machine.MachineHubClient;
 import com.huanghuang.rsintegration.machine.MachineInteractType;
 import com.huanghuang.rsintegration.machine.MachineState;
 import com.huanghuang.rsintegration.machine.MachineStatus;
@@ -51,10 +50,7 @@ public abstract class GridScreenTooltipMixin {
                 if (total > 0 && MachineHub.shouldUseHub(total)) {
                     List<Component> hubTip = new ArrayList<>();
                     hubTip.add(Component.translatable("rsi.hub.title", total));
-                    String keyName = MachineHubClient.KEY_TOGGLE_HUB != null
-                            ? MachineHubClient.KEY_TOGGLE_HUB.getTranslatedKeyMessage().getString()
-                            : "?";
-                    hubTip.add(Component.translatable("rsi.hub.key_toggle", keyName)
+                    hubTip.add(Component.translatable("rsi.hub.tooltip_click")
                             .withStyle(ChatFormatting.GRAY));
                     gfx.renderTooltip(Minecraft.getInstance().font, hubTip,
                             Optional.empty(), mouseX, mouseY);

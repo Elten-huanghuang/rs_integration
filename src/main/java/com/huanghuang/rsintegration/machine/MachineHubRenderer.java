@@ -57,7 +57,7 @@ public final class MachineHubRenderer {
 
         // Ensure panel is wide enough for footer text + config toggle
         var font = Minecraft.getInstance().font;
-        int contentMinW = Math.max(slotGridW, 130);
+        int contentMinW = Math.max(slotGridW, 150);
         int totalW = contentMinW + PADDING * 2;
         int totalH = visibleGridH + TITLE_H + FILTER_H + FOOTER_H + PADDING * 3 + 2;
 
@@ -277,21 +277,44 @@ public final class MachineHubRenderer {
         g.fill(x + PADDING, footerY, x + totalW - PADDING, footerY + 1, SEPARATOR);
         int footerTextY = footerY + 3;
 
-        // Config toggle button (left side)
+        // Config checkbox + label
         boolean returnToRs = RSIntegrationConfig.RETURN_TO_RS_AFTER_MACHINE_GUI.get();
-        String toggleLabel = (returnToRs ? "§a✓ " : "§8✗ ")
-                + Component.translatable("rsi.hub.config_return_rs").getString();
-        int toggleMaxW = totalW - PADDING * 2 - 4;
-        String truncatedToggle = font.plainSubstrByWidth(toggleLabel, toggleMaxW);
-        int toggleW = font.width(truncatedToggle);
-        int toggleX = x + PADDING + 2;
-        int toggleY = footerTextY;
-        boolean toggleHovered = mouseX >= toggleX && mouseX < toggleX + toggleW
-                && mouseY >= toggleY - 1 && mouseY < toggleY + 9;
-        int toggleColor = toggleHovered ? TEXT_PRIMARY : (returnToRs ? 0xFF88CC88 : TEXT_DIM);
-        g.drawString(font, truncatedToggle, toggleX, toggleY, toggleColor);
+        int cbSize = 9;
+        int cbX = x + PADDING + 2;
+        int cbY = footerTextY - 1;
+        String labelText = Component.translatable("rsi.hub.config_return_rs").getString();
+        int maxLabelW = totalW - PADDING * 2 - cbSize - 8;
+        String truncatedLabel = font.plainSubstrByWidth(labelText, maxLabelW);
+        int labelX = cbX + cbSize + 3;
+        int labelY = footerTextY;
+
+        boolean toggleHovered = mouseX >= cbX && mouseX < cbX + cbSize + 3 + font.width(truncatedLabel)
+                && mouseY >= cbY - 1 && mouseY < cbY + cbSize + 2;
+
+        // Checkbox border
+        g.fill(cbX - 1, cbY - 1, cbX + cbSize + 1, cbY + cbSize + 1, toggleHovered ? 0xFF8899AA : 0xFF4A5568);
+        g.fill(cbX, cbY, cbX + cbSize, cbY + cbSize, PANEL_BG);
+        // Checkbox fill when enabled
+        if (returnToRs) {
+            int fillColor = toggleHovered ? 0xFF88CC88 : 0xFF55AA55;
+            g.fill(cbX + 1, cbY + 1, cbX + cbSize - 1, cbY + cbSize - 1, fillColor);
+            // Checkmark (simple cross-hatch)
+            g.fill(cbX + 2, cbY + 4, cbX + 4, cbY + 7, 0xFFFFFFFF);
+            g.fill(cbX + 4, cbY + 5, cbX + 7, cbY + 2, 0xFFFFFFFF);
+        }
+        // Label
+        int labelColor = toggleHovered ? TEXT_PRIMARY : TEXT_DIM;
+        g.drawString(font, truncatedLabel, labelX, labelY, labelColor);
+
+        // Tooltip on hover
+        if (toggleHovered) {
+            g.renderTooltip(font,
+                    List.of(Component.translatable("rsi.hub.config_return_rs_tooltip")),
+                    java.util.Optional.empty(), mouseX, mouseY);
+        }
+
         MachineHub.setConfigButtonHovered(toggleHovered);
-        MachineHub.setConfigButtonBounds(toggleX, toggleY - 1, toggleW, 10);
+        MachineHub.setConfigButtonBounds(cbX, cbY - 1, cbSize + 3 + font.width(truncatedLabel), cbSize + 4);
 
         pose.popPose();
 

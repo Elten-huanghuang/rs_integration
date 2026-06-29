@@ -103,8 +103,7 @@ public final class RSIntegrationMod {
             com.huanghuang.rsintegration.sidepanel.RSSidePanelModule.initCommon();
         }
         if (RSIntegrationConfig.ENABLE_MACHINE_GUI_TABS.get()) {
-            DistExecutor.safeRunWhenOn(Dist.CLIENT,
-                    () -> com.huanghuang.rsintegration.machine.MachineHubClient::init);
+            // Hub toggle is now mouse-only (click the Hub button on the left side of the RS grid)
         }
         if (enabled(RSIntegrationConfig.ENABLE_SOPHISTICATED_BACKPACKS, ModIds.SOPHISTICATED_BACKPACKS)) {
             com.huanghuang.rsintegration.backpack.SophisticatedBackpacksItems
