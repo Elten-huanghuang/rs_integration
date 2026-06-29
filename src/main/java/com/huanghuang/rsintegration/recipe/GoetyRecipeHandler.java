@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.recipe;
 
 import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.util.Reflect;
 import net.minecraft.core.RegistryAccess;
@@ -25,7 +26,7 @@ final class GoetyRecipeHandler implements ModRecipeHandler {
         // Filter out rituals that can't be automated safely:
         // ConvertRitual (converts mobs), TeleportRitual (teleports players).
         // SummonRitual is allowed — spawns entities.
-        var ritualOpt = com.huanghuang.rsintegration.util.Reflect.invoke(recipe, "getRitual");
+        var ritualOpt = Reflect.invoke(recipe, "getRitual");
         if (ritualOpt.isPresent()) {
             String name = ritualOpt.get().getClass().getSimpleName();
             if (name.equals("ConvertRitual")
@@ -40,14 +41,49 @@ final class GoetyRecipeHandler implements ModRecipeHandler {
             if ((boolean) recipe.getClass().getMethod("requiresSacrifice").invoke(recipe)) {
                 return false;
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Goety] requiresSacrifice probe failed", e); }
 
         return true;
     }
 
     @Override
     public ItemStack getResultItem(Recipe<?> recipe, RegistryAccess access) {
-        return ModRecipeHandlers.tryGetResultItem(recipe, access);
+        // Try standard getResultItem first (may work on some subclasses)
+        ItemStack result = recipe.getResultItem(access);
+        if (!result.isEmpty()) return result;
+
+        // Try to find output through the ritual object
+        try {
+            var ritualObj = Class.forName("com.Polarice3.Goety.common.crafting.RitualRecipe")
+                    .getMethod("getRitual").invoke(recipe);
+            if (ritualObj != null) {
+                // Ritual has getOutput() → ItemStack
+                for (var m : ritualObj.getClass().getMethods()) {
+                    if ((m.getName().equals("getOutput") || m.getName().equals("getResult"))
+                            && ItemStack.class.isAssignableFrom(m.getReturnType())
+                            && m.getParameterCount() == 0) {
+                        ItemStack s = (ItemStack) m.invoke(ritualObj);
+                        if (!s.isEmpty()) return s;
+                    }
+                }
+            }
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Goety] Ritual output probe failed", e); }
+
+        // Scan fields for an output ItemStack
+        Class<?> scan = recipe.getClass();
+        while (scan != null && scan != Object.class) {
+            for (var f : scan.getDeclaredFields()) {
+                if (!ItemStack.class.isAssignableFrom(f.getType())) continue;
+                f.setAccessible(true);
+                try {
+                    ItemStack s = (ItemStack) f.get(recipe);
+                    if (s != null && !s.isEmpty()) return s.copy();
+                } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Goety] Field probe {} failed", f.getName(), e); }
+            }
+            scan = scan.getSuperclass();
+        }
+
+        return ItemStack.EMPTY;
     }
 
     @Nullable
@@ -70,7 +106,7 @@ final class GoetyRecipeHandler implements ModRecipeHandler {
             if (act.isPresent() && act.get() instanceof Ingredient aing && !aing.isEmpty()) {
                 result.add(new IngredientSpec(aing, 1));
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Goety] getActivationItem probe failed", e); }
 
         return result.isEmpty() ? null : result;
     }

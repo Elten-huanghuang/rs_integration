@@ -4,12 +4,16 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
 import com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket;
 import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler;
+import com.huanghuang.rsintegration.sidepanel.client.GuiNavStack;
+import com.huanghuang.rsintegration.sidepanel.network.OpenBoundMachineGuiPacket;
 import com.huanghuang.rsintegration.util.UIRenderer;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.resources.language.I18n;
 import org.lwjgl.glfw.GLFW;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
@@ -38,8 +42,6 @@ public final class CraftingPlanScreen extends Screen {
     private static final int C_BG          = 0xCC0D0D0D;
     private static final int C_MODTAG_BG   = 0xCC338855;
     private static final int C_MODTAG_TEXT = 0xFFCCFFDD;
-    private static final int C_TREE_LINE_TOP = 0xB4334433;
-    private static final int C_TREE_LINE_BOT = 0x1E334433;
     private static final int C_ARROW       = 0xFF44CC88;
     private static final int C_ARROW_DIM   = 0xFF334433;
     private static final int C_NAME_TEXT   = 0xFFBBCCBB;
@@ -52,14 +54,6 @@ public final class CraftingPlanScreen extends Screen {
     private static final int C_TEXT_BACKDROP  = 0xAA0A0A0A;
     // Slot hover brightening
     private static final int C_SLOT_HOVER = 0x80FFFFFF;
-    // Pill colors
-    private static final int C_PILL_GREEN_BG = 0xCC1B5E20;
-    private static final int C_PILL_GREEN_FG = 0xFFC8E6C9;
-    private static final int C_PILL_RED_BG   = 0xCCB71C1C;
-    private static final int C_PILL_RED_FG   = 0xFFFFCDD2;
-    private static final int C_PILL_ORANGE_BG = 0xCCE65100;
-    private static final int C_PILL_ORANGE_FG = 0xFFFFE0B2;
-
     private final PlanResponse plan;
     private int currentRepeat = 1;
     private int scrollOffset;
@@ -80,6 +74,8 @@ public final class CraftingPlanScreen extends Screen {
     private int lastRefreshCount = 1;
     private int ticksOpen;
     private int mouseX, mouseY;
+
+    private PlanRenderEngine renderEngine;
 
     private int embersPedestalY;
     private int embersPedestalH;
@@ -126,8 +122,15 @@ public final class CraftingPlanScreen extends Screen {
     private int hoveredTooltipAvail, hoveredTooltipNeeded;
 
     protected CraftingPlanScreen(PlanResponse plan) {
-        super(Component.translatable("rsi.plan.title", plan.targetName()));
+        super(Component.translatable("rsi.plan.title",
+                plan.targetResult().getHoverName().getString()));
         this.plan = plan;
+        this.renderEngine = new PlanRenderEngine(Minecraft.getInstance().font);
+    }
+
+    /** Exposed for {@link PlanResponsePacket} dedup check. */
+    public String getRecipeId() {
+        return plan.recipeId();
     }
 
     @Override
@@ -138,6 +141,9 @@ public final class CraftingPlanScreen extends Screen {
         altChoices.clear();
         Font font = minecraft.font;
         int contentW = width - 40;
+
+        // Start card-entry animation (target card + intermediate steps)
+        renderEngine.animation().start(1 + plan.steps().size());
 
         // Embers alchemy pedestal layout height
         boolean hasEmbers = plan.embersCode() != null
@@ -192,6 +198,21 @@ public final class CraftingPlanScreen extends Screen {
         int btnW = 80;
         int btnY = height - 24;
 
+        // "Open Machine" button — only when a bound machine position is known
+        // AND the mod type is in the config whitelist (machines that actually have GUIs)
+        boolean hasMachineGui = plan.executionModTypeId() != null
+                && com.huanghuang.rsintegration.config.RSIntegrationConfig.MACHINE_GUI_WHITELIST.get()
+                        .contains(plan.executionModTypeId());
+        if (plan.executionDim() != null && !plan.executionDim().isEmpty() && hasMachineGui) {
+            int openBtnW = 90;
+            addRenderableWidget(Button.builder(
+                            Component.translatable("rsi.plan.open_machine"),
+                            btn -> onOpenMachine())
+                    .pos(width / 2 - btnW - openBtnW - 20, btnY)
+                    .size(openBtnW, 20)
+                    .build());
+        }
+
         addRenderableWidget(Button.builder(
                         Component.translatable("rsi.plan.confirm"),
                         btn -> onConfirm())
@@ -224,6 +245,17 @@ public final class CraftingPlanScreen extends Screen {
             }
         }
         onClose();
+    }
+
+    private void onOpenMachine() {
+        ResourceLocation dim = ResourceLocation.tryParse(plan.executionDim());
+        if (dim == null) return;
+        net.minecraft.core.BlockPos pos = new net.minecraft.core.BlockPos(
+                plan.executionPosX(), plan.executionPosY(), plan.executionPosZ());
+        ResourceLocation recipeId = ResourceLocation.tryParse(plan.recipeId());
+        GuiNavStack.pushCurrent();
+        RSSidePanelNetworkHandler.CHANNEL.sendToServer(
+                new OpenBoundMachineGuiPacket(dim, pos, plan.recipeId(), recipeId));
     }
 
     private void requestPlanRefresh() {
@@ -305,7 +337,8 @@ public final class CraftingPlanScreen extends Screen {
             int cardW0 = contentW - 8;
             y = drawStepCard(gfx, font, left + 4, y, cardW0,
                     plan.targetResult(), plan.targetResult().getHoverName().getString(),
-                    null, plan.repeatCount(), stepIdx++, 0f);
+                    null, plan.repeatCount(), stepIdx, 0);
+            stepIdx++;
             int prevCardBottom = y;
             int prevStepX = left + 4;
 
@@ -316,15 +349,13 @@ public final class CraftingPlanScreen extends Screen {
                 int cardW = contentW - 8 - step.depth() * INDENT;
 
                 y += CONNECTOR_GAP;
-                drawTreeConnector(gfx, prevCardBottom, y, stepX, prevStepX, i);
+                renderEngine.drawTreeConnector(gfx, prevCardBottom, y, stepX, prevStepX, INDENT, i);
 
-                // Staggered animation: each card fades in 3 ticks after the previous
-                float cardFade = Math.min(1f, Math.max(0f,
-                        (ticksOpen - 5f - i * 3f) / 6f));
-
+                int animIdx = i + 1;
                 y = drawStepCard(gfx, font, stepX, y, cardW,
                         step.output(), step.output().getHoverName().getString(),
-                        step, step.batches(), stepIdx++, cardFade);
+                        step, step.batches(), stepIdx, animIdx);
+                stepIdx++;
 
                 prevCardBottom = y;
                 prevStepX = stepX;
@@ -349,7 +380,15 @@ public final class CraftingPlanScreen extends Screen {
 
         // Material summary
         if (materialAreaHeight > 0) {
-            renderMaterialArea(gfx, font, left, materialAreaTop, contentW);
+            renderEngine.renderMaterialArea(gfx, left, materialAreaTop, contentW,
+                    materialAreaHeight, plan.materials(), mouseX, mouseY,
+                    (stack, mx, my, avail, need) -> {
+                        hoveredItemForTooltip = stack;
+                        hoveredTooltipX = mx;
+                        hoveredTooltipY = my;
+                        hoveredTooltipAvail = avail;
+                        hoveredTooltipNeeded = need;
+                    });
         }
 
         // ── Repeat count row ─────────────────────────────────────────
@@ -440,7 +479,7 @@ public final class CraftingPlanScreen extends Screen {
 
     private int drawStepCard(GuiGraphics gfx, Font font, int x, int y, int cardW,
                               ItemStack output, String outputName,
-                              PlanStep step, int batches, int idx, float fade) {
+                              PlanStep step, int batches, int idx, int animIdx) {
         boolean isMultiblock = step != null
                 && step.modType() != null
                 && step.modType() != ModType.GENERIC;
@@ -467,10 +506,11 @@ public final class CraftingPlanScreen extends Screen {
         int warnH = (step != null && !step.warnings().isEmpty()) ? step.warnings().size() * (font.lineHeight + 3) + 6 : 0;
         cardH += warnH;
 
-        // ── Card background ───────────────────────────────────
-        if (fade < 1f) {
+        // ── Card entrance animation — slide in from right ──────
+        int slideX = renderEngine.animation().getSlideOffset(animIdx, 30);
+        if (slideX != 0) {
             gfx.pose().pushPose();
-            gfx.pose().translate(0, (1f - fade) * 12f, 0);
+            gfx.pose().translate(slideX, 0, 0);
         }
 
         int accent = step != null ? stepAccent(step, batches) : C_ACCENT_NEUTRAL;
@@ -494,7 +534,7 @@ public final class CraftingPlanScreen extends Screen {
             String modLabel = Component.translatable(
                     "rsi.batch.mod." + step.modType().id()).getString();
             int labelW = font.width(modLabel) + 12;
-            UIRenderer.pill(gfx, cx, cy, labelW, font.lineHeight + 4, fade, true);
+            UIRenderer.pill(gfx, cx, cy, labelW, font.lineHeight + 4, renderEngine.animation().getAlpha(animIdx), true);
             gfx.drawString(font, modLabel, cx + 6, cy + 2, C_MODTAG_TEXT);
             cy += font.lineHeight + 8;
         }
@@ -516,7 +556,10 @@ public final class CraftingPlanScreen extends Screen {
                     int row = i / step.recipeWidth();
                     int sx = gridLeft + col * (GRID_SLOT + GRID_GAP);
                     int sy = gridTop + row * (GRID_SLOT + GRID_GAP);
-                    drawGridSlot(gfx, font, sx, sy, step.inputs().get(i), step.batches());
+                    ItemStack gs = step.inputs().get(i);
+                    int gTotal = gs.getCount() * Math.max(1, step.batches());
+                    int gDisp = batches > 1 ? gs.getCount() : gTotal;
+                    drawGridSlot(gfx, font, sx, sy, gs, gTotal, gDisp);
                 }
                 int totalCells = step.recipeWidth() * step.recipeHeight();
                 for (int i = step.inputs().size(); i < totalCells; i++) {
@@ -534,7 +577,9 @@ public final class CraftingPlanScreen extends Screen {
                     ItemStack in = step.inputs().get(i);
                     int sx = cx + (i % cols) * (SLOT_SIZE + 3);
                     int sy = cy + (i / cols) * (SLOT_SIZE + 3);
-                    drawSlot(gfx, font, sx, sy, in, step.batches(), true);
+                    int totalNeed = in.getCount() * Math.max(1, step.batches());
+                    int disp = batches > 1 ? in.getCount() : totalNeed;
+                    drawSlot(gfx, font, sx, sy, in, totalNeed, disp, true);
                 }
                 cx += cols * (SLOT_SIZE + 3) + ARROW_W;
             }
@@ -547,7 +592,7 @@ public final class CraftingPlanScreen extends Screen {
 
         // ── Output slot ───────────────────────────────────────
         int outAmount = batches > 0 ? output.getCount() * batches : output.getCount();
-        drawSlot(gfx, font, cx, cy, output, outAmount, false);
+        drawSlot(gfx, font, cx, cy, output, outAmount, outAmount, false);
 
         // ── Output name ───────────────────────────────────────
         int nameMaxW = x + cardW - cx - SLOT_SIZE - 8;
@@ -606,7 +651,9 @@ public final class CraftingPlanScreen extends Screen {
 
             for (int i = 0; i < choices.size(); i++) {
                 AltChoice ac = choices.get(i);
-                String label = ac.recipeId.getPath();
+                String modName = Component.translatable(
+                        "rsi.batch.mod." + ac.modTypeId).getString();
+                String label = modName;
                 int bw = font.width(label) + 10;
                 if (badgeX + bw > x + cardW - CARD_PAD) break;
 
@@ -620,7 +667,7 @@ public final class CraftingPlanScreen extends Screen {
                 // Tooltip on hover
                 if (mouseX >= badgeX && mouseX <= badgeX + bw
                         && mouseY >= badgeY && mouseY <= badgeY + badgeH) {
-                    String tip = ac.recipeId.toString() + "  [" + ac.modTypeId + "]";
+                    String tip = ac.recipeId.toString() + "  [" + modName + "]";
                     gfx.renderTooltip(font, Component.literal(tip), mouseX, mouseY);
                 }
 
@@ -643,15 +690,17 @@ public final class CraftingPlanScreen extends Screen {
             }
         }
 
-        if (fade < 1f) gfx.pose().popPose();
+        if (slideX != 0) gfx.pose().popPose();
 
         return y + cardH + 8;
     }
 
     // ── Grid slot ─────────────────────────────────────────────────
 
+    /** @param needed       threshold for border color
+     *  @param displayCount number drawn in corner; 0 = hide, 1 = vanilla decorations */
     private void drawGridSlot(GuiGraphics gfx, Font font, int x, int y,
-                               ItemStack stack, int needed) {
+                               ItemStack stack, int needed, int displayCount) {
         boolean hovered = mouseX >= x - 1 && mouseX <= x + GRID_SLOT + 1
                 && mouseY >= y - 1 && mouseY <= y + GRID_SLOT + 1;
 
@@ -679,14 +728,14 @@ public final class CraftingPlanScreen extends Screen {
             gfx.fill(x + GRID_SLOT + 1, y - 1, x + GRID_SLOT + 2, y + GRID_SLOT + 1, C_SLOT_HOVER);
         }
 
-        if (needed > 1) {
+        if (displayCount > 1) {
             gfx.pose().pushPose();
             gfx.pose().translate(0, 0, 200);
-            String txt = String.valueOf(needed);
+            String txt = String.valueOf(displayCount);
             gfx.drawString(font, txt, x + GRID_SLOT - font.width(txt),
                     y + GRID_SLOT - font.lineHeight + 2, 0xFFFFFF);
             gfx.pose().popPose();
-        } else {
+        } else if (displayCount == 1) {
             gfx.renderItemDecorations(font, stack, x + 1, y + 1);
         }
     }
@@ -694,50 +743,6 @@ public final class CraftingPlanScreen extends Screen {
     private void drawGridPlaceholder(GuiGraphics gfx, int x, int y) {
         gfx.fill(x - 1, y - 1, x + GRID_SLOT + 1, y + GRID_SLOT + 1, 0xFF3A3A3A);
         gfx.fill(x, y, x + GRID_SLOT, y + GRID_SLOT, 0xFF252525);
-    }
-
-    // ── Tree connector ────────────────────────────────────────────
-
-    private void drawTreeConnector(GuiGraphics gfx, int prevBottom, int currTop,
-                                    int childX, int parentX, int stepIdx) {
-        int stemX = childX - INDENT / 2;
-        if (stemX < 4) stemX = 4;
-
-        // Vertical line — gradient fade top→bottom, 2px wide
-        int lineColorTop = C_TREE_LINE_TOP;
-        int lineColorBottom = C_TREE_LINE_BOT;
-        UIRenderer.vLineGradient(gfx, stemX, prevBottom, currTop, 2f,
-                lineColorTop, lineColorBottom);
-
-        // Horizontal branch — fading toward child
-        if (childX > stemX + 6) {
-            int hY = currTop - 4;
-            // Fade from stem toward child
-            int branchSteps = Math.max(1, (childX - stemX) / 4);
-            for (int i = 0; i < branchSteps; i++) {
-                float t = (float) i / branchSteps;
-                int segX = (int) (stemX + t * (childX - stemX));
-                int nextX = (int) (stemX + (t + 1f / branchSteps) * (childX - stemX));
-                int c = UIRenderer.mix(lineColorTop, lineColorBottom, t * 0.5f);
-                gfx.fill(segX, hY, nextX + 1, hY + 2, c);
-            }
-        }
-
-        // Step number circle at branch point
-        int circleX = stemX + 1;
-        int circleY = currTop - 6;
-        int circleR = 6;
-        UIRenderer.rounded(gfx, circleX - circleR, circleY - circleR,
-                circleR * 2f, circleR * 2f, circleR, 0xFF1A2A1A);
-        UIRenderer.rounded(gfx, circleX - circleR + 1, circleY - circleR + 1,
-                circleR * 2f - 2, circleR * 2f - 2, circleR - 1, 0xFF2A4A2A);
-
-        String num = String.valueOf(stepIdx + 1);
-        Font font = minecraft.font;
-        gfx.drawString(font, num,
-                circleX - font.width(num) / 2,
-                circleY - font.lineHeight / 2,
-                0xFF88BB88);
     }
 
     // ── Alternative selection ─────────────────────────────────────
@@ -798,8 +803,10 @@ public final class CraftingPlanScreen extends Screen {
 
     // ── Slot drawing ──────────────────────────────────────────────
 
+    /** @param needed       threshold for color (green/orange/red)
+     *  @param displayCount number shown in the slot corner; 0 = hide */
     private void drawSlot(GuiGraphics gfx, Font font, int x, int y,
-                           ItemStack stack, int needed, boolean isInput) {
+                           ItemStack stack, int needed, int displayCount, boolean isInput) {
         int avail = 0;
         PlanResponse.Availability a = plan.materials().get(stack.getItem());
         if (a != null) avail = a.available();
@@ -834,102 +841,15 @@ public final class CraftingPlanScreen extends Screen {
             hoveredTooltipNeeded = needed;
         }
 
-        if (needed > 1) {
+        if (displayCount > 1) {
             gfx.pose().pushPose();
             gfx.pose().translate(0, 0, 200);
-            String txt = String.valueOf(needed);
+            String txt = String.valueOf(displayCount);
             gfx.drawString(font, txt, x + SLOT_SIZE - font.width(txt),
                     y + SLOT_SIZE - font.lineHeight + 2, 0xFFFFFF);
             gfx.pose().popPose();
-        } else {
+        } else if (displayCount == 1) {
             gfx.renderItemDecorations(font, stack, x + 1, y + 1);
-        }
-    }
-
-    // ── Material area ─────────────────────────────────────────────
-
-    private void renderMaterialArea(GuiGraphics gfx, Font font, int left, int top, int contentW) {
-        // Background with emerald left accent
-        UIRenderer.roundedGradient(gfx, left, top, contentW, materialAreaHeight, 6f,
-                0xE6141E18, 0xE6101814);
-        gfx.fill(left + 1, top + 2, left + 4, top + materialAreaHeight - 2, 0xFF44AA66);
-
-        // Header with text backdrop
-        int y = top + 4;
-        String hdr = Component.translatable("rsi.plan.materials").getString();
-        UIRenderer.textBackdrop(gfx, font, left + 10, y, hdr, C_TEXT_BACKDROP);
-        gfx.drawString(font, hdr, left + 10, y, 0xFFCCCCCC);
-        y += font.lineHeight + 4;
-
-        // Measure pill widths
-        int maxPillW = 0;
-        String[][] countPairs = new String[plan.materials().size()][];
-        int pi = 0;
-        for (var entry : plan.materials().entrySet()) {
-            String[] pair = {String.valueOf(entry.getValue().available()),
-                             String.valueOf(entry.getValue().needed())};
-            countPairs[pi++] = pair;
-            int w = font.width(pair[0]) + font.width("/") + font.width(pair[1]) + 14;
-            if (w > maxPillW) maxPillW = w;
-        }
-        int cellW = SLOT_SIZE + maxPillW + 10;
-        int cols = Math.max(1, (contentW - 16) / cellW);
-        int cx = left + 8;
-        int cy = y;
-        int col = 0;
-
-        gfx.enableScissor(left, top, left + contentW, top + materialAreaHeight);
-        try {
-            pi = 0;
-            for (var entry : plan.materials().entrySet()) {
-                int needed = entry.getValue().needed();
-                int have = entry.getValue().available();
-                int border = have >= needed ? C_GREEN : (have > 0 ? C_ORANGE : C_RED);
-
-                Item item = entry.getKey();
-                ItemStack stack = new ItemStack(item);
-                UIRenderer.slotBg(gfx, cx, cy, SLOT_SIZE, border);
-                gfx.renderItem(stack, cx + 1, cy + 1);
-                gfx.renderItemDecorations(font, stack, cx + 1, cy + 1);
-
-                // Defer tooltip — render after scissor disabled
-                if (mouseX >= cx - 1 && mouseX <= cx + SLOT_SIZE + 1
-                        && mouseY >= cy - 1 && mouseY <= cy + SLOT_SIZE + 1) {
-                    hoveredItemForTooltip = stack;
-                    hoveredTooltipX = mouseX;
-                    hoveredTooltipY = mouseY;
-                    hoveredTooltipAvail = have;
-                    hoveredTooltipNeeded = needed;
-                }
-
-                // Pill badge for count
-                String[] pair = countPairs[pi++];
-                String pillText = pair[0] + "/" + pair[1];
-                int pillW = font.width(pillText) + 14;
-                int pillH = font.lineHeight + 4;
-                int pillX = cx + SLOT_SIZE + 4;
-                int pillY = cy + SLOT_SIZE / 2 - pillH / 2;
-
-                int pillBg, pillFg;
-                if (have >= needed) {
-                    pillBg = C_PILL_GREEN_BG; pillFg = C_PILL_GREEN_FG;
-                } else if (have > 0) {
-                    pillBg = C_PILL_ORANGE_BG; pillFg = C_PILL_ORANGE_FG;
-                } else {
-                    pillBg = C_PILL_RED_BG; pillFg = C_PILL_RED_FG;
-                }
-                UIRenderer.pillBadge(gfx, font, pillX, pillY, pillW, pillH, pillBg, pillFg, pillText);
-
-                col++;
-                cx += cellW;
-                if (col >= cols) {
-                    col = 0;
-                    cx = left + 8;
-                    cy += SLOT_SIZE + 8;
-                }
-            }
-        } finally {
-            gfx.disableScissor();
         }
     }
 
@@ -980,7 +900,7 @@ public final class CraftingPlanScreen extends Screen {
                 UIRenderer.rounded(gfx, px, py, cardW, cardH, 4f, 0xCC1A221E);
 
                 // Input name (top)
-                String inputName = i < inputs.length ? inputs[i] : "?";
+                String inputName = i < inputs.length ? I18n.get(inputs[i]) : "?";
                 int maxNameW = cardW - 8;
                 if (font.width(inputName) > maxNameW) {
                     inputName = font.plainSubstrByWidth(inputName, maxNameW - font.width("...")) + "...";
@@ -989,7 +909,7 @@ public final class CraftingPlanScreen extends Screen {
                 gfx.drawString(font, inputName, nameX, py + 2, 0xFFCCCCCC);
 
                 // Aspect name (bottom)
-                String aspectName = i < aspects.length ? aspects[i] : "?";
+                String aspectName = i < aspects.length ? I18n.get(aspects[i]) : "?";
                 if (font.width(aspectName) > maxNameW) {
                     aspectName = font.plainSubstrByWidth(aspectName, maxNameW - font.width("...")) + "...";
                 }
@@ -1085,7 +1005,7 @@ public final class CraftingPlanScreen extends Screen {
             gfx.drawString(font, hdr, left + 10, my, 0xFFFF6666);
             my += font.lineHeight + 4;
             for (String msg : plan.missing()) {
-                String line = "  " + msg;
+                String line = "  " + I18n.get(msg);
                 UIRenderer.textBackdrop(gfx, font, left + 10, my, line, C_TEXT_BACKDROP);
                 gfx.drawString(font, line, left + 10, my, 0xFFCC8888);
                 my += font.lineHeight + 4;

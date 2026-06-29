@@ -41,7 +41,6 @@ public final class EidolonCraftPacket {
     @Nullable private final ResourceLocation dim;
     private final BlockPos pos;
 
-    private static volatile boolean classesLoaded;
     private static volatile Class<?> crucibleRecipeClass;
     private static volatile Class<?> crucibleRecipeStepClass;
     private static volatile Class<?> crucibleTileEntityClass;
@@ -50,8 +49,11 @@ public final class EidolonCraftPacket {
     private static volatile java.lang.reflect.Field stepsField;
 
     private static void ensureClasses() {
-        if (classesLoaded) return;
-        classesLoaded = true;
+        if (!com.huanghuang.rsintegration.util.ModClassLoader.ensureClasses("eidolon",
+                "elucent.eidolon.recipe.CrucibleRecipe",
+                "elucent.eidolon.recipe.CrucibleRecipe$Step",
+                "elucent.eidolon.common.tile.CrucibleTileEntity",
+                "elucent.eidolon.common.tile.CrucibleTileEntity$CrucibleStep")) return;
         try {
             crucibleRecipeClass = Class.forName("elucent.eidolon.recipe.CrucibleRecipe");
             crucibleRecipeStepClass = Class.forName("elucent.eidolon.recipe.CrucibleRecipe$Step");
@@ -101,7 +103,7 @@ public final class EidolonCraftPacket {
     public static void handle(EidolonCraftPacket packet, Supplier<NetworkEvent.Context> contextSupplier) {
         NetworkEvent.Context context = contextSupplier.get();
         ServerPlayer player = context.getSender();
-        if (player == null) {
+        if (player == null || player instanceof net.minecraftforge.common.util.FakePlayer) {
             context.setPacketHandled(true);
             return;
         }        context.enqueueWork(() -> {
@@ -132,11 +134,12 @@ public final class EidolonCraftPacket {
             return;
         }
         if (!crucibleRecipeClass.isInstance(recipe)) {
-            player.sendSystemMessage(Component.translatable("rsi.generic.error.wrong_recipe_type"));
+            player.sendSystemMessage(Component.literal("§c" + Component.translatable("rsi.generic.error.wrong_recipe_type").getString()
+                    + " [" + recipeId + " expected=CrucibleRecipe got=" + recipe.getClass().getSimpleName() + "]"));
             return;
         }
 
-        if (!level.isLoaded(pos)) level.getChunk(pos);
+        com.huanghuang.rsintegration.util.ChunkUtils.loadChunk(level, pos);
         BlockEntity be = level.getBlockEntity(pos);
         if (be == null || !crucibleTileEntityClass.isInstance(be)) {
             player.sendSystemMessage(Component.translatable("rsi.eidolon.error.crucible_not_found"));

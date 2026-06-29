@@ -182,6 +182,16 @@ final class ResolutionContext {
             int take = Math.min(available, remaining);
             decrement(key, take);
             remaining -= take;
+            // Return crafting remainder immediately so it stays available
+            // for subsequent ingredient groups within the same recipe.
+            try {
+                ItemStack remainder = key.toStack().getCraftingRemainingItem();
+                if (!remainder.isEmpty()) {
+                    add(remainder.copyWithCount(take));
+                }
+            } catch (Throwable e) {
+                // defensive — broken getCraftingRemainingItem implementations
+            }
         }
         return remaining <= 0;
     }

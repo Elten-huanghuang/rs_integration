@@ -61,7 +61,7 @@ public final class RecipeIndex {
 
                 if (handler != null) {
                     type = handler.modType();
-                    result = handler.getResultItem(recipe, level.registryAccess());
+                    result = ModRecipeHandlers.tryGetResultItem(recipe, level.registryAccess());
                 } else if (recipe instanceof CraftingRecipe cr
                         && ModType.classifyRecipe(recipe) == null) {
                     // Vanilla / CraftTweaker / datapack crafting recipe — no handler needed

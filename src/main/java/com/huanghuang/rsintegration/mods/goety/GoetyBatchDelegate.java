@@ -1,29 +1,19 @@
 package com.huanghuang.rsintegration.mods.goety;
 
-import com.Polarice3.Goety.common.blocks.entities.DarkAltarBlockEntity;
-import com.Polarice3.Goety.common.blocks.entities.NecroBrazierBlockEntity;
-import com.Polarice3.Goety.common.blocks.entities.PedestalBlockEntity;
-import com.Polarice3.Goety.common.blocks.entities.SoulCandlestickBlockEntity;
-import com.Polarice3.Goety.common.crafting.BrazierRecipe;
-import com.Polarice3.Goety.common.crafting.RitualRecipe;
-import com.Polarice3.Goety.common.ritual.CraftItemRitual;
-import com.Polarice3.Goety.common.ritual.EnchantItemRitual;
-import com.Polarice3.Goety.common.ritual.Ritual;
-import com.Polarice3.Goety.common.ritual.RitualRequirements;
-import com.Polarice3.Goety.common.ritual.ConvertRitual;
-import com.Polarice3.Goety.common.ritual.TeleportRitual;
-import com.Polarice3.Goety.utils.SEHelper;
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.ModRecipeIndex;
-import com.huanghuang.rsintegration.network.AltarBindingRegistry;
-import com.huanghuang.rsintegration.network.RSIntegration;
+import com.huanghuang.rsintegration.util.Reflect;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.NonNullList;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.Level;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
@@ -31,6 +21,7 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
@@ -38,24 +29,52 @@ import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraftforge.common.util.LazyOptional;
+import net.minecraftforge.items.IItemHandler;
 import net.minecraftforge.items.ItemHandlerHelper;
 
 import javax.annotation.Nullable;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
-public final class GoetyBatchDelegate implements IBatchDelegate {
+public final class GoetyBatchDelegate extends AbstractBatchDelegate {
 
     // ── Shared class refs ────────────────────────────────────────
-    private static volatile boolean classesLoaded;
     private static volatile Class<?> darkAltarBEClass;
     private static volatile Class<?> seHelperClass;
     private static volatile Class<?> cursedCageBEClass;
     private static volatile Class<?> researchListClass;
+    private static volatile Class<?> necroBrazierBEClass;
+    private static volatile Class<?> pedestalBEClass;
+    private static volatile Class<?> soulCandlestickBEClass;
+    private static volatile Class<?> brazierRecipeClass;
+    private static volatile Class<?> ritualRecipeClass;
+    private static volatile Class<?> ritualClass;
+    private static volatile Class<?> enchantItemRitualClass;
+    private static volatile Class<?> convertRitualClass;
+    private static volatile Class<?> teleportRitualClass;
+    private static volatile Class<?> ritualRequirementsClass;
+    private static volatile Class<?> ritualBlockEntityClass;
 
     private static void ensureClasses() {
-        if (classesLoaded) return;
+        if (!com.huanghuang.rsintegration.util.ModClassLoader.ensureClasses("goety",
+                "com.Polarice3.Goety.common.blocks.entities.DarkAltarBlockEntity",
+                "com.Polarice3.Goety.utils.SEHelper",
+                "com.Polarice3.Goety.common.blocks.entities.CursedCageBlockEntity",
+                "com.Polarice3.Goety.common.blocks.entities.NecroBrazierBlockEntity",
+                "com.Polarice3.Goety.common.blocks.entities.PedestalBlockEntity",
+                "com.Polarice3.Goety.common.blocks.entities.SoulCandlestickBlockEntity",
+                "com.Polarice3.Goety.common.blocks.entities.RitualBlockEntity",
+                "com.Polarice3.Goety.common.crafting.BrazierRecipe",
+                "com.Polarice3.Goety.common.crafting.RitualRecipe",
+                "com.Polarice3.Goety.common.ritual.Ritual",
+                "com.Polarice3.Goety.common.ritual.EnchantItemRitual",
+                "com.Polarice3.Goety.common.ritual.ConvertRitual",
+                "com.Polarice3.Goety.common.ritual.TeleportRitual",
+                "com.Polarice3.Goety.common.ritual.RitualRequirements",
+                "com.Polarice3.Goety.common.research.ResearchList")) return;
         try {
             darkAltarBEClass = Class.forName(
                     "com.Polarice3.Goety.common.blocks.entities.DarkAltarBlockEntity");
@@ -63,6 +82,28 @@ public final class GoetyBatchDelegate implements IBatchDelegate {
                     "com.Polarice3.Goety.utils.SEHelper");
             cursedCageBEClass = Class.forName(
                     "com.Polarice3.Goety.common.blocks.entities.CursedCageBlockEntity");
+            necroBrazierBEClass = Class.forName(
+                    "com.Polarice3.Goety.common.blocks.entities.NecroBrazierBlockEntity");
+            pedestalBEClass = Class.forName(
+                    "com.Polarice3.Goety.common.blocks.entities.PedestalBlockEntity");
+            soulCandlestickBEClass = Class.forName(
+                    "com.Polarice3.Goety.common.blocks.entities.SoulCandlestickBlockEntity");
+            brazierRecipeClass = Class.forName(
+                    "com.Polarice3.Goety.common.crafting.BrazierRecipe");
+            ritualRecipeClass = Class.forName(
+                    "com.Polarice3.Goety.common.crafting.RitualRecipe");
+            ritualClass = Class.forName(
+                    "com.Polarice3.Goety.common.ritual.Ritual");
+            enchantItemRitualClass = Class.forName(
+                    "com.Polarice3.Goety.common.ritual.EnchantItemRitual");
+            convertRitualClass = Class.forName(
+                    "com.Polarice3.Goety.common.ritual.ConvertRitual");
+            teleportRitualClass = Class.forName(
+                    "com.Polarice3.Goety.common.ritual.TeleportRitual");
+            ritualRequirementsClass = Class.forName(
+                    "com.Polarice3.Goety.common.ritual.RitualRequirements");
+            ritualBlockEntityClass = Class.forName(
+                    "com.Polarice3.Goety.common.blocks.entities.RitualBlockEntity");
             try {
                 researchListClass = Class.forName(
                         "com.Polarice3.Goety.common.research.ResearchList");
@@ -70,7 +111,6 @@ public final class GoetyBatchDelegate implements IBatchDelegate {
                 RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] ResearchList not found — research checks disabled");
                 researchListClass = null;
             }
-            classesLoaded = true;
         } catch (ClassNotFoundException e) {
             RSIntegrationMod.LOGGER.error("[RSI-Batch-Goety] Failed to load Goety classes", e);
         }
@@ -80,21 +120,17 @@ public final class GoetyBatchDelegate implements IBatchDelegate {
     private ServerPlayer player;
     private ResourceKey<Level> myDim;
     private BlockPos myPos;
-    private DarkAltarBlockEntity altar;
-    private RitualRecipe ritualRecipe;
-    private ExtractionLedger ledger;
-    private ExtractionLedger sharedLedger;
-    private INetwork network;
-    private List<PedestalBlockEntity> filledPedestals;
+    private Object altar;                 // DarkAltarBlockEntity
+    private Object ritualRecipe;          // RitualRecipe
+    private List<Object> filledPedestals;
     private int soulCost;
-    private boolean usingSharedLedger;
     private boolean ritualEverSeenActive;
     @Nullable private ItemStack activationExtractedFromPlayer;
 
     // Brazier-mode state
     private boolean isBrazier;
-    private NecroBrazierBlockEntity brazier;
-    private BrazierRecipe brazierRecipeObj;
+    private Object brazier;               // NecroBrazierBlockEntity
+    private Object brazierRecipeObj;      // BrazierRecipe
     private int brazierSoulCost;
     private boolean brazierCraftStarted;
 
@@ -103,8 +139,13 @@ public final class GoetyBatchDelegate implements IBatchDelegate {
     @Override
     public boolean validateAndInit(ServerPlayer player, ResourceLocation recipeId,
                                    @Nullable ResourceLocation dim, BlockPos pos) {
+        ensureClasses();
+        RSIntegrationMod.LOGGER.info("[RSI-Batch-Goety] validateAndInit [1/9] entry: recipe={} dim={} pos={}",
+                recipeId, dim, pos);
+
         ServerLevel level = CraftPacketUtils.resolveLevel(player.server, dim, player);
         if (level == null) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Batch-Goety] validateAndInit [FAIL-1] dim resolution failed for dim={}", dim);
             player.sendSystemMessage(Component.translatable("rsi.generic.error.dim_not_found"));
             return false;
         }
@@ -112,107 +153,156 @@ public final class GoetyBatchDelegate implements IBatchDelegate {
         this.myPos = pos;
         this.player = player;
 
-        if (!level.isLoaded(pos)) level.getChunk(pos);
-        BlockEntity be = level.getBlockEntity(pos);
-
-        // ── Brazier path ───────────────────────────────────
-        if (be instanceof NecroBrazierBlockEntity nb) {
-            return validateAndInitBrazier(nb, recipeId, level);
+        if (!level.isLoaded(pos)) {
+            RSIntegrationMod.LOGGER.info("[RSI-Batch-Goety] validateAndInit [2/9] chunk unloaded at {} — force-loading", pos);
+            level.getChunk(pos);
         }
+        RSIntegrationMod.LOGGER.info("[RSI-Batch-Goety] validateAndInit [2/9] chunk ready, getting BE at {} dim={}", pos, myDim);
 
-        // ── Dark Altar path (original) ─────────────────────
-        if (!(be instanceof DarkAltarBlockEntity darkAltar)) {
+        BlockEntity be = level.getBlockEntity(pos);
+        if (be == null) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Batch-Goety] validateAndInit [FAIL-3] no BE at pos={} dim={}", pos, myDim);
             player.sendSystemMessage(Component.translatable("rsi.goety.error.altar_not_found"));
             return false;
         }
-        this.altar = darkAltar;
+        RSIntegrationMod.LOGGER.info("[RSI-Batch-Goety] validateAndInit [3/9] BE found: class={} at {}",
+                be.getClass().getSimpleName(), pos);
+
+        // ── Brazier path ───────────────────────────────────
+        if (necroBrazierBEClass != null && necroBrazierBEClass.isInstance(be)) {
+            RSIntegrationMod.LOGGER.info("[RSI-Batch-Goety] validateAndInit [BRANCH] Brazier path: recipe={}", recipeId);
+            boolean ok = validateAndInitBrazier(be, recipeId, level);
+            if (!ok) {
+                isBrazier = false;
+                brazier = null;
+                brazierRecipeObj = null;
+            }
+            return ok;
+        }
+
+        // ── Dark Altar path (original) ─────────────────────
+        if (darkAltarBEClass == null || !darkAltarBEClass.isInstance(be)) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Batch-Goety] validateAndInit [FAIL-4] BE is not DarkAltar (got {} class={}) at {}",
+                    be.getClass().getSimpleName(), be.getClass().getName(), pos);
+            player.sendSystemMessage(Component.translatable("rsi.goety.error.altar_not_found"));
+            return false;
+        }
+        this.altar = be;
+        RSIntegrationMod.LOGGER.info("[RSI-Batch-Goety] validateAndInit [4/9] Dark Altar confirmed");
 
         Recipe<?> foundRecipe = level.getRecipeManager().byKey(recipeId).orElse(null);
-        if (!(foundRecipe instanceof RitualRecipe rr)) {
-            if (foundRecipe == null)
+        if (ritualRecipeClass == null || !ritualRecipeClass.isInstance(foundRecipe)) {
+            if (foundRecipe == null) {
+                RSIntegrationMod.LOGGER.warn("[RSI-Batch-Goety] validateAndInit [FAIL-5] recipe not found: {}", recipeId);
                 player.sendSystemMessage(Component.translatable("rsi.generic.error.recipe_not_found", recipeId.toString()));
-            else
-                player.sendSystemMessage(Component.translatable("rsi.generic.error.wrong_recipe_type"));
+            } else {
+                RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] validateAndInit [FAIL-5] Dark Altar: recipe {} is not a RitualRecipe (got {}) — trying next machine",
+                        recipeId, foundRecipe.getClass().getSimpleName());
+            }
             return false;
         }
-        this.ritualRecipe = rr;
+        this.ritualRecipe = foundRecipe;
         this.ritualEverSeenActive = false;
+        RSIntegrationMod.LOGGER.info("[RSI-Batch-Goety] validateAndInit [5/9] recipe verified as RitualRecipe");
 
-        this.soulCost = rr.getSoulCost();
+        this.soulCost = Reflect.<Integer>invoke(ritualRecipe, "getSoulCost").orElse(0);
+        RSIntegrationMod.LOGGER.info("[RSI-Batch-Goety] validateAndInit [6/9] soulCost={}", soulCost);
 
-        Ritual ritualObj = rr.getRitual();
-        if (ritualObj instanceof ConvertRitual) {
-            player.sendSystemMessage(Component.translatable("rsi.goety.error.unsupported_ritual_type", "convert"));
-            return false;
+        Object ritualObj = Reflect.invoke(ritualRecipe, "getRitual").orElse(null);
+        if (ritualObj == null) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Batch-Goety] validateAndInit [WARN-6] ritual is null for recipe {} — deferring to tryStartSingleCraft check", recipeId);
+            // Old code tolerated null here; tryStartSingleCraft has the real null guard.
+            // Skip ritual-type checks and pedestal scan — nothing to derive from.
+            // Still do the altar-idle check (independent of ritualObj).
+        } else {
+            if (convertRitualClass != null && convertRitualClass.isInstance(ritualObj)) {
+                RSIntegrationMod.LOGGER.info("[RSI-Batch-Goety] validateAndInit [FAIL-7] convert ritual blocked: recipe={}", recipeId);
+                player.sendSystemMessage(Component.translatable("rsi.goety.error.unsupported_ritual_type", "convert"));
+                return false;
+            }
+            if (teleportRitualClass != null && teleportRitualClass.isInstance(ritualObj)) {
+                RSIntegrationMod.LOGGER.info("[RSI-Batch-Goety] validateAndInit [FAIL-7] teleport ritual blocked: recipe={}", recipeId);
+                player.sendSystemMessage(Component.translatable("rsi.goety.error.unsupported_ritual_type", "teleport"));
+                return false;
+            }
+            RSIntegrationMod.LOGGER.info("[RSI-Batch-Goety] validateAndInit [7/9] ritual type OK: {}", ritualObj.getClass().getSimpleName());
         }
-        if (ritualObj instanceof TeleportRitual) {
-            player.sendSystemMessage(Component.translatable("rsi.goety.error.unsupported_ritual_type", "teleport"));
-            return false;
-        }
 
-        if (altar.currentRitualRecipe != null) {
+        Object currentRitual = Reflect.getField(altar, "currentRitualRecipe").orElse(null);
+        if (currentRitual != null) {
+            RSIntegrationMod.LOGGER.info("[RSI-Batch-Goety] validateAndInit [FAIL-8] altar busy: currentRitualRecipe={}",
+                    currentRitual.getClass().getSimpleName());
             player.sendSystemMessage(Component.translatable("rsi.goety.warn.altar_busy"));
             return false;
         }
+        RSIntegrationMod.LOGGER.info("[RSI-Batch-Goety] validateAndInit [8/9] altar idle confirmed");
 
-        // Verify all pedestals are empty.  A craft that consumes items
-        // immediately can leave `getCurrentRitualRecipe() == null` while
-        // pedestals still hold leftovers; a second craft would overwrite
-        // them and cause item duplication.
-        try {
-            @SuppressWarnings("unchecked")
-            List<PedestalBlockEntity> allPedestals = (List<PedestalBlockEntity>)
-                    ritualObj.getClass().getMethod("getPedestals", Level.class, BlockPos.class)
-                            .invoke(ritualObj, level, myPos);
-            if (allPedestals != null) {
-                for (PedestalBlockEntity ped : allPedestals) {
-                    if (!readPedestalItem(ped).isEmpty()) {
-                        player.sendSystemMessage(Component.translatable("rsi.goety.warn.altar_busy"));
-                        return false;
+        // Verify all pedestals are empty.
+        if (ritualObj != null) {
+            try {
+                @SuppressWarnings("unchecked")
+                List<Object> allPedestals = (List<Object>)
+                        ritualObj.getClass().getMethod("getPedestals", Level.class, BlockPos.class)
+                                .invoke(ritualObj, level, myPos);
+                RSIntegrationMod.LOGGER.info("[RSI-Batch-Goety] validateAndInit [9/9] pedestal scan: {} pedestals found",
+                        allPedestals != null ? allPedestals.size() : 0);
+                if (allPedestals != null) {
+                    for (Object ped : allPedestals) {
+                        ItemStack pedItem = readPedestalItem(ped);
+                        if (!pedItem.isEmpty()) {
+                            RSIntegrationMod.LOGGER.info("[RSI-Batch-Goety] validateAndInit [FAIL-9] pedestal occupied with {} x{}",
+                                    pedItem.getDisplayName().getString(), pedItem.getCount());
+                            player.sendSystemMessage(Component.translatable("rsi.goety.warn.altar_busy"));
+                            return false;
+                        }
                     }
                 }
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.warn("[RSI-Batch-Goety] validateAndInit [9/9] pedestal scan failed — proceeding without pedestal check: {}",
+                        e.toString());
             }
-        } catch (Exception e) {
-            // If we can't scan pedestals, err on the safe side: skip the
-            // check but log loudly so the admin can investigate.
-            RSIntegrationMod.LOGGER.warn("[RSI-Batch-Goety] Pedestal scan failed — proceeding without pedestal check", e);
+        } else {
+            RSIntegrationMod.LOGGER.info("[RSI-Batch-Goety] validateAndInit [9/9] pedestal scan skipped (ritual is null)");
         }
 
-        RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] validateAndInit OK: recipe={}", recipeId);
+        RSIntegrationMod.LOGGER.info("[RSI-Batch-Goety] validateAndInit [OK] all checks passed: recipe={} altar at {}", recipeId, pos);
         return true;
     }
 
-    private boolean validateAndInitBrazier(NecroBrazierBlockEntity nb, ResourceLocation recipeId,
-                                           ServerLevel level) {
+    private boolean validateAndInitBrazier(Object be, ResourceLocation recipeId, ServerLevel level) {
         this.isBrazier = true;
-        this.brazier = nb;
+        this.brazier = be;
         this.altar = null;
         this.ritualRecipe = null;
 
         Recipe<?> foundRecipe = level.getRecipeManager().byKey(recipeId).orElse(null);
-        if (!(foundRecipe instanceof BrazierRecipe br)) {
+        if (brazierRecipeClass == null || !brazierRecipeClass.isInstance(foundRecipe)) {
             if (foundRecipe == null)
                 player.sendSystemMessage(Component.translatable("rsi.generic.error.recipe_not_found", recipeId.toString()));
-            else
-                player.sendSystemMessage(Component.translatable("rsi.generic.error.wrong_recipe_type"));
+            else {
+                RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] Brazier: recipe {} is not a BrazierRecipe (got {}) — trying next machine",
+                        recipeId, foundRecipe.getClass().getSimpleName());
+            }
             return false;
         }
-        this.brazierRecipeObj = br;
-        this.brazierSoulCost = br.getSoulCost();
+        this.brazierRecipeObj = foundRecipe;
+        this.brazierSoulCost = Reflect.<Integer>invoke(brazierRecipeObj, "getSoulCost").orElse(0);
 
         // Idle check: currentTime must be 0 and no active recipe
-        if (nb.currentTime > 0 || nb.recipe != null) {
+        int ct = Reflect.getIntField(brazier, "currentTime").orElse(1);
+        Object recipe = Reflect.getField(brazier, "recipe").orElse(null);
+        if (ct > 0 || recipe != null) {
             player.sendSystemMessage(Component.translatable("rsi.goety.warn.altar_busy"));
             return false;
         }
 
-        // Inventory must be empty (no leftover items from previous manual craft)
-        if (!nb.isEmpty()) {
+        // Inventory must be empty
+        if (!Reflect.<Boolean>invoke(brazier, "isEmpty").orElse(true)) {
             player.sendSystemMessage(Component.translatable("rsi.goety.warn.altar_busy"));
             return false;
         }
 
-        // Deep Dark biome check — the brazier tick() requires it
+        // Deep Dark biome check
         ResourceKey<Biome> deepDark = ResourceKey.create(Registries.BIOME,
                 new ResourceLocation("minecraft", "deep_dark"));
         if (!level.getBiome(myPos).is(deepDark)) {
@@ -221,12 +311,14 @@ public final class GoetyBatchDelegate implements IBatchDelegate {
         }
 
         // Soul candlestick check
-        var candlesticks = findNearbyCandlesticks(level, myPos);
+        List<Object> candlesticks = findNearbyCandlesticks(level, myPos);
         if (candlesticks.isEmpty()) {
             player.sendSystemMessage(Component.translatable("rsi.goety.error.brazier_no_candlesticks"));
             return false;
         }
-        int totalSouls = candlesticks.stream().mapToInt(SoulCandlestickBlockEntity::getSouls).sum();
+        int totalSouls = candlesticks.stream()
+                .mapToInt(cs -> Reflect.<Integer>invoke(cs, "getSouls").orElse(0))
+                .sum();
         if (totalSouls < brazierSoulCost) {
             player.sendSystemMessage(Component.translatable("rsi.goety.error.insufficient_souls",
                     brazierSoulCost, totalSouls));
@@ -245,25 +337,38 @@ public final class GoetyBatchDelegate implements IBatchDelegate {
         this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
         this.activationExtractedFromPlayer = null;
 
+        // Verify the cached BlockEntity is still valid
+        if (myPos != null && player.serverLevel().isLoaded(myPos)) {
+            BlockEntity current = player.serverLevel().getBlockEntity(myPos);
+            if (current == null || current.isRemoved()) {
+                player.sendSystemMessage(Component.translatable("rsi.error.machine_missing"));
+                if (ledger != null && ledger.isCommitted()) {
+                    ledger.refundCommitted(network, player);
+                }
+                return false;
+            }
+        }
+
         if (isBrazier) return tryStartBrazierCraft();
 
         // ── Dark Altar path ────────────────────────────────
-        if (altar.currentRitualRecipe != null) return false;
+        if (Reflect.getField(altar, "currentRitualRecipe").orElse(null) != null) return false;
 
         this.filledPedestals = new ArrayList<>();
 
         if (!validateSoulsAvailable(soulCost)) return false;
 
-        Ritual ritual = ritualRecipe.getRitual();
+        Object ritual = Reflect.invoke(ritualRecipe, "getRitual").orElse(null);
         if (ritual == null) {
-            RSIntegrationMod.LOGGER.error("[RSI-Batch-Goety] Ritual is null for recipe {}", ritualRecipe.getId());
+            RSIntegrationMod.LOGGER.error("[RSI-Batch-Goety] Ritual is null for recipe {}",
+                    ((Recipe<?>) ritualRecipe).getId());
             return false;
         }
 
         if (!checkRitualPrerequisites(ritualRecipe, ritual)) return false;
 
         List<IngredientSpec> specList = collectIngredients(ritualRecipe);
-        Ingredient activationIng = ritualRecipe.getActivationItem();
+        Ingredient activationIng = Reflect.<Ingredient>invoke(ritualRecipe, "getActivationItem").orElse(Ingredient.EMPTY);
         if (activationIng != null && !activationIng.isEmpty()) {
             ItemStack[] actItems = activationIng.getItems();
             if (actItems.length > 0) {
@@ -299,9 +404,16 @@ public final class GoetyBatchDelegate implements IBatchDelegate {
                     ledger.rollback(player);
                     return false;
                 }
-                altar.startRitual(player, activationItemStack, ritualRecipe);
+                // Start ritual FIRST; only commit ledger on success
+                if (!startAltarRitual(altar, player, activationItemStack, ritualRecipe)) {
+                    player.sendSystemMessage(Component.translatable("rsi.goety.error.ritual_start_failed"));
+                    refundActivationToPlayer();
+                    ledger.rollback(player);
+                    return false;
+                }
                 if (!ledger.commit(network, player)) {
                     RSIntegrationMod.LOGGER.error("[RSI-Batch-Goety] Ledger commit failed (no ingredients)");
+                    refundActivationToPlayer();
                     return false;
                 }
             } catch (Exception e) {
@@ -313,7 +425,7 @@ public final class GoetyBatchDelegate implements IBatchDelegate {
             return true;
         }
 
-        List<PedestalBlockEntity> availablePedestals = findAvailablePedestals(player.serverLevel(), ritual);
+        List<Object> availablePedestals = findAvailablePedestals(player.serverLevel(), ritual);
         if (availablePedestals.size() < specList.size()) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-Goety] Insufficient pedestals: need {}, found {}",
                     specList.size(), availablePedestals.size());
@@ -344,7 +456,7 @@ public final class GoetyBatchDelegate implements IBatchDelegate {
             for (int i = 0; i < templates.size(); i++) {
                 ItemStack stack = templates.get(i);
                 if (stack.isEmpty()) continue;
-                PedestalBlockEntity ped = availablePedestals.get(i);
+                Object ped = availablePedestals.get(i);
                 writePedestalItem(ped, stack);
                 filledPedestals.add(ped);
             }
@@ -356,7 +468,20 @@ public final class GoetyBatchDelegate implements IBatchDelegate {
                 ledger.rollback(player);
                 return false;
             }
-            altar.startRitual(player, activationItemStack, ritualRecipe);
+            // Start ritual FIRST; only commit ledger on success
+            if (!startAltarRitual(altar, player, activationItemStack, ritualRecipe)) {
+                player.sendSystemMessage(Component.translatable("rsi.goety.error.ritual_start_failed"));
+                refundActivationToPlayer();
+                recoverFromPedestals();
+                ledger.rollback(player);
+                return false;
+            }
+            if (!ledger.commit(network, player)) {
+                RSIntegrationMod.LOGGER.error("[RSI-Batch-Goety] Ledger commit failed before ritual start");
+                refundActivationToPlayer();
+                recoverFromPedestals();
+                return false;
+            }
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.error("[RSI-Batch-Goety] Placement/start failed:", e);
             refundActivationToPlayer();
@@ -365,26 +490,31 @@ public final class GoetyBatchDelegate implements IBatchDelegate {
             return false;
         }
 
-        if (!ledger.commit(network, player)) {
-            RSIntegrationMod.LOGGER.error("[RSI-Batch-Goety] Ledger commit failed after ritual start");
-            return true;
-        }
-
         return true;
     }
 
     private boolean tryStartBrazierCraft() {
         ServerLevel level = player.serverLevel();
-        if (!level.isLoaded(myPos)) level.getChunk(myPos);
+        if (!level.isLoaded(myPos)) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Batch-Goety] Chunk unloaded at {} — aborting brazier craft", myPos);
+            return false;
+        }
 
         // Re-verify idle
-        if (brazier.currentTime > 0 || brazier.recipe != null || !brazier.isEmpty()) {
+        int ct = Reflect.getIntField(brazier, "currentTime").orElse(1);
+        Object recipe = Reflect.getField(brazier, "recipe").orElse(null);
+        boolean empty = Reflect.<Boolean>invoke(brazier, "isEmpty").orElse(false);
+        if (ct > 0 || recipe != null || !empty) {
             player.sendSystemMessage(Component.translatable("rsi.goety.warn.altar_busy"));
             return false;
         }
 
-        List<Ingredient> ingredients = brazierRecipeObj.getIngredients();
-        NonNullList<ItemStack> toPlace = NonNullList.withSize(brazier.getContainer().getContainerSize(), ItemStack.EMPTY);
+        List<Ingredient> ingredients = ((Recipe<?>) brazierRecipeObj).getIngredients();
+        Object container = Reflect.invoke(brazier, "getContainer").orElse(null);
+        int containerSize = container != null
+                ? Reflect.<Integer>invoke(container, "getContainerSize").orElse(3)
+                : 3;
+        NonNullList<ItemStack> toPlace = NonNullList.withSize(containerSize, ItemStack.EMPTY);
 
         int slot = 0;
         for (Ingredient ing : ingredients) {
@@ -397,27 +527,35 @@ public final class GoetyBatchDelegate implements IBatchDelegate {
             toPlace.set(slot++, taken.copy());
         }
 
-        brazier.setItems(toPlace);
-        brazier.recipeId = brazierRecipeObj.getId();
-        brazier.updateRecipe(level);
+        // Place items and start recipe BEFORE committing — so we can rollback if setup fails
+        Reflect.invoke(brazier, "setItems", toPlace);
+        Reflect.setField(brazier, "recipeId", ((Recipe<?>) brazierRecipeObj).getId());
+        Reflect.invoke(brazier, "updateRecipe", level);
 
-        if (brazier.recipe == null) {
+        Object bzrRecipe = Reflect.getField(brazier, "recipe").orElse(null);
+        if (bzrRecipe == null) {
             RSIntegrationMod.LOGGER.error("[RSI-Batch-Goety] Brazier recipe not set after updateRecipe: {}",
-                    brazierRecipeObj.getId());
-            brazier.setItems(NonNullList.withSize(brazier.getContainer().getContainerSize(), ItemStack.EMPTY));
-            brazier.recipeId = null;
+                    ((Recipe<?>) brazierRecipeObj).getId());
+            Reflect.invoke(brazier, "setItems",
+                    NonNullList.withSize(containerSize, ItemStack.EMPTY));
+            Reflect.setField(brazier, "recipeId", null);
             ledger.rollback(player);
             return false;
         }
 
         if (!ledger.commit(network, player)) {
             RSIntegrationMod.LOGGER.error("[RSI-Batch-Goety] Ledger commit failed for brazier craft");
-            return true;
+            Reflect.invoke(brazier, "setItems",
+                    NonNullList.withSize(containerSize, ItemStack.EMPTY));
+            Reflect.setField(brazier, "recipe", null);
+            Reflect.setField(brazier, "recipeId", null);
+            Reflect.setField(brazier, "currentTime", 0);
+            return false;
         }
 
         this.brazierCraftStarted = true;
         RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] Brazier craft started: recipe={} soulCost={}",
-                brazierRecipeObj.getId(), brazierSoulCost);
+                ((Recipe<?>) brazierRecipeObj).getId(), brazierSoulCost);
         return true;
     }
 
@@ -427,7 +565,7 @@ public final class GoetyBatchDelegate implements IBatchDelegate {
         if (isBrazier) {
             if (brazierRecipeObj == null) return null;
             List<IngredientSpec> specs = new ArrayList<>();
-            for (Ingredient ing : brazierRecipeObj.getIngredients()) {
+            for (Ingredient ing : ((Recipe<?>) brazierRecipeObj).getIngredients()) {
                 if (!ing.isEmpty()) specs.add(new IngredientSpec(ing, 1));
             }
             return specs.isEmpty() ? null : specs;
@@ -446,10 +584,22 @@ public final class GoetyBatchDelegate implements IBatchDelegate {
         this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
         this.activationExtractedFromPlayer = null;
 
+        // Verify the cached BlockEntity is still valid
+        if (myPos != null && player.serverLevel().isLoaded(myPos)) {
+            BlockEntity current = player.serverLevel().getBlockEntity(myPos);
+            if (current == null || current.isRemoved()) {
+                player.sendSystemMessage(Component.translatable("rsi.error.machine_missing"));
+                if (ledger != null && ledger.isCommitted()) {
+                    ledger.refundCommitted(network, player);
+                }
+                return false;
+            }
+        }
+
         if (isBrazier) return tryStartBrazierWithMaterials(materials);
 
         // ── Dark Altar path ────────────────────────────────
-        if (altar.currentRitualRecipe != null) {
+        if (Reflect.getField(altar, "currentRitualRecipe").orElse(null) != null) {
             player.sendSystemMessage(Component.translatable("rsi.goety.warn.altar_busy"));
             return false;
         }
@@ -458,9 +608,10 @@ public final class GoetyBatchDelegate implements IBatchDelegate {
 
         if (!validateSoulsAvailable(soulCost)) return false;
 
-        Ritual ritual = ritualRecipe.getRitual();
+        Object ritual = Reflect.invoke(ritualRecipe, "getRitual").orElse(null);
         if (ritual == null) {
-            RSIntegrationMod.LOGGER.error("[RSI-Batch-Goety] tryStartWithMaterials: Ritual is null for recipe {}", ritualRecipe.getId());
+            RSIntegrationMod.LOGGER.error("[RSI-Batch-Goety] tryStartWithMaterials: Ritual is null for recipe {}",
+                    ((Recipe<?>) ritualRecipe).getId());
             player.sendSystemMessage(Component.translatable("rsi.goety.error.one_click_failed"));
             return false;
         }
@@ -468,7 +619,7 @@ public final class GoetyBatchDelegate implements IBatchDelegate {
         if (!checkRitualPrerequisites(ritualRecipe, ritual)) return false;
 
         ItemStack activationItem = ItemStack.EMPTY;
-        Ingredient activationIng = ritualRecipe.getActivationItem();
+        Ingredient activationIng = Reflect.<Ingredient>invoke(ritualRecipe, "getActivationItem").orElse(Ingredient.EMPTY);
         if (activationIng != null && !activationIng.isEmpty()) {
             activationItem = removeActivationFromMaterials(materials, activationIng);
             if (activationItem.isEmpty()) {
@@ -490,7 +641,11 @@ public final class GoetyBatchDelegate implements IBatchDelegate {
                     refundActivationToPlayer();
                     return false;
                 }
-                altar.startRitual(player, activationItem, ritualRecipe);
+                if (startAltarRitual(altar, player, activationItem, ritualRecipe)) {
+                    return true;
+                }
+                player.sendSystemMessage(Component.translatable("rsi.goety.error.one_click_failed"));
+                refundActivationToPlayer();
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.error("[RSI-Batch-Goety] tryStartWithMaterials: Failed to start ritual (no materials)", e);
                 player.sendSystemMessage(Component.translatable("rsi.goety.error.one_click_failed"));
@@ -500,7 +655,7 @@ public final class GoetyBatchDelegate implements IBatchDelegate {
             return true;
         }
 
-        List<PedestalBlockEntity> availablePedestals = findAvailablePedestals(player.serverLevel(), ritual);
+        List<Object> availablePedestals = findAvailablePedestals(player.serverLevel(), ritual);
         if (availablePedestals.size() < materials.size()) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-Goety] tryStartWithMaterials: insufficient pedestals (need {}, found {})",
                     materials.size(), availablePedestals.size());
@@ -513,7 +668,7 @@ public final class GoetyBatchDelegate implements IBatchDelegate {
             for (int i = 0; i < materials.size(); i++) {
                 ItemStack stack = materials.get(i);
                 if (stack.isEmpty()) continue;
-                PedestalBlockEntity ped = availablePedestals.get(i);
+                Object ped = availablePedestals.get(i);
                 writePedestalItem(ped, stack);
                 filledPedestals.add(ped);
             }
@@ -524,7 +679,12 @@ public final class GoetyBatchDelegate implements IBatchDelegate {
                 recoverFromPedestals();
                 return false;
             }
-            altar.startRitual(player, activationItem, ritualRecipe);
+            if (!startAltarRitual(altar, player, activationItem, ritualRecipe)) {
+                player.sendSystemMessage(Component.translatable("rsi.goety.error.one_click_failed"));
+                refundActivationToPlayer();
+                recoverFromPedestals();
+                return false;
+            }
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.error("[RSI-Batch-Goety] Material placement/start failed:", e);
             player.sendSystemMessage(Component.translatable("rsi.goety.error.one_click_failed"));
@@ -538,30 +698,41 @@ public final class GoetyBatchDelegate implements IBatchDelegate {
 
     private boolean tryStartBrazierWithMaterials(List<ItemStack> materials) {
         ServerLevel level = player.serverLevel();
-        if (!level.isLoaded(myPos)) level.getChunk(myPos);
+        if (!level.isLoaded(myPos)) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Batch-Goety] Chunk unloaded at {} — aborting brazier materials", myPos);
+            return false;
+        }
 
-        if (brazier.currentTime > 0 || brazier.recipe != null || !brazier.isEmpty()) {
+        int ct = Reflect.getIntField(brazier, "currentTime").orElse(1);
+        Object recipe = Reflect.getField(brazier, "recipe").orElse(null);
+        boolean empty = Reflect.<Boolean>invoke(brazier, "isEmpty").orElse(false);
+        if (ct > 0 || recipe != null || !empty) {
             player.sendSystemMessage(Component.translatable("rsi.goety.warn.altar_busy"));
             return false;
         }
 
-        NonNullList<ItemStack> toPlace = NonNullList.withSize(
-                brazier.getContainer().getContainerSize(), ItemStack.EMPTY);
+        Object container = Reflect.invoke(brazier, "getContainer").orElse(null);
+        int containerSize = container != null
+                ? Reflect.<Integer>invoke(container, "getContainerSize").orElse(3)
+                : 3;
+        NonNullList<ItemStack> toPlace = NonNullList.withSize(containerSize, ItemStack.EMPTY);
         int slot = 0;
         for (ItemStack mat : materials) {
             if (mat.isEmpty()) continue;
             toPlace.set(slot++, mat.copy());
         }
 
-        brazier.setItems(toPlace);
-        brazier.recipeId = brazierRecipeObj.getId();
-        brazier.updateRecipe(level);
+        Reflect.invoke(brazier, "setItems", toPlace);
+        Reflect.setField(brazier, "recipeId", ((Recipe<?>) brazierRecipeObj).getId());
+        Reflect.invoke(brazier, "updateRecipe", level);
 
-        if (brazier.recipe == null) {
+        Object bzrRecipe = Reflect.getField(brazier, "recipe").orElse(null);
+        if (bzrRecipe == null) {
             RSIntegrationMod.LOGGER.error("[RSI-Batch-Goety] Brazier recipe not set in tryStartWithMaterials: {}",
-                    brazierRecipeObj.getId());
-            brazier.setItems(NonNullList.withSize(brazier.getContainer().getContainerSize(), ItemStack.EMPTY));
-            brazier.recipeId = null;
+                    ((Recipe<?>) brazierRecipeObj).getId());
+            Reflect.invoke(brazier, "setItems",
+                    NonNullList.withSize(containerSize, ItemStack.EMPTY));
+            Reflect.setField(brazier, "recipeId", null);
             player.sendSystemMessage(Component.translatable("rsi.goety.error.one_click_failed"));
             return false;
         }
@@ -577,12 +748,12 @@ public final class GoetyBatchDelegate implements IBatchDelegate {
         // Use the public field directly — getCurrentRitualRecipe() has a side
         // effect: it re-populates currentRitualRecipe from currentRitualRecipeId
         // via recipe-manager lookup, which defeats null-after-completion detection.
-        if (altar.currentRitualRecipe != null) {
+        if (Reflect.getField(altar, "currentRitualRecipe").orElse(null) != null) {
             ritualEverSeenActive = true;
             return false;
         }
         if (!ritualEverSeenActive && player != null) {
-            ItemStack expected = ModRecipeIndex.tryGetResultItem(ritualRecipe, level.registryAccess());
+            ItemStack expected = ModRecipeIndex.tryGetResultItem((Recipe<?>) ritualRecipe, level.registryAccess());
             if (!expected.isEmpty()) {
                 if (myPos != null && level.isLoaded(myPos)) {
                     var entities = level.getEntitiesOfClass(
@@ -606,7 +777,10 @@ public final class GoetyBatchDelegate implements IBatchDelegate {
     private boolean isBrazierCraftComplete(ServerLevel level) {
         if (!brazierCraftStarted) return false;
         // Recipe was non-null (processing), now null (finished — success or failure)
-        if (brazier.recipe == null && brazier.currentTime == 0 && brazier.isEmpty()) {
+        Object recipe = Reflect.getField(brazier, "recipe").orElse(null);
+        int ct = Reflect.getIntField(brazier, "currentTime").orElse(1);
+        boolean empty = Reflect.<Boolean>invoke(brazier, "isEmpty").orElse(true);
+        if (recipe == null && ct == 0 && empty) {
             return true;
         }
         return false;
@@ -616,25 +790,30 @@ public final class GoetyBatchDelegate implements IBatchDelegate {
     public ItemStack collectResult(ServerPlayer player) {
         if (isBrazier) return collectBrazierResult(player);
 
-        ItemStack expected = ModRecipeIndex.tryGetResultItem(ritualRecipe, player.serverLevel().registryAccess());
+        ItemStack expected = ModRecipeIndex.tryGetResultItem((Recipe<?>) ritualRecipe, player.serverLevel().registryAccess());
         if (expected.isEmpty()) return ItemStack.EMPTY;
 
         // 1. Check altar's own inventory (slot 0 is where Ritual.finish() places the result)
         try {
-            var resolved = altar.itemStackHandler.resolve();
-            if (resolved.isPresent()) {
-                var handler = resolved.get();
-                ItemStack inAltar = handler.getStackInSlot(0);
-                if (!inAltar.isEmpty()) {
-                    boolean matches = ItemStack.isSameItemSameTags(inAltar, expected)
-                            || ItemStack.isSameItem(inAltar, expected);
-                    if (matches) {
-                        ItemStack collected = inAltar.copy();
-                        if (collected.getCount() > expected.getCount()) {
-                            collected.setCount(expected.getCount());
+            var handlerOpt = Reflect.<Object>getField(altar, "itemStackHandler");
+            if (handlerOpt.isPresent()) {
+                Object lazyObj = handlerOpt.get();
+                LazyOptional<?> lazy = (LazyOptional<?>) lazyObj;
+                var resolved = lazy.resolve();
+                if (resolved.isPresent()) {
+                    var handler = (IItemHandler) resolved.get();
+                    ItemStack inAltar = handler.getStackInSlot(0);
+                    if (!inAltar.isEmpty()) {
+                        boolean matches = ItemStack.isSameItemSameTags(inAltar, expected)
+                                || ItemStack.isSameItem(inAltar, expected);
+                        if (matches) {
+                            ItemStack collected = inAltar.copy();
+                            if (collected.getCount() > expected.getCount()) {
+                                collected.setCount(expected.getCount());
+                            }
+                            handler.extractItem(0, collected.getCount(), false);
+                            return collected;
                         }
-                        handler.extractItem(0, collected.getCount(), false);
-                        return collected;
                     }
                 }
             }
@@ -688,8 +867,10 @@ public final class GoetyBatchDelegate implements IBatchDelegate {
         return ItemStack.EMPTY;
     }
 
+    @SuppressWarnings("unchecked")
     private ItemStack collectBrazierResult(ServerPlayer player) {
-        ItemStack expected = brazierRecipeObj.getResultItem(player.serverLevel().registryAccess());
+        ItemStack expected = Reflect.<ItemStack>invoke(brazierRecipeObj, "getResultItem", player.serverLevel().registryAccess())
+                .orElse(ItemStack.EMPTY);
         if (expected.isEmpty()) return ItemStack.EMPTY;
 
         // stopBrazier(true) drops the result at (x, y+1, z)
@@ -738,10 +919,7 @@ public final class GoetyBatchDelegate implements IBatchDelegate {
             refundActivationToPlayer();
             recoverFromPedestals();
         }
-        ledger = null;
-        sharedLedger = null;
-        network = null;
-        usingSharedLedger = false;
+        resetState();
         activationExtractedFromPlayer = null;
     }
 
@@ -753,16 +931,15 @@ public final class GoetyBatchDelegate implements IBatchDelegate {
             ritualEverSeenActive = false;
             clearFilledPedestals();
         }
-        ledger = null;
-        sharedLedger = null;
-        network = null;
-        usingSharedLedger = false;
+        resetState();
         activationExtractedFromPlayer = null;
     }
 
+    @SuppressWarnings("unchecked")
     private void recoverBrazierItems() {
         if (brazier == null) return;
-        NonNullList<ItemStack> items = brazier.getItems();
+        NonNullList<ItemStack> items = Reflect.<NonNullList<ItemStack>>invoke(brazier, "getItems")
+                .orElse(NonNullList.withSize(0, ItemStack.EMPTY));
         boolean hasItems = false;
         for (ItemStack stack : items) {
             if (!stack.isEmpty()) {
@@ -781,14 +958,27 @@ public final class GoetyBatchDelegate implements IBatchDelegate {
         } else if (player != null) {
             for (ItemStack stack : items) {
                 if (!stack.isEmpty()) {
-                    ItemHandlerHelper.giveItemToPlayer(player, stack.copy());
+                    if (network != null) {
+                        ItemStack leftover = network.insertItem(stack.copy(), stack.getCount(),
+                                com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                        if (!leftover.isEmpty()) {
+                            ItemHandlerHelper.giveItemToPlayer(player, leftover);
+                        }
+                    } else {
+                        ItemHandlerHelper.giveItemToPlayer(player, stack.copy());
+                    }
                 }
             }
         }
-        brazier.setItems(NonNullList.withSize(brazier.getContainer().getContainerSize(), ItemStack.EMPTY));
-        brazier.recipe = null;
-        brazier.recipeId = null;
-        brazier.currentTime = 0;
+        Object container = Reflect.invoke(brazier, "getContainer").orElse(null);
+        int containerSize = container != null
+                ? Reflect.<Integer>invoke(container, "getContainerSize").orElse(3)
+                : 3;
+        Reflect.invoke(brazier, "setItems",
+                NonNullList.withSize(containerSize, ItemStack.EMPTY));
+        Reflect.setField(brazier, "recipe", null);
+        Reflect.setField(brazier, "recipeId", null);
+        Reflect.setField(brazier, "currentTime", 0);
         brazierCraftStarted = false;
     }
 
@@ -801,16 +991,20 @@ public final class GoetyBatchDelegate implements IBatchDelegate {
 
     private static final int CANDLESTICK_SEARCH_RANGE = 8;
 
-    private static List<SoulCandlestickBlockEntity> findNearbyCandlesticks(
-            ServerLevel level, BlockPos pos) {
-        List<SoulCandlestickBlockEntity> result = new ArrayList<>();
+    private static List<Object> findNearbyCandlesticks(ServerLevel level, BlockPos pos) {
+        List<Object> result = new ArrayList<>();
+        ensureClasses();
+        if (soulCandlestickBEClass == null) return result;
         int r = CANDLESTICK_SEARCH_RANGE;
         for (BlockPos cp : BlockPos.betweenClosed(
                 pos.offset(-r, -r, -r), pos.offset(r, r, r))) {
             if (!level.isLoaded(cp)) continue;
             BlockEntity be = level.getBlockEntity(cp);
-            if (be instanceof SoulCandlestickBlockEntity cs && cs.getSouls() > 0) {
-                result.add(cs);
+            if (soulCandlestickBEClass.isInstance(be)) {
+                int souls = Reflect.<Integer>invoke(be, "getSouls").orElse(0);
+                if (souls > 0) {
+                    result.add(be);
+                }
             }
         }
         return result;
@@ -821,7 +1015,7 @@ public final class GoetyBatchDelegate implements IBatchDelegate {
     private boolean validateSoulsAvailable(int cost) {
         if (cost <= 0) return true;
         try {
-            var cageOpt = com.huanghuang.rsintegration.util.Reflect.getField(altar, "cursedCageTile");
+            var cageOpt = Reflect.getField(altar, "cursedCageTile");
             if (cageOpt.isEmpty() || cageOpt.get() == null) {
                 RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] No cursedCageTile — assuming link gem/Arca, skipping soul check");
                 return true;
@@ -845,11 +1039,12 @@ public final class GoetyBatchDelegate implements IBatchDelegate {
     // ── Recipe ingredient collection ─────────────────────────────
 
     @SuppressWarnings("unchecked")
-    private static List<IngredientSpec> collectIngredients(RitualRecipe recipe) {
-        List<IngredientSpec> specs = CraftPacketUtils.extractIngredientSpecs(recipe);
+    private static List<IngredientSpec> collectIngredients(Object recipe) {
+        Recipe<?> r = (Recipe<?>) recipe;
+        List<IngredientSpec> specs = CraftPacketUtils.extractIngredientSpecs(r);
         if (specs != null) return specs;
 
-        var ingredients = recipe.getIngredients();
+        var ingredients = r.getIngredients();
         if (!ingredients.isEmpty()) {
             List<IngredientSpec> result = new ArrayList<>();
             for (Ingredient ing : ingredients) {
@@ -864,32 +1059,50 @@ public final class GoetyBatchDelegate implements IBatchDelegate {
 
     // ── Pedestal helpers ─────────────────────────────────────────
 
-    private static ItemStack readPedestalItem(PedestalBlockEntity pedestal) {
-        return pedestal.itemStackHandler.map(h -> h.getStackInSlot(0)).orElse(ItemStack.EMPTY);
+    @SuppressWarnings("unchecked")
+    private static ItemStack readPedestalItem(Object pedestal) {
+        try {
+            var opt = Reflect.<Object>getField(pedestal, "itemStackHandler");
+            if (opt.isEmpty()) return ItemStack.EMPTY;
+            return ((LazyOptional<IItemHandler>) opt.get())
+                    .map(h -> h.getStackInSlot(0)).orElse(ItemStack.EMPTY);
+        } catch (Exception e) { return ItemStack.EMPTY; }
     }
 
-    private static void writePedestalItem(PedestalBlockEntity pedestal, ItemStack stack) {
-        pedestal.itemStackHandler.ifPresent(handler -> {
-            handler.extractItem(0, 64, false);
-            if (!stack.isEmpty()) {
-                handler.insertItem(0, stack.copy(), false);
+    @SuppressWarnings("unchecked")
+    private static void writePedestalItem(Object pedestal, ItemStack stack) {
+        try {
+            var opt = Reflect.<Object>getField(pedestal, "itemStackHandler");
+            if (opt.isEmpty()) return;
+            var lazy = (LazyOptional<IItemHandler>) opt.get();
+            lazy.ifPresent(handler -> {
+                handler.extractItem(0, 64, false);
+                if (!stack.isEmpty()) {
+                    handler.insertItem(0, stack.copy(), false);
+                }
+            });
+            BlockEntity be = (BlockEntity) pedestal;
+            be.setChanged();
+            Level lvl = be.getLevel();
+            if (lvl != null && !lvl.isClientSide()) {
+                BlockPos pos = be.getBlockPos();
+                BlockState state = be.getBlockState();
+                lvl.sendBlockUpdated(pos, state, state, 3);
             }
-        });
-        pedestal.setChanged();
-        if (pedestal.getLevel() != null && !pedestal.getLevel().isClientSide()) {
-            pedestal.getLevel().sendBlockUpdated(pedestal.getBlockPos(), pedestal.getBlockState(), pedestal.getBlockState(), 3);
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] writePedestalItem failed", e);
         }
     }
 
     @SuppressWarnings("unchecked")
-    private List<PedestalBlockEntity> findAvailablePedestals(ServerLevel level, Ritual ritual) {
-        List<PedestalBlockEntity> result = new ArrayList<>();
+    private List<Object> findAvailablePedestals(ServerLevel level, Object ritual) {
+        List<Object> result = new ArrayList<>();
         try {
-            List<PedestalBlockEntity> raw = (List<PedestalBlockEntity>)
+            List<Object> raw = (List<Object>)
                     ritual.getClass().getMethod("getPedestals", Level.class, BlockPos.class)
                             .invoke(ritual, level, myPos);
             RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] getPedestals returned {} entries", raw.size());
-            for (PedestalBlockEntity ped : raw) {
+            for (Object ped : raw) {
                 ItemStack stack = readPedestalItem(ped);
                 if (stack.isEmpty()) result.add(ped);
             }
@@ -905,9 +1118,9 @@ public final class GoetyBatchDelegate implements IBatchDelegate {
                 myPos.offset(range, range, range))) {
             if (!level.isLoaded(cp)) continue;
             BlockEntity be = level.getBlockEntity(cp);
-            if (be instanceof PedestalBlockEntity ped) {
-                ItemStack stack = readPedestalItem(ped);
-                if (stack.isEmpty()) result.add(ped);
+            if (pedestalBEClass != null && pedestalBEClass.isInstance(be)) {
+                ItemStack stack = readPedestalItem(be);
+                if (stack.isEmpty()) result.add(be);
             }
         }
         RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] Fallback: {} available pedestals", result.size());
@@ -916,14 +1129,14 @@ public final class GoetyBatchDelegate implements IBatchDelegate {
 
     private void clearFilledPedestals() {
         if (filledPedestals == null) return;
-        for (PedestalBlockEntity ped : filledPedestals) {
+        for (Object ped : filledPedestals) {
             writePedestalItem(ped, ItemStack.EMPTY);
         }
     }
 
     private void recoverFromPedestals() {
         if (filledPedestals == null) return;
-        for (PedestalBlockEntity ped : filledPedestals) {
+        for (Object ped : filledPedestals) {
             ItemStack stack = readPedestalItem(ped);
             if (stack != null && !stack.isEmpty()) {
                 if (!usingSharedLedger) {
@@ -944,16 +1157,16 @@ public final class GoetyBatchDelegate implements IBatchDelegate {
 
     private void refundActivationToPlayer() {
         if (activationExtractedFromPlayer != null && !activationExtractedFromPlayer.isEmpty() && player != null) {
-            if (!usingSharedLedger) {
-                ItemHandlerHelper.giveItemToPlayer(player, activationExtractedFromPlayer.copy());
-            }
+            // Always refund: the activation item was extracted directly from the player's
+            // inventory, not through the ledger — shared/private ledger doesn't matter.
+            ItemHandlerHelper.giveItemToPlayer(player, activationExtractedFromPlayer.copy());
             activationExtractedFromPlayer = null;
         }
     }
 
     // ── Prerequisite validation ─────────────────────────────────
 
-    private boolean checkRitualPrerequisites(RitualRecipe recipe, Ritual ritual) {
+    private boolean checkRitualPrerequisites(Object recipe, Object ritual) {
         if (!checkResearchRequirement(recipe)) return false;
         if (!checkSacrificeRequirement(recipe)) return false;
         if (!checkStructureRequirements(recipe)) return false;
@@ -962,10 +1175,10 @@ public final class GoetyBatchDelegate implements IBatchDelegate {
         return true;
     }
 
-    private boolean checkResearchRequirement(RitualRecipe recipe) {
+    private boolean checkResearchRequirement(Object recipe) {
         if (researchListClass == null) return true;
         try {
-            String researchId = recipe.getResearch();
+            String researchId = Reflect.<String>invoke(recipe, "getResearch").orElse(null);
             if (researchId == null || researchId.isEmpty()) return true;
 
             Object research = researchListClass.getMethod("getResearch", String.class)
@@ -973,7 +1186,7 @@ public final class GoetyBatchDelegate implements IBatchDelegate {
             if (research == null) return true;
 
             boolean hasIt = (boolean) seHelperClass.getMethod("hasResearch",
-                    net.minecraft.world.entity.player.Player.class, research.getClass())
+                    Player.class, research.getClass())
                     .invoke(null, player, research);
             if (!hasIt) {
                 player.sendSystemMessage(Component.translatable(
@@ -987,19 +1200,23 @@ public final class GoetyBatchDelegate implements IBatchDelegate {
         }
     }
 
-    private boolean checkSacrificeRequirement(RitualRecipe recipe) {
-        if (!recipe.requiresSacrifice()) return true;
-        player.sendSystemMessage(Component.translatable(
-                "rsi.goety.error.requires_sacrifice", recipe.getEntityToSacrificeDisplayName()));
+    private boolean checkSacrificeRequirement(Object recipe) {
+        boolean requires = Reflect.<Boolean>invoke(recipe, "requiresSacrifice").orElse(false);
+        if (!requires) return true;
+        Component name = Reflect.<Component>invoke(recipe, "getEntityToSacrificeDisplayName")
+                .orElse(Component.literal("?"));
+        player.sendSystemMessage(Component.translatable("rsi.goety.error.requires_sacrifice", name));
         return false;
     }
 
-    private boolean checkStructureRequirements(RitualRecipe recipe) {
+    private boolean checkStructureRequirements(Object recipe) {
         try {
-            String craftType = recipe.getCraftType();
+            String craftType = Reflect.<String>invoke(recipe, "getCraftType").orElse(null);
             if (craftType == null || craftType.isEmpty()) return true;
             ServerLevel level = player.serverLevel();
-            boolean valid = RitualRequirements.getProperStructure(craftType, altar, myPos, level);
+            Method m = ritualRequirementsClass.getMethod("getProperStructure",
+                    String.class, ritualBlockEntityClass, BlockPos.class, Level.class);
+            boolean valid = (boolean) m.invoke(null, craftType, altar, myPos, level);
             if (!valid) {
                 player.sendSystemMessage(Component.translatable(
                         "rsi.goety.error.structure_mismatch", resolveCraftTypeName(craftType)));
@@ -1013,18 +1230,22 @@ public final class GoetyBatchDelegate implements IBatchDelegate {
     }
 
     @SuppressWarnings("unchecked")
-    private boolean checkRitualIsValid(Ritual ritual, ItemStack activationItem) {
+    private boolean checkRitualIsValid(Object ritual, ItemStack activationItem) {
         try {
-            List<Ingredient> raw = ritualRecipe.getIngredients();
+            Recipe<?> r = (Recipe<?>) ritualRecipe;
+            List<Ingredient> raw = r.getIngredients();
             List<Ingredient> filtered = new ArrayList<>();
             for (Ingredient ing : raw) {
                 if (!ing.isEmpty()) filtered.add(ing);
             }
             ServerLevel level = player.serverLevel();
-            boolean valid = ritual.isValid(level, myPos, altar, player, activationItem, filtered);
+            boolean valid = (boolean) ritual.getClass()
+                    .getMethod("isValid", Level.class, BlockPos.class, darkAltarBEClass,
+                            Player.class, ItemStack.class, List.class)
+                    .invoke(ritual, level, myPos, altar, player, activationItem, filtered);
             if (!valid) {
                 RSIntegrationMod.LOGGER.warn("[RSI-Batch-Goety] ritual.isValid() returned false for {}, activationEmpty={}, ingredientCount={} (filtered from {} raw)",
-                        ritualRecipe.getId(), activationItem.isEmpty(), filtered.size(), raw.size());
+                        ((Recipe<?>) ritualRecipe).getId(), activationItem.isEmpty(), filtered.size(), raw.size());
                 return false;
             }
             return true;
@@ -1034,9 +1255,9 @@ public final class GoetyBatchDelegate implements IBatchDelegate {
         }
     }
 
-    private boolean checkEnchantmentRequirements(RitualRecipe recipe, Ritual ritual) {
-        if (!(ritual instanceof EnchantItemRitual)) return true;
-        int xpCost = recipe.getXPLevelCost();
+    private boolean checkEnchantmentRequirements(Object recipe, Object ritual) {
+        if (enchantItemRitualClass == null || !enchantItemRitualClass.isInstance(ritual)) return true;
+        int xpCost = Reflect.<Integer>invoke(recipe, "getXPLevelCost").orElse(0);
         if (xpCost > 0 && player.experienceLevel < xpCost) {
             player.sendSystemMessage(Component.translatable(
                     "rsi.goety.error.insufficient_xp", xpCost, player.experienceLevel));
@@ -1045,10 +1266,11 @@ public final class GoetyBatchDelegate implements IBatchDelegate {
         return true;
     }
 
-    private boolean checkEnchantCompatibility(RitualRecipe recipe, Ritual ritual) {
-        if (!(ritual instanceof EnchantItemRitual)) return true;
+    private boolean checkEnchantCompatibility(Object recipe, Object ritual) {
+        if (enchantItemRitualClass == null || !enchantItemRitualClass.isInstance(ritual)) return true;
         try {
-            if (recipe.getEnchantment() == null) {
+            Object enchantment = Reflect.invoke(recipe, "getEnchantment").orElse(null);
+            if (enchantment == null) {
                 player.sendSystemMessage(Component.translatable("rsi.goety.error.no_enchantment"));
                 return false;
             }
@@ -1113,10 +1335,18 @@ public final class GoetyBatchDelegate implements IBatchDelegate {
 
     // ── Reflection helpers ───────────────────────────────────────
 
-    private static Method getMethod(Class<?> clazz, String name, Class<?>... paramTypes) throws NoSuchMethodException {
-        Method m = com.huanghuang.rsintegration.util.Reflect.findMethod(clazz, name, paramTypes);
-        if (m == null) throw new NoSuchMethodException(clazz.getName() + "." + name);
-        return m;
+    /** Start a ritual on the altar via reflection (DarkAltarBlockEntity.startRitual).
+     * @return true if the ritual started successfully */
+    private static boolean startAltarRitual(Object altar, ServerPlayer player, ItemStack activation, Object recipe) {
+        try {
+            ensureClasses();
+            Method m = darkAltarBEClass.getMethod("startRitual", Player.class, ItemStack.class, ritualRecipeClass);
+            m.invoke(altar, player, activation, recipe);
+            return true;
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.error("[RSI-Batch-Goety] startRitual failed", e);
+            return false;
+        }
     }
 
     // ── Plan-time validation ─────────────────────────────────────
@@ -1125,20 +1355,20 @@ public final class GoetyBatchDelegate implements IBatchDelegate {
                                                @Nullable ResourceLocation dim,
                                                @Nullable net.minecraft.core.BlockPos pos) {
         List<String> warnings = new ArrayList<>();
-        if (!(recipe instanceof RitualRecipe rr)) return warnings;
+        ensureClasses();
+        if (ritualRecipeClass == null || !ritualRecipeClass.isInstance(recipe)) return warnings;
 
         // Research check
-        String researchId = rr.getResearch();
+        String researchId = Reflect.<String>invoke(recipe, "getResearch").orElse(null);
         if (researchId != null && !researchId.isEmpty()) {
             boolean hasResearch = false;
             try {
-                ensureClasses();
                 if (researchListClass != null && seHelperClass != null) {
                     Object research = researchListClass.getMethod("getResearch", String.class)
                             .invoke(null, researchId);
                     if (research != null) {
                         hasResearch = (boolean) seHelperClass.getMethod("hasResearch",
-                                net.minecraft.world.entity.player.Player.class, research.getClass())
+                                Player.class, research.getClass())
                                 .invoke(null, player, research);
                     }
                 }
@@ -1153,13 +1383,15 @@ public final class GoetyBatchDelegate implements IBatchDelegate {
         // Structure/craftType check
         if (pos != null && dim != null) {
             try {
-                String craftType = rr.getCraftType();
+                String craftType = Reflect.<String>invoke(recipe, "getCraftType").orElse(null);
                 if (craftType != null && !craftType.isEmpty()) {
                     ServerLevel level = CraftPacketUtils.resolveLevel(player.server, dim, player);
                     if (level != null && level.isLoaded(pos)) {
                         BlockEntity be = level.getBlockEntity(pos);
-                        if (be instanceof DarkAltarBlockEntity darkAltar) {
-                            boolean valid = RitualRequirements.getProperStructure(craftType, darkAltar, pos, level);
+                        if (darkAltarBEClass != null && darkAltarBEClass.isInstance(be)) {
+                            Method m = ritualRequirementsClass.getMethod("getProperStructure",
+                                    String.class, darkAltarBEClass, BlockPos.class, Level.class);
+                            boolean valid = (boolean) m.invoke(null, craftType, be, pos, level);
                             if (!valid) {
                                 warnings.add(Component.translatable(
                                         "rsi.goety.warn.structure_mismatch", resolveCraftTypeName(craftType)).getString());
@@ -1172,7 +1404,7 @@ public final class GoetyBatchDelegate implements IBatchDelegate {
             }
         } else if (dim == null || pos == null) {
             try {
-                String craftType = rr.getCraftType();
+                String craftType = Reflect.<String>invoke(recipe, "getCraftType").orElse(null);
                 if (craftType != null && !craftType.isEmpty()) {
                     warnings.add(Component.translatable(
                             "rsi.goety.warn.no_bound_altar", resolveCraftTypeName(craftType)).getString());

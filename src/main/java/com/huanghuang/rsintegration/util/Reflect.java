@@ -22,9 +22,53 @@ public final class Reflect {
     private static final String TAG = "[RSI-Reflect]";
 
     private static final ConcurrentHashMap<String, Optional<Field>> fieldCache = new ConcurrentHashMap<>();
-    private static final ConcurrentHashMap<String, Method> methodCache = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<String, Optional<Method>> methodCache = new ConcurrentHashMap<>();
 
     private Reflect() {}
+
+    // ── Method discovery (throwing variant) ────────────────────
+
+    /**
+     * Like {@link #findMethod(Class, String, Class[])} but throws
+     * {@link NoSuchMethodException} instead of returning null.
+     */
+    public static Method getMethodOrThrow(Class<?> clazz, String mcp, String srg, Class<?>... params)
+            throws NoSuchMethodException {
+        var found = findMethod(clazz, mcp, params);
+        if (found != null) return found;
+        found = findMethod(clazz, srg, params);
+        if (found != null) return found;
+        throw new NoSuchMethodException(clazz.getName() + "." + mcp + "/" + srg);
+    }
+
+    // ── Holder value extraction ─────────────────────────────────
+
+    /**
+     * Extract the wrapped value from a {@code net.minecraft.core.Holder}
+     * (typically {@code Holder$Reference}). Tries known field names, then
+     * falls back to scanning declared fields by type.
+     */
+    public static Object extractHolderValue(Object holder) {
+        if (holder == null) return null;
+        // Try known field names first
+        for (String name : new String[]{"value", "f_205752_", "delegate", "wrapped"}) {
+            try {
+                var f = holder.getClass().getDeclaredField(name);
+                f.setAccessible(true);
+                return f.get(holder);
+            } catch (Exception ignored) {}
+        }
+        // Brute-force: return first non-synthetic Object field
+        for (var f : holder.getClass().getDeclaredFields()) {
+            if (java.lang.reflect.Modifier.isStatic(f.getModifiers())) continue;
+            if (f.isSynthetic()) continue;
+            if (f.getType() == Object.class) {
+                f.setAccessible(true);
+                try { return f.get(holder); } catch (Exception ignored) {}
+            }
+        }
+        return null;
+    }
 
     // ── Class loading ────────────────────────────────────────────
 
@@ -140,28 +184,30 @@ public final class Reflect {
 
     // ── Method discovery ───────────────────────────────────────────
 
-    /** Walk the class hierarchy to find a declared method by name and parameter types. Results are cached. */
+    /** Walk the class hierarchy to find a declared method by name and parameter types. Results are cached including negatives. */
+    @Nullable
     public static Method findMethod(Class<?> clazz, String name, Class<?>[] paramTypes) {
         String key = methodKey(clazz, name, paramTypes);
-        Method cached = methodCache.get(key);
-        if (cached != null) return cached;
+        {
+            var cached = methodCache.get(key);
+            if (cached != null) return cached.orElse(null);
+        }
 
         Class<?> scan = clazz;
         while (scan != null && scan != Object.class) {
             try {
                 Method m = scan.getDeclaredMethod(name, paramTypes);
                 m.setAccessible(true);
-                methodCache.put(key, m);
+                methodCache.put(key, Optional.of(m));
                 return m;
             } catch (NoSuchMethodException e) {
-                // Try with auto-unboxing tolerance: if a param is Integer.class, also try int.class
                 for (int attempt = 0; attempt < 2; attempt++) {
                     try {
                         Class<?>[] relaxed = relaxParamTypes(paramTypes, attempt == 1);
                         if (relaxed != paramTypes) {
                             Method m = scan.getDeclaredMethod(name, relaxed);
                             m.setAccessible(true);
-                            methodCache.put(key, m);
+                            methodCache.put(key, Optional.of(m));
                             return m;
                         }
                     } catch (NoSuchMethodException ignored) {}
@@ -169,7 +215,57 @@ public final class Reflect {
                 scan = scan.getSuperclass();
             }
         }
+
+        // Fallback: scan declared methods for assignable match (handles
+        // subclass→superclass parameter widening, e.g. passing
+        // AlchemyTabletBlockEntity where BlockEntity is declared).
+        Method found = findAssignable(clazz, name, paramTypes);
+        if (found != null) {
+            methodCache.put(key, Optional.of(found));
+            return found;
+        }
+
+        methodCache.put(key, Optional.empty());
         return null;
+    }
+
+    /**
+     * Scan all declared methods (including inherited) for one with the same
+     * name and parameter count where every actual parameter type is assignable
+     * to the declared type (with primitive↔boxed bridging).
+     */
+    @Nullable
+    private static Method findAssignable(Class<?> clazz, String name, Class<?>[] paramTypes) {
+        Class<?> scan = clazz;
+        while (scan != null && scan != Object.class) {
+            for (Method m : scan.getDeclaredMethods()) {
+                if (!m.getName().equals(name)) continue;
+                Class<?>[] declared = m.getParameterTypes();
+                if (declared.length != paramTypes.length) continue;
+                if (paramsAssignable(paramTypes, declared)) {
+                    m.setAccessible(true);
+                    return m;
+                }
+            }
+            scan = scan.getSuperclass();
+        }
+        return null;
+    }
+
+    private static boolean paramsAssignable(Class<?>[] actual, Class<?>[] declared) {
+        for (int i = 0; i < actual.length; i++) {
+            if (!paramAssignable(actual[i], declared[i])) return false;
+        }
+        return true;
+    }
+
+    private static boolean paramAssignable(Class<?> actual, Class<?> declared) {
+        if (declared.isAssignableFrom(actual)) return true;
+        // Boxed actual → primitive declared (e.g. Double → double)
+        if (declared.isPrimitive() && unwrap(actual) == declared) return true;
+        // Primitive actual → boxed declared (e.g. double → Double)
+        if (actual.isPrimitive() && wrap(actual) == declared) return true;
+        return false;
     }
 
     private static String methodKey(Class<?> clazz, String name, Class<?>[] paramTypes) {

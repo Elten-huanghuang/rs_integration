@@ -5,11 +5,9 @@ import com.huanghuang.rsintegration.network.RSIntegration;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.network.security.Permission;
 import com.refinedmods.refinedstorage.api.util.Action;
-import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.items.ItemHandlerHelper;
 import net.minecraftforge.items.wrapper.PlayerMainInvWrapper;
@@ -100,31 +98,21 @@ public final class RSSidePanelClickPacket {
     }
 
     private static void writeStack(FriendlyByteBuf buf, ItemStack stack) {
-        if (stack.isEmpty()) {
-            buf.writeBoolean(false);
-            return;
-        }
-        buf.writeBoolean(true);
-        buf.writeId(BuiltInRegistries.ITEM, stack.getItem());
-        buf.writeVarInt(stack.getCount());
-        buf.writeNbt(stack.hasTag() ? stack.getTag() : null);
+        buf.writeItem(stack);
     }
 
     private static ItemStack readStack(FriendlyByteBuf buf) {
-        if (!buf.readBoolean()) return ItemStack.EMPTY;
-        Item item = buf.readById(BuiltInRegistries.ITEM);
-        if (item == null) return ItemStack.EMPTY;
-        int count = buf.readVarInt();
-        CompoundTag tag = buf.readNbt();
-        ItemStack stack = new ItemStack(item, count);
-        if (tag != null) stack.setTag(tag);
-        return stack;
+        return buf.readItem();
     }
 
     static void handle(RSSidePanelClickPacket packet, Supplier<NetworkEvent.Context> contextSupplier) {
         NetworkEvent.Context context = contextSupplier.get();
         ServerPlayer player = context.getSender();
         if (player == null) {
+            context.setPacketHandled(true);
+            return;
+        }
+        if (player instanceof net.minecraftforge.common.util.FakePlayer) {
             context.setPacketHandled(true);
             return;
         }
@@ -257,13 +245,10 @@ public final class RSSidePanelClickPacket {
         ItemStack extracted = network.extractItem(extractTemplate, count, Action.PERFORM);
         if (extracted.isEmpty()) return;
 
-        if (isShift || player.isCreative()) {
+        if (isShift || (player.isCreative() && action == ACTION_EXTRACT_MAX)) {
             ItemStack remainder = ItemHandlerHelper.insertItemStacked(
                     playerFullInv(player), extracted, false);
             if (!remainder.isEmpty()) player.drop(remainder, false);
-            // Creative mode: server cursor is a ghost that cannot be synced
-            // (ClientboundContainerSetSlotPacket is dropped by vanilla).
-            // Clear it immediately so it never blocks subsequent extractions.
             if (player.isCreative()) {
                 player.containerMenu.setCarried(ItemStack.EMPTY);
             }
@@ -280,10 +265,12 @@ public final class RSSidePanelClickPacket {
         try {
             var nim = network.getNetworkItemManager();
             if (nim != null) {
-                var cfg = com.refinedmods.refinedstorage.RS.SERVER_CONFIG.getWirelessGrid();
-                nim.drainEnergy(player, cfg.getExtractUsage());
+                int extractCost = com.refinedmods.refinedstorage.RS.SERVER_CONFIG.getWirelessGrid().getExtractUsage();
+                nim.drainEnergy(player, extractCost);
             }
-        } catch (Exception e) { RSIntegrationMod.LOGGER.warn("[RSI] Energy drain failed", e); }
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI] Energy drain failed after extraction", e);
+        }
 
         // Delta is handled by the storage-cache listener registered in
         // RSSidePanelNetworkHandler — matches RS native pattern where
@@ -348,10 +335,12 @@ public final class RSSidePanelClickPacket {
             try {
                 var nim = network.getNetworkItemManager();
                 if (nim != null) {
-                    var cfg = com.refinedmods.refinedstorage.RS.SERVER_CONFIG.getWirelessGrid();
-                    nim.drainEnergy(player, cfg.getInsertUsage());
+                    int insertCost = com.refinedmods.refinedstorage.RS.SERVER_CONFIG.getWirelessGrid().getInsertUsage();
+                    nim.drainEnergy(player, insertCost);
                 }
-            } catch (Exception e) { RSIntegrationMod.LOGGER.warn("[RSI] Energy drain failed", e); }
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.warn("[RSI] Energy drain failed after insertion", e);
+            }
 
             // Delta is handled by the storage-cache listener registered in
             // RSSidePanelNetworkHandler — matches RS native pattern.
@@ -401,10 +390,12 @@ public final class RSSidePanelClickPacket {
         try {
             var nim = network.getNetworkItemManager();
             if (nim != null) {
-                var cfg = com.refinedmods.refinedstorage.RS.SERVER_CONFIG.getWirelessGrid();
-                nim.drainEnergy(player, cfg.getExtractUsage() * dragItems.size());
+                int extractCost = com.refinedmods.refinedstorage.RS.SERVER_CONFIG.getWirelessGrid().getExtractUsage() * dragItems.size();
+                nim.drainEnergy(player, extractCost);
             }
-        } catch (Exception e) { RSIntegrationMod.LOGGER.warn("[RSI] Energy drain failed", e); }
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI] Energy drain failed after drag-distribute", e);
+        }
 
         // Delta is handled by the storage-cache listener.
     }

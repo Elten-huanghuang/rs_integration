@@ -65,7 +65,7 @@ public final class CraftingResolver {
 
         for (ItemStack stack : needed) {
             if (stack.isEmpty()) continue;
-            Ingredient ing = Ingredient.of(stack);
+            Ingredient ing = ingredientOf(stack);
             if (!ensureIngredient(ing, stack.getCount(), ctx, 0)) {
                 if (missingOut != null) {
                     missingOut.add(describeItem(stack));
@@ -221,18 +221,26 @@ public final class CraftingResolver {
             @Nullable INetwork network,
             @Nullable List<String> missingOut) {
         return resolveStepsForIngredientsWithTypes(
-                needed.stream().map(Ingredient::of).collect(Collectors.toList()),
+                needed.stream().map(CraftingResolver::ingredientOf).collect(Collectors.toList()),
                 available,
                 level, player, network, missingOut);
     }
 
     static boolean ensureIngredient(Ingredient ingredient, int count, ResolutionContext ctx, int depth) {
         if (count <= 0) return true;
-        if (ctx.timedOut()) return false;
+        if (ctx.timedOut()) {
+            com.huanghuang.rsintegration.debug.PerformanceMonitor.recordResolveTimeout();
+            return false;
+        }
         if (++ctx.ensureCalls > MAX_ENSURE_CALLS) return false;
 
+        int minReserve = com.huanghuang.rsintegration.config.RSIntegrationConfig.getProtectedReserve(ingredient, ctx.player);
+
         ctx.beginUndo();
-        if (ctx.consumeMatching(ingredient, count)) {
+        // Only consume directly if we can maintain the reserve after consumption.
+        boolean mayConsumeDirect = minReserve <= 0
+                || ctx.countMatching(ingredient) >= count + minReserve;
+        if (mayConsumeDirect && ctx.consumeMatching(ingredient, count)) {
             ctx.commitUndo();
             return true;
         }
@@ -240,6 +248,11 @@ public final class CraftingResolver {
 
         int alreadyHave = ctx.countMatching(ingredient);
         int remaining = count - alreadyHave;
+        // For protected items, inflate remaining so we craft extra copies
+        // and keep at least minReserve after consumption.
+        if (minReserve > 0) {
+            remaining += minReserve;
+        }
 
         if (remaining <= 0) {
             return ctx.consumeMatching(ingredient, count);
@@ -335,6 +348,10 @@ public final class CraftingResolver {
 
         ctx.diag("ensureIngredient FAILED: exhausted " + alive.size() + " viable candidates for "
                 + describeFirstItem(ingredient));
+        if (ctx.bestEffort && ctx.missingOut != null) {
+            ctx.missingOut.add(describeFirstItem(ingredient));
+            return true;
+        }
         return false;
     }
 
@@ -406,9 +423,16 @@ public final class CraftingResolver {
         return recipeId + "|" + itemKey + "|" + nbt;
     }
 
+    private static final int MAX_NBT_DEPTH = 32;
+
     /** Produce a deterministic string from a CompoundTag, sorting keys at each level. */
     private static String stableNbtString(@Nullable net.minecraft.nbt.CompoundTag tag) {
+        return stableNbtStringDepth(tag, 0);
+    }
+
+    private static String stableNbtStringDepth(@Nullable net.minecraft.nbt.CompoundTag tag, int depth) {
         if (tag == null || tag.isEmpty()) return "";
+        if (depth > MAX_NBT_DEPTH) return "[too-deep]";
         List<String> keys = new java.util.ArrayList<>(tag.getAllKeys());
         java.util.Collections.sort(keys);
         StringBuilder sb = new StringBuilder();
@@ -417,7 +441,7 @@ public final class CraftingResolver {
             sb.append(key).append('=');
             net.minecraft.nbt.Tag val = tag.get(key);
             if (val instanceof net.minecraft.nbt.CompoundTag child) {
-                sb.append('{').append(stableNbtString(child)).append('}');
+                sb.append('{').append(stableNbtStringDepth(child, depth + 1)).append('}');
             } else {
                 sb.append(val);
             }
@@ -507,12 +531,12 @@ public final class CraftingResolver {
 
     private static String describeItem(ItemStack stack) {
         if (stack.isEmpty()) return "???";
-        return stack.getHoverName().getString();
+        return stack.getDescriptionId();
     }
 
     private static String describeFirstItem(Ingredient ingredient) {
         for (ItemStack stack : ingredient.getItems()) {
-            if (!stack.isEmpty()) return stack.getHoverName().getString();
+            if (!stack.isEmpty()) return stack.getDescriptionId();
         }
         return "???";
     }
@@ -578,6 +602,18 @@ public final class CraftingResolver {
             out.add(new TraceEntry(d.recipeId(), d.modType(), d.score(), d.skipped(), d.skipReason()));
         }
         return out;
+    }
+
+    /**
+     * Creates an NBT-agnostic Ingredient from an ItemStack.
+     * Strips NBT to avoid {@code StrictNBTIngredient} which would fail to match
+     * recipe outputs that carry different NBT than the requested item.
+     */
+    static Ingredient ingredientOf(ItemStack stack) {
+        if (stack.hasTag()) {
+            return Ingredient.of(new ItemStack(stack.getItem()));
+        }
+        return Ingredient.of(stack);
     }
 
     public record StackKey(Item item, @Nullable String tag) {

@@ -47,6 +47,7 @@ final class ContainerTransferLogic {
             if (!slot.mayPickup(player)) continue;
 
             int count = stack.getCount();
+            network.getItemStorageTracker().changed(player, stack.copy());
             ItemStack remaining = network.insertItem(stack.copy(), count, Action.PERFORM);
 
             if (remaining.isEmpty()) {
@@ -140,26 +141,12 @@ final class ContainerTransferLogic {
 
     @Nullable
     private static IItemHandler findBackpack(ServerPlayer player) {
-        // Priority 1: Curios "back" slot
-        try {
-            var opt = top.theillusivec4.curios.api.CuriosApi.getCuriosInventory(player).resolve();
-            if (opt.isPresent()) {
-                var handler = opt.get();
-                var backStacks = handler.getCurios().get("back");
-                if (backStacks != null) {
-                    var stacks = backStacks.getStacks();
-                    for (int s = 0; s < stacks.getSlots(); s++) {
-                        IItemHandler bh = getBackpackHandler(stacks.getStackInSlot(s));
-                        if (bh != null) return bh;
-                    }
-                }
-            }
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI] Curios scan error in findBackpack: {}", e.toString());
-        }
+        // Priority 1: Curios "back" slot (reflective — Curios is optional)
+        IItemHandler bh = findBackpackInCurios(player);
+        if (bh != null) return bh;
 
         // Priority 2: Offhand
-        IItemHandler bh = getBackpackHandler(player.getOffhandItem());
+        bh = getBackpackHandler(player.getOffhandItem());
         if (bh != null) return bh;
 
         // Priority 3: Main inventory (hotbar first, then rest)
@@ -173,6 +160,40 @@ final class ContainerTransferLogic {
             if (bh != null) return bh;
         }
 
+        return null;
+    }
+
+    /**
+     * Use reflection to scan the Curios "back" slot for a backpack.
+     * Curios is an optional dependency — this must not link directly.
+     */
+    @Nullable
+    private static IItemHandler findBackpackInCurios(ServerPlayer player) {
+        try {
+            Class<?> curiosApiClass = Class.forName("top.theillusivec4.curios.api.CuriosApi");
+            Object curiosInv = curiosApiClass.getMethod("getCuriosInventory", net.minecraft.world.entity.player.Player.class)
+                    .invoke(null, player);
+            if (curiosInv == null) return null;
+            // Optional<ICuriosItemHandler>
+            Object opt = curiosInv.getClass().getMethod("resolve").invoke(curiosInv);
+            if (opt == null) return null;
+            Object handler = ((java.util.Optional<?>) opt).orElse(null);
+            if (handler == null) return null;
+            // handler.getCurios()
+            Object curios = handler.getClass().getMethod("getCurios").invoke(handler);
+            // curios.get("back")
+            Object backHandler = ((java.util.Map<?, ?>) curios).get("back");
+            if (backHandler == null) return null;
+            // backHandler.getStacks()
+            Object stacks = backHandler.getClass().getMethod("getStacks").invoke(backHandler);
+            if (!(stacks instanceof net.minecraftforge.items.IItemHandler itemHandler)) return null;
+            for (int s = 0; s < itemHandler.getSlots(); s++) {
+                IItemHandler bh = getBackpackHandler(itemHandler.getStackInSlot(s));
+                if (bh != null) return bh;
+            }
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI] Curios scan error in findBackpack: {}", e.toString());
+        }
         return null;
     }
 

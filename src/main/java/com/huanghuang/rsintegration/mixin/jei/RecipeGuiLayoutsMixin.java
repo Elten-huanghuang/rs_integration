@@ -1,11 +1,13 @@
 package com.huanghuang.rsintegration.mixin.jei;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.util.Reflect;
 import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
+import com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.mods.ModCraftNetworkHandlers;
 import com.huanghuang.rsintegration.network.BindingStorage;
-import com.huanghuang.rsintegration.mods.goety.AltarCraftButtons;
+import com.huanghuang.rsintegration.sidepanel.client.AltarCraftButtons;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.mods.goety.GoetyRSNetworkHandler;
 import com.huanghuang.rsintegration.mods.goety.RSClientAvailabilityCache;
@@ -46,6 +48,8 @@ public class RecipeGuiLayoutsMixin {
             new ResourceLocation("wizards_reborn", "arcane_iterator");
     private static final ResourceLocation MALUM_SPIRIT_INFUSION_UID =
             new ResourceLocation("malum", "spirit_infusion");
+    private static final ResourceLocation MALUM_SPIRIT_FOCUSING_UID =
+            new ResourceLocation("malum", "spirit_focusing");
     private static final ResourceLocation WR_WORKBENCH_UID =
             new ResourceLocation("wizards_reborn", "arcane_workbench");
     private static final ResourceLocation WR_CRYSTAL_RITUAL_UID =
@@ -62,6 +66,18 @@ public class RecipeGuiLayoutsMixin {
             new ResourceLocation("eidolon", "worktable");
     private static final ResourceLocation EMBER_ALCHEMY_UID =
             new ResourceLocation("embers", "alchemy");
+    private static final ResourceLocation SMELTING_UID =
+            new ResourceLocation("minecraft", "smelting");
+    private static final ResourceLocation BLASTING_UID =
+            new ResourceLocation("minecraft", "blasting");
+    private static final ResourceLocation SMOKING_UID =
+            new ResourceLocation("minecraft", "smoking");
+    private static final ResourceLocation CAMPFIRE_UID =
+            new ResourceLocation("minecraft", "campfire_cooking");
+    private static final ResourceLocation STONECUTTING_UID =
+            new ResourceLocation("minecraft", "stonecutting");
+    private static final ResourceLocation SMITHING_UID =
+            new ResourceLocation("minecraft", "smithing");
 
     @Shadow
     private List<RecipeLayoutWithButtons<?>> recipeLayoutsWithButtons;
@@ -73,14 +89,16 @@ public class RecipeGuiLayoutsMixin {
 
     @Unique
     private final List<ResourceLocation> rsi$recipeIds = new ArrayList<>();
+    @Unique
+    private final List<Boolean> rsi$hasMachineGui = new ArrayList<>();
 
     @Inject(method = "setRecipeLayoutsWithButtons", at = @At("RETURN"))
     private void rsi$onLayoutsSet(CallbackInfo ci) {
         AltarCraftButtons.clear();
         rsi$layoutIndices.clear();
         rsi$positions.clear();
-
         rsi$recipeIds.clear();
+        rsi$hasMachineGui.clear();
 
         if (!RSIntegrationConfig.ENABLE_JEI.get()) return;
 
@@ -166,6 +184,11 @@ public class RecipeGuiLayoutsMixin {
                 continue;
             }
 
+            // Skip SmithingTrimRecipe — output depends on input armor NBT, not predictable
+            if (recipe instanceof net.minecraft.world.item.crafting.SmithingTrimRecipe) {
+                continue;
+            }
+
             ResourceLocation bindingDim;
             BlockPos machinePos;
             if (isGeneric) {
@@ -194,6 +217,8 @@ public class RecipeGuiLayoutsMixin {
                 tooltipKey = "gui.rs_integration.jei.altar_craft";
             } else if (filter.equals("spirit_altar")) {
                 tooltipKey = "gui.rs_integration.jei.malum_spirit_craft";
+            } else if (filter.equals("spirit_crucible")) {
+                tooltipKey = "gui.rs_integration.jei.malum_crucible_craft";
             } else if (filter.equals("crystal_ritual")) {
                 tooltipKey = "gui.rs_integration.jei.wr_crystal_craft";
             } else if (filter.equals("hephaestus_forge")) {
@@ -206,6 +231,8 @@ public class RecipeGuiLayoutsMixin {
                 tooltipKey = "gui.rs_integration.jei.tlm_maid_altar_craft";
             } else if (filter.equals("embers")) {
                 tooltipKey = "gui.rs_integration.jei.embers_alchemy_craft";
+            } else if (filter.startsWith("block.minecraft.")) {
+                tooltipKey = "gui.rs_integration.jei.vanilla_machine_craft";
             } else if (filter.equals("generic")) {
                 tooltipKey = "gui.rs_integration.jei.rs_auto_craft";
             } else {
@@ -220,6 +247,27 @@ public class RecipeGuiLayoutsMixin {
             ModType modType = computeModType(recipe);
             AltarCraftButtons.add(0, 0, 10, 10, handler, tooltipKey, recipeId,
                     bindingDim, machinePos, modType);
+
+            // Register machine GUI button for non-generic (bound) recipes
+            // that are in the MACHINE_GUI_WHITELIST
+            if (!isGeneric && bindingDim != null && machinePos != null
+                    && modType != null
+                    && com.huanghuang.rsintegration.config.RSIntegrationConfig.MACHINE_GUI_WHITELIST.get()
+                            .contains(modType.id())) {
+                ResourceLocation guiDim = bindingDim;
+                BlockPos guiPos = machinePos;
+                ResourceLocation jeiOpenRecipeId = recipeId;
+                AltarCraftButtons.addMachineGui(0, 0, 10, 10, () -> {
+                    com.huanghuang.rsintegration.sidepanel.client.GuiNavStack.pushCurrent();
+                    com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler.CHANNEL.sendToServer(
+                            new com.huanghuang.rsintegration.sidepanel.network.OpenBoundMachineGuiPacket(
+                                    guiDim, guiPos, jeiOpenRecipeId.toString(), jeiOpenRecipeId));
+                });
+                rsi$hasMachineGui.add(true);
+            } else {
+                rsi$hasMachineGui.add(false);
+            }
+
             buttonsAdded++;
 
             if (rsi$isGoetyRitual(recipe)) {
@@ -238,6 +286,8 @@ public class RecipeGuiLayoutsMixin {
     @Inject(method = "updateRecipeButtonPositions", at = @At("RETURN"))
     private void rsi$updatePositions(CallbackInfo ci) {
         AltarCraftButtons.clearTransferPositions();
+        int mgIdx = 0;
+        List<int[]> mgPos = AltarCraftButtons.getMachineGuiPositions();
         for (int i = 0; i < rsi$layoutIndices.size(); i++) {
             int layoutIdx = rsi$layoutIndices.get(i);
             if (layoutIdx >= recipeLayoutsWithButtons.size()) continue;
@@ -247,23 +297,35 @@ public class RecipeGuiLayoutsMixin {
             ImmutableRect2i area = ((GuiIconToggleButtonAccessor) transferBtn).getButton().getArea();
             int bx = area.getX();
             int by = area.getY() + area.getHeight();
+            int bw = area.getWidth();
+            int bh = area.getHeight();
 
             int[] pos = rsi$positions.get(i);
             pos[0] = bx;
             pos[1] = by;
-            pos[2] = area.getWidth();
-            pos[3] = area.getHeight();
+            pos[2] = bw;
+            pos[3] = bh;
 
             List<int[]> globalPos = AltarCraftButtons.getPositions();
             if (i < globalPos.size()) {
                 int[] gp = globalPos.get(i);
                 gp[0] = bx;
                 gp[1] = by;
-                gp[2] = area.getWidth();
-                gp[3] = area.getHeight();
+                gp[2] = bw;
+                gp[3] = bh;
             }
 
-            AltarCraftButtons.addTransferPos(area.getX(), area.getY(), area.getWidth(), area.getHeight());
+            AltarCraftButtons.addTransferPos(area.getX(), area.getY(), bw, bh);
+
+            // Machine GUI button position — right of "+" button
+            if (rsi$hasMachineGui.size() > i && rsi$hasMachineGui.get(i) && mgIdx < mgPos.size()) {
+                int[] mgp = mgPos.get(mgIdx);
+                mgp[0] = bx + bw + 2;
+                mgp[1] = by;
+                mgp[2] = bw;
+                mgp[3] = bh;
+                mgIdx++;
+            }
         }
     }
 
@@ -315,6 +377,31 @@ public class RecipeGuiLayoutsMixin {
                     by + (bh - font.lineHeight) / 2,
                     textColor);
         }
+
+        // Draw machine GUI buttons (gear icon to the right of "+" buttons)
+        List<int[]> mgPositions = AltarCraftButtons.getMachineGuiPositions();
+        for (int i = 0; i < mgPositions.size(); i++) {
+            int[] pos = mgPositions.get(i);
+            int mx = pos[0], my = pos[1], mw = pos[2], mh = pos[3];
+            boolean hovered = mouseX >= mx && mouseX < mx + mw && mouseY >= my && mouseY < my + mh;
+
+            int bgColor = hovered ? 0xFF556688 : 0xFF334455;
+            int borderColor = hovered ? 0xFF88AACC : 0xFF556677;
+            guiGraphics.fill(mx, my, mx + mw, my + mh, borderColor);
+            guiGraphics.fill(mx + 1, my + 1, mx + mw - 1, my + mh - 1, bgColor);
+
+            // Monitor/display icon for "open machine GUI"
+            int iconColor = hovered ? 0xFFCCDDEE : 0xFF8899AA;
+            int screenColor = hovered ? 0xFFEEF4FF : 0xFFAABBCC;
+            int standColor = hovered ? 0xFF99AACC : 0xFF667788;
+            // Bezel
+            guiGraphics.fill(mx + 1, my + 1, mx + mw - 1, my + mh - 3, iconColor);
+            // Screen
+            guiGraphics.fill(mx + 2, my + 2, mx + mw - 2, my + mh - 4, screenColor);
+            // Stand
+            guiGraphics.fill(mx + mw / 2 - 1, my + mh - 2, mx + mw / 2 + 1, my + mh - 1, standColor);
+            guiGraphics.fill(mx + mw / 2 - 2, my + mh - 1, mx + mw / 2 + 2, my + mh, standColor);
+        }
     }
 
     @Unique
@@ -333,6 +420,7 @@ public class RecipeGuiLayoutsMixin {
         try {
             ResourceLocation uid = recipeLayout.getRecipeCategory().getRecipeType().getUid();
             if (MALUM_SPIRIT_INFUSION_UID.equals(uid)) return "spirit_altar";
+            if (MALUM_SPIRIT_FOCUSING_UID.equals(uid)) return "spirit_crucible";
             if (WR_CRYSTALLIZER_UID.equals(uid)) return "wissen_crystallizer";
             if (WR_ITERATOR_UID.equals(uid)) return "arcane_iterator";
             if (WR_WORKBENCH_UID.equals(uid)) return "arcane_workbench";
@@ -343,11 +431,19 @@ public class RecipeGuiLayoutsMixin {
             if (EIDOLON_CRUCIBLE_UID.equals(uid)) return "crucible";
             if (EIDOLON_WORKTABLE_UID.equals(uid)) return "worktable";
             if (EMBER_ALCHEMY_UID.equals(uid)) return "embers";
+            if (SMELTING_UID.equals(uid)) return "block.minecraft.furnace";
+            if (BLASTING_UID.equals(uid)) return "block.minecraft.blast_furnace";
+            if (SMOKING_UID.equals(uid)) return "block.minecraft.smoker";
+            if (CAMPFIRE_UID.equals(uid)) return "block.minecraft.campfire";
+            if (STONECUTTING_UID.equals(uid)) return "block.minecraft.stonecutter";
+            if (SMITHING_UID.equals(uid)) return "block.minecraft.smithing_table";
         } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] Reflection probe failed", e); }
 
         String recipeClassName = recipe.getClass().getName();
         if (recipeClassName.equals("com.sammy.malum.common.recipe.SpiritInfusionRecipe"))
             return "spirit_altar";
+        if (recipeClassName.startsWith("com.sammy.malum.common.recipe.SpiritFocusingRecipe"))
+            return "spirit_crucible";
         if (recipeClassName.startsWith("mod.maxbogomol.wizards_reborn.common.recipe.WissenCrystallizer"))
             return "wissen_crystallizer";
         if (recipeClassName.startsWith("mod.maxbogomol.wizards_reborn.common.recipe.ArcaneIterator"))
@@ -379,19 +475,22 @@ public class RecipeGuiLayoutsMixin {
 
         // Standard Recipe.getId() / m_6423_()
         try {
-            Method getId = null;
-            try { getId = recipe.getClass().getMethod("getId"); }
-            catch (NoSuchMethodException e) { getId = recipe.getClass().getMethod("m_6423_"); }
-            Object result = getId.invoke(recipe);
-            if (result instanceof ResourceLocation id) return id;
+            Method getId = Reflect.findMethod(recipe.getClass(), "getId", new Class<?>[0]);
+            if (getId == null) getId = Reflect.findMethod(recipe.getClass(), "m_6423_", new Class<?>[0]);
+            if (getId != null) {
+                Object result = getId.invoke(recipe);
+                if (result instanceof ResourceLocation id) return id;
+            }
         } catch (Exception e) { /* falls through to mod-specific handlers */ }
 
         // getResourceLocation() fallback (common in non-Recipe objects)
         try {
-            Method getRL = recipe.getClass().getMethod("getResourceLocation");
-            Object result = getRL.invoke(recipe);
-            if (result instanceof ResourceLocation id) return id;
-        } catch (Exception ignored) {}
+            Method getRL = Reflect.findMethod(recipe.getClass(), "getResourceLocation", new Class<?>[0]);
+            if (getRL != null) {
+                Object result = getRL.invoke(recipe);
+                if (result instanceof ResourceLocation id) return id;
+            }
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] getResourceLocation failed", e); }
 
         // FA-specific: Ritual is a Java Record stored in FARegistries.RITUAL custom registry
         if (className.startsWith("com.stal111.forbidden_arcanus")) {
@@ -730,14 +829,32 @@ public class RecipeGuiLayoutsMixin {
     private static Runnable createHandler(Object recipe, ResourceLocation recipeId,
                                            ResourceLocation dim, BlockPos machinePos, String filter) {
         if (filter.equals("generic")) {
-            return () -> BatchCraftNetworkHandler.CHANNEL.sendToServer(
-                    new com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket(recipeId, true));
+            return () -> {
+                GenericCraftPacket pkt;
+                try {
+                    pkt = new GenericCraftPacket(recipeId, true);
+                } catch (Exception e) {
+                    RSIntegrationMod.LOGGER.error("[RSI-JEI] Failed to create GenericCraftPacket (generic): recipeId={}", recipeId, e);
+                    return;
+                }
+                RSIntegrationMod.LOGGER.info("[RSI-JEI] Sending GenericCraftPacket (generic): recipeId={}", recipeId);
+                BatchCraftNetworkHandler.CHANNEL.sendToServer(pkt);
+            };
         }
         // All mod recipes (including FA) route through the plan-preview flow.
         // GenericCraftPacket now falls back to FARegistries.RITUAL when a recipe
         // is not found in RecipeManager, so FA rituals show the plan tree too.
-        return () -> BatchCraftNetworkHandler.CHANNEL.sendToServer(
-                new com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket(recipeId, true, dim, machinePos));
+        return () -> {
+            GenericCraftPacket pkt;
+            try {
+                pkt = new GenericCraftPacket(recipeId, true, dim, machinePos);
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.error("[RSI-JEI] Failed to create GenericCraftPacket: recipeId={} dim={} pos={}", recipeId, dim, machinePos, e);
+                return;
+            }
+            RSIntegrationMod.LOGGER.info("[RSI-JEI] Sending GenericCraftPacket: recipeId={} dim={} pos={}", recipeId, dim, machinePos);
+            BatchCraftNetworkHandler.CHANNEL.sendToServer(pkt);
+        };
     }
 
     @javax.annotation.Nullable
@@ -747,14 +864,16 @@ public class RecipeGuiLayoutsMixin {
         if (player == null) return null;
 
         boolean debugFaTlm = filter.equals("hephaestus_forge") || filter.equals("touhou_little_maid");
-        List<String> allBlockKeys = debugFaTlm ? new ArrayList<>() : null;
+		boolean debugVanilla = filter != null && filter.startsWith("block.minecraft.");
+		boolean debug = debugFaTlm || debugVanilla;
+        List<String> allBlockKeys = debug ? new ArrayList<>() : null;
 
         if (container != null) {
             for (net.minecraft.world.inventory.Slot slot : container.slots) {
                 ItemStack stack = slot.getItem();
                 if (!stack.isEmpty()) {
                     for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
-                        if (debugFaTlm) allBlockKeys.add(entry.blockKey());
+                        if (debug) allBlockKeys.add(entry.blockKey());
                         if (entry.blockKey().contains(filter)) return entry;
                     }
                 }
@@ -764,13 +883,13 @@ public class RecipeGuiLayoutsMixin {
         var inv = player.getInventory();
         for (ItemStack stack : inv.items) {
             for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
-                if (debugFaTlm) allBlockKeys.add(entry.blockKey());
+                if (debug) allBlockKeys.add(entry.blockKey());
                 if (entry.blockKey().contains(filter)) return entry;
             }
         }
         for (ItemStack stack : inv.offhand) {
             for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
-                if (debugFaTlm) allBlockKeys.add(entry.blockKey());
+                if (debug) allBlockKeys.add(entry.blockKey());
                 if (entry.blockKey().contains(filter)) return entry;
             }
         }
@@ -784,7 +903,7 @@ public class RecipeGuiLayoutsMixin {
                     for (int s = 0; s < stacks.getSlots(); s++) {
                         ItemStack stack = stacks.getStackInSlot(s);
                         for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
-                            if (debugFaTlm) allBlockKeys.add(entry.blockKey());
+                            if (debug) allBlockKeys.add(entry.blockKey());
                             if (entry.blockKey().contains(filter)) return entry;
                         }
                     }
@@ -792,7 +911,7 @@ public class RecipeGuiLayoutsMixin {
             }
         } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] Reflection probe failed", e); }
 
-        if (debugFaTlm) {
+        if (debug) {
             RSIntegrationMod.LOGGER.warn("[RSI-JEI-Mixin] findBinding(filter={}) found no match. All blockKeys in inv: {}",
                     filter, allBlockKeys.isEmpty() ? "<none>" : String.join(", ", allBlockKeys));
         }

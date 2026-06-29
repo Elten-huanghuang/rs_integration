@@ -1,13 +1,8 @@
 package com.huanghuang.rsintegration.mods.goety;
 
-import com.Polarice3.Goety.common.blocks.entities.DarkAltarBlockEntity;
-import com.Polarice3.Goety.common.blocks.entities.PedestalBlockEntity;
-import com.Polarice3.Goety.common.crafting.RitualRecipe;
-import com.Polarice3.Goety.common.research.Research;
-import com.Polarice3.Goety.common.ritual.Ritual;
-import com.Polarice3.Goety.utils.SEHelper;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
+import com.huanghuang.rsintegration.util.Reflect;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -18,12 +13,15 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraftforge.common.util.LazyOptional;
+import net.minecraftforge.items.IItemHandler;
 import net.minecraftforge.items.ItemHandlerHelper;
 import net.minecraftforge.network.NetworkEvent;
 
@@ -33,6 +31,57 @@ import java.util.List;
 import java.util.function.Supplier;
 
 public final class GoetyGuiSelectRitualPacket {
+
+    // ── Shared class refs ────────────────────────────────────────
+    private static volatile Class<?> darkAltarBEClass;
+    private static volatile Class<?> pedestalBEClass;
+    private static volatile Class<?> ritualRecipeClass;
+    private static volatile Class<?> ritualClass;
+    private static volatile Class<?> researchListClass;
+    private static volatile Class<?> seHelperClass;
+    private static volatile Class<?> convertRitualClass;
+    private static volatile Class<?> teleportRitualClass;
+    private static volatile Class<?> enchantItemRitualClass;
+
+    private static void ensureClasses() {
+        if (!com.huanghuang.rsintegration.util.ModClassLoader.ensureClasses("goety",
+                "com.Polarice3.Goety.common.blocks.entities.DarkAltarBlockEntity",
+                "com.Polarice3.Goety.common.blocks.entities.PedestalBlockEntity",
+                "com.Polarice3.Goety.common.crafting.RitualRecipe",
+                "com.Polarice3.Goety.common.ritual.Ritual",
+                "com.Polarice3.Goety.utils.SEHelper",
+                "com.Polarice3.Goety.common.ritual.ConvertRitual",
+                "com.Polarice3.Goety.common.ritual.TeleportRitual",
+                "com.Polarice3.Goety.common.ritual.EnchantItemRitual",
+                "com.Polarice3.Goety.common.research.ResearchList")) return;
+        try {
+            darkAltarBEClass = Class.forName(
+                    "com.Polarice3.Goety.common.blocks.entities.DarkAltarBlockEntity");
+            pedestalBEClass = Class.forName(
+                    "com.Polarice3.Goety.common.blocks.entities.PedestalBlockEntity");
+            ritualRecipeClass = Class.forName(
+                    "com.Polarice3.Goety.common.crafting.RitualRecipe");
+            ritualClass = Class.forName(
+                    "com.Polarice3.Goety.common.ritual.Ritual");
+            seHelperClass = Class.forName(
+                    "com.Polarice3.Goety.utils.SEHelper");
+            convertRitualClass = Class.forName(
+                    "com.Polarice3.Goety.common.ritual.ConvertRitual");
+            teleportRitualClass = Class.forName(
+                    "com.Polarice3.Goety.common.ritual.TeleportRitual");
+            enchantItemRitualClass = Class.forName(
+                    "com.Polarice3.Goety.common.ritual.EnchantItemRitual");
+            try {
+                researchListClass = Class.forName(
+                        "com.Polarice3.Goety.common.research.ResearchList");
+            } catch (ClassNotFoundException e) {
+                RSIntegrationMod.LOGGER.debug("[RSI-Goety] ResearchList not found — research checks disabled");
+                researchListClass = null;
+            }
+        } catch (ClassNotFoundException e) {
+            RSIntegrationMod.LOGGER.error("[RSI-Goety] Failed to load Goety classes", e);
+        }
+    }
 
     private final ResourceLocation recipeId;
     @Nullable private final ResourceLocation dim;
@@ -65,6 +114,7 @@ public final class GoetyGuiSelectRitualPacket {
             return;
         }
         context.enqueueWork(() -> {
+            ensureClasses();
             ServerLevel level = resolveLevel(player.server, packet.dim, player);
             if (level == null) {
                 player.sendSystemMessage(Component.translatable("rsi.generic.error.dim_not_found"));
@@ -72,18 +122,20 @@ public final class GoetyGuiSelectRitualPacket {
             }
 
             Recipe<?> recipe = level.getRecipeManager().byKey(packet.recipeId).orElse(null);
-            if (!(recipe instanceof RitualRecipe ritualRecipe)) {
+            if (ritualRecipeClass == null || !ritualRecipeClass.isInstance(recipe)) {
                 player.sendSystemMessage(Component.translatable("rsi.generic.error.recipe_not_found", packet.recipeId.toString()));
                 RSIntegrationMod.LOGGER.warn("Player {} selected unknown Goety ritual: {}", player.getName().getString(), packet.recipeId);
                 return;
             }
+            Object ritualRecipe = recipe;
 
-            if (!level.isLoaded(packet.pos)) level.getChunk(packet.pos);
+            com.huanghuang.rsintegration.util.ChunkUtils.loadChunk(level, packet.pos);
             BlockEntity be = level.getBlockEntity(packet.pos);
-            if (!(be instanceof DarkAltarBlockEntity altar)) {
+            if (darkAltarBEClass == null || !darkAltarBEClass.isInstance(be)) {
                 player.sendSystemMessage(Component.translatable("rsi.goety.error.altar_not_found"));
                 return;
             }
+            Object altar = be;
 
             if (!tryStartRitual(player, altar, ritualRecipe)) {
                 player.sendSystemMessage(Component.translatable("rsi.goety.error.one_click_failed"));
@@ -97,20 +149,32 @@ public final class GoetyGuiSelectRitualPacket {
         return CraftPacketUtils.resolveLevel(server, dim, player);
     }
 
-    private static boolean tryStartRitual(ServerPlayer player, DarkAltarBlockEntity altar, RitualRecipe recipe) {
-        Level beLevel = altar.getLevel();
+    @SuppressWarnings("unchecked")
+    private static boolean tryStartRitual(ServerPlayer player, Object altar, Object recipe) {
+        Level beLevel = Reflect.<Level>invoke(altar, "getLevel").orElse(null);
         Level level = beLevel != null ? beLevel : player.level();
-        BlockPos pos = altar.getBlockPos();
+        BlockPos pos = Reflect.<BlockPos>invoke(altar, "getBlockPos").orElse(player.blockPosition());
         ResourceKey<Level> altarDim = level.dimension();
 
-        if (altar.currentRitualRecipe != null) {
+        if (Reflect.getField(altar, "currentRitualRecipe").orElse(null) != null) {
             player.displayClientMessage(Component.translatable("rsi.goety.warn.ritual_running"), true);
             return false;
         }
 
-        Ritual ritual = recipe.getRitual();
-        List<PedestalBlockEntity> pedestals = ritual.getPedestals(level, pos);
-        List<Ingredient> requiredIngredients = new ArrayList<>(recipe.getIngredients());
+        Object ritual = Reflect.invoke(recipe, "getRitual").orElse(null);
+        if (ritual == null) return false;
+
+        List<Object> pedestals;
+        try {
+            pedestals = (List<Object>) ritual.getClass()
+                    .getMethod("getPedestals", Level.class, BlockPos.class)
+                    .invoke(ritual, level, pos);
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.error("[RSI-Goety] Failed to get pedestals", e);
+            return false;
+        }
+
+        List<Ingredient> requiredIngredients = new ArrayList<>(((Recipe<?>) recipe).getIngredients());
 
         if (pedestals.size() < requiredIngredients.size()) {
             player.displayClientMessage(Component.translatable("rsi.wr.error.pedestals_insufficient", requiredIngredients.size(), pedestals.size()), true);
@@ -118,14 +182,12 @@ public final class GoetyGuiSelectRitualPacket {
         }
 
         // 1. Check soul energy FIRST (before any extraction)
-        // Souls come from the CursedCageBlockEntity attached to the altar, not the player.
-        int soulCost = recipe.getSoulCost();
+        int soulCost = Reflect.<Integer>invoke(recipe, "getSoulCost").orElse(0);
         if (soulCost > 0) {
             try {
-                var cageField = DarkAltarBlockEntity.class.getDeclaredField("cursedCageTile");
-                cageField.setAccessible(true);
-                Object cage = cageField.get(altar);
-                if (cage != null) {
+                var cageOpt = Reflect.getField(altar, "cursedCageTile");
+                if (cageOpt.isPresent() && cageOpt.get() != null) {
+                    Object cage = cageOpt.get();
                     int available = (int) cage.getClass().getMethod("getSouls").invoke(cage);
                     if (available < soulCost) {
                         player.displayClientMessage(Component.translatable(
@@ -141,38 +203,46 @@ public final class GoetyGuiSelectRitualPacket {
 
         // 2. Validate ritual prerequisites BEFORE touching any inventory/pedestals
         // 2a. Filter unsupported ritual subtypes
-        if (ritual instanceof com.Polarice3.Goety.common.ritual.ConvertRitual
-                || ritual instanceof com.Polarice3.Goety.common.ritual.TeleportRitual) {
+        if ((convertRitualClass != null && convertRitualClass.isInstance(ritual))
+                || (teleportRitualClass != null && teleportRitualClass.isInstance(ritual))) {
             player.displayClientMessage(Component.translatable(
                     "rsi.goety.error.unsupported_ritual_type", ritual.getClass().getSimpleName()), true);
             return false;
         }
         // 2b. Reject sacrifice-requiring rituals
-        if (recipe.requiresSacrifice()) {
+        if (Reflect.<Boolean>invoke(recipe, "requiresSacrifice").orElse(false)) {
+            Component name = Reflect.<Component>invoke(recipe, "getEntityToSacrificeDisplayName")
+                    .orElse(Component.literal("?"));
             player.displayClientMessage(Component.translatable(
-                    "rsi.goety.error.requires_sacrifice", recipe.getEntityToSacrificeDisplayName()), true);
+                    "rsi.goety.error.requires_sacrifice", name), true);
             return false;
         }
         // 2c. Research check
-        String researchId = recipe.getResearch();
+        String researchId = Reflect.<String>invoke(recipe, "getResearch").orElse(null);
         if (researchId != null && !researchId.isEmpty()) {
             try {
-                var researchList = Class.forName("com.Polarice3.Goety.common.research.ResearchList");
-                Research research = (Research) researchList
-                        .getMethod("getResearch", String.class).invoke(null, researchId);
-                if (research != null && !SEHelper.hasResearch(player, research)) {
-                    player.displayClientMessage(Component.translatable(
-                            "rsi.goety.error.research_required",
-                            resolveResearchName(researchId)), true);
-                    return false;
+                if (researchListClass != null && seHelperClass != null) {
+                    Object research = researchListClass
+                            .getMethod("getResearch", String.class).invoke(null, researchId);
+                    if (research != null) {
+                        boolean hasResearch = (boolean) seHelperClass.getMethod("hasResearch",
+                                Player.class, research.getClass())
+                                .invoke(null, player, research);
+                        if (!hasResearch) {
+                            player.displayClientMessage(Component.translatable(
+                                    "rsi.goety.error.research_required",
+                                    resolveResearchName(researchId)), true);
+                            return false;
+                        }
+                    }
                 }
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.debug("[RSI-Goety] Research check failed, skipping", e);
             }
         }
         // 2d. Enchant XP check
-        if (ritual instanceof com.Polarice3.Goety.common.ritual.EnchantItemRitual) {
-            int xpCost = recipe.getXPLevelCost();
+        if (enchantItemRitualClass != null && enchantItemRitualClass.isInstance(ritual)) {
+            int xpCost = Reflect.<Integer>invoke(recipe, "getXPLevelCost").orElse(0);
             if (xpCost > 0 && player.experienceLevel < xpCost) {
                 player.displayClientMessage(Component.translatable(
                         "rsi.goety.error.insufficient_xp", xpCost, player.experienceLevel), true);
@@ -180,27 +250,38 @@ public final class GoetyGuiSelectRitualPacket {
             }
         }
         // 2e. Ritual.isValid() pre-flight — validate BEFORE any extraction
-        if (!ritual.isValid(level, pos, altar, player, ItemStack.EMPTY, requiredIngredients)) {
-            player.displayClientMessage(Component.translatable("rsi.goety.error.one_click_failed"), true);
-            RSIntegrationMod.LOGGER.warn("[RSI-Goety] ritual.isValid() returned false before extraction for {}", recipe.getId());
+        try {
+            boolean valid = (boolean) ritual.getClass()
+                    .getMethod("isValid", Level.class, BlockPos.class, darkAltarBEClass,
+                            ServerPlayer.class, ItemStack.class, List.class)
+                    .invoke(ritual, level, pos, altar, player, ItemStack.EMPTY, requiredIngredients);
+            if (!valid) {
+                player.displayClientMessage(Component.translatable("rsi.goety.error.one_click_failed"), true);
+                RSIntegrationMod.LOGGER.warn("[RSI-Goety] ritual.isValid() returned false before extraction for {}",
+                        ((Recipe<?>) recipe).getId());
+                return false;
+            }
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.error("[RSI-Goety] ritual.isValid check failed", e);
             return false;
         }
 
         // 3. Save old pedestal items so we can restore them on failure
         List<ItemStack> oldPedestalItems = new ArrayList<>();
-        for (PedestalBlockEntity p : pedestals) {
+        for (Object p : pedestals) {
             oldPedestalItems.add(extractAllFromPedestal(p));
         }
 
         // 4. Collect activation item
-        Ingredient activationIngredient = recipe.getActivationItem();
-        ItemStack activationItem = takeFromHandler(altar.itemStackHandler, 0, activationIngredient, 1);
+        Ingredient activationIngredient = Reflect.<Ingredient>invoke(recipe, "getActivationItem").orElse(Ingredient.EMPTY);
+        ItemStack activationItem = takeFromHandler(altar, 0, activationIngredient, 1);
         if (activationItem.isEmpty()) {
             activationItem = CraftPacketUtils.ensureMaterialAvailable(player, altarDim, pos, activationIngredient, 1);
         }
         if (activationItem.isEmpty()) {
             restorePedestalItems(pedestals, oldPedestalItems);
-            player.displayClientMessage(Component.translatable("rsi.goety.error.missing_activation", CraftPacketUtils.describeIngredient(activationIngredient)), true);
+            player.displayClientMessage(Component.translatable("rsi.goety.error.missing_activation",
+                    CraftPacketUtils.describeIngredient(activationIngredient)), true);
             return false;
         }
 
@@ -208,7 +289,7 @@ public final class GoetyGuiSelectRitualPacket {
         List<ItemStack> extractedIngredients = new ArrayList<>();
         for (Ingredient ingredient : requiredIngredients) {
             ItemStack extracted = ItemStack.EMPTY;
-            for (PedestalBlockEntity p : pedestals) {
+            for (Object p : pedestals) {
                 extracted = takeFromPedestal(p, ingredient, 1);
                 if (!extracted.isEmpty()) break;
             }
@@ -218,7 +299,8 @@ public final class GoetyGuiSelectRitualPacket {
             if (extracted.isEmpty()) {
                 refundItems(player, activationItem, extractedIngredients);
                 restorePedestalItems(pedestals, oldPedestalItems);
-                player.displayClientMessage(Component.translatable("rsi.generic.error.missing_materials", CraftPacketUtils.describeIngredient(ingredient)), true);
+                player.displayClientMessage(Component.translatable("rsi.generic.error.missing_materials",
+                        CraftPacketUtils.describeIngredient(ingredient)), true);
                 return false;
             }
             extractedIngredients.add(extracted);
@@ -226,10 +308,14 @@ public final class GoetyGuiSelectRitualPacket {
 
         // 6. Place ingredients on pedestals
         for (int i = 0; i < requiredIngredients.size(); i++) {
-            PedestalBlockEntity pedestal = pedestals.get(i);
+            Object pedestal = pedestals.get(i);
             final int idx = i;
-            pedestal.itemStackHandler.ifPresent(handler -> {
-                handler.insertItem(0, extractedIngredients.get(idx).copy(), false);
+            var handlerOpt = Reflect.<Object>getField(pedestal, "itemStackHandler");
+            handlerOpt.ifPresent(obj -> {
+                LazyOptional<IItemHandler> lazy = (LazyOptional<IItemHandler>) obj;
+                lazy.ifPresent(handler -> {
+                    handler.insertItem(0, extractedIngredients.get(idx).copy(), false);
+                });
             });
         }
 
@@ -240,7 +326,8 @@ public final class GoetyGuiSelectRitualPacket {
 
         // 8. Start ritual
         try {
-            altar.startRitual(player, activationItem, recipe);
+            darkAltarBEClass.getMethod("startRitual", Player.class, ItemStack.class, ritualRecipeClass)
+                    .invoke(altar, player, activationItem, recipe);
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.error("[RSI-Goety] startRitual threw after extraction — refunding activation item", e);
             if (!activationItem.isEmpty()) {
@@ -248,13 +335,17 @@ public final class GoetyGuiSelectRitualPacket {
             }
             return false;
         }
-        RSIntegrationMod.LOGGER.debug("Player {} started Goety ritual '{}' via remote crafting.", player.getName().getString(), recipe.getId());
+        RSIntegrationMod.LOGGER.debug("Player {} started Goety ritual '{}' via remote crafting.",
+                player.getName().getString(), ((Recipe<?>) recipe).getId());
         return true;
     }
 
-    private static ItemStack takeFromPedestal(PedestalBlockEntity pedestal, Ingredient ingredient, int count) {
+    @SuppressWarnings("unchecked")
+    private static ItemStack takeFromPedestal(Object pedestal, Ingredient ingredient, int count) {
         if (pedestal == null) return ItemStack.EMPTY;
-        return pedestal.itemStackHandler.map(handler -> {
+        var opt = Reflect.<Object>getField(pedestal, "itemStackHandler");
+        if (opt.isEmpty()) return ItemStack.EMPTY;
+        return ((LazyOptional<IItemHandler>) opt.get()).map(handler -> {
             ItemStack stack = handler.getStackInSlot(0);
             if (ingredient.test(stack) && stack.getCount() >= count) {
                 return handler.extractItem(0, count, false);
@@ -263,36 +354,45 @@ public final class GoetyGuiSelectRitualPacket {
         }).orElse(ItemStack.EMPTY);
     }
 
-    private static ItemStack extractAllFromPedestal(PedestalBlockEntity pedestal) {
+    @SuppressWarnings("unchecked")
+    private static ItemStack extractAllFromPedestal(Object pedestal) {
         if (pedestal == null) return ItemStack.EMPTY;
-        return pedestal.itemStackHandler.map(handler ->
+        var opt = Reflect.<Object>getField(pedestal, "itemStackHandler");
+        if (opt.isEmpty()) return ItemStack.EMPTY;
+        return ((LazyOptional<IItemHandler>) opt.get()).map(handler ->
                 handler.extractItem(0, 64, false)
         ).orElse(ItemStack.EMPTY);
     }
 
-    private static void restorePedestalItems(List<PedestalBlockEntity> pedestals, List<ItemStack> items) {
+    @SuppressWarnings("unchecked")
+    private static void restorePedestalItems(List<Object> pedestals, List<ItemStack> items) {
         for (int i = 0; i < pedestals.size() && i < items.size(); i++) {
             ItemStack item = items.get(i);
             if (!item.isEmpty()) {
-                final int idx = i;
-                pedestals.get(i).itemStackHandler.ifPresent(handler ->
-                        handler.insertItem(0, item.copy(), false));
+                var handlerOpt = Reflect.<Object>getField(pedestals.get(i), "itemStackHandler");
+                handlerOpt.ifPresent(obj -> {
+                    LazyOptional<IItemHandler> lazy = (LazyOptional<IItemHandler>) obj;
+                    lazy.ifPresent(handler -> handler.insertItem(0, item.copy(), false));
+                });
             }
         }
     }
 
-    private static ItemStack takeFromHandler(net.minecraftforge.common.util.LazyOptional<?> lazyHandler,
-                                               int startSlot, Ingredient ingredient, int count) {
-        return lazyHandler.map(obj -> {
-            var handler = (net.minecraftforge.items.IItemHandler) obj;
-            for (int s = startSlot; s < handler.getSlots(); s++) {
-                ItemStack stack = handler.getStackInSlot(s);
-                if (ingredient.test(stack) && stack.getCount() >= count) {
-                    return handler.extractItem(s, count, false);
+    @SuppressWarnings("unchecked")
+    private static ItemStack takeFromHandler(Object altarBlockEntity, int startSlot, Ingredient ingredient, int count) {
+        try {
+            var handlerOpt = Reflect.<Object>getField(altarBlockEntity, "itemStackHandler");
+            if (handlerOpt.isEmpty()) return ItemStack.EMPTY;
+            return ((LazyOptional<IItemHandler>) handlerOpt.get()).map(handler -> {
+                for (int s = startSlot; s < handler.getSlots(); s++) {
+                    ItemStack stack = handler.getStackInSlot(s);
+                    if (ingredient.test(stack) && stack.getCount() >= count) {
+                        return handler.extractItem(s, count, false);
+                    }
                 }
-            }
-            return ItemStack.EMPTY;
-        }).orElse(ItemStack.EMPTY);
+                return ItemStack.EMPTY;
+            }).orElse(ItemStack.EMPTY);
+        } catch (Exception e) { return ItemStack.EMPTY; }
     }
 
     private static void giveToPlayer(ServerPlayer player, ItemStack stack) {
@@ -355,5 +455,4 @@ public final class GoetyGuiSelectRitualPacket {
         }
         return researchId;
     }
-
 }

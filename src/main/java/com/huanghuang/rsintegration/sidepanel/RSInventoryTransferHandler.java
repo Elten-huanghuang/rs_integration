@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.sidepanel;
 
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.util.ModIds;
 import mezz.jei.api.gui.ingredient.IRecipeSlotsView;
 import mezz.jei.api.recipe.transfer.IRecipeTransferError;
 import mezz.jei.api.recipe.transfer.IUniversalRecipeTransferHandler;
@@ -43,7 +44,7 @@ public final class RSInventoryTransferHandler
                                                 boolean doTransfer) {
         if (!doTransfer) return null;
         if (!RSIntegrationConfig.ENABLE_RS_SIDE_PANEL.get()) return null;
-        if (!ModList.get().isLoaded("refinedstorage")) return null;
+        if (!ModList.get().isLoaded(ModIds.REFINED_STORAGE)) return null;
 
         ResourceLocation recipeId = extractRecipeId(recipe);
         if (recipeId == null) return null;

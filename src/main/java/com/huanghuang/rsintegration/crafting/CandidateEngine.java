@@ -35,8 +35,8 @@ final class CandidateEngine {
      */
     static List<RecipeIndex.Entry> findCandidates(Ingredient ingredient, ResolutionContext ctx,
                                                    @javax.annotation.Nullable List<CandidateDiagnostic> diag) {
-        Map<ResourceLocation, RecipeIndex.Entry> dedup = new LinkedHashMap<>();
-
+        // Phase 1: collect unique entries by recipe ID (cheap — no getResultItem calls)
+        Map<ResourceLocation, RecipeIndex.Entry> byId = new LinkedHashMap<>();
         ItemStack[] items = ingredient.getItems();
         int limit = Math.min(items.length, 64);
         for (int idx = 0; idx < limit; idx++) {
@@ -51,12 +51,13 @@ final class CandidateEngine {
             }
 
             for (RecipeIndex.Entry entry : recipes) {
+                ResourceLocation rid = entry.recipe().getId();
+                if (byId.containsKey(rid)) continue; // already collected
                 if (entry.modType() != ModType.GENERIC) {
                     if (!isMachineAvailable(entry, ctx)) {
                         if (diag != null) logDiag(diag, item, entry, 0, entry.modType(), true, "Machine not available");
                         continue;
                     }
-                    ResourceLocation rid = entry.recipe().getId();
                     var allowlist = RSIntegrationConfig.MULTIBLOCK_RECIPE_ALLOWLIST.get();
                     if (!allowlist.isEmpty() && !allowlist.contains(rid.toString())) {
                         if (diag != null) logDiag(diag, item, entry, 0, entry.modType(), true, "Not in allowlist");
@@ -67,19 +68,24 @@ final class CandidateEngine {
                         continue;
                     }
                 }
-
-                ItemStack output;
-                if (entry.recipe() instanceof CraftingRecipe cr) {
-                    output = cr.getResultItem(ctx.level.registryAccess());
-                } else {
-                    output = ModRecipeHandlers.tryGetResultItem(entry.recipe(), ctx.level.registryAccess());
-                }
-                if (output.isEmpty() || !ingredient.test(output)) {
-                    if (diag != null) logDiag(diag, item, entry, 0, entry.modType(), true, "Output does not match ingredient");
-                    continue;
-                }
-                dedup.put(entry.recipe().getId(), entry);
+                byId.put(rid, entry);
             }
+        }
+
+        // Phase 2: check output matching for each unique recipe (expensive calls once per recipe)
+        Map<ResourceLocation, RecipeIndex.Entry> dedup = new LinkedHashMap<>();
+        for (RecipeIndex.Entry entry : byId.values()) {
+            ItemStack output;
+            if (entry.recipe() instanceof CraftingRecipe cr) {
+                output = cr.getResultItem(ctx.level.registryAccess());
+            } else {
+                output = ModRecipeHandlers.tryGetResultItem(entry.recipe(), ctx.level.registryAccess());
+            }
+            if (output.isEmpty() || !ingredient.test(output)) {
+                if (diag != null) logDiag(diag, null, entry, 0, entry.modType(), true, "Output does not match ingredient");
+                continue;
+            }
+            dedup.put(entry.recipe().getId(), entry);
         }
 
         List<RecipeIndex.Entry> result = new ArrayList<>(dedup.values());

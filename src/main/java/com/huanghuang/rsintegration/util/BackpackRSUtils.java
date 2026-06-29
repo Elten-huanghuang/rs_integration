@@ -58,7 +58,7 @@ public final class BackpackRSUtils {
         ItemStack remaining = network.insertItem(stack.copy(), stack.getCount(), Action.PERFORM);
         IStorageTracker tracker = network.getItemStorageTracker();
         if (tracker != null) {
-            Player fakePlayer = createFakePlayer(level, backpackUuid);
+            Player fakePlayer = getOrCreateFakePlayer((ServerLevel) level, backpackUuid);
             tracker.changed(fakePlayer, remaining.isEmpty() ? stack.copy() : remaining.copy());
         }
 
@@ -97,7 +97,7 @@ public final class BackpackRSUtils {
         if (!simulate) {
             IStorageTracker tracker = network.getItemStorageTracker();
             if (tracker != null) {
-                Player fakePlayer = createFakePlayer(world, backpackUuid);
+                Player fakePlayer = getOrCreateFakePlayer((ServerLevel) world, backpackUuid);
                 tracker.changed(fakePlayer, remaining.isEmpty() ? stack.copy() : remaining.copy());
             }
         }
@@ -155,7 +155,13 @@ public final class BackpackRSUtils {
         return API.instance().getNetworkManager(serverLevel).getNetwork(pos);
     }
 
-    private static Player createFakePlayer(Level level, UUID backpackUuid) {
+    private static volatile FakePlayer cachedFakePlayer;
+    private static volatile ServerLevel cachedFakePlayerLevel;
+
+    private static Player getOrCreateFakePlayer(ServerLevel level, UUID backpackUuid) {
+        if (cachedFakePlayer != null && cachedFakePlayerLevel == level) {
+            return cachedFakePlayer;
+        }
         String playerName = "Refined Storage";
         if (backpackUuid != null) {
             Map<UUID, AccessLogRecord> logs = BackpackStorage.get().getAccessLogs();
@@ -167,6 +173,8 @@ public final class BackpackRSUtils {
                 }
             }
         }
-        return new FakePlayer((ServerLevel) level, new GameProfile(UUID.randomUUID(), playerName));
+        cachedFakePlayer = new FakePlayer(level, new GameProfile(UUID.randomUUID(), playerName));
+        cachedFakePlayerLevel = level;
+        return cachedFakePlayer;
     }
 }

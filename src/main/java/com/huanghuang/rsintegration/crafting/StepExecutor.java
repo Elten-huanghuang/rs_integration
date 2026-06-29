@@ -27,7 +27,10 @@ final class StepExecutor {
 
     static boolean craftOnce(CraftingRecipe recipe, ResolutionContext ctx, int depth,
                              List<ResourceLocation> altIds, List<String> altModTypes) {
-        if (ctx.timedOut()) return false;
+        if (ctx.timedOut()) {
+            com.huanghuang.rsintegration.debug.PerformanceMonitor.recordResolveTimeout();
+            return false;
+        }
         if (depth > MAX_DEPTH) return false;
         if (ctx.steps.size() >= MAX_STEPS) return false;
 
@@ -58,7 +61,10 @@ final class StepExecutor {
 
     static boolean craftOnce(RecipeIndex.Entry entry, ResolutionContext ctx, int depth,
                              List<ResourceLocation> altIds, List<String> altModTypes) {
-        if (ctx.timedOut()) return false;
+        if (ctx.timedOut()) {
+            com.huanghuang.rsintegration.debug.PerformanceMonitor.recordResolveTimeout();
+            return false;
+        }
         if (depth > MAX_DEPTH) return false;
         if (ctx.steps.size() >= MAX_STEPS) return false;
 
@@ -85,14 +91,22 @@ final class StepExecutor {
         } else {
             for (IngredientSpec spec : specs) {
                 if (spec.isEmpty()) continue;
-                addCraftingRemainder(spec.ingredient(), ctx);
+                addCraftingRemainder(spec.ingredient(), spec.count(), ctx);
             }
         }
 
         var handler = ModRecipeHandlers.handlerFor(entry.recipe());
-        ItemStack result = handler != null
-                ? handler.getResultItem(entry.recipe(), ctx.level.registryAccess())
-                : ModRecipeHandlers.tryGetResultItem(entry.recipe(), ctx.level.registryAccess());
+        ItemStack result = ItemStack.EMPTY;
+        if (handler != null) {
+            result = handler.getResultItem(entry.recipe(), ctx.level.registryAccess());
+        }
+        if (result.isEmpty()) {
+            result = ModRecipeHandlers.tryGetResultItem(entry.recipe(), ctx.level.registryAccess());
+        }
+        if (result.isEmpty()) {
+            RSIntegrationMod.LOGGER.warn("[RSI] craftOnce: empty result for recipe {} (handler={})",
+                    entry.recipe().getId(), handler != null ? handler.getClass().getSimpleName() : "null");
+        }
         ctx.add(result);
 
         if (handler != null) {
@@ -175,13 +189,13 @@ final class StepExecutor {
         return true;
     }
 
-    static void addCraftingRemainder(Ingredient ingredient, ResolutionContext ctx) {
+    static void addCraftingRemainder(Ingredient ingredient, int count, ResolutionContext ctx) {
         for (ItemStack stack : ingredient.getItems()) {
             if (stack.isEmpty()) continue;
             try {
                 ItemStack remainder = stack.getCraftingRemainingItem();
                 if (!remainder.isEmpty()) {
-                    ctx.add(remainder.copyWithCount(1));
+                    ctx.add(remainder.copyWithCount(count));
                     return;
                 }
             } catch (Throwable e) {

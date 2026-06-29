@@ -168,14 +168,23 @@ public final class GenericBatchDelegate implements IBatchDelegate {
     }
 
     private void refundAll() {
-        // GenericBatchDelegate has no physical machine — committed items are
-        // consumed by the virtual crafting process and cannot be recovered.
-        // tryStartSingleCraft now computes the result BEFORE committing, so
-        // this path is only reached in unexpected failure scenarios.
         if (ledger != null && ledger.isCommitted()) {
-            RSIntegrationMod.LOGGER.error("[RSI-Batch-Generic] Batch failed after commit. "
-                    + "{} items may have been lost for recipe {}.",
-                    ledger.size(), recipe != null ? recipe.getId() : "unknown");
+            // Materials were already extracted and committed.  If we computed
+            // the result (Phase 1 succeeds before Phase 3), insert the result
+            // into RS so the materials are not simply lost.
+            if (craftDone && !pendingResult.isEmpty() && network != null) {
+                var leftover = network.insertItem(pendingResult.copy(),
+                        pendingResult.getCount(), com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                if (!leftover.isEmpty() && player != null) {
+                    ItemHandlerHelper.giveItemToPlayer(player, leftover);
+                }
+                RSIntegrationMod.LOGGER.warn("[RSI-Batch-Generic] Recovery: inserted result {}x{} after commit failure",
+                        pendingResult.getCount(), pendingResult.getHoverName().getString());
+            } else {
+                RSIntegrationMod.LOGGER.error("[RSI-Batch-Generic] Batch failed after commit. "
+                        + "{} items may have been lost for recipe {}.",
+                        ledger.size(), recipe != null ? recipe.getId() : "unknown");
+            }
         }
     }
 }

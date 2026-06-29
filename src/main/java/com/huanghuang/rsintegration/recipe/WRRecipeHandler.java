@@ -25,7 +25,31 @@ final class WRRecipeHandler implements ModRecipeHandler {
 
     @Override
     public ItemStack getResultItem(Recipe<?> recipe, RegistryAccess access) {
-        return ModRecipeHandlers.tryGetResultItem(recipe, access);
+        for (String name : new String[]{"getResultItem", "getResult", "getOutput", "getOutputCopy", "getAssembledItem"}) {
+            // Try 1-param version first — some recipes (e.g. ArcaneIteratorRecipe)
+            // have a no-arg getResultItem() that returns the machine block itself,
+            // while getResultItem(RegistryAccess) returns the real recipe output.
+            for (java.lang.reflect.Method m : recipe.getClass().getMethods()) {
+                if (!m.getName().equals(name)) continue;
+                if (!ItemStack.class.isAssignableFrom(m.getReturnType())) continue;
+                if (m.getParameterCount() != 1) continue;
+                try {
+                    Object r = m.invoke(recipe, access);
+                    if (r instanceof ItemStack s && !s.isEmpty()) return s;
+                } catch (Exception ignored) {}
+            }
+            // Fall back to no-arg version
+            for (java.lang.reflect.Method m : recipe.getClass().getMethods()) {
+                if (!m.getName().equals(name)) continue;
+                if (!ItemStack.class.isAssignableFrom(m.getReturnType())) continue;
+                if (m.getParameterCount() != 0) continue;
+                try {
+                    Object r = m.invoke(recipe);
+                    if (r instanceof ItemStack s && !s.isEmpty()) return s;
+                } catch (Exception ignored) {}
+            }
+        }
+        return ItemStack.EMPTY;
     }
 
     @Nullable

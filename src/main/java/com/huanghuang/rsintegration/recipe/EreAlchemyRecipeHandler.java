@@ -25,8 +25,9 @@ final class EreAlchemyRecipeHandler implements ModRecipeHandler {
 
     @Override
     public ItemStack getResultItem(Recipe<?> recipe, RegistryAccess access) {
-        // AlchemyRecipe.getResultItem() returns ItemStack directly (IAlchemyRecipe)
-        return ModRecipeHandlers.tryGetResultItem(recipe, access);
+        // Embers Alchemy has no fixed result — output depends on runtime pedestal arrangement.
+        // Returning empty lets tryGetResultItem's reflection fallback probe the recipe object.
+        return ItemStack.EMPTY;
     }
 
     @Nullable

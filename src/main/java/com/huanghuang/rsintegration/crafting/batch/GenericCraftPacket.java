@@ -25,8 +25,10 @@ import com.huanghuang.rsintegration.util.Reflect;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.level.Level;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.Item;
@@ -46,15 +48,21 @@ import java.util.stream.Collectors;
 
 public final class GenericCraftPacket {
 
-    // Tick-bucketed LRU cache to avoid recomputing the same plan within ~1 second.
-    // Key: "playerUUID:recipeId:tickBucket" → PlanResponse
-    private static final Map<String, PlanResponse> PLAN_CACHE =
-            Collections.synchronizedMap(new LinkedHashMap<>(32, 0.75f, true) {
-                @Override
-                protected boolean removeEldestEntry(Map.Entry<String, PlanResponse> eldest) {
-                    return size() > 32;
-                }
-            });
+    // Time-based plan cache — serves both dedup and compute-avoidance.
+    // On cache hit within TTL: reply with cached plan immediately (no silent drop).
+    // Key: "playerUUID:recipeId:forcedHash:repeatCount"
+    private static final java.util.concurrent.ConcurrentHashMap<String, CachedPlan> PLAN_CACHE =
+            new java.util.concurrent.ConcurrentHashMap<>();
+    private static final long PLAN_CACHE_TTL_NANOS = 5_000_000_000L; // 5 seconds
+
+    private static final class CachedPlan {
+        final PlanResponse plan;
+        final long createdNanos;
+        CachedPlan(PlanResponse plan, long createdNanos) {
+            this.plan = plan;
+            this.createdNanos = createdNanos;
+        }
+    }
 
     private final ResourceLocation recipeId;
     private final boolean preview;
@@ -104,7 +112,7 @@ public final class GenericCraftPacket {
         this.forcedRecipes = forcedRecipes != null ? forcedRecipes : Collections.emptyMap();
         this.dim = dim;
         this.pos = pos;
-        this.repeatCount = Math.max(1, Math.min(repeatCount, 64));
+        this.repeatCount = Math.max(1, Math.min(repeatCount, RSIntegrationConfig.REPEAT_COUNT_MAX.get()));
         this.inferMode = inferMode;
     }
 
@@ -160,31 +168,76 @@ public final class GenericCraftPacket {
                 pos = raw;
             }
         }
-        int repeatCount = Math.max(1, Math.min(buf.readVarInt(), 64));
+        int repeatCount = Math.max(1, Math.min(buf.readVarInt(), RSIntegrationConfig.REPEAT_COUNT_MAX.get()));
         boolean inferMode = buf.readBoolean();
         return new GenericCraftPacket(recipeId, preview, forced, dim, pos, repeatCount, inferMode);
     }
 
     public static void handle(GenericCraftPacket packet, Supplier<NetworkEvent.Context> contextSupplier) {
+        RSIntegrationMod.LOGGER.info("[RSI-Generic] handle() ENTRY: recipeId={} preview={} dim={} pos={} repeat={}",
+                packet.recipeId, packet.preview, packet.dim, packet.pos, packet.repeatCount);
         NetworkEvent.Context context = contextSupplier.get();
         ServerPlayer player = context.getSender();
         if (player == null) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Generic] handle() DROP: player is null, recipeId={}", packet.recipeId);
             context.setPacketHandled(true);
             return;
         }
+        if (player instanceof net.minecraftforge.common.util.FakePlayer) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Generic] handle() DROP: FakePlayer, recipeId={}", packet.recipeId);
+            context.setPacketHandled(true);
+            return;
+        }
+        // Supplementary: catch fake players that extend ServerPlayer directly
+        // without implementing FakePlayer (some mods do this).
+        if (player.getServer() != null
+                && player.getServer().getPlayerList().getPlayer(player.getUUID()) != player) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Generic] handle() DROP: not in player list (fake?), recipeId={}", packet.recipeId);
+            context.setPacketHandled(true);
+            return;
+        }
+        if (packet.preview && com.huanghuang.rsintegration.crafting.PreviewRateLimiter.isRateLimited(player.getUUID())) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Generic] handle() DROP: rate-limited, recipeId={} player={}",
+                    packet.recipeId, player.getGameProfile().getName());
+            context.setPacketHandled(true);
+            return;
+        }
+        if (packet.preview) {
+            String cacheKey = player.getUUID() + ":" + packet.recipeId + ":"
+                    + packet.forcedRecipes.hashCode() + ":" + packet.repeatCount;
+            CachedPlan cached = PLAN_CACHE.get(cacheKey);
+            if (cached != null && System.nanoTime() - cached.createdNanos < PLAN_CACHE_TTL_NANOS) {
+                RSIntegrationMod.LOGGER.warn("[RSI-Generic] handle() CACHE HIT: replying with cached plan, recipeId={} player={} ageMs={}",
+                        packet.recipeId, player.getGameProfile().getName(),
+                        (System.nanoTime() - cached.createdNanos) / 1_000_000L);
+                BatchCraftNetworkHandler.CHANNEL.send(
+                        PacketDistributor.PLAYER.with(() -> player),
+                        new PlanResponsePacket(cached.plan));
+                context.setPacketHandled(true);
+                return;
+            }
+        }
+        RSIntegrationMod.LOGGER.info("[RSI-Generic] handle() enqueueWork: recipeId={} preview={}",
+                packet.recipeId, packet.preview);
         context.enqueueWork(() -> {
             try {
                 if (packet.preview) {
+                    RSIntegrationMod.LOGGER.info("[RSI-Generic] handle() → tryBuildPlan: recipeId={}", packet.recipeId);
                     tryBuildPlan(player, packet.recipeId, packet.forcedRecipes,
                             packet.dim, packet.pos, packet.repeatCount);
                 } else {
+                    RSIntegrationMod.LOGGER.info("[RSI-Generic] handle() → tryResolve: recipeId={}", packet.recipeId);
                     tryResolve(player, packet.recipeId, packet.dim, packet.pos,
                             packet.repeatCount, packet.inferMode);
                 }
-            } catch (Exception e) {
+            } catch (Throwable e) {
                 RSIntegrationMod.LOGGER.error("[RSI-Generic] Failed for {}:", packet.recipeId, e);
                 String reason = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
-                player.sendSystemMessage(Component.translatable("rsi.generic.error.craft_failed", reason));
+                try {
+                    player.sendSystemMessage(Component.translatable("rsi.generic.error.craft_failed", reason));
+                } catch (Throwable ignored) {
+                    RSIntegrationMod.LOGGER.error("[RSI-Generic] Failed to send error message to player:", ignored);
+                }
             }
         });
         context.setPacketHandled(true);
@@ -336,22 +389,29 @@ public final class GenericCraftPacket {
             grouped.computeIfAbsent(key, k -> new IngredientNeed(spec.ingredient(), 0)).count += spec.count();
         }
 
-        // Resolve network via machine binding when available — the player may
-        // not carry RS items, but the bound altar can locate the controller.
-        INetwork network;
-        if (dim != null && pos != null) {
-            network = CraftPacketUtils.resolveNetworkForCraft(player,
-                    net.minecraft.resources.ResourceKey.create(
-                            net.minecraft.core.registries.Registries.DIMENSION, dim),
-                    pos);
-        } else {
-            network = RSIntegration.resolveNetworkFromPlayer(player);
+        ModType modType = ModType.classifyRecipe(recipe);
+        INetwork network = resolveNetworkForRecipe(player, dim, pos, modType);
+
+        // Auto-select a bound machine for mod recipes when dim/pos are not
+        // explicitly provided (e.g. triggered from RS terminal instead of
+        // a specific machine's JEI page).  Without this, mod recipes fall
+        // through to the grouped-extraction fallback which bypasses the
+        // machine entirely and may fail or give results for free.
+        ResourceLocation effectiveDim = dim;
+        net.minecraft.core.BlockPos effectivePos = pos;
+        if ((effectiveDim == null || effectivePos == null) && !(recipe instanceof CraftingRecipe) && modType != null) {
+            for (var m : com.huanghuang.rsintegration.network.AltarBindingRegistry
+                    .getBoundMachinesForType(player, modType)) {
+                effectiveDim = m.dim();
+                effectivePos = m.pos();
+                if (network == null) {
+                    network = resolveNetworkForRecipe(player, effectiveDim, effectivePos, modType);
+                }
+                break;
+            }
         }
 
-        // Mod recipe with machine binding → async chain via plan preview path
-        ModType modType = ModType.classifyRecipe(recipe);
-
-        if (!(recipe instanceof CraftingRecipe) && dim != null && pos != null
+        if (!(recipe instanceof CraftingRecipe) && effectiveDim != null && effectivePos != null
                 && network != null && RSIntegrationConfig.ENABLE_MULTIBLOCK_AUTO_CRAFTING.get()) {
             if (modType != null) {
                 // Expand ingredient specs into flat list for typed resolver
@@ -373,15 +433,15 @@ public final class GenericCraftPacket {
                 }
                 // Append the mod recipe itself as the final multi-block step
                 modSteps.add(new ResolutionStep(recipeId, modType, recipeId, inferMode));
-                AsyncCraftChain chain = new AsyncCraftChain(player, network, modSteps);
-                final INetwork netForDone = network;
+                AsyncCraftChain chain = new AsyncCraftChain(player.getUUID(), player.getServer(), network, modSteps);
+                final UUID capturedUuidA = player.getUUID();
+                final var capturedServerA = player.getServer();
                 AsyncCraftManager.getInstance().submit(chain);
                 chain.onDone(() -> {
-                    if (chain.isAborted()) return;
                     AsyncCraftManager.getInstance().remove(chain);
-                    if (repeatCount > 1) {
-                        tryResolve(player, recipeId, dim, pos, repeatCount - 1, inferMode);
-                    }
+                    com.huanghuang.rsintegration.crafting.chain.ChainRepeatController.scheduleNext(
+                            chain, capturedServerA, capturedUuidA, repeatCount,
+                            (p, rem) -> tryResolve(p, recipeId, dim, pos, rem, inferMode));
                 });
                 player.sendSystemMessage(Component.translatable(
                         "rsi.async.chain_started", modSteps.size()));
@@ -401,15 +461,15 @@ public final class GenericCraftPacket {
                     // Multi-block intermediates → async chain
                     allSteps.add(new ResolutionStep(recipeId, ModType.GENERIC,
                             new ResourceLocation("minecraft:crafting")));
-                    AsyncCraftChain chain = new AsyncCraftChain(player, network, allSteps);
-                    final INetwork netForDone2 = network;
+                    AsyncCraftChain chain = new AsyncCraftChain(player.getUUID(), player.getServer(), network, allSteps);
+                    final UUID capturedUuidB = player.getUUID();
+                    final var capturedServerB = player.getServer();
                     AsyncCraftManager.getInstance().submit(chain);
                     chain.onDone(() -> {
-                        if (chain.isAborted()) return;
                         AsyncCraftManager.getInstance().remove(chain);
-                        if (repeatCount > 1) {
-                            tryResolve(player, recipeId, dim, pos, repeatCount - 1, inferMode);
-                        }
+                        com.huanghuang.rsintegration.crafting.chain.ChainRepeatController.scheduleNext(
+                                chain, capturedServerB, capturedUuidB, repeatCount,
+                                (p, rem) -> tryResolve(p, recipeId, dim, pos, rem, inferMode));
                     });
                     player.sendSystemMessage(Component.translatable(
                             "rsi.async.chain_started", allSteps.size()));
@@ -445,15 +505,15 @@ public final class GenericCraftPacket {
                 if (planSteps.stream().anyMatch(s -> s.modType() != ModType.GENERIC)) {
                     planSteps.add(new ResolutionStep(recipeId, ModType.GENERIC,
                             new ResourceLocation("minecraft:crafting")));
-                    AsyncCraftChain chain = new AsyncCraftChain(player, network, planSteps);
-                    final INetwork netForDone3 = network;
+                    AsyncCraftChain chain = new AsyncCraftChain(player.getUUID(), player.getServer(), network, planSteps);
+                    final UUID capturedUuidC = player.getUUID();
+                    final var capturedServerC = player.getServer();
                     AsyncCraftManager.getInstance().submit(chain);
                     chain.onDone(() -> {
-                        if (chain.isAborted()) return;
                         AsyncCraftManager.getInstance().remove(chain);
-                        if (repeatCount > 1) {
-                            tryResolve(player, recipeId, dim, pos, repeatCount - 1, inferMode);
-                        }
+                        com.huanghuang.rsintegration.crafting.chain.ChainRepeatController.scheduleNext(
+                                chain, capturedServerC, capturedUuidC, repeatCount,
+                                (p, rem) -> tryResolve(p, recipeId, dim, pos, rem, inferMode));
                     });
                     player.sendSystemMessage(Component.translatable(
                             "rsi.async.chain_started", planSteps.size()));
@@ -575,6 +635,32 @@ public final class GenericCraftPacket {
         }
     }
 
+    @Nullable
+    private static INetwork resolveNetworkForRecipe(ServerPlayer player,
+            @Nullable ResourceLocation dim, @Nullable net.minecraft.core.BlockPos pos,
+            @Nullable ModType modType) {
+        // 1. Try primary machine (from packet/JEI)
+        if (dim != null && pos != null) {
+            ResourceKey<Level> key = ResourceKey.create(Registries.DIMENSION, dim);
+            INetwork network = CraftPacketUtils.resolveNetworkForCraft(player, key, pos);
+            if (network != null) return network;
+        }
+        // 2. Fallback to player inventory / nearby RS node
+        INetwork network = RSIntegration.resolveNetworkFromPlayer(player);
+        if (network != null) return network;
+        // 3. For mod recipes: try all bound machines of matching type
+        if (modType != null && modType != ModType.GENERIC) {
+            for (AltarBindingRegistry.BoundMachine m :
+                    AltarBindingRegistry.getBoundMachinesForType(player, modType)) {
+                if (m.dim().equals(dim) && m.pos().equals(pos)) continue;
+                ResourceKey<Level> key = ResourceKey.create(Registries.DIMENSION, m.dim());
+                network = AltarBindingRegistry.resolveNetworkForAltar(player, key, m.pos());
+                if (network != null) return network;
+            }
+        }
+        return null;
+    }
+
     private static final class IngredientNeed {
         final Ingredient ingredient;
         int count;
@@ -607,8 +693,12 @@ public final class GenericCraftPacket {
         ItemStack targetOutput;
         ModType recipeModType = null;
 
+        // Un-expanded ingredients for PlanStep display (avoids 64× icon spam).
+        List<Ingredient> displayIngredients;
+
         if (recipe instanceof CraftingRecipe cr) {
             List<Ingredient> raw = cr.getIngredients();
+            displayIngredients = raw;
             recipeIngredients = new ArrayList<>(raw.size() * repeatCount);
             for (int r = 0; r < repeatCount; r++) recipeIngredients.addAll(raw);
             targetOutput = cr.getResultItem(player.serverLevel().registryAccess());
@@ -618,20 +708,28 @@ public final class GenericCraftPacket {
                 sendPlanError(player, Component.translatable("rsi.generic.error.no_ingredients").getString());
                 return;
             }
+            List<Ingredient> perRecipe = new ArrayList<>();
             List<Ingredient> expanded = new ArrayList<>();
             for (IngredientSpec spec : specs) {
                 if (spec.isEmpty()) continue;
-                for (int i = 0; i < spec.count() * repeatCount; i++) {
-                    expanded.add(spec.ingredient());
-                }
+                for (int i = 0; i < spec.count(); i++) perRecipe.add(spec.ingredient());
+                for (int i = 0; i < spec.count() * repeatCount; i++) expanded.add(spec.ingredient());
             }
+            displayIngredients = perRecipe;
             recipeIngredients = expanded;
-            targetOutput = ModRecipeIndex.tryGetResultItem(recipe, player.serverLevel().registryAccess());
-            if (targetOutput.isEmpty()) {
+            targetOutput = com.huanghuang.rsintegration.recipe.ModRecipeHandlers.tryGetResultItem(recipe, player.serverLevel().registryAccess());
+            recipeModType = ModType.classifyRecipe(recipe);
+            RSIntegrationMod.LOGGER.info("[RSI-tryBuildPlan] targetOutput: recipeId={} class={} result={}x{} isEmpty={} modType={}",
+                    recipeId,
+                    recipe.getClass().getSimpleName(),
+                    targetOutput.isEmpty() ? "EMPTY"
+                            : net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(targetOutput.getItem()),
+                    targetOutput.getCount(), targetOutput.isEmpty(),
+                    recipeModType != null ? recipeModType.id() : "null");
+            if (targetOutput.isEmpty() && recipeModType != ModType.EMBERS_ALCHEMY) {
                 sendPlanError(player, Component.translatable("rsi.generic.error.unsupported_machine", recipe.getClass().getSimpleName()).getString());
                 return;
             }
-            recipeModType = ModType.classifyRecipe(recipe);
         }
 
         // Convert forced recipe overrides (itemRegKey → recipeId) for the resolver
@@ -647,17 +745,15 @@ public final class GenericCraftPacket {
             }
         }
 
-        // Capture tick-bucket once to avoid drift between lookup and store
-        final long tickBucket = player.serverLevel().getServer().getTickCount() / 20;
         final String cacheKey = player.getUUID() + ":" + recipeId + ":"
                 + (forcedOverrides != null ? forcedOverrides.hashCode() : "0") + ":"
-                + repeatCount + ":"
-                + tickBucket;
-        PlanResponse cached = PLAN_CACHE.get(cacheKey);
-        if (cached != null) {
+                + repeatCount;
+        CachedPlan cached = PLAN_CACHE.get(cacheKey);
+        if (cached != null && System.nanoTime() - cached.createdNanos < PLAN_CACHE_TTL_NANOS) {
+            RSIntegrationMod.LOGGER.info("[RSI-tryBuildPlan] Cache hit: recipeId={}", recipeId);
             BatchCraftNetworkHandler.CHANNEL.send(
                     PacketDistributor.PLAYER.with(() -> player),
-                    new PlanResponsePacket(cached));
+                    new PlanResponsePacket(cached.plan));
             return;
         }
 
@@ -714,6 +810,12 @@ public final class GenericCraftPacket {
                     .map(ResolutionStep::recipeId).collect(Collectors.toList());
         }
 
+        // Diagnostic: log stepId distribution before dedup
+        Map<ResourceLocation, Integer> diagStepCounts = new LinkedHashMap<>();
+        for (ResourceLocation id : stepIds) diagStepCounts.merge(id, 1, Integer::sum);
+        RSIntegrationMod.LOGGER.info("[RSI-plan] stepIds: total={} unique={} | {}",
+                stepIds.size(), diagStepCounts.size(), diagStepCounts);
+
         // Build modType lookup from typed resolution results and recipe dimensions
         Map<ResourceLocation, ModType> modTypeByRecipe = new HashMap<>();
         Map<ResourceLocation, Integer> recipeWidths = new HashMap<>();
@@ -748,30 +850,40 @@ public final class GenericCraftPacket {
                     itemAvailable.size(), totalItems);
         }
 
-        // Group step IDs into PlanSteps (batch identical consecutive steps)
+        // Merge only consecutive identical recipe IDs to preserve dependency order.
+        // A global merge (e.g. LinkedHashMap.merge) collapses non-adjacent
+        // occurrences and can reorder steps (e.g. [A, B, A, C] → [A:2, B:1, C:1]
+        // vs correct consecutive: [A:1, B:1, A:1, C:1]).
         List<PlanStep> steps = new ArrayList<>();
 
-        // Count occurrences
-        Map<ResourceLocation, Integer> stepCounts = new LinkedHashMap<>();
+        List<ResourceLocation> mergedStepIds = new ArrayList<>();
+        List<Integer> mergedBatchCounts = new ArrayList<>();
         for (ResourceLocation id : stepIds) {
-            stepCounts.merge(id, 1, Integer::sum);
+            int lastIdx = mergedStepIds.size() - 1;
+            if (lastIdx >= 0 && mergedStepIds.get(lastIdx).equals(id)) {
+                mergedBatchCounts.set(lastIdx, mergedBatchCounts.get(lastIdx) + 1);
+            } else {
+                mergedStepIds.add(id);
+                mergedBatchCounts.add(1);
+            }
         }
 
-        for (var entry : stepCounts.entrySet()) {
-            Recipe<?> stepRecipe = resolveRecipe(player.serverLevel(), entry.getKey());
+        for (int si = 0; si < mergedStepIds.size(); si++) {
+            ResourceLocation stepId = mergedStepIds.get(si);
+            int batches = mergedBatchCounts.get(si);
+            Recipe<?> stepRecipe = resolveRecipe(player.serverLevel(), stepId);
             if (stepRecipe == null) {
                 RSIntegrationMod.LOGGER.warn("[RSI-Generic] Plan step recipe not found: {}",
-                        entry.getKey());
+                        stepId);
                 continue;
             }
             ItemStack output = ModRecipeIndex.tryGetResultItem(
                     stepRecipe, player.serverLevel().registryAccess());
             if (output.isEmpty()) {
                 RSIntegrationMod.LOGGER.debug("[RSI-Generic] Plan step output empty: {} ({})",
-                        entry.getKey(), stepRecipe.getClass().getSimpleName());
+                        stepId, stepRecipe.getClass().getSimpleName());
                 continue;
             }
-            int batches = entry.getValue();
             int recipeW = 0, recipeH = 0;
 
             List<ItemStack> inputs = new ArrayList<>();
@@ -826,9 +938,9 @@ public final class GenericCraftPacket {
             // recipes the player can actually use.
             List<ResourceLocation> alternatives = new ArrayList<>();
             List<String> alternativeModTypes = new ArrayList<>();
-            ResolutionStep rs = stepByRecipe.get(entry.getKey());
+            ResolutionStep rs = stepByRecipe.get(stepId);
             RSIntegrationMod.LOGGER.info("[RSI-OR] buildStep {}: stepByRecipe has rs={} alternatives={}",
-                    entry.getKey(), rs != null,
+                    stepId, rs != null,
                     rs != null ? rs.alternativeIds().size() : -1);
             if (rs != null && !rs.alternativeIds().isEmpty()) {
                 for (int i = 0; i < rs.alternativeIds().size(); i++) {
@@ -865,10 +977,10 @@ public final class GenericCraftPacket {
             }
             if (alternatives.isEmpty()) { alternatives = Collections.emptyList(); alternativeModTypes = Collections.emptyList(); }
 
-            ModType mt = modTypeByRecipe.get(entry.getKey());
-            recipeWidths.put(entry.getKey(), recipeW);
-            recipeHeights.put(entry.getKey(), recipeH);
-            steps.add(new PlanStep(entry.getKey(), output, batches, inputs, alternatives, mt,
+            ModType mt = modTypeByRecipe.get(stepId);
+            recipeWidths.put(stepId, recipeW);
+            recipeHeights.put(stepId, recipeH);
+            steps.add(new PlanStep(stepId, output, batches, inputs, alternatives, mt,
                     0, !alternatives.isEmpty(), recipeW, recipeH, alternativeModTypes));
         }
 
@@ -941,7 +1053,7 @@ public final class GenericCraftPacket {
             if (recipe instanceof net.minecraft.world.item.crafting.ShapedRecipe shaped) {
                 targetW = shaped.getWidth();
                 targetH = shaped.getHeight();
-                for (Ingredient ing : recipeIngredients) {
+                for (Ingredient ing : displayIngredients) {
                     if (ing.isEmpty()) {
                         targetInputs.add(ItemStack.EMPTY);
                     } else {
@@ -952,11 +1064,11 @@ public final class GenericCraftPacket {
                 }
             } else if (recipe instanceof CraftingRecipe) {
                 int n = 0;
-                for (Ingredient ing : recipeIngredients) { if (!ing.isEmpty()) n++; }
+                for (Ingredient ing : displayIngredients) { if (!ing.isEmpty()) n++; }
                 if (n <= 3) { targetW = n; targetH = 1; }
                 else if (n <= 4) { targetW = 2; targetH = 2; }
                 else { targetW = 3; targetH = 3; }
-                for (Ingredient ing : recipeIngredients) {
+                for (Ingredient ing : displayIngredients) {
                     if (ing.isEmpty()) continue;
                     Item matched = matchAndConsume(ing, displayAvailable);
                     targetInputs.add(matched != null ? new ItemStack(matched, 1)
@@ -964,7 +1076,7 @@ public final class GenericCraftPacket {
                 }
             } else {
                 // Mod recipe: linear layout with matched ingredients
-                for (Ingredient ing : recipeIngredients) {
+                for (Ingredient ing : displayIngredients) {
                     if (ing.isEmpty()) continue;
                     Item matched = matchAndConsume(ing, displayAvailable);
                     targetInputs.add(matched != null ? new ItemStack(matched, 1)
@@ -1019,7 +1131,7 @@ public final class GenericCraftPacket {
                         .getPlanWarnings(player, recipe, dim, pos));
             }
 
-            steps.add(new PlanStep(recipeId, targetOutput, 1, targetInputs,
+            steps.add(new PlanStep(recipeId, targetOutput, repeatCount, targetInputs,
                     targetAlts, recipeModType, targetDepth, !targetAlts.isEmpty(),
                     targetW, targetH, targetAltModTypes, Collections.emptyList()));
 
@@ -1126,7 +1238,7 @@ public final class GenericCraftPacket {
         // name for every step that references it, producing an unreadable wall.
         List<String> dedupedMissing = missing.stream().distinct().toList();
 
-        String targetName = targetOutput.getHoverName().getString();
+        String targetName = targetOutput.getDescriptionId();
 
         // ── Embers Alchemy: lookup cached codes from prior inference ──
         // Always consult KnownCodeSavedData — even when the calculation config is off,
@@ -1185,7 +1297,7 @@ public final class GenericCraftPacket {
                                 if (idx < aspects.size()) {
                                     Ingredient aspectIng = aspects.get(idx);
                                     ItemStack first = firstValidDisplayItem(aspectIng);
-                                    embersAspectNames[i] = first.isEmpty() ? "?" : first.getHoverName().getString();
+                                    embersAspectNames[i] = first.isEmpty() ? "?" : first.getDescriptionId();
                                 } else {
                                     embersAspectNames[i] = "?";
                                 }
@@ -1195,7 +1307,7 @@ public final class GenericCraftPacket {
                                 if (i < inputs.size()) {
                                     Ingredient inputIng = inputs.get(i);
                                     ItemStack first = firstValidDisplayItem(inputIng);
-                                    embersInputNames[i] = first.isEmpty() ? "?" : first.getHoverName().getString();
+                                    embersInputNames[i] = first.isEmpty() ? "?" : first.getDescriptionId();
                                 } else {
                                     embersInputNames[i] = "?";
                                 }
@@ -1234,14 +1346,19 @@ public final class GenericCraftPacket {
                 embersCodeFromCache
         );
 
-        // Cache the plan with the same tick-bucket captured earlier
-        PLAN_CACHE.put(cacheKey, plan);
+        PLAN_CACHE.put(cacheKey, new CachedPlan(plan, System.nanoTime()));
+        // Prune stale entries if cache grows too large
+        if (PLAN_CACHE.size() > 64) {
+            long cutoff = System.nanoTime() - PLAN_CACHE_TTL_NANOS;
+            PLAN_CACHE.values().removeIf(e -> e.createdNanos < cutoff);
+        }
 
+        RSIntegrationMod.LOGGER.info("[RSI-tryBuildPlan] SENDING PlanResponsePacket: recipeId={} steps={} feasible={} player={}",
+                recipeId, steps.size(), feasible, player.getGameProfile().getName());
         BatchCraftNetworkHandler.CHANNEL.send(
                 PacketDistributor.PLAYER.with(() -> player),
                 new PlanResponsePacket(plan));
-        RSIntegrationMod.LOGGER.debug("[RSI-Generic] Plan built for {}: {} steps, feasible={}",
-                recipeId, steps.size(), feasible);
+        RSIntegrationMod.LOGGER.info("[RSI-tryBuildPlan] PlanResponsePacket SENT: recipeId={}", recipeId);
     }
 
     /**
@@ -1320,6 +1437,8 @@ public final class GenericCraftPacket {
     }
 
     private static void sendPlanError(ServerPlayer player, String msg) {
+        RSIntegrationMod.LOGGER.info("[RSI-tryBuildPlan] sendPlanError: recipe={} msg={} player={}",
+                "?", msg, player.getGameProfile().getName());
         BatchCraftNetworkHandler.CHANNEL.send(
                 PacketDistributor.PLAYER.with(() -> player),
                 new PlanResponsePacket(new PlanResponse(false, "", ItemStack.EMPTY,

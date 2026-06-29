@@ -12,16 +12,17 @@ public final class PanelStack {
 
     private final UUID id;
     final ItemStack stack;       // count is NEVER set to 0 — matches RS final stack
-    long timestamp;
-    boolean craftable;
-    boolean zeroed;
-    long zeroedAt;
+    public long timestamp;
+    public boolean craftable;
+    public boolean zeroed;
+    public long zeroedAt;
 
     private String cachedName;
     private String cachedModId;
     private String cachedModName;
+    private String cachedSearchKey;
 
-    PanelStack(UUID id, ItemStack stack, long timestamp, boolean craftable) {
+    public PanelStack(UUID id, ItemStack stack, long timestamp, boolean craftable) {
         this.id = id;
         this.stack = stack.copy();
         if (this.stack.getCount() <= 0 && !this.stack.isEmpty()) {
@@ -82,11 +83,14 @@ public final class PanelStack {
     }
 
     public String searchKey() {
-        var rl = net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(stack.getItem());
-        String base = rl != null ? rl.toString() : "";
-        String nbt = stableNbtString(stack.getTag());
-        if (!nbt.isEmpty()) base += "|" + nbt;
-        return base;
+        if (cachedSearchKey == null) {
+            var rl = net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(stack.getItem());
+            String base = rl != null ? rl.toString() : "";
+            String nbt = stableNbtString(stack.getTag());
+            if (!nbt.isEmpty()) base += "|" + nbt;
+            cachedSearchKey = base;
+        }
+        return cachedSearchKey;
     }
 
     /** Produce a deterministic string from a CompoundTag by sorting keys at each level.
@@ -102,6 +106,18 @@ public final class PanelStack {
             net.minecraft.nbt.Tag val = tag.get(key);
             if (val instanceof net.minecraft.nbt.CompoundTag child) {
                 sb.append('{').append(stableNbtString(child)).append('}');
+            } else if (val instanceof net.minecraft.nbt.ListTag list) {
+                sb.append('[');
+                for (int i = 0; i < list.size(); i++) {
+                    if (i > 0) sb.append(',');
+                    net.minecraft.nbt.Tag elem = list.get(i);
+                    if (elem instanceof net.minecraft.nbt.CompoundTag c) {
+                        sb.append('{').append(stableNbtString(c)).append('}');
+                    } else {
+                        sb.append(elem);
+                    }
+                }
+                sb.append(']');
             } else {
                 sb.append(val);
             }

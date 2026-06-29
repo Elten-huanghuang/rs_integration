@@ -1,11 +1,8 @@
 package com.huanghuang.rsintegration.sidepanel;
 
 import net.minecraft.client.Minecraft;
-import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
@@ -71,15 +68,7 @@ public final class RSSidePanelDeltaPacket {
         buf.writeVarInt(entries.size());
         for (Entry e : entries) {
             buf.writeUUID(e.stackId);
-            Item item = e.stack.getItem();
-            if (item != null) {
-                buf.writeBoolean(true);
-                buf.writeId(BuiltInRegistries.ITEM, item);
-                buf.writeVarInt(Math.max(0, e.stack.getCount()));
-                buf.writeNbt(e.stack.getTag() != null ? e.stack.getTag() : null);
-            } else {
-                buf.writeBoolean(false);
-            }
+            buf.writeItem(e.stack);
             buf.writeVarLong(e.timestamp);
             buf.writeBoolean(e.craftable);
         }
@@ -90,22 +79,7 @@ public final class RSSidePanelDeltaPacket {
         List<Entry> entries = new ArrayList<>(count);
         for (int i = 0; i < count; i++) {
             UUID id = buf.readUUID();
-            ItemStack stack;
-            if (buf.readBoolean()) {
-                Item item = buf.readById(BuiltInRegistries.ITEM);
-                if (item != null) {
-                    int c = buf.readVarInt();
-                    CompoundTag tag = buf.readNbt();
-                    stack = new ItemStack(item, c);
-                    if (tag != null) stack.setTag(tag);
-                } else {
-                    buf.readVarInt();
-                    buf.readNbt();
-                    stack = ItemStack.EMPTY;
-                }
-            } else {
-                stack = ItemStack.EMPTY;
-            }
+            ItemStack stack = buf.readItem();
             entries.add(new Entry(id, stack, buf.readVarLong(), buf.readBoolean()));
         }
         return new RSSidePanelDeltaPacket(entries);

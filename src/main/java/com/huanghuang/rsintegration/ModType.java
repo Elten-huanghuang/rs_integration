@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration;
 
+import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import net.minecraft.world.item.crafting.Recipe;
 
@@ -39,6 +40,8 @@ public final class ModType {
     public static final ModType WIZARDS_REBORN;
     public static final ModType TOUHOU_LITTLE_MAID;
     public static final ModType EMBERS_ALCHEMY;
+    public static final ModType VANILLA_MACHINE;
+    public static final ModType MALUM_SPIRIT_CRUCIBLE;
 
     static {
         GENERIC = register("generic",
@@ -51,6 +54,14 @@ public final class ModType {
                 new String[]{"goety"},
                 new String[0],
                 delegateSupplier("com.huanghuang.rsintegration.mods.goety.GoetyBatchDelegate"));
+
+        // Must be before MALUM so classifyRecipe() matches the specific
+        // SpiritFocusingRecipe prefix before the generic com.sammy.malum. prefix.
+        MALUM_SPIRIT_CRUCIBLE = register("malum_spirit_crucible",
+                new String[]{"com.sammy.malum.common.recipe.SpiritFocusingRecipe"},
+                new String[]{"malum"},
+                new String[]{"spirit_crucible"},
+                delegateSupplier("com.huanghuang.rsintegration.mods.malum.MalumSpiritCrucibleBatchDelegate"));
 
         MALUM = register("malum",
                 new String[]{"com.sammy.malum."},
@@ -88,6 +99,20 @@ public final class ModType {
                 new String[0],
                 delegateSupplier("com.huanghuang.rsintegration.mods.embers.EreAlchemyBatchDelegate"),
                 delegateSupplier("com.huanghuang.rsintegration.mods.embers.EreAlchemyInferDelegate"));
+
+        VANILLA_MACHINE = register("vanilla_machine",
+                new String[]{
+                        "net.minecraft.world.item.crafting.SmeltingRecipe",
+                        "net.minecraft.world.item.crafting.BlastingRecipe",
+                        "net.minecraft.world.item.crafting.SmokingRecipe",
+                        "net.minecraft.world.item.crafting.CampfireCookingRecipe",
+                        "net.minecraft.world.item.crafting.StonecutterRecipe",
+                        "net.minecraft.world.item.crafting.SmithingTransformRecipe",
+                        "net.minecraft.world.item.crafting.SmithingTrimRecipe"
+                },
+                new String[]{"furnace", "smoker", "campfire", "stonecutter", "smithing_table"},
+                new String[]{"vanilla_machine"},
+                delegateSupplier("com.huanghuang.rsintegration.mods.vanilla.VanillaMachineBatchDelegate"));
     }
 
     // ── constructors ──────────────────────────────────────────────
@@ -234,8 +259,8 @@ public final class ModType {
                 Class<? extends IBatchDelegate> clazz =
                         (Class<? extends IBatchDelegate>) Class.forName(className);
                 return clazz.getDeclaredConstructor().newInstance();
-            } catch (Exception e) {
-                com.huanghuang.rsintegration.RSIntegrationMod.LOGGER.error(
+            } catch (Exception | Error e) {
+                RSIntegrationMod.LOGGER.error(
                         "[RSI] Failed to load delegate class '{}': {}", className, e.toString());
                 return null;
             }

@@ -17,7 +17,7 @@ public class StorageUpgradeSlotMixin {
     @Shadow
     private int slotIndex;
 
-    @Inject(method = "m_5857_", at = @At("HEAD"), cancellable = true)
+    @Inject(method = "m_5857_", at = @At("HEAD"), cancellable = true, remap = false)
     private void onMayPlaceHead(ItemStack stack, CallbackInfoReturnable<Boolean> cir) {
         if (stack.isEmpty()) return;
         ResourceLocation key = ForgeRegistries.ITEMS.getKey(stack.getItem());

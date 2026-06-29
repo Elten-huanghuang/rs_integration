@@ -1,83 +1,86 @@
 package com.huanghuang.rsintegration.sidepanel;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.machine.MachineInteractType;
+import com.huanghuang.rsintegration.machine.MachineStatus;
+import com.huanghuang.rsintegration.machine.MachineStatusReader;
+import com.huanghuang.rsintegration.network.BindingStorage;
+import com.huanghuang.rsintegration.network.ConfigSyncPacket;
+import com.huanghuang.rsintegration.network.NetworkHandler;
+import com.huanghuang.rsintegration.network.GuiOpenRateLimiter;
+import com.huanghuang.rsintegration.network.RemoteGuiAuth;
+import com.huanghuang.rsintegration.sidepanel.data.BindingInfo;
+import com.huanghuang.rsintegration.sidepanel.network.MachineCollectPacket;
+import com.huanghuang.rsintegration.sidepanel.network.MachineInsertPacket;
+import com.huanghuang.rsintegration.sidepanel.network.MachineStatusDeltaPacket;
+import com.huanghuang.rsintegration.sidepanel.network.OpenBoundMachineGuiPacket;
 import com.refinedmods.refinedstorage.api.storage.cache.IStorageCache;
 import com.refinedmods.refinedstorage.api.storage.cache.IStorageCacheListener;
 import com.refinedmods.refinedstorage.api.util.StackListResult;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.api.distmarker.OnlyIn;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.TickEvent;
+import net.minecraftforge.event.entity.player.PlayerContainerEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
-import net.minecraftforge.network.NetworkRegistry;
 import net.minecraftforge.network.PacketDistributor;
 import net.minecraftforge.network.simple.SimpleChannel;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.ArrayList;
 
 public final class RSSidePanelNetworkHandler {
 
-    private static final String PROTOCOL_VERSION = "3";
-    public static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
-            new ResourceLocation(RSIntegrationMod.MOD_ID, "rs_side_panel"),
-            () -> PROTOCOL_VERSION,
-            remote -> true,
-            remote -> true
-    );
+    public static final SimpleChannel CHANNEL = NetworkHandler.CHANNEL;
 
-    private static boolean registered;
-
-    // ── Per-player server-side cache + storage-cache listener ─────
     private static final Map<UUID, ListenerEntry> playerListeners = new ConcurrentHashMap<>();
     private static net.minecraft.server.MinecraftServer cachedServer;
 
     // ── Pending deltas per player — collected during a tick, flushed at end ──
     private static final Map<UUID, List<RSSidePanelDeltaPacket.Entry>> pendingDeltas = new ConcurrentHashMap<>();
-    private static boolean tickHookRegistered;
-    private static boolean logoutHookRegistered;
+    // ── Machine status: last-pushed snapshot per (player, dim, pos) for diff ──
+    private static final Map<UUID, Map<String, MachineStatus>> lastPushedStatuses = new ConcurrentHashMap<>();
+    private static int machineScanCounter;
+    private static boolean registered;
 
     private RSSidePanelNetworkHandler() {}
 
     public static void register() {
         if (registered) return;
-        CHANNEL.registerMessage(0,
-                RSSidePanelRequestPacket.class,
-                RSSidePanelRequestPacket::encode,
-                RSSidePanelRequestPacket::decode,
-                RSSidePanelRequestPacket::handle);
-        CHANNEL.registerMessage(1,
-                RSSidePanelSyncPacket.class,
-                RSSidePanelSyncPacket::encode,
-                RSSidePanelSyncPacket::decode,
-                RSSidePanelSyncPacket::handle);
-        CHANNEL.registerMessage(2,
-                RSSidePanelClickPacket.class,
-                RSSidePanelClickPacket::encode,
-                RSSidePanelClickPacket::decode,
-                RSSidePanelClickPacket::handle);
-        CHANNEL.registerMessage(3,
-                RSSidePanelDeltaPacket.class,
-                RSSidePanelDeltaPacket::encode,
-                RSSidePanelDeltaPacket::decode,
-                RSSidePanelDeltaPacket::handle);
-        CHANNEL.registerMessage(4,
-                RSInventoryTransferPacket.class,
-                RSInventoryTransferPacket::encode,
-                RSInventoryTransferPacket::decode,
-                RSInventoryTransferPacket::handle);
+        var ch = NetworkHandler.CHANNEL;
+        ch.registerMessage(NetworkHandler.nextId(), RSSidePanelRequestPacket.class,
+                RSSidePanelRequestPacket::encode, RSSidePanelRequestPacket::decode, RSSidePanelRequestPacket::handle);
+        ch.registerMessage(NetworkHandler.nextId(), RSSidePanelSyncPacket.class,
+                RSSidePanelSyncPacket::encode, RSSidePanelSyncPacket::decode, RSSidePanelSyncPacket::handle);
+        ch.registerMessage(NetworkHandler.nextId(), RSSidePanelClickPacket.class,
+                RSSidePanelClickPacket::encode, RSSidePanelClickPacket::decode, RSSidePanelClickPacket::handle);
+        ch.registerMessage(NetworkHandler.nextId(), RSSidePanelDeltaPacket.class,
+                RSSidePanelDeltaPacket::encode, RSSidePanelDeltaPacket::decode, RSSidePanelDeltaPacket::handle);
+        ch.registerMessage(NetworkHandler.nextId(), RSInventoryTransferPacket.class,
+                RSInventoryTransferPacket::encode, RSInventoryTransferPacket::decode, RSInventoryTransferPacket::handle);
+        ch.registerMessage(NetworkHandler.nextId(), OpenBoundMachineGuiPacket.class,
+                OpenBoundMachineGuiPacket::encode, OpenBoundMachineGuiPacket::decode, OpenBoundMachineGuiPacket::handle);
+        ch.registerMessage(NetworkHandler.nextId(), MachineStatusDeltaPacket.class,
+                MachineStatusDeltaPacket::encode, MachineStatusDeltaPacket::decode, MachineStatusDeltaPacket::handle);
+        ch.registerMessage(NetworkHandler.nextId(), MachineCollectPacket.class,
+                MachineCollectPacket::encode, MachineCollectPacket::decode, MachineCollectPacket::handle);
+        ch.registerMessage(NetworkHandler.nextId(), MachineInsertPacket.class,
+                MachineInsertPacket::encode, MachineInsertPacket::decode, MachineInsertPacket::handle);
+        ch.registerMessage(NetworkHandler.nextId(), ConfigSyncPacket.class,
+                ConfigSyncPacket::encode, ConfigSyncPacket::decode, ConfigSyncPacket::handle);
+        ch.registerMessage(NetworkHandler.nextId(), RSItemLockPacket.class,
+                RSItemLockPacket::encode, RSItemLockPacket::decode, RSItemLockPacket::handle);
+        ch.registerMessage(NetworkHandler.nextId(), RSItemLockSyncPacket.class,
+                RSItemLockSyncPacket::encode, RSItemLockSyncPacket::decode, RSItemLockSyncPacket::handle);
         registered = true;
 
-        if (!logoutHookRegistered) {
-            MinecraftForge.EVENT_BUS.register(RSSidePanelNetworkHandler.class);
-            logoutHookRegistered = true;
-        }
-        if (!tickHookRegistered) {
-            MinecraftForge.EVENT_BUS.addListener(RSSidePanelNetworkHandler::onServerTickEnd);
-            tickHookRegistered = true;
-        }
+        MinecraftForge.EVENT_BUS.register(RSSidePanelNetworkHandler.class);
+        MinecraftForge.EVENT_BUS.addListener(RSSidePanelNetworkHandler::onServerTickEnd);
     }
 
     // ── Tick-end delta flush ──────────────────────────────────────
@@ -87,9 +90,21 @@ public final class RSSidePanelNetworkHandler {
     private static void onServerTickEnd(TickEvent.ServerTickEvent event) {
         if (event.phase != TickEvent.Phase.END) return;
 
+        // Periodic cleanup of expired RemoteGuiAuth entries (every 30s)
+        if (event.getServer().getTickCount() % 600 == 0) {
+            RemoteGuiAuth.cleanExpired();
+            com.huanghuang.rsintegration.mods.embers.EreAlchemyLock.cleanExpired();
+        }
+
         if (!tickFiringConfirmed) {
             tickFiringConfirmed = true;
             RSIntegrationMod.LOGGER.info("[RSI-Delta] onServerTickEnd is firing (listener registered OK)");
+        }
+
+        // ── Machine status push (every 40 ticks) ─────────────────
+        machineScanCounter++;
+        if (machineScanCounter % 40 == 0) {
+            pushMachineStatusDeltas(event.getServer());
         }
 
         if (pendingDeltas.isEmpty()) return;
@@ -128,10 +143,76 @@ public final class RSSidePanelNetworkHandler {
         return server.getPlayerList().getPlayer(playerId);
     }
 
+    // ── Machine status push ───────────────────────────────────────
+
+    private static void pushMachineStatusDeltas(net.minecraft.server.MinecraftServer server) {
+        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+            pushMachineStatusDeltasFor(player);
+        }
+    }
+
+    private static void pushMachineStatusDeltasFor(ServerPlayer player) {
+        List<BindingInfo> bindings = new ArrayList<>();
+        collectBindingsFromStacks(player.getInventory().items, bindings);
+        collectBindingsFromStacks(player.getInventory().offhand, bindings);
+        collectBindingsFromStacks(player.getInventory().armor, bindings);
+        try {
+            var opt = top.theillusivec4.curios.api.CuriosApi.getCuriosInventory(player).resolve();
+            if (opt.isPresent()) {
+                for (var handler : opt.get().getCurios().values()) {
+                    var stacks = handler.getStacks();
+                    for (int s = 0; s < stacks.getSlots(); s++) {
+                        collectBindingsFromStacks(List.of(stacks.getStackInSlot(s)), bindings);
+                    }
+                }
+            }
+        } catch (Throwable ignored) {}
+
+        UUID pid = player.getUUID();
+        Map<String, MachineStatus> playerLast = lastPushedStatuses.computeIfAbsent(pid,
+                k -> new ConcurrentHashMap<>());
+
+        List<MachineStatusDeltaPacket.Entry> changed = new ArrayList<>();
+        var level = player.level();
+
+        for (BindingInfo info : bindings) {
+            // Defensive: skip entries with invalid dims before they reach network encoding
+            if (info.dim() == null
+                    || net.minecraft.resources.ResourceLocation.tryParse(info.dim().toString()) == null) {
+                RSIntegrationMod.LOGGER.warn("[RSI-Delta] Skipping binding with invalid dim: dim={} blockKey={}",
+                        info.dim(), info.blockKey());
+                continue;
+            }
+            if (MachineInteractType.fromBlockKey(info.blockKey()) != MachineInteractType.QUICK)
+                continue;
+
+            String key = statusKey(info.dim(), info.pos());
+            MachineStatus current = MachineStatusReader.read(level, info.pos());
+            MachineStatus last = playerLast.get(key);
+
+            if (last == null || !current.equals(last)) {
+                changed.add(new MachineStatusDeltaPacket.Entry(info.dim(), info.pos(), current));
+                playerLast.put(key, current);
+            }
+        }
+
+        if (!changed.isEmpty()) {
+            CHANNEL.send(
+                net.minecraftforge.network.PacketDistributor.PLAYER.with(() -> player),
+                new MachineStatusDeltaPacket(changed));
+        }
+    }
+
+    private static String statusKey(net.minecraft.resources.ResourceLocation dim, net.minecraft.core.BlockPos pos) {
+        return dim.toString() + ":" + pos.getX() + "," + pos.getY() + "," + pos.getZ();
+    }
+
     // ── convenience senders ────────────────────────────────────────
 
+    @OnlyIn(Dist.CLIENT)
     public static void sendRequestSync() {
-        CHANNEL.sendToServer(new RSSidePanelRequestPacket(true, false));
+        CHANNEL.sendToServer(new RSSidePanelRequestPacket(true, false,
+                (byte) RSSidePanelClient.sortMode, RSSidePanelClient.sortAsc));
     }
 
     public static void sendCloseRequest() {
@@ -143,9 +224,82 @@ public final class RSSidePanelNetworkHandler {
                                 List<Boolean> craftableFlags,
                                 int totalSlotCount, boolean networkAvailable,
                                 String networkName) {
-        CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
-                new RSSidePanelSyncPacket(ids, items, timestamps, craftableFlags,
-                        totalSlotCount, networkAvailable, networkName));
+        // Build binding info list from player's inventory bindings
+        List<BindingInfo> bindings = new ArrayList<>();
+        try {
+            collectBindingsFromStacks(player.getInventory().items, bindings);
+            collectBindingsFromStacks(player.getInventory().offhand, bindings);
+            collectBindingsFromStacks(player.getInventory().armor, bindings);
+            try {
+                var opt = top.theillusivec4.curios.api.CuriosApi.getCuriosInventory(player).resolve();
+                if (opt.isPresent()) {
+                    for (var handler : opt.get().getCurios().values()) {
+                        var stacks = handler.getStacks();
+                        for (int s = 0; s < stacks.getSlots(); s++) {
+                            collectBindingsFromStacks(List.of(stacks.getStackInSlot(s)), bindings);
+                        }
+                    }
+                }
+            } catch (Throwable ignored) {}
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI] Failed to build binding info: {}", e.toString());
+        }
+
+        // Piggyback lock sync
+        Set<ResourceLocation> locked = PlayerLockManager.getLockedItems(player);
+        if (!locked.isEmpty()) {
+            CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
+                    new RSItemLockSyncPacket(new ArrayList<>(locked)));
+        }
+
+        int total = ids.size();
+        if (total <= RSSidePanelSyncPacket.CHUNK_SIZE) {
+            CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
+                    new RSSidePanelSyncPacket(ids, items, timestamps, craftableFlags,
+                            totalSlotCount, networkAvailable, networkName, bindings));
+        } else {
+            int totalChunks = (int) Math.ceil((double) total / RSSidePanelSyncPacket.CHUNK_SIZE);
+            RSIntegrationMod.LOGGER.debug("[RSI] Splitting sync into {} chunks ({} items > {})",
+                    totalChunks, total, RSSidePanelSyncPacket.CHUNK_SIZE);
+            for (int i = 0; i < totalChunks; i++) {
+                int from = i * RSSidePanelSyncPacket.CHUNK_SIZE;
+                int to = Math.min(from + RSSidePanelSyncPacket.CHUNK_SIZE, total);
+                List<UUID> cIds = new ArrayList<>(ids.subList(from, to));
+                List<ItemStack> cItems = new ArrayList<>(items.subList(from, to));
+                List<Long> cTimestamps = new ArrayList<>(timestamps.subList(from, to));
+                List<Boolean> cFlags = new ArrayList<>(craftableFlags.subList(from, to));
+                List<BindingInfo> cBindings = (i == 0) ? bindings : Collections.emptyList();
+                CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
+                        new RSSidePanelSyncPacket(cIds, cItems, cTimestamps, cFlags,
+                                totalSlotCount, networkAvailable, networkName,
+                                cBindings, i, totalChunks));
+            }
+        }
+    }
+
+    private static void collectBindingsFromStacks(List<ItemStack> stacks, List<BindingInfo> out) {
+        for (ItemStack stack : stacks) {
+            if (stack.isEmpty()) continue;
+            var itemKey = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stack.getItem());
+            if (itemKey == null) continue;
+            for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
+                String displayName = resolveDisplayName(entry.blockKey());
+                out.add(new BindingInfo(itemKey.toString(), entry.dim(), entry.pos(),
+                        entry.blockKey(), displayName));
+            }
+        }
+    }
+
+    private static String resolveDisplayName(String blockKey) {
+        if (blockKey == null || blockKey.isEmpty()) return "?";
+        var rl = net.minecraft.resources.ResourceLocation.tryParse(blockKey);
+        if (rl != null) {
+            var block = net.minecraft.core.registries.BuiltInRegistries.BLOCK.get(rl);
+            if (block != null) {
+                return block.getDescriptionId();
+            }
+        }
+        return blockKey;
     }
 
     public static void sendClick(ItemStack targetItem, byte action, boolean isShift, UUID panelId) {
@@ -175,7 +329,7 @@ public final class RSSidePanelNetworkHandler {
      *  Multiple changes to the same stackId within a tick are consolidated. */
     public static void queueDelta(ServerPlayer player, UUID stackId,
                                   ItemStack stack, long timestamp, boolean craftable) {
-        pendingDeltas.computeIfAbsent(player.getUUID(), k -> new ArrayList<>())
+        pendingDeltas.computeIfAbsent(player.getUUID(), k -> java.util.Collections.synchronizedList(new ArrayList<>()))
                 .add(new RSSidePanelDeltaPacket.Entry(stackId, stack, timestamp, craftable));
     }
 
@@ -330,10 +484,38 @@ public final class RSSidePanelNetworkHandler {
         pendingDeltas.remove(playerId);
     }
 
+    /** @return true if the player has an active storage-cache listener. */
+    public static boolean hasListener(UUID playerId) {
+        return playerListeners.containsKey(playerId);
+    }
+
+    @SubscribeEvent
+    public static void onPlayerLogin(PlayerEvent.PlayerLoggedInEvent event) {
+        if (event.getEntity() instanceof ServerPlayer sp) {
+            Set<ResourceLocation> locked = PlayerLockManager.getLockedItems(sp);
+            if (!locked.isEmpty()) {
+                CHANNEL.send(PacketDistributor.PLAYER.with(() -> sp),
+                        new RSItemLockSyncPacket(new ArrayList<>(locked)));
+            }
+        }
+    }
+
     @SubscribeEvent
     public static void onPlayerLogout(PlayerEvent.PlayerLoggedOutEvent event) {
         if (event.getEntity() instanceof ServerPlayer sp) {
-            unregisterListener(sp.getUUID());
+            UUID pid = sp.getUUID();
+            unregisterListener(pid);
+            lastPushedStatuses.remove(pid);
+            RemoteGuiAuth.onPlayerLogout(pid);
+            GuiOpenRateLimiter.onPlayerLogout(pid);
+            com.huanghuang.rsintegration.crafting.PreviewRateLimiter.onPlayerLogout(pid);
+        }
+    }
+
+    @SubscribeEvent
+    public static void onContainerClose(PlayerContainerEvent.Close event) {
+        if (event.getEntity() instanceof ServerPlayer sp) {
+            RemoteGuiAuth.deauthorize(sp.getUUID());
         }
     }
 

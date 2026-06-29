@@ -87,6 +87,7 @@ public final class RSIntegration {
             INetwork net = resolveFromNetworkItem(player, stack);
             if (net != null) return net;
         }
+        if (!net.minecraftforge.fml.ModList.get().isLoaded("curios")) return null;
         try {
             var opt = top.theillusivec4.curios.api.CuriosApi.getCuriosInventory(player).resolve();
             if (opt.isPresent()) {
@@ -117,10 +118,7 @@ public final class RSIntegration {
                 RSIntegrationMod.LOGGER.info("[RSI] resolveNetwork: null level for dim {}", dimension.location());
                 return null;
             }
-            if (!level.isLoaded(controllerPos)) {
-                RSIntegrationMod.LOGGER.info("[RSI] resolveNetwork: chunk not loaded at {}, forcing load", controllerPos);
-                level.getChunk(controllerPos);
-            }
+            com.huanghuang.rsintegration.util.ChunkUtils.loadChunk(level, controllerPos);
             BlockEntity be = level.getBlockEntity(controllerPos);
             if (be == null) {
                 RSIntegrationMod.LOGGER.info("[RSI] resolveNetwork: no BlockEntity at pos={} dim={}",

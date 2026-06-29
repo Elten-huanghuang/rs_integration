@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting.plan;
 
 import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.RSIntegrationMod;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
@@ -25,6 +26,8 @@ public final class PlanResponsePacket {
     }
 
     public void encode(FriendlyByteBuf buf) {
+        RSIntegrationMod.LOGGER.info("[RSI-PlanPkt] encode() called: recipeId={} success={} steps={}",
+                plan.recipeId(), plan.success(), plan.steps().size());
         buf.writeBoolean(plan.success());
         buf.writeUtf(plan.recipeId() != null ? plan.recipeId() : "");
         // Always send full plan data — even infeasible plans need the recipe
@@ -64,7 +67,7 @@ public final class PlanResponsePacket {
         // Materials
         buf.writeVarInt(plan.materials().size());
         for (Map.Entry<Item, PlanResponse.Availability> e : plan.materials().entrySet()) {
-            buf.writeVarInt(Item.getId(e.getKey()));
+            buf.writeResourceLocation(net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(e.getKey()));
             buf.writeVarInt(e.getValue().needed());
             buf.writeVarInt(e.getValue().available());
         }
@@ -107,6 +110,7 @@ public final class PlanResponsePacket {
     }
 
     public static PlanResponsePacket decode(FriendlyByteBuf buf) {
+        RSIntegrationMod.LOGGER.info("[RSI-PlanPkt] decode() called");
         boolean success = buf.readBoolean();
         String recipeId = buf.readUtf();
         // Always read full plan data — the server sends the recipe chain
@@ -157,8 +161,12 @@ public final class PlanResponsePacket {
         int matCount = buf.readVarInt();
         Map<Item, PlanResponse.Availability> materials = new LinkedHashMap<>();
         for (int i = 0; i < matCount; i++) {
-            Item item = Item.byId(buf.readVarInt());
-            materials.put(item, new PlanResponse.Availability(buf.readVarInt(), buf.readVarInt()));
+            Item item = net.minecraftforge.registries.ForgeRegistries.ITEMS.getValue(buf.readResourceLocation());
+            if (item != null) {
+                materials.put(item, new PlanResponse.Availability(buf.readVarInt(), buf.readVarInt()));
+            } else {
+                buf.readVarInt(); buf.readVarInt(); // skip counts for unknown item
+            }
         }
         // Missing
         int missCount = buf.readVarInt();
@@ -208,15 +216,42 @@ public final class PlanResponsePacket {
 
     @SuppressWarnings("resource")
     public static void handle(PlanResponsePacket packet, Supplier<NetworkEvent.Context> ctxSupplier) {
+        RSIntegrationMod.LOGGER.info(
+                "[RSI-PlanPkt] Client received PlanResponsePacket: recipeId={} success={} steps={}",
+                packet.plan.recipeId(), packet.plan.success(), packet.plan.steps().size());
         NetworkEvent.Context ctx = ctxSupplier.get();
-        ctx.enqueueWork(() -> openScreen(packet.plan));
+        ctx.enqueueWork(() -> {
+            RSIntegrationMod.LOGGER.info(
+                    "[RSI-PlanPkt] enqueueWork running on client thread: recipeId={}",
+                    packet.plan.recipeId());
+            openScreen(packet.plan);
+        });
         ctx.setPacketHandled(true);
     }
 
     @OnlyIn(Dist.CLIENT)
     private static void openScreen(PlanResponse plan) {
+        RSIntegrationMod.LOGGER.info(
+                "[RSI-PlanPkt] openScreen called: success={} steps={}",
+                plan.success(), plan.steps().size());
         var mc = Minecraft.getInstance();
-        if (mc.player == null) return;
-        mc.setScreen(new CraftingPlanScreen(plan));
+        if (mc.player == null) {
+            RSIntegrationMod.LOGGER.warn("[RSI-PlanPkt] openScreen ABORT: mc.player is null");
+            return;
+        }
+        // Skip if a CraftingPlanScreen for the same recipe is already open
+        if (mc.screen instanceof CraftingPlanScreen existing
+                && plan.recipeId() != null
+                && plan.recipeId().equals(existing.getRecipeId())) {
+            RSIntegrationMod.LOGGER.warn("[RSI-PlanPkt] openScreen SKIP: already showing plan for {}",
+                    plan.recipeId());
+            return;
+        }
+        try {
+            mc.setScreen(new CraftingPlanScreen(plan));
+            RSIntegrationMod.LOGGER.info("[RSI-PlanPkt] CraftingPlanScreen opened successfully");
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.error("[RSI-PlanPkt] Failed to open CraftingPlanScreen:", e);
+        }
     }
 }

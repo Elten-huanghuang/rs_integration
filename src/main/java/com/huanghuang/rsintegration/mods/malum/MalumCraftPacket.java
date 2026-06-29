@@ -59,7 +59,7 @@ public final class MalumCraftPacket {
     public static void handle(MalumCraftPacket packet, Supplier<NetworkEvent.Context> contextSupplier) {
         NetworkEvent.Context context = contextSupplier.get();
         ServerPlayer player = context.getSender();
-        if (player == null) {
+        if (player == null || player instanceof net.minecraftforge.common.util.FakePlayer) {
             context.setPacketHandled(true);
             return;
         }        context.enqueueWork(() -> {
@@ -87,7 +87,7 @@ public final class MalumCraftPacket {
             return;
         }
 
-        if (!level.isLoaded(pos)) level.getChunk(pos);
+        com.huanghuang.rsintegration.util.ChunkUtils.loadChunk(level, pos);
         BlockEntity be = level.getBlockEntity(pos);
         Object altar = castSpiritAltar(be);
         if (altar == null) {

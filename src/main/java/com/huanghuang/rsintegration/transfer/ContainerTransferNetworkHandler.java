@@ -1,19 +1,11 @@
 package com.huanghuang.rsintegration.transfer;
 
-import com.huanghuang.rsintegration.RSIntegrationMod;
-import net.minecraft.resources.ResourceLocation;
-import net.minecraftforge.network.NetworkRegistry;
+import com.huanghuang.rsintegration.network.NetworkHandler;
 import net.minecraftforge.network.simple.SimpleChannel;
 
 public final class ContainerTransferNetworkHandler {
 
-    private static final String PROTOCOL_VERSION = "1";
-    public static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
-            new ResourceLocation(RSIntegrationMod.MOD_ID, "container_transfer"),
-            () -> PROTOCOL_VERSION,
-            remote -> true,
-            remote -> true
-    );
+    public static final SimpleChannel CHANNEL = NetworkHandler.CHANNEL;
 
     private static boolean registered;
 
@@ -21,13 +13,9 @@ public final class ContainerTransferNetworkHandler {
 
     public static void register() {
         if (registered) return;
-        CHANNEL.registerMessage(
-                0,
-                StoreAllPacket.class,
-                StoreAllPacket::encode,
-                StoreAllPacket::decode,
-                StoreAllPacket::handle
-        );
+        var ch = NetworkHandler.CHANNEL;
+        ch.registerMessage(NetworkHandler.nextId(), StoreAllPacket.class,
+                StoreAllPacket::encode, StoreAllPacket::decode, StoreAllPacket::handle);
         registered = true;
     }
 }

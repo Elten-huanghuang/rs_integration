@@ -64,7 +64,7 @@ public final class WRWandCraftPacket {
     public static void handle(WRWandCraftPacket packet, Supplier<NetworkEvent.Context> contextSupplier) {
         NetworkEvent.Context context = contextSupplier.get();
         ServerPlayer player = context.getSender();
-        if (player == null) {
+        if (player == null || player instanceof net.minecraftforge.common.util.FakePlayer) {
             context.setPacketHandled(true);
             return;
         }
@@ -162,6 +162,9 @@ public final class WRWandCraftPacket {
             templates.add(taken);
         }
 
+        // Phase 1.5: check wissen energy before extracting items from RS
+        if (!checkWissen(player, be, recipe)) return false;
+
         // Phase 2: commit all extractions atomically
         if (!ledger.commit(network, player)) {
             RSIntegrationMod.LOGGER.error("[RSI-WR] Ledger commit failed for WissenCrystallizer");
@@ -178,6 +181,12 @@ public final class WRWandCraftPacket {
             }
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-WR] WissenCrystallizer item placement failed, rolling back", e);
+            // Clear slots that may have been filled before the exception
+            for (int j = 0; j < templates.size(); j++) {
+                if (!templates.get(j).isEmpty()) {
+                    try { rsi$setContainerItem(be, j, ItemStack.EMPTY); } catch (Exception ignored) {}
+                }
+            }
             refundTemplates(network, player, templates);
             return false;
         }
@@ -245,6 +254,9 @@ public final class WRWandCraftPacket {
             }
             templates.add(taken);
         }
+
+        // Phase 1.5: check wissen energy before extracting items from RS
+        if (!checkWissen(player, be, recipe)) return false;
 
         // Phase 2: commit all extractions atomically
         if (!ledger.commit(network, player)) {
@@ -351,6 +363,9 @@ public final class WRWandCraftPacket {
             }
             templates.add(taken);
         }
+
+        // Phase 1.5: check wissen energy before extracting items from RS
+        if (!checkWissen(player, be, recipe)) return false;
 
         // Phase 2: commit all extractions atomically
         if (!ledger.commit(network, player)) {
@@ -483,6 +498,9 @@ public final class WRWandCraftPacket {
             }
             templates.add(taken);
         }
+
+        // Phase 1.5: check wissen energy before extracting items from RS
+        if (!checkWissen(player, be, recipe)) return false;
 
         // Phase 2: commit all extractions atomically
         if (!ledger.commit(network, player)) {
@@ -639,132 +657,29 @@ public final class WRWandCraftPacket {
 
     @Nullable
     private static IItemHandler rsi$getForgeItemHandler(Object be) {
-        if (be instanceof BlockEntity blockEntity) {
-            return blockEntity.getCapability(ForgeCapabilities.ITEM_HANDLER, null).resolve().orElse(null);
-        }
-        return null;
+        return WRContainerHelper.getForgeItemHandler(be);
     }
 
     @Nullable
     private static net.minecraft.world.SimpleContainer rsi$getLiveSimpleContainer(Object be) {
-        Class<?> clazz = be.getClass();
-        while (clazz != null && clazz != Object.class) {
-            for (java.lang.reflect.Field field : clazz.getDeclaredFields()) {
-                if (net.minecraft.world.SimpleContainer.class.isAssignableFrom(field.getType())) {
-                    field.setAccessible(true);
-                    try { return (net.minecraft.world.SimpleContainer) field.get(be); }
-                    catch (Exception ignored) {}
-                }
-            }
-            clazz = clazz.getSuperclass();
-        }
-        return null;
+        return WRContainerHelper.getLiveSimpleContainer(be);
     }
 
     @Nullable
     private static net.minecraft.world.SimpleContainer rsi$getSimpleContainer(Object be) {
-        Class<?> clazz = be.getClass();
-        while (clazz != null && clazz != Object.class) {
-            try {
-                java.lang.reflect.Method m = clazz.getDeclaredMethod("createItemHandler");
-                m.setAccessible(true);
-                return (net.minecraft.world.SimpleContainer) m.invoke(be);
-            } catch (NoSuchMethodException e) {
-                clazz = clazz.getSuperclass();
-            } catch (Exception e) {
-                return null;
-            }
-        }
-        return null;
+        return WRContainerHelper.getSimpleContainer(be);
     }
 
     private static int rsi$getContainerSize(Object be) {
-        Class<?> bc = be.getClass();
-        java.lang.reflect.Method m = com.huanghuang.rsintegration.util.Reflect.findMethod(bc, "getInventorySize", new Class<?>[0]);
-        if (m != null) try { return (int) m.invoke(be); } catch (Exception ignored) {}
-        m = com.huanghuang.rsintegration.util.Reflect.findMethod(bc, "getContainerSize", new Class<?>[0]);
-        if (m != null) try { return (int) m.invoke(be); } catch (Exception ignored) {}
-        m = com.huanghuang.rsintegration.util.Reflect.findMethod(bc, "getItemHandler", new Class<?>[0]);
-        if (m != null) {
-            try {
-                Object h = m.invoke(be);
-                if (h != null) {
-                    m = com.huanghuang.rsintegration.util.Reflect.findMethod(h.getClass(), "getSlots", new Class<?>[0]);
-                    if (m != null) return (int) m.invoke(h);
-                }
-            } catch (Exception ignored) {}
-        }
-        IItemHandler cap = rsi$getForgeItemHandler(be);
-        if (cap != null) return cap.getSlots();
-        net.minecraft.world.SimpleContainer live = rsi$getLiveSimpleContainer(be);
-        if (live != null) return live.getContainerSize();
-        m = com.huanghuang.rsintegration.util.Reflect.findMethod(bc, "m_6643_", new Class<?>[0]);
-        if (m != null) try { return (int) m.invoke(be); } catch (Exception ignored) {}
-        net.minecraft.world.SimpleContainer sc = rsi$getSimpleContainer(be);
-        if (sc != null) return sc.getContainerSize();
-        return -1;
+        return WRContainerHelper.getContainerSize(be);
     }
 
     private static ItemStack rsi$getContainerItem(Object be, int slot) {
-        Class<?> bc = be.getClass();
-        java.lang.reflect.Method m = com.huanghuang.rsintegration.util.Reflect.findMethod(bc, "getItem", new Class<?>[]{int.class});
-        if (m != null) try { return (ItemStack) m.invoke(be, slot); } catch (Exception ignored) {}
-        m = com.huanghuang.rsintegration.util.Reflect.findMethod(bc, "getItemHandler", new Class<?>[0]);
-        if (m != null) {
-            try {
-                Object h = m.invoke(be);
-                if (h != null) {
-                    m = com.huanghuang.rsintegration.util.Reflect.findMethod(h.getClass(), "getStackInSlot", new Class<?>[]{int.class});
-                    if (m != null) return (ItemStack) m.invoke(h, slot);
-                }
-            } catch (Exception ignored) {}
-        }
-        IItemHandler cap = rsi$getForgeItemHandler(be);
-        if (cap != null) return cap.getStackInSlot(slot);
-        net.minecraft.world.SimpleContainer live = rsi$getLiveSimpleContainer(be);
-        if (live != null) return live.getItem(slot);
-        m = com.huanghuang.rsintegration.util.Reflect.findMethod(bc, "m_8020_", new Class<?>[]{int.class});
-        if (m != null) try { return (ItemStack) m.invoke(be, slot); } catch (Exception ignored) {}
-        net.minecraft.world.SimpleContainer sc = rsi$getSimpleContainer(be);
-        if (sc != null) return sc.getItem(slot);
-        return ItemStack.EMPTY;
+        return WRContainerHelper.getContainerItem(be, slot);
     }
 
     private static void rsi$setContainerItem(Object be, int slot, ItemStack stack) {
-        Class<?> bc = be.getClass();
-        java.lang.reflect.Method m = com.huanghuang.rsintegration.util.Reflect.findMethod(bc, "setItem", new Class<?>[]{int.class, ItemStack.class});
-        if (m != null) { try { m.invoke(be, slot, stack); return; } catch (Exception ignored) {} }
-        m = com.huanghuang.rsintegration.util.Reflect.findMethod(bc, "getItemHandler", new Class<?>[0]);
-        if (m != null) {
-            try {
-                Object h = m.invoke(be);
-                if (h != null) {
-                    m = com.huanghuang.rsintegration.util.Reflect.findMethod(h.getClass(), "setStackInSlot", new Class<?>[]{int.class, ItemStack.class});
-                    if (m != null) { m.invoke(h, slot, stack); return; }
-                }
-            } catch (Exception ignored) {}
-        }
-        IItemHandler cap = rsi$getForgeItemHandler(be);
-        if (cap != null) {
-            if (cap instanceof ItemStackHandler handler) {
-                handler.setStackInSlot(slot, stack);
-                return;
-            }
-            ItemStack old = cap.extractItem(slot, cap.getStackInSlot(slot).getCount(), false);
-            ItemStack leftover = cap.insertItem(slot, stack, false);
-            if (!leftover.isEmpty()) {
-                if (!old.isEmpty()) cap.insertItem(slot, old, false);
-            } else {
-                return;
-            }
-        }
-        net.minecraft.world.SimpleContainer live = rsi$getLiveSimpleContainer(be);
-        if (live != null) { live.setItem(slot, stack); return; }
-        m = com.huanghuang.rsintegration.util.Reflect.findMethod(bc, "m_6836_", new Class<?>[]{int.class, ItemStack.class});
-        if (m != null) { try { m.invoke(be, slot, stack); return; } catch (Exception ignored) {} }
-        net.minecraft.world.SimpleContainer sc = rsi$getSimpleContainer(be);
-        if (sc != null) { sc.setItem(slot, stack); return; }
-        throw new RuntimeException("[RSI-WR] Failed to set container item in " + be.getClass().getName());
+        WRContainerHelper.setContainerItem(be, slot, stack);
     }
 
     private static java.lang.reflect.Method rsi$getMethod(Class<?> clazz, String name, Class<?>... paramTypes)
@@ -775,18 +690,65 @@ public final class WRWandCraftPacket {
         return m;
     }
 
-    private static void rsi$syncBlockEntity(Object be) {
-        if (!(be instanceof BlockEntity blockEntity)) return;
-        try {
-            Class<?> updateClass = Class.forName(
-                    "mod.maxbogomol.fluffy_fur.common.network.BlockEntityUpdate");
-            rsi$getMethod(updateClass, "packet", BlockEntity.class).invoke(null, blockEntity);
-        } catch (Exception e) {
-            try {
-                java.lang.reflect.Method m = com.huanghuang.rsintegration.util.Reflect.findMethod(
-                        blockEntity.getClass(), "m_6596_", new Class<?>[0]);
-                if (m != null) m.invoke(blockEntity);
-            } catch (Exception ignored) {}
+    // ── Wissen energy check ───────────────────────────────────────
+
+    /**
+     * Check whether the machine has enough Wissen energy for the recipe.
+     * Returns true if wissen is sufficient or if the check can't be performed.
+     * Must be called BEFORE ledger commit to avoid extracting items that can't be used.
+     */
+    private static boolean checkWissen(ServerPlayer player, BlockEntity be, Recipe<?> recipe) {
+        int cost = readWissenCost(recipe);
+        if (cost <= 0) return true; // no wissen cost, pass
+
+        int current = readCurrentWissen(be);
+        if (current < cost) {
+            player.sendSystemMessage(Component.translatable(
+                    "rsi.wr.error.insufficient_wissen",
+                    String.format("%,d", current), String.format("%,d", cost)));
+            return false;
         }
+        return true;
+    }
+
+    private static int readWissenCost(Recipe<?> recipe) {
+        try {
+            java.lang.reflect.Method m = com.huanghuang.rsintegration.util.Reflect.findMethod(
+                    recipe.getClass(), "getWissen", new Class<?>[0]);
+            if (m != null) return (int) m.invoke(recipe);
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-WR] Failed to read wissen cost", e);
+        }
+        return 0;
+    }
+
+    private static int readCurrentWissen(BlockEntity be) {
+        try {
+            java.lang.reflect.Method m = com.huanghuang.rsintegration.util.Reflect.findMethod(
+                    be.getClass(), "getWissen", new Class<?>[0]);
+            if (m != null) return (int) m.invoke(be);
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-WR] Failed to read current wissen", e);
+        }
+        // Fallback: try reading the public `wissen` field directly
+        try {
+            Class<?> clazz = be.getClass();
+            while (clazz != null && clazz != Object.class) {
+                try {
+                    java.lang.reflect.Field f = clazz.getDeclaredField("wissen");
+                    f.setAccessible(true);
+                    return f.getInt(be);
+                } catch (NoSuchFieldException e) {
+                    clazz = clazz.getSuperclass();
+                }
+            }
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-WR] Failed to read wissen field", e);
+        }
+        return -1; // can't determine — fail safe
+    }
+
+    private static void rsi$syncBlockEntity(Object be) {
+        WRContainerHelper.syncBlockEntity(be);
     }
 }

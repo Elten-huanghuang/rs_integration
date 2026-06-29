@@ -1,9 +1,14 @@
 package com.huanghuang.rsintegration.backpack;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import net.minecraft.client.renderer.block.model.BakedQuad;
+import net.minecraft.client.resources.model.BakedModel;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
 import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.client.event.ModelEvent;
+import net.minecraftforge.client.event.RegisterColorHandlersEvent;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.fml.DistExecutor;
 import net.minecraftforge.registries.DeferredRegister;
@@ -26,7 +31,10 @@ import net.p3pp3rf1y.sophisticatedcore.upgrades.magnet.MagnetUpgradeItem;
 import net.p3pp3rf1y.sophisticatedcore.upgrades.magnet.MagnetUpgradeWrapper;
 import net.p3pp3rf1y.sophisticatedcore.upgrades.pickup.PickupUpgradeWrapper;
 
+import java.util.List;
 import java.util.Objects;
+
+import java.util.ArrayList;
 
 public final class SophisticatedBackpacksItems {
 
@@ -99,6 +107,7 @@ public final class SophisticatedBackpacksItems {
     public static void init(IEventBus modBus) {
         ITEMS.register(modBus);
         modBus.addListener(SophisticatedBackpacksItems::registerContainers);
+        DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () -> registerClientColors(modBus));
     }
 
     private static void registerContainers(RegisterEvent event) {
@@ -142,5 +151,86 @@ public final class SophisticatedBackpacksItems {
                  StorageScreenBase<?> screen) ->
                         new RSFeedingUpgradeTab(container, position, screen,
                                 Config.SERVER.advancedFeedingUpgrade.slotsInRow.get()));
+    }
+
+    // ── Client-only: rainbow tint for bound items ──────────────────
+
+    private static void registerClientColors(IEventBus modBus) {
+        // Tint bound items with time-varying rainbow hue
+        modBus.addListener((RegisterColorHandlersEvent.Item event) -> {
+            event.register((stack, tintIndex) -> {
+                if (tintIndex != 0) return 0xFFFFFFFF;
+                var tag = stack.getTag();
+                if (tag == null || !tag.contains("RSBlockPos") || !tag.contains("RSBlockDimension"))
+                    return 0xFFFFFFFF;
+                return hslToRgb(((System.currentTimeMillis() % 3000L) / 3000.0f), 0.7f, 0.65f);
+            }, RS_MAGNET_UPGRADE.get(), RS_PICKUP_UPGRADE.get(),
+               RS_REFILL_UPGRADE.get(), RS_FEEDING_UPGRADE.get());
+        });
+
+        // Set tintIndex=0 on baked quads so ItemColor is applied
+        modBus.addListener((ModelEvent.BakingCompleted event) -> {
+            ResourceLocation[] modelIds = {
+                    new ResourceLocation(RSIntegrationMod.MOD_ID, "rs_magnet_upgrade"),
+                    new ResourceLocation(RSIntegrationMod.MOD_ID, "rs_pickup_upgrade"),
+                    new ResourceLocation(RSIntegrationMod.MOD_ID, "rs_refill_upgrade"),
+                    new ResourceLocation(RSIntegrationMod.MOD_ID, "rs_feeding_upgrade"),
+            };
+            for (ResourceLocation id : modelIds) {
+                BakedModel original = event.getModels().get(id);
+                if (original != null && !(original instanceof TintedItemModel)) {
+                    event.getModels().put(id, new TintedItemModel(original));
+                }
+            }
+        });
+    }
+
+    private static int hslToRgb(float h, float s, float l) {
+        float c = (1f - Math.abs(2f * l - 1f)) * s;
+        float x = c * (1f - Math.abs((h * 6f) % 2f - 1f));
+        float m = l - c / 2f;
+        float r, g, b;
+        if (h < 1f / 6f)      { r = c; g = x; b = 0f; }
+        else if (h < 2f / 6f) { r = x; g = c; b = 0f; }
+        else if (h < 3f / 6f) { r = 0f; g = c; b = x; }
+        else if (h < 4f / 6f) { r = 0f; g = x; b = c; }
+        else if (h < 5f / 6f) { r = x; g = 0f; b = c; }
+        else                  { r = c; g = 0f; b = x; }
+        return 0xFF000000 | ((int)((r + m) * 255f) << 16)
+                | ((int)((g + m) * 255f) << 8)
+                | (int)((b + m) * 255f);
+    }
+
+    /** Wraps a BakedModel so all quads have tintIndex=0 for ItemColor support. */
+    private static class TintedItemModel implements BakedModel {
+        private final BakedModel delegate;
+
+        TintedItemModel(BakedModel delegate) { this.delegate = delegate; }
+
+        @Override
+        public List<BakedQuad> getQuads(@javax.annotation.Nullable net.minecraft.world.level.block.state.BlockState state,
+                                         @javax.annotation.Nullable net.minecraft.core.Direction side,
+                                         net.minecraft.util.RandomSource rand) {
+            List<BakedQuad> quads = delegate.getQuads(state, side, rand);
+            List<BakedQuad> tinted = new ArrayList<>(quads.size());
+            for (BakedQuad q : quads) {
+                if (q.isTinted()) {
+                    tinted.add(q);
+                } else {
+                    tinted.add(new BakedQuad(
+                            q.getVertices().clone(), 0, q.getDirection(),
+                            q.getSprite(), q.isShade()));
+                }
+            }
+            return tinted;
+        }
+
+        @Override public boolean useAmbientOcclusion() { return delegate.useAmbientOcclusion(); }
+        @Override public boolean isGui3d() { return delegate.isGui3d(); }
+        @Override public boolean usesBlockLight() { return delegate.usesBlockLight(); }
+        @Override public boolean isCustomRenderer() { return delegate.isCustomRenderer(); }
+        @Override public net.minecraft.client.renderer.texture.TextureAtlasSprite getParticleIcon() { return delegate.getParticleIcon(); }
+        @Override public net.minecraft.client.renderer.block.model.ItemTransforms getTransforms() { return delegate.getTransforms(); }
+        @Override public net.minecraft.client.renderer.block.model.ItemOverrides getOverrides() { return delegate.getOverrides(); }
     }
 }

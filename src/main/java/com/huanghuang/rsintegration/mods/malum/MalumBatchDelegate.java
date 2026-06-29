@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.mods.malum;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
@@ -25,21 +26,21 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
-public final class MalumBatchDelegate implements IBatchDelegate {
+public final class MalumBatchDelegate extends AbstractBatchDelegate {
 
     // ── Shared class refs ────────────────────────────────────────
-    private static volatile boolean classesLoaded;
     private static volatile Class<?> spiritAltarBEClass;
     private static volatile Class<?> altarCraftingHelperClass;
 
     private static void ensureClasses() {
-        if (classesLoaded) return;
+        if (!com.huanghuang.rsintegration.util.ModClassLoader.ensureClasses("malum",
+                "com.sammy.malum.common.block.curiosities.spirit_altar.SpiritAltarBlockEntity",
+                "com.sammy.malum.common.block.curiosities.spirit_altar.AltarCraftingHelper")) return;
         try {
             spiritAltarBEClass = Class.forName(
                     "com.sammy.malum.common.block.curiosities.spirit_altar.SpiritAltarBlockEntity");
             altarCraftingHelperClass = Class.forName(
                     "com.sammy.malum.common.block.curiosities.spirit_altar.AltarCraftingHelper");
-            classesLoaded = true;
         } catch (ClassNotFoundException e) {
             RSIntegrationMod.LOGGER.error("[RSI-Batch-Malum] Failed to load Malum classes", e);
         }
@@ -54,12 +55,8 @@ public final class MalumBatchDelegate implements IBatchDelegate {
     private Object invMain;              // main inventory
     private Object invSpirit;            // spirit inventory
     private Recipe<?> recipe;
-    private ExtractionLedger ledger;
-    private ExtractionLedger sharedLedger; // set by tryStartWithMaterials
-    private INetwork network;
     private List<Integer> filledPedestalIndices;
     private List<?> pedestals;           // captured pedestal list
-    private boolean usingSharedLedger;
     private boolean craftStarted;
     private boolean craftWasSeenActive;
 
@@ -69,6 +66,18 @@ public final class MalumBatchDelegate implements IBatchDelegate {
     public boolean validateAndInit(ServerPlayer player, ResourceLocation recipeId,
                                    @Nullable ResourceLocation dim, BlockPos pos) {
         ensureClasses();
+
+        // Reset all instance state to prevent pollution from a previous
+        // validateAndInit() call that failed partway through.
+        this.altar = null;
+        this.invMain = null;
+        this.invSpirit = null;
+        this.recipe = null;
+        this.filledPedestalIndices = null;
+        this.pedestals = null;
+        this.craftStarted = false;
+        this.craftWasSeenActive = false;
+
         if (spiritAltarBEClass == null || altarCraftingHelperClass == null) {
             player.sendSystemMessage(Component.translatable("rsi.batch.error.mod_missing", "Malum"));
             return false;
@@ -84,7 +93,10 @@ public final class MalumBatchDelegate implements IBatchDelegate {
         this.myPos = pos;
         this.player = player;
 
-        if (!level.isLoaded(pos)) level.getChunk(pos);
+        if (!level.isLoaded(pos)) {
+            RSIntegrationMod.LOGGER.info("[RSI-Batch-Malum] Chunk unloaded at {} — force-loading", pos);
+            level.getChunk(pos);
+        }
         BlockEntity be = level.getBlockEntity(pos);
         if (be == null || !spiritAltarBEClass.isInstance(be)) {
             player.sendSystemMessage(Component.translatable("rsi.malum.error.altar_not_found"));
@@ -125,7 +137,7 @@ public final class MalumBatchDelegate implements IBatchDelegate {
             return false;
         }
 
-        // Check pedestals are empty
+        // Require enough empty pedestals for this recipe (not ALL pedestals)
         try {
             this.pedestals = capturePedestals();
         } catch (Exception e) {
@@ -135,7 +147,9 @@ public final class MalumBatchDelegate implements IBatchDelegate {
         }
         if (pedestals != null) {
             int emptyPedCount = countEmptyPedestalSlots(pedestals);
-            if (emptyPedCount < pedestals.size()) {
+            List<?> extraItems = (List<?>) getField(recipe, "extraItems");
+            int needed = extraItems != null ? extraItems.size() : 0;
+            if (emptyPedCount < needed) {
                 player.sendSystemMessage(Component.translatable("rsi.malum.warn.not_empty"));
                 return false;
             }
@@ -150,6 +164,18 @@ public final class MalumBatchDelegate implements IBatchDelegate {
         this.player = player;
         this.ledger = new ExtractionLedger();
         this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+
+        // Verify the cached BlockEntity is still valid
+        if (myPos != null && myLevel != null && myLevel.isLoaded(myPos)) {
+            BlockEntity current = myLevel.getBlockEntity(myPos);
+            if (current == null || current.isRemoved()) {
+                player.sendSystemMessage(Component.translatable("rsi.error.machine_missing"));
+                if (ledger != null && ledger.isCommitted()) {
+                    ledger.refundCommitted(network, player);
+                }
+                return false;
+            }
+        }
 
         Boolean crafting = (Boolean) getField(altar, "isCrafting");
         if (crafting == null || Boolean.TRUE.equals(crafting)) return false;
@@ -294,6 +320,18 @@ public final class MalumBatchDelegate implements IBatchDelegate {
         this.player = player;
         this.sharedLedger = sharedLedger;
         this.usingSharedLedger = true;
+
+        // Verify the cached BlockEntity is still valid
+        if (myPos != null && myLevel != null && myLevel.isLoaded(myPos)) {
+            BlockEntity current = myLevel.getBlockEntity(myPos);
+            if (current == null || current.isRemoved()) {
+                player.sendSystemMessage(Component.translatable("rsi.error.machine_missing"));
+                if (ledger != null && ledger.isCommitted()) {
+                    ledger.refundCommitted(network, player);
+                }
+                return false;
+            }
+        }
 
         Boolean crafting = (Boolean) getField(altar, "isCrafting");
         if (crafting == null || Boolean.TRUE.equals(crafting)) return false;
@@ -503,10 +541,7 @@ public final class MalumBatchDelegate implements IBatchDelegate {
                 }
             } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", ex); }
         }
-        ledger = null;
-        sharedLedger = null;
-        network = null;
-        usingSharedLedger = false;
+        resetState();
     }
 
     /** Retrieve items from altar slots and return them to the network/player. */
@@ -590,10 +625,7 @@ public final class MalumBatchDelegate implements IBatchDelegate {
                 }
             }
         } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", ex); }
-        ledger = null;
-        sharedLedger = null;
-        network = null;
-        usingSharedLedger = false;
+        resetState();
     }
 
     @Override
@@ -641,6 +673,13 @@ public final class MalumBatchDelegate implements IBatchDelegate {
             try {
                 Object ap = pedestals.get(idx);
                 Object inv = ap.getClass().getMethod("getSuppliedInventory").invoke(ap);
+                // Extract item before clearing -- if items were committed from
+                // our own ledger, refund them to RS/player instead of destroying.
+                ItemStack stack = (ItemStack) inv.getClass().getMethod("getStackInSlot", int.class).invoke(inv, 0);
+                boolean isReal = (ledger != null && ledger.isCommitted()) && !usingSharedLedger;
+                if (stack != null && !stack.isEmpty() && isReal) {
+                    returnItem(stack);
+                }
                 inv.getClass().getMethod("setStackInSlot", int.class, ItemStack.class)
                         .invoke(inv, 0, ItemStack.EMPTY);
             } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", ex); }

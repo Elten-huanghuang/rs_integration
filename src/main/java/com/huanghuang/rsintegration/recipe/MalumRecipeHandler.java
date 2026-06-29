@@ -30,7 +30,22 @@ final class MalumRecipeHandler implements ModRecipeHandler {
 
     @Override
     public ItemStack getResultItem(Recipe<?> recipe, RegistryAccess access) {
-        return ModRecipeHandlers.tryGetResultItem(recipe, access);
+        for (String name : new String[]{"getResultItem", "getResult", "getOutput"}) {
+            try {
+                java.lang.reflect.Method m = recipe.getClass().getMethod(name);
+                if (!ItemStack.class.isAssignableFrom(m.getReturnType())) continue;
+                Object r = m.getParameterCount() == 1 ? m.invoke(recipe, access) : m.invoke(recipe);
+                if (r instanceof ItemStack s && !s.isEmpty()) return s;
+            } catch (Exception ignored) {}
+        }
+        // Fallback: direct field access (SpiritFocusingRecipe.output, etc.)
+        try {
+            java.lang.reflect.Field f = recipe.getClass().getDeclaredField("output");
+            f.setAccessible(true);
+            Object v = f.get(recipe);
+            if (v instanceof ItemStack s && !s.isEmpty()) return s;
+        } catch (Exception ignored) {}
+        return ItemStack.EMPTY;
     }
 
     @Nullable

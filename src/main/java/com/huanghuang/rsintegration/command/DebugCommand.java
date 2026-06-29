@@ -3,6 +3,8 @@ package com.huanghuang.rsintegration.command;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.*;
+import com.huanghuang.rsintegration.network.AltarBindingRegistry;
+import com.huanghuang.rsintegration.network.BindingStorage;
 import com.huanghuang.rsintegration.network.RSIntegration;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.crafting.MaterialSources;
@@ -60,7 +62,11 @@ public final class DebugCommand {
                 .then(Commands.literal("embers_clearcache")
                         .executes(DebugCommand::embersClearCache))
                 .then(Commands.literal("embers_clearlocks")
-                        .executes(DebugCommand::embersClearLocks)));
+                        .executes(DebugCommand::embersClearLocks))
+                .then(Commands.literal("perf")
+                        .executes(DebugCommand::perfSnapshot))
+                .then(Commands.literal("bindings")
+                        .executes(DebugCommand::dumpBindings)));
     }
 
     // ── dump chain ───────────────────────────────────────────────
@@ -389,6 +395,63 @@ public final class DebugCommand {
         int count = com.huanghuang.rsintegration.mods.embers.EreAlchemyLock.clearAll();
         ctx.getSource().sendSuccess(() -> Component.literal(
                 "Cleared " + count + " Embers tablet lock(s)."), true);
+        return 1;
+    }
+
+    // ── perf snapshot ─────────────────────────────────────────────
+
+    private static int perfSnapshot(CommandContext<CommandSourceStack> ctx) {
+        String snap = com.huanghuang.rsintegration.debug.PerformanceMonitor.snapshot();
+        ctx.getSource().sendSuccess(() -> Component.literal(snap), false);
+        return 1;
+    }
+
+    // ── dump bindings ─────────────────────────────────────────────
+
+    private static int dumpBindings(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
+        ServerPlayer player = ctx.getSource().getPlayerOrException();
+        ctx.getSource().sendSuccess(() -> Component.literal("=== Player: " + player.getName().getString() + " ==="), false);
+
+        List<ItemStack> allStacks = new ArrayList<>();
+        allStacks.addAll(player.getInventory().items);
+        allStacks.addAll(player.getInventory().offhand);
+        allStacks.addAll(player.getInventory().armor);
+        try {
+            var opt = top.theillusivec4.curios.api.CuriosApi.getCuriosInventory(player).resolve();
+            if (opt.isPresent()) {
+                for (var handler : opt.get().getCurios().values()) {
+                    var stacks = handler.getStacks();
+                    for (int s = 0; s < stacks.getSlots(); s++) {
+                        allStacks.add(stacks.getStackInSlot(s));
+                    }
+                }
+            }
+        } catch (Throwable e) { /* curios not present */ }
+
+        int totalBindings = 0;
+        for (ItemStack stack : allStacks) {
+            if (stack.isEmpty()) continue;
+            var rl = ForgeRegistries.ITEMS.getKey(stack.getItem());
+            String itemId = rl != null ? rl.toString() : "unknown";
+            List<BindingStorage.BindingEntry> entries = BindingStorage.getBindings(stack);
+            if (entries.isEmpty()) continue;
+            for (var entry : entries) {
+                totalBindings++;
+                ModType mt = ModType.fromBlockKey(entry.blockKey());
+                String typeName = mt != null ? mt.id() : "UNKNOWN";
+                ctx.getSource().sendSuccess(() -> Component.literal(
+                        "  [" + typeName + "] " + itemId + " → " + entry.blockKey()
+                        + " @ dim=" + entry.dim() + " pos=" + entry.pos().getX()
+                        + "," + entry.pos().getY() + "," + entry.pos().getZ()), false);
+            }
+        }
+
+        if (totalBindings == 0) {
+            ctx.getSource().sendSuccess(() -> Component.literal("  (no bindings found)"), false);
+        } else {
+            final int fTotal = totalBindings;
+            ctx.getSource().sendSuccess(() -> Component.literal("  Total: " + fTotal + " binding(s)"), false);
+        }
         return 1;
     }
 }

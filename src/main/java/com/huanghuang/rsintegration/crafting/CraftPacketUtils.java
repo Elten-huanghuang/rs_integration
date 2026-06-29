@@ -55,11 +55,11 @@ public final class CraftPacketUtils {
         return (ServerLevel) player.level();
     }
 
-    public static String describeIngredient(Ingredient ingredient) {
+    public static net.minecraft.network.chat.Component describeIngredient(Ingredient ingredient) {
         for (ItemStack stack : ingredient.getItems()) {
-            if (!stack.isEmpty()) return stack.getDisplayName().getString();
+            if (!stack.isEmpty()) return net.minecraft.network.chat.Component.translatable(stack.getDescriptionId());
         }
-        return "Unknown Item";
+        return net.minecraft.network.chat.Component.literal("Unknown Item");
     }
 
     /**
@@ -337,7 +337,7 @@ public final class CraftPacketUtils {
                     try {
                         List<?> list = (List<?>) field.get(recipe);
                         if (!list.isEmpty() && list.get(0) instanceof Ingredient) {
-                            return (List<Ingredient>) list;
+                            return filterWRCrystal(recipe, (List<Ingredient>) list);
                         }
                     } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
                 }
@@ -389,11 +389,20 @@ public final class CraftPacketUtils {
         // consumed input materials, not catalysts. Do NOT strip them.
         if (className.endsWith("WissenCrystallizerRecipe")) return ingredients;
 
+        // ArcaneIteratorRecipe: crystal goes on a pedestal as a consumable
+        // input (the Arcane Iterator has no separate crystal block).
+        // Do NOT strip crystals — the delegate must extract and place them.
+        if (className.endsWith("ArcaneIteratorRecipe")) {
+            RSIntegrationMod.LOGGER.debug("[RSI] filterWRCrystal: ArcaneIteratorRecipe — keeping all {} ingredients (crystal goes on pedestal)",
+                    ingredients.size());
+            return ingredients;
+        }
+
         java.util.Set<Item> crystalItems = new java.util.HashSet<>();
 
-        // Primary: use ritual.getCrystalType(ItemStack) — the WR API for
-        // testing whether an item is a crystal (does instanceof CrystalItem).
-        // CrystalRitualRecipe has getRitual(); CrystalInfusionRecipe does not.
+        // CrystalRitualRecipe has getRitual(); CrystalInfusionRecipe has neither.
+        // For both, the crystal sits in a separate Crystal block as a catalyst
+        // and must NOT be extracted from RS as a material.
         Object ritual = null;
         java.lang.reflect.Method getCrystalType = null;
         try {
@@ -424,10 +433,24 @@ public final class CraftPacketUtils {
             }
         }
 
+        // Fallback: use CrystalHandler.getItems() — WR's official crystal registry
+        if (crystalItems.isEmpty()) {
+            try {
+                Class<?> handlerClass = Class.forName(
+                        "mod.maxbogomol.wizards_reborn.api.crystal.CrystalHandler");
+                java.lang.reflect.Method getItems = handlerClass.getMethod("getItems");
+                @SuppressWarnings("unchecked")
+                java.util.ArrayList<Item> registered = (java.util.ArrayList<Item>) getItems.invoke(null);
+                if (registered != null) {
+                    crystalItems.addAll(registered);
+                }
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.debug("[RSI] CrystalHandler.getItems failed: {}", e.toString());
+            }
+        }
+
         // Class-based detection — catches any WR crystal item regardless
-        // of recipe type (CrystalRitualRecipe, WissenCrystallizerRecipe,
-        // CrystalInfusionRecipe, etc.). Some CrystalInfusionRecipes include
-        // the crystal in getIngredients(), others don't — this handles both.
+        // of recipe type (CrystalRitualRecipe, CrystalInfusionRecipe, etc.).
         if (crystalItems.isEmpty()) {
             try {
                 Class<?> crystalItemClass = Class.forName(
@@ -481,7 +504,7 @@ public final class CraftPacketUtils {
                     if (list.get(0) instanceof ItemStack) {
                         List<Ingredient> wrapped = new ArrayList<>();
                         for (Object obj : list) {
-                            if (obj instanceof ItemStack stack) wrapped.add(Ingredient.of(stack));
+                            if (obj instanceof ItemStack stack) wrapped.add(CraftingResolver.ingredientOf(stack));
                         }
                         if (!wrapped.isEmpty()) return wrapped;
                     }
@@ -761,7 +784,7 @@ public final class CraftPacketUtils {
                 boolean hasMultiblock = steps.stream()
                         .anyMatch(s -> s.modType() != ModType.GENERIC);
                 if (hasMultiblock) {
-                    AsyncCraftChain chain = new AsyncCraftChain(player, network, steps);
+                    AsyncCraftChain chain = new AsyncCraftChain(player.getUUID(), player.getServer(), network, steps);
                     AsyncCraftManager.getInstance().submit(chain);
                     player.sendSystemMessage(Component.translatable(
                             "rsi.async.chain_started", steps.size()));

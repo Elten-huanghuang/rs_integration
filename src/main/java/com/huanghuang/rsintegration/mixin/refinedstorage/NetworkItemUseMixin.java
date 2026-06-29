@@ -15,7 +15,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 @Mixin(value = NetworkItem.class, remap = false)
 public class NetworkItemUseMixin {
 
-    @Inject(method = "m_7203_", at = @At("HEAD"), cancellable = true)
+    @Inject(method = "m_7203_", at = @At("HEAD"), cancellable = true, remap = false)
     private void rsi$cancelUseWhenSneaking(Level level, Player player, InteractionHand hand,
                                            CallbackInfoReturnable<InteractionResultHolder<ItemStack>> cir) {
         if (RSIntegrationConfig.ENABLE_BINDING.get() && player.isShiftKeyDown()) {

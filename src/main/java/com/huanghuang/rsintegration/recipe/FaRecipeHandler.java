@@ -29,7 +29,7 @@ final class FaRecipeHandler implements ModRecipeHandler {
 
     @Override
     public ItemStack getResultItem(Recipe<?> recipe, RegistryAccess access) {
-        return ModRecipeHandlers.tryGetResultItem(recipe, access);
+        return ItemStack.EMPTY;
     }
 
     @Nullable

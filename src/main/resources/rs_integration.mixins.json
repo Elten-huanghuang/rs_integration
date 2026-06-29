@@ -1,6 +1,7 @@
 {
   "required": true,
   "minVersion": "0.8",
+  "priority": 2000,
   "package": "com.huanghuang.rsintegration.mixin",
   "compatibilityLevel": "JAVA_17",
   "refmap": "rs_integration.refmap.json",
@@ -16,12 +17,19 @@
     "sophisticatedbackpacks.RefillUpgradeWrapperMixin",
     "sophisticatedbackpacks.FeedingUpgradeWrapperMixin",
     "sophisticatedbackpacks.UpgradeHandlerMixin",
-    "sophisticatedbackpacks.StorageUpgradeSlotMixin"
+    "sophisticatedbackpacks.StorageUpgradeSlotMixin",
+    "rs.ContainerDistanceMixin"
   ],
   "client": [
     "jei.GuiIconToggleButtonAccessor",
     "jei.RecipeGuiLayoutsMixin",
-    "jei.RecipesGuiMixin"
+    "jei.RecipesGuiMixin",
+    "rs.AbstractContainerScreenAccessor",
+    "rs.GridScreenMachineTabMixin",
+    "rs.GridScreenMouseMixin",
+    "rs.GridScreenKeyboardMixin",
+    "rs.GridScreenTooltipMixin",
+    "rs.ScreenCloseMixin"
   ],
   "injectors": {
     "defaultRequire": 0

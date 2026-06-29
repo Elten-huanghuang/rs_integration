@@ -10,6 +10,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.level.Level;
@@ -243,10 +244,10 @@ public final class ExtractionLedger {
                         if (tracker != null) tracker.changed(player, s.copy());
                         ItemStack leftover = rec.sourceNetwork.insertItem(s, s.getCount(), Action.PERFORM);
                         if (!leftover.isEmpty()) {
-                            ItemHandlerHelper.giveItemToPlayer(player, leftover);
+                            safeGiveToPlayer(player, leftover, rec.sourceNetwork);
                         }
                     } else {
-                        ItemHandlerHelper.giveItemToPlayer(player, s);
+                        safeGiveToPlayer(player, s, null);
                     }
                 }
                 case NETWORK -> {
@@ -255,14 +256,39 @@ public final class ExtractionLedger {
                         if (tracker != null) tracker.changed(player, s.copy());
                         ItemStack leftover = rec.sourceNetwork.insertItem(s, s.getCount(), Action.PERFORM);
                         if (!leftover.isEmpty()) {
-                            ItemHandlerHelper.giveItemToPlayer(player, leftover);
+                            safeGiveToPlayer(player, leftover, rec.sourceNetwork);
                         }
                     } else {
-                        ItemHandlerHelper.giveItemToPlayer(player, s);
+                        safeGiveToPlayer(player, s, null);
                     }
                 }
-                case PLAYER_INVENTORY -> ItemHandlerHelper.giveItemToPlayer(player, s);
+                case PLAYER_INVENTORY -> safeGiveToPlayer(player, s, null);
             }
+        }
+    }
+
+    /**
+     * Safely gives an item stack to a player, with fallbacks when the player's
+     * chunk is unloaded (which would silently void items).
+     */
+    private static void safeGiveToPlayer(ServerPlayer player, ItemStack stack, @Nullable INetwork network) {
+        if (stack.isEmpty()) return;
+        if (player.level().hasChunkAt(player.blockPosition())) {
+            ItemHandlerHelper.giveItemToPlayer(player, stack);
+            return;
+        }
+        if (network != null) {
+            network.insertItem(stack, stack.getCount(), Action.PERFORM);
+            RSIntegrationMod.LOGGER.warn("[RSI] Refund redirected to RS network (player chunk unloaded): {} x{}",
+                stack.getHoverName().getString(), stack.getCount());
+        } else {
+            var spawnLevel = player.getServer().overworld();
+            var spawnPos = spawnLevel.getSharedSpawnPos();
+            spawnLevel.addFreshEntity(
+                new ItemEntity(spawnLevel,
+                    spawnPos.getX() + 0.5, spawnPos.getY() + 0.5, spawnPos.getZ() + 0.5, stack));
+            RSIntegrationMod.LOGGER.warn("[RSI] Refund dropped at world spawn (player {} in unloaded chunk): {} x{}",
+                player.getGameProfile().getName(), stack.getHoverName().getString(), stack.getCount());
         }
     }
 
@@ -350,11 +376,11 @@ public final class ExtractionLedger {
                 for (ItemStack stack : player.getInventory().items) {
                     if (entry.originalIngredient.test(stack) && stack.getCount() > 0) {
                         int take = Math.min(needed, stack.getCount());
+                        ItemStack part = stack.split(take);
                         if (extracted.isEmpty()) {
-                            extracted = stack.split(take);
+                            extracted = part;
                         } else {
-                            stack.shrink(take);
-                            extracted.grow(take);
+                            extracted.grow(part.getCount());
                         }
                         needed -= take;
                         if (needed <= 0) break;
@@ -554,13 +580,13 @@ public final class ExtractionLedger {
                         if (!leftover.isEmpty()) {
                             RSIntegrationMod.LOGGER.warn("[RSI-Ledger] Refund: RS insert had leftover for {} x{}",
                                     refund.getDisplayName().getString(), refund.getCount());
-                            ItemHandlerHelper.giveItemToPlayer(player, leftover);
+                            safeGiveToPlayer(player, leftover, network);
                         }
                     } else {
-                        ItemHandlerHelper.giveItemToPlayer(player, refund);
+                        safeGiveToPlayer(player, refund, network);
                     }
                 }
-                case PLAYER_INVENTORY -> ItemHandlerHelper.giveItemToPlayer(player, refund);
+                case PLAYER_INVENTORY -> safeGiveToPlayer(player, refund, network);
             }
         }
     }

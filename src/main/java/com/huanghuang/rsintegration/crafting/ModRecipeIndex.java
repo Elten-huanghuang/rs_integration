@@ -3,6 +3,8 @@ package com.huanghuang.rsintegration.crafting;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
+import com.huanghuang.rsintegration.util.Reflect;
+import java.lang.reflect.Method;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Item;
@@ -105,8 +107,8 @@ public final class ModRecipeIndex {
                 }
             }
 
-            recipeIndex = idx;
             indexedRecipeManager = rm;
+            recipeIndex = idx;
 
             long elapsed = System.currentTimeMillis() - start;
             RSIntegrationMod.LOGGER.debug("[ModRecipeIndex] built: {} items, {} entries in {}ms",
@@ -119,6 +121,13 @@ public final class ModRecipeIndex {
         if (recipe == null) return ItemStack.EMPTY;
         if (recipe instanceof CraftingRecipe cr) {
             return cr.getResultItem(access);
+        }
+        // Handler dispatch — compile-time resolution is always correct
+        com.huanghuang.rsintegration.recipe.ModRecipeHandler handler =
+                com.huanghuang.rsintegration.recipe.ModRecipeHandlers.handlerFor(recipe);
+        if (handler != null) {
+            ItemStack result = handler.getResultItem(recipe, access);
+            if (!result.isEmpty()) return result;
         }
         // Try cached reflective access for this recipe class
         Class<?> clazz = recipe.getClass();
@@ -134,19 +143,30 @@ public final class ModRecipeIndex {
                 if (result instanceof ItemStack s && !s.isEmpty()) return s;
             } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
         }
-        // Probe for the result accessor and cache it
-        for (String methodName : new String[]{"getResultItem", "getResultItem", "getResult", "getOutput", "getOutputCopy", "getAssembledItem"}) {
+        // Probe for the result accessor — prefer 1-param (RegistryAccess) overloads
+        // to avoid no-arg getResultItem() that returns a machine block icon.
+        for (String methodName : new String[]{"getResultItem", "getResult", "getOutput", "getOutputCopy", "getAssembledItem"}) {
+            // Try 1-param methods first
             for (java.lang.reflect.Method method : clazz.getMethods()) {
                 if (method.getName().equals(methodName)
                         && ItemStack.class.isAssignableFrom(method.getReturnType())
-                        && (method.getParameterCount() == 1 || method.getParameterCount() == 0)) {
+                        && method.getParameterCount() == 1) {
                     try {
-                        Object result;
-                        if (method.getParameterCount() == 1) {
-                            result = method.invoke(recipe, access);
-                        } else {
-                            result = method.invoke(recipe);
+                        Object result = method.invoke(recipe, access);
+                        if (result instanceof ItemStack s && !s.isEmpty()) {
+                            resultMethodCache.put(clazz, method);
+                            return s;
                         }
+                    } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
+                }
+            }
+            // Fall back to no-arg methods
+            for (java.lang.reflect.Method method : clazz.getMethods()) {
+                if (method.getName().equals(methodName)
+                        && ItemStack.class.isAssignableFrom(method.getReturnType())
+                        && method.getParameterCount() == 0) {
+                    try {
+                        Object result = method.invoke(recipe);
                         if (result instanceof ItemStack s && !s.isEmpty()) {
                             resultMethodCache.put(clazz, method);
                             return s;
@@ -186,30 +206,39 @@ public final class ModRecipeIndex {
         if (recipe == null) return results;
 
         try {
-            Object obj = recipe.getClass().getMethod("getRemainingItems").invoke(recipe);
-            if (obj instanceof List<?> list) {
-                for (Object e : list) {
-                    if (e instanceof ItemStack s && !s.isEmpty()) results.add(s.copy());
-                }
-            } else if (obj instanceof ItemStack[] arr) {
-                for (ItemStack s : arr) {
-                    if (!s.isEmpty()) results.add(s.copy());
-                }
-            }
-        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
-        try {
-            Object obj = recipe.getClass().getMethod("getByproducts").invoke(recipe);
-            if (obj instanceof List<?> list) {
-                for (Object e : list) {
-                    if (e instanceof ItemStack s && !s.isEmpty()) results.add(s.copy());
+            Method m = Reflect.findMethod(recipe.getClass(), "getRemainingItems", new Class<?>[0]);
+            if (m != null) {
+                Object obj = m.invoke(recipe);
+                if (obj instanceof List<?> list) {
+                    for (Object e : list) {
+                        if (e instanceof ItemStack s && !s.isEmpty()) results.add(s.copy());
+                    }
+                } else if (obj instanceof ItemStack[] arr) {
+                    for (ItemStack s : arr) {
+                        if (!s.isEmpty()) results.add(s.copy());
+                    }
                 }
             }
         } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
         try {
-            Object obj = recipe.getClass().getMethod("getRollResults").invoke(recipe);
-            if (obj instanceof List<?> list) {
-                for (Object e : list) {
-                    if (e instanceof ItemStack s && !s.isEmpty()) results.add(s.copy());
+            Method m = Reflect.findMethod(recipe.getClass(), "getByproducts", new Class<?>[0]);
+            if (m != null) {
+                Object obj = m.invoke(recipe);
+                if (obj instanceof List<?> list) {
+                    for (Object e : list) {
+                        if (e instanceof ItemStack s && !s.isEmpty()) results.add(s.copy());
+                    }
+                }
+            }
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
+        try {
+            Method m = Reflect.findMethod(recipe.getClass(), "getRollResults", new Class<?>[0]);
+            if (m != null) {
+                Object obj = m.invoke(recipe);
+                if (obj instanceof List<?> list) {
+                    for (Object e : list) {
+                        if (e instanceof ItemStack s && !s.isEmpty()) results.add(s.copy());
+                    }
                 }
             }
         } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }

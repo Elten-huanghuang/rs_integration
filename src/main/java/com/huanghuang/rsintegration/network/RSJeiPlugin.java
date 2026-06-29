@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.mods.goety.GoetyRSModule;
 import com.huanghuang.rsintegration.sidepanel.RSInventoryTransferHandler;
+import com.huanghuang.rsintegration.util.ModIds;
 import mezz.jei.api.IModPlugin;
 import mezz.jei.api.JeiPlugin;
 import mezz.jei.api.registration.IRecipeTransferRegistration;
@@ -37,7 +38,7 @@ public final class RSJeiPlugin implements IModPlugin {
     public void onRuntimeAvailable(@NotNull IJeiRuntime jeiRuntime) {
         cachedRuntime = jeiRuntime;
         if (!RSIntegrationConfig.ENABLE_JEI.get()) return;
-        if (RSIntegrationConfig.ENABLE_GOETY.get() && ModList.get().isLoaded("goety")) {
+        if (RSIntegrationConfig.ENABLE_GOETY.get() && ModList.get().isLoaded(ModIds.GOETY)) {
             GoetyRSModule.onJeiRuntimeAvailable(jeiRuntime);
         }
     }
@@ -45,22 +46,22 @@ public final class RSJeiPlugin implements IModPlugin {
     @Override
     public void onRuntimeUnavailable() {
         cachedRuntime = null;
-        if (RSIntegrationConfig.ENABLE_GOETY.get() && ModList.get().isLoaded("goety")) {
+        if (RSIntegrationConfig.ENABLE_GOETY.get() && ModList.get().isLoaded(ModIds.GOETY)) {
             GoetyRSModule.onJeiRuntimeUnavailable();
         }
     }
 
     @Override
     public void registerRecipeTransferHandlers(IRecipeTransferRegistration registration) {
-        if (RSIntegrationConfig.ENABLE_GOETY.get() && ModList.get().isLoaded("goety")) {
+        if (RSIntegrationConfig.ENABLE_GOETY.get() && ModList.get().isLoaded(ModIds.GOETY)) {
             GoetyRSModule.registerRecipeTransferHandlers(registration);
         }
         if (RSIntegrationConfig.ENABLE_RS_SIDE_PANEL.get()
-                && ModList.get().isLoaded("refinedstorage")) {
+                && ModList.get().isLoaded(ModIds.REFINED_STORAGE)) {
             registration.addUniversalRecipeTransferHandler(
                     new RSInventoryTransferHandler());
         }
-        if (RSIntegrationConfig.ENABLE_EIDOLON.get() && ModList.get().isLoaded("eidolon")) {
+        if (RSIntegrationConfig.ENABLE_EIDOLON.get() && ModList.get().isLoaded(ModIds.EIDOLON)) {
             registerEidolonTransferHandlers(registration);
         }
     }

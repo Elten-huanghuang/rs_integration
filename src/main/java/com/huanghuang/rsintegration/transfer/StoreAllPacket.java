@@ -27,9 +27,16 @@ public final class StoreAllPacket {
 
     public static void handle(StoreAllPacket pkt, Supplier<NetworkEvent.Context> ctxSupplier) {
         NetworkEvent.Context ctx = ctxSupplier.get();
+        ServerPlayer player = ctx.getSender();
+        if (player == null) {
+            ctx.setPacketHandled(true);
+            return;
+        }
+        if (player instanceof net.minecraftforge.common.util.FakePlayer) {
+            ctx.setPacketHandled(true);
+            return;
+        }
         ctx.enqueueWork(() -> {
-            ServerPlayer player = ctx.getSender();
-            if (player == null) return;
             if (!RSIntegrationConfig.ENABLE_CONTAINER_TRANSFER.get()) return;
 
             AbstractContainerMenu menu = player.containerMenu;

@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.mods.wizards_reborn;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.util.ModIds;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.BlockItem;
 import net.minecraftforge.api.distmarker.Dist;
@@ -26,7 +27,7 @@ public final class WRGuiClientEventHandler {
     @SubscribeEvent
     public static void onItemTooltip(ItemTooltipEvent event) {
         if (!RSIntegrationConfig.ENABLE_WIZARDS_REBORN.get()) return;
-        if (!net.minecraftforge.fml.ModList.get().isLoaded("wizards_reborn")) return;
+        if (!net.minecraftforge.fml.ModList.get().isLoaded(ModIds.WIZARDS_REBORN)) return;
 
         if (event.getItemStack().getItem() instanceof BlockItem bi) {
             String className = bi.getBlock().getClass().getName();

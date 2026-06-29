@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.mods.eidolon;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
@@ -28,10 +29,9 @@ import java.util.ArrayList;
 import java.util.List;
 
 
-public final class EidolonBatchDelegate implements IBatchDelegate {
+public final class EidolonBatchDelegate extends AbstractBatchDelegate {
 
     // ── Shared class refs ────────────────────────────────────────
-    private static volatile boolean classesLoaded;
     private static volatile Class<?> crucibleRecipeClass;
     private static volatile Class<?> crucibleRecipeStepClass;
     private static volatile Class<?> crucibleTileEntityClass;
@@ -42,8 +42,13 @@ public final class EidolonBatchDelegate implements IBatchDelegate {
     private static volatile java.lang.reflect.Field stepsField;
 
     private static void ensureClasses() {
-        if (classesLoaded) return;
-        classesLoaded = true;
+        if (!com.huanghuang.rsintegration.util.ModClassLoader.ensureClasses("eidolon",
+                "elucent.eidolon.recipe.CrucibleRecipe",
+                "elucent.eidolon.recipe.CrucibleRecipe$Step",
+                "elucent.eidolon.common.tile.CrucibleTileEntity",
+                "elucent.eidolon.common.tile.CrucibleTileEntity$CrucibleStep",
+                "elucent.eidolon.common.block.WorktableBlock",
+                "elucent.eidolon.recipe.WorktableRecipe")) return;
         try {
             crucibleRecipeClass = Class.forName("elucent.eidolon.recipe.CrucibleRecipe");
             crucibleRecipeStepClass = Class.forName("elucent.eidolon.recipe.CrucibleRecipe$Step");
@@ -82,12 +87,8 @@ public final class EidolonBatchDelegate implements IBatchDelegate {
     private Object crucible;             // CrucibleTileEntity (null for worktable)
     private Recipe<?> recipe;            // CrucibleRecipe or WorktableRecipe
     private boolean isWorktable;         // true = worktable mode, no BE interaction
-    private ExtractionLedger ledger;
-    private ExtractionLedger sharedLedger;
-    private INetwork network;
     private ItemStack pendingResult;      // Stored result for collectResult()
     private boolean craftCompleted;       // Flag set after instant craft
-    private boolean usingSharedLedger;
 
     // ── IBatchDelegate impl ───────────────────────────────────────
 
@@ -105,7 +106,7 @@ public final class EidolonBatchDelegate implements IBatchDelegate {
         this.myPos = pos;
         this.player = player;
 
-        if (!level.isLoaded(pos)) level.getChunk(pos);
+        com.huanghuang.rsintegration.util.ChunkUtils.loadChunk(level, pos);
         BlockEntity be = level.getBlockEntity(pos);
         var blockState = level.getBlockState(pos);
 
@@ -123,7 +124,8 @@ public final class EidolonBatchDelegate implements IBatchDelegate {
 
         if (isWorktable) {
             if (!isWtRecipe) {
-                player.sendSystemMessage(Component.translatable("rsi.generic.error.wrong_recipe_type"));
+                player.sendSystemMessage(Component.literal("§c" + Component.translatable("rsi.generic.error.wrong_recipe_type").getString()
+                        + " [" + recipeId + " expected=WorktableRecipe got=" + foundRecipe.getClass().getSimpleName() + "]"));
                 return false;
             }
             this.crucible = null;
@@ -139,7 +141,8 @@ public final class EidolonBatchDelegate implements IBatchDelegate {
             return false;
         }
         if (!crucibleRecipeClass.isInstance(foundRecipe)) {
-            player.sendSystemMessage(Component.translatable("rsi.generic.error.wrong_recipe_type"));
+            player.sendSystemMessage(Component.literal("§c" + Component.translatable("rsi.generic.error.wrong_recipe_type").getString()
+                    + " [" + recipeId + " expected=CrucibleRecipe got=" + foundRecipe.getClass().getSimpleName() + "]"));
             return false;
         }
         if (be == null || !crucibleTileEntityClass.isInstance(be)) {
@@ -214,6 +217,18 @@ public final class EidolonBatchDelegate implements IBatchDelegate {
             return tryStartWorktableCraft();
         }
 
+        // Verify the cached BlockEntity is still valid
+        if (myPos != null && player.serverLevel().isLoaded(myPos)) {
+            BlockEntity current = player.serverLevel().getBlockEntity(myPos);
+            if (current == null || current.isRemoved()) {
+                player.sendSystemMessage(Component.translatable("rsi.error.machine_missing"));
+                if (ledger != null && ledger.isCommitted()) {
+                    ledger.refundCommitted(network, player);
+                }
+                return false;
+            }
+        }
+
         // Re-validate crucible state before each iteration
         boolean hasWater;
                 try {
@@ -284,6 +299,9 @@ public final class EidolonBatchDelegate implements IBatchDelegate {
             RSIntegrationMod.LOGGER.error("[RSI-Batch-Eidolon] Extraction/step creation failed:", e);
             return false;
         }
+
+        // Phase 1.5: check water amount before committing materials
+        if (!checkCrucibleWater()) return false;
 
         // Phase 2: commit all extractions atomically
         if (!ledger.commit(network, player)) {
@@ -360,7 +378,17 @@ public final class EidolonBatchDelegate implements IBatchDelegate {
             return false;
         }
 
-        // Phase 3: Handle crafting remainders before getting result.
+        // Phase 3: Get result first — no side effects if this fails
+        try {
+            this.pendingResult = recipe.getResultItem(player.serverLevel().registryAccess()).copy();
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.error("[RSI-Batch-Eidolon] Failed to get worktable result:", e);
+            refundAll();
+            ledger = null;
+            return false;
+        }
+
+        // Phase 4: Handle crafting remainders.
         // Vanilla WorktableRecipe.getRemainingItems() checks hasCraftingRemainingItem()
         // on every slot in both core and extras containers; items without a remainder
         // are consumed, items with a remainder leave getCraftingRemainingItem() behind.
@@ -376,16 +404,6 @@ public final class EidolonBatchDelegate implements IBatchDelegate {
                     }
                 }
             }
-        }
-
-        // Get result
-        try {
-            this.pendingResult = recipe.getResultItem(player.serverLevel().registryAccess()).copy();
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.error("[RSI-Batch-Eidolon] Failed to get worktable result:", e);
-            refundAll();
-            ledger = null;
-            return false;
         }
 
         this.craftCompleted = true;
@@ -489,6 +507,18 @@ public final class EidolonBatchDelegate implements IBatchDelegate {
             return true;
         }
 
+        // Verify the cached BlockEntity is still valid
+        if (myPos != null && player.serverLevel().isLoaded(myPos)) {
+            BlockEntity current = player.serverLevel().getBlockEntity(myPos);
+            if (current == null || current.isRemoved()) {
+                player.sendSystemMessage(Component.translatable("rsi.error.machine_missing"));
+                if (ledger != null && ledger.isCommitted()) {
+                    ledger.refundCommitted(network, player);
+                }
+                return false;
+            }
+        }
+
         // Re-validate crucible state
         boolean hasWater;
                 try {
@@ -521,6 +551,9 @@ public final class EidolonBatchDelegate implements IBatchDelegate {
                 if (stepsField != null) stepsField.set(crucible, new ArrayList<>());
             } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-Eidolon] Reflection probe failed", e); }
         }
+
+        // Check water amount before using pre-extracted materials
+        if (!checkCrucibleWater()) return false;
 
         // Collect steps to know counts
         List<StepInput> stepInputs = collectSteps(recipe);
@@ -603,20 +636,14 @@ public final class EidolonBatchDelegate implements IBatchDelegate {
         }
         pendingResult = ItemStack.EMPTY;
         craftCompleted = false;
-        ledger = null;
-        sharedLedger = null;
-        network = null;
-        usingSharedLedger = false;
+        resetState();
     }
 
     @Override
     public void onBatchFinished(ServerPlayer player) {
         pendingResult = ItemStack.EMPTY;
         craftCompleted = false;
-        ledger = null;
-        sharedLedger = null;
-        network = null;
-        usingSharedLedger = false;
+        resetState();
     }
 
     @Override
@@ -666,6 +693,58 @@ public final class EidolonBatchDelegate implements IBatchDelegate {
             return (int) m.invoke(recipe);
         } catch (Exception e) { /* fall through */ }
         return 1000; // sensible default
+    }
+
+    /**
+     * Check whether the crucible has enough water for the recipe.
+     * Must be called BEFORE ledger commit to avoid extracting items
+     * that can't be used due to insufficient water.
+     */
+    private boolean checkCrucibleWater() {
+        if (crucible == null) return true;
+        int required = readWaterAmount();
+        if (required <= 0) return true;
+        int current = readCurrentWaterAmount();
+        if (current < required) {
+            player.sendSystemMessage(Component.translatable(
+                    "rsi.eidolon.error.insufficient_water",
+                    current, required));
+            return false;
+        }
+        return true;
+    }
+
+    private int readCurrentWaterAmount() {
+        if (crucible == null) return Integer.MAX_VALUE;
+        try {
+            java.lang.reflect.Field tankField = crucible.getClass().getDeclaredField("tank");
+            tankField.setAccessible(true);
+            Object tank = tankField.get(crucible);
+            // Try getFluidAmount() first (common Forge tank pattern)
+            try {
+                java.lang.reflect.Method m = tank.getClass().getMethod("getFluidAmount");
+                return (int) m.invoke(tank);
+            } catch (NoSuchMethodException e) { /* fall through */ }
+            // Try getFluidInTank(0).getAmount()
+            try {
+                java.lang.reflect.Method m = tank.getClass().getMethod("getFluidInTank", int.class);
+                Object fluidStack = m.invoke(tank, 0);
+                if (fluidStack != null) {
+                    java.lang.reflect.Method am = fluidStack.getClass().getMethod("getAmount");
+                    return (int) am.invoke(fluidStack);
+                }
+            } catch (NoSuchMethodException e) { /* fall through */ }
+            // Try IFluidHandler.getTankCapacity(0) - not useful for current amount
+            // Try reading a public `amount` field on the tank
+            try {
+                java.lang.reflect.Field f = tank.getClass().getDeclaredField("amount");
+                f.setAccessible(true);
+                return f.getInt(tank);
+            } catch (NoSuchFieldException e) { /* fall through */ }
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-Batch-Eidolon] Failed to read current water amount", e);
+        }
+        return Integer.MAX_VALUE; // can't determine -- don't block
     }
 
     // ── Refund ───────────────────────────────────────────────────

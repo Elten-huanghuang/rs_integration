@@ -41,6 +41,11 @@ public abstract class IngredientTrackerMixin {
     }
 
     @Unique
+    private static boolean rsi$matchesExact(ItemStack a, ItemStack b) {
+        return API.instance().getComparer().isEqual(a, b, IComparer.COMPARE_NBT);
+    }
+
+    @Unique
     private static ItemStackKey rsi$keyOf(ItemStack stack) {
         ItemStack copy = stack.copy();
         copy.setTag(null);
@@ -68,6 +73,37 @@ public abstract class IngredientTrackerMixin {
     @Inject(method = "findBestMatch", at = @At("HEAD"), cancellable = true)
     public ItemStack findBestMatch(GridContainerMenu gridContainer, Player player, List<ItemStack> list,
                                     CallbackInfoReturnable<ItemStack> cir) {
+        // Pass 1: exact NBT match — prefer specific-NBT items over generic ones
+        int exactCount = 0;
+        ItemStack exactResult = ItemStack.EMPTY;
+        for (ItemStack listStack : list) {
+            if (gridContainer.getGrid().getGridType().equals(GridType.CRAFTING)) {
+                CraftingContainer craftingMatrix = gridContainer.getGrid().getCraftingMatrix();
+                if (craftingMatrix != null) {
+                    for (int matrixSlot = 0; matrixSlot < craftingMatrix.getContainerSize(); matrixSlot++) {
+                        ItemStack stackInSlot = craftingMatrix.getItem(matrixSlot);
+                        if (rsi$matchesExact(listStack, stackInSlot) && stackInSlot.getCount() > exactCount) {
+                            exactCount = stackInSlot.getCount();
+                            exactResult = stackInSlot.copy();
+                        }
+                    }
+                }
+            }
+            for (int inventorySlot = 0; inventorySlot < player.getInventory().getContainerSize(); inventorySlot++) {
+                ItemStack stackInSlot = player.getInventory().getItem(inventorySlot);
+                if (rsi$matchesExact(listStack, stackInSlot) && stackInSlot.getCount() > exactCount) {
+                    exactCount = stackInSlot.getCount();
+                    exactResult = stackInSlot.copy();
+                }
+            }
+        }
+        if (!exactResult.isEmpty()) {
+            cir.setReturnValue(exactResult);
+            cir.cancel();
+            return exactResult;
+        }
+
+        // Pass 2: NBT-agnostic fallback — handles generic-item recipes
         ItemStack resultStack = ItemStack.EMPTY;
         int count = 0;
 
@@ -79,7 +115,7 @@ public abstract class IngredientTrackerMixin {
                         ItemStack stackInSlot = craftingMatrix.getItem(matrixSlot);
                         if (rsi$matches(listStack, stackInSlot) && stackInSlot.getCount() > count) {
                             count = stackInSlot.getCount();
-                            resultStack = stackInSlot;
+                            resultStack = stackInSlot.copy();
                         }
                     }
                 }
@@ -89,7 +125,7 @@ public abstract class IngredientTrackerMixin {
                 ItemStack stackInSlot = player.getInventory().getItem(inventorySlot);
                 if (rsi$matches(listStack, stackInSlot) && stackInSlot.getCount() > count) {
                     count = stackInSlot.getCount();
-                    resultStack = stackInSlot;
+                    resultStack = stackInSlot.copy();
                 }
             }
 
@@ -142,6 +178,10 @@ public abstract class IngredientTrackerMixin {
     )
     private boolean rsi$redirectIsEqual(IComparer comparer, ItemStack a, ItemStack b, int flags) {
         if (!RSIntegrationConfig.ENABLE_BINDING.get()) return comparer.isEqual(a, b, flags);
+        // If the recipe ingredient has NBT, require exact match — prevents
+        // wrongly accepting NBT-mutated items as "already present" in the grid.
+        // If the ingredient has no NBT (generic recipe), NBT-agnostic is fine.
+        if (a.hasTag()) return comparer.isEqual(a, b, flags);
         return comparer.isEqual(a, b, flags & ~IComparer.COMPARE_NBT);
     }
 }

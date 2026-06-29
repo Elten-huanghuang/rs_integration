@@ -1,0 +1,701 @@
+package com.huanghuang.rsintegration.mods.forbidden;
+
+import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.util.Reflect;
+import com.refinedmods.refinedstorage.api.network.INetwork;
+import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraftforge.items.ItemHandlerHelper;
+
+import javax.annotation.Nullable;
+import java.lang.reflect.Method;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Optional;
+import java.util.Set;
+
+/**
+ * Shared reflection helpers for FA (Forbidden &amp; Arcanus) Hephaestus Forge rituals.
+ * Used by both {@link FaBatchDelegate} and {@link FaCraftPacket}.
+ */
+public final class FaRitualHelper {
+
+    private FaRitualHelper() {}
+
+    // ── Shared class refs ────────────────────────────────────────
+    static Class<?> hephaestusForgeBEClass;
+    static Class<?> pedestalBEClass;
+    static Class<?> ritualClass;
+    static Class<?> essencesDefinitionClass;
+    static Class<?> essencesStorageClass;
+    static Class<?> ritualManagerClass;
+    static Class<?> booleanConsumerClass;
+    static Class<?> essenceManagerClass;
+    static Class<?> createItemResultClass;
+    static Class<?> upgradeTierResultClass;
+    static Class<?> ritualStarterItemClass;
+    static Class<?> enhancerAccessorClass;
+    static Class<?> enhancerDefinitionClass;
+    static Class<?> enhancerEffectClass;
+    static Class<?> essenceModifierClass;
+
+    private static volatile ResourceKey<?> cachedFaRitualKey;
+
+    static void ensureClasses() {
+        if (!com.huanghuang.rsintegration.util.ModClassLoader.ensureClasses("forbidden_arcanus",
+                "com.stal111.forbidden_arcanus.common.block.entity.forge.HephaestusForgeBlockEntity",
+                "com.stal111.forbidden_arcanus.common.block.entity.PedestalBlockEntity",
+                "com.stal111.forbidden_arcanus.common.block.entity.forge.ritual.Ritual",
+                "com.stal111.forbidden_arcanus.common.block.entity.forge.essence.EssencesDefinition",
+                "com.stal111.forbidden_arcanus.common.block.entity.forge.essence.EssencesStorage",
+                "com.stal111.forbidden_arcanus.common.block.entity.forge.ritual.RitualManager",
+                "it.unimi.dsi.fastutil.booleans.BooleanConsumer",
+                "com.stal111.forbidden_arcanus.common.block.entity.forge.essence.EssenceManager",
+                "com.stal111.forbidden_arcanus.common.block.entity.forge.ritual.result.CreateItemResult",
+                "com.stal111.forbidden_arcanus.common.block.entity.forge.ritual.result.UpgradeTierResult",
+                "com.stal111.forbidden_arcanus.common.item.RitualStarterItem",
+                "com.stal111.forbidden_arcanus.common.item.enhancer.EnhancerAccessor",
+                "com.stal111.forbidden_arcanus.common.item.enhancer.EnhancerDefinition",
+                "com.stal111.forbidden_arcanus.common.item.enhancer.EnhancerEffect",
+                "com.stal111.forbidden_arcanus.common.block.entity.forge.essence.EssenceModifier")) return;
+        try {
+            hephaestusForgeBEClass = Class.forName(
+                    "com.stal111.forbidden_arcanus.common.block.entity.forge.HephaestusForgeBlockEntity");
+            pedestalBEClass = Class.forName(
+                    "com.stal111.forbidden_arcanus.common.block.entity.PedestalBlockEntity");
+            ritualClass = Class.forName(
+                    "com.stal111.forbidden_arcanus.common.block.entity.forge.ritual.Ritual");
+            essencesDefinitionClass = Class.forName(
+                    "com.stal111.forbidden_arcanus.common.block.entity.forge.essence.EssencesDefinition");
+            essencesStorageClass = Class.forName(
+                    "com.stal111.forbidden_arcanus.common.block.entity.forge.essence.EssencesStorage");
+            ritualManagerClass = Class.forName(
+                    "com.stal111.forbidden_arcanus.common.block.entity.forge.ritual.RitualManager");
+            booleanConsumerClass = Class.forName(
+                    "it.unimi.dsi.fastutil.booleans.BooleanConsumer");
+            essenceManagerClass = Class.forName(
+                    "com.stal111.forbidden_arcanus.common.block.entity.forge.essence.EssenceManager");
+            createItemResultClass = Class.forName(
+                    "com.stal111.forbidden_arcanus.common.block.entity.forge.ritual.result.CreateItemResult");
+            upgradeTierResultClass = Class.forName(
+                    "com.stal111.forbidden_arcanus.common.block.entity.forge.ritual.result.UpgradeTierResult");
+            ritualStarterItemClass = Class.forName(
+                    "com.stal111.forbidden_arcanus.common.item.RitualStarterItem");
+            enhancerAccessorClass = Class.forName(
+                    "com.stal111.forbidden_arcanus.common.item.enhancer.EnhancerAccessor");
+            enhancerDefinitionClass = Class.forName(
+                    "com.stal111.forbidden_arcanus.common.item.enhancer.EnhancerDefinition");
+            enhancerEffectClass = Class.forName(
+                    "com.stal111.forbidden_arcanus.common.item.enhancer.EnhancerEffect");
+            essenceModifierClass = Class.forName(
+                    "com.stal111.forbidden_arcanus.common.block.entity.forge.essence.EssenceModifier");
+        } catch (ClassNotFoundException e) {
+            RSIntegrationMod.LOGGER.error("[RSI-FA] Failed to load FA classes", e);
+        }
+    }
+
+    // ── Registry ─────────────────────────────────────────────────
+
+    @Nullable
+    static ResourceKey<?> getFARegistryKey() {
+        if (cachedFaRitualKey != null) return cachedFaRitualKey;
+        try {
+            Class<?> faRegistries = Class.forName(
+                    "com.stal111.forbidden_arcanus.core.registry.FARegistries");
+            java.lang.reflect.Field field = faRegistries.getField("RITUAL");
+            field.setAccessible(true);
+            cachedFaRitualKey = (ResourceKey<?>) field.get(null);
+        } catch (Exception ex) {
+            RSIntegrationMod.LOGGER.error("[RSI-FA] Failed to get FA ritual registry key", ex);
+        }
+        return cachedFaRitualKey;
+    }
+
+    @Nullable
+    static Object getRitualById(ResourceLocation id, ServerLevel level) {
+        ensureClasses();
+        ResourceKey<?> key = getFARegistryKey();
+        if (key == null) return null;
+        try {
+            net.minecraft.core.Registry<?> registry = level.registryAccess().registryOrThrow(
+                    (ResourceKey<? extends net.minecraft.core.Registry<?>>) (Object) key);
+            return registry.get(id);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    // ── Tier ─────────────────────────────────────────────────────
+
+    static int getForgeTier(BlockState state) {
+        try {
+            for (net.minecraft.world.level.block.state.properties.Property<?> prop : state.getProperties()) {
+                if (prop.getName().equals("tier")) {
+                    Comparable<?> val = state.getValue(prop);
+                    if (val instanceof Number n) return n.intValue();
+                }
+            }
+        } catch (Exception e) { /* ignore */ }
+        return 1;
+    }
+
+    static int getRitualRequiredTier(Object ritual) {
+        try {
+            Object req = invoke(ritual, "requirements");
+            if (req != null) {
+                return (int) Reflect.getMethodOrThrow(req.getClass(), "tier", "tier").invoke(req);
+            }
+        } catch (Exception e) { /* ignore */ }
+        return 1;
+    }
+
+    /** Reads the exact required tier from an UpgradeTierResult. Returns -1 on failure. */
+    static int readUpgradeRequiredTier(Object upgradeResult) {
+        try {
+            return (int) Reflect.getMethodOrThrow(upgradeTierResultClass, "requiredTier", "requiredTier").invoke(upgradeResult);
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-FA] readUpgradeRequiredTier method failed: {}", e.toString());
+        }
+        try {
+            java.lang.reflect.Field f = Reflect.findField(upgradeTierResultClass, "requiredTier").orElse(null);
+            if (f != null) { f.setAccessible(true); return f.getInt(upgradeResult); }
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-FA] readUpgradeRequiredTier field failed: {}", e.toString());
+        }
+        return -1;
+    }
+
+    // ── Enhancer modifiers ───────────────────────────────────────
+
+    /**
+     * Collect {@code EssenceModifier} instances from enhancers placed in the forge.
+     * Mirrors what {@code RitualManager.canStartRitual} does before comparing essences.
+     */
+    @SuppressWarnings("unchecked")
+    static List<Object> collectEnhancerModifiers(Object ritualManager, Object ritual) {
+        List<Object> modifiers = new ArrayList<>();
+        try {
+            ensureClasses();
+            Set<Object> requiredDefs = new HashSet<>();
+            Object requirements = invoke(ritual, "requirements");
+            if (requirements != null) {
+                List<?> requiredEnhancers = invokeList(requirements, "enhancers");
+                if (requiredEnhancers != null) {
+                    for (Object holder : requiredEnhancers) {
+                        Object def = Reflect.extractHolderValue(holder);
+                        if (def != null) requiredDefs.add(def);
+                    }
+                }
+            }
+            if (requiredDefs.isEmpty()) return modifiers;
+
+            java.lang.reflect.Field accessorField = Reflect.findField(ritualManagerClass, "enhancerAccessor").orElse(null);
+            if (accessorField == null) return modifiers;
+            accessorField.setAccessible(true);
+            Object enhancerAccessor = accessorField.get(ritualManager);
+            if (enhancerAccessor == null) return modifiers;
+
+            List<?> enhancers = (List<?>) Reflect.getMethodOrThrow(enhancerAccessorClass, "getEnhancers", "getEnhancers").invoke(enhancerAccessor);
+            if (enhancers == null) return modifiers;
+
+            for (Object enhancerDef : enhancers) {
+                if (!requiredDefs.contains(enhancerDef)) continue;
+                List<?> effects = (List<?>) Reflect.getMethodOrThrow(enhancerDefinitionClass, "effects", "effects").invoke(enhancerDef);
+                if (effects == null) continue;
+                for (Object effect : effects) {
+                    if (essenceModifierClass.isInstance(effect)) {
+                        modifiers.add(effect);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-FA] Failed to collect enhancer modifiers: {}", e.toString());
+        }
+        return modifiers;
+    }
+
+    // ── Essence validation ───────────────────────────────────────
+
+    /**
+     * Checks all 4 essence types individually and sends per-type error
+     * messages so the player knows exactly what's missing.
+     *
+     * @return true if all required essences are available
+     */
+    static boolean checkEssences(ServerPlayer player, Object ritual, Object forge, Object ritualManager) {
+        try {
+            ensureClasses();
+            Object ritualEssences = Reflect.getMethodOrThrow(ritualClass, "essences", "essences").invoke(ritual);
+
+            List<Object> enhancerModifiers = collectEnhancerModifiers(ritualManager, ritual);
+            Object requiredEssences = ritualEssences;
+            if (!enhancerModifiers.isEmpty()) {
+                requiredEssences = Reflect.getMethodOrThrow(essencesDefinitionClass, "applyModifiers", "applyModifiers",
+                        List.class).invoke(ritualEssences, enhancerModifiers);
+            }
+
+            int reqAureal = (int) Reflect.getMethodOrThrow(essencesDefinitionClass, "aureal", "aureal").invoke(requiredEssences);
+            int reqSouls  = (int) Reflect.getMethodOrThrow(essencesDefinitionClass, "souls", "souls").invoke(requiredEssences);
+            int reqBlood  = (int) Reflect.getMethodOrThrow(essencesDefinitionClass, "blood", "blood").invoke(requiredEssences);
+            int reqExp    = (int) Reflect.getMethodOrThrow(essencesDefinitionClass, "experience", "experience").invoke(requiredEssences);
+
+            Object curEssences = Reflect.getMethodOrThrow(hephaestusForgeBEClass, "getEssences", "getEssences").invoke(forge);
+            int curAureal = (int) Reflect.getMethodOrThrow(essencesDefinitionClass, "aureal", "aureal").invoke(curEssences);
+            int curSouls  = (int) Reflect.getMethodOrThrow(essencesDefinitionClass, "souls", "souls").invoke(curEssences);
+            int curBlood  = (int) Reflect.getMethodOrThrow(essencesDefinitionClass, "blood", "blood").invoke(curEssences);
+            int curExp    = (int) Reflect.getMethodOrThrow(essencesDefinitionClass, "experience", "experience").invoke(curEssences);
+
+            RSIntegrationMod.LOGGER.debug("[RSI-FA] Essence check: a={}/{}, s={}/{}, b={}/{}, e={}/{}",
+                    curAureal, reqAureal, curSouls, reqSouls, curBlood, reqBlood, curExp, reqExp);
+
+            boolean ok = true;
+            if (reqAureal > 0 && curAureal < reqAureal) {
+                player.sendSystemMessage(Component.translatable(
+                        "rsi.fa.error.insufficient_aureal", reqAureal, curAureal));
+                ok = false;
+            }
+            if (reqSouls > 0 && curSouls < reqSouls) {
+                player.sendSystemMessage(Component.translatable(
+                        "rsi.fa.error.insufficient_souls", reqSouls, curSouls));
+                ok = false;
+            }
+            if (reqBlood > 0 && curBlood < reqBlood) {
+                player.sendSystemMessage(Component.translatable(
+                        "rsi.fa.error.insufficient_blood", reqBlood, curBlood));
+                ok = false;
+            }
+            if (reqExp > 0 && curExp < reqExp) {
+                player.sendSystemMessage(Component.translatable(
+                        "rsi.fa.error.insufficient_experience", reqExp, curExp));
+                ok = false;
+            }
+            return ok;
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.error("[RSI-FA] Essence check failed: {}", e.toString(), e);
+            player.sendSystemMessage(Component.translatable("rsi.fa.error.essence_check_failed", e.toString()));
+            return false;
+        }
+    }
+
+    // ── Pedestal finding ─────────────────────────────────────────
+
+    static List<Object> findPedestals(BlockPos forgePos, ServerLevel level) {
+        List<Object> result = new ArrayList<>();
+        try {
+            BlockPos.betweenClosedStream(
+                    forgePos.offset(-8, -3, -8),
+                    forgePos.offset(8, 3, 8)
+            ).forEach(cp -> {
+                BlockEntity be = level.getBlockEntity(cp);
+                if (be != null && pedestalBEClass.isInstance(be)) {
+                    result.add(be);
+                }
+            });
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.error("[RSI-FA] Failed to find pedestals", e);
+            return null;
+        }
+        return result;
+    }
+
+    // ── Slot helpers ─────────────────────────────────────────────
+
+    private static volatile Integer cachedMainSlot;
+
+    static int getMainSlot() {
+        Integer v = cachedMainSlot;
+        if (v != null) return v;
+        try {
+            java.lang.reflect.Field f = Reflect.findField(hephaestusForgeBEClass, "MAIN_SLOT").orElse(null);
+            if (f != null) {
+                f.setAccessible(true);
+                cachedMainSlot = f.getInt(null);
+                return cachedMainSlot;
+            }
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-FA] MAIN_SLOT lookup failed", e);
+        }
+        return 0;
+    }
+
+    static void setForgeSlot(Object be, int slot, ItemStack stack) {
+        // Strategy 1: setStack(int, ItemStack) — FA's actual method name
+        try {
+            Method m = Reflect.findMethod(be.getClass(), "setStack",
+                    new Class<?>[]{int.class, ItemStack.class});
+            if (m != null) { m.invoke(be, slot, stack); return; }
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-FA] S1 setStack({}) failed: {}", slot, e.toString());
+        }
+        // Strategy 2: setStackInSlot (MCP mapped name)
+        try {
+            Method m = Reflect.findMethod(be.getClass(), "setStackInSlot",
+                    new Class<?>[]{int.class, ItemStack.class});
+            if (m != null) { m.invoke(be, slot, stack); return; }
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-FA] S2 setStackInSlot({}) failed: {}", slot, e.toString());
+        }
+        // Strategy 3: setItem (Mojang mapped name)
+        try {
+            Method m = Reflect.findMethod(be.getClass(), "setItem",
+                    new Class<?>[]{int.class, ItemStack.class});
+            if (m != null) { m.invoke(be, slot, stack); return; }
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-FA] S3 setItem({}) failed: {}", slot, e.toString());
+        }
+        // Strategy 4: Forge IItemHandler capability
+        try {
+            var cap = net.minecraftforge.common.capabilities.ForgeCapabilities.ITEM_HANDLER;
+            var handler = be.getClass().getMethod("getCapability",
+                    net.minecraftforge.common.capabilities.Capability.class,
+                    net.minecraft.core.Direction.class)
+                    .invoke(be, cap, null);
+            if (handler != null) {
+                var ih = (net.minecraftforge.items.IItemHandler) handler;
+                if (slot < ih.getSlots()) {
+                    ih.extractItem(slot, ih.getStackInSlot(slot).getCount(), false);
+                    if (!stack.isEmpty()) ih.insertItem(slot, stack.copy(), false);
+                }
+                return;
+            }
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-FA] S4 IItemHandler set({}) failed: {}", slot, e.toString());
+        }
+        // Strategy 5: itemStackHandler field
+        try {
+            java.lang.reflect.Field f = Reflect.findField(be.getClass(), "itemStackHandler").orElse(null);
+            if (f != null) {
+                f.setAccessible(true);
+                Object h = f.get(be);
+                if (h instanceof net.minecraftforge.items.IItemHandler ih) {
+                    if (slot < ih.getSlots()) {
+                        ih.extractItem(slot, ih.getStackInSlot(slot).getCount(), false);
+                        if (!stack.isEmpty()) ih.insertItem(slot, stack.copy(), false);
+                    }
+                    return;
+                }
+            }
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-FA] S5 itemStackHandler field({}) failed: {}", slot, e.toString());
+        }
+        // Strategy 6: inventory / items NonNullList field
+        try {
+            java.lang.reflect.Field f = Reflect.findField(be.getClass(), "inventory").orElse(null);
+            if (f == null) f = Reflect.findField(be.getClass(), "items").orElse(null);
+            if (f != null) {
+                f.setAccessible(true);
+                var list = (net.minecraft.core.NonNullList<ItemStack>) f.get(be);
+                if (slot < list.size()) { list.set(slot, stack.copy()); be.getClass().getMethod("setChanged").invoke(be); }
+                return;
+            }
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-FA] S6 inventory field({}) failed: {}", slot, e.toString());
+        }
+        RSIntegrationMod.LOGGER.warn("[RSI-FA] All slot strategies failed for set slot {}", slot);
+    }
+
+    static ItemStack getForgeSlot(Object be, int slot) {
+        // Strategy 1: getStack(int) — FA's actual method name
+        try {
+            Method m = Reflect.findMethod(be.getClass(), "getStack",
+                    new Class<?>[]{int.class});
+            if (m != null) return (ItemStack) m.invoke(be, slot);
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-FA] S1 getStack({}) failed: {}", slot, e.toString());
+        }
+        // Strategy 2: getStackInSlot (MCP mapped name)
+        try {
+            Method m = Reflect.findMethod(be.getClass(), "getStackInSlot",
+                    new Class<?>[]{int.class});
+            if (m != null) return (ItemStack) m.invoke(be, slot);
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-FA] S2 getStackInSlot({}) failed: {}", slot, e.toString());
+        }
+        // Strategy 3: getItem (Mojang mapped name)
+        try {
+            Method m = Reflect.findMethod(be.getClass(), "getItem",
+                    new Class<?>[]{int.class});
+            if (m != null) return (ItemStack) m.invoke(be, slot);
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-FA] S3 getItem({}) failed: {}", slot, e.toString());
+        }
+        // Strategy 4: Forge IItemHandler capability
+        try {
+            var cap = net.minecraftforge.common.capabilities.ForgeCapabilities.ITEM_HANDLER;
+            var handler = be.getClass().getMethod("getCapability",
+                    net.minecraftforge.common.capabilities.Capability.class,
+                    net.minecraft.core.Direction.class)
+                    .invoke(be, cap, null);
+            if (handler != null) {
+                var ih = (net.minecraftforge.items.IItemHandler) handler;
+                if (slot < ih.getSlots()) return ih.getStackInSlot(slot);
+            }
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-FA] S4 IItemHandler get({}) failed: {}", slot, e.toString());
+        }
+        // Strategy 5: itemStackHandler field
+        try {
+            java.lang.reflect.Field f = Reflect.findField(be.getClass(), "itemStackHandler").orElse(null);
+            if (f != null) {
+                f.setAccessible(true);
+                Object h = f.get(be);
+                if (h instanceof net.minecraftforge.items.IItemHandler ih) {
+                    if (slot < ih.getSlots()) return ih.getStackInSlot(slot);
+                }
+            }
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-FA] S5 itemStackHandler field({}) failed: {}", slot, e.toString());
+        }
+        // Strategy 6: inventory / items NonNullList field
+        try {
+            java.lang.reflect.Field f = Reflect.findField(be.getClass(), "inventory").orElse(null);
+            if (f == null) f = Reflect.findField(be.getClass(), "items").orElse(null);
+            if (f != null) {
+                f.setAccessible(true);
+                var list = (net.minecraft.core.NonNullList<ItemStack>) f.get(be);
+                if (slot < list.size()) return list.get(slot);
+            }
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-FA] S6 inv field({}) failed: {}", slot, e.toString());
+        }
+        return ItemStack.EMPTY;
+    }
+
+    // ── Reflection helpers ───────────────────────────────────────
+
+    @Nullable
+    static Object invoke(Object obj, String methodName) {
+        try {
+            Method m = Reflect.findMethod(obj.getClass(), methodName, new Class<?>[0]);
+            if (m == null) {
+                RSIntegrationMod.LOGGER.debug("[RSI-FA] invoke: method not found {}.{}",
+                        obj.getClass().getName(), methodName);
+                return null;
+            }
+            return m.invoke(obj);
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-FA] invoke failed: {}.{} — {}",
+                    obj.getClass().getName(), methodName, e.toString());
+            return null;
+        }
+    }
+
+    @Nullable
+    @SuppressWarnings("unchecked")
+    static List<?> invokeList(Object obj, String methodName) {
+        try {
+            Method m = Reflect.findMethod(obj.getClass(), methodName, new Class<?>[0]);
+            if (m == null) {
+                RSIntegrationMod.LOGGER.debug("[RSI-FA] invokeList: method not found {}.{}",
+                        obj.getClass().getName(), methodName);
+                return null;
+            }
+            return (List<?>) m.invoke(obj);
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-FA] invokeList failed: {}.{} — {}",
+                    obj.getClass().getName(), methodName, e.toString());
+            return null;
+        }
+    }
+
+    static int invokeInt(Object obj, String methodName) {
+        try {
+            Method m = Reflect.findMethod(obj.getClass(), methodName, new Class<?>[0]);
+            if (m == null) return 0;
+            Object v = m.invoke(obj);
+            return v instanceof Number n ? n.intValue() : 0;
+        } catch (Exception e) { return 0; }
+    }
+
+    /**
+     * Tries multiple reflection strategies to read RitualManager's current
+     * valid ritual.  FA versions rename this field/method across builds.
+     */
+    @Nullable
+    static Object getValidRitualSafe(Object ritualManager) {
+        try {
+            Method m = Reflect.findMethod(ritualManagerClass, "getValidRitual", new Class<?>[0]);
+            if (m != null) return m.invoke(ritualManager);
+        } catch (Exception ignored) { /* fallthrough */ }
+        try {
+            Method m = Reflect.findMethod(ritualManagerClass, "getRitual", new Class<?>[0]);
+            if (m != null) return m.invoke(ritualManager);
+        } catch (Exception ignored) { /* fallthrough */ }
+        try {
+            java.lang.reflect.Field f = Reflect.findField(ritualManagerClass, "validRitual").orElse(null);
+            if (f != null) { f.setAccessible(true); return f.get(ritualManager); }
+        } catch (Exception ignored) { /* fallthrough */ }
+        try {
+            java.lang.reflect.Field f = Reflect.findField(ritualManagerClass, "ritual").orElse(null);
+            if (f != null) { f.setAccessible(true); return f.get(ritualManager); }
+        } catch (Exception ignored) { /* fallthrough */ }
+        return null;
+    }
+
+    // ── RitualStarterItem helpers ─────────────────────────────────
+
+    /** Return type for {@link #findRitualStarterItem}. */
+    public static final class StarterResult {
+        private final ItemStack stack;
+        @Nullable private final INetwork sourceNetwork;
+
+        StarterResult(ItemStack stack, @Nullable INetwork sourceNetwork) {
+            this.stack = stack;
+            this.sourceNetwork = sourceNetwork;
+        }
+
+        public ItemStack stack() { return stack; }
+        @Nullable public INetwork sourceNetwork() { return sourceNetwork; }
+        public boolean isEmpty() { return stack.isEmpty(); }
+
+        public static final StarterResult EMPTY = new StarterResult(ItemStack.EMPTY, null);
+    }
+
+    static StarterResult findRitualStarterItem(ServerPlayer player, @Nullable INetwork network) {
+        ensureClasses();
+        if (ritualStarterItemClass == null) return StarterResult.EMPTY;
+
+        // 1. Check player inventory + offhand
+        for (ItemStack stack : player.getInventory().items) {
+            if (!stack.isEmpty() && ritualStarterItemClass.isInstance(stack.getItem())
+                    && canStartRitual(stack)) {
+                RSIntegrationMod.LOGGER.info("[RSI-FA] Found RitualStarterItem '{}' in player inventory",
+                        stack.getHoverName().getString());
+                return new StarterResult(stack, null);
+            }
+        }
+        ItemStack offhand = player.getOffhandItem();
+        if (!offhand.isEmpty() && ritualStarterItemClass.isInstance(offhand.getItem())
+                && canStartRitual(offhand)) {
+            RSIntegrationMod.LOGGER.info("[RSI-FA] Found RitualStarterItem '{}' in player offhand",
+                    offhand.getHoverName().getString());
+            return new StarterResult(offhand, null);
+        }
+
+        // 2. Fall back to RS network
+        if (network != null) {
+            try {
+                var cacheList = network.getItemStorageCache().getList();
+                if (cacheList != null) {
+                    for (var entry : cacheList.getStacks()) {
+                        ItemStack rsStack = entry.getStack();
+                        if (rsStack.isEmpty()) continue;
+                        if (!ritualStarterItemClass.isInstance(rsStack.getItem())) continue;
+                        if (!canStartRitual(rsStack)) {
+                            RSIntegrationMod.LOGGER.info("[RSI-FA] RS has RitualStarterItem '{}' but canStartRitual=false",
+                                    rsStack.getHoverName().getString());
+                            continue;
+                        }
+
+                        ItemStack req = rsStack.copy();
+                        req.setCount(1);
+                        ItemStack extracted = network.extractItem(req, 1,
+                                com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                        if (!extracted.isEmpty()) {
+                            RSIntegrationMod.LOGGER.info("[RSI-FA] Extracted RitualStarterItem '{}' from RS",
+                                    extracted.getHoverName().getString());
+                            return new StarterResult(extracted, network);
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.warn("[RSI-FA] RS starter search failed: {}", e.toString());
+            }
+        }
+
+        return StarterResult.EMPTY;
+    }
+
+    static boolean canStartRitual(ItemStack stack) {
+        try {
+            return (boolean) Reflect.getMethodOrThrow(ritualStarterItemClass, "canStartRitual", "canStartRitual", ItemStack.class).invoke(stack.getItem(), stack);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /**
+     * Decrements remaining uses on a RitualStarterItem unless the player
+     * is in creative mode.  If the item was extracted from RS, re-inserts
+     * it after modifying durability.
+     */
+    static void consumeRitualStarterUse(ItemStack starterStack, ServerPlayer player,
+                                        @Nullable INetwork starterNetwork) {
+        boolean isCreative = player.isCreative();
+        String source = starterNetwork != null ? "RS" : "inventory";
+        RSIntegrationMod.LOGGER.info("[RSI-FA] consumeRitualStarterUse: item='{}' creative={} source={}",
+                starterStack.getHoverName().getString(), isCreative, source);
+
+        if (!isCreative) {
+            try {
+                Object item = starterStack.getItem();
+                int remaining = (int) Reflect.getMethodOrThrow(ritualStarterItemClass, "getRemainingUses", "getRemainingUses", ItemStack.class).invoke(item, starterStack);
+                RSIntegrationMod.LOGGER.info("[RSI-FA] Starter '{}' uses before: {} (source: {})",
+                        starterStack.getHoverName().getString(), remaining, source);
+                if (remaining > 0) {
+                    int newRemaining = remaining - 1;
+                    Reflect.getMethodOrThrow(ritualStarterItemClass, "setRemainingUses", "setRemainingUses", ItemStack.class, int.class)
+                            .invoke(item, starterStack, newRemaining);
+                    RSIntegrationMod.LOGGER.info("[RSI-FA] Starter '{}' uses after: {}",
+                            starterStack.getHoverName().getString(), newRemaining);
+                } else {
+                    RSIntegrationMod.LOGGER.warn("[RSI-FA] Starter '{}' has {} remaining uses — cannot consume",
+                            starterStack.getHoverName().getString(), remaining);
+                }
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.warn("[RSI-FA] consumeRitualStarterUse failed for '{}': {}",
+                        starterStack.getHoverName().getString(), e.toString());
+            }
+        } else {
+            RSIntegrationMod.LOGGER.info("[RSI-FA] consumeRitualStarterUse: player is creative, not consuming durability");
+        }
+
+        // Always re-insert to RS if it came from there — even in creative mode
+        if (starterNetwork != null) {
+            ItemStack leftover = starterNetwork.insertItem(starterStack, starterStack.getCount(),
+                    com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+            if (!leftover.isEmpty()) {
+                RSIntegrationMod.LOGGER.warn("[RSI-FA] consumeRitualStarterUse: RS insert failed, giving '{}' to player",
+                        starterStack.getHoverName().getString());
+                ItemHandlerHelper.giveItemToPlayer(player, leftover);
+            }
+        }
+    }
+
+    static void returnStarterToSource(ItemStack stack, ServerPlayer player,
+                                      @Nullable INetwork starterNetwork) {
+        if (stack.isEmpty()) return;
+        if (starterNetwork != null) {
+            ItemStack leftover = starterNetwork.insertItem(stack, stack.getCount(),
+                    com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+            if (!leftover.isEmpty()) {
+                RSIntegrationMod.LOGGER.warn("[RSI-FA] returnStarterToSource: RS insert failed, giving '{}' to player",
+                        stack.getHoverName().getString());
+                ItemHandlerHelper.giveItemToPlayer(player, leftover);
+            }
+        }
+    }
+
+    // ── Display ───────────────────────────────────────────────────
+
+    static String enhancerDefName(Object enhancerDef) {
+        Optional<Object> item = Reflect.getField(enhancerDef, "item");
+        if (item.isPresent() && item.get() instanceof Item it) {
+            return it.getDescription().getString();
+        }
+        Optional<Object> desc = Reflect.invoke(enhancerDef, "getDescription");
+        if (desc.isPresent() && desc.get() instanceof Component c) {
+            return c.getString();
+        }
+        return enhancerDef.toString();
+    }
+}

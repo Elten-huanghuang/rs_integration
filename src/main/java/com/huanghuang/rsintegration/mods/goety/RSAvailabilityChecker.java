@@ -1,12 +1,11 @@
 package com.huanghuang.rsintegration.mods.goety;
 
-import com.Polarice3.Goety.common.blocks.entities.PedestalBlockEntity;
-import com.Polarice3.Goety.common.crafting.RitualRecipe;
 import com.huanghuang.rsintegration.network.AltarBinding;
 import com.huanghuang.rsintegration.network.AltarBindingRegistry;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.network.RSIntegration;
+import com.huanghuang.rsintegration.util.Reflect;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceKey;
@@ -17,6 +16,8 @@ import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraftforge.common.util.LazyOptional;
+import net.minecraftforge.items.IItemHandler;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
@@ -24,10 +25,29 @@ import java.util.List;
 
 public final class RSAvailabilityChecker {
 
+    // ── Shared class refs ────────────────────────────────────────
+    private static volatile Class<?> ritualRecipeClass;
+    private static volatile Class<?> pedestalBEClass;
+
+    private static void ensureClasses() {
+        if (!com.huanghuang.rsintegration.util.ModClassLoader.ensureClasses("goety",
+                "com.Polarice3.Goety.common.crafting.RitualRecipe",
+                "com.Polarice3.Goety.common.blocks.entities.PedestalBlockEntity")) return;
+        try {
+            ritualRecipeClass = Class.forName(
+                    "com.Polarice3.Goety.common.crafting.RitualRecipe");
+            pedestalBEClass = Class.forName(
+                    "com.Polarice3.Goety.common.blocks.entities.PedestalBlockEntity");
+        } catch (ClassNotFoundException e) {
+            RSIntegrationMod.LOGGER.error("[RSI-Avail] Failed to load Goety classes", e);
+        }
+    }
+
     private RSAvailabilityChecker() {}
 
     public static boolean[] check(ServerPlayer player, ResourceLocation recipeId,
                                   @Nullable ResourceLocation altarDim, BlockPos pos) {
+        ensureClasses();
         Recipe<?> recipe = player.level().getRecipeManager().byKey(recipeId).orElse(null);
         if (recipe == null) return null;
 
@@ -35,9 +55,12 @@ public final class RSAvailabilityChecker {
         if (network == null) return null;
 
         List<Ingredient> ingredients = new ArrayList<>();
-        if (recipe instanceof RitualRecipe ritualRecipe) {
-            ingredients.add(ritualRecipe.getActivationItem());
-            ingredients.addAll(ritualRecipe.getIngredients());
+        if (ritualRecipeClass != null && ritualRecipeClass.isInstance(recipe)) {
+            Object ritualRecipe = recipe;
+            Ingredient activationItem = Reflect.<Ingredient>invoke(ritualRecipe, "getActivationItem")
+                    .orElse(Ingredient.EMPTY);
+            ingredients.add(activationItem);
+            ingredients.addAll(recipe.getIngredients());
         } else {
             List<Ingredient> extracted = CraftPacketUtils.extractIngredients(recipe);
             if (extracted == null || extracted.isEmpty()) return null;
@@ -50,8 +73,8 @@ public final class RSAvailabilityChecker {
         }
 
         List<ItemStack> pedestalItems = new ArrayList<>();
-        if (recipe instanceof RitualRecipe ritualRecipe) {
-            pedestalItems.addAll(rsi$collectGoetyPedestalItems(player, pos, ritualRecipe));
+        if (ritualRecipeClass != null && ritualRecipeClass.isInstance(recipe)) {
+            pedestalItems.addAll(rsi$collectGoetyPedestalItems(player, pos, recipe));
         } else if (recipe.getClass().getName().equals("com.sammy.malum.common.recipe.SpiritInfusionRecipe")) {
             pedestalItems.addAll(rsi$collectMalumPedestalItems(player, pos));
         }
@@ -69,22 +92,27 @@ public final class RSAvailabilityChecker {
         return results;
     }
 
+    @SuppressWarnings("unchecked")
     private static List<ItemStack> rsi$collectGoetyPedestalItems(ServerPlayer player, BlockPos altarPos,
-                                                                 RitualRecipe recipe) {
+                                                                 Recipe<?> recipe) {
         List<ItemStack> items = new ArrayList<>();
         var level = player.level();
 
         // Use Goety's ritual.getPedestals() which respects configurable range (default 16)
         try {
-            var ritual = recipe.getRitual();
-            @SuppressWarnings("unchecked")
-            List<PedestalBlockEntity> pedestals = (List<PedestalBlockEntity>)
+            Object ritual = Reflect.invoke(recipe, "getRitual").orElse(null);
+            if (ritual == null) return items;
+            List<Object> pedestals = (List<Object>)
                     ritual.getClass().getMethod("getPedestals", Level.class, BlockPos.class)
                             .invoke(ritual, level, altarPos);
-            for (PedestalBlockEntity pedestal : pedestals) {
-                pedestal.itemStackHandler.ifPresent(handler -> {
-                    ItemStack stack = handler.getStackInSlot(0);
-                    if (!stack.isEmpty()) items.add(stack.copy());
+            for (Object pedestal : pedestals) {
+                var opt = Reflect.<Object>getField(pedestal, "itemStackHandler");
+                opt.ifPresent(obj -> {
+                    LazyOptional<IItemHandler> lazy = (LazyOptional<IItemHandler>) obj;
+                    lazy.ifPresent(handler -> {
+                        ItemStack stack = handler.getStackInSlot(0);
+                        if (!stack.isEmpty()) items.add(stack.copy());
+                    });
                 });
             }
             return items;
@@ -98,12 +126,16 @@ public final class RSAvailabilityChecker {
                 altarPos.offset(-range, -range, -range),
                 altarPos.offset(range, range, range))) {
             BlockEntity be = level.getBlockEntity(p);
-            if (be instanceof PedestalBlockEntity pedestal) {
-                pedestal.itemStackHandler.ifPresent(handler -> {
-                    ItemStack stack = handler.getStackInSlot(0);
-                    if (!stack.isEmpty()) {
-                        items.add(stack.copy());
-                    }
+            if (pedestalBEClass != null && pedestalBEClass.isInstance(be)) {
+                var opt = Reflect.<Object>getField(be, "itemStackHandler");
+                opt.ifPresent(obj -> {
+                    LazyOptional<IItemHandler> lazy = (LazyOptional<IItemHandler>) obj;
+                    lazy.ifPresent(handler -> {
+                        ItemStack stack = handler.getStackInSlot(0);
+                        if (!stack.isEmpty()) {
+                            items.add(stack.copy());
+                        }
+                    });
                 });
             }
         }
@@ -148,7 +180,6 @@ public final class RSAvailabilityChecker {
         }
         return false;
     }
-
 
     private static INetwork resolveNetwork(ServerPlayer player, @Nullable ResourceLocation altarDimId, BlockPos pos) {
         ResourceKey<Level> lookupDim = altarDimId != null

@@ -4,7 +4,7 @@ import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.item.NetworkItem;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.network.chat.Component;
+import com.huanghuang.rsintegration.util.TextBuilder;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
@@ -44,10 +44,14 @@ public final class RSBindingHook implements IBindingHook {
         data.putInt(KEY_X, pos.getX());
         data.putInt(KEY_Y, pos.getY());
         data.putInt(KEY_Z, pos.getZ());
+        String dimName = dim.location().getPath();
         return Optional.of(new AltarBinding(
                 AltarBinding.RS_NETWORK,
-                Component.translatable("gui.rs_integration.altar.binding.rs",
-                        pos.toShortString()),
+                TextBuilder.of("RS 网络 (").gold()
+                    .append(TextBuilder.of(dimName).aqua())
+                    .append(TextBuilder.of(") ").gold())
+                    .append(TextBuilder.of(pos.toShortString()).gray())
+                    .build(),
                 data
         ));
     }

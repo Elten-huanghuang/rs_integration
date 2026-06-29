@@ -45,7 +45,7 @@ public class InventoryInteractionHelperMixin {
 
         GridBlockEntity grid = (GridBlockEntity) blockEntity;
         cir.cancel();
-        GridNetworkNode node = (GridNetworkNode) grid.getNode();
+        GridNetworkNode node = grid.getNode();
         if (node == null) {
             cir.setReturnValue(false);
             return;

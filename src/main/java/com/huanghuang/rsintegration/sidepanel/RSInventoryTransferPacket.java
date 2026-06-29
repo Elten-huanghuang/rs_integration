@@ -56,6 +56,10 @@ public final class RSInventoryTransferPacket {
             context.setPacketHandled(true);
             return;
         }
+        if (player instanceof net.minecraftforge.common.util.FakePlayer) {
+            context.setPacketHandled(true);
+            return;
+        }
         context.enqueueWork(() -> {
             try {
                 execute(player, packet.recipeId);
@@ -68,6 +72,8 @@ public final class RSInventoryTransferPacket {
         });
         context.setPacketHandled(true);
     }
+
+    private static final int MAX_DROPS = 20; // §13.5 N-3: drop throttle
 
     private static void execute(ServerPlayer player, ResourceLocation recipeId) {
         if (!RSIntegrationConfig.ENABLE_RS_SIDE_PANEL.get()) return;
@@ -92,9 +98,6 @@ public final class RSInventoryTransferPacket {
             }
         }
         // Safety filter: strip WR crystal items from the transfer specs.
-        // WR crystal infusion/ritual recipes should not extract the crystal
-        // (it stays in-world as a catalyst).  filterWRCrystal covers most
-        // paths but this is a defense-in-depth check at the transfer boundary.
         String recipeClassName = recipe.getClass().getName();
         if (recipeClassName.startsWith("mod.maxbogomol.wizards_reborn.")
                 && !recipeClassName.endsWith("WissenCrystallizerRecipe")) {
@@ -132,6 +135,7 @@ public final class RSInventoryTransferPacket {
 
         int transferred = 0;
         int missing = 0;
+        int dropsRemaining = MAX_DROPS;
         for (IngredientSpec spec : specs) {
             if (spec.isEmpty()) continue;
             int needed = spec.count();
@@ -147,7 +151,15 @@ public final class RSInventoryTransferPacket {
                 ItemStack extracted = network.extractItem(req, take, Action.PERFORM);
                 if (!extracted.isEmpty()) {
                     ItemStack remainder = ItemHandlerHelper.insertItemStacked(inv, extracted, false);
-                    if (!remainder.isEmpty()) player.drop(remainder, false);
+                    if (!remainder.isEmpty()) {
+                        if (dropsRemaining > 0) {
+                            player.drop(remainder, false);
+                            dropsRemaining--;
+                        } else {
+                            // Drop throttle exhausted: refund to RS network
+                            network.insertItem(remainder, remainder.getCount(), Action.PERFORM);
+                        }
+                    }
                     transferred += extracted.getCount() - remainder.getCount();
                     needed -= extracted.getCount();
                 }

@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.mods.wizards_reborn;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
@@ -31,7 +32,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 
-public final class WRBatchDelegate implements IBatchDelegate {
+public final class WRBatchDelegate extends AbstractBatchDelegate {
 
     // ── Machine type enum ────────────────────────────────────────
     private enum MachineType {
@@ -43,7 +44,6 @@ public final class WRBatchDelegate implements IBatchDelegate {
     }
 
     // ── Shared class refs (loaded via Class.forName) ─────────────
-    private static volatile boolean classesLoaded;
     private static volatile Class<?> wissenCrystallizerBEClass;
     private static volatile Class<?> arcaneIteratorBEClass;
     private static volatile Class<?> arcaneWorkbenchBEClass;
@@ -54,19 +54,28 @@ public final class WRBatchDelegate implements IBatchDelegate {
     private static volatile Class<?> runicPedestalBEClass;
 
     private static void ensureClasses() {
-        if (classesLoaded) return;
+        if (!com.huanghuang.rsintegration.util.ModClassLoader.ensureClasses("wizards_reborn",
+                "mod.maxbogomol.wizards_reborn.common.block.wissen_crystallizer.WissenCrystallizerBlockEntity",
+                "mod.maxbogomol.wizards_reborn.common.block.arcane_iterator.ArcaneIteratorBlockEntity",
+                "mod.maxbogomol.wizards_reborn.common.block.arcane_workbench.ArcaneWorkbenchBlockEntity",
+                "mod.maxbogomol.wizards_reborn.common.block.crystal_ritual.CrystalRitualBlockEntity",
+                "mod.maxbogomol.wizards_reborn.common.block.crystal.CrystalBlockEntity",
+                "mod.maxbogomol.wizards_reborn.api.crystalritual.CrystalRitual",
+                "mod.maxbogomol.wizards_reborn.api.crystalritual.CrystalRitualArea",
+                "mod.maxbogomol.wizards_reborn.common.recipe.CrystalInfusionRecipe",
+                "mod.maxbogomol.wizards_reborn.common.block.runic_pedestal.RunicPedestalBlockEntity")) return;
         try {
             wissenCrystallizerBEClass = Class.forName(
                     "mod.maxbogomol.wizards_reborn.common.block.wissen_crystallizer.WissenCrystallizerBlockEntity");
-        } catch (ClassNotFoundException ignored) {}
+        } catch (ClassNotFoundException ignored) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-WR] WissenCrystallizer class not found — mod variant may differ"); }
         try {
             arcaneIteratorBEClass = Class.forName(
                     "mod.maxbogomol.wizards_reborn.common.block.arcane_iterator.ArcaneIteratorBlockEntity");
-        } catch (ClassNotFoundException ignored) {}
+        } catch (ClassNotFoundException ignored) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-WR] ArcaneIterator class not found — mod variant may differ"); }
         try {
             arcaneWorkbenchBEClass = Class.forName(
                     "mod.maxbogomol.wizards_reborn.common.block.arcane_workbench.ArcaneWorkbenchBlockEntity");
-        } catch (ClassNotFoundException ignored) {}
+        } catch (ClassNotFoundException ignored) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-WR] ArcaneWorkbench class not found — mod variant may differ"); }
         try {
             // Try crystal_ritual first, then crystal as fallback
             try {
@@ -76,22 +85,21 @@ public final class WRBatchDelegate implements IBatchDelegate {
                 crystalRitualBEClass = Class.forName(
                         "mod.maxbogomol.wizards_reborn.common.block.crystal.CrystalBlockEntity");
             }
-        } catch (ClassNotFoundException ignored) {}
+        } catch (ClassNotFoundException ignored) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-WR] CrystalRitual/Crystal BE class not found — mod variant may differ"); }
         try {
             crystalRitualClass = Class.forName(
                     "mod.maxbogomol.wizards_reborn.api.crystalritual.CrystalRitual");
             ritualAreaClass = Class.forName(
                     "mod.maxbogomol.wizards_reborn.api.crystalritual.CrystalRitualArea");
-        } catch (ClassNotFoundException ignored) {}
+        } catch (ClassNotFoundException ignored) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-WR] CrystalRitual/RitualArea class not found — mod variant may differ"); }
         try {
             crystalInfusionRecipeClass = Class.forName(
                     "mod.maxbogomol.wizards_reborn.common.recipe.CrystalInfusionRecipe");
-        } catch (ClassNotFoundException ignored) {}
+        } catch (ClassNotFoundException ignored) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-WR] CrystalInfusionRecipe class not found — mod variant may differ"); }
         try {
             runicPedestalBEClass = Class.forName(
                     "mod.maxbogomol.wizards_reborn.common.block.runic_pedestal.RunicPedestalBlockEntity");
-        } catch (ClassNotFoundException ignored) {}
-        classesLoaded = true;
+        } catch (ClassNotFoundException ignored) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-WR] RunicPedestal class not found — mod variant may differ"); }
     }
 
     // ── Instance state ───────────────────────────────────────────
@@ -101,9 +109,6 @@ public final class WRBatchDelegate implements IBatchDelegate {
     private Object be;                   // The block entity
     private MachineType machineType = MachineType.UNKNOWN;
     private Recipe<?> recipe;
-    private ExtractionLedger ledger;
-    private ExtractionLedger sharedLedger;
-    private INetwork network;
     private List<Integer> filledSlotIndices;
     private List<Object> filledPedestals;
     private List<?> pedestalRefs;
@@ -114,7 +119,6 @@ public final class WRBatchDelegate implements IBatchDelegate {
     // key = pedestal BlockEntity, value = the ItemStack we placed on it.
     private java.util.Map<Object, ItemStack> placedPedestalItems;
     private int waitTicks;
-    private boolean usingSharedLedger;
     private boolean craftStarted;
     private static final int MAX_WAIT_TICKS = 600;
 
@@ -125,6 +129,19 @@ public final class WRBatchDelegate implements IBatchDelegate {
                                    @Nullable ResourceLocation dim, BlockPos pos) {
         ensureClasses();
 
+        // Reset all instance state to prevent pollution from a previous
+        // validateAndInit() call that failed partway through.
+        this.machineType = MachineType.UNKNOWN;
+        this.be = null;
+        this.recipe = null;
+        this.pedestalRefs = null;
+        this.waitTicks = 0;
+        this.craftStarted = false;
+        this.filledSlotIndices = null;
+        this.filledPedestals = null;
+        this.placedInputs = null;
+        this.placedPedestalItems = null;
+
         ServerLevel level = CraftPacketUtils.resolveLevel(player.server, dim, player);
         if (level == null) {
             player.sendSystemMessage(Component.translatable("rsi.generic.error.dim_not_found"));
@@ -134,7 +151,10 @@ public final class WRBatchDelegate implements IBatchDelegate {
         this.myPos = pos;
         this.player = player;
 
-        if (!level.isLoaded(pos)) level.getChunk(pos);
+        if (!level.isLoaded(pos)) {
+            RSIntegrationMod.LOGGER.info("[RSI-Batch-WR] Chunk unloaded at {} — force-loading", pos);
+            level.getChunk(pos);
+        }
         BlockEntity blockEntity = level.getBlockEntity(pos);
         if (blockEntity == null) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] BE null at bound pos ({},{},{}) dim={}",
@@ -235,7 +255,7 @@ public final class WRBatchDelegate implements IBatchDelegate {
             }
             case ARCANE_ITERATOR: {
                 try {
-                    pedestalRefs = (List<?>) getMethod(be.getClass(), "getPedestals").invoke(be);
+                    pedestalRefs = (List<?>) Reflect.getMethodOrThrow(be.getClass(), "getPedestals", "getPedestals").invoke(be);
                 } catch (Exception e) {
                     RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] Failed to get iterator pedestals", e);
                     return false;
@@ -363,7 +383,7 @@ public final class WRBatchDelegate implements IBatchDelegate {
         //    crystal type manually.  For CrystalInfusionRecipe the crystal is
         //    not even listed in recipe ingredients.
         try {
-            Object crystalItem = getMethod(be.getClass(), "getCrystalItem").invoke(be);
+            Object crystalItem = Reflect.getMethodOrThrow(be.getClass(), "getCrystalItem", "getCrystalItem").invoke(be);
             if (crystalItem == null || ((ItemStack) crystalItem).isEmpty()) {
                 RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] [step 3/6] getCrystalItem() returned null/empty — no crystal in block at {}", myPos);
                 player.sendSystemMessage(Component.translatable("rsi.wr.error.crystal_ritual_no_crystal"));
@@ -452,72 +472,6 @@ public final class WRBatchDelegate implements IBatchDelegate {
     }
 
 
-    /**
-     * Extract ingredients from a WR recipe WITHOUT crystal filtering.
-     * Uses the same multi-strategy approach as CraftPacketUtils.extractIngredients
-     * but skips filterWRCrystal so the crystal item remains in the list.
-     */
-    @Nullable
-    private static List<Ingredient> getUnfilteredIngredients(Object recipe) {
-        // Strategy 1: getIngredients() method (most WR recipes)
-        try {
-            @SuppressWarnings("unchecked")
-            List<Ingredient> result = (List<Ingredient>) recipe.getClass()
-                    .getMethod("getIngredients").invoke(recipe);
-            if (result != null && !result.isEmpty()) return result;
-        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
-
-        // Strategy 2: scan fields for "ingredients" List<Ingredient>
-        Class<?> scan = recipe.getClass();
-        while (scan != null && scan != Object.class) {
-            for (java.lang.reflect.Field field : scan.getDeclaredFields()) {
-                if (field.getName().equals("ingredients")
-                        && List.class.isAssignableFrom(field.getType())) {
-                    field.setAccessible(true);
-                    try {
-                        List<?> list = (List<?>) field.get(recipe);
-                        if (!list.isEmpty() && list.get(0) instanceof Ingredient) {
-                            @SuppressWarnings("unchecked")
-                            List<Ingredient> result = (List<Ingredient>) list;
-                            return result;
-                        }
-                    } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
-                }
-            }
-            scan = scan.getSuperclass();
-        }
-
-        // Strategy 3: try getInputs / getInputItems
-        for (String name : new String[]{"getInputs", "getInputItems"}) {
-            try {
-                @SuppressWarnings("unchecked")
-                List<Ingredient> result = (List<Ingredient>) recipe.getClass()
-                        .getMethod(name).invoke(recipe);
-                if (result != null && !result.isEmpty()) return result;
-            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
-        }
-
-        // Strategy 4: scan all List<Ingredient> fields
-        scan = recipe.getClass();
-        while (scan != null && scan != Object.class) {
-            for (java.lang.reflect.Field field : scan.getDeclaredFields()) {
-                if (!List.class.isAssignableFrom(field.getType())) continue;
-                field.setAccessible(true);
-                try {
-                    List<?> list = (List<?>) field.get(recipe);
-                    if (list != null && !list.isEmpty() && list.get(0) instanceof Ingredient) {
-                        @SuppressWarnings("unchecked")
-                        List<Ingredient> result = (List<Ingredient>) list;
-                        return result;
-                    }
-                } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
-            }
-            scan = scan.getSuperclass();
-        }
-
-        return null;
-    }
-
     @Override
     public boolean tryStartSingleCraft(ServerPlayer player) {
         this.player = player;
@@ -527,16 +481,22 @@ public final class WRBatchDelegate implements IBatchDelegate {
         this.filledPedestals = new ArrayList<>();
         this.waitTicks = 0;
 
-        // CRYSTAL_RITUAL uses raw unfiltered ingredients (matching betterjei):
-        // the crystal ingredient at index 0 may be empty (any-crystal catalyst)
-        // or non-empty (specific crystal required as material on pedestal).
-        // Other machines go through filterWRCrystal to strip crystal items.
-        List<Ingredient> ingredients;
-        if (machineType == MachineType.CRYSTAL_RITUAL) {
-            ingredients = getUnfilteredIngredients(recipe);
-        } else {
-            ingredients = CraftPacketUtils.extractIngredients(recipe);
+        // Verify the cached BlockEntity is still valid
+        if (myPos != null && player.serverLevel().isLoaded(myPos)) {
+            BlockEntity current = player.serverLevel().getBlockEntity(myPos);
+            if (current == null || current.isRemoved()) {
+                player.sendSystemMessage(Component.translatable("rsi.error.machine_missing"));
+                if (ledger != null && ledger.isCommitted()) {
+                    ledger.refundCommitted(network, player);
+                }
+                return false;
+            }
         }
+
+        // All machine types go through extractIngredients → filterWRCrystal.
+        // The crystal catalyst belongs in the crystal block (validated in
+        // validateCrystalSetup), not on a pedestal from RS extraction.
+        List<Ingredient> ingredients = CraftPacketUtils.extractIngredients(recipe);
         if (ingredients == null || ingredients.isEmpty()) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] Failed to get ingredients from recipe: {}", recipe.getId());
             return false;
@@ -614,7 +574,7 @@ public final class WRBatchDelegate implements IBatchDelegate {
 
         craftStarted = true;
         try {
-            getMethod(be.getClass(), "wissenWandFunction").invoke(be);
+            Reflect.getMethodOrThrow(be.getClass(), "wissenWandFunction", "wissenWandFunction").invoke(be);
             syncBlockEntity(be);
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] wissenWandFunction invoke failed, rolling back", e);
@@ -631,7 +591,7 @@ public final class WRBatchDelegate implements IBatchDelegate {
     private boolean tryStartArcaneIterator(ServerPlayer player, List<Ingredient> ingredients) {
         List<?> pedestals;
         try {
-            pedestals = (List<?>) getMethod(be.getClass(), "getPedestals").invoke(be);
+            pedestals = (List<?>) Reflect.getMethodOrThrow(be.getClass(), "getPedestals", "getPedestals").invoke(be);
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] Failed to get pedestals from ArcaneIterator", e);
             return false;
@@ -685,7 +645,7 @@ public final class WRBatchDelegate implements IBatchDelegate {
 
         craftStarted = true;
         try {
-            getMethod(be.getClass(), "wissenWandFunction").invoke(be);
+            Reflect.getMethodOrThrow(be.getClass(), "wissenWandFunction", "wissenWandFunction").invoke(be);
             syncBlockEntity(be);
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] wissenWandFunction invoke failed, rolling back", e);
@@ -749,7 +709,7 @@ public final class WRBatchDelegate implements IBatchDelegate {
 
         craftStarted = true;
         try {
-            getMethod(be.getClass(), "wissenWandFunction").invoke(be);
+            Reflect.getMethodOrThrow(be.getClass(), "wissenWandFunction", "wissenWandFunction").invoke(be);
             syncBlockEntity(be);
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] wissenWandFunction invoke failed, rolling back", e);
@@ -767,7 +727,7 @@ public final class WRBatchDelegate implements IBatchDelegate {
         Object ritual = extractRitual(recipe);
         if (ritual == null) {
             try {
-                ritual = getMethod(be.getClass(), "getCrystalRitual").invoke(be);
+                ritual = Reflect.getMethodOrThrow(be.getClass(), "getCrystalRitual", "getCrystalRitual").invoke(be);
             } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
         }
         if (ritual == null) {
@@ -777,7 +737,7 @@ public final class WRBatchDelegate implements IBatchDelegate {
 
         Object area;
         try {
-            area = getMethod(ritual.getClass(), "getArea", be.getClass()).invoke(ritual, be);
+            area = Reflect.getMethodOrThrow(ritual.getClass(), "getArea", "getArea", be.getClass()).invoke(ritual, be);
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] Failed to get ritual area", e);
             return false;
@@ -786,7 +746,7 @@ public final class WRBatchDelegate implements IBatchDelegate {
         List<?> pedestals;
         try {
             ServerLevel level = player.serverLevel();
-            pedestals = (List<?>) getMethod(crystalRitualClass, "getPedestalsWithArea", Level.class, BlockPos.class, ritualAreaClass)
+            pedestals = (List<?>) Reflect.getMethodOrThrow(crystalRitualClass, "getPedestalsWithArea", "getPedestalsWithArea", Level.class, BlockPos.class, ritualAreaClass)
                     .invoke(null, level, myPos, area);
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] Failed to find arcane pedestals for crystal ritual", e);
@@ -794,6 +754,12 @@ public final class WRBatchDelegate implements IBatchDelegate {
         }
 
         if (pedestals.size() < ingredients.size()) return false;
+
+        // The crystal ingredient is now filtered out by extractIngredients.
+        // If the ritual area has more pedestals than material ingredients,
+        // the extra pedestal (index 0) corresponds to the crystal slot in
+        // the original recipe and should be skipped.
+        int pedOffset = pedestals.size() - ingredients.size();
 
         // Phase 1: reserve all ingredients
         List<ItemStack> templates = new ArrayList<>();
@@ -804,7 +770,7 @@ public final class WRBatchDelegate implements IBatchDelegate {
                 continue;
             }
 
-            Object ped = pedestals.get(i);
+            Object ped = pedestals.get(i + pedOffset);
             ItemStack existing = getContainerItem(ped, 0);
             if (!existing.isEmpty() && ing.test(existing)) {
                 templates.add(ItemStack.EMPTY);
@@ -827,7 +793,7 @@ public final class WRBatchDelegate implements IBatchDelegate {
             ItemStack taken = templates.get(i);
             if (taken.isEmpty()) continue;
 
-            Object ped = pedestals.get(i);
+            Object ped = pedestals.get(i + pedOffset);
             ItemStack existing = getContainerItem(ped, 0);
             if (!existing.isEmpty()) {
                 ItemHandlerHelper.giveItemToPlayer(player, existing.copy());
@@ -841,14 +807,14 @@ public final class WRBatchDelegate implements IBatchDelegate {
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] Failed to place item on crystal pedestal {}: {}", i, e.getMessage());
                 clearFilledPedestals();
-    
+
                 return false;
             }
         }
 
         craftStarted = true;
         try {
-            getMethod(be.getClass(), "wissenWandFunction").invoke(be);
+            Reflect.getMethodOrThrow(be.getClass(), "wissenWandFunction", "wissenWandFunction").invoke(be);
             syncBlockEntity(be);
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] Failed to invoke wissenWandFunction on crystal block", e);
@@ -866,15 +832,7 @@ public final class WRBatchDelegate implements IBatchDelegate {
     @Nullable
     public List<IngredientSpec> getRequiredMaterials() {
         if (recipe == null) return null;
-        // CRYSTAL_RITUAL: use raw ingredients (matching betterjei).
-        // The crystal ingredient at index 0 is included if non-empty.
-        // Other machines: filter out crystal items via extractIngredients.
-        List<Ingredient> ingredients;
-        if (machineType == MachineType.CRYSTAL_RITUAL) {
-            ingredients = getUnfilteredIngredients(recipe);
-        } else {
-            ingredients = CraftPacketUtils.extractIngredients(recipe);
-        }
+        List<Ingredient> ingredients = CraftPacketUtils.extractIngredients(recipe);
         if (ingredients == null || ingredients.isEmpty()) return null;
         List<IngredientSpec> specs = new ArrayList<>();
         for (Ingredient ing : ingredients) {
@@ -893,6 +851,18 @@ public final class WRBatchDelegate implements IBatchDelegate {
         this.filledPedestals = new ArrayList<>();
         this.waitTicks = 0;
         this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+
+        // Verify the cached BlockEntity is still valid
+        if (myPos != null && player.serverLevel().isLoaded(myPos)) {
+            BlockEntity current = player.serverLevel().getBlockEntity(myPos);
+            if (current == null || current.isRemoved()) {
+                player.sendSystemMessage(Component.translatable("rsi.error.machine_missing"));
+                if (ledger != null && ledger.isCommitted()) {
+                    ledger.refundCommitted(network, player);
+                }
+                return false;
+            }
+        }
 
         boolean ok;
         switch (machineType) {
@@ -950,7 +920,7 @@ public final class WRBatchDelegate implements IBatchDelegate {
 
         craftStarted = true;
         try {
-            getMethod(be.getClass(), "wissenWandFunction").invoke(be);
+            Reflect.getMethodOrThrow(be.getClass(), "wissenWandFunction", "wissenWandFunction").invoke(be);
             syncBlockEntity(be);
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] wissenWandFunction invoke failed, rolling back", e);
@@ -964,7 +934,7 @@ public final class WRBatchDelegate implements IBatchDelegate {
         if (!checkWissen()) return false;
         List<?> pedestals;
         try {
-            pedestals = (List<?>) getMethod(be.getClass(), "getPedestals").invoke(be);
+            pedestals = (List<?>) Reflect.getMethodOrThrow(be.getClass(), "getPedestals", "getPedestals").invoke(be);
         } catch (Exception e) {
             return false;
         }
@@ -993,7 +963,7 @@ public final class WRBatchDelegate implements IBatchDelegate {
 
         craftStarted = true;
         try {
-            getMethod(be.getClass(), "wissenWandFunction").invoke(be);
+            Reflect.getMethodOrThrow(be.getClass(), "wissenWandFunction", "wissenWandFunction").invoke(be);
             syncBlockEntity(be);
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] wissenWandFunction invoke failed, rolling back", e);
@@ -1034,7 +1004,7 @@ public final class WRBatchDelegate implements IBatchDelegate {
 
         craftStarted = true;
         try {
-            getMethod(be.getClass(), "wissenWandFunction").invoke(be);
+            Reflect.getMethodOrThrow(be.getClass(), "wissenWandFunction", "wissenWandFunction").invoke(be);
             syncBlockEntity(be);
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] wissenWandFunction invoke failed, rolling back", e);
@@ -1048,14 +1018,14 @@ public final class WRBatchDelegate implements IBatchDelegate {
         Object ritual = extractRitual(recipe);
         if (ritual == null) {
             try {
-                ritual = getMethod(be.getClass(), "getCrystalRitual").invoke(be);
+                ritual = Reflect.getMethodOrThrow(be.getClass(), "getCrystalRitual", "getCrystalRitual").invoke(be);
             } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
         }
         if (ritual == null) return false;
 
         Object area;
         try {
-            area = getMethod(ritual.getClass(), "getArea", be.getClass()).invoke(ritual, be);
+            area = Reflect.getMethodOrThrow(ritual.getClass(), "getArea", "getArea", be.getClass()).invoke(ritual, be);
         } catch (Exception e) {
             return false;
         }
@@ -1063,30 +1033,32 @@ public final class WRBatchDelegate implements IBatchDelegate {
         List<?> pedestals;
         try {
             ServerLevel level = player.serverLevel();
-            pedestals = (List<?>) getMethod(crystalRitualClass, "getPedestalsWithArea", Level.class, BlockPos.class, ritualAreaClass)
+            pedestals = (List<?>) Reflect.getMethodOrThrow(crystalRitualClass, "getPedestalsWithArea", "getPedestalsWithArea", Level.class, BlockPos.class, ritualAreaClass)
                     .invoke(null, level, myPos, area);
         } catch (Exception e) {
             return false;
         }
 
         // Re-expand compacted materials to match recipe ingredient positions.
-        // getRequiredMaterials() filters empty ingredients, so materials may
-        // be compacted. We must match them to the recipe's actual ingredient list.
-        List<Ingredient> recipeIngredients = getUnfilteredIngredients(recipe);
+        // Both getRequiredMaterials() and extractIngredients() filter out the
+        // crystal catalyst, so materials and recipeIngredients are aligned.
+        List<Ingredient> recipeIngredients = CraftPacketUtils.extractIngredients(recipe);
         if (recipeIngredients == null || pedestals.size() < recipeIngredients.size()) return false;
+
+        int pedOffset = pedestals.size() - recipeIngredients.size();
 
         this.pedestalRefs = pedestals;
         this.placedPedestalItems = new java.util.HashMap<>();
         int matIdx = 0;
         for (int slot = 0; slot < recipeIngredients.size() && matIdx < materials.size(); slot++) {
             Ingredient ing = recipeIngredients.get(slot);
-            if (ing.isEmpty()) continue; // skip empty (e.g. crystal catalyst slot)
+            if (ing.isEmpty()) continue;
 
             ItemStack stack = materials.get(matIdx);
             matIdx++;
             if (stack.isEmpty()) continue;
 
-            Object ped = pedestals.get(slot);
+            Object ped = pedestals.get(slot + pedOffset);
             ItemStack existing = getContainerItem(ped, 0);
             if (!existing.isEmpty()) {
                 ItemHandlerHelper.giveItemToPlayer(player, existing.copy());
@@ -1104,7 +1076,7 @@ public final class WRBatchDelegate implements IBatchDelegate {
 
         craftStarted = true;
         try {
-            getMethod(be.getClass(), "wissenWandFunction").invoke(be);
+            Reflect.getMethodOrThrow(be.getClass(), "wissenWandFunction", "wissenWandFunction").invoke(be);
             syncBlockEntity(be);
         } catch (Exception e) {
             clearFilledPedestals();
@@ -1388,10 +1360,7 @@ public final class WRBatchDelegate implements IBatchDelegate {
         this.player = player;
         clearFilledSlots();
         clearFilledPedestals();
-        ledger = null;
-        sharedLedger = null;
-        network = null;
-        usingSharedLedger = false;
+        resetState();
         craftStarted = false;
     }
 
@@ -1402,10 +1371,7 @@ public final class WRBatchDelegate implements IBatchDelegate {
         this.player = player;
         clearFilledSlots();
         clearFilledPedestals();
-        ledger = null;
-        sharedLedger = null;
-        network = null;
-        usingSharedLedger = false;
+        resetState();
         craftStarted = false;
     }
 
@@ -1554,10 +1520,7 @@ public final class WRBatchDelegate implements IBatchDelegate {
      */
     @Nullable
     private static IItemHandler getForgeItemHandler(Object be) {
-        if (be instanceof BlockEntity blockEntity) {
-            return blockEntity.getCapability(ForgeCapabilities.ITEM_HANDLER, null).resolve().orElse(null);
-        }
-        return null;
+        return WRContainerHelper.getForgeItemHandler(be);
     }
 
     /**
@@ -1567,242 +1530,30 @@ public final class WRBatchDelegate implements IBatchDelegate {
      */
     @Nullable
     private static net.minecraft.world.SimpleContainer getLiveSimpleContainer(Object be) {
-        Class<?> clazz = be.getClass();
-        while (clazz != null && clazz != Object.class) {
-            for (java.lang.reflect.Field field : clazz.getDeclaredFields()) {
-                if (net.minecraft.world.SimpleContainer.class.isAssignableFrom(field.getType())) {
-                    field.setAccessible(true);
-                    try {
-                        return (net.minecraft.world.SimpleContainer) field.get(be);
-                    } catch (Exception ignored) {}
-                }
-            }
-            clazz = clazz.getSuperclass();
-        }
-        return null;
+        return WRContainerHelper.getLiveSimpleContainer(be);
     }
 
-    /**
-     * Get a SimpleContainer via the protected createItemHandler() factory.
-     * WARNING: This MAY create a NEW empty container each call, not the BE's
-     * live inventory. Prefer getLiveSimpleContainer() or getForgeItemHandler().
-     */
     @Nullable
     private static net.minecraft.world.SimpleContainer getSimpleContainer(Object be) {
-        Class<?> clazz = be.getClass();
-        while (clazz != null && clazz != Object.class) {
-            try {
-                java.lang.reflect.Method m = clazz.getDeclaredMethod("createItemHandler");
-                m.setAccessible(true);
-                return (net.minecraft.world.SimpleContainer) m.invoke(be);
-            } catch (NoSuchMethodException e) {
-                clazz = clazz.getSuperclass();
-            } catch (Exception e) {
-                return null;
-            }
-        }
-        return null;
+        return WRContainerHelper.getSimpleContainer(be);
     }
 
     private static int getContainerSize(Object be) {
-        Class<?> bc = be.getClass();
-        String beName = bc.getName();
-        java.lang.reflect.Method m;
-
-        // 1. WR BlockSimpleInventory.inventorySize() (no "get" prefix)
-        m = com.huanghuang.rsintegration.util.Reflect.findMethod(bc, "inventorySize", new Class<?>[0]);
-        if (m != null) { try { return (int) m.invoke(be); } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Batch-WR] inventorySize() invoke failed for {}: {}", beName, e.toString());
-        }}
-        // 2. Alternative: getInventorySize()
-        m = com.huanghuang.rsintegration.util.Reflect.findMethod(bc, "getInventorySize", new Class<?>[0]);
-        if (m != null) { try { return (int) m.invoke(be); } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Batch-WR] getInventorySize() invoke failed for {}: {}", beName, e.toString());
-        }}
-        // 3. Vanilla: getContainerSize() (BaseContainerBlockEntity)
-        m = com.huanghuang.rsintegration.util.Reflect.findMethod(bc, "getContainerSize", new Class<?>[0]);
-        if (m != null) { try { return (int) m.invoke(be); } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Batch-WR] getContainerSize() invoke failed for {}: {}", beName, e.toString());
-        }}
-        // 4. getItemHandler() → IItemHandler.getSlots() or Container.getContainerSize()
-        m = com.huanghuang.rsintegration.util.Reflect.findMethod(bc, "getItemHandler", new Class<?>[0]);
-        if (m != null) {
-            try {
-                Object h = m.invoke(be);
-                if (h != null) {
-                    // Try IItemHandler.getSlots() first
-                    java.lang.reflect.Method gm = com.huanghuang.rsintegration.util.Reflect.findMethod(h.getClass(), "getSlots", new Class<?>[0]);
-                    if (gm != null) return (int) gm.invoke(h);
-                    // Vanilla Container.getContainerSize() (WR returns Container, not IItemHandler)
-                    gm = com.huanghuang.rsintegration.util.Reflect.findMethod(h.getClass(), "getContainerSize", new Class<?>[0]);
-                    if (gm != null) return (int) gm.invoke(h);
-                    // SRG fallback for Container
-                    gm = com.huanghuang.rsintegration.util.Reflect.findMethod(h.getClass(), "m_6643_", new Class<?>[0]);
-                    if (gm != null) return (int) gm.invoke(h);
-                }
-            } catch (Exception e) {
-                RSIntegrationMod.LOGGER.debug("[RSI-Batch-WR] getItemHandler() invoke failed for {}: {}", beName, e.toString());
-            }
-        }
-        // 5. Forge capabilities (standard API)
-        IItemHandler cap = getForgeItemHandler(be);
-        if (cap != null) return cap.getSlots();
-        // 6. Live SimpleContainer field on BE
-        net.minecraft.world.SimpleContainer live = getLiveSimpleContainer(be);
-        if (live != null) return live.getContainerSize();
-        // 7. SRG name
-        m = com.huanghuang.rsintegration.util.Reflect.findMethod(bc, "m_6643_", new Class<?>[0]);
-        if (m != null) { try { return (int) m.invoke(be); } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Batch-WR] m_6643_() invoke failed for {}: {}", beName, e.toString());
-        }}
-        // 8. createItemHandler() factory (last resort)
-        net.minecraft.world.SimpleContainer sc = getSimpleContainer(be);
-        if (sc != null) return sc.getContainerSize();
-
-        RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] getContainerSize failed for {} — superclass={}, fields: {}",
-                beName, bc.getSuperclass() != null ? bc.getSuperclass().getName() : "<none>",
-                getFieldTypes(bc));
-        return -1;
-    }
-
-    private static String getFieldTypes(Class<?> bc) {
-        StringBuilder sb = new StringBuilder();
-        Class<?> clazz = bc;
-        int count = 0;
-        while (clazz != null && clazz != Object.class && count < 3) {
-            for (java.lang.reflect.Field field : clazz.getDeclaredFields()) {
-                if (sb.length() > 0) sb.append(", ");
-                sb.append(field.getName()).append(':').append(field.getType().getSimpleName());
-            }
-            clazz = clazz.getSuperclass();
-            count++;
-        }
-        return sb.toString();
+        return WRContainerHelper.getContainerSize(be);
     }
 
     private static ItemStack getContainerItem(Object be, int slot) {
-        Class<?> bc = be.getClass();
-        // 1. Vanilla: getItem(int)
-        java.lang.reflect.Method m = com.huanghuang.rsintegration.util.Reflect.findMethod(bc, "getItem", new Class<?>[]{int.class});
-        if (m != null) try { return (ItemStack) m.invoke(be, slot); } catch (Exception ignored) {}
-        // 2. getItemHandler() — returns either IItemHandler or Container
-        m = com.huanghuang.rsintegration.util.Reflect.findMethod(bc, "getItemHandler", new Class<?>[0]);
-        if (m != null) {
-            try {
-                Object h = m.invoke(be);
-                if (h != null) {
-                    // 2a. IItemHandler.getStackInSlot(int)
-                    java.lang.reflect.Method gm = com.huanghuang.rsintegration.util.Reflect.findMethod(h.getClass(), "getStackInSlot", new Class<?>[]{int.class});
-                    if (gm != null) return (ItemStack) gm.invoke(h, slot);
-                    // 2b. Container.getItem(int) — ExposedBlockSimpleInventory path
-                    gm = com.huanghuang.rsintegration.util.Reflect.findMethod(h.getClass(), "getItem", new Class<?>[]{int.class});
-                    if (gm != null) return (ItemStack) gm.invoke(h, slot);
-                    // 2c. SRG m_8020_(int) → Container.getItem
-                    gm = com.huanghuang.rsintegration.util.Reflect.findMethod(h.getClass(), "m_8020_", new Class<?>[]{int.class});
-                    if (gm != null) return (ItemStack) gm.invoke(h, slot);
-                }
-            } catch (Exception ignored) {}
-        }
-        // 3. Forge capabilities (standard API)
-        IItemHandler cap = getForgeItemHandler(be);
-        if (cap != null) return cap.getStackInSlot(slot);
-        // 4. Live SimpleContainer field on BE
-        net.minecraft.world.SimpleContainer live = getLiveSimpleContainer(be);
-        if (live != null) return live.getItem(slot);
-        // 5. SRG name on BE
-        m = com.huanghuang.rsintegration.util.Reflect.findMethod(bc, "m_8020_", new Class<?>[]{int.class});
-        if (m != null) try { return (ItemStack) m.invoke(be, slot); } catch (Exception ignored) {}
-        // 6. createItemHandler() factory (last resort)
-        net.minecraft.world.SimpleContainer sc = getSimpleContainer(be);
-        if (sc != null) return sc.getItem(slot);
-
-        return ItemStack.EMPTY;
+        return WRContainerHelper.getContainerItem(be, slot);
     }
 
     private static void setContainerItem(Object be, int slot, ItemStack stack) {
-        Class<?> bc = be.getClass();
-        // 1. Vanilla: setItem(int, ItemStack)
-        java.lang.reflect.Method m = com.huanghuang.rsintegration.util.Reflect.findMethod(bc, "setItem", new Class<?>[]{int.class, ItemStack.class});
-        if (m != null) { try { m.invoke(be, slot, stack); return; } catch (Exception ignored) {} }
-        // 2. getItemHandler() — returns either IItemHandler or Container
-        m = com.huanghuang.rsintegration.util.Reflect.findMethod(bc, "getItemHandler", new Class<?>[0]);
-        if (m != null) {
-            try {
-                Object h = m.invoke(be);
-                if (h != null) {
-                    // 2a. IItemHandler.setStackInSlot(int, ItemStack)
-                    java.lang.reflect.Method sm = com.huanghuang.rsintegration.util.Reflect.findMethod(h.getClass(), "setStackInSlot", new Class<?>[]{int.class, ItemStack.class});
-                    if (sm != null) { sm.invoke(h, slot, stack); return; }
-                    // 2b. Container.setItem(int, ItemStack) — ExposedBlockSimpleInventory path
-                    sm = com.huanghuang.rsintegration.util.Reflect.findMethod(h.getClass(), "setItem", new Class<?>[]{int.class, ItemStack.class});
-                    if (sm != null) { sm.invoke(h, slot, stack); return; }
-                    // 2c. SRG m_6836_(int, ItemStack) → Container.setItem
-                    sm = com.huanghuang.rsintegration.util.Reflect.findMethod(h.getClass(), "m_6836_", new Class<?>[]{int.class, ItemStack.class});
-                    if (sm != null) { sm.invoke(h, slot, stack); return; }
-                }
-            } catch (Exception ignored) {}
-        }
-        // 3. Forge capabilities
-        IItemHandler cap = getForgeItemHandler(be);
-        if (cap != null) {
-            if (cap instanceof ItemStackHandler handler) {
-                handler.setStackInSlot(slot, stack);
-                return;
-            }
-            // Non-ItemStackHandler: extract old, insert new
-            ItemStack old = cap.extractItem(slot, cap.getStackInSlot(slot).getCount(), false);
-            ItemStack leftover = cap.insertItem(slot, stack, false);
-            if (!leftover.isEmpty()) {
-                // insertItem didn't accept at this slot; restore old
-                if (!old.isEmpty()) cap.insertItem(slot, old, false);
-            } else {
-                return;
-            }
-        }
-        // 4. Live SimpleContainer field on BE
-        net.minecraft.world.SimpleContainer live = getLiveSimpleContainer(be);
-        if (live != null) { live.setItem(slot, stack); return; }
-        // 5. SRG name on BE
-        m = com.huanghuang.rsintegration.util.Reflect.findMethod(bc, "m_6836_", new Class<?>[]{int.class, ItemStack.class});
-        if (m != null) { try { m.invoke(be, slot, stack); return; } catch (Exception ignored) {} }
-        // 6. createItemHandler() factory (last resort)
-        net.minecraft.world.SimpleContainer sc = getSimpleContainer(be);
-        if (sc != null) { sc.setItem(slot, stack); return; }
-        RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] Failed to set container item for {}",
-                be.getClass().getName());
-    }
-
-    // ── Reflection helper ────────────────────────────────────────
-
-    private static java.lang.reflect.Method getMethod(Class<?> clazz, String name, Class<?>... paramTypes)
-            throws NoSuchMethodException {
-        java.lang.reflect.Method m = com.huanghuang.rsintegration.util.Reflect.findMethod(
-                clazz, name, paramTypes);
-        if (m == null) throw new NoSuchMethodException(clazz.getName() + "." + name);
-        return m;
+        WRContainerHelper.setContainerItem(be, slot, stack);
     }
 
     // ── Client sync ──────────────────────────────────────────────
 
-    /**
-     * Send a block-entity update to tracking clients so the rendered item
-     * model matches the server-side inventory. Tries FluffyFur's packet
-     * helper first, then vanilla sendBlockUpdated which reliably syncs.
-     */
     private static void syncBlockEntity(Object be) {
-        if (!(be instanceof BlockEntity blockEntity)) return;
-        var level = blockEntity.getLevel();
-        if (level == null) return;
-        try {
-            Class<?> updateClass = Class.forName(
-                    "mod.maxbogomol.fluffy_fur.common.network.BlockEntityUpdate");
-            getMethod(updateClass, "packet", BlockEntity.class).invoke(null, blockEntity);
-        } catch (Exception e) {
-            // Vanilla: marks changed + sends SUpdateBlockEntityPacket to tracking clients
-            blockEntity.setChanged();
-            level.sendBlockUpdated(blockEntity.getBlockPos(),
-                    blockEntity.getBlockState(), blockEntity.getBlockState(), 3);
-        }
+        WRContainerHelper.syncBlockEntity(be);
     }
 
     // ── Crystal ritual pre-flight checks ──────────────────────────
@@ -1856,7 +1607,7 @@ public final class WRBatchDelegate implements IBatchDelegate {
                 return f.getInt(be);
             }
         } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-WR] Failed to read wissen field", e); }
-        return Integer.MAX_VALUE; // can't determine — don't block
+        return -1; // can't determine — fail safe
     }
 
     // ── Ritual extraction ────────────────────────────────────────
@@ -1935,11 +1686,11 @@ public final class WRBatchDelegate implements IBatchDelegate {
         try {
             java.lang.reflect.Method m = Reflect.findMethod(be.getClass(), "getWissen", new Class<?>[0]);
             if (m != null) return (int) m.invoke(be);
-        } catch (Exception e) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-WR] readCurrentWissen method failed: {}", e.toString()); }
         try {
             java.lang.reflect.Field f = Reflect.findField(be.getClass(), "wissen").orElse(null);
             if (f != null) { f.setAccessible(true); return f.getInt(be); }
-        } catch (Exception e) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-WR] readCurrentWissen field failed: {}", e.toString()); }
         return -1;
     }
 }

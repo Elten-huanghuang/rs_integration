@@ -1,9 +1,5 @@
 package com.huanghuang.rsintegration.mods.goety;
 
-import com.Polarice3.Goety.common.blocks.CursedCageBlock;
-import com.Polarice3.Goety.common.blocks.DarkAltarBlock;
-import com.Polarice3.Goety.common.blocks.NecroBrazierBlock;
-import com.Polarice3.Goety.common.blocks.SoulCandlestickBlock;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.network.BindingStorage;
@@ -27,6 +23,32 @@ import java.util.List;
 @OnlyIn(Dist.CLIENT)
 public final class GoetyGuiClientEventHandler {
 
+    // ── Shared class refs ────────────────────────────────────────
+    private static volatile Class<?> darkAltarBlockClass;
+    private static volatile Class<?> necroBrazierBlockClass;
+    private static volatile Class<?> cursedCageBlockClass;
+    private static volatile Class<?> soulCandlestickBlockClass;
+
+    private static void ensureClasses() {
+        if (!com.huanghuang.rsintegration.util.ModClassLoader.ensureClasses("goety",
+                "com.Polarice3.Goety.common.blocks.DarkAltarBlock",
+                "com.Polarice3.Goety.common.blocks.NecroBrazierBlock",
+                "com.Polarice3.Goety.common.blocks.CursedCageBlock",
+                "com.Polarice3.Goety.common.blocks.SoulCandlestickBlock")) return;
+        try {
+            darkAltarBlockClass = Class.forName(
+                    "com.Polarice3.Goety.common.blocks.DarkAltarBlock");
+            necroBrazierBlockClass = Class.forName(
+                    "com.Polarice3.Goety.common.blocks.NecroBrazierBlock");
+            cursedCageBlockClass = Class.forName(
+                    "com.Polarice3.Goety.common.blocks.CursedCageBlock");
+            soulCandlestickBlockClass = Class.forName(
+                    "com.Polarice3.Goety.common.blocks.SoulCandlestickBlock");
+        } catch (ClassNotFoundException e) {
+            RSIntegrationMod.LOGGER.error("[RSI-Client] Failed to load Goety block classes", e);
+        }
+    }
+
     private GoetyGuiClientEventHandler() {}
 
     @SubscribeEvent
@@ -40,17 +62,15 @@ public final class GoetyGuiClientEventHandler {
 
     @SubscribeEvent
     public static void onItemTooltip(ItemTooltipEvent event) {
+        ensureClasses();
         if (event.getItemStack().getItem() instanceof BlockItem bi) {
             Block block = bi.getBlock();
-            String blockClassName = block.getClass().getName();
-            if (block instanceof DarkAltarBlock) {
+            if (darkAltarBlockClass != null && darkAltarBlockClass.isInstance(block)) {
                 event.getToolTip().add(
                         Component.translatable("gui.rs_integration.altar.tooltip.1"));
                 event.getToolTip().add(
                         Component.translatable("gui.rs_integration.altar.tooltip.2"));
-            } else if (block instanceof NecroBrazierBlock
-                    || block instanceof CursedCageBlock
-                    || block instanceof SoulCandlestickBlock) {
+            } else if (isGoetyBindingBlock(block)) {
                 event.getToolTip().add(
                         Component.translatable("gui.rs_integration.altar.binding.rs_bind_hint"));
             }
@@ -72,6 +92,12 @@ public final class GoetyGuiClientEventHandler {
                         Component.translatable("gui.rs_integration.altar.shift_to_view"));
             }
         }
+    }
+
+    private static boolean isGoetyBindingBlock(Block block) {
+        return (necroBrazierBlockClass != null && necroBrazierBlockClass.isInstance(block))
+                || (cursedCageBlockClass != null && cursedCageBlockClass.isInstance(block))
+                || (soulCandlestickBlockClass != null && soulCandlestickBlockClass.isInstance(block));
     }
 
     @SubscribeEvent
