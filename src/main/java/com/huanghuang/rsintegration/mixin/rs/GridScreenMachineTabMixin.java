@@ -12,7 +12,6 @@ import com.huanghuang.rsintegration.sidepanel.data.MachineStatusCache;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.network.chat.Component;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -23,12 +22,16 @@ import java.util.List;
 /**
  * Injects machine shortcut tabs / Hub button into the RS GridScreen foreground layer.
  * Target: com.refinedmods.refinedstorage.screen.grid.GridScreen
+ *
+ * <p>renderForeground has the PoseStack translated by (leftPos, topPos),
+ * so draw coordinates are RELATIVE to the grid top-left.</p>
  */
 @Mixin(value = com.refinedmods.refinedstorage.screen.grid.GridScreen.class, remap = false)
 public abstract class GridScreenMachineTabMixin {
 
     private static final int HUB_BUTTON_W = 18;
     private static final int HUB_BUTTON_H = 18;
+    private static final int GRID_W = 174;  // RS grid image width
 
     @Inject(method = "renderForeground", at = @At("TAIL"), remap = false)
     private void rsi$renderMachineTabs(GuiGraphics gfx, int mouseX, int mouseY, CallbackInfo ci) {
@@ -38,21 +41,14 @@ public abstract class GridScreenMachineTabMixin {
         int leftPos = acc.getLeftPos();
         int topPos = acc.getTopPos();
         List<BindingInfo> machines = MachineTabHandler.getVisibleTabs();
-        int tabX = leftPos - MachineTabRenderer.getTotalWidth(machines.size()) - 2;
-        int tabY = topPos + 6;
-        int maxX = leftPos;
 
         if (machines.isEmpty()) {
-            // Hub mode: render a single "Hub" button instead of individual tabs.
-            // The Hub button is placed on the LEFT side, below the RS side-buttons
-            // (sort, size, search mode, etc.) so it reads as another function toggle.
+            // Hub mode: render a single "Hub" button on the LEFT side
             List<BindingInfo> allMachines = MachineTabHandler.getAllMachines();
             if (allMachines.isEmpty()) return;
             if (MachineHub.shouldUseHub(allMachines.size())) {
-                // Left-side X: same column as RS side-buttons (leftPos - WIDTH - 2)
-                int hubX = leftPos - HUB_BUTTON_W - 2;
-
-                // Y: below the last RS side-button, or topPos + 6 if none
+                // Relative draw coords (pose is already translated by (leftPos, topPos))
+                int hubRelX = -HUB_BUTTON_W - 2;
                 int sideButtonBottom = 0;
                 try {
                     var base = (com.refinedmods.refinedstorage.screen.BaseScreen<?>) (Object) this;
@@ -62,10 +58,13 @@ public abstract class GridScreenMachineTabMixin {
                         sideButtonBottom = (last.getY() - topPos) + last.getHeight();
                     }
                 } catch (Exception ignored) {}
-                int hubY = topPos + sideButtonBottom + 4; // 4 px gap
+                int hubRelY = sideButtonBottom + 4;
 
-                boolean hubHovered = mouseX >= hubX && mouseX < hubX + HUB_BUTTON_W
-                        && mouseY >= hubY && mouseY < hubY + HUB_BUTTON_H;
+                // Hit-test in screen space
+                int hubScrX = leftPos + hubRelX;
+                int hubScrY = topPos + hubRelY;
+                boolean hubHovered = mouseX >= hubScrX && mouseX < hubScrX + HUB_BUTTON_W
+                        && mouseY >= hubScrY && mouseY < hubScrY + HUB_BUTTON_H;
                 boolean hubActive = MachineHub.isVisible();
                 int hubColor, outlineColor;
                 if (hubActive) {
@@ -75,12 +74,12 @@ public abstract class GridScreenMachineTabMixin {
                     hubColor = hubHovered ? 0xFF555588 : 0xFF333355;
                     outlineColor = 0xFF8888CC;
                 }
-                gfx.fill(hubX, hubY, hubX + HUB_BUTTON_W, hubY + HUB_BUTTON_H, hubColor);
-                gfx.renderOutline(hubX, hubY, HUB_BUTTON_W, HUB_BUTTON_H, outlineColor);
+                gfx.fill(hubRelX, hubRelY, hubRelX + HUB_BUTTON_W, hubRelY + HUB_BUTTON_H, hubColor);
+                gfx.renderOutline(hubRelX, hubRelY, HUB_BUTTON_W, HUB_BUTTON_H, outlineColor);
 
-                // Grid icon (3×2 dots) centered in the 18×18 button
-                int iconX = hubX + 4;
-                int iconY = hubY + 4;
+                // Grid icon (2x2 dots) centered in the 18x18 button
+                int iconX = hubRelX + 5;
+                int iconY = hubRelY + 5;
                 int dotColor = hubActive ? 0xFFAADDEE : 0xFFAAAACC;
                 for (int r = 0; r < 2; r++) {
                     for (int c = 0; c < 2; c++) {
@@ -88,39 +87,45 @@ public abstract class GridScreenMachineTabMixin {
                     }
                 }
 
-                // Machine count label at bottom-right of the button
+                // Machine count label
                 Font font = Minecraft.getInstance().font;
                 String label = allMachines.size() > 99 ? "…" : String.valueOf(allMachines.size());
                 int labelW = font.width(label);
-                gfx.fill(hubX + HUB_BUTTON_W - labelW - 3, hubY + HUB_BUTTON_H - 8,
-                         hubX + HUB_BUTTON_W, hubY + HUB_BUTTON_H, 0xCC335588);
-                gfx.drawString(font, label, hubX + HUB_BUTTON_W - labelW - 2,
-                               hubY + HUB_BUTTON_H - 8, 0xFFFFFF);
+                gfx.fill(hubRelX + HUB_BUTTON_W - labelW - 3, hubRelY + HUB_BUTTON_H - 8,
+                         hubRelX + HUB_BUTTON_W, hubRelY + HUB_BUTTON_H, 0xCC335588);
+                gfx.drawString(font, label, hubRelX + HUB_BUTTON_W - labelW - 2,
+                               hubRelY + HUB_BUTTON_H - 8, 0xFFFFFF);
                 MachineTabHandler.setHoveredTabIndex(hubHovered ? 0 : -1);
             }
         } else {
-            int hovered = MachineTabRenderer.getHoveredTab(mouseX, mouseY, tabX, tabY, machines, maxX);
+            // Individual tabs on the LEFT side, rendered rightward
+            int tabRelX = -MachineTabRenderer.getTotalWidth(machines.size()) - 2;
+            int tabRelY = 6;
+            int maxRelX = GRID_W;
+
+            // Hit-test in screen space
+            int tabScrX = leftPos + tabRelX;
+            int tabScrY = topPos + tabRelY;
+            int maxScrX = leftPos + maxRelX;
+            int hovered = MachineTabRenderer.getHoveredTab(mouseX, mouseY, tabScrX, tabScrY, machines, maxScrX);
             MachineTabHandler.setHoveredTabIndex(hovered);
 
             MachineStatusCache statusCache = MachineStatusCache.getInstance();
             for (int i = 0; i < machines.size(); i++) {
-                int x = tabX + i * (MachineTabRenderer.getTabWidth() + 2);
-                if (x + MachineTabRenderer.getTabWidth() > maxX) break;
+                int x = tabRelX + i * (MachineTabRenderer.getTabWidth() + 2);
+                if (x + MachineTabRenderer.getTabWidth() > maxRelX) break;
                 BindingInfo info = machines.get(i);
                 MachineInteractType type = MachineInteractType.fromBlockKey(info.blockKey());
                 MachineStatus status = statusCache.get(info);
-                MachineTabRenderer.drawTab(gfx, x, tabY, info, type, status, i == hovered);
+                MachineTabRenderer.drawTab(gfx, x, tabRelY, info, type, status, i == hovered);
             }
         }
-
-        // Hub overlay is rendered in rsi$renderHub — a separate @Inject on render()
-        // at TAIL, because renderForeground may have scissoring that clips
-        // elements drawn outside the container bounds.
     }
 
-    // ── Hub overlay: injected at TAIL of render() to avoid scissoring ──────
-
-    @Inject(method = "render", at = @At("TAIL"), remap = false)
+    // Hub overlay: injected at TAIL of the OBFUSCATED render() method.
+    // GridScreen inherits render from vanilla AbstractContainerScreen, which is
+    // named "m_88315_" in bytecode (remap=false must match the bytecode name).
+    @Inject(method = "m_88315_", at = @At("TAIL"), remap = false)
     private void rsi$renderHub(GuiGraphics gfx, int mouseX, int mouseY, float partialTick,
                                 CallbackInfo ci) {
         if (!RSIntegrationConfig.ENABLE_MACHINE_GUI_TABS.get()) return;
