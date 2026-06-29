@@ -315,6 +315,7 @@
   "rsi.hub.title": "Machine Hub (%s)",
   "rsi.hub.machine_count": "%s bound machines",
   "rsi.hub.back_to_grid": "Back to Grid",
+  "rsi.hub.config_return_rs": "Return to RS Terminal",
   "rsi.hub.filter_hint": "Filter machines...",
   "rsi.hub.no_machines": "No machines match filter.",
   "rsi.hub.key_toggle": "%s: Toggle Hub",

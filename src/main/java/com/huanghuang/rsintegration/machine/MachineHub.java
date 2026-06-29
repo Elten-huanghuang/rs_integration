@@ -32,6 +32,8 @@ public final class MachineHub {
     private static final List<BindingInfo> filteredMachines = new ArrayList<>();
     private static int hoveredIndex = -1;
     private static boolean closeButtonHovered;
+    private static boolean configButtonHovered;
+    private static int configBtnX, configBtnY, configBtnW, configBtnH;
     private static String filterText = "";
     private static int scrollOffset;
 
@@ -55,6 +57,15 @@ public final class MachineHub {
     public static void setHoveredIndex(int idx) { hoveredIndex = idx; }
     public static boolean isCloseButtonHovered() { return closeButtonHovered; }
     public static void setCloseButtonHovered(boolean v) { closeButtonHovered = v; }
+    public static boolean isConfigButtonHovered() { return configButtonHovered; }
+    public static void setConfigButtonHovered(boolean v) { configButtonHovered = v; }
+    public static void setConfigButtonBounds(int x, int y, int w, int h) {
+        configBtnX = x; configBtnY = y; configBtnW = w; configBtnH = h;
+    }
+    public static boolean isWithinConfigButton(int mouseX, int mouseY) {
+        return mouseX >= configBtnX && mouseX < configBtnX + configBtnW
+                && mouseY >= configBtnY && mouseY < configBtnY + configBtnH;
+    }
     public static List<BindingInfo> getMachines() { return filteredMachines; }
     public static List<BindingInfo> getAllMachines() { return machines; }
     public static String getFilterText() { return filterText; }

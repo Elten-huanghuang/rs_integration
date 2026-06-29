@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.machine;
 
+import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.sidepanel.data.BindingInfo;
 import com.huanghuang.rsintegration.sidepanel.data.MachineStatusCache;
 import net.minecraft.client.Minecraft;
@@ -53,7 +54,11 @@ public final class MachineHubRenderer {
         int maxVisibleRows = 12;
         int visibleRows = Math.min(rows, maxVisibleRows);
         int visibleGridH = visibleRows * SLOT_SIZE;
-        int totalW = slotGridW + PADDING * 2;
+
+        // Ensure panel is wide enough for footer text + config toggle
+        var font = Minecraft.getInstance().font;
+        int contentMinW = Math.max(slotGridW, 130);
+        int totalW = contentMinW + PADDING * 2;
         int totalH = visibleGridH + TITLE_H + FILTER_H + FOOTER_H + PADDING * 3 + 2;
 
         int sw = Minecraft.getInstance().getWindow().getGuiScaledWidth();
@@ -82,7 +87,6 @@ public final class MachineHubRenderer {
         var pose = g.pose();
         pose.pushPose();
         pose.translate(0, 0, 400f);
-        var font = Minecraft.getInstance().font;
 
         // ── Outer shadow ──────────────────────────────────────────────
         g.fill(x + 2, y + 2, x + totalW + 2, y + totalH + 2, 0x40000000);
@@ -96,11 +100,14 @@ public final class MachineHubRenderer {
         g.fill(x + 1, y + 1, x + totalW - 1, headerBottom, HEADER_BG);
         g.fill(x + 1, headerBottom, x + totalW - 1, headerBottom + 1, SEPARATOR);
 
-        // Title text
+        // Title text (truncated to fit between close button and left edge)
         String title = Component.translatable("rsi.hub.title", allMachines.size()).getString();
+        int closeAreaW = 24;
+        int titleMaxW = totalW - PADDING * 2 - closeAreaW - 4;
+        String truncatedTitle = font.plainSubstrByWidth(title, titleMaxW);
         int titleX = x + PADDING + 2;
         int titleY = y + PADDING + 1;
-        g.drawString(font, title, titleX, titleY, TEXT_PRIMARY);
+        g.drawString(font, truncatedTitle, titleX, titleY, TEXT_PRIMARY);
 
         // Close button (drawn with lines, not text)
         int closeR = 5; // radius
@@ -122,17 +129,20 @@ public final class MachineHubRenderer {
         g.fill(filterX + 1, filterY + 1, filterX + filterW - 1, filterY + FILTER_H - 1, FILTER_BG);
 
         String filterText = MachineHub.getFilterText();
+        // Count badge (right side of filter) — reserve space
+        String countStr = machines.size() + "/" + allMachines.size();
+        int countW = font.width(countStr);
+        int filterTextMaxW = filterW - 8 - countW - 8;
         if (filterText.isEmpty()) {
             String hint = Component.translatable("rsi.hub.filter_hint").getString();
-            g.drawString(font, hint, filterX + 4, filterY + 3, TEXT_DIM);
+            g.drawString(font, font.plainSubstrByWidth(hint, filterTextMaxW),
+                    filterX + 4, filterY + 3, TEXT_DIM);
         } else {
-            String display = filterText + (System.currentTimeMillis() % 1000 < 500 ? "|" : " ");
+            String display = font.plainSubstrByWidth(filterText, filterTextMaxW)
+                    + (System.currentTimeMillis() % 1000 < 500 ? "|" : " ");
             g.drawString(font, display, filterX + 4, filterY + 3, TEXT_PRIMARY);
         }
 
-        // Count badge (right side of filter)
-        String countStr = machines.size() + "/" + allMachines.size();
-        int countW = font.width(countStr);
         g.drawString(font, countStr, filterX + filterW - countW - 5, filterY + 3, TEXT_DIM);
 
         // ── Machine grid ─────────────────────────────────────────────
@@ -266,9 +276,22 @@ public final class MachineHubRenderer {
         int footerY = gridY_ + visibleGridH + 2;
         g.fill(x + PADDING, footerY, x + totalW - PADDING, footerY + 1, SEPARATOR);
         int footerTextY = footerY + 3;
-        String footer = Component.translatable("rsi.hub.back_to_grid").getString()
-                + "  |  " + Component.translatable("rsi.hub.machine_count", allMachines.size()).getString();
-        g.drawString(font, footer, x + PADDING + 2, footerTextY, TEXT_DIM);
+
+        // Config toggle button (left side)
+        boolean returnToRs = RSIntegrationConfig.RETURN_TO_RS_AFTER_MACHINE_GUI.get();
+        String toggleLabel = (returnToRs ? "§a✓ " : "§8✗ ")
+                + Component.translatable("rsi.hub.config_return_rs").getString();
+        int toggleMaxW = totalW - PADDING * 2 - 4;
+        String truncatedToggle = font.plainSubstrByWidth(toggleLabel, toggleMaxW);
+        int toggleW = font.width(truncatedToggle);
+        int toggleX = x + PADDING + 2;
+        int toggleY = footerTextY;
+        boolean toggleHovered = mouseX >= toggleX && mouseX < toggleX + toggleW
+                && mouseY >= toggleY - 1 && mouseY < toggleY + 9;
+        int toggleColor = toggleHovered ? TEXT_PRIMARY : (returnToRs ? 0xFF88CC88 : TEXT_DIM);
+        g.drawString(font, truncatedToggle, toggleX, toggleY, toggleColor);
+        MachineHub.setConfigButtonHovered(toggleHovered);
+        MachineHub.setConfigButtonBounds(toggleX, toggleY - 1, toggleW, 10);
 
         pose.popPose();
 

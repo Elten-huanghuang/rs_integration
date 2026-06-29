@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.machine;
 
+import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.machine.MachineSlotType;
 import com.huanghuang.rsintegration.sidepanel.data.BindingInfo;
 import com.huanghuang.rsintegration.sidepanel.data.MachineStatusCache;
@@ -43,6 +44,13 @@ public final class MachineHubInputHandler {
         // Close button takes priority
         if (MachineHub.isCloseButtonHovered() && button == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
             MachineHub.hide();
+            return true;
+        }
+
+        // Config toggle button
+        if (MachineHub.isConfigButtonHovered() && button == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
+            boolean current = RSIntegrationConfig.RETURN_TO_RS_AFTER_MACHINE_GUI.get();
+            RSIntegrationConfig.RETURN_TO_RS_AFTER_MACHINE_GUI.set(!current);
             return true;
         }
 

@@ -316,6 +316,7 @@
   "rsi.hub.title": "机器集成中心 (%s)",
   "rsi.hub.machine_count": "已绑定 %s 台机器",
   "rsi.hub.back_to_grid": "返回网格",
+  "rsi.hub.config_return_rs": "返回RS终端",
   "rsi.hub.filter_hint": "过滤机器...",
   "rsi.hub.no_machines": "没有匹配的机器。",
   "rsi.hub.key_toggle": "%s: 开关面板",
