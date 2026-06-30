@@ -23,7 +23,38 @@ public final class AetherworksRecipeHandler implements ModRecipeHandler {
 
     @Override
     public ItemStack getResultItem(Recipe<?> recipe, RegistryAccess access) {
-        return ItemStack.EMPTY; // let reflection fallback in ModRecipeHandlers probe
+        // Try 1-arg getResultItem(RegistryAccess) first — Recipe's default
+        // delegates to the deprecated 0-arg getResultItem(), which AetheriumAnvilRecipe
+        // overrides to return the real output.
+        for (String name : new String[]{"getResultItem", "getResult", "getOutput", "getOutputCopy", "getAssembledItem"}) {
+            boolean isResultItem = "getResultItem".equals(name);
+            // 1-param
+            for (java.lang.reflect.Method m : recipe.getClass().getMethods()) {
+                if (!m.getName().equals(name)) continue;
+                if (!ItemStack.class.isAssignableFrom(m.getReturnType())) continue;
+                if (m.getParameterCount() != 1) continue;
+                try {
+                    Object r = m.invoke(recipe, access);
+                    if (r instanceof ItemStack s && !s.isEmpty()) return s;
+                } catch (Exception ignored) {}
+            }
+            // Skip no-arg getResultItem() — safety guard like ModRecipeHandlers.
+            // AetheriumAnvilRecipe doesn't abuse the 0-arg overload (unlike WR),
+            // but the 1-arg got here via Recipe's default delegation, so if
+            // that returned EMPTY the 0-arg would too.
+            if (isResultItem) continue;
+            // 0-param fallback for other method names
+            for (java.lang.reflect.Method m : recipe.getClass().getMethods()) {
+                if (!m.getName().equals(name)) continue;
+                if (!ItemStack.class.isAssignableFrom(m.getReturnType())) continue;
+                if (m.getParameterCount() != 0) continue;
+                try {
+                    Object r = m.invoke(recipe);
+                    if (r instanceof ItemStack s && !s.isEmpty()) return s;
+                } catch (Exception ignored) {}
+            }
+        }
+        return ItemStack.EMPTY;
     }
 
     @Nullable

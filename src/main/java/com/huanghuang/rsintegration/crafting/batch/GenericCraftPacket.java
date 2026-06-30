@@ -764,7 +764,10 @@ public final class GenericCraftPacket {
                             : net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(targetOutput.getItem()),
                     targetOutput.getCount(), targetOutput.isEmpty(),
                     recipeModType != null ? recipeModType.id() : "null");
-            if (targetOutput.isEmpty() && recipeModType != null && !"embers_alchemy".equals(recipeModType.id())) {
+            if (targetOutput.isEmpty() && recipeModType != null
+                    && !"embers_alchemy".equals(recipeModType.id())
+                    && !"aetherworks_anvil".equals(recipeModType.id())
+                    && !"touhou_little_maid".equals(recipeModType.id())) {
                 sendPlanError(player, Component.translatable("rsi.generic.error.unsupported_machine", recipe.getClass().getSimpleName()).getString());
                 return;
             }
