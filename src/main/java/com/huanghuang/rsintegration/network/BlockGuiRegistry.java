@@ -1,9 +1,10 @@
 package com.huanghuang.rsintegration.network;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
-import com.huanghuang.rsintegration.machine.ContainerDistanceCheck;
 import com.huanghuang.rsintegration.machine.StandardMenuProviderOpener;
+import com.huanghuang.rsintegration.network.RemoteGuiAuth;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.MenuProvider;
@@ -34,16 +35,22 @@ public final class BlockGuiRegistry {
         return OPENERS.containsKey(type);
     }
 
-    /** Open the GUI for a bound machine, with full safety checks via ContainerDistanceCheck.
+    /** Open the GUI for a bound machine.
      * @return true if the GUI was successfully opened
      */
     public static boolean openGui(ServerPlayer player, ResourceKey<Level> dim, BlockPos pos) {
-        BlockEntity be = ContainerDistanceCheck.validateAndAuthorize(player, dim, pos);
+        var server = player.getServer();
+        if (server == null) return false;
+        var level = server.getLevel(dim);
+        if (level == null) return false;
+        // Authorize the remote container access (no distance limit)
+        RemoteGuiAuth.authorize(player, dim, pos,
+                BuiltInRegistries.BLOCK.getKey(level.getBlockState(pos).getBlock()).toString());
+        if (!level.hasChunkAt(pos)) return false;
+        BlockEntity be = level.getBlockEntity(pos);
         if (be != null) {
             return openWithBlockEntity(player, be, dim, pos);
         }
-        // Some blocks have no BlockEntity (e.g., Smithing Table).
-        // Try to open via the block state's MenuProvider.
         return openWithoutBlockEntity(player, dim, pos);
     }
 

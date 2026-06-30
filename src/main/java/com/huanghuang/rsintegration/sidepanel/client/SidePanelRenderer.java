@@ -20,6 +20,9 @@ import java.util.*;
  */
 public final class SidePanelRenderer {
 
+    private static final Set<net.minecraft.world.item.Item> RENDER_ERRORED_ITEMS =
+            new java.util.HashSet<>();
+
     private SidePanelRenderer() {}
 
     // ── Main panel rendering ─────────────────────────────────────
@@ -172,8 +175,10 @@ public final class SidePanelRenderer {
                         renderSlotQuantity(g, font, ix, iy, label, labelColor);
                     }
                 } catch (Exception t) {
-                    RSIntegrationMod.LOGGER.warn("[RSI-SidePanel] Failed render stack {}: {}",
-                            ForgeRegistries.ITEMS.getKey(stack.getItem()), t.toString());
+                    if (RENDER_ERRORED_ITEMS.add(stack.getItem())) {
+                        RSIntegrationMod.LOGGER.warn("[RSI-SidePanel] Failed render stack {} (silenced for this item): {}",
+                                ForgeRegistries.ITEMS.getKey(stack.getItem()), t.toString());
+                    }
                 }
 
                 boolean dragHighlight = gridDragging
@@ -209,51 +214,8 @@ public final class SidePanelRenderer {
         int totalRows = (int) Math.ceil(displayList.size() / (double) RSSidePanelClient.COLUMNS);
         renderScrollbar(g, panelX, panelY, visibleRows, scrollRow, totalRows);
 
-        // ── 9. Tooltips ──────────────────────────────────────────
-        if (hoveredSlotIndex >= 0 && hoveredSlotIndex < displayList.size()) {
-            ItemStack hs = displayList.get(hoveredSlotIndex).getStack();
-            if (!hs.isEmpty()) {
-                renderItemTooltip(g, font, hs, mouseX, mouseY);
-
-                // Lock icon tooltip
-                if (RSSidePanelClient.isItemLocked(hs)) {
-                    int col = hoveredSlotIndex % RSSidePanelClient.COLUMNS;
-                    int row = hoveredSlotIndex / RSSidePanelClient.COLUMNS - scrollRow;
-                    if (row >= 0 && row < visibleRows) {
-                        int lix = panelX + RSSidePanelClient.GRID_ITEM_X + col * RSSidePanelClient.SLOT_SIZE + 1 + 1;
-                        int liy = panelY + RSSidePanelClient.HEADER_H + row * RSSidePanelClient.SLOT_SIZE + 1 + 1;
-                        if (mouseX >= lix && mouseX < lix + 7 && mouseY >= liy && mouseY < liy + 7) {
-                            g.renderTooltip(font,
-                                    Component.translatable("rsi.side_panel.locked_item"),
-                                    mouseX, mouseY);
-                        }
-                    }
-                }
-
-                // GUI icon tooltip — show when hovering the 8×8 icon
-                String hsKey = RSSidePanelClient.keyOf(hs);
-                if (!hsKey.isEmpty()
-                        && com.huanghuang.rsintegration.sidepanel.data.BindingCache.getInstance().hasGui(hsKey)) {
-                    int col = hoveredSlotIndex % RSSidePanelClient.COLUMNS;
-                    int row = hoveredSlotIndex / RSSidePanelClient.COLUMNS - scrollRow;
-                    if (row >= 0 && row < visibleRows) {
-                        int gix = panelX + RSSidePanelClient.GRID_ITEM_X + col * RSSidePanelClient.SLOT_SIZE + 1 + 10;
-                        int giy = panelY + RSSidePanelClient.HEADER_H + row * RSSidePanelClient.SLOT_SIZE + 1 + 10;
-                        if (mouseX >= gix && mouseX < gix + 8
-                                && mouseY >= giy && mouseY < giy + 8) {
-                            g.renderTooltip(font,
-                                    Component.translatable("rsi.side_panel.open_machine"),
-                                    mouseX, mouseY);
-                        }
-                    }
-                }
-            }
-        }
-        if (hoveredSideButton >= 0)
-            renderSideButtonTooltip(g, font, hoveredSideButton,
-                    viewType, sortAsc, sortMode, searchMode, gridSize,
-                    mouseX, mouseY);
-
+        // ── 9. Result (tooltips are rendered by the caller at
+        //         a higher z-level to avoid pose nesting issues) ──
         return new PanelRenderResult(hoveredSideButton, hoveredSlotIndex);
     }
 
@@ -269,7 +231,8 @@ public final class SidePanelRenderer {
         String title;
         int titleColor;
         if (networkAvailable) {
-            title = !networkName.isEmpty() ? networkName : "Refined Storage";
+            String base = !networkName.isEmpty() ? networkName : "Refined Storage";
+            title = base + " (" + totalSlotCount + ")";
             titleColor = 0xFF7BAAF7;
         } else {
             title = Component.translatable("rsi.side_panel.no_network").getString();
@@ -295,7 +258,8 @@ public final class SidePanelRenderer {
         String title;
         int titleColor;
         if (networkAvailable) {
-            title = !networkName.isEmpty() ? networkName : "Refined Storage";
+            String base = !networkName.isEmpty() ? networkName : "Refined Storage";
+            title = base + " (" + totalSlotCount + ")";
             titleColor = 0xFF7BAAF7;
         } else {
             title = Component.translatable("rsi.side_panel.no_network").getString();

@@ -93,13 +93,15 @@ final class SidePanelMouseHandler {
             return;
         }
 
-        // Side buttons
-        if (btn == GLFW.GLFW_MOUSE_BUTTON_LEFT && RSSidePanelClient.sideButtonContains(mx, my)) {
-            int relY = (int) my - (RSSidePanelClient.panelY + RSSidePanelClient.HEADER_H + 1);
-            int i = relY / SidePanelInputHandler.SIDE_BTN_PITCH;
-            if (i >= 0 && i < 5) RSSidePanelClient.handleSideButtonClick(i);
-            SearchController.onSearchBlur();
-            return;
+        // Side buttons — use per-button bounds, not division
+        if (btn == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
+            int i = SidePanelInputHandler.sideButtonIndex(mx, my,
+                    RSSidePanelClient.panelX, RSSidePanelClient.panelY);
+            if (i >= 0) {
+                RSSidePanelClient.handleSideButtonClick(i);
+                SearchController.onSearchBlur();
+                return;
+            }
         }
 
         SearchController.onSearchBlur();

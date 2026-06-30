@@ -87,16 +87,8 @@ final class SidePanelTickManager {
             timeoutStaleExtractions();
         }
 
-        // Remove zeroed non-craftable items without pending extractions
-        boolean removedAny = false;
-        for (int i = RSSidePanelClient.panels.size() - 1; i >= 0; i--) {
-            PanelStack ps = RSSidePanelClient.panels.get(i);
-            if (ps.zeroed && !ps.craftable && !RSSidePanelClient.pendingExtractions.containsKey(ps.getId())) {
-                RSSidePanelClient.removePanel(ps.getId());
-                removedAny = true;
-            }
-        }
-        if (removedAny) RSSidePanelClient.displayDirty = true;
+        // Zeroed items are removed immediately in SyncHandler.onDeltaReceived()
+        // (matching RS GridViewImpl.postChange). No delayed cleanup needed.
     }
 
     private static void timeoutStaleExtractions() {

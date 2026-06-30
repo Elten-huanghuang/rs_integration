@@ -214,8 +214,7 @@ public final class RSSidePanelNetworkHandler {
 
     @OnlyIn(Dist.CLIENT)
     public static void sendRequestSync() {
-        CHANNEL.sendToServer(new RSSidePanelRequestPacket(true, false,
-                (byte) RSSidePanelClient.sortMode, RSSidePanelClient.sortAsc));
+        CHANNEL.sendToServer(new RSSidePanelRequestPacket(true, false));
     }
 
     public static void sendCloseRequest() {

@@ -177,13 +177,21 @@ final class ContainerTransferLogic {
     private static IItemHandler findBackpackInCurios(ServerPlayer player) {
         try {
             Class<?> curiosApiClass = Class.forName("top.theillusivec4.curios.api.CuriosApi");
-            Object curiosInv = curiosApiClass.getMethod("getCuriosInventory", net.minecraft.world.entity.player.Player.class)
+            Object result = curiosApiClass.getMethod("getCuriosInventory", net.minecraft.world.entity.player.Player.class)
                     .invoke(null, player);
-            if (curiosInv == null) return null;
-            // Optional<ICuriosItemHandler>
-            Object opt = curiosInv.getClass().getMethod("resolve").invoke(curiosInv);
-            if (opt == null) return null;
-            Object handler = ((java.util.Optional<?>) opt).orElse(null);
+            if (result == null) return null;
+
+            // Curios 5.x returns java.util.Optional; older versions return LazyOptional
+            Object handler;
+            if (result instanceof java.util.Optional<?> opt) {
+                handler = opt.orElse(null);
+            } else {
+                try {
+                    handler = result.getClass().getMethod("resolve").invoke(result);
+                } catch (NoSuchMethodException e) {
+                    return null;
+                }
+            }
             if (handler == null) return null;
             // handler.getCurios() -> Map<String, ICurioStacksHandler>
             Object curios = handler.getClass().getMethod("getCurios").invoke(handler);

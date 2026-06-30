@@ -258,7 +258,9 @@ public final class MachineHubRenderer {
                     tip.add(Component.translatable("rsi.hub.controls.gui")
                             .withStyle(net.minecraft.ChatFormatting.GRAY));
                 }
+                MachineHub.isRenderingOurTooltip = true;
                 g.renderTooltip(font, tip, java.util.Optional.empty(), mouseX, mouseY);
+                MachineHub.isRenderingOurTooltip = false;
             }
         }
 
@@ -311,9 +313,11 @@ public final class MachineHubRenderer {
 
         // Tooltip on hover
         if (toggleHovered) {
+            MachineHub.isRenderingOurTooltip = true;
             g.renderTooltip(font,
                     List.of(Component.translatable("rsi.hub.config_return_rs_tooltip")),
                     java.util.Optional.empty(), mouseX, mouseY);
+            MachineHub.isRenderingOurTooltip = false;
         }
 
         MachineHub.setConfigButtonHovered(toggleHovered);

@@ -21,6 +21,7 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 
 import javax.annotation.Nullable;
 import java.lang.reflect.Method;
+import java.util.UUID;
 
 public final class RSIntegration {
 
@@ -29,40 +30,62 @@ public final class RSIntegration {
     @Nullable
     public static INetwork resolveNetworkFromPlayer(ServerPlayer player) {
         INetwork net = getNetworkFromContainer(player.containerMenu);
-        if (net != null) return net;
+        if (net != null) { logResolved("container", net); return net; }
 
         net = resolveFromPlayerInventory(player);
-        if (net != null) return net;
+        if (net != null) { logResolved("inventory", net); return net; }
 
         net = resolveFromContainerTerminal(player);
-        if (net != null) return net;
+        if (net != null) { logResolved("terminal", net); return net; }
 
         net = com.huanghuang.rsintegration.network.AltarBindingRegistry.resolveNetworkFromAnyBinding(player);
-        if (net != null) return net;
+        if (net != null) { logResolved("binding", net); return net; }
 
         net = resolveFromNearbyNode(player);
-        if (net != null) return net;
+        if (net != null) {
+            RSIntegrationMod.LOGGER.warn("[RSI] Resolved network via nearby-node fallback (last resort) — " +
+                    "player may be connected to a different network than intended");
+            return net;
+        }
 
         RSIntegrationMod.LOGGER.debug("[RSI] resolveNetworkFromPlayer: all paths failed");
         return null;
+    }
+
+    private static void logResolved(String source, INetwork net) {
+        if (!RSIntegrationMod.LOGGER.isDebugEnabled()) return;
+        try {
+            var cache = net.getItemStorageCache();
+            int count = cache != null && cache.getList() != null
+                    ? cache.getList().getStacks().size() : -1;
+            RSIntegrationMod.LOGGER.debug("[RSI] Resolved network via {} ({} items in cache)", source, count);
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI] Resolved network via {} (cache probe failed: {})", source, e.toString());
+        }
     }
 
     @Nullable
     private static INetwork getNetworkFromContainer(AbstractContainerMenu container) {
         if (container == null) return null;
         try {
+            // Probe any RS grid container (GridContainerMenu, CraftingGridContainerMenu,
+            // WirelessGridContainerMenu, etc.) by trying getGrid() reflectively across
+            // the class hierarchy, rather than matching a single hardcoded class name.
             Class<?> clazz = container.getClass();
             while (clazz != null && clazz != Object.class) {
-                if (clazz.getName().equals("com.refinedmods.refinedstorage.container.GridContainerMenu")) {
-                    Method getGrid = clazz.getMethod("getGrid");
-                    Object grid = getGrid.invoke(container);
-                    if (grid instanceof INetworkAwareGrid awareGrid) {
-                        return awareGrid.getNetwork();
-                    }
-                    if (grid instanceof INetworkNode node) {
-                        return node.getNetwork();
-                    }
-                    break;
+                if (clazz.getName().startsWith("com.refinedmods.refinedstorage.")) {
+                    try {
+                        Method getGrid = clazz.getMethod("getGrid");
+                        Object grid = getGrid.invoke(container);
+                        if (grid instanceof INetworkAwareGrid awareGrid) {
+                            INetwork net = awareGrid.getNetwork();
+                            if (net != null) return net;
+                        }
+                        if (grid instanceof INetworkNode node) {
+                            INetwork net = node.getNetwork();
+                            if (net != null) return net;
+                        }
+                    } catch (NoSuchMethodException e) { /* try superclass */ }
                 }
                 clazz = clazz.getSuperclass();
             }
@@ -304,11 +327,25 @@ public final class RSIntegration {
         return null;
     }
 
+    // Cooldown cache for nearby-node scans — prevents repeated 4096-block sweeps
+    private static final java.util.Map<UUID, Long> lastNearbyScan = new java.util.HashMap<>();
+    private static final long NEARBY_SCAN_COOLDOWN_MS = 10_000;
+    private static final int NEARBY_SCAN_RANGE = 8;
+
     @Nullable
     private static INetwork resolveFromNearbyNode(ServerPlayer player) {
+        UUID pid = player.getUUID();
+        long now = System.currentTimeMillis();
+        Long last = lastNearbyScan.get(pid);
+        if (last != null && now - last < NEARBY_SCAN_COOLDOWN_MS) return null;
+
+        lastNearbyScan.put(pid, now);
+        // Prune stale entries
+        lastNearbyScan.values().removeIf(t -> now - t > NEARBY_SCAN_COOLDOWN_MS * 6);
+
         ServerLevel level = (ServerLevel) player.level();
         BlockPos playerPos = player.blockPosition();
-        int range = 32;
+        int range = NEARBY_SCAN_RANGE;
         for (BlockPos pos : BlockPos.betweenClosed(
                 playerPos.offset(-range, -range / 2, -range),
                 playerPos.offset(range, range / 2, range))) {
@@ -381,13 +418,15 @@ public final class RSIntegration {
 
             // Partial extraction: refund what we got back to the network.
             if (!result.isEmpty()) {
-                RSIntegrationMod.LOGGER.error("[RSI] extractFromNetwork: partial extraction — "
-                        + "requested {} but got {}, refunding", count, result.getCount());
                 ItemStack leftover = network.insertItem(result, result.getCount(), Action.PERFORM);
                 if (!leftover.isEmpty()) {
-                    RSIntegrationMod.LOGGER.error("[RSI] extractFromNetwork: refund insert also failed, "
-                            + "{} items may be lost", leftover.getCount());
+                    RSIntegrationMod.LOGGER.warn("[RSI] extractFromNetwork: partial extraction refund incomplete — "
+                            + "requested {} but returning {} to prevent item loss",
+                            count, leftover.getCount());
+                    return leftover;
                 }
+                RSIntegrationMod.LOGGER.warn("[RSI] extractFromNetwork: partial extraction refunded — "
+                        + "requested {} but only got {} before refund", count, result.getCount());
             }
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.error("[RSI] extractFromNetwork error — items may have been lost", e);

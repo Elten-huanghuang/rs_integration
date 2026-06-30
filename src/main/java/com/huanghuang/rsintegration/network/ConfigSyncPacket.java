@@ -13,22 +13,19 @@ import java.util.function.Supplier;
 public class ConfigSyncPacket {
     public final boolean enableMachineGuiTabs;
     public final int machineTabThreshold;
-    public final int machineGuiMaxDistance;
 
-    public ConfigSyncPacket(boolean enableMachineGuiTabs, int machineTabThreshold, int machineGuiMaxDistance) {
+    public ConfigSyncPacket(boolean enableMachineGuiTabs, int machineTabThreshold) {
         this.enableMachineGuiTabs = enableMachineGuiTabs;
         this.machineTabThreshold = machineTabThreshold;
-        this.machineGuiMaxDistance = machineGuiMaxDistance;
     }
 
     public static void encode(ConfigSyncPacket packet, FriendlyByteBuf buf) {
         buf.writeBoolean(packet.enableMachineGuiTabs);
         buf.writeVarInt(packet.machineTabThreshold);
-        buf.writeVarInt(packet.machineGuiMaxDistance);
     }
 
     public static ConfigSyncPacket decode(FriendlyByteBuf buf) {
-        return new ConfigSyncPacket(buf.readBoolean(), buf.readVarInt(), buf.readVarInt());
+        return new ConfigSyncPacket(buf.readBoolean(), buf.readVarInt());
     }
 
     public static void handle(ConfigSyncPacket packet, Supplier<NetworkEvent.Context> ctx) {

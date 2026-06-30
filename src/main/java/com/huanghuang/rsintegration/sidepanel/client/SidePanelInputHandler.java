@@ -37,8 +37,8 @@ public final class SidePanelInputHandler {
         int pw = GRID_W;
         int rows = visibleRows > 0 ? visibleRows : 5;
         int ph = HEADER_H + rows * SLOT_SIZE + BOTTOM_H;
-        if (mx >= panelX - 2 && mx < panelX + pw + 2
-                && my >= panelY - 2 && my < panelY + ph + 2)
+        if (mx >= panelX && mx < panelX + pw
+                && my >= panelY && my < panelY + ph)
             return true;
         if (mx >= panelX + SIDE_BTN_FLOAT_X && mx < panelX
                 && my >= panelY + HEADER_H + 1
@@ -57,6 +57,20 @@ public final class SidePanelInputHandler {
         int by = panelY + HEADER_H + 1;
         return mx >= bx && mx < bx + SIDE_BTN_SIZE
                 && my >= by && my < by + 5 * SIDE_BTN_PITCH;
+    }
+
+    /** Check whether the coordinate hits a specific side button (0-4).
+     *  Uses the button's actual 18×18 bounds, not the 20-pitch cell,
+     *  so the 2 px gap between buttons is dead space. */
+    public static int sideButtonIndex(double mx, double my, int panelX, int panelY) {
+        int bx = panelX + SIDE_BTN_FLOAT_X;
+        int by = panelY + HEADER_H + 1;
+        if (mx < bx || mx >= bx + SIDE_BTN_SIZE) return -1;
+        for (int i = 0; i < 5; i++) {
+            int btnY = by + i * SIDE_BTN_PITCH;
+            if (my >= btnY && my < btnY + SIDE_BTN_SIZE) return i;
+        }
+        return -1;
     }
 
     /** Check whether the coordinate is within the search bar. */

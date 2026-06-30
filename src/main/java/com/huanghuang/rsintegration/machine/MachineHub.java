@@ -46,6 +46,9 @@ public final class MachineHub {
     // store last-rendered hub bounds for title-bar hit testing
     private static int hubX, hubY, hubW, hubH;
 
+    // Tooltip bleed guard — set while the Hub is rendering its own tooltips
+    public static volatile boolean isRenderingOurTooltip;
+
     private MachineHub() {}
 
     // ── State queries ─────────────────────────────────────────────

@@ -98,6 +98,12 @@ public final class RSSidePanelClient {
     static int clickLockTicks;
     static volatile Set<ResourceLocation> lockedItems = Set.of();
 
+    // ── Tooltip bleed guard ──────────────────────────────────────
+    // Set while the side panel is rendering its own tooltips, so
+    // the RenderTooltipEvent.Pre interceptor knows to let them
+    // through instead of cancelling them as foreign.
+    public static volatile boolean isRenderingOurTooltip;
+
     // ── Animation / delta ────────────────────────────────────────
     static final Map<UUID, SlotAnim> slotAnims = new HashMap<>();
     static final Set<UUID> deltaBatch = new HashSet<>();
@@ -150,7 +156,7 @@ public final class RSSidePanelClient {
         var bus = MinecraftForge.EVENT_BUS;
         bus.addListener(RSSidePanelClient::onClientTick);
         bus.addListener(EventPriority.HIGHEST, RSSidePanelClient::onRenderGuiPost);
-        bus.addListener(EventPriority.HIGHEST, RSSidePanelClient::onScreenRenderPost);
+        bus.addListener(EventPriority.LOWEST, RSSidePanelClient::onScreenRenderPost);
         bus.addListener(EventPriority.HIGH, RSSidePanelClient::onKeyInput);
         bus.addListener(EventPriority.HIGHEST, RSSidePanelClient::onScreenMousePressed);
         bus.addListener(EventPriority.HIGHEST, RSSidePanelClient::onScreenMouseReleased);
@@ -159,6 +165,9 @@ public final class RSSidePanelClient {
         bus.addListener(EventPriority.HIGHEST, RSSidePanelClient::onInputMouseScrolled);
         bus.addListener(EventPriority.HIGHEST, RSSidePanelClient::onScreenKeyPressed);
         bus.addListener(EventPriority.HIGHEST, RSSidePanelClient::onScreenCharTyped);
+
+        // Cancel foreign tooltips that land inside the side panel area
+        bus.addListener(EventPriority.HIGHEST, RSSidePanelClient::onRenderTooltipPre);
 
         RSIntegrationMod.LOGGER.info("[RSI] SidePanel client initialized.");
     }
@@ -207,7 +216,7 @@ public final class RSSidePanelClient {
 
     // ── Sort guard ───────────────────────────────────────────────
 
-    static boolean canSort() { return !gridDragging && !isShifting; }
+    static boolean canSort() { return !gridDragging; }
 
     // ── Layout helpers ───────────────────────────────────────────
 
@@ -248,6 +257,23 @@ public final class RSSidePanelClient {
     //  RENDERING
     // ═════════════════════════════════════════════════════════════
 
+    /** Cancel foreign tooltips that land on the side panel or Machine Hub area. */
+    private static void onRenderTooltipPre(net.minecraftforge.client.event.RenderTooltipEvent.Pre event) {
+        // Side panel guard
+        if (panelVisible && !panelHidden && !isRenderingOurTooltip
+                && anyPanelContains(event.getX(), event.getY())) {
+            event.setCanceled(true);
+            return;
+        }
+        // Machine Hub guard
+        if (com.huanghuang.rsintegration.machine.MachineHub.isVisible()
+                && !com.huanghuang.rsintegration.machine.MachineHub.isRenderingOurTooltip
+                && com.huanghuang.rsintegration.machine.MachineHub.isWithinBounds(
+                        event.getX(), event.getY())) {
+            event.setCanceled(true);
+        }
+    }
+
     @SuppressWarnings("resource")
     private static void doRenderContext(GuiGraphics g, Minecraft mc) {
         int guiScale = (int) mc.getWindow().getGuiScale();
@@ -266,11 +292,13 @@ public final class RSSidePanelClient {
 
         var pose = g.pose();
         pose.pushPose();
-        pose.translate(0, 0, 150.0F);
+        pose.translate(0, 0, 400.0F);
 
         if (panelHidden) {
             SidePanelRenderer.renderCollapsedBar(g, panelX, panelY,
                     networkAvailable, networkName, totalSlotCount);
+            hoveredSideButton = -1;
+            hoveredSlotIndex = -1;
         } else {
             DisplayListManager.ensureDisplayReady();
             var result = SidePanelRenderer.renderPanel(g, panelX, panelY,
@@ -287,15 +315,84 @@ public final class RSSidePanelClient {
 
         pose.popPose();
 
+        // ── Carried item (z=800) ──────────────────────────────────
         ItemStack carried = mc.player.containerMenu.getCarried();
         if (!carried.isEmpty()) {
             int cx = lastMouseX - 8;
             int cy = lastMouseY - 8;
             pose.pushPose();
-            pose.translate(0, 0, 300.0F);
+            pose.translate(0, 0, 800.0F);
             g.renderItem(carried, cx, cy);
             g.renderItemDecorations(mc.font, carried, cx, cy,
                     carried.getCount() > 1 ? String.valueOf(carried.getCount()) : null);
+            pose.popPose();
+        }
+
+        // ── Tooltips (z=900 → internal translate(0,0,400) → 1300) ─
+        // Rendered outside the panel pose so the tooltip's internal
+        // z-offset stacks on a fresh base, keeping background fills and
+        // text in agreement.  1300 > panel max 700 and held item 800.
+        if (!panelHidden && hoveredSlotIndex >= 0
+                && hoveredSlotIndex < displayList.size()) {
+            ItemStack hs = displayList.get(hoveredSlotIndex).getStack();
+            if (!hs.isEmpty()) {
+                pose.pushPose();
+                pose.translate(0, 0, 900.0F);
+                isRenderingOurTooltip = true;
+                SidePanelRenderer.renderItemTooltip(g, mc.font, hs,
+                        lastMouseX, lastMouseY);
+                isRenderingOurTooltip = false;
+
+                if (isItemLocked(hs)) {
+                    int col = hoveredSlotIndex % COLUMNS;
+                    int row = hoveredSlotIndex / COLUMNS - scrollRow;
+                    if (row >= 0 && row < visibleRows) {
+                        int lix = panelX + GRID_ITEM_X + col * SLOT_SIZE + 1 + 1;
+                        int liy = panelY + HEADER_H + row * SLOT_SIZE + 1 + 1;
+                        if (lastMouseX >= lix && lastMouseX < lix + 7
+                                && lastMouseY >= liy && lastMouseY < liy + 7) {
+                            isRenderingOurTooltip = true;
+                            g.renderTooltip(mc.font,
+                                    Component.translatable(
+                                            "rsi.side_panel.locked_item"),
+                                    lastMouseX, lastMouseY);
+                            isRenderingOurTooltip = false;
+                        }
+                    }
+                }
+
+                String hsKey = keyOf(hs);
+                if (!hsKey.isEmpty()
+                        && com.huanghuang.rsintegration.sidepanel.data.BindingCache.getInstance().hasGui(hsKey)) {
+                    int col = hoveredSlotIndex % COLUMNS;
+                    int row = hoveredSlotIndex / COLUMNS - scrollRow;
+                    if (row >= 0 && row < visibleRows) {
+                        int gix = panelX + GRID_ITEM_X + col * SLOT_SIZE + 1 + 10;
+                        int giy = panelY + HEADER_H + row * SLOT_SIZE + 1 + 10;
+                        if (lastMouseX >= gix && lastMouseX < gix + 8
+                                && lastMouseY >= giy && lastMouseY < giy + 8) {
+                            isRenderingOurTooltip = true;
+                            g.renderTooltip(mc.font,
+                                    Component.translatable(
+                                            "rsi.side_panel.open_machine"),
+                                    lastMouseX, lastMouseY);
+                            isRenderingOurTooltip = false;
+                        }
+                    }
+                }
+                pose.popPose();
+            }
+        }
+        if (!panelHidden && hoveredSideButton >= 0) {
+            pose.pushPose();
+            pose.translate(0, 0, 900.0F);
+            isRenderingOurTooltip = true;
+            SidePanelRenderer.renderSideButtonTooltip(g, mc.font,
+                    hoveredSideButton,
+                    viewType, sortAsc, sortMode,
+                    SearchController.searchMode, gridSize,
+                    lastMouseX, lastMouseY);
+            isRenderingOurTooltip = false;
             pose.popPose();
         }
     }

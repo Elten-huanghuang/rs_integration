@@ -68,7 +68,11 @@ public final class RSSidePanelDeltaPacket {
         buf.writeVarInt(entries.size());
         for (Entry e : entries) {
             buf.writeUUID(e.stackId);
-            buf.writeItem(e.stack);
+            int realCount = e.stack.getCount();
+            ItemStack sent = e.stack.copy();
+            sent.setCount(1);
+            buf.writeItem(sent);
+            buf.writeVarInt(realCount);
             buf.writeVarLong(e.timestamp);
             buf.writeBoolean(e.craftable);
         }
@@ -80,6 +84,8 @@ public final class RSSidePanelDeltaPacket {
         for (int i = 0; i < count; i++) {
             UUID id = buf.readUUID();
             ItemStack stack = buf.readItem();
+            int realCount = buf.readVarInt();
+            stack.setCount(realCount);
             entries.add(new Entry(id, stack, buf.readVarLong(), buf.readBoolean()));
         }
         return new RSSidePanelDeltaPacket(entries);

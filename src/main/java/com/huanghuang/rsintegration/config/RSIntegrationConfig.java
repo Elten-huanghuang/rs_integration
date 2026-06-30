@@ -19,6 +19,7 @@ public final class RSIntegrationConfig {
 
     public static final ForgeConfigSpec SERVER_SPEC;
     public static final ForgeConfigSpec CLIENT_SPEC;
+    private static ModConfig clientModConfig;
 
     // ── master switches ──────────────────────────────────────────
     public static ForgeConfigSpec.BooleanValue ENABLE_BINDING;
@@ -52,7 +53,6 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.IntValue MACHINE_TAB_THRESHOLD;
     public static ForgeConfigSpec.IntValue MACHINE_HUB_TOGGLE_KEY;
     public static ForgeConfigSpec.ConfigValue<List<? extends String>> MACHINE_GUI_WHITELIST;
-    public static ForgeConfigSpec.IntValue MACHINE_GUI_MAX_DISTANCE;
     public static ForgeConfigSpec.ConfigValue<List<? extends String>> CUSTOM_GUI_MACHINE_MODS;
     public static ForgeConfigSpec.IntValue REPEAT_COUNT_MAX;
     public static ForgeConfigSpec.ConfigValue<List<? extends String>> PROTECTED_ITEMS;
@@ -245,9 +245,9 @@ public final class RSIntegrationConfig {
                 .comment("Whitelist of mod type IDs that support the \"Open Machine\" GUI button.",
                         "Only mod types in this list will show the button in crafting plan screens.",
                         "Valid values: vanilla_machine, custom_gui, goety, malum, forbidden_arcanus,",
-                        "eidolon, wizards_reborn")
+                        "eidolon, wizards_reborn, farmingforblockheads")
                 .defineList("machineGuiWhitelist",
-                        List.of("vanilla_machine"),
+                        List.of("vanilla_machine", "farmingforblockheads"),
                         obj -> obj instanceof String s && !s.isBlank());
         MACHINE_TAB_THRESHOLD = b
                 .comment("Maximum number of machine shortcut tabs displayed before auto-collapsing",
@@ -257,11 +257,6 @@ public final class RSIntegrationConfig {
                 .comment("Key code for toggling the Machine Hub overlay on the RS Grid screen.",
                         "Default H = 72. See GLFW key codes: https://www.glfw.org/docs/latest/group__keys.html")
                 .defineInRange("machineHubToggleKey", 72, 32, 348);
-        MACHINE_GUI_MAX_DISTANCE = b
-                .comment("Maximum distance (in blocks) for wirelessly opening a bound machine's GUI.",
-                        "Set to 0 to disable distance checks (unlimited range).",
-                        "This is a server-side security control to prevent cross-dimension GUI abuse.")
-                .defineInRange("machineGuiMaxDistance", 0, 0, Integer.MAX_VALUE);
         ENABLE_FARMINGFORBLOCKHEADS = b
                 .comment("Enable FarmingForBlockheads Market integration for recursive crafting.",
                         "Allows the Market to participate in JEI-to-RS auto-crafting chains.",
@@ -323,6 +318,10 @@ public final class RSIntegrationConfig {
 
     private RSIntegrationConfig() {}
 
+    public static void saveClientConfig() {
+        if (clientModConfig != null) clientModConfig.save();
+    }
+
     /**
      * Returns the minimum reserve count for items matching the given ingredient,
      * or 0 if the item is not in the protected list.
@@ -374,7 +373,8 @@ public final class RSIntegrationConfig {
                 "rs_integration/common.toml"));
         container.addConfig(new ModConfig(ModConfig.Type.SERVER, SERVER_SPEC, container,
                 "rs_integration/server.toml"));
-        container.addConfig(new ModConfig(ModConfig.Type.CLIENT, CLIENT_SPEC, container,
-                "rs_integration/client.toml"));
+        clientModConfig = new ModConfig(ModConfig.Type.CLIENT, CLIENT_SPEC, container,
+                "rs_integration/client.toml");
+        container.addConfig(clientModConfig);
     }
 }

@@ -33,22 +33,23 @@ public final class MachineHubInputHandler {
             return false;
         }
 
-        // Title bar drag
-        if (button == GLFW.GLFW_MOUSE_BUTTON_LEFT && MachineHub.tryStartDrag(mouseX, mouseY)) {
-            return true;
-        }
-
-        // Close button takes priority
+        // Close button — must be checked BEFORE tryStartDrag, otherwise
+        // drag consumes all title bar clicks and the button is unreachable.
         if (MachineHub.isCloseButtonHovered() && button == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
             MachineHub.hide();
             return true;
         }
 
-        // Config toggle button
+        // Config toggle button — also before drag to guarantee it fires.
         if (MachineHub.isConfigButtonHovered() && button == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
             boolean current = RSIntegrationConfig.RETURN_TO_RS_AFTER_MACHINE_GUI.get();
             RSIntegrationConfig.RETURN_TO_RS_AFTER_MACHINE_GUI.set(!current);
-            RSIntegrationConfig.CLIENT_SPEC.save();
+            RSIntegrationConfig.saveClientConfig();
+            return true;
+        }
+
+        // Title bar drag
+        if (button == GLFW.GLFW_MOUSE_BUTTON_LEFT && MachineHub.tryStartDrag(mouseX, mouseY)) {
             return true;
         }
 

@@ -24,6 +24,8 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraftforge.items.ItemHandlerHelper;
 import net.minecraftforge.items.ItemStackHandler;
+import net.minecraftforge.registries.ForgeRegistries;
+import net.minecraft.core.registries.Registries;
 
 import javax.annotation.Nullable;
 import java.lang.reflect.Method;
@@ -703,5 +705,108 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
         java.lang.reflect.Field f = altarBEClass.getDeclaredField("handler");
         f.setAccessible(true);
         return (ItemStackHandler) f.get(storageBe);
+    }
+
+    // ── Plan warnings (static) ─────────────────────────────────────
+
+    /** Item that can be right-clicked to absorb into the player's P-Power capability. */
+    private static final ResourceLocation PP_ID =
+            new ResourceLocation("touhou_little_maid", "power_point");
+
+    /**
+     * Returns plan-time warnings for TLM altar recipes.
+     * P-Power comes from two sources: the player's capability bar AND unconsumed
+     * power_point items (in inventory / RS network) that can be absorbed on demand.
+     */
+    public static List<String> getPlanWarnings(ServerPlayer player, Recipe<?> recipe,
+                                                @Nullable ResourceLocation dim,
+                                                @Nullable BlockPos pos) {
+        List<String> warnings = new ArrayList<>();
+        float cost = rsi$staticPowerCost(recipe);
+        if (cost <= 0) return warnings;
+
+        // 1. P-Power already absorbed into the player's capability
+        float capPower = 0f;
+        ensureClasses();
+        if (powerCapToken != null) {
+            Float f = rsi$staticCurrentPower(player);
+            if (f != null) capPower = f;
+        }
+
+        // 2. power_point items that can be absorbed on demand
+        int itemPower = countPowerPointItems(player, dim, pos);
+
+        float totalPower = capPower + itemPower;
+        if (totalPower < cost) {
+            warnings.add(Component.translatable("rsi.tlm.warn.insufficient_power_points",
+                    String.format("%.1f", totalPower), String.format("%.1f", cost)).getString());
+        }
+        return warnings;
+    }
+
+    private static float rsi$staticPowerCost(Recipe<?> recipe) {
+        try {
+            Method getPowerCost = Reflect.findMethod(recipe.getClass(), "getPowerCost", new Class<?>[0]);
+            if (getPowerCost == null) return 0;
+            Object result = getPowerCost.invoke(recipe);
+            if (result instanceof Float f) return f;
+            if (result instanceof Double d) return d.floatValue();
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-Batch-TLM] staticPowerCost failed", e);
+        }
+        return 0;
+    }
+
+    @Nullable
+    private static Float rsi$staticCurrentPower(ServerPlayer player) {
+        if (powerCapToken == null) return null;
+        try {
+            var capInstance = player.getCapability(
+                    (net.minecraftforge.common.capabilities.Capability<?>) powerCapToken)
+                    .resolve();
+            if (capInstance.isEmpty()) return null;
+            Class<?> powerCapClass = capInstance.get().getClass();
+            Method getter = Reflect.findMethod(powerCapClass, "get", new Class<?>[0]);
+            if (getter == null) return null;
+            Object result = getter.invoke(capInstance.get());
+            if (result instanceof Float f) return f;
+            if (result instanceof Double d) return d.floatValue();
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-Batch-TLM] staticCurrentPower failed", e);
+        }
+        return null;
+    }
+
+    /** Count power_point items in RS network + player inventory. */
+    private static int countPowerPointItems(ServerPlayer player,
+                                             @Nullable ResourceLocation dim,
+                                             @Nullable BlockPos pos) {
+        int count = 0;
+        // Player inventory
+        for (ItemStack stack : player.getInventory().items) {
+            if (isPowerPoint(stack)) count += stack.getCount();
+        }
+        // RS network
+        INetwork network = null;
+        if (dim != null && pos != null) {
+            ResourceKey<Level> key = ResourceKey.create(Registries.DIMENSION, dim);
+            network = CraftPacketUtils.resolveNetworkForCraft(player, key, pos);
+        }
+        if (network == null) {
+            network = com.huanghuang.rsintegration.network.RSIntegration
+                    .resolveNetworkFromPlayer(player);
+        }
+        if (network != null) {
+            for (var entry : network.getItemStorageCache().getList().getStacks()) {
+                ItemStack stack = entry.getStack();
+                if (isPowerPoint(stack)) count += stack.getCount();
+            }
+        }
+        return count;
+    }
+
+    private static boolean isPowerPoint(ItemStack stack) {
+        if (stack.isEmpty()) return false;
+        return PP_ID.equals(ForgeRegistries.ITEMS.getKey(stack.getItem()));
     }
 }

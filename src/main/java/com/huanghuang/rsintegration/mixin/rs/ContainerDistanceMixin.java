@@ -1,6 +1,5 @@
 package com.huanghuang.rsintegration.mixin.rs;
 
-import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.ContainerLevelAccess;
 import net.minecraft.world.entity.player.Player;
@@ -17,10 +16,6 @@ public abstract class ContainerDistanceMixin {
             at = @At("HEAD"), cancellable = true)
     private static void rsi$bypassDistanceCheck(ContainerLevelAccess access, Player player, Block block,
                                                  CallbackInfoReturnable<Boolean> cir) {
-        // Bypass for both sides — server already validates auth & range
-        // in ContainerDistanceCheck.  Client-side must also skip the
-        // distance check, otherwise RemotePlayer (LocalPlayer) fails it
-        // and the GUI flashes open then closes immediately.
         cir.setReturnValue(true);
     }
 }

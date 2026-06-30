@@ -49,6 +49,7 @@
   "rsi.generic.error.prepare_failed": "§cMaterial preparation failed",
   "rsi.generic.error.machine_not_found": "§cCannot find target machine",
   "rsi.generic.error.unsupported_machine": "§cUnsupported machine type: %s",
+  "rsi.generic.error.no_bound_machine": "§cNo bound %s machine. Shift+right-click the machine block from a terminal to bind it",
   "rsi.generic.error.craft_failed": "§cRS auto-craft failed: %s",
   "rsi.generic.error.no_ingredients": "§cThis recipe has no resolvable ingredients",
   "rsi.generic.info.auto_crafting": "§eAuto-crafting %s intermediate step(s)...",
@@ -215,6 +216,7 @@
   "rsi.tlm.error.no_power": "Cannot access P-Power",
   "rsi.tlm.error.insufficient_power": "Insufficient P-Power (have %s, need %s)",
   "rsi.tlm.warn.insufficient_power_bind": "§e⚠ P-Power insufficient (have %s, need %s) — craft will fail",
+  "rsi.tlm.warn.insufficient_power_points": "§e⚠ P-Power insufficient (capability + items total %s, need %s)",
   "rsi.tlm.error.handler_not_empty": "Altar storage slots occupied — another task may be running",
 
   "rsi.plan.title": "Craft Plan: %s",

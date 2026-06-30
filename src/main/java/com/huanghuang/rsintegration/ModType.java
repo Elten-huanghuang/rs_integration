@@ -207,14 +207,16 @@ public final class ModType {
     }
 
     /** Check whether {@code segment} appears in {@code lower} bounded by
-     *  dots, underscores, or string edges.  Avoids false matches like
-     *  "goety" matching "some_mod.goety_stone". */
+     *  dots, underscores, pipes, or string edges.  Avoids false matches
+     *  like "goety" matching "some_mod.goety_stone". */
     private static boolean containsSegment(String lower, String segment) {
         int idx = lower.indexOf(segment);
         while (idx >= 0) {
-            boolean leftOk = idx == 0 || lower.charAt(idx - 1) == '.' || lower.charAt(idx - 1) == '_';
+            char leftChar = idx == 0 ? 0 : lower.charAt(idx - 1);
+            boolean leftOk = idx == 0 || leftChar == '.' || leftChar == '_' || leftChar == '|';
             int end = idx + segment.length();
-            boolean rightOk = end == lower.length() || lower.charAt(end) == '.' || lower.charAt(end) == '_';
+            char rightChar = end == lower.length() ? 0 : lower.charAt(end);
+            boolean rightOk = end == lower.length() || rightChar == '.' || rightChar == '_' || rightChar == '|';
             if (leftOk && rightOk) return true;
             idx = lower.indexOf(segment, idx + 1);
         }

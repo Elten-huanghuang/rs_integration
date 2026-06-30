@@ -114,13 +114,23 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
         }
         this.myLevel = level;
 
-        // Validate block entity
+        // Validate block entity — Spirit Crucible is a multi-block; the player
+        // may have clicked on a component block rather than the core.  Scan a
+        // 2-block radius for the core BE.
         if (pos == null) {
             player.sendSystemMessage(net.minecraft.network.chat.Component.translatable(
                     "rsi.generic.error.machine_not_found"));
             return false;
         }
         BlockEntity be = level.getBlockEntity(pos);
+        if (be == null || !beClass.isInstance(be)) {
+            // Scan for core BE — the bound position may be a component block
+            BlockPos corePos = findCrucibleCore(level, pos);
+            if (corePos != null) {
+                this.myPos = corePos;
+                be = level.getBlockEntity(corePos);
+            }
+        }
         if (be == null || !beClass.isInstance(be)) {
             player.sendSystemMessage(net.minecraft.network.chat.Component.translatable(
                     "rsi.malum_crucible.error.not_crucible"));
@@ -697,5 +707,28 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
         }
 
         return warnings;
+    }
+
+    /**
+     * Scan up to 2 blocks away for a SpiritCrucibleCoreBlockEntity.
+     * The Spirit Crucible is a Lodestone multi-block; the player may
+     * have shift+clicked a component block instead of the core.
+     */
+    @Nullable
+    private static BlockPos findCrucibleCore(Level level, BlockPos pos) {
+        ensureClasses();
+        if (beClass == null) return null;
+        int r = 2;
+        for (int dx = -r; dx <= r; dx++) {
+            for (int dy = -r; dy <= r; dy++) {
+                for (int dz = -r; dz <= r; dz++) {
+                    if (dx == 0 && dy == 0 && dz == 0) continue;
+                    BlockPos scan = pos.offset(dx, dy, dz);
+                    BlockEntity be = level.getBlockEntity(scan);
+                    if (be != null && beClass.isInstance(be)) return scan;
+                }
+            }
+        }
+        return null;
     }
 }

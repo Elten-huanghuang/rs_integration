@@ -9,6 +9,7 @@ import net.minecraft.core.GlobalPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
@@ -153,17 +154,37 @@ public final class AltarBindingRegistry {
 
     /**
      * Check whether a binding is still valid at the block-entity level.
-     * For now, validates that the BE still exists and is of the expected
-     * type. A full identity signature would require persistent BE UUIDs
-     * which most mods don't provide.
+     * Requires a {@link ServerLevel} to inspect the block at the bound
+     * position. When {@code level} is null the check is skipped and this
+     * returns true (conservative — can't verify without access to the
+     * dimension).
      *
-     * @return true if the binding is considered fresh (BE exists and type matches)
+     * <p>This verifies that the chunk is loaded, the BE still exists,
+     * and the block's description ID matches the one recorded at binding
+     * time.  Migrated (destroyed-and-replaced) blocks with the same type
+     * are accepted — that is an inherent limitation of matching by
+     * description ID without persistent BE UUIDs.</p>
      */
-    public static boolean isBindingFresh(ResourceKey<Level> dim, BlockPos pos, String blockKey) {
-        // The binding is fresh enough. For now, validate that the BE still exists
-        // and is of the expected type. A full identity signature would require
-        // persistent BE UUIDs which most mods don't provide.
-        return true; // Placeholder — full implementation needs BE identity API
+    public static boolean isBindingFresh(@Nullable ServerLevel level,
+                                         ResourceKey<Level> dim, BlockPos pos,
+                                         String blockKey) {
+        if (level == null) return true;
+        if (!level.dimension().equals(dim)) {
+            var server = level.getServer();
+            if (server == null) return true;
+            level = server.getLevel(dim);
+            if (level == null) return true;
+        }
+        if (!com.huanghuang.rsintegration.util.ChunkUtils.loadChunk(level, pos))
+            return true; // chunk load failed, don't invalidate
+        net.minecraft.world.level.block.entity.BlockEntity be = level.getBlockEntity(pos);
+        if (be == null) return false;
+        String currentId = be.getBlockState().getBlock().getDescriptionId();
+        if (blockKey != null && blockKey.contains("||")) {
+            String expectedId = blockKey.substring(blockKey.indexOf("||") + 2);
+            return currentId.equals(expectedId);
+        }
+        return currentId.equals(blockKey);
     }
 
     /**
@@ -495,16 +516,16 @@ public final class AltarBindingRegistry {
     public static List<BoundMachine> getBoundMachinesForType(ServerPlayer player, ModType type,
                                                               @Nullable String subTypeHint) {
         List<BoundMachine> result = new ArrayList<>();
-        collectBindingsForType(player.getInventory().items, type, subTypeHint, result);
-        collectBindingsForType(player.getInventory().offhand, type, subTypeHint, result);
-        collectBindingsForType(player.getInventory().armor, type, subTypeHint, result);
+        collectBindingsForType(player.getInventory().items, type, subTypeHint, player, result);
+        collectBindingsForType(player.getInventory().offhand, type, subTypeHint, player, result);
+        collectBindingsForType(player.getInventory().armor, type, subTypeHint, player, result);
         try {
             var opt = top.theillusivec4.curios.api.CuriosApi.getCuriosInventory(player).resolve();
             if (opt.isPresent()) {
                 for (var handler : opt.get().getCurios().values()) {
                     var stacks = handler.getStacks();
                     for (int s = 0; s < stacks.getSlots(); s++) {
-                        collectBindingsForType(List.of(stacks.getStackInSlot(s)), type, subTypeHint, result);
+                        collectBindingsForType(List.of(stacks.getStackInSlot(s)), type, subTypeHint, player, result);
                     }
                 }
             }
@@ -528,6 +549,8 @@ public final class AltarBindingRegistry {
                 if (entryType != type) continue;
                 ResourceKey<Level> altarDim = ResourceKey.create(
                         net.minecraft.core.registries.Registries.DIMENSION, entry.dim());
+                ServerLevel entryLevel = player.server.getLevel(altarDim);
+                if (!isBindingFresh(entryLevel, altarDim, entry.pos(), entry.blockKey())) continue;
                 INetwork net = resolveNetworkForAltar(player, altarDim, entry.pos());
                 RSIntegrationMod.LOGGER.debug(
                         "[RSI-DIAG] scanBindingsForType: resolveNetworkForAltar({}, {}, {}) → {}",
@@ -542,6 +565,7 @@ public final class AltarBindingRegistry {
 
     private static void collectBindingsForType(List<ItemStack> stacks, ModType type,
                                                 @Nullable String subTypeHint,
+                                                ServerPlayer player,
                                                 List<BoundMachine> out) {
         // Normalize recipe sub-type hint to canonical machine prefix.
         // Recipe IDs use a different naming scheme than blockKey prefixes
@@ -555,6 +579,10 @@ public final class AltarBindingRegistry {
                 if (normalized != null && entry.blockKey() != null
                         && !entry.blockKey().toLowerCase(java.util.Locale.ROOT).contains(normalized))
                     continue;
+                ResourceKey<Level> altarDim = ResourceKey.create(
+                        net.minecraft.core.registries.Registries.DIMENSION, entry.dim());
+                ServerLevel entryLevel = player.server.getLevel(altarDim);
+                if (!isBindingFresh(entryLevel, altarDim, entry.pos(), entry.blockKey())) continue;
                 out.add(new BoundMachine(entry.dim(), entry.pos(), type));
             }
         }
@@ -570,6 +598,7 @@ public final class AltarBindingRegistry {
      *  machine prefix used during binding is "spirit_altar". */
     private static String normalizeSubType(@Nullable String hint, ModType type) {
         if (hint == null) return null;
+        if (type == null) return hint;
         if (ModIds.WIZARDS_REBORN.equals(type.id())) {
             if ("crystal_infusion".equals(hint)) {
                 return "crystal_ritual";
@@ -583,6 +612,13 @@ public final class AltarBindingRegistry {
         }
         if (ModIds.MALUM.equals(type.id()) && "spirit_infusion".equals(hint)) {
             return "spirit_altar";
+        }
+        // malum_spirit_crucible is a leaf type — all recipes are Spirit Crucible
+        // recipes and all bindings are Spirit Crucible bindings.  Sub-type
+        // filtering is unnecessary and can cause false negatives when the
+        // blockKey format doesn't cleanly contain the recipe path prefix.
+        if ("malum_spirit_crucible".equals(type.id())) {
+            return null;
         }
         // Aetherworks names its recipe category "aetherium_anvil" but the
         // block description ID uses "forge_anvil".

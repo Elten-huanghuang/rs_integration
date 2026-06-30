@@ -433,7 +433,8 @@ extends AbstractBatchDelegate {
         this.clearAndRefundSurvivors();
         this.filterCandidates(blackPins, whitePins);
         if (this.candidates.isEmpty()) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Embers-Infer] No candidates remain after filtering");
+            RSIntegrationMod.LOGGER.warn("[RSI-Embers-Infer] No candidates remain after filtering (black={} white={} guess={})",
+                    blackPins, whitePins, Arrays.toString(this.currentGuess));
             if (this.player != null) {
                 this.player.displayClientMessage(Component.translatable("rsi.embers.infer.failed_no_candidates"), true);
             }
@@ -447,12 +448,16 @@ extends AbstractBatchDelegate {
             this.phase = Phase.DONE_FAILED;
             return true;
         }
+        // Save progress BEFORE extractAndSparkNext so attemptCount reflects the
+        // number of completed attempts, not the one about to start.  When this
+        // state is later restored, tryStartWithMaterials will ++attemptCount
+        // exactly once for the replayed attempt (no double-count).
+        if (this.player != null) {
+            this.saveProgress(this.player.getUUID());
+        }
         if (!this.extractAndSparkNext()) {
             this.phase = Phase.DONE_FAILED;
             return true;
-        }
-        if (this.player != null) {
-            this.saveProgress(this.player.getUUID());
         }
         return false;
     }

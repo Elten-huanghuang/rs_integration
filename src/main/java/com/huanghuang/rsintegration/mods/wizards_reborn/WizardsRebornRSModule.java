@@ -14,7 +14,6 @@ import net.minecraftforge.fml.DistExecutor;
 
 import java.util.List;
 import java.util.function.Supplier;
-import java.util.function.Supplier;
 
 public final class WizardsRebornRSModule implements IModIntegration {
 

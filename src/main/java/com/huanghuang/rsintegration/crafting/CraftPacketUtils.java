@@ -36,6 +36,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
@@ -43,8 +44,14 @@ public final class CraftPacketUtils {
 
     private CraftPacketUtils() {}
 
-    private static final Map<Class<?>, List<Ingredient>> ingredientCache = new ConcurrentHashMap<>();
-    private static final Map<Class<?>, Boolean> emptyIngredientMarkers = new ConcurrentHashMap<>();
+    private static final Map<ResourceLocation, List<Ingredient>> ingredientCache = new ConcurrentHashMap<>();
+    private static final Set<ResourceLocation> emptyIngredientMarkers = ConcurrentHashMap.newKeySet();
+
+    /** Clear ingredient extraction cache — called when recipes are reloaded. */
+    public static void clearIngredientCache() {
+        ingredientCache.clear();
+        emptyIngredientMarkers.clear();
+    }
 
     // ── shared utilities used by all craft packets ──────────────
 
@@ -329,13 +336,16 @@ public final class CraftPacketUtils {
     @SuppressWarnings("unchecked")
     public static List<Ingredient> extractIngredients(Object recipe) {
         Class<?> clazz = recipe.getClass();
+        ResourceLocation recipeId = recipe instanceof Recipe<?> r ? r.getId() : null;
 
-        List<Ingredient> cached = ingredientCache.get(clazz);
-        if (cached != null) return cached;
-        if (emptyIngredientMarkers.containsKey(clazz)) return null;
+        if (recipeId != null) {
+            List<Ingredient> cached = ingredientCache.get(recipeId);
+            if (cached != null) return cached;
+            if (emptyIngredientMarkers.contains(recipeId)) return null;
+        }
 
         List<Ingredient> result = tryGetIngredients(recipe, "getIngredients");
-        if (result != null) return cacheAndReturn(clazz, filterWRCrystal(recipe, result));
+        if (result != null) return cacheAndReturn(recipeId, filterWRCrystal(recipe, result));
 
         Class<?> scan = clazz;
         while (scan != null && scan != Object.class) {
@@ -346,7 +356,7 @@ public final class CraftPacketUtils {
                     try {
                         List<?> list = (List<?>) field.get(recipe);
                         if (!list.isEmpty() && list.get(0) instanceof Ingredient) {
-                            return cacheAndReturn(clazz, filterWRCrystal(recipe, (List<Ingredient>) list));
+                            return cacheAndReturn(recipeId, filterWRCrystal(recipe, (List<Ingredient>) list));
                         }
                     } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
                 }
@@ -356,31 +366,31 @@ public final class CraftPacketUtils {
 
         for (String name : new String[]{"getInputs", "getInputItems"}) {
             result = tryGetIngredients(recipe, name);
-            if (result != null) return cacheAndReturn(clazz, filterWRCrystal(recipe, result));
+            if (result != null) return cacheAndReturn(recipeId, filterWRCrystal(recipe, result));
         }
 
         result = tryExtractStepBasedIngredients(recipe);
-        if (result != null) return cacheAndReturn(clazz, result);
+        if (result != null) return cacheAndReturn(recipeId, result);
 
         result = tryExtractRitualBasedIngredients(recipe);
-        if (result != null) return cacheAndReturn(clazz, result);
+        if (result != null) return cacheAndReturn(recipeId, result);
 
         result = scanAllFieldsForIngredients(recipe);
-        if (result != null) return cacheAndReturn(clazz, filterWRCrystal(recipe, result));
+        if (result != null) return cacheAndReturn(recipeId, filterWRCrystal(recipe, result));
 
         result = extractLodestoneIngredients(recipe);
         if (result != null) result = filterWRCrystal(recipe, result);
-        if (result != null) return cacheAndReturn(clazz, result);
+        if (result != null) return cacheAndReturn(recipeId, result);
 
-        emptyIngredientMarkers.put(clazz, Boolean.TRUE);
+        if (recipeId != null) emptyIngredientMarkers.add(recipeId);
         return null;
     }
 
     @Nullable
-    private static List<Ingredient> cacheAndReturn(Class<?> clazz, @Nullable List<Ingredient> result) {
-        if (result == null) return null;
+    private static List<Ingredient> cacheAndReturn(@Nullable ResourceLocation recipeId, @Nullable List<Ingredient> result) {
+        if (result == null || recipeId == null) return result;
         List<Ingredient> immutable = Collections.unmodifiableList(result);
-        ingredientCache.put(clazz, immutable);
+        ingredientCache.put(recipeId, immutable);
         return immutable;
     }
 

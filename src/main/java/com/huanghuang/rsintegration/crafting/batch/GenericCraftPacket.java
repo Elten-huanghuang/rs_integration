@@ -230,7 +230,7 @@ public final class GenericCraftPacket {
                     tryResolve(player, packet.recipeId, packet.dim, packet.pos,
                             packet.repeatCount, packet.inferMode);
                 }
-            } catch (Exception e) {
+            } catch (Throwable e) {
                 RSIntegrationMod.LOGGER.error("[RSI-Generic] Failed for {}:", packet.recipeId, e);
                 String reason = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
                 try {
@@ -582,6 +582,16 @@ public final class GenericCraftPacket {
             }
         }
 
+        // Guard: non-CraftingRecipe mod recipes REQUIRE a bound machine.
+        // Falling through to grouped extraction would consume items without
+        // actually running the machine crafting.
+        if (!(recipe instanceof CraftingRecipe) && modType != null && modType != ModType.GENERIC
+                && (effectiveDim == null || effectivePos == null)) {
+            player.sendSystemMessage(Component.translatable(
+                    "rsi.generic.error.no_bound_machine", modType.id()));
+            return;
+        }
+
         // Re-resolve network in case the top-level resolution failed but
         // ensureMaterialAvailable succeeded via binding/NBT fallback internally.
         // The ledger's NETWORK entries need a valid network for commit extraction.
@@ -767,7 +777,8 @@ public final class GenericCraftPacket {
             if (targetOutput.isEmpty() && recipeModType != null
                     && !"embers_alchemy".equals(recipeModType.id())
                     && !"aetherworks_anvil".equals(recipeModType.id())
-                    && !"touhou_little_maid".equals(recipeModType.id())) {
+                    && !"touhou_little_maid".equals(recipeModType.id())
+                    && !"forbidden_arcanus".equals(recipeModType.id())) {
                 sendPlanError(player, Component.translatable("rsi.generic.error.unsupported_machine", recipe.getClass().getSimpleName()).getString());
                 return;
             }
@@ -1185,6 +1196,10 @@ public final class GenericCraftPacket {
                         break;
                     case "farmingforblockheads":
                         modWarnings.addAll(com.huanghuang.rsintegration.mods.farmingforblockheads.MarketBatchDelegate
+                                .getPlanWarnings(player, recipe, dim, pos));
+                        break;
+                    case "touhou_little_maid":
+                        modWarnings.addAll(com.huanghuang.rsintegration.mods.touhoulittlemaid.TlmAltarBatchDelegate
                                 .getPlanWarnings(player, recipe, dim, pos));
                         break;
                 }

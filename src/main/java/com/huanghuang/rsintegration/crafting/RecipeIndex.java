@@ -44,6 +44,7 @@ public final class RecipeIndex {
         RecipeManager rm = level.getRecipeManager();
         Map<Item, List<Entry>> idx = index;
         if (idx != null && source == rm) return idx;
+        CraftPacketUtils.clearIngredientCache();
 
         synchronized (RecipeIndex.class) {
             idx = index;
@@ -63,7 +64,8 @@ public final class RecipeIndex {
                 ItemStack result;
 
                 if (handler != null) {
-                    type = handler.modType();
+                    type = ModType.classifyRecipe(recipe);
+                    if (type == null) type = handler.modType();
                     result = ModRecipeHandlers.tryGetResultItem(recipe, level.registryAccess());
                 } else if (recipe instanceof CraftingRecipe cr
                         && ModType.classifyRecipe(recipe) == null) {
@@ -391,6 +393,9 @@ public final class RecipeIndex {
         if (handler != null) {
             ItemStack result = handler.getResultItem(recipe, access);
             if (!result.isEmpty()) return result;
+            // Handler exists and returned EMPTY — don't fall through
+            // to the reflection probe (same reason as ModRecipeHandlers).
+            return ItemStack.EMPTY;
         }
         Class<?> clazz = recipe.getClass();
         Method m = resultMethodCache.get(clazz);

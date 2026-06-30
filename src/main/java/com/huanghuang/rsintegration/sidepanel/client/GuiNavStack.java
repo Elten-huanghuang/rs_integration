@@ -23,15 +23,24 @@ import net.minecraftforge.eventbus.api.SubscribeEvent;
  * the game world.
  *
  * <p>Call {@link #pushCurrent()} before the machine GUI opens.
- * The {@code ScreenMixin} (rs.ScreenCloseMixin) calls
+ * The {@code ScreenCloseMixin} (rs.ScreenCloseMixin) calls
  * {@link #onScreenRemoved(Screen)} when any screen is removed —
  * if the removed screen is NOT the cached screen, the cached screen
  * is restored.</p>
+ *
+ * <p>{@link #pushCurrent()} only sets {@code cachedScreen} once —
+ * subsequent calls from intermediate screens (JEI, CraftingPlanScreen)
+ * set {@code expectingReplace} so the intermediate removal is correctly
+ * ignored by {@link #onScreenRemoved}.</p>
  */
 @OnlyIn(Dist.CLIENT)
 public final class GuiNavStack {
     private static Screen cachedScreen;
     private static boolean pendingRestore;
+    /** true when we just called pushCurrent() and expect the cached
+     *  screen to be replaced by a mod-initiated GUI.  Distinguishes
+     *  "replaced by our GUI" from "user closed it manually". */
+    private static boolean expectingReplace;
     private static boolean hookRegistered;
     private static Screen restoreTarget;
 
@@ -42,15 +51,20 @@ public final class GuiNavStack {
 
     private GuiNavStack() {}
 
-    /** Save the currently displayed screen as the return target. */
+    /** Save the currently displayed screen as the return target.
+     *  If a screen is already cached, does NOT overwrite it —
+     *  the first/outermost RS GridScreen is always the return target. */
     public static void pushCurrent() {
         Screen current = Minecraft.getInstance().screen;
         if (current != null) {
-            cachedScreen = current;
-            pendingRestore = true;
-            registerLogoutHook();
-            RSIntegrationMod.LOGGER.debug("[RSI-GuiNav] Pushed screen: {}",
-                    current.getClass().getSimpleName());
+            if (cachedScreen == null) {
+                cachedScreen = current;
+                pendingRestore = true;
+                registerLogoutHook();
+                RSIntegrationMod.LOGGER.debug("[RSI-GuiNav] Pushed screen: {}",
+                        current.getClass().getSimpleName());
+            }
+            expectingReplace = true;
         }
     }
 
@@ -65,23 +79,36 @@ public final class GuiNavStack {
         Screen cached = cachedScreen;
         if (cached == null) {
             pendingRestore = false;
+            expectingReplace = false;
             return;
         }
 
-        // When the cached RS GridScreen itself is removed (because the machine
-        // GUI is opening), do nothing — we WANT the machine GUI on top.
-        if (removed == cached) return;
-
-        // Safety: don't restore a screen that's already the current screen
-        Screen current = Minecraft.getInstance().screen;
-        if (current == cached) {
+        if (removed == cached) {
+            if (expectingReplace) {
+                // Cached screen is being replaced by our machine GUI / intermediate
+                // screen — keep it on standby for the eventual restore.
+                expectingReplace = false;
+                return;
+            }
+            // Cached screen was closed manually (user pressed E / ESC).
+            // Clear state so a stale screen isn't restored later.
             pendingRestore = false;
             cachedScreen = null;
+            expectingReplace = false;
+            RSIntegrationMod.LOGGER.debug("[RSI-GuiNav] Cached screen closed manually — cleared");
             return;
         }
 
-        // A different screen (the machine GUI) closed — restore RS GridScreen
-        // if the user has enabled return-to-RS in config.
+        // removed != cached — a machine GUI or intermediate screen is closing.
+        if (expectingReplace) {
+            // We're still in a replacement transition (e.g. intermediate
+            // screen replaced by the actual machine GUI).  Keep the cached
+            // screen on standby.
+            expectingReplace = false;
+            return;
+        }
+
+        // Genuine close of a machine GUI — restore the cached RS GridScreen.
         pendingRestore = false;
         cachedScreen = null;
         if (!RSIntegrationConfig.RETURN_TO_RS_AFTER_MACHINE_GUI.get()) {
@@ -92,6 +119,8 @@ public final class GuiNavStack {
         // called setScreen(cached) now, the outer setScreen would
         // still set this.screen = null and destroy the restore.
         restoreTarget = cached;
+        RSIntegrationMod.LOGGER.debug("[RSI-GuiNav] Scheduling restore of: {}",
+                cached.getClass().getSimpleName());
     }
 
     /** Clear state on logout to prevent stale references. */
@@ -105,6 +134,7 @@ public final class GuiNavStack {
     public static void onClientLogout(ClientPlayerNetworkEvent.LoggingOut event) {
         cachedScreen = null;
         pendingRestore = false;
+        expectingReplace = false;
     }
 
     /**
@@ -129,6 +159,8 @@ public final class GuiNavStack {
         if (restoreTarget != null) {
             Screen target = restoreTarget;
             restoreTarget = null;
+            RSIntegrationMod.LOGGER.debug("[RSI-GuiNav] Restoring screen: {}",
+                    target.getClass().getSimpleName());
             Minecraft.getInstance().setScreen(target);
         }
     }

@@ -17,6 +17,7 @@ import java.util.function.Supplier;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.event.server.ServerStoppingEvent;
 import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.common.ForgeConfigSpec;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.fml.DistExecutor;
@@ -38,15 +39,26 @@ public final class RSIntegrationMod {
     /** RS-themed flow colors used by magnet tooltip and machine hub tooltip. */
     public static final int[] RS_FLOW_COLORS = {0x3355FF, 0x7733FF, 0xCC33FF, 0x3355FF};
 
-    private static final List<Supplier<IModIntegration>> MODULE_SUPPLIERS = List.of(
-            () -> com.huanghuang.rsintegration.mods.goety.GoetyRSModule.INSTANCE,
-            () -> com.huanghuang.rsintegration.mods.malum.MalumRSModule.INSTANCE,
-            () -> com.huanghuang.rsintegration.mods.eidolon.EidolonRSModule.INSTANCE,
-            () -> com.huanghuang.rsintegration.mods.forbidden.FaRSModule.INSTANCE,
-            () -> com.huanghuang.rsintegration.mods.wizards_reborn.WizardsRebornRSModule.INSTANCE,
-            () -> com.huanghuang.rsintegration.mods.touhoulittlemaid.TlmRSModule.INSTANCE,
-            () -> com.huanghuang.rsintegration.mods.embers.EreAlchemyRSModule.INSTANCE,
-            () -> com.huanghuang.rsintegration.mods.aetherworks.AetherworksRSModule.INSTANCE
+    private record ModuleEntry(String modId, ForgeConfigSpec.BooleanValue configFlag,
+                               Supplier<IModIntegration> supplier) {}
+
+    private static final List<ModuleEntry> MODULES = List.of(
+            new ModuleEntry("goety", RSIntegrationConfig.ENABLE_GOETY,
+                    () -> com.huanghuang.rsintegration.mods.goety.GoetyRSModule.INSTANCE),
+            new ModuleEntry("malum", RSIntegrationConfig.ENABLE_MALUM,
+                    () -> com.huanghuang.rsintegration.mods.malum.MalumRSModule.INSTANCE),
+            new ModuleEntry("eidolon", RSIntegrationConfig.ENABLE_EIDOLON,
+                    () -> com.huanghuang.rsintegration.mods.eidolon.EidolonRSModule.INSTANCE),
+            new ModuleEntry("forbidden_arcanus", RSIntegrationConfig.ENABLE_FORBIDDEN_ARCANUS,
+                    () -> com.huanghuang.rsintegration.mods.forbidden.FaRSModule.INSTANCE),
+            new ModuleEntry("wizards_reborn", RSIntegrationConfig.ENABLE_WIZARDS_REBORN,
+                    () -> com.huanghuang.rsintegration.mods.wizards_reborn.WizardsRebornRSModule.INSTANCE),
+            new ModuleEntry("touhou_little_maid", RSIntegrationConfig.ENABLE_TOUHOU_LITTLE_MAID,
+                    () -> com.huanghuang.rsintegration.mods.touhoulittlemaid.TlmRSModule.INSTANCE),
+            new ModuleEntry("embers", RSIntegrationConfig.ENABLE_EMBERS_ALCHEMY,
+                    () -> com.huanghuang.rsintegration.mods.embers.EreAlchemyRSModule.INSTANCE),
+            new ModuleEntry("aetherworks", RSIntegrationConfig.ENABLE_AETHERWORKS,
+                    () -> com.huanghuang.rsintegration.mods.aetherworks.AetherworksRSModule.INSTANCE)
     );
 
     public RSIntegrationMod() {
@@ -54,20 +66,19 @@ public final class RSIntegrationMod {
         RSIntegrationConfig.register();
         AltarBindingRegistry.registerHook(AltarBinding.RS_NETWORK, RSBindingHook.INSTANCE);
 
-        // Per-mod init via IModIntegration interface
-        // Supplier defers class loading — RSModule classes are only loaded
-        // when their mod is detected as present, avoiding CNFE from optional
-        // dependencies (e.g. JEI imports on GoetyRSModule).
-        for (Supplier<IModIntegration> supplier : MODULE_SUPPLIERS) {
-            IModIntegration module = supplier.get();
-            if (module.configFlag().get() && ModList.get().isLoaded(module.modId())) {
-                module.registerModType();
-                module.registerBindingTargets();
-                module.registerRecipeHandler();
-                module.registerNetworkPackets();
-                module.initCommon();
-                DistExecutor.safeRunWhenOn(Dist.CLIENT, module.clientInitSupplier());
-            }
+        // Per-mod init via IModIntegration interface.
+        // Check config + mod presence BEFORE calling supplier.get() so
+        // module classes are never loaded for absent mods (avoids CNFE
+        // from optional dependencies like JEI imports on GoetyRSModule).
+        for (ModuleEntry entry : MODULES) {
+            if (!entry.configFlag().get() || !ModList.get().isLoaded(entry.modId())) continue;
+            IModIntegration module = entry.supplier().get();
+            module.registerModType();
+            module.registerBindingTargets();
+            module.registerRecipeHandler();
+            module.registerNetworkPackets();
+            module.initCommon();
+            DistExecutor.safeRunWhenOn(Dist.CLIENT, module.clientInitSupplier());
         }
 
         // --- FarmingForBlockheads Market (virtual exchange, no IModIntegration) ---
@@ -86,7 +97,7 @@ public final class RSIntegrationMod {
                             "net.minecraft.world.item.crafting.SmithingTransformRecipe",
                             "net.minecraft.world.item.crafting.SmithingTrimRecipe"
                     },
-                    new String[]{"furnace", "smoker", "campfire", "stonecutter", "smithing_table"},
+                    new String[]{"furnace", "smoker", "stonecutter", "smithing_table"},
                     new String[]{"vanilla_machine"},
                     ModType.delegateSupplier("com.huanghuang.rsintegration.mods.vanilla.VanillaMachineBatchDelegate"));
             com.huanghuang.rsintegration.network.BindingEventHandler.registerTarget(
@@ -97,7 +108,6 @@ public final class RSIntegrationMod {
                                     "net.minecraft.world.level.block.FurnaceBlock",
                                     "net.minecraft.world.level.block.BlastFurnaceBlock",
                                     "net.minecraft.world.level.block.SmokerBlock",
-                                    "net.minecraft.world.level.block.CampfireBlock",
                                     "net.minecraft.world.level.block.StonecutterBlock",
                                     "net.minecraft.world.level.block.SmithingTableBlock"
                             ),

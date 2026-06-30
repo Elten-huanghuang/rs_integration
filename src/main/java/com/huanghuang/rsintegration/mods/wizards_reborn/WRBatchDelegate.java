@@ -54,11 +54,15 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
     private static volatile Class<?> runicPedestalBEClass;
 
     private static void ensureClasses() {
+        // CrystalRitualBlockEntity is intentionally omitted — newer WR
+        // versions renamed it to CrystalBlockEntity, and the local try-catch
+        // below handles the fallback.  Putting both in ensureClasses would
+        // cause the entire gate to fail if one is missing, which prevents the
+        // local fallback from ever running.
         if (!com.huanghuang.rsintegration.util.ModClassLoader.ensureClasses("wizards_reborn",
                 "mod.maxbogomol.wizards_reborn.common.block.wissen_crystallizer.WissenCrystallizerBlockEntity",
                 "mod.maxbogomol.wizards_reborn.common.block.arcane_iterator.ArcaneIteratorBlockEntity",
                 "mod.maxbogomol.wizards_reborn.common.block.arcane_workbench.ArcaneWorkbenchBlockEntity",
-                "mod.maxbogomol.wizards_reborn.common.block.crystal_ritual.CrystalRitualBlockEntity",
                 "mod.maxbogomol.wizards_reborn.common.block.crystal.CrystalBlockEntity",
                 "mod.maxbogomol.wizards_reborn.api.crystalritual.CrystalRitual",
                 "mod.maxbogomol.wizards_reborn.api.crystalritual.CrystalRitualArea",

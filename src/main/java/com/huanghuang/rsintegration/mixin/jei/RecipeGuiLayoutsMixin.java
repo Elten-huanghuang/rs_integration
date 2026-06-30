@@ -295,6 +295,11 @@ public class RecipeGuiLayoutsMixin {
                 faSeen, faNoRecipe, faNoFilter, faNoRecipeId, faNoBinding);
     }
 
+    @Unique
+    private static final int MIN_BUTTON_W = 10;
+    @Unique
+    private static final int MIN_BUTTON_H = 10;
+
     @Inject(method = "updateRecipeButtonPositions", at = @At("RETURN"))
     private void rsi$updatePositions(CallbackInfo ci) {
         AltarCraftButtons.clearTransferPositions();
@@ -309,8 +314,8 @@ public class RecipeGuiLayoutsMixin {
             ImmutableRect2i area = ((GuiIconToggleButtonAccessor) transferBtn).getButton().getArea();
             int bx = area.getX();
             int by = area.getY() + area.getHeight();
-            int bw = area.getWidth();
-            int bh = area.getHeight();
+            int bw = Math.max(area.getWidth(), MIN_BUTTON_W);
+            int bh = Math.max(area.getHeight(), MIN_BUTTON_H);
 
             int[] pos = rsi$positions.get(i);
             pos[0] = bx;

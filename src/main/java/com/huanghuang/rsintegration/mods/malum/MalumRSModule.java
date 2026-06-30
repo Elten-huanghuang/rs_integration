@@ -51,7 +51,8 @@ public final class MalumRSModule implements IModIntegration {
 
         BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
                 "malum", ModType.byId("malum_spirit_crucible"), RSIntegrationConfig.ENABLE_MALUM, List.of(
-                "com.sammy.malum.common.block.curiosities.spirit_crucible.SpiritCrucibleCoreBlock"
+                "com.sammy.malum.common.block.curiosities.spirit_crucible.SpiritCrucibleCoreBlock",
+                "com.sammy.malum.common.block.curiosities.spirit_crucible.SpiritCrucibleComponentBlock"
         ), "malum_spirit_crucible"));
     }
 

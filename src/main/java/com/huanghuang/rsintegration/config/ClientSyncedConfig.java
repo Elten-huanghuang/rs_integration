@@ -13,7 +13,6 @@ public final class ClientSyncedConfig {
     private static boolean synced;
     public static boolean ENABLE_MACHINE_GUI_TABS = true;
     public static int MACHINE_TAB_THRESHOLD = 5;
-    public static int MACHINE_GUI_MAX_DISTANCE = 0;
 
     private ClientSyncedConfig() {}
 
@@ -21,7 +20,6 @@ public final class ClientSyncedConfig {
         synced = true;
         ENABLE_MACHINE_GUI_TABS = packet.enableMachineGuiTabs;
         MACHINE_TAB_THRESHOLD = packet.machineTabThreshold;
-        MACHINE_GUI_MAX_DISTANCE = packet.machineGuiMaxDistance;
     }
 
     /** Whether the server has sent a config sync. If not, fall back to local config. */
@@ -32,6 +30,5 @@ public final class ClientSyncedConfig {
         synced = false;
         ENABLE_MACHINE_GUI_TABS = true;
         MACHINE_TAB_THRESHOLD = 5;
-        MACHINE_GUI_MAX_DISTANCE = 0;
     }
 }

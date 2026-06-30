@@ -23,36 +23,35 @@ public final class AetherworksRecipeHandler implements ModRecipeHandler {
 
     @Override
     public ItemStack getResultItem(Recipe<?> recipe, RegistryAccess access) {
-        // Try 1-arg getResultItem(RegistryAccess) first — Recipe's default
-        // delegates to the deprecated 0-arg getResultItem(), which AetheriumAnvilRecipe
-        // overrides to return the real output.
-        for (String name : new String[]{"getResultItem", "getResult", "getOutput", "getOutputCopy", "getAssembledItem"}) {
-            boolean isResultItem = "getResultItem".equals(name);
-            // 1-param
+        // Probe getResult/getOutput/getOutputCopy/getAssembledItem first.
+        // Fall back to getResultItem last — some recipes (e.g. Goety
+        // Revelation cross-mod anvil recipes) only expose output through
+        // the deprecated 0-arg getResultItem() and don't have other methods.
+        for (String name : new String[]{"getResult", "getOutput", "getOutputCopy", "getAssembledItem", "getResultItem"}) {
             for (java.lang.reflect.Method m : recipe.getClass().getMethods()) {
                 if (!m.getName().equals(name)) continue;
                 if (!ItemStack.class.isAssignableFrom(m.getReturnType())) continue;
-                if (m.getParameterCount() != 1) continue;
-                try {
-                    Object r = m.invoke(recipe, access);
-                    if (r instanceof ItemStack s && !s.isEmpty()) return s;
-                } catch (Exception ignored) {}
+                if (m.getParameterCount() == 1) {
+                    try {
+                        Object r = m.invoke(recipe, access);
+                        if (r instanceof ItemStack s && !s.isEmpty()) return s;
+                    } catch (Exception ignored) {}
+                } else if (m.getParameterCount() == 0) {
+                    try {
+                        Object r = m.invoke(recipe);
+                        if (r instanceof ItemStack s && !s.isEmpty()) return s;
+                    } catch (Exception ignored) {}
+                }
             }
-            // Skip no-arg getResultItem() — safety guard like ModRecipeHandlers.
-            // AetheriumAnvilRecipe doesn't abuse the 0-arg overload (unlike WR),
-            // but the 1-arg got here via Recipe's default delegation, so if
-            // that returned EMPTY the 0-arg would too.
-            if (isResultItem) continue;
-            // 0-param fallback for other method names
-            for (java.lang.reflect.Method m : recipe.getClass().getMethods()) {
-                if (!m.getName().equals(name)) continue;
-                if (!ItemStack.class.isAssignableFrom(m.getReturnType())) continue;
-                if (m.getParameterCount() != 0) continue;
-                try {
-                    Object r = m.invoke(recipe);
-                    if (r instanceof ItemStack s && !s.isEmpty()) return s;
-                } catch (Exception ignored) {}
-            }
+        }
+        // Field fallback — some cross-mod recipes store output directly
+        for (String fieldName : new String[]{"output", "result"}) {
+            try {
+                java.lang.reflect.Field f = recipe.getClass().getDeclaredField(fieldName);
+                f.setAccessible(true);
+                Object v = f.get(recipe);
+                if (v instanceof ItemStack s && !s.isEmpty()) return s;
+            } catch (Exception ignored) {}
         }
         return ItemStack.EMPTY;
     }

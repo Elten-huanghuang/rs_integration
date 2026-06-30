@@ -50,6 +50,7 @@ public final class ModRecipeHandlers {
      */
     public static void register(ModRecipeHandler handler) {
         HANDLERS.add(handler);
+        HANDLER_CACHE.clear(); // Invalidate — new handler may cover previously-unknown classes
     }
 
     private ModRecipeHandlers() {}
@@ -89,11 +90,17 @@ public final class ModRecipeHandlers {
         if (recipe instanceof CraftingRecipe cr) {
             return cr.getResultItem(access);
         }
-        // Handler dispatch first — compile-time dispatch is always correct
+        // Handler dispatch first — if handler returns EMPTY it has
+        // explicitly rejected the recipe (e.g. CrystalRitualRecipe).
         ModRecipeHandler handler = handlerFor(recipe);
         if (handler != null) {
             ItemStack result = handler.getResultItem(recipe, access);
             if (!result.isEmpty()) return result;
+            // Handler exists and returned EMPTY — don't fall through.
+            // The reflection probe would call getResultItem(RegistryAccess)
+            // which delegates to deprecated 0-arg getResultItem() that many
+            // mods override to return the machine block icon.
+            return ItemStack.EMPTY;
         }
         Class<?> clazz = recipe.getClass();
 

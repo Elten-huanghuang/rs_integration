@@ -59,7 +59,12 @@ public final class RSSidePanelSyncPacket {
         buf.writeVarInt(items.size());
         for (int i = 0; i < items.size(); i++) {
             buf.writeUUID(ids != null && i < ids.size() ? ids.get(i) : UUID.randomUUID());
-            buf.writeItem(items.get(i));
+            ItemStack stack = items.get(i);
+            int realCount = stack.getCount();
+            ItemStack sent = stack.copy();
+            sent.setCount(1);
+            buf.writeItem(sent);
+            buf.writeVarInt(realCount);
             buf.writeVarLong(timestamps != null && i < timestamps.size() ? timestamps.get(i) : 0L);
             buf.writeBoolean(craftableFlags != null && i < craftableFlags.size() && craftableFlags.get(i));
         }
@@ -84,7 +89,10 @@ public final class RSSidePanelSyncPacket {
         List<Boolean> craftable = new ArrayList<>(count);
         for (int i = 0; i < count; i++) {
             ids.add(buf.readUUID());
-            items.add(buf.readItem());
+            ItemStack stack = buf.readItem();
+            int realCount = buf.readVarInt();
+            stack.setCount(realCount);
+            items.add(stack);
             timestamps.add(buf.readVarLong());
             craftable.add(buf.readBoolean());
         }

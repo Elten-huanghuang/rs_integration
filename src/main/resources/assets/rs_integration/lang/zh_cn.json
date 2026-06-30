@@ -49,6 +49,7 @@
   "rsi.generic.error.prepare_failed": "§c材料准备失败",
   "rsi.generic.error.machine_not_found": "§c无法找到目标机器",
   "rsi.generic.error.unsupported_machine": "§c不支持的机器类型: %s",
+  "rsi.generic.error.no_bound_machine": "§c未绑定 %s 机器，请在终端中 Shift+右击机器方块进行绑定",
   "rsi.generic.error.craft_failed": "§cRS 自动合成失败: %s",
   "rsi.generic.error.no_ingredients": "§c此配方无可解析的材料",
   "rsi.generic.info.auto_crafting": "§e正在自动合成 %s 个中间步骤...",
@@ -216,6 +217,7 @@
   "rsi.tlm.error.no_power": "无法获取P点能力",
   "rsi.tlm.error.insufficient_power": "P点不足（当前 %s，需要 %s）",
   "rsi.tlm.warn.insufficient_power_bind": "§e⚠ 当前P点不足（当前 %s，需要 %s）— 合成时将失败",
+  "rsi.tlm.warn.insufficient_power_points": "§e⚠ P点不足（能力值+物品合计 %s，需要 %s）",
   "rsi.tlm.error.handler_not_empty": "祭坛存储槽位已被占用 — 可能另有任务正在运行",
 
   "rsi.plan.title": "合成方案: %s",

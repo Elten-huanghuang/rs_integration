@@ -112,6 +112,9 @@ final class SyncHandler {
 
         RSSidePanelClient.dataModel.updatePanels(new ArrayList<>(RSSidePanelClient.panels), RSSidePanelClient.totalSlotCount);
         BindingCache.getInstance().updateBindings(bindings);
+
+        RSIntegrationMod.LOGGER.info("[RSI] SidePanel sync applied: {} panel entries, totalSlotCount={}, network='{}'",
+                RSSidePanelClient.panels.size(), totalSlotCount, networkName);
     }
 
     static void onDeltaReceived(UUID id, ItemStack stack, long timestamp, boolean craftable) {
@@ -136,19 +139,24 @@ final class SyncHandler {
         UUID animId = id;
 
         if (count <= 0) {
+            // Match RS GridViewImpl.postChange(): map.remove(stackId)
+            // when quantity drops to zero — no lingering zeroed entry.
             if (existing != null) {
-                existing.setCount(0);
-                existing.craftable = craftable;
                 animId = existing.getId();
+                RSSidePanelClient.removePanel(animId);
             } else {
                 String deadKey = RSSidePanelClient.keyOf(stack);
                 RSSidePanelClient.clearPendingBySearchKey(deadKey);
+                UUID toRemove = null;
                 for (PanelStack p : RSSidePanelClient.panels) {
                     if (p.searchKey().equals(deadKey)) {
-                        p.setCount(0);
-                        animId = p.getId();
+                        toRemove = p.getId();
                         break;
                     }
+                }
+                if (toRemove != null) {
+                    animId = toRemove;
+                    RSSidePanelClient.removePanel(toRemove);
                 }
             }
         } else {

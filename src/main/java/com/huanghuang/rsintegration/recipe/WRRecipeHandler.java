@@ -34,33 +34,52 @@ public final class WRRecipeHandler implements ModRecipeHandler {
         String className = recipe.getClass().getName();
         if (className.endsWith("CrystalRitualRecipe")) return ItemStack.EMPTY;
 
-        for (String name : new String[]{"getResultItem", "getResult", "getOutput", "getOutputCopy", "getAssembledItem"}) {
-            boolean isResultItem = "getResultItem".equals(name);
-            // Try 1-param version first — some recipes (e.g. ArcaneIteratorRecipe)
-            // have a no-arg getResultItem() that returns the machine block itself,
-            // while getResultItem(RegistryAccess) returns the real recipe output.
+        // Probe getResult/getOutput/getOutputCopy/getAssembledItem first —
+        // these are the canonical output methods that don't delegate to
+        // the deprecated 0-arg getResultItem() which WR abuses to return
+        // machine block icons.  Fall back to getResultItem last because
+        // some recipes (e.g. ArcaneIteratorRecipe) only expose output
+        // through it.
+        for (String name : new String[]{"getResult", "getOutput", "getOutputCopy", "getAssembledItem", "getResultItem"}) {
             for (java.lang.reflect.Method m : recipe.getClass().getMethods()) {
                 if (!m.getName().equals(name)) continue;
                 if (!ItemStack.class.isAssignableFrom(m.getReturnType())) continue;
-                if (m.getParameterCount() != 1) continue;
-                try {
-                    Object r = m.invoke(recipe, access);
-                    if (r instanceof ItemStack s && !s.isEmpty()) return s;
-                } catch (Exception ignored) {}
+                if (m.getParameterCount() == 1) {
+                    try {
+                        Object r = m.invoke(recipe, access);
+                        if (r instanceof ItemStack s && !s.isEmpty()) return s;
+                    } catch (Exception ignored) {}
+                } else if (m.getParameterCount() == 0) {
+                    try {
+                        Object r = m.invoke(recipe);
+                        if (r instanceof ItemStack s && !s.isEmpty()) return s;
+                    } catch (Exception ignored) {}
+                }
             }
-            // Skip no-arg getResultItem() — the deprecated overload that mods
-            // abuse to return machine block icons.
-            if (isResultItem) continue;
-            // Fall back to no-arg version (other method names only)
-            for (java.lang.reflect.Method m : recipe.getClass().getMethods()) {
-                if (!m.getName().equals(name)) continue;
-                if (!ItemStack.class.isAssignableFrom(m.getReturnType())) continue;
-                if (m.getParameterCount() != 0) continue;
-                try {
-                    Object r = m.invoke(recipe);
-                    if (r instanceof ItemStack s && !s.isEmpty()) return s;
-                } catch (Exception ignored) {}
+        }
+
+        // Field-scanning fallback: some WR recipes (e.g. ArcaneIteratorRecipe)
+        // may not expose output through the standard methods at runtime if
+        // Forge SRG→MCP remapping hasn't been applied yet or the recipe uses
+        // a different output mechanism.  Scan for common output field names.
+        return scanOutputField(recipe);
+    }
+
+    private static ItemStack scanOutputField(Object recipe) {
+        Class<?> scan = recipe.getClass();
+        while (scan != null && scan != Object.class) {
+            for (java.lang.reflect.Field f : scan.getDeclaredFields()) {
+                if (!ItemStack.class.isAssignableFrom(f.getType())) continue;
+                String fn = f.getName();
+                if (fn.equals("output") || fn.equals("result") || fn.equals("resultItem")) {
+                    f.setAccessible(true);
+                    try {
+                        ItemStack s = (ItemStack) f.get(recipe);
+                        if (s != null && !s.isEmpty()) return s.copy();
+                    } catch (Exception ignored) {}
+                }
             }
+            scan = scan.getSuperclass();
         }
         return ItemStack.EMPTY;
     }

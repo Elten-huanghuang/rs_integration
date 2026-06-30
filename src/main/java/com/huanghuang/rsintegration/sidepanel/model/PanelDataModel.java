@@ -166,22 +166,25 @@ public final class PanelDataModel {
         UUID animId = id;
 
         if (count <= 0) {
+            // Match RS GridViewImpl.postChange(): map.remove(stackId)
             if (existing != null) {
-                existing.setCount(0);
-                existing.craftable = craftable;
                 animId = existing.getId();
+                removePanel(animId);
             } else {
-                // UUID mismatch — match by item identity
                 String deadKey = keyOf(stack);
                 clearPendingBySearchKey(deadKey);
+                UUID toRemove = null;
                 synchronized (panels) {
                     for (PanelStack p : panels) {
                         if (p.searchKey().equals(deadKey)) {
-                            p.setCount(0);
-                            animId = p.getId();
+                            toRemove = p.getId();
                             break;
                         }
                     }
+                }
+                if (toRemove != null) {
+                    animId = toRemove;
+                    removePanel(toRemove);
                 }
             }
         } else {

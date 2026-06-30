@@ -29,6 +29,7 @@ public final class FaRecipeHandler implements ModRecipeHandler {
 
     @Override
     public ItemStack getResultItem(Recipe<?> recipe, RegistryAccess access) {
+        if (recipe instanceof FaRitualWrapper w) return w.getResultItem(access);
         return ItemStack.EMPTY;
     }
 

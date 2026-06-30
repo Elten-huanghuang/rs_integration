@@ -24,29 +24,24 @@ public final class TlmAltarRecipeHandler implements ModRecipeHandler {
 
     @Override
     public ItemStack getResultItem(Recipe<?> recipe, RegistryAccess access) {
-        // Recipe's default getResultItem(RegistryAccess) delegates to the
-        // deprecated 0-arg getResultItem().  Probe 1-arg first, then other
-        // known output methods.
-        for (String name : new String[]{"getResultItem", "getResult", "getOutput", "getOutputCopy", "getAssembledItem"}) {
-            boolean isResultItem = "getResultItem".equals(name);
+        // Probe getResult/getOutput/getOutputCopy/getAssembledItem first,
+        // fall back to getResultItem last — some recipes only expose
+        // output through getResultItem.
+        for (String name : new String[]{"getResult", "getOutput", "getOutputCopy", "getAssembledItem", "getResultItem"}) {
             for (java.lang.reflect.Method m : recipe.getClass().getMethods()) {
                 if (!m.getName().equals(name)) continue;
                 if (!ItemStack.class.isAssignableFrom(m.getReturnType())) continue;
-                if (m.getParameterCount() != 1) continue;
-                try {
-                    Object r = m.invoke(recipe, access);
-                    if (r instanceof ItemStack s && !s.isEmpty()) return s;
-                } catch (Exception ignored) {}
-            }
-            if (isResultItem) continue;
-            for (java.lang.reflect.Method m : recipe.getClass().getMethods()) {
-                if (!m.getName().equals(name)) continue;
-                if (!ItemStack.class.isAssignableFrom(m.getReturnType())) continue;
-                if (m.getParameterCount() != 0) continue;
-                try {
-                    Object r = m.invoke(recipe);
-                    if (r instanceof ItemStack s && !s.isEmpty()) return s;
-                } catch (Exception ignored) {}
+                if (m.getParameterCount() == 1) {
+                    try {
+                        Object r = m.invoke(recipe, access);
+                        if (r instanceof ItemStack s && !s.isEmpty()) return s;
+                    } catch (Exception ignored) {}
+                } else if (m.getParameterCount() == 0) {
+                    try {
+                        Object r = m.invoke(recipe);
+                        if (r instanceof ItemStack s && !s.isEmpty()) return s;
+                    } catch (Exception ignored) {}
+                }
             }
         }
         return ItemStack.EMPTY;

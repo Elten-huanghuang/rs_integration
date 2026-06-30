@@ -13,12 +13,11 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Authorizes a player to interact with a remote container by bypassing
- * the vanilla {@code stillValid()} distance check.
+ * Authorizes a player to interact with a remote container.
  *
  * <p>Usage: Before opening a remote machine GUI, call
  * {@code authorize(player, dim, pos, expectedBlock)}.
- * The player is granted temporary access to the container until it is closed.</p>
+ * The player is granted access to the container until it is closed.</p>
  *
  * <p><b>Safety:</b> Authorizations auto-expire after {@link #AUTH_TTL_MS} to prevent
  * permanent ghost-container access.  The {@code expectedBlock} field prevents
@@ -56,15 +55,6 @@ public final class RemoteGuiAuth {
             return false;
         }
 
-        // Same dimension: enforce a 16-block radius so the container
-        // stays open while the player walks around the machine area.
-        if (player.level().dimension() == auth.dim()) {
-            double distSq = player.position().distanceToSqr(
-                    auth.pos().getX() + 0.5, auth.pos().getY() + 0.5, auth.pos().getZ() + 0.5);
-            return distSq <= 256.0;
-        }
-        // Cross-dimension: distance is meaningless.  Allow as long as
-        // the auth is not expired (TTL safety net) and block still exists.
         return true;
     }
 

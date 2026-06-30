@@ -6,6 +6,7 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
+import net.minecraft.world.item.Item;
 import net.minecraftforge.registries.ForgeRegistries;
 
 import java.util.ArrayList;
@@ -20,24 +21,12 @@ final class DisplayListManager {
 
     private DisplayListManager() {}
 
-    // ── Lazy display list rebuild ─────────────────────────────────
-
     static void ensureDisplayReady() {
-        if (!RSSidePanelClient.displayDirty) {
-            long now = System.currentTimeMillis();
-            for (PanelStack ps : RSSidePanelClient.panels) {
-                if (ps.zeroed && now - ps.zeroedAt > 200) {
-                    RSSidePanelClient.displayDirty = true;
-                    break;
-                }
-            }
-        }
         if (!RSSidePanelClient.displayDirty) return;
         rebuildDisplayList();
     }
 
     static void rebuildDisplayList() {
-        RSSidePanelClient.displayDirty = false;
         List<PanelStack> list = refilter(RSSidePanelClient.panels);
         resort(list);
         if (list.isEmpty() && !RSSidePanelClient.panels.isEmpty()) {
@@ -52,9 +41,8 @@ final class DisplayListManager {
         }
         RSSidePanelClient.displayList.clear();
         RSSidePanelClient.displayList.addAll(list);
+        RSSidePanelClient.displayDirty = false;
     }
-
-    // ── Filter ────────────────────────────────────────────────────
 
     @SuppressWarnings("resource")
     static List<PanelStack> refilter(List<PanelStack> source) {
@@ -109,42 +97,44 @@ final class DisplayListManager {
         if (RSSidePanelClient.viewType != 0) {
             list.removeIf(ps -> RSSidePanelClient.viewType == 1 ? ps.craftable : !ps.craftable);
         }
-
-        list.removeIf(ps -> ps.zeroed && !ps.craftable);
-
         return list;
     }
 
-    // ── Sort ──────────────────────────────────────────────────────
-
+    // 【核心修复】：彻底翻转了 .thenComparing 的顺序，并使用了安全的比较器
     static void resort(List<PanelStack> list) {
         if (!RSSidePanelClient.canSort()) return;
         int sm = RSSidePanelClient.sortMode;
         boolean asc = RSSidePanelClient.sortAsc;
+
+        // 基础名称比较器（兜底用）
+        Comparator<PanelStack> nameCmp = Comparator.comparing(PanelStack::getName);
+
         switch (sm) {
             case 0 -> {
-                if (asc) list.sort(Comparator.comparing(ps -> ps.getName().toLowerCase()));
-                else list.sort(Comparator.comparing((PanelStack ps) -> ps.getName().toLowerCase()).reversed());
+                // 按名称
+                if (asc) list.sort(nameCmp);
+                else list.sort(nameCmp.reversed());
             }
             case 1 -> {
-                if (asc) list.sort(Comparator.comparingInt(PanelStack::getCount));
-                else list.sort((a, b) -> Integer.compare(b.getCount(), a.getCount()));
+                // 按数量（数量为主，名称为辅）
+                Comparator<PanelStack> qtyCmp = Comparator.comparingInt(PanelStack::getCount);
+                if (asc) list.sort(qtyCmp.thenComparing(nameCmp));
+                else list.sort(qtyCmp.reversed().thenComparing(nameCmp.reversed()));
             }
-            case 2 -> list.sort((a, b) -> {
-                var ka = ForgeRegistries.ITEMS.getKey(a.getStack().getItem());
-                var kb = ForgeRegistries.ITEMS.getKey(b.getStack().getItem());
-                String ia = ka != null ? ka.toString() : "zzz:zzz";
-                String ib = kb != null ? kb.toString() : "zzz:zzz";
-                return asc ? ia.compareToIgnoreCase(ib) : ib.compareToIgnoreCase(ia);
-            });
+            case 2 -> {
+                // 按 ID（ID为主，名称为辅）
+                Comparator<PanelStack> idCmp = Comparator.comparingInt(ps -> Item.getId(ps.getStack().getItem()));
+                if (asc) list.sort(idCmp.thenComparing(nameCmp));
+                else list.sort(idCmp.reversed().thenComparing(nameCmp.reversed()));
+            }
             case 3 -> {
-                if (asc) list.sort(Comparator.comparingLong(ps -> ps.timestamp));
-                else list.sort((a, b) -> Long.compare(b.timestamp, a.timestamp));
+                // 按最后修改时间（时间为主，名称为辅）
+                Comparator<PanelStack> tsCmp = Comparator.comparingLong(ps -> ps.timestamp);
+                if (asc) list.sort(tsCmp.thenComparing(nameCmp));
+                else list.sort(tsCmp.reversed().thenComparing(nameCmp.reversed()));
             }
         }
     }
-
-    // ── Pinyin ────────────────────────────────────────────────────
 
     static boolean matchesPinyin(String itemName, String query) {
         try {
