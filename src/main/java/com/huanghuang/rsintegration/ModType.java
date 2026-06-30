@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import net.minecraft.world.item.crafting.Recipe;
 
@@ -43,6 +44,7 @@ public final class ModType {
     public static final ModType VANILLA_MACHINE;
     public static final ModType MALUM_SPIRIT_CRUCIBLE;
     public static final ModType AETHERWORKS_ANVIL;
+    public static final ModType CUSTOM_GUI;
 
     static {
         GENERIC = register("generic",
@@ -120,6 +122,12 @@ public final class ModType {
                 new String[]{"aetherworks", "aetherium", "anvil"},
                 new String[0],
                 delegateSupplier("com.huanghuang.rsintegration.mods.aetherworks.AetherworksBatchDelegate"));
+
+        CUSTOM_GUI = register("custom_gui",
+                new String[0],
+                new String[0],
+                new String[0],
+                com.huanghuang.rsintegration.crafting.batch.delegate.GenericBatchDelegate::new);
     }
 
     // ── constructors ──────────────────────────────────────────────
@@ -231,6 +239,10 @@ public final class ModType {
             }
             // 3. Fallback: check if blockKey contains the mod type id as a segment
             if (containsSegment(lower, mt.id().toLowerCase(Locale.ROOT))) return mt;
+        }
+        // 4. Config-driven: check customGuiMachineMods list
+        for (String modId : RSIntegrationConfig.CUSTOM_GUI_MACHINE_MODS.get()) {
+            if (containsSegment(lower, modId.toLowerCase(Locale.ROOT))) return CUSTOM_GUI;
         }
         return null;
     }

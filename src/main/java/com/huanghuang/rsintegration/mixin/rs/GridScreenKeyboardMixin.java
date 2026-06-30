@@ -15,7 +15,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 @Mixin(value = com.refinedmods.refinedstorage.screen.grid.GridScreen.class, remap = false)
 public abstract class GridScreenKeyboardMixin {
 
-    @Inject(method = "m_7920_", at = @At("HEAD"), cancellable = true, remap = false)
+    @Inject(method = "m_7933_", at = @At("HEAD"), cancellable = true, remap = false)
     private void rsi$onKeyPressed(int keyCode, int scanCode, int modifiers,
                                    CallbackInfoReturnable<Boolean> cir) {
         // Hub overlay steals keyboard input first

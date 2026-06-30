@@ -2,9 +2,9 @@ package com.huanghuang.rsintegration.mixin.rs;
 
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.machine.MachineHub;
-import com.huanghuang.rsintegration.machine.MachineHubRenderer;
 import com.huanghuang.rsintegration.machine.MachineInteractType;
 import com.huanghuang.rsintegration.machine.MachineStatus;
+import com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler;
 import com.huanghuang.rsintegration.sidepanel.client.MachineTabHandler;
 import com.huanghuang.rsintegration.sidepanel.client.MachineTabRenderer;
 import com.huanghuang.rsintegration.sidepanel.data.BindingInfo;
@@ -32,21 +32,32 @@ public abstract class GridScreenMachineTabMixin {
     private static final int HUB_BUTTON_W = 18;
     private static final int HUB_BUTTON_H = 18;
     private static final int GRID_W = 174;  // RS grid image width
+    private static boolean rsi$bindingSyncRequested;
 
     @Inject(method = "renderForeground", at = @At("TAIL"), remap = false)
     private void rsi$renderMachineTabs(GuiGraphics gfx, int mouseX, int mouseY, CallbackInfo ci) {
         if (!RSIntegrationConfig.ENABLE_MACHINE_GUI_TABS.get()) return;
 
+        // Request machine binding data from server on first render.
+        // Without this, the Hub button won't appear until the side panel is opened.
+        // Also clear any stale Hub overlay state from a previous screen session.
+        if (!rsi$bindingSyncRequested) {
+            rsi$bindingSyncRequested = true;
+            MachineHub.hideImmediate();
+            RSSidePanelNetworkHandler.sendRequestSync();
+        }
+
         AbstractContainerScreenAccessor acc = (AbstractContainerScreenAccessor) this;
         int leftPos = acc.getLeftPos();
         int topPos = acc.getTopPos();
         List<BindingInfo> machines = MachineTabHandler.getVisibleTabs();
+        List<BindingInfo> allMachines = MachineTabHandler.getAllMachines();
 
         if (machines.isEmpty()) {
             // Hub mode: render a single "Hub" button on the LEFT side
-            List<BindingInfo> allMachines = MachineTabHandler.getAllMachines();
             if (allMachines.isEmpty()) return;
-            if (MachineHub.shouldUseHub(allMachines.size())) {
+            int cnt = allMachines.size();
+            if (MachineHub.shouldUseHub(cnt)) {
                 // Relative draw coords (pose is already translated by (leftPos, topPos))
                 int hubRelX = -HUB_BUTTON_W - 2;
                 int sideButtonBottom = 0;
@@ -60,11 +71,10 @@ public abstract class GridScreenMachineTabMixin {
                 } catch (Exception ignored) {}
                 int hubRelY = sideButtonBottom + 4;
 
-                // Hit-test in screen space
-                int hubScrX = leftPos + hubRelX;
-                int hubScrY = topPos + hubRelY;
-                boolean hubHovered = mouseX >= hubScrX && mouseX < hubScrX + HUB_BUTTON_W
-                        && mouseY >= hubScrY && mouseY < hubScrY + HUB_BUTTON_H;
+                // Hit-test in RELATIVE coords — mouseX/mouseY are already
+                // translated by (leftPos, topPos) by the caller (BaseScreen).
+                boolean hubHovered = mouseX >= hubRelX && mouseX < hubRelX + HUB_BUTTON_W
+                        && mouseY >= hubRelY && mouseY < hubRelY + HUB_BUTTON_H;
                 boolean hubActive = MachineHub.isVisible();
                 int hubColor, outlineColor;
                 if (hubActive) {
@@ -122,17 +132,6 @@ public abstract class GridScreenMachineTabMixin {
         }
     }
 
-    // Hub overlay: injected at TAIL of the OBFUSCATED render() method.
-    // GridScreen inherits render from vanilla AbstractContainerScreen, which is
-    // named "m_88315_" in bytecode (remap=false must match the bytecode name).
-    @Inject(method = "m_88315_", at = @At("TAIL"), remap = false)
-    private void rsi$renderHub(GuiGraphics gfx, int mouseX, int mouseY, float partialTick,
-                                CallbackInfo ci) {
-        if (!RSIntegrationConfig.ENABLE_MACHINE_GUI_TABS.get()) return;
-        if (!MachineHub.isVisible()) return;
-
-        AbstractContainerScreenAccessor acc = (AbstractContainerScreenAccessor) this;
-        MachineHubRenderer.render(gfx, acc.getLeftPos(), acc.getTopPos(),
-                acc.getImageWidth(), mouseX, mouseY);
-    }
+    // Hub overlay is now rendered via ScreenEvent.Render.Post (in GuiNavStack)
+    // so that it draws above JEI's ingredient panel.
 }

@@ -27,12 +27,9 @@ public final class MachineHubInputHandler {
     public static boolean mouseClicked(double mouseX, double mouseY, int button) {
         if (!MachineHub.isVisible()) return false;
 
-        // Only consume clicks within the hub panel bounds
+        // Only handle clicks within the hub panel bounds.
+        // Clicks outside (e.g. grid interaction) pass through without closing the hub.
         if (!MachineHub.isWithinBounds((int) mouseX, (int) mouseY)) {
-            // Click outside hub — hide on left-click, but DON'T consume the event
-            if (button == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
-                MachineHub.hide();
-            }
             return false;
         }
 
@@ -91,13 +88,15 @@ public final class MachineHubInputHandler {
 
             if (carried.isEmpty() && status.state() == MachineState.HAS_OUTPUT) {
                 MachineTabHandler.onCollect(info, shift);
+                MachineHub.hide();
             } else if (!carried.isEmpty()) {
                 MachineSlotType slot = shift ? MachineSlotType.FUEL : MachineSlotType.INPUT;
                 MachineTabHandler.onInsert(info, slot);
+                // Keep Hub open so player can insert multiple items (fuel + input)
             } else {
                 MachineTabHandler.onClick(info);
+                MachineHub.hide();
             }
-            MachineHub.hide();
             return true;
         }
 

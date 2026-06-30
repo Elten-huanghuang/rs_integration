@@ -102,9 +102,6 @@ public final class RSIntegrationMod {
                     () -> com.huanghuang.rsintegration.sidepanel.RSSidePanelModule::initClient);
             com.huanghuang.rsintegration.sidepanel.RSSidePanelModule.initCommon();
         }
-        if (RSIntegrationConfig.ENABLE_MACHINE_GUI_TABS.get()) {
-            // Hub toggle is now mouse-only (click the Hub button on the left side of the RS grid)
-        }
         if (enabled(RSIntegrationConfig.ENABLE_SOPHISTICATED_BACKPACKS, ModIds.SOPHISTICATED_BACKPACKS)) {
             com.huanghuang.rsintegration.backpack.SophisticatedBackpacksItems
                     .init(FMLJavaModLoadingContext.get().getModEventBus());

@@ -1,6 +1,5 @@
 package com.huanghuang.rsintegration.mixin.rs;
 
-import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.machine.MachineHub;
 import com.huanghuang.rsintegration.machine.MachineHubInputHandler;
 import com.huanghuang.rsintegration.machine.MachineInteractType;
@@ -57,15 +56,15 @@ public abstract class GridScreenMouseMixin {
         // Hub button click — must be before individual tab hover check,
         // since hovered == -1 when hub button is showing (tabs collapsed).
         // hoveredTabIndex is set to 0 by renderForeground when mouse is over the hub.
-        if (button == 0 && MachineTabHandler.getHoveredTabIndex() == 0) {
+        if (button == 0) {
+            int ht = MachineTabHandler.getHoveredTabIndex();
             List<BindingInfo> visibleTabs = MachineTabHandler.getVisibleTabs();
-            if (visibleTabs.isEmpty()) {
-                List<BindingInfo> allMachines = MachineTabHandler.getAllMachines();
-                if (MachineHub.shouldUseHub(allMachines.size())) {
-                    MachineHub.toggle(allMachines);
-                    cir.setReturnValue(true);
-                    return;
-                }
+            List<BindingInfo> allMachines = MachineTabHandler.getAllMachines();
+            boolean shouldUse = MachineHub.shouldUseHub(allMachines.size());
+            if (ht == 0 && visibleTabs.isEmpty() && shouldUse) {
+                MachineHub.toggle(allMachines);
+                cir.setReturnValue(true);
+                return;
             }
         }
 

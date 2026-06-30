@@ -158,7 +158,7 @@ public final class MachineHub {
         refilter();
         state = State.ANIMATING_IN;
         stateEnteredAt = System.currentTimeMillis();
-        animProgress = 0f;
+        animProgress = 0.001f; // avoid alpha=0 gate on same-frame render
     }
 
     /** Start hide animation. */

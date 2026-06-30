@@ -52,6 +52,7 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.IntValue MACHINE_HUB_TOGGLE_KEY;
     public static ForgeConfigSpec.ConfigValue<List<? extends String>> MACHINE_GUI_WHITELIST;
     public static ForgeConfigSpec.IntValue MACHINE_GUI_MAX_DISTANCE;
+    public static ForgeConfigSpec.ConfigValue<List<? extends String>> CUSTOM_GUI_MACHINE_MODS;
     public static ForgeConfigSpec.IntValue REPEAT_COUNT_MAX;
     public static ForgeConfigSpec.ConfigValue<List<? extends String>> PROTECTED_ITEMS;
     public static ForgeConfigSpec.IntValue PROTECTED_RESERVE;
@@ -242,7 +243,8 @@ public final class RSIntegrationConfig {
         MACHINE_GUI_WHITELIST = b
                 .comment("Whitelist of mod type IDs that support the \"Open Machine\" GUI button.",
                         "Only mod types in this list will show the button in crafting plan screens.",
-                        "Valid values: vanilla_machine, goety, malum, forbidden_arcanus, eidolon, wizards_reborn")
+                        "Valid values: vanilla_machine, custom_gui, goety, malum, forbidden_arcanus,",
+                        "eidolon, wizards_reborn")
                 .defineList("machineGuiWhitelist",
                         List.of("vanilla_machine"),
                         obj -> obj instanceof String);
@@ -259,6 +261,14 @@ public final class RSIntegrationConfig {
                         "Set to 0 to disable distance checks (unlimited range).",
                         "This is a server-side security control to prevent cross-dimension GUI abuse.")
                 .defineInRange("machineGuiMaxDistance", 0, 0, Integer.MAX_VALUE);
+        CUSTOM_GUI_MACHINE_MODS = b
+                .comment("Mod IDs to register as GUI-type machines without writing any Java code.",
+                        "Machines from these mods appear in the Machine Hub, can be remotely opened,",
+                        "and can be managed via the machineGuiWhitelist using \"custom_gui\".",
+                        "No batch-crafting — this is purely for remote GUI access.",
+                        "Example: [\"aether\", \"crabbersdelight\"]")
+                .defineList("customGuiMachineMods", List.of("aether", "crabbersdelight"),
+                        obj -> obj instanceof String);
         b.pop();
 
         b.push("advanced");

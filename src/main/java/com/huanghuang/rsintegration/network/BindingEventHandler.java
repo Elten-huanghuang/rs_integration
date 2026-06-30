@@ -7,12 +7,15 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.MenuProvider;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraftforge.common.ForgeConfigSpec;
 import net.minecraftforge.event.entity.player.PlayerInteractEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.ModList;
+import net.minecraftforge.registries.ForgeRegistries;
 import net.minecraftforge.fml.common.Mod;
 
 import javax.annotation.Nullable;
@@ -54,7 +57,19 @@ public final class BindingEventHandler {
             matched = target;
             break;
         }
-        if (matched == null) return;
+        // Config-driven fallback: only blocks with a GUI (MenuProvider BE)
+        // from mods listed in customGuiMachineMods.
+        if (matched == null) {
+            ResourceLocation regName = ForgeRegistries.BLOCKS.getKey(block);
+            if (regName == null) return;
+            boolean inCustomList = RSIntegrationConfig.CUSTOM_GUI_MACHINE_MODS.get().stream()
+                    .anyMatch(regName.getNamespace()::equals);
+            if (!inCustomList) return;
+            BlockEntity be = event.getLevel().getBlockEntity(event.getPos());
+            if (!(be instanceof MenuProvider)) return;
+            matched = new MachineBindingTarget(regName.getNamespace(), ModType.CUSTOM_GUI,
+                    RSIntegrationConfig.ENABLE_MACHINE_GUI_TABS, List.of(), null);
+        }
 
         ItemStack held = player.getItemInHand(event.getHand());
         Optional<IBindingHook> hook = AltarBindingRegistry.findHook(held);

@@ -22,8 +22,10 @@ import java.util.List;
 public final class MachineHubRenderer {
 
     private static final int SLOT_SIZE = 18;
-    private static final int COLS = 6;
-    private static final int PADDING = 5;
+    private static final int CELL_GAP  = 2;
+    private static final int CELL_SIZE = SLOT_SIZE + CELL_GAP;
+    private static final int COLS = 5;
+    private static final int PADDING = 6;
     private static final int TITLE_H = 14;
     private static final int FILTER_H = 14;
     private static final int FOOTER_H = 10;
@@ -50,10 +52,10 @@ public final class MachineHubRenderer {
         if (allMachines.isEmpty()) return -1;
 
         int rows = Math.max(1, (int) Math.ceil((double) machines.size() / COLS));
-        int slotGridW = COLS * SLOT_SIZE;
+        int slotGridW = COLS * CELL_SIZE - CELL_GAP;
         int maxVisibleRows = 12;
         int visibleRows = Math.min(rows, maxVisibleRows);
-        int visibleGridH = visibleRows * SLOT_SIZE;
+        int visibleGridH = visibleRows * CELL_SIZE - CELL_GAP;
 
         // Ensure panel is wide enough for footer text + config toggle
         var font = Minecraft.getInstance().font;
@@ -109,17 +111,16 @@ public final class MachineHubRenderer {
         int titleY = y + PADDING + 1;
         g.drawString(font, truncatedTitle, titleX, titleY, TEXT_PRIMARY);
 
-        // Close button (drawn with lines, not text)
-        int closeR = 5; // radius
-        int closeCx = x + totalW - PADDING - closeR - 3;
-        int closeCy = y + PADDING + TITLE_H / 2;
-        boolean closeHovered = mouseX >= closeCx - closeR - 2 && mouseX < closeCx + closeR + 2
-                && mouseY >= closeCy - closeR - 2 && mouseY < closeCy + closeR + 2;
+        // Close button — X symbol
+        String xMark = "✕";
+        int xW = font.width(xMark);
+        int xX = x + totalW - PADDING - xW - 4;
+        int xY = y + PADDING + (TITLE_H - font.lineHeight) / 2;
+        boolean closeHovered = mouseX >= xX - 2 && mouseX < xX + xW + 2
+                && mouseY >= xY - 2 && mouseY < xY + font.lineHeight + 2;
         MachineHub.setCloseButtonHovered(closeHovered);
-
         int closeColor = closeHovered ? 0xFFFF5555 : TEXT_DIM;
-        g.fill(closeCx - closeR, closeCy - 1, closeCx + closeR + 1, closeCy + 1, closeColor);   // horizontal bar
-        g.fill(closeCx - 1, closeCy - closeR, closeCx + 1, closeCy + closeR + 1, closeColor);   // vertical bar
+        g.drawString(font, xMark, xX, xY, closeColor);
 
         // ── Filter bar ───────────────────────────────────────────────
         int filterX = x + PADDING;
@@ -147,7 +148,7 @@ public final class MachineHubRenderer {
 
         // ── Machine grid ─────────────────────────────────────────────
         int gridY_ = filterY + FILTER_H + PADDING;
-        int totalRowsHeight = rows * SLOT_SIZE;
+        int totalRowsHeight = rows * CELL_SIZE - CELL_GAP;
         int maxScroll = Math.max(0, totalRowsHeight - visibleGridH);
         int scrollOffset = MachineHub.getScrollOffset();
         if (scrollOffset > maxScroll) scrollOffset = maxScroll;
@@ -160,8 +161,8 @@ public final class MachineHubRenderer {
             BindingInfo info = machines.get(i);
             int col = i % COLS;
             int row = i / COLS;
-            int sx = x + PADDING + col * SLOT_SIZE;
-            int sy = gridY_ + row * SLOT_SIZE - scrollOffset;
+            int sx = x + PADDING + col * CELL_SIZE;
+            int sy = gridY_ + row * CELL_SIZE - scrollOffset;
 
             if (sy + SLOT_SIZE <= gridY_ || sy >= gridY_ + visibleGridH) continue;
 
@@ -279,17 +280,19 @@ public final class MachineHubRenderer {
 
         // Config checkbox + label
         boolean returnToRs = RSIntegrationConfig.RETURN_TO_RS_AFTER_MACHINE_GUI.get();
-        int cbSize = 9;
+        int cbSize = 11;
         int cbX = x + PADDING + 2;
-        int cbY = footerTextY - 1;
+        int cbY = footerTextY - 2;
         String labelText = Component.translatable("rsi.hub.config_return_rs").getString();
         int maxLabelW = totalW - PADDING * 2 - cbSize - 8;
         String truncatedLabel = font.plainSubstrByWidth(labelText, maxLabelW);
-        int labelX = cbX + cbSize + 3;
+        int labelX = cbX + cbSize + 4;
         int labelY = footerTextY;
 
-        boolean toggleHovered = mouseX >= cbX && mouseX < cbX + cbSize + 3 + font.width(truncatedLabel)
-                && mouseY >= cbY - 1 && mouseY < cbY + cbSize + 2;
+        // Hit area: checkbox + gap + label, with extra vertical padding
+        int hitH = cbSize + 6;
+        boolean toggleHovered = mouseX >= cbX && mouseX < cbX + cbSize + 4 + font.width(truncatedLabel)
+                && mouseY >= cbY - 3 && mouseY < cbY + hitH - 3;
 
         // Checkbox border
         g.fill(cbX - 1, cbY - 1, cbX + cbSize + 1, cbY + cbSize + 1, toggleHovered ? 0xFF8899AA : 0xFF4A5568);
@@ -297,10 +300,10 @@ public final class MachineHubRenderer {
         // Checkbox fill when enabled
         if (returnToRs) {
             int fillColor = toggleHovered ? 0xFF88CC88 : 0xFF55AA55;
-            g.fill(cbX + 1, cbY + 1, cbX + cbSize - 1, cbY + cbSize - 1, fillColor);
-            // Checkmark (simple cross-hatch)
-            g.fill(cbX + 2, cbY + 4, cbX + 4, cbY + 7, 0xFFFFFFFF);
-            g.fill(cbX + 4, cbY + 5, cbX + 7, cbY + 2, 0xFFFFFFFF);
+            g.fill(cbX + 2, cbY + 2, cbX + cbSize - 2, cbY + cbSize - 2, fillColor);
+            // Checkmark
+            g.fill(cbX + 3, cbY + 5, cbX + 5, cbY + 8, 0xFFFFFFFF);
+            g.fill(cbX + 5, cbY + 6, cbX + 8, cbY + 3, 0xFFFFFFFF);
         }
         // Label
         int labelColor = toggleHovered ? TEXT_PRIMARY : TEXT_DIM;
@@ -314,7 +317,7 @@ public final class MachineHubRenderer {
         }
 
         MachineHub.setConfigButtonHovered(toggleHovered);
-        MachineHub.setConfigButtonBounds(cbX, cbY - 1, cbSize + 3 + font.width(truncatedLabel), cbSize + 4);
+        MachineHub.setConfigButtonBounds(cbX, cbY - 3, cbSize + 4 + font.width(truncatedLabel), hitH);
 
         pose.popPose();
 
