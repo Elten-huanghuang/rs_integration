@@ -120,7 +120,7 @@ public final class PlanRenderEngine {
 
         ModType modType = step.modType();
         if (modType != null) {
-            String modLabel = formatModTypeLabel(modType);
+            String modLabel = formatModTypeLabel(modType.id());
             gfx.drawString(font, modLabel, cardX + 50, y + 18,
                     0xFF6A8A6A | (alpha << 24));
         }
@@ -294,20 +294,26 @@ public final class PlanRenderEngine {
         return sb.toString();
     }
 
-    public static String formatModTypeLabel(ModType modType) {
-        return switch (modType.id()) {
-            case "generic"            -> "Crafting";
-            case "goety"              -> "Goety";
-            case "malum"              -> "Malum";
-            case "forbidden_arcanus"  -> "Forbidden Arcanus";
-            case "eidolon"            -> "Eidolon";
-            case "wizards_reborn"     -> "Wizards Reborn";
-            case "touhou_little_maid" -> "TLM";
-            case "embers_alchemy"     -> "Embers Alchemy";
-            case "aetherworks_anvil" -> "Aetherworks Anvil";
-            case "farmingforblockheads" -> "Market";
-            default                   -> capitalizeWords(modType.id().replace('_', ' '));
-        };
+    /**
+     * Resolve a human-readable label for a mod type.
+     * Uses the game's existing localisation when available —
+     * either from {@code rsi.batch.mod.<id>} translation keys
+     * or the mod's own display name from {@code mods.toml}.
+     */
+    public static String formatModTypeLabel(String modTypeId) {
+        // 1. Explicit translation key (optional override)
+        String key = "rsi.batch.mod." + modTypeId;
+        if (net.minecraft.client.resources.language.I18n.exists(key)) {
+            return net.minecraft.client.resources.language.I18n.get(key);
+        }
+        // 2. Forge mod display name
+        String forgeName = net.minecraftforge.fml.ModList.get()
+                .getModContainerById(modTypeId)
+                .map(c -> c.getModInfo().getDisplayName())
+                .orElse("");
+        if (!forgeName.isEmpty()) return forgeName;
+        // 3. Fallback
+        return capitalizeWords(modTypeId.replace('_', ' '));
     }
 
     private static String capitalizeWords(String input) {

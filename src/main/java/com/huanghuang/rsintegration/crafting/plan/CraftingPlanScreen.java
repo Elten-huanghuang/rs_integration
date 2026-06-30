@@ -661,8 +661,7 @@ public final class CraftingPlanScreen extends Screen {
 
             for (int i = 0; i < choices.size(); i++) {
                 AltChoice ac = choices.get(i);
-                String modName = Component.translatable(
-                        "rsi.batch.mod." + ac.modTypeId).getString();
+                String modName = PlanRenderEngine.formatModTypeLabel(ac.modTypeId);
                 String label = modName;
                 int bw = font.width(label) + 10;
                 if (badgeX + bw > x + cardW - CARD_PAD) break;
