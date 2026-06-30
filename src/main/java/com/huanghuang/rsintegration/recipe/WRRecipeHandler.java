@@ -35,6 +35,7 @@ public final class WRRecipeHandler implements ModRecipeHandler {
         if (className.endsWith("CrystalRitualRecipe")) return ItemStack.EMPTY;
 
         for (String name : new String[]{"getResultItem", "getResult", "getOutput", "getOutputCopy", "getAssembledItem"}) {
+            boolean isResultItem = "getResultItem".equals(name);
             // Try 1-param version first — some recipes (e.g. ArcaneIteratorRecipe)
             // have a no-arg getResultItem() that returns the machine block itself,
             // while getResultItem(RegistryAccess) returns the real recipe output.
@@ -47,7 +48,10 @@ public final class WRRecipeHandler implements ModRecipeHandler {
                     if (r instanceof ItemStack s && !s.isEmpty()) return s;
                 } catch (Exception ignored) {}
             }
-            // Fall back to no-arg version
+            // Skip no-arg getResultItem() — the deprecated overload that mods
+            // abuse to return machine block icons.
+            if (isResultItem) continue;
+            // Fall back to no-arg version (other method names only)
             for (java.lang.reflect.Method m : recipe.getClass().getMethods()) {
                 if (!m.getName().equals(name)) continue;
                 if (!ItemStack.class.isAssignableFrom(m.getReturnType())) continue;
