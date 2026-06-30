@@ -11,10 +11,10 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 
-final class AetherworksRecipeHandler implements ModRecipeHandler {
+public final class AetherworksRecipeHandler implements ModRecipeHandler {
 
     @Override
-    public ModType modType() { return ModType.AETHERWORKS_ANVIL; }
+    public ModType modType() { return ModType.byId("aetherworks_anvil"); }
 
     @Override
     public boolean canHandle(Recipe<?> recipe) {

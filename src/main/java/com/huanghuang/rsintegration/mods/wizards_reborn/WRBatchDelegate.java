@@ -166,7 +166,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         this.player = player;
 
         if (!level.isLoaded(pos)) {
-            RSIntegrationMod.LOGGER.info("[RSI-Batch-WR] Chunk unloaded at {} — force-loading", pos);
+            RSIntegrationMod.LOGGER.debug("[RSI-Batch-WR] Chunk unloaded at {} — force-loading", pos);
             level.getChunk(pos);
         }
         BlockEntity blockEntity = level.getBlockEntity(pos);
@@ -313,7 +313,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
                     }
                 }
                 if (hadStray) {
-                    RSIntegrationMod.LOGGER.info("[RSI-Batch-WR] Recovered stray pedestal items for iterator at {}", myPos);
+                    RSIntegrationMod.LOGGER.debug("[RSI-Batch-WR] Recovered stray pedestal items for iterator at {}", myPos);
                 }
                 break;
             }
@@ -510,7 +510,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
             RSIntegrationMod.LOGGER.debug("[RSI-Batch-WR] [step 6/6] ritual ID check exception", e);
         }
 
-        RSIntegrationMod.LOGGER.info("[RSI-Batch-WR] Crystal setup validation PASSED at {}", myPos);
+        RSIntegrationMod.LOGGER.debug("[RSI-Batch-WR] Crystal setup validation PASSED at {}", myPos);
         return true;
     }
 
@@ -1320,7 +1320,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
                 // (two blocks below). Durability-based recipes leave tools
                 // on input pedestals with reduced durability — those are NOT
                 // outputs and must not be collected.
-                ItemStack expectedOut = com.huanghuang.rsintegration.crafting.ModRecipeIndex
+                ItemStack expectedOut = com.huanghuang.rsintegration.crafting.RecipeIndex
                         .tryGetResultItem(recipe, player.serverLevel().registryAccess());
 
                 // 1. Check main pedestal (canonical output location)
@@ -1496,7 +1496,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
 
         // wissenWandFunction auto-delivers the result to the player's inventory
         // (standard WR behavior). Search player inventory as fallback.
-        ItemStack expected = com.huanghuang.rsintegration.crafting.ModRecipeIndex.tryGetResultItem(
+        ItemStack expected = com.huanghuang.rsintegration.crafting.RecipeIndex.tryGetResultItem(
                 recipe, player.serverLevel().registryAccess());
         if (expected.isEmpty()) return ItemStack.EMPTY;
 

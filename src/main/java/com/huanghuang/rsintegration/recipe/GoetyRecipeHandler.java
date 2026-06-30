@@ -13,10 +13,10 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 
-final class GoetyRecipeHandler implements ModRecipeHandler {
+public final class GoetyRecipeHandler implements ModRecipeHandler {
 
     @Override
-    public ModType modType() { return ModType.GOETY; }
+    public ModType modType() { return ModType.byId("goety"); }
 
     @Override
     public boolean canHandle(Recipe<?> recipe) {

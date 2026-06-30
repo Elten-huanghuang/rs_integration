@@ -26,7 +26,6 @@ import java.util.stream.Collectors;
 public final class CraftingResolver {
 
     private static final int MAX_ENSURE_CALLS = 2000;
-    private static final long MAX_RESOLVE_NANOS = 500_000_000L;
 
     private CraftingResolver() {}
 
@@ -170,7 +169,7 @@ public final class CraftingResolver {
                 prefs,
                 player,
                 network,
-                false);
+                false, null);
 
         for (Ingredient ing : needed) {
             if (ing.isEmpty()) continue;
@@ -229,7 +228,7 @@ public final class CraftingResolver {
     static boolean ensureIngredient(Ingredient ingredient, int count, ResolutionContext ctx, int depth) {
         if (count <= 0) return true;
         if (ctx.timedOut()) {
-            com.huanghuang.rsintegration.debug.PerformanceMonitor.recordResolveTimeout();
+            com.huanghuang.rsintegration.command.PerformanceMonitor.recordResolveTimeout();
             return false;
         }
         if (++ctx.ensureCalls > MAX_ENSURE_CALLS) return false;
@@ -531,12 +530,14 @@ public final class CraftingResolver {
 
     private static String describeItem(ItemStack stack) {
         if (stack.isEmpty()) return "???";
-        return stack.getDescriptionId();
+        return stack.getHoverName().getString();
     }
 
     private static String describeFirstItem(Ingredient ingredient) {
         for (ItemStack stack : ingredient.getItems()) {
-            if (!stack.isEmpty()) return stack.getDescriptionId();
+            if (!stack.isEmpty()) {
+                return stack.getHoverName().getString();
+            }
         }
         return "???";
     }

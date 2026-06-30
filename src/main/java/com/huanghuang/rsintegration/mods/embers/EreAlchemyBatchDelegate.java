@@ -110,7 +110,8 @@ extends AbstractBatchDelegate {
         }
         this.recipe = r;
         long seed = lvl.getSeed();
-        List codeList = Reflect.invoke((Object)this.recipe, "getCode", seed).map(o -> (List)o).orElse(Collections.emptyList());
+        @SuppressWarnings("unchecked")
+        List<Ingredient> codeList = (List<Ingredient>) (Object) Reflect.invoke((Object)this.recipe, "getCode", seed).map(o -> (List<?>)o).orElse(Collections.emptyList());
         this.code = codeList;
         this.pedestals = EreAlchemyBatchDelegate.scanPedestals((Level)lvl, pos);
         if (this.pedestals.size() < this.code.size()) {
@@ -127,14 +128,14 @@ extends AbstractBatchDelegate {
             Object topInv = Reflect.getField((Object)p.be(), "inventory").orElse(null);
             if (topInv != null && !(topStack = Reflect.invoke(topInv, "getStackInSlot", 0).map(o -> (ItemStack)o).orElse(ItemStack.EMPTY)).isEmpty()) {
                 RSIntegrationMod.LOGGER.warn("[RSI-Embers] Pedestal top at {} still occupied after recycle: {}", (Object)p.pos(), (Object)topStack);
-                player.sendSystemMessage(Component.literal("\u00a7c\u57fa\u5ea7\u9876\u90e8\u4ecd\u6709\u7269\u54c1: " + p.pos().toShortString() + " (" + topStack.getHoverName().getString() + ")"));
+                player.sendSystemMessage(Component.translatable("rsi.embers.error.pedestal_top_occupied", p.pos().toShortString(), topStack.getHoverName().getString()));
                 return false;
             }
             BlockEntity bottomBE = lvl.getBlockEntity(p.pos().below());
             if (bottomBE == null || !alchemyPedestalBEClass.isInstance(bottomBE)) {
                 String reason = bottomBE == null ? "\u65e0BE" : "\u7c7b\u578b=" + bottomBE.getClass().getSimpleName();
                 RSIntegrationMod.LOGGER.warn("[RSI-Embers] Pedestal bottom at {} missing or invalid: {}", (Object)p.pos().below(), (Object)reason);
-                player.sendSystemMessage(Component.literal("\u00a7c\u57fa\u5ea7\u5e95\u90e8\u5f02\u5e38: " + p.pos().below().toShortString() + " (" + reason + ")"));
+                player.sendSystemMessage(Component.translatable("rsi.embers.error.pedestal_bottom_invalid", p.pos().below().toShortString(), reason));
                 return false;
             }
             if (bottomBE.isRemoved()) {
@@ -142,14 +143,15 @@ extends AbstractBatchDelegate {
             }
             if ((bottomInv = Reflect.getField((Object)bottomBE, "inventory").orElse(null)) == null || (bottomStack = Reflect.invoke(bottomInv, "getStackInSlot", 0).map(o -> (ItemStack)o).orElse(ItemStack.EMPTY)).isEmpty()) continue;
             RSIntegrationMod.LOGGER.warn("[RSI-Embers] Pedestal bottom at {} still occupied after recycle: {}", (Object)p.pos().below(), (Object)bottomStack);
-            player.sendSystemMessage(Component.literal("\u00a7c\u57fa\u5ea7\u5e95\u90e8\u4ecd\u6709\u7269\u54c1: " + p.pos().below().toShortString() + " (" + bottomStack.getHoverName().getString() + ")"));
+            player.sendSystemMessage(Component.translatable("rsi.embers.error.pedestal_bottom_occupied", p.pos().below().toShortString(), bottomStack.getHoverName().getString()));
             return false;
         }
         if (!EreAlchemyLock.tryLock(lvl.dimension(), (BlockPos)pos, player.getUUID())) {
             player.sendSystemMessage(Component.translatable("rsi.embers.error.tablet_locked"));
             return false;
         }
-        List aspectsRaw = (List) Reflect.getField((Object)this.recipe, "aspects").orElse(Collections.emptyList());
+        @SuppressWarnings("unchecked")
+        List<?> aspectsRaw = (List<?>) Reflect.getField((Object)this.recipe, "aspects").orElse(Collections.emptyList());
         int[] codeIndices = new int[this.code.size()];
         for (int i = 0; i < this.code.size(); ++i) {
             Ingredient aspectIng = this.code.get(i);
@@ -178,7 +180,8 @@ extends AbstractBatchDelegate {
         if (tabletIng != null) {
             specs.add(new IngredientSpec(tabletIng, 1));
         }
-        List inputsRaw = (List) Reflect.getField((Object)this.recipe, "inputs").orElse(Collections.emptyList());
+        @SuppressWarnings("unchecked")
+        List<?> inputsRaw = (List<?>) Reflect.getField((Object)this.recipe, "inputs").orElse(Collections.emptyList());
         for (int i = 0; i < this.code.size(); ++i) {
             Object t;
             specs.add(new IngredientSpec(this.code.get(i), 1));
@@ -263,7 +266,7 @@ extends AbstractBatchDelegate {
                 return false;
             }
             this.craftStarted = true;
-            RSIntegrationMod.LOGGER.warn("[RSI-Embers] sparkProgress OK: progress {} -> {}",
+            RSIntegrationMod.LOGGER.debug("[RSI-Embers] sparkProgress OK: progress {} -> {}",
                     (Object)progressBefore, (Object)progressAfter);
             return true;
         }
@@ -277,18 +280,18 @@ extends AbstractBatchDelegate {
 
     public boolean isCraftComplete(ServerLevel level) {
         if (this.tablet == null) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Embers] isCraftComplete: tablet is null");
+            RSIntegrationMod.LOGGER.debug("[RSI-Embers] isCraftComplete: tablet is null");
             return true;
         }
         BlockEntity current = this.level.getBlockEntity(this.machinePos);
         if (current == null || current.isRemoved()) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Embers] isCraftComplete: tablet removed (direct check) current={}", (Object)current);
+            RSIntegrationMod.LOGGER.debug("[RSI-Embers] isCraftComplete: tablet removed (direct check) current={}", (Object)current);
             return true;
         }
         int progress = Reflect.getIntField((Object)this.tablet, "progress").orElse(-1);
         boolean complete = this.craftStarted && progress == 0;
         if (complete) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Embers] isCraftComplete=TRUE: craftStarted={} progress={}",
+            RSIntegrationMod.LOGGER.debug("[RSI-Embers] isCraftComplete=TRUE: craftStarted={} progress={}",
                     (Object)this.craftStarted, (Object)progress);
         }
         return complete;
@@ -298,7 +301,7 @@ extends AbstractBatchDelegate {
         EreAlchemyLock.unlock(this.level.dimension(), (BlockPos)this.machinePos);
         this.craftStarted = false;
         if (this.tablet == null) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Embers] collectResult: tablet is null");
+            RSIntegrationMod.LOGGER.debug("[RSI-Embers] collectResult: tablet is null");
             return ItemStack.EMPTY;
         }
 
@@ -310,16 +313,16 @@ extends AbstractBatchDelegate {
 
         // Primary: check outputHandler (where result goes if no IBin)
         Object outHandler = Reflect.getField((Object)this.tablet, "outputHandler").orElse(null);
-        RSIntegrationMod.LOGGER.warn("[RSI-Embers] collectResult: outputHandler found={}", (Object)(outHandler != null));
+        RSIntegrationMod.LOGGER.debug("[RSI-Embers] collectResult: outputHandler found={}", (Object)(outHandler != null));
         if (outHandler != null) {
             result = Reflect.invoke(outHandler, "extractItem", 0, 64, false)
                     .map(o -> (ItemStack)o).orElse(ItemStack.EMPTY);
-            RSIntegrationMod.LOGGER.warn("[RSI-Embers] collectResult: outputHandler extractItem isEmpty={}",
+            RSIntegrationMod.LOGGER.debug("[RSI-Embers] collectResult: outputHandler extractItem isEmpty={}",
                     (Object)result.isEmpty());
             if (!result.isEmpty()) {
                 ((BlockEntity) this.tablet).setChanged();
                 this.clearAllSlots();
-                RSIntegrationMod.LOGGER.warn("[RSI-Embers] Collected result from outputHandler: {} x{}",
+                RSIntegrationMod.LOGGER.debug("[RSI-Embers] Collected result from outputHandler: {} x{}",
                         (Object)result.getHoverName().getString(), (Object)result.getCount());
                 return result;
             }
@@ -329,21 +332,21 @@ extends AbstractBatchDelegate {
         BlockPos below = this.machinePos.below();
         ChunkUtils.loadChunk((ServerLevel)this.level, (BlockPos)below);
         BlockEntity be = this.level.getBlockEntity(below);
-        RSIntegrationMod.LOGGER.warn("[RSI-Embers] collectResult: IBin below check — ibinClass={} be={} isInstance={}",
+        RSIntegrationMod.LOGGER.debug("[RSI-Embers] collectResult: IBin below check — ibinClass={} be={} isInstance={}",
                 (Object)(ibinClass != null), (Object)(be != null),
                 (Object)(ibinClass != null && be != null && ibinClass.isInstance(be)));
         if (ibinClass != null && be != null && ibinClass.isInstance(be)) {
             Object binInv = Reflect.invoke((Object)be, "getInventory").orElse(null);
-            RSIntegrationMod.LOGGER.warn("[RSI-Embers] collectResult: binInv found={}", (Object)(binInv != null));
+            RSIntegrationMod.LOGGER.debug("[RSI-Embers] collectResult: binInv found={}", (Object)(binInv != null));
             if (binInv != null) {
                 result = Reflect.invoke(binInv, "extractItem", 0, 64, false)
                         .map(o -> (ItemStack)o).orElse(ItemStack.EMPTY);
-                RSIntegrationMod.LOGGER.warn("[RSI-Embers] collectResult: IBin extractItem isEmpty={}",
+                RSIntegrationMod.LOGGER.debug("[RSI-Embers] collectResult: IBin extractItem isEmpty={}",
                         (Object)result.isEmpty());
                 if (!result.isEmpty()) {
                     be.setChanged();
                     this.clearAllSlots();
-                    RSIntegrationMod.LOGGER.warn("[RSI-Embers] Collected result from IBin: {} x{}",
+                    RSIntegrationMod.LOGGER.debug("[RSI-Embers] Collected result from IBin: {} x{}",
                             (Object)result.getHoverName().getString(), (Object)result.getCount());
                     return result;
                 }
@@ -396,7 +399,8 @@ extends AbstractBatchDelegate {
                 warnings.add(Component.translatable("rsi.embers.warn.tablet_missing").getString());
             } else if (alchemyRecipeClass != null && alchemyRecipeClass.isInstance(recipe)) {
                 long seed = lvl.getSeed();
-                List code = Reflect.invoke(recipe, "getCode", seed).map(o -> (List)o).orElse(Collections.emptyList());
+                @SuppressWarnings("unchecked")
+                List<?> code = Reflect.invoke(recipe, "getCode", seed).map(o -> (List<?>)o).orElse(Collections.emptyList());
                 int needed = code.size();
                 List<PedestalInfo> nearby = EreAlchemyBatchDelegate.scanPedestals((Level)lvl, pos);
                 if (nearby.size() < needed) {

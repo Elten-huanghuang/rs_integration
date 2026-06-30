@@ -3,19 +3,59 @@ package com.huanghuang.rsintegration.mods.embers;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.mods.IModIntegration;
 import com.huanghuang.rsintegration.network.BindingEventHandler;
+import com.huanghuang.rsintegration.recipe.EreAlchemyRecipeHandler;
+import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
+import net.minecraftforge.common.ForgeConfigSpec;
 
 import java.util.List;
 
-public final class EreAlchemyRSModule {
+public final class EreAlchemyRSModule implements IModIntegration {
 
-    public static void initCommon() {
+    public static final EreAlchemyRSModule INSTANCE = new EreAlchemyRSModule();
+
+    private EreAlchemyRSModule() {}
+
+    @Override
+    public ForgeConfigSpec.BooleanValue configFlag() {
+        return RSIntegrationConfig.ENABLE_EMBERS_ALCHEMY;
+    }
+
+    @Override
+    public String modId() {
+        return "embers";
+    }
+
+    @Override
+    public void registerModType() {
+        ModType.register("embers_alchemy",
+                new String[]{"com.rekindled.embers."},
+                new String[]{"embers"},
+                new String[0],
+                ModType.delegateSupplier("com.huanghuang.rsintegration.mods.embers.EreAlchemyBatchDelegate"),
+                ModType.delegateSupplier("com.huanghuang.rsintegration.mods.embers.EreAlchemyInferDelegate"));
+    }
+
+    @Override
+    public void registerBindingTargets() {
         BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
-                "embers", ModType.EMBERS_ALCHEMY,
+                "embers", ModType.byId("embers_alchemy"),
                 RSIntegrationConfig.ENABLE_EMBERS_ALCHEMY, List.of(
                 "com.rekindled.embers.block.AlchemyTabletBlock"
         ), null));
+    }
 
+    @Override
+    public void registerRecipeHandler() {
+        ModRecipeHandlers.register(new EreAlchemyRecipeHandler());
+    }
+
+    @Override
+    public void registerNetworkPackets() {}
+
+    @Override
+    public void initCommon() {
         RSIntegrationMod.LOGGER.debug("Embers Alchemy RS module common init done.");
     }
 }

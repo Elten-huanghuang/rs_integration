@@ -77,27 +77,6 @@ final class ResolutionContext {
                       @Nullable Map<ResourceLocation, ResourceLocation> preferredRecipes,
                       @Nullable ServerPlayer player,
                       @Nullable INetwork network,
-                      boolean unused) {
-        this.level = level;
-        this.index = index;
-        this.counts = new LinkedHashMap<>(keyedCounts);
-        this.steps = new ArrayList<>();
-        this.resolving = new HashSet<>();
-        this.preferredRecipes = preferredRecipes;
-        this.player = player;
-        this.network = network;
-        this.deadlineNanos = System.nanoTime() + MAX_RESOLVE_NANOS;
-        this.bestEffort = false;
-        this.missingOut = null;
-        this.diagLog = Diagnostics.isEnabled() ? new ArrayList<>() : null;
-    }
-
-    ResolutionContext(Level level,
-                      Map<Item, List<RecipeIndex.Entry>> index,
-                      Map<CraftingResolver.StackKey, Integer> keyedCounts,
-                      @Nullable Map<ResourceLocation, ResourceLocation> preferredRecipes,
-                      @Nullable ServerPlayer player,
-                      @Nullable INetwork network,
                       boolean bestEffort,
                       @Nullable List<String> missingOut) {
         this.level = level;
@@ -189,7 +168,7 @@ final class ResolutionContext {
                 if (!remainder.isEmpty()) {
                     add(remainder.copyWithCount(take));
                 }
-            } catch (Throwable e) {
+            } catch (Exception e) {
                 // defensive — broken getCraftingRemainingItem implementations
             }
         }

@@ -6,7 +6,7 @@ import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
-import com.huanghuang.rsintegration.crafting.ModRecipeIndex;
+import com.huanghuang.rsintegration.crafting.RecipeIndex;
 import com.huanghuang.rsintegration.util.Reflect;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
@@ -107,7 +107,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
         this.player = player;
 
         if (!level.isLoaded(pos)) {
-            RSIntegrationMod.LOGGER.info("[RSI-Batch-TLM] Chunk unloaded at {} — force-loading", pos);
+            RSIntegrationMod.LOGGER.debug("[RSI-Batch-TLM] Chunk unloaded at {} — force-loading", pos);
             level.getChunk(pos);
         }
         BlockEntity be = level.getBlockEntity(pos);
@@ -464,7 +464,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
 
         // Fallback: read output directly from recipe (guaranteed correct for non-copyInput recipes).
         if (recipe != null) {
-            ItemStack result = ModRecipeIndex.tryGetResultItem(recipe, level.registryAccess());
+            ItemStack result = RecipeIndex.tryGetResultItem(recipe, level.registryAccess());
             if (!result.isEmpty()) {
                 RSIntegrationMod.LOGGER.debug("[RSI-Batch-TLM] Falling back to recipe resultItem: {} (no ItemEntity found at {})",
                         result, outputPos);
@@ -626,7 +626,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
             if (level != null && myPos != null) {
                 ItemStack expected = ItemStack.EMPTY;
                 if (recipe != null && level != null) {
-                    expected = ModRecipeIndex.tryGetResultItem(recipe, level.registryAccess());
+                    expected = RecipeIndex.tryGetResultItem(recipe, level.registryAccess());
                 }
                 for (ItemEntity entity : level.getEntitiesOfClass(ItemEntity.class,
                         new net.minecraft.world.phys.AABB(myPos).inflate(2.5))) {

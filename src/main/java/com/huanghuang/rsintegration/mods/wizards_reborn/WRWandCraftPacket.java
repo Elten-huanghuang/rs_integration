@@ -717,7 +717,7 @@ public final class WRWandCraftPacket {
                     recipe.getClass(), "getWissen", new Class<?>[0]);
             if (m != null) return (int) m.invoke(recipe);
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-WR] Failed to read wissen cost", e);
+            RSIntegrationMod.LOGGER.warn("[RSI-WR] Failed to read wissen cost", e);
         }
         return 0;
     }

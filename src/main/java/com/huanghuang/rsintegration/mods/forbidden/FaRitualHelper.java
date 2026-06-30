@@ -281,7 +281,7 @@ public final class FaRitualHelper {
             return ok;
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.error("[RSI-FA] Essence check failed: {}", e.toString(), e);
-            player.sendSystemMessage(Component.translatable("rsi.fa.error.essence_check_failed", e.toString()));
+            player.sendSystemMessage(Component.translatable("rsi.fa.error.essence_check_failed"));
             return false;
         }
     }
@@ -568,7 +568,7 @@ public final class FaRitualHelper {
         for (ItemStack stack : player.getInventory().items) {
             if (!stack.isEmpty() && ritualStarterItemClass.isInstance(stack.getItem())
                     && canStartRitual(stack)) {
-                RSIntegrationMod.LOGGER.info("[RSI-FA] Found RitualStarterItem '{}' in player inventory",
+                RSIntegrationMod.LOGGER.debug("[RSI-FA] Found RitualStarterItem '{}' in player inventory",
                         stack.getHoverName().getString());
                 return new StarterResult(stack, null);
             }
@@ -576,7 +576,7 @@ public final class FaRitualHelper {
         ItemStack offhand = player.getOffhandItem();
         if (!offhand.isEmpty() && ritualStarterItemClass.isInstance(offhand.getItem())
                 && canStartRitual(offhand)) {
-            RSIntegrationMod.LOGGER.info("[RSI-FA] Found RitualStarterItem '{}' in player offhand",
+            RSIntegrationMod.LOGGER.debug("[RSI-FA] Found RitualStarterItem '{}' in player offhand",
                     offhand.getHoverName().getString());
             return new StarterResult(offhand, null);
         }
@@ -591,7 +591,7 @@ public final class FaRitualHelper {
                         if (rsStack.isEmpty()) continue;
                         if (!ritualStarterItemClass.isInstance(rsStack.getItem())) continue;
                         if (!canStartRitual(rsStack)) {
-                            RSIntegrationMod.LOGGER.info("[RSI-FA] RS has RitualStarterItem '{}' but canStartRitual=false",
+                            RSIntegrationMod.LOGGER.debug("[RSI-FA] RS has RitualStarterItem '{}' but canStartRitual=false",
                                     rsStack.getHoverName().getString());
                             continue;
                         }
@@ -601,7 +601,7 @@ public final class FaRitualHelper {
                         ItemStack extracted = network.extractItem(req, 1,
                                 com.refinedmods.refinedstorage.api.util.Action.PERFORM);
                         if (!extracted.isEmpty()) {
-                            RSIntegrationMod.LOGGER.info("[RSI-FA] Extracted RitualStarterItem '{}' from RS",
+                            RSIntegrationMod.LOGGER.debug("[RSI-FA] Extracted RitualStarterItem '{}' from RS",
                                     extracted.getHoverName().getString());
                             return new StarterResult(extracted, network);
                         }
@@ -632,20 +632,20 @@ public final class FaRitualHelper {
                                         @Nullable INetwork starterNetwork) {
         boolean isCreative = player.isCreative();
         String source = starterNetwork != null ? "RS" : "inventory";
-        RSIntegrationMod.LOGGER.info("[RSI-FA] consumeRitualStarterUse: item='{}' creative={} source={}",
+        RSIntegrationMod.LOGGER.debug("[RSI-FA] consumeRitualStarterUse: item='{}' creative={} source={}",
                 starterStack.getHoverName().getString(), isCreative, source);
 
         if (!isCreative) {
             try {
                 Object item = starterStack.getItem();
                 int remaining = (int) Reflect.getMethodOrThrow(ritualStarterItemClass, "getRemainingUses", "getRemainingUses", ItemStack.class).invoke(item, starterStack);
-                RSIntegrationMod.LOGGER.info("[RSI-FA] Starter '{}' uses before: {} (source: {})",
+                RSIntegrationMod.LOGGER.debug("[RSI-FA] Starter '{}' uses before: {} (source: {})",
                         starterStack.getHoverName().getString(), remaining, source);
                 if (remaining > 0) {
                     int newRemaining = remaining - 1;
                     Reflect.getMethodOrThrow(ritualStarterItemClass, "setRemainingUses", "setRemainingUses", ItemStack.class, int.class)
                             .invoke(item, starterStack, newRemaining);
-                    RSIntegrationMod.LOGGER.info("[RSI-FA] Starter '{}' uses after: {}",
+                    RSIntegrationMod.LOGGER.debug("[RSI-FA] Starter '{}' uses after: {}",
                             starterStack.getHoverName().getString(), newRemaining);
                 } else {
                     RSIntegrationMod.LOGGER.warn("[RSI-FA] Starter '{}' has {} remaining uses — cannot consume",
@@ -656,7 +656,7 @@ public final class FaRitualHelper {
                         starterStack.getHoverName().getString(), e.toString());
             }
         } else {
-            RSIntegrationMod.LOGGER.info("[RSI-FA] consumeRitualStarterUse: player is creative, not consuming durability");
+            RSIntegrationMod.LOGGER.debug("[RSI-FA] consumeRitualStarterUse: player is creative, not consuming durability");
         }
 
         // Always re-insert to RS if it came from there — even in creative mode

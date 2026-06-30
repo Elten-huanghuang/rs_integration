@@ -305,6 +305,7 @@ public final class PlanRenderEngine {
             case "touhou_little_maid" -> "TLM";
             case "embers_alchemy"     -> "Embers Alchemy";
             case "aetherworks_anvil" -> "Aetherworks Anvil";
+            case "farmingforblockheads" -> "Market";
             default                   -> capitalizeWords(modType.id().replace('_', ' '));
         };
     }

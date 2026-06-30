@@ -13,10 +13,10 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 
-final class WRRecipeHandler implements ModRecipeHandler {
+public final class WRRecipeHandler implements ModRecipeHandler {
 
     @Override
-    public ModType modType() { return ModType.WIZARDS_REBORN; }
+    public ModType modType() { return ModType.byId("wizards_reborn"); }
 
     @Override
     public boolean canHandle(Recipe<?> recipe) {
@@ -25,6 +25,15 @@ final class WRRecipeHandler implements ModRecipeHandler {
 
     @Override
     public ItemStack getResultItem(Recipe<?> recipe, RegistryAccess access) {
+        // CrystalRitualRecipe.getResultItem(RegistryAccess) returns EMPTY and
+        // getResultItem() returns RUNIC_PEDESTAL (the machine block icon).
+        // Crystal rituals produce runtime-determined effects (breeding,
+        // fertility, infusion), not statically-declared items.  Returning
+        // EMPTY skips them in RecipeIndex (no corruption) and avoids the
+        // plan builder showing the machine block as the output.
+        String className = recipe.getClass().getName();
+        if (className.endsWith("CrystalRitualRecipe")) return ItemStack.EMPTY;
+
         for (String name : new String[]{"getResultItem", "getResult", "getOutput", "getOutputCopy", "getAssembledItem"}) {
             // Try 1-param version first — some recipes (e.g. ArcaneIteratorRecipe)
             // have a no-arg getResultItem() that returns the machine block itself,

@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
+import com.huanghuang.rsintegration.util.ModIds;
 import net.minecraft.world.item.crafting.Recipe;
 
 import javax.annotation.Nullable;
@@ -34,100 +35,25 @@ public final class ModType {
     // ── built-in constants (registered in static {}) ──────────────
 
     public static final ModType GENERIC;
-    public static final ModType GOETY;
-    public static final ModType MALUM;
-    public static final ModType FORBIDDEN_ARCANUS;
-    public static final ModType EIDOLON;
-    public static final ModType WIZARDS_REBORN;
-    public static final ModType TOUHOU_LITTLE_MAID;
-    public static final ModType EMBERS_ALCHEMY;
-    public static final ModType VANILLA_MACHINE;
-    public static final ModType MALUM_SPIRIT_CRUCIBLE;
-    public static final ModType AETHERWORKS_ANVIL;
     public static final ModType CUSTOM_GUI;
+    public static final ModType FARMINGFORBLOCKHEADS_MARKET;
 
     static {
         GENERIC = register("generic",
                 new String[0], new String[0], new String[0],
-                com.huanghuang.rsintegration.crafting.batch.delegate.GenericBatchDelegate::new);
-
-        // Lazy delegate construction to avoid ClassNotFoundException
-        GOETY = register("goety",
-                new String[]{"com.Polarice3.Goety."},
-                new String[]{"goety"},
-                new String[0],
-                delegateSupplier("com.huanghuang.rsintegration.mods.goety.GoetyBatchDelegate"));
-
-        // Must be before MALUM so classifyRecipe() matches the specific
-        // SpiritFocusingRecipe prefix before the generic com.sammy.malum. prefix.
-        MALUM_SPIRIT_CRUCIBLE = register("malum_spirit_crucible",
-                new String[]{"com.sammy.malum.common.recipe.SpiritFocusingRecipe"},
-                new String[]{"spirit_crucible"},
-                new String[]{"malum_spirit_crucible"},
-                delegateSupplier("com.huanghuang.rsintegration.mods.malum.MalumSpiritCrucibleBatchDelegate"));
-
-        MALUM = register("malum",
-                new String[]{"com.sammy.malum."},
-                new String[]{"malum"},
-                new String[0],
-                delegateSupplier("com.huanghuang.rsintegration.mods.malum.MalumBatchDelegate"));
-
-        FORBIDDEN_ARCANUS = register("forbidden_arcanus",
-                new String[]{"com.stal111.forbidden_arcanus."},
-                new String[]{"forbidden_arcanus"},
-                new String[0],
-                delegateSupplier("com.huanghuang.rsintegration.mods.forbidden.FaBatchDelegate"));
-
-        EIDOLON = register("eidolon",
-                new String[]{"elucent.eidolon."},
-                new String[]{"eidolon"},
-                new String[0],
-                delegateSupplier("com.huanghuang.rsintegration.mods.eidolon.EidolonBatchDelegate"));
-
-        WIZARDS_REBORN = register("wizards_reborn",
-                new String[]{"mod.maxbogomol.wizards_reborn."},
-                new String[]{"wizards_reborn"},
-                new String[]{"crystal_ritual"},
-                delegateSupplier("com.huanghuang.rsintegration.mods.wizards_reborn.WRBatchDelegate"));
-
-        TOUHOU_LITTLE_MAID = register("touhou_little_maid",
-                new String[]{"com.github.tartaricacid.touhoulittlemaid."},
-                new String[]{"touhou_little_maid"},
-                new String[0],
-                delegateSupplier("com.huanghuang.rsintegration.mods.touhoulittlemaid.TlmAltarBatchDelegate"));
-
-        EMBERS_ALCHEMY = register("embers_alchemy",
-                new String[]{"com.rekindled.embers."},
-                new String[]{"embers"},
-                new String[0],
-                delegateSupplier("com.huanghuang.rsintegration.mods.embers.EreAlchemyBatchDelegate"),
-                delegateSupplier("com.huanghuang.rsintegration.mods.embers.EreAlchemyInferDelegate"));
-
-        VANILLA_MACHINE = register("vanilla_machine",
-                new String[]{
-                        "net.minecraft.world.item.crafting.SmeltingRecipe",
-                        "net.minecraft.world.item.crafting.BlastingRecipe",
-                        "net.minecraft.world.item.crafting.SmokingRecipe",
-                        "net.minecraft.world.item.crafting.CampfireCookingRecipe",
-                        "net.minecraft.world.item.crafting.StonecutterRecipe",
-                        "net.minecraft.world.item.crafting.SmithingTransformRecipe",
-                        "net.minecraft.world.item.crafting.SmithingTrimRecipe"
-                },
-                new String[]{"furnace", "smoker", "campfire", "stonecutter", "smithing_table"},
-                new String[]{"vanilla_machine"},
-                delegateSupplier("com.huanghuang.rsintegration.mods.vanilla.VanillaMachineBatchDelegate"));
-
-        AETHERWORKS_ANVIL = register("aetherworks_anvil",
-                new String[]{"net.sirplop.aetherworks."},
-                new String[]{"aetherworks", "aetherium", "anvil"},
-                new String[0],
-                delegateSupplier("com.huanghuang.rsintegration.mods.aetherworks.AetherworksBatchDelegate"));
+                com.huanghuang.rsintegration.crafting.batch.GenericBatchDelegate::new);
 
         CUSTOM_GUI = register("custom_gui",
                 new String[0],
                 new String[0],
                 new String[0],
-                com.huanghuang.rsintegration.crafting.batch.delegate.GenericBatchDelegate::new);
+                com.huanghuang.rsintegration.crafting.batch.GenericBatchDelegate::new);
+
+        FARMINGFORBLOCKHEADS_MARKET = register("farmingforblockheads",
+                new String[]{"com.huanghuang.rsintegration.crafting.MarketRecipeWrapper"},
+                new String[]{"market", "farmingforblockheads"},
+                new String[]{"market"},
+                delegateSupplier("com.huanghuang.rsintegration.mods.farmingforblockheads.MarketBatchDelegate"));
     }
 
     // ── constructors ──────────────────────────────────────────────
@@ -193,56 +119,89 @@ public final class ModType {
         return Collections.unmodifiableCollection(BY_ID.values());
     }
 
-    @Nullable
+    /** Get a registered ModType by id. Never returns null — falls back to GENERIC. */
     public static ModType byId(String id) {
-        return BY_ID.get(id);
+        return BY_ID.getOrDefault(id, GENERIC);
     }
 
     // ── classification ────────────────────────────────────────────
 
     /**
-     * Classify a recipe by iterating registered mod-type prefixes.
+     * Classify a recipe using longest-prefix matching across all registered
+     * mod types. Longer prefixes take priority (e.g. SpiritFocusingRecipe
+     * matches malum_spirit_crucible before malum).
      * Returns null for unknown types.
      */
     @Nullable
     public static ModType classifyRecipe(Recipe<?> recipe) {
         if (recipe instanceof com.huanghuang.rsintegration.mods.forbidden.FaRitualWrapper) {
-            return FORBIDDEN_ARCANUS;
+            return byId(ModIds.FORBIDDEN_ARCANUS);
         }
         String cn = recipe.getClass().getName();
+        ModType best = null;
+        int bestLen = 0;
         for (ModType mt : BY_ID.values()) {
             if (mt == GENERIC) continue;
             for (String prefix : mt.recipePrefixes) {
-                if (cn.startsWith(prefix)) return mt;
+                if (cn.startsWith(prefix) && prefix.length() > bestLen) {
+                    best = mt;
+                    bestLen = prefix.length();
+                }
             }
         }
-        return null;
+        return best;
     }
 
     /**
-     * Map a blockKey from {@code BindingEntry} to a ModType.
-     * blockKey format: "{prefix}||block.description.id" or just "block.description.id".
+     * Map a blockKey from {@code BindingEntry} to a ModType using longest-prefix
+     * matching. blockKey format: "{prefix}||block.description.id" or just
+     * "block.description.id". Explicit prefix matches are checked first and the
+     * longest wins; segment keyword matching is used as fallback.
      */
     @Nullable
     public static ModType fromBlockKey(@Nullable String blockKey) {
         if (blockKey == null) return null;
         String lower = blockKey.toLowerCase(Locale.ROOT);
+
+        // 1. Longest explicit prefix match
+        ModType best = null;
+        int bestLen = 0;
         for (ModType mt : BY_ID.values()) {
             if (mt == GENERIC) continue;
-            // 1. Explicit prefix ("goety||block.goety.dark_altar")
             for (String prefix : mt.blockKeyPrefixes) {
-                if (lower.startsWith(prefix.toLowerCase(Locale.ROOT) + "||")) return mt;
+                String prefixed = prefix.toLowerCase(Locale.ROOT) + "||";
+                if (lower.startsWith(prefixed) && prefixed.length() > bestLen) {
+                    best = mt;
+                    bestLen = prefixed.length();
+                }
             }
-            // 2. Registered keywords — match as a dot/underscore-delimited segment
-            for (String kw : mt.blockKeyKeywords) {
-                if (containsSegment(lower, kw.toLowerCase(Locale.ROOT))) return mt;
-            }
-            // 3. Fallback: check if blockKey contains the mod type id as a segment
-            if (containsSegment(lower, mt.id().toLowerCase(Locale.ROOT))) return mt;
         }
+        if (best != null) return best;
+
+        // 2. Segment keyword matching — longest keyword wins
+        best = null;
+        bestLen = 0;
+        for (ModType mt : BY_ID.values()) {
+            if (mt == GENERIC) continue;
+            for (String kw : mt.blockKeyKeywords) {
+                String kwLower = kw.toLowerCase(Locale.ROOT);
+                if (containsSegment(lower, kwLower) && kwLower.length() > bestLen) {
+                    best = mt;
+                    bestLen = kwLower.length();
+                }
+            }
+            // 3. Fallback: mod type id as segment
+            String idLower = mt.id().toLowerCase(Locale.ROOT);
+            if (containsSegment(lower, idLower) && idLower.length() > bestLen) {
+                best = mt;
+                bestLen = idLower.length();
+            }
+        }
+        if (best != null) return best;
+
         // 4. Config-driven: check customGuiMachineMods list
         for (String modId : RSIntegrationConfig.CUSTOM_GUI_MACHINE_MODS.get()) {
-            if (containsSegment(lower, modId.toLowerCase(Locale.ROOT))) return CUSTOM_GUI;
+            if (containsSegment(lower, modId.toLowerCase(Locale.ROOT))) return byId("custom_gui");
         }
         return null;
     }
@@ -272,13 +231,14 @@ public final class ModType {
      * {@link ClassNotFoundException} when the target mod is absent.
      */
     @SuppressWarnings("unchecked")
-    private static Supplier<IBatchDelegate> delegateSupplier(String className) {
+    /** Shared lazy delegate supplier. Public so RSModules can use it. */
+    public static Supplier<IBatchDelegate> delegateSupplier(String className) {
         return () -> {
             try {
                 Class<? extends IBatchDelegate> clazz =
                         (Class<? extends IBatchDelegate>) Class.forName(className);
                 return clazz.getDeclaredConstructor().newInstance();
-            } catch (Exception | Error e) {
+            } catch (Exception e) {
                 RSIntegrationMod.LOGGER.error(
                         "[RSI] Failed to load delegate class '{}': {}", className, e.toString());
                 return null;

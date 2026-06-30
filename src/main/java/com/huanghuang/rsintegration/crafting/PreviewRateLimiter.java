@@ -29,12 +29,8 @@ public final class PreviewRateLimiter {
     /** Returns true if this request should be silently dropped. */
     public static boolean isRateLimited(UUID playerId) {
         long now = System.currentTimeMillis();
-        Long last = LAST_PREVIEW_TIME.get(playerId);
-        if (last != null && (now - last) < MIN_INTERVAL_MS) {
-            return true;
-        }
-        LAST_PREVIEW_TIME.put(playerId, now);
-        return false;
+        Long prev = LAST_PREVIEW_TIME.put(playerId, now);
+        return prev != null && (now - prev) < MIN_INTERVAL_MS;
     }
 
     /** Cleanup on player logout. */

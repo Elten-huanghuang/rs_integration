@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.mixin.rs;
 
+import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.machine.MachineHub;
 import com.huanghuang.rsintegration.machine.MachineInteractType;
 import com.huanghuang.rsintegration.machine.MachineState;
@@ -60,8 +61,6 @@ public abstract class GridScreenTooltipMixin {
         }
     }
 
-    private static final int[] RS_FLOW_COLORS = {0x3355FF, 0x7733FF, 0xCC33FF, 0x3355FF};
-
     private static void drawMachineTooltip(GuiGraphics gfx, int mouseX, int mouseY, BindingInfo info) {
         MachineInteractType type = MachineInteractType.fromBlockKey(info.blockKey());
         MachineStatus status = MachineStatusCache.getInstance().get(info);
@@ -69,7 +68,7 @@ public abstract class GridScreenTooltipMixin {
         List<Component> lines = new ArrayList<>();
         // Title line: block name with flow animation (matching backpack RS upgrade style)
         String blockDisplay = net.minecraft.client.resources.language.I18n.get(info.displayName());
-        lines.add(TextBuilder.of(blockDisplay).colorFlow(1500L, 0.0F, RS_FLOW_COLORS).build());
+        lines.add(TextBuilder.of(blockDisplay).colorFlow(1500L, 0.0F, RSIntegrationMod.RS_FLOW_COLORS).build());
 
         // Dimension + coordinates line in cornflower blue (matching backpack RS upgrade)
         String dimDisplay = dimDisplayName(info.dim());

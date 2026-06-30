@@ -8,6 +8,7 @@ import com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler;
 import com.huanghuang.rsintegration.sidepanel.client.GuiNavStack;
 import com.huanghuang.rsintegration.sidepanel.network.OpenBoundMachineGuiPacket;
 import com.huanghuang.rsintegration.util.UIRenderer;
+import com.huanghuang.rsintegration.util.ModIds;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
@@ -54,7 +55,7 @@ public final class CraftingPlanScreen extends Screen {
     private static final int C_TEXT_BACKDROP  = 0xAA0A0A0A;
     // Slot hover brightening
     private static final int C_SLOT_HOVER = 0x80FFFFFF;
-    private final PlanResponse plan;
+    private PlanResponse plan;
     private int currentRepeat = 1;
     private int scrollOffset;
     private int maxScroll;
@@ -131,6 +132,18 @@ public final class CraftingPlanScreen extends Screen {
     /** Exposed for {@link PlanResponsePacket} dedup check. */
     public String getRecipeId() {
         return plan.recipeId();
+    }
+
+    /** Update plan data in-place (OR-path switch, repeat-count change, etc.).
+     *  Avoids creating a new screen which would lose UI state. */
+    public void updatePlan(PlanResponse newPlan) {
+        this.plan = newPlan;
+        this.renderEngine = new PlanRenderEngine(Minecraft.getInstance().font);
+        this.altChoices.clear();
+        this.orHitboxes.clear();
+        this.altSelection.clear();
+        this.clearWidgets();
+        this.init();
     }
 
     @Override
@@ -757,16 +770,16 @@ public final class CraftingPlanScreen extends Screen {
                 }
             }
         }
-        RSIntegrationMod.LOGGER.info("[RSI-OR-UI] selectAlternative itemKey={} index={} oldIdx={} choices=[{}]",
+        RSIntegrationMod.LOGGER.debug("[RSI-OR-UI] selectAlternative itemKey={} index={} oldIdx={} choices=[{}]",
                 itemKey, index, oldIdx,
                 choices.stream().map(c -> c.recipeId.toString() + ":" + c.modTypeId)
                         .reduce((a, b) -> a + ", " + b).orElse(""));
         if (oldIdx == index) {
             if (index != 0) {
                 altSelection.put(itemKey, 0);
-                RSIntegrationMod.LOGGER.info("[RSI-OR-UI]   reverting to default");
+                RSIntegrationMod.LOGGER.debug("[RSI-OR-UI]   reverting to default");
             } else {
-                RSIntegrationMod.LOGGER.info("[RSI-OR-UI]   already default, no-op");
+                RSIntegrationMod.LOGGER.debug("[RSI-OR-UI]   already default, no-op");
                 return;
             }
         } else {
@@ -783,8 +796,25 @@ public final class CraftingPlanScreen extends Screen {
         }
         LAST_FORCED.clear();
         LAST_FORCED.putAll(forced);
-        RSIntegrationMod.LOGGER.info("[RSI-OR-UI]   sending forced={}", forced);
-        ResourceLocation rid = ResourceLocation.tryParse(plan.recipeId());
+        RSIntegrationMod.LOGGER.debug("[RSI-OR-UI]   sending forced={}", forced);
+
+        // If the user clicked an OR badge on the target step (the top-level
+        // recipe output), send the alternative recipe ID as the new root so
+        // the server resolves different ingredients.  Forced overrides only
+        // affect intermediate steps — the target output is never resolved as
+        // an ingredient, so a forced override for it is silently ignored.
+        boolean isTarget = plan.targetResult() != null
+                && itemKey.equals(BuiltInRegistries.ITEM.getKey(plan.targetResult().getItem()).toString());
+        int newIdx = altSelection.getOrDefault(itemKey, 0);
+        ResourceLocation rid;
+        if (isTarget && newIdx != 0 && choices != null && newIdx < choices.size()) {
+            rid = choices.get(newIdx).recipeId;
+            forced.remove(itemKey);
+            RSIntegrationMod.LOGGER.debug("[RSI-OR-UI]   target switch → root recipe={}", rid);
+        } else {
+            rid = ResourceLocation.tryParse(plan.recipeId());
+        }
+
         if (rid != null) {
             ResourceLocation execDim = null;
             net.minecraft.core.BlockPos execPos = null;
@@ -1169,24 +1199,24 @@ public final class CraftingPlanScreen extends Screen {
     /** Left accent bar color per mod type — used for badges only now. */
     private static int accentColor(String modTypeId) {
         return switch (modTypeId) {
-            case "malum"            -> 0xFF6633AA;
-            case "eidolon"          -> 0xFF338855;
-            case "forbidden_arcanus" -> 0xFF994422;
-            case "goety"            -> 0xFF334488;
-            case "wizards_reborn"   -> 0xFF6655AA;
-            default                 -> 0xFF44AA66;
+            case ModIds.MALUM              -> 0xFF6633AA;
+            case ModIds.EIDOLON            -> 0xFF338855;
+            case ModIds.FORBIDDEN_ARCANUS  -> 0xFF994422;
+            case ModIds.GOETY              -> 0xFF334488;
+            case ModIds.WIZARDS_REBORN     -> 0xFF6655AA;
+            default                        -> 0xFF44AA66;
         };
     }
 
     /** Badge fill color per mod type. */
     private static int badgeColor(String modTypeId) {
         return switch (modTypeId) {
-            case "malum"            -> 0xCC442288;
-            case "eidolon"          -> 0xCC226644;
-            case "forbidden_arcanus" -> 0xCC663322;
-            case "goety"            -> 0xCC222244;
-            case "wizards_reborn"   -> 0xCC444466;
-            default                 -> 0xCC886622;
+            case ModIds.MALUM              -> 0xCC442288;
+            case ModIds.EIDOLON            -> 0xCC226644;
+            case ModIds.FORBIDDEN_ARCANUS  -> 0xCC663322;
+            case ModIds.GOETY              -> 0xCC222244;
+            case ModIds.WIZARDS_REBORN     -> 0xCC444466;
+            default                        -> 0xCC886622;
         };
     }
 

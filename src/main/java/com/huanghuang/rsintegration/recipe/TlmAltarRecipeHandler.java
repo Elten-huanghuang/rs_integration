@@ -11,10 +11,10 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 
-final class TlmAltarRecipeHandler implements ModRecipeHandler {
+public final class TlmAltarRecipeHandler implements ModRecipeHandler {
 
     @Override
-    public ModType modType() { return ModType.TOUHOU_LITTLE_MAID; }
+    public ModType modType() { return ModType.byId("touhou_little_maid"); }
 
     @Override
     public boolean canHandle(Recipe<?> recipe) {

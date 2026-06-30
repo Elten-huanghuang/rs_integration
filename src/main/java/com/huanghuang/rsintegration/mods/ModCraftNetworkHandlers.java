@@ -5,15 +5,8 @@ import com.huanghuang.rsintegration.mods.forbidden.FaCraftPacket;
 import com.huanghuang.rsintegration.mods.malum.MalumCraftPacket;
 import com.huanghuang.rsintegration.mods.wizards_reborn.WRWandCraftPacket;
 import com.huanghuang.rsintegration.network.NetworkHandler;
-import net.minecraft.core.BlockPos;
-import net.minecraft.resources.ResourceLocation;
-import net.minecraftforge.network.simple.SimpleChannel;
-
-import javax.annotation.Nullable;
 
 public final class ModCraftNetworkHandlers {
-
-    public static final SimpleChannel CHANNEL = NetworkHandler.CHANNEL;
 
     private static boolean malumRegistered, faRegistered, eidolonRegistered, wrWandRegistered;
 
@@ -51,19 +44,4 @@ public final class ModCraftNetworkHandlers {
         wrWandRegistered = true;
     }
 
-    public static void sendMalumCraft(ResourceLocation recipeId, @Nullable ResourceLocation dim, BlockPos pos) {
-        CHANNEL.sendToServer(new MalumCraftPacket(recipeId, dim, pos));
-    }
-
-    public static void sendFaCraft(ResourceLocation ritualId, @Nullable ResourceLocation dim, BlockPos pos) {
-        CHANNEL.sendToServer(new FaCraftPacket(ritualId, dim, pos));
-    }
-
-    public static void sendEidolonCraft(ResourceLocation recipeId, @Nullable ResourceLocation dim, BlockPos pos) {
-        CHANNEL.sendToServer(new EidolonCraftPacket(recipeId, dim, pos));
-    }
-
-    public static void sendWRWandCraft(ResourceLocation recipeId, @Nullable ResourceLocation dim, BlockPos pos) {
-        CHANNEL.sendToServer(new WRWandCraftPacket(recipeId, dim, pos));
-    }
 }

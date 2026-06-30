@@ -75,8 +75,9 @@ final class SidePanelTickManager {
         if (SearchController.searchMode >= 2 && RSSidePanelClient.tickCounter % 5 == 0)
             SearchController.pullJeiFilter();
 
-        // Periodic full sync (15s)
-        if (RSSidePanelClient.tickCounter % 300 == 0
+        // Periodic full sync
+        int syncInterval = com.huanghuang.rsintegration.config.RSIntegrationConfig.SIDE_PANEL_SYNC_INTERVAL.get();
+        if (RSSidePanelClient.tickCounter % syncInterval == 0
                 && RSSidePanelClient.networkAvailable && !RSSidePanelClient.panelHidden) {
             RSSidePanelNetworkHandler.sendRequestSync();
         }
@@ -103,7 +104,8 @@ final class SidePanelTickManager {
         var it = RSSidePanelClient.pendingExtractions.entrySet().iterator();
         while (it.hasNext()) {
             var pe = it.next();
-            if (now - pe.getValue().createdAt > 2000) {
+            int extractionTimeout = com.huanghuang.rsintegration.config.RSIntegrationConfig.SIDE_PANEL_EXTRACTION_TIMEOUT.get();
+            if (now - pe.getValue().createdAt > extractionTimeout) {
                 RSSidePanelClient.PendingExtraction p = pe.getValue();
                 if (p.previousStack.getCount() > 0) {
                     PanelStack ps = RSSidePanelClient.getById(pe.getKey());

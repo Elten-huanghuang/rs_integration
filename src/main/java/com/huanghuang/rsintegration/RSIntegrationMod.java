@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration;
 
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
+import com.huanghuang.rsintegration.mods.IModIntegration;
 import com.huanghuang.rsintegration.network.AltarBinding;
 import com.huanghuang.rsintegration.network.AltarBindingRegistry;
 import com.huanghuang.rsintegration.network.RSBindingHook;
@@ -11,6 +12,7 @@ import com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 
 import java.util.List;
+import java.util.function.Supplier;
 
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.event.server.ServerStoppingEvent;
@@ -33,51 +35,63 @@ public final class RSIntegrationMod {
     public static final String MOD_ID = "rs_integration";
     public static final String MOD_NAME = "RS Integration";
     public static final Logger LOGGER = LogManager.getLogger(MOD_NAME);
+    /** RS-themed flow colors used by magnet tooltip and machine hub tooltip. */
+    public static final int[] RS_FLOW_COLORS = {0x3355FF, 0x7733FF, 0xCC33FF, 0x3355FF};
+
+    private static final List<Supplier<IModIntegration>> MODULE_SUPPLIERS = List.of(
+            () -> com.huanghuang.rsintegration.mods.goety.GoetyRSModule.INSTANCE,
+            () -> com.huanghuang.rsintegration.mods.malum.MalumRSModule.INSTANCE,
+            () -> com.huanghuang.rsintegration.mods.eidolon.EidolonRSModule.INSTANCE,
+            () -> com.huanghuang.rsintegration.mods.forbidden.FaRSModule.INSTANCE,
+            () -> com.huanghuang.rsintegration.mods.wizards_reborn.WizardsRebornRSModule.INSTANCE,
+            () -> com.huanghuang.rsintegration.mods.touhoulittlemaid.TlmRSModule.INSTANCE,
+            () -> com.huanghuang.rsintegration.mods.embers.EreAlchemyRSModule.INSTANCE,
+            () -> com.huanghuang.rsintegration.mods.aetherworks.AetherworksRSModule.INSTANCE
+    );
 
     public RSIntegrationMod() {
         registerDisplayTest();
         RSIntegrationConfig.register();
         AltarBindingRegistry.registerHook(AltarBinding.RS_NETWORK, RSBindingHook.INSTANCE);
 
-        // Per-mod init (includes binding target registration)
-        if (enabled(RSIntegrationConfig.ENABLE_GOETY, ModIds.GOETY)) {
-            DistExecutor.safeRunWhenOn(Dist.CLIENT,
-                    () -> com.huanghuang.rsintegration.mods.goety.GoetyRSModule::initClient);
-            com.huanghuang.rsintegration.mods.goety.GoetyRSModule.initCommon();
-        }
-        if (enabled(RSIntegrationConfig.ENABLE_WIZARDS_REBORN, ModIds.WIZARDS_REBORN)) {
-            DistExecutor.safeRunWhenOn(Dist.CLIENT,
-                    () -> com.huanghuang.rsintegration.mods.wizards_reborn.WizardsRebornRSModule::initClient);
-            com.huanghuang.rsintegration.mods.wizards_reborn.WizardsRebornRSModule.initCommon();
-        }
-        if (enabled(RSIntegrationConfig.ENABLE_MALUM, ModIds.MALUM))
-            com.huanghuang.rsintegration.mods.malum.MalumRSModule.initCommon();
-        if (enabled(RSIntegrationConfig.ENABLE_FORBIDDEN_ARCANUS, ModIds.FORBIDDEN_ARCANUS))
-            com.huanghuang.rsintegration.mods.forbidden.FARSModule.initCommon();
-        if (enabled(RSIntegrationConfig.ENABLE_EIDOLON, ModIds.EIDOLON))
-            com.huanghuang.rsintegration.mods.eidolon.EidolonRSModule.initCommon();
-
-        // --- Touhou Little Maid -------------------------------------------
-        if (enabled(RSIntegrationConfig.ENABLE_TOUHOU_LITTLE_MAID, ModIds.TOUHOU_LITTLE_MAID))
-            com.huanghuang.rsintegration.mods.touhoulittlemaid.TlmRSModule.initCommon();
-
-        // --- Embers Rekindled ------------------------------------------
-        if (enabled(RSIntegrationConfig.ENABLE_EMBERS_ALCHEMY, ModIds.EMBERS))
-            com.huanghuang.rsintegration.mods.embers.EreAlchemyRSModule.initCommon();
-
-        // --- Aetherworks (Embers addon) ---------------------------------
-        if (enabled(RSIntegrationConfig.ENABLE_AETHERWORKS, ModIds.AETHERWORKS)) {
-            DistExecutor.safeRunWhenOn(Dist.CLIENT,
-                    () -> () -> com.huanghuang.rsintegration.mods.aetherworks.client.AetherworksClientSetup
-                            .init(FMLJavaModLoadingContext.get().getModEventBus()));
-            com.huanghuang.rsintegration.mods.aetherworks.AetherworksRSModule.initCommon();
+        // Per-mod init via IModIntegration interface
+        // Supplier defers class loading — RSModule classes are only loaded
+        // when their mod is detected as present, avoiding CNFE from optional
+        // dependencies (e.g. JEI imports on GoetyRSModule).
+        for (Supplier<IModIntegration> supplier : MODULE_SUPPLIERS) {
+            IModIntegration module = supplier.get();
+            if (module.configFlag().get() && ModList.get().isLoaded(module.modId())) {
+                module.registerModType();
+                module.registerBindingTargets();
+                module.registerRecipeHandler();
+                module.registerNetworkPackets();
+                module.initCommon();
+                DistExecutor.safeRunWhenOn(Dist.CLIENT, module.clientInitSupplier());
+            }
         }
 
-        // --- Vanilla Machines ------------------------------------------
+        // --- FarmingForBlockheads Market (virtual exchange, no IModIntegration) ---
+        if (enabled(RSIntegrationConfig.ENABLE_FARMINGFORBLOCKHEADS, ModIds.FARMINGFORBLOCKHEADS))
+            com.huanghuang.rsintegration.mods.farmingforblockheads.FarmingForBlockheadsRSModule.initCommon();
+
+        // --- Vanilla Machines (built-in, not IModIntegration) ----------
         if (RSIntegrationConfig.ENABLE_VANILLA_MACHINES.get()) {
+            ModType.register("vanilla_machine",
+                    new String[]{
+                            "net.minecraft.world.item.crafting.SmeltingRecipe",
+                            "net.minecraft.world.item.crafting.BlastingRecipe",
+                            "net.minecraft.world.item.crafting.SmokingRecipe",
+                            "net.minecraft.world.item.crafting.CampfireCookingRecipe",
+                            "net.minecraft.world.item.crafting.StonecutterRecipe",
+                            "net.minecraft.world.item.crafting.SmithingTransformRecipe",
+                            "net.minecraft.world.item.crafting.SmithingTrimRecipe"
+                    },
+                    new String[]{"furnace", "smoker", "campfire", "stonecutter", "smithing_table"},
+                    new String[]{"vanilla_machine"},
+                    ModType.delegateSupplier("com.huanghuang.rsintegration.mods.vanilla.VanillaMachineBatchDelegate"));
             com.huanghuang.rsintegration.network.BindingEventHandler.registerTarget(
                     new com.huanghuang.rsintegration.network.BindingEventHandler.MachineBindingTarget(
-                            "minecraft", ModType.VANILLA_MACHINE,
+                            "minecraft", ModType.byId("vanilla_machine"),
                             RSIntegrationConfig.ENABLE_VANILLA_MACHINES,
                             List.of(
                                     "net.minecraft.world.level.block.FurnaceBlock",

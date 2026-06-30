@@ -161,6 +161,23 @@ public final class MachineHub {
         animProgress = 0.001f; // avoid alpha=0 gate on same-frame render
     }
 
+    /** Refresh machine list from BindingCache without animation. */
+    public static void refreshMachines() {
+        if (state != State.VISIBLE && state != State.HIDDEN) return;
+        machines.clear();
+        var list = com.huanghuang.rsintegration.sidepanel.client.MachineTabHandler.getAllMachines();
+        var whitelist = RSIntegrationConfig.MACHINE_GUI_WHITELIST.get();
+        for (var info : list) {
+            ModType mt = ModType.fromBlockKey(info.blockKey());
+            if (mt != null && !whitelist.contains(mt.id())) continue;
+            machines.add(info);
+        }
+        refilter();
+        if (machines.isEmpty() && state == State.VISIBLE) {
+            hide();
+        }
+    }
+
     /** Start hide animation. */
     public static void hide() {
         if (state == State.HIDDEN) return;

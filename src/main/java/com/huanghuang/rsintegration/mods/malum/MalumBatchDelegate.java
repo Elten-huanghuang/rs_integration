@@ -94,7 +94,7 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
         this.player = player;
 
         if (!level.isLoaded(pos)) {
-            RSIntegrationMod.LOGGER.info("[RSI-Batch-Malum] Chunk unloaded at {} — force-loading", pos);
+            RSIntegrationMod.LOGGER.debug("[RSI-Batch-Malum] Chunk unloaded at {} — force-loading", pos);
             level.getChunk(pos);
         }
         BlockEntity be = level.getBlockEntity(pos);
@@ -463,7 +463,7 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
 
         // Fallback: scan for ItemEntity near the altar (it may have finished
         // between our poll ticks and we missed the transition)
-        ItemStack expected = com.huanghuang.rsintegration.crafting.ModRecipeIndex
+        ItemStack expected = com.huanghuang.rsintegration.crafting.RecipeIndex
                 .tryGetResultItem(recipe, level.registryAccess());
         if (!expected.isEmpty() && myPos != null && level.isLoaded(myPos)) {
             var entities = level.getEntitiesOfClass(
@@ -479,7 +479,7 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public ItemStack collectResult(ServerPlayer player) {
-        ItemStack expected = com.huanghuang.rsintegration.crafting.ModRecipeIndex
+        ItemStack expected = com.huanghuang.rsintegration.crafting.RecipeIndex
                 .tryGetResultItem(recipe, player.serverLevel().registryAccess());
         if (expected.isEmpty()) return ItemStack.EMPTY;
 

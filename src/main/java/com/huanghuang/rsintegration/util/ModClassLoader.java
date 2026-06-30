@@ -34,7 +34,7 @@ public final class ModClassLoader {
 
         String gateKey = modId + ":" + String.join(",", classNames);
         AtomicBoolean gate = CLASS_LOAD_GATES.computeIfAbsent(gateKey, k -> new AtomicBoolean(false));
-        if (!gate.compareAndSet(false, true)) return true; // already verified
+        if (gate.get()) return true; // already verified
 
         boolean allOk = true;
         for (String className : classNames) {
@@ -45,6 +45,7 @@ public final class ModClassLoader {
                 allOk = false;
             }
         }
+        if (allOk) gate.set(true);
         return allOk;
     }
 }

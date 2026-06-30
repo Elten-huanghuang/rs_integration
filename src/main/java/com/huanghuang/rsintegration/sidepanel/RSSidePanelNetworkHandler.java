@@ -14,6 +14,7 @@ import com.huanghuang.rsintegration.sidepanel.network.MachineCollectPacket;
 import com.huanghuang.rsintegration.sidepanel.network.MachineInsertPacket;
 import com.huanghuang.rsintegration.sidepanel.network.MachineStatusDeltaPacket;
 import com.huanghuang.rsintegration.sidepanel.network.OpenBoundMachineGuiPacket;
+import com.huanghuang.rsintegration.sidepanel.network.RSBindingSyncPacket;
 import com.refinedmods.refinedstorage.api.storage.cache.IStorageCache;
 import com.refinedmods.refinedstorage.api.storage.cache.IStorageCacheListener;
 import com.refinedmods.refinedstorage.api.util.StackListResult;
@@ -71,6 +72,8 @@ public final class RSSidePanelNetworkHandler {
                 MachineCollectPacket::encode, MachineCollectPacket::decode, MachineCollectPacket::handle);
         ch.registerMessage(NetworkHandler.nextId(), MachineInsertPacket.class,
                 MachineInsertPacket::encode, MachineInsertPacket::decode, MachineInsertPacket::handle);
+        ch.registerMessage(NetworkHandler.nextId(), RSBindingSyncPacket.class,
+                RSBindingSyncPacket::encode, RSBindingSyncPacket::decode, RSBindingSyncPacket::handle);
         ch.registerMessage(NetworkHandler.nextId(), ConfigSyncPacket.class,
                 ConfigSyncPacket::encode, ConfigSyncPacket::decode, ConfigSyncPacket::handle);
         ch.registerMessage(NetworkHandler.nextId(), RSItemLockPacket.class,
@@ -98,7 +101,7 @@ public final class RSSidePanelNetworkHandler {
 
         if (!tickFiringConfirmed) {
             tickFiringConfirmed = true;
-            RSIntegrationMod.LOGGER.info("[RSI-Delta] onServerTickEnd is firing (listener registered OK)");
+            RSIntegrationMod.LOGGER.debug("[RSI-Delta] onServerTickEnd is firing (listener registered OK)");
         }
 
         // ── Machine status push (every 40 ticks) ─────────────────
@@ -166,7 +169,7 @@ public final class RSSidePanelNetworkHandler {
                     }
                 }
             }
-        } catch (Throwable ignored) {}
+        } catch (Exception ignored) {}
 
         UUID pid = player.getUUID();
         Map<String, MachineStatus> playerLast = lastPushedStatuses.computeIfAbsent(pid,
@@ -219,6 +222,30 @@ public final class RSSidePanelNetworkHandler {
         CHANNEL.sendToServer(new RSSidePanelRequestPacket(false, true));
     }
 
+    public static void sendBindingSync(ServerPlayer player) {
+        List<BindingInfo> bindings = new ArrayList<>();
+        try {
+            collectBindingsFromStacks(player.getInventory().items, bindings);
+            collectBindingsFromStacks(player.getInventory().offhand, bindings);
+            collectBindingsFromStacks(player.getInventory().armor, bindings);
+            try {
+                var opt = top.theillusivec4.curios.api.CuriosApi.getCuriosInventory(player).resolve();
+                if (opt.isPresent()) {
+                    for (var handler : opt.get().getCurios().values()) {
+                        var stacks = handler.getStacks();
+                        for (int s = 0; s < stacks.getSlots(); s++) {
+                            collectBindingsFromStacks(List.of(stacks.getStackInSlot(s)), bindings);
+                        }
+                    }
+                }
+            } catch (Exception ignored) {}
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI] Failed to collect bindings for sync: {}", e.toString());
+        }
+        CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
+                new RSBindingSyncPacket(bindings));
+    }
+
     public static void sendSync(ServerPlayer player, List<UUID> ids, List<ItemStack> items,
                                 List<Long> timestamps,
                                 List<Boolean> craftableFlags,
@@ -240,7 +267,7 @@ public final class RSSidePanelNetworkHandler {
                         }
                     }
                 }
-            } catch (Throwable ignored) {}
+            } catch (Exception ignored) {}
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.debug("[RSI] Failed to build binding info: {}", e.toString());
         }
@@ -382,7 +409,7 @@ public final class RSSidePanelNetworkHandler {
                         try {
                             IStorageCache<ItemStack> freshCache = network.getItemStorageCache();
                             if (freshCache != null && freshCache != cache) {
-                                RSIntegrationMod.LOGGER.info("[RSI] Cache rebuilt — re-registering listener for {}", pid);
+                                RSIntegrationMod.LOGGER.debug("[RSI] Cache rebuilt — re-registering listener for {}", pid);
                                 // registerListener will add the listener to the freshCache
                                 registerListener(sp, network);
                                 return;
@@ -391,7 +418,7 @@ public final class RSSidePanelNetworkHandler {
                             RSIntegrationMod.LOGGER.warn("[RSI] Re-registration attempt failed for {}: {}", pid, ex.toString());
                         }
                         // Network is truly gone — notify client
-                        RSIntegrationMod.LOGGER.info("[RSI] Network unavailable for {} — clearing panel", pid);
+                        RSIntegrationMod.LOGGER.debug("[RSI] Network unavailable for {} — clearing panel", pid);
                         sendSync(sp,
                                 Collections.emptyList(), Collections.emptyList(),
                                 Collections.emptyList(), Collections.emptyList(),

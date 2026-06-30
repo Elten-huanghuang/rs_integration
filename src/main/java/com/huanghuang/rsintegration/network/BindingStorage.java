@@ -118,7 +118,7 @@ public final class BindingStorage {
         list.add(entry.toTag());
         tag.put(KEY_BINDINGS, list);
         stack.setTag(tag);
-        RSIntegrationMod.LOGGER.info("[RSI-Bind] addBinding: item={} dim={} pos={} blockKey={} totalBindings={}",
+        RSIntegrationMod.LOGGER.debug("[RSI-Bind] addBinding: item={} dim={} pos={} blockKey={} totalBindings={}",
                 stack.getItem(), dim, pos, blockKey, list.size());
         return true;
     }
@@ -140,7 +140,7 @@ public final class BindingStorage {
                 list.remove(i);
                 tag.put(KEY_BINDINGS, list);
                 stack.setTag(tag);
-                RSIntegrationMod.LOGGER.info("[RSI-Bind] removeBinding: item={} dim={} pos={} remaining={}",
+                RSIntegrationMod.LOGGER.debug("[RSI-Bind] removeBinding: item={} dim={} pos={} remaining={}",
                         stack.getItem(), dim, pos, list.size());
                 return true;
             }

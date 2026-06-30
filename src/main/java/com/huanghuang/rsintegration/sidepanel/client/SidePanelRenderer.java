@@ -8,7 +8,6 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.network.chat.Component;
-import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.registries.ForgeRegistries;
 
@@ -20,24 +19,6 @@ import java.util.*;
  * as parameters — they hold no mutable state.
  */
 public final class SidePanelRenderer {
-
-    // ── Layout constants (mirrored from RSSidePanelClient) ────────
-    public static final int SLOT_SIZE        = 18;
-    public static final int COLUMNS          = 9;
-    public static final int GRID_W           = 193;
-    public static final int HEADER_H         = 19;
-    public static final int BOTTOM_H         = 7;
-    public static final int GRID_ITEM_X      = 8;
-    public static final int SCROLLBAR_X      = 174;
-    public static final int SIDE_BTN_SIZE    = 18;
-    public static final int SIDE_BTN_GAP     = 2;
-    public static final int SIDE_BTN_PITCH   = SIDE_BTN_SIZE + SIDE_BTN_GAP;
-    public static final int SIDE_BTN_FLOAT_X = -20;
-
-    private static final ResourceLocation RS_GRID_TEX =
-            new ResourceLocation("refinedstorage", "textures/gui/grid.png");
-    private static final ResourceLocation RS_ICONS_TEX =
-            new ResourceLocation(RSIntegrationMod.MOD_ID, "textures/gui/icons.png");
 
     private SidePanelRenderer() {}
 
@@ -91,22 +72,22 @@ public final class SidePanelRenderer {
         RenderSystem.defaultBlendFunc();
 
         Font font = Minecraft.getInstance().font;
-        int gy = panelY + HEADER_H;
-        int gridH = visibleRows * SLOT_SIZE;
+        int gy = panelY + RSSidePanelClient.HEADER_H;
+        int gridH = visibleRows * RSSidePanelClient.SLOT_SIZE;
 
         // ── 1. Header strip ──────────────────────────────────────
-        g.blit(RS_GRID_TEX, panelX, panelY, 0, 0, GRID_W, HEADER_H);
+        g.blit(RSSidePanelClient.RS_GRID_TEX, panelX, panelY, 0, 0, RSSidePanelClient.GRID_W, RSSidePanelClient.HEADER_H);
 
         // ── 2. Row backgrounds ───────────────────────────────────
         for (int row = 0; row < visibleRows; row++) {
             int v = row == 0 ? 19 : (row == visibleRows - 1 ? 55 : 37);
-            int ry = gy + row * SLOT_SIZE;
-            g.blit(RS_GRID_TEX, panelX, ry, 0, v, GRID_W, SLOT_SIZE);
+            int ry = gy + row * RSSidePanelClient.SLOT_SIZE;
+            g.blit(RSSidePanelClient.RS_GRID_TEX, panelX, ry, 0, v, RSSidePanelClient.GRID_W, RSSidePanelClient.SLOT_SIZE);
         }
 
         // ── 3. Bottom strip ──────────────────────────────────────
         int by = gy + gridH;
-        g.blit(RS_GRID_TEX, panelX, by, 0, 73, GRID_W, BOTTOM_H);
+        g.blit(RSSidePanelClient.RS_GRID_TEX, panelX, by, 0, 73, RSSidePanelClient.GRID_W, RSSidePanelClient.BOTTOM_H);
 
         // ── 4. Header content ────────────────────────────────────
         renderHeaderTitle(g, font, panelX, panelY,
@@ -124,36 +105,36 @@ public final class SidePanelRenderer {
 
         // ── 5. Side buttons ──────────────────────────────────────
         int hoveredSideButton = -1;
-        int btnX = panelX + SIDE_BTN_FLOAT_X;
-        int sby = panelY + HEADER_H + 1;
+        int btnX = panelX + RSSidePanelClient.SIDE_BTN_FLOAT_X;
+        int sby = panelY + RSSidePanelClient.HEADER_H + 1;
         for (int i = 0; i < 5; i++) {
-            int h = renderSideButton(g, btnX, sby + i * SIDE_BTN_PITCH, i,
+            int h = renderSideButton(g, btnX, sby + i * RSSidePanelClient.SIDE_BTN_PITCH, i,
                     viewType, sortAsc, sortMode, searchMode, gridSize,
                     mouseX, mouseY);
             if (h >= 0) hoveredSideButton = h;
         }
 
         // ── 6. Fold button ───────────────────────────────────────
-        int foldX = panelX + GRID_W - 16;
+        int foldX = panelX + RSSidePanelClient.GRID_W - 16;
         int foldY = panelY + 2;
         boolean foldHovered = mouseX >= foldX && mouseX < foldX + 14
                 && mouseY >= foldY && mouseY < foldY + 14;
-        g.blit(RS_ICONS_TEX, foldX, foldY, foldHovered ? 16 : 0, 128, 14, 14, 256, 256);
+        g.blit(RSSidePanelClient.RS_ICONS_TEX, foldX, foldY, foldHovered ? 16 : 0, 128, 14, 14, 256, 256);
 
         // ── 7. Grid items ────────────────────────────────────────
         int hoveredSlotIndex = -1;
 
         for (int row = 0; row < visibleRows; row++) {
-            for (int col = 0; col < COLUMNS; col++) {
-                int dIdx = (scrollRow + row) * COLUMNS + col;
+            for (int col = 0; col < RSSidePanelClient.COLUMNS; col++) {
+                int dIdx = (scrollRow + row) * RSSidePanelClient.COLUMNS + col;
                 if (dIdx >= displayList.size()) break;
                 PanelStack ps = displayList.get(dIdx);
                 ItemStack stack = ps.getStack();
 
-                int itemLeft = panelX + GRID_ITEM_X;
-                int itemTop  = panelY + HEADER_H;
-                int ix = itemLeft + col * SLOT_SIZE + 1;
-                int iy = itemTop  + row * SLOT_SIZE + 1;
+                int itemLeft = panelX + RSSidePanelClient.GRID_ITEM_X;
+                int itemTop  = panelY + RSSidePanelClient.HEADER_H;
+                int ix = itemLeft + col * RSSidePanelClient.SLOT_SIZE + 1;
+                int iy = itemTop  + row * RSSidePanelClient.SLOT_SIZE + 1;
 
                 boolean hovered = mouseX >= ix - 1 && mouseX < ix + 17
                         && mouseY >= iy - 1 && mouseY < iy + 17;
@@ -190,7 +171,7 @@ public final class SidePanelRenderer {
                     if (label != null) {
                         renderSlotQuantity(g, font, ix, iy, label, labelColor);
                     }
-                } catch (Throwable t) {
+                } catch (Exception t) {
                     RSIntegrationMod.LOGGER.warn("[RSI-SidePanel] Failed render stack {}: {}",
                             ForgeRegistries.ITEMS.getKey(stack.getItem()), t.toString());
                 }
@@ -225,7 +206,7 @@ public final class SidePanelRenderer {
         }
 
         // ── 8. Scrollbar ─────────────────────────────────────────
-        int totalRows = (int) Math.ceil(displayList.size() / (double) COLUMNS);
+        int totalRows = (int) Math.ceil(displayList.size() / (double) RSSidePanelClient.COLUMNS);
         renderScrollbar(g, panelX, panelY, visibleRows, scrollRow, totalRows);
 
         // ── 9. Tooltips ──────────────────────────────────────────
@@ -236,11 +217,11 @@ public final class SidePanelRenderer {
 
                 // Lock icon tooltip
                 if (RSSidePanelClient.isItemLocked(hs)) {
-                    int col = hoveredSlotIndex % COLUMNS;
-                    int row = hoveredSlotIndex / COLUMNS - scrollRow;
+                    int col = hoveredSlotIndex % RSSidePanelClient.COLUMNS;
+                    int row = hoveredSlotIndex / RSSidePanelClient.COLUMNS - scrollRow;
                     if (row >= 0 && row < visibleRows) {
-                        int lix = panelX + GRID_ITEM_X + col * SLOT_SIZE + 1 + 1;
-                        int liy = panelY + HEADER_H + row * SLOT_SIZE + 1 + 1;
+                        int lix = panelX + RSSidePanelClient.GRID_ITEM_X + col * RSSidePanelClient.SLOT_SIZE + 1 + 1;
+                        int liy = panelY + RSSidePanelClient.HEADER_H + row * RSSidePanelClient.SLOT_SIZE + 1 + 1;
                         if (mouseX >= lix && mouseX < lix + 7 && mouseY >= liy && mouseY < liy + 7) {
                             g.renderTooltip(font,
                                     Component.translatable("rsi.side_panel.locked_item"),
@@ -253,11 +234,11 @@ public final class SidePanelRenderer {
                 String hsKey = RSSidePanelClient.keyOf(hs);
                 if (!hsKey.isEmpty()
                         && com.huanghuang.rsintegration.sidepanel.data.BindingCache.getInstance().hasGui(hsKey)) {
-                    int col = hoveredSlotIndex % COLUMNS;
-                    int row = hoveredSlotIndex / COLUMNS - scrollRow;
+                    int col = hoveredSlotIndex % RSSidePanelClient.COLUMNS;
+                    int row = hoveredSlotIndex / RSSidePanelClient.COLUMNS - scrollRow;
                     if (row >= 0 && row < visibleRows) {
-                        int gix = panelX + GRID_ITEM_X + col * SLOT_SIZE + 1 + 10;
-                        int giy = panelY + HEADER_H + row * SLOT_SIZE + 1 + 10;
+                        int gix = panelX + RSSidePanelClient.GRID_ITEM_X + col * RSSidePanelClient.SLOT_SIZE + 1 + 10;
+                        int giy = panelY + RSSidePanelClient.HEADER_H + row * RSSidePanelClient.SLOT_SIZE + 1 + 10;
                         if (mouseX >= gix && mouseX < gix + 8
                                 && mouseY >= giy && mouseY < giy + 8) {
                             g.renderTooltip(font,
@@ -296,7 +277,7 @@ public final class SidePanelRenderer {
         }
         int titleMaxW = 73;
         g.drawString(font, font.plainSubstrByWidth(title, titleMaxW),
-                panelX + GRID_ITEM_X, panelY + 7, titleColor);
+                panelX + RSSidePanelClient.GRID_ITEM_X, panelY + 7, titleColor);
     }
 
     // ── Collapsed bar ────────────────────────────────────────────
@@ -309,7 +290,7 @@ public final class SidePanelRenderer {
                                            String networkName,
                                            int totalSlotCount) {
         Font font = Minecraft.getInstance().font;
-        g.blit(RS_GRID_TEX, panelX, panelY, 0, 0, GRID_W, HEADER_H);
+        g.blit(RSSidePanelClient.RS_GRID_TEX, panelX, panelY, 0, 0, RSSidePanelClient.GRID_W, RSSidePanelClient.HEADER_H);
 
         String title;
         int titleColor;
@@ -322,8 +303,8 @@ public final class SidePanelRenderer {
         }
         int titleMaxW = 73;
         g.drawString(font, font.plainSubstrByWidth(title, titleMaxW),
-                panelX + GRID_ITEM_X, panelY + 7, titleColor);
-        g.drawString(font, "▶", panelX + GRID_W - 16, panelY + 5, 0xFFAAAAAA);
+                panelX + RSSidePanelClient.GRID_ITEM_X, panelY + 7, titleColor);
+        g.drawString(font, "▶", panelX + RSSidePanelClient.GRID_W - 16, panelY + 5, 0xFFAAAAAA);
     }
 
     // ── Side button ──────────────────────────────────────────────
@@ -339,15 +320,15 @@ public final class SidePanelRenderer {
                                         int sortMode, int searchMode,
                                         int gridSize,
                                         int mouseX, int mouseY) {
-        boolean hovered = mouseX >= bx && mouseX < bx + SIDE_BTN_SIZE
-                && mouseY >= by && mouseY < by + SIDE_BTN_SIZE;
+        boolean hovered = mouseX >= bx && mouseX < bx + RSSidePanelClient.SIDE_BTN_SIZE
+                && mouseY >= by && mouseY < by + RSSidePanelClient.SIDE_BTN_SIZE;
 
         var p = g.pose();
         p.pushPose();
         p.translate(0, 0, 20);
 
         int bgV = hovered ? 54 : 16;
-        g.blit(RS_ICONS_TEX, bx, by, 238, bgV, SIDE_BTN_SIZE, SIDE_BTN_SIZE, 256, 256);
+        g.blit(RSSidePanelClient.RS_ICONS_TEX, bx, by, 238, bgV, RSSidePanelClient.SIDE_BTN_SIZE, RSSidePanelClient.SIDE_BTN_SIZE, 256, 256);
 
         int u = 0, v = 0;
         switch (idx) {
@@ -368,7 +349,7 @@ public final class SidePanelRenderer {
                 break;
             default: { p.popPose(); return -1; }
         }
-        g.blit(RS_ICONS_TEX, bx + 1, by + 1, u, v, 16, 16, 256, 256);
+        g.blit(RSSidePanelClient.RS_ICONS_TEX, bx + 1, by + 1, u, v, 16, 16, 256, 256);
         p.popPose();
 
         return hovered ? idx : -1;
@@ -399,14 +380,14 @@ public final class SidePanelRenderer {
         int maxScroll = Math.max(0, totalRows - visibleRows);
         if (maxScroll <= 0) return;
 
-        int sx = panelX + SCROLLBAR_X;
-        int sy = panelY + HEADER_H + 2;
-        int trackH = visibleRows * SLOT_SIZE - 4;
+        int sx = panelX + RSSidePanelClient.SCROLLBAR_X;
+        int sy = panelY + RSSidePanelClient.HEADER_H + 2;
+        int trackH = visibleRows * RSSidePanelClient.SLOT_SIZE - 4;
         int thumbH = 15;
         int trackAvail = Math.max(1, trackH - thumbH);
         int thumbY = sy + (int) Math.round((double) trackAvail * scrollRow / maxScroll);
 
-        g.blit(RS_ICONS_TEX, sx, thumbY, 232, 0, 12, 15, 256, 256);
+        g.blit(RSSidePanelClient.RS_ICONS_TEX, sx, thumbY, 232, 0, 12, 15, 256, 256);
     }
 
     // ── Tooltips ─────────────────────────────────────────────────

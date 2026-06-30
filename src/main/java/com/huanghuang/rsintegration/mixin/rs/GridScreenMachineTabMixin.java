@@ -132,6 +132,11 @@ public abstract class GridScreenMachineTabMixin {
         }
     }
 
+    @Inject(method = "removed", at = @At("HEAD"), remap = false)
+    private void rsi$onClose(CallbackInfo ci) {
+        rsi$bindingSyncRequested = false;
+    }
+
     // Hub overlay is now rendered via ScreenEvent.Render.Post (in GuiNavStack)
     // so that it draws above JEI's ingredient panel.
 }

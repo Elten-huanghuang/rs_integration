@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.network;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.util.ModIds;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.GlobalPos;
@@ -120,7 +121,7 @@ public final class AltarBindingRegistry {
                         if (found != null) break;
                     }
                 }
-            } catch (Throwable e) {
+            } catch (Exception e) {
                 RSIntegrationMod.LOGGER.debug("[RSI] Curios NBT scan failed", e);
             }
         }
@@ -175,6 +176,7 @@ public final class AltarBindingRegistry {
                                                    BlockPos altarPos) {
         List<AltarBinding> list = BINDINGS.get(GlobalPos.of(dim, altarPos));
         if (list != null) {
+            synchronized (list) {
             for (AltarBinding binding : list) {
                 if (!binding.type().equals(AltarBinding.RS_NETWORK)) continue;
                 try {
@@ -187,7 +189,8 @@ public final class AltarBindingRegistry {
                             data.getInt("x"), data.getInt("y"), data.getInt("z"));
                     INetwork net = RSIntegration.resolveNetwork(player.server, netDim, netPos);
                     if (net != null) return net;
-                } catch (Throwable e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
+                } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
+            }
             }
         }
         // Fallback: scan player inventory for bound NetworkItems
@@ -215,7 +218,7 @@ public final class AltarBindingRegistry {
                     }
                 }
             }
-        } catch (Throwable e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
         return null;
     }
 
@@ -240,12 +243,14 @@ public final class AltarBindingRegistry {
                                                     BlockPos altarPos, Ingredient ingredient, int count) {
         List<AltarBinding> list = BINDINGS.get(GlobalPos.of(dim, altarPos));
         if (list != null) {
+            synchronized (list) {
             for (AltarBinding binding : list) {
                 IBindingHook hook = HOOKS.get(binding.type());
                 if (hook != null) {
                     ItemStack stack = hook.extractItem(player, binding, ingredient, count);
                     if (!stack.isEmpty()) return stack;
                 }
+            }
             }
         }
         // Fallback: rebuild binding from player items (survives server restart)
@@ -275,7 +280,7 @@ public final class AltarBindingRegistry {
                     }
                 }
             }
-        } catch (Throwable e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
         return ItemStack.EMPTY;
     }
 
@@ -328,7 +333,7 @@ public final class AltarBindingRegistry {
                     }
                 }
             }
-        } catch (Throwable e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
         return null;
     }
 
@@ -354,7 +359,7 @@ public final class AltarBindingRegistry {
                                 data.getInt("x"), data.getInt("y"), data.getInt("z"));
                         INetwork net = RSIntegration.resolveNetwork(player.server, netDim, netPos);
                         if (net != null) return net;
-                    } catch (Throwable e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
+                    } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
                 }
             }
         }
@@ -407,7 +412,7 @@ public final class AltarBindingRegistry {
                     }
                 }
             }
-        } catch (Throwable e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
         return false;
     }
 
@@ -435,22 +440,22 @@ public final class AltarBindingRegistry {
      */
     public static boolean hasAnyBindingForType(ServerPlayer player, ModType type) {
         if (type == ModType.GENERIC) return true;
-        RSIntegrationMod.LOGGER.info(
+        RSIntegrationMod.LOGGER.debug(
                 "[RSI-DIAG] hasAnyBindingForType called: type={}, player={}",
                 type.id(), player.getName().getString());
         var inv = player.getInventory();
         if (scanBindingsForType(inv.items, player, type)) {
-            RSIntegrationMod.LOGGER.info(
+            RSIntegrationMod.LOGGER.debug(
                     "[RSI-DIAG] hasAnyBindingForType → TRUE (main inventory)");
             return true;
         }
         if (scanBindingsForType(inv.offhand, player, type)) {
-            RSIntegrationMod.LOGGER.info(
+            RSIntegrationMod.LOGGER.debug(
                     "[RSI-DIAG] hasAnyBindingForType → TRUE (offhand)");
             return true;
         }
         if (scanBindingsForType(inv.armor, player, type)) {
-            RSIntegrationMod.LOGGER.info(
+            RSIntegrationMod.LOGGER.debug(
                     "[RSI-DIAG] hasAnyBindingForType → TRUE (armor)");
             return true;
         }
@@ -461,15 +466,15 @@ public final class AltarBindingRegistry {
                     var stacks = handler.getStacks();
                     for (int s = 0; s < stacks.getSlots(); s++) {
                         if (scanBindingsForType(List.of(stacks.getStackInSlot(s)), player, type)) {
-                            RSIntegrationMod.LOGGER.info(
+                            RSIntegrationMod.LOGGER.debug(
                                     "[RSI-DIAG] hasAnyBindingForType → TRUE (curios slot {})", s);
                             return true;
                         }
                     }
                 }
             }
-        } catch (Throwable e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
-        RSIntegrationMod.LOGGER.info(
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
+        RSIntegrationMod.LOGGER.debug(
                 "[RSI-DIAG] hasAnyBindingForType → FALSE for type={}", type.id());
         return false;
     }
@@ -503,7 +508,7 @@ public final class AltarBindingRegistry {
                     }
                 }
             }
-        } catch (Throwable e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
         return result;
     }
 
@@ -515,7 +520,7 @@ public final class AltarBindingRegistry {
                 var rl = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(
                         stack.getItem());
                 String itemId = rl != null ? rl.toString() : "unknown";
-                RSIntegrationMod.LOGGER.info(
+                RSIntegrationMod.LOGGER.debug(
                         "[RSI-DIAG] scanBindingsForType: item={}, blockKey={}, entryType={}, lookingFor={}",
                         itemId, entry.blockKey(),
                         entryType != null ? entryType.id() : "null",
@@ -524,7 +529,7 @@ public final class AltarBindingRegistry {
                 ResourceKey<Level> altarDim = ResourceKey.create(
                         net.minecraft.core.registries.Registries.DIMENSION, entry.dim());
                 INetwork net = resolveNetworkForAltar(player, altarDim, entry.pos());
-                RSIntegrationMod.LOGGER.info(
+                RSIntegrationMod.LOGGER.debug(
                         "[RSI-DIAG] scanBindingsForType: resolveNetworkForAltar({}, {}, {}) → {}",
                         entry.dim(), entry.pos(), type.id(), net != null ? "FOUND" : "null");
                 if (net != null) {
@@ -565,33 +570,26 @@ public final class AltarBindingRegistry {
      *  machine prefix used during binding is "spirit_altar". */
     private static String normalizeSubType(@Nullable String hint, ModType type) {
         if (hint == null) return null;
-        if (type == ModType.WIZARDS_REBORN) {
+        if (ModIds.WIZARDS_REBORN.equals(type.id())) {
             if ("crystal_infusion".equals(hint)) {
                 return "crystal_ritual";
             }
-            // WR names its Arcane Iterator recipe category "crystal_ritual",
-            // but the machine binding uses the "wizards_reborn" prefix.
-            // Map to "arcane_iterator" so it matches the block key.
             if ("crystal_ritual".equals(hint)) {
                 return "arcane_iterator";
             }
-            // Third-party WR recipes (e.g. goety_cataclysm:focus/xxx) use
-            // the Wissen Crystallizer — let validateAndInit filter by machine type.
             if ("focus".equals(hint)) {
                 return null;
             }
         }
-        if (type == ModType.MALUM && "spirit_infusion".equals(hint)) {
+        if (ModIds.MALUM.equals(type.id()) && "spirit_infusion".equals(hint)) {
             return "spirit_altar";
         }
         // Aetherworks names its recipe category "aetherium_anvil" but the
         // block description ID uses "forge_anvil".
-        if (type == ModType.AETHERWORKS_ANVIL && "aetherium_anvil".equals(hint)) {
+        if (ModType.byId("aetherworks_anvil") == type && "aetherium_anvil".equals(hint)) {
             return "forge_anvil";
         }
-        // Goety recipe categories (focus, ritual) don't map to machine sub-types.
-        // All Goety machines (Dark Altar, Necro Brazier) can process all recipes.
-        if (type == ModType.GOETY) {
+        if (ModIds.GOETY.equals(type.id())) {
             return null;
         }
         return hint;

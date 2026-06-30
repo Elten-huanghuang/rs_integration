@@ -213,7 +213,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
         }
 
         if (hadStray) {
-            RSIntegrationMod.LOGGER.info("[RSI-Crucible] Recovered stray items from crucible at {}", pos);
+            RSIntegrationMod.LOGGER.debug("[RSI-Crucible] Recovered stray items from crucible at {}", pos);
         }
 
         this.craftStarted = false;
@@ -543,7 +543,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
 
     @Override
     public void onBatchFailed(ServerPlayer player, String reason) {
-        RSIntegrationMod.LOGGER.debug("[RSI-Crucible] Batch failed: {}", reason);
+        RSIntegrationMod.LOGGER.warn("[RSI-Crucible] Batch failed: {}", reason);
         if (usingSharedLedger) {
             // Chain will refund via ledger.refundCommitted() — clearing
             // here would double-return. Reset state without touching slots.

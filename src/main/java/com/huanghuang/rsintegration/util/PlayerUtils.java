@@ -1,8 +1,13 @@
 package com.huanghuang.rsintegration.util;
 
+import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.item.ItemStack;
+import net.minecraftforge.items.ItemHandlerHelper;
 
 import javax.annotation.Nullable;
 import java.util.UUID;
@@ -33,6 +38,33 @@ public final class PlayerUtils {
         ServerPlayer player = getOnlinePlayer(server, playerId);
         if (player != null && !player.hasDisconnected()) {
             player.sendSystemMessage(message);
+        }
+    }
+
+    /**
+     * Safely gives an item to a player, with fallbacks when the player's chunk
+     * is unloaded (which would silently void items). Falls back to RS network
+     * insertion, then to world-spawn drop.
+     */
+    public static void safeGiveToPlayer(ServerPlayer player, ItemStack stack, @Nullable INetwork network) {
+        if (stack.isEmpty()) return;
+        if (player.level().hasChunkAt(player.blockPosition())) {
+            ItemHandlerHelper.giveItemToPlayer(player, stack);
+            return;
+        }
+        if (network != null) {
+            network.insertItem(stack, stack.getCount(), com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+            RSIntegrationMod.LOGGER.warn("[RSI] Refund redirected to RS network (player chunk unloaded): {} x{}",
+                stack.getHoverName().getString(), stack.getCount());
+        } else {
+            var spawnLevel = player.getServer().overworld();
+            if (spawnLevel == null) return;
+            var spawnPos = spawnLevel.getSharedSpawnPos();
+            spawnLevel.addFreshEntity(
+                new ItemEntity(spawnLevel,
+                    spawnPos.getX() + 0.5, spawnPos.getY() + 0.5, spawnPos.getZ() + 0.5, stack));
+            RSIntegrationMod.LOGGER.warn("[RSI] Refund dropped at world spawn (player {} in unloaded chunk): {} x{}",
+                player.getGameProfile().getName(), stack.getHoverName().getString(), stack.getCount());
         }
     }
 }

@@ -26,7 +26,7 @@ public final class PlanResponsePacket {
     }
 
     public void encode(FriendlyByteBuf buf) {
-        RSIntegrationMod.LOGGER.info("[RSI-PlanPkt] encode() called: recipeId={} success={} steps={}",
+        RSIntegrationMod.LOGGER.debug("[RSI-PlanPkt] encode() called: recipeId={} success={} steps={}",
                 plan.recipeId(), plan.success(), plan.steps().size());
         buf.writeBoolean(plan.success());
         buf.writeUtf(plan.recipeId() != null ? plan.recipeId() : "");
@@ -110,7 +110,7 @@ public final class PlanResponsePacket {
     }
 
     public static PlanResponsePacket decode(FriendlyByteBuf buf) {
-        RSIntegrationMod.LOGGER.info("[RSI-PlanPkt] decode() called");
+        RSIntegrationMod.LOGGER.debug("[RSI-PlanPkt] decode() called");
         boolean success = buf.readBoolean();
         String recipeId = buf.readUtf();
         // Always read full plan data — the server sends the recipe chain
@@ -216,12 +216,12 @@ public final class PlanResponsePacket {
 
     @SuppressWarnings("resource")
     public static void handle(PlanResponsePacket packet, Supplier<NetworkEvent.Context> ctxSupplier) {
-        RSIntegrationMod.LOGGER.info(
+        RSIntegrationMod.LOGGER.debug(
                 "[RSI-PlanPkt] Client received PlanResponsePacket: recipeId={} success={} steps={}",
                 packet.plan.recipeId(), packet.plan.success(), packet.plan.steps().size());
         NetworkEvent.Context ctx = ctxSupplier.get();
         ctx.enqueueWork(() -> {
-            RSIntegrationMod.LOGGER.info(
+            RSIntegrationMod.LOGGER.debug(
                     "[RSI-PlanPkt] enqueueWork running on client thread: recipeId={}",
                     packet.plan.recipeId());
             openScreen(packet.plan);
@@ -231,7 +231,7 @@ public final class PlanResponsePacket {
 
     @OnlyIn(Dist.CLIENT)
     private static void openScreen(PlanResponse plan) {
-        RSIntegrationMod.LOGGER.info(
+        RSIntegrationMod.LOGGER.debug(
                 "[RSI-PlanPkt] openScreen called: success={} steps={}",
                 plan.success(), plan.steps().size());
         var mc = Minecraft.getInstance();
@@ -239,17 +239,20 @@ public final class PlanResponsePacket {
             RSIntegrationMod.LOGGER.warn("[RSI-PlanPkt] openScreen ABORT: mc.player is null");
             return;
         }
-        // Skip if a CraftingPlanScreen for the same recipe is already open
+        // If a CraftingPlanScreen is already open for the same recipe,
+        // update it in-place rather than replacing it — this preserves
+        // scroll position and avoids flicker during OR-path switching.
         if (mc.screen instanceof CraftingPlanScreen existing
                 && plan.recipeId() != null
                 && plan.recipeId().equals(existing.getRecipeId())) {
-            RSIntegrationMod.LOGGER.warn("[RSI-PlanPkt] openScreen SKIP: already showing plan for {}",
+            RSIntegrationMod.LOGGER.debug("[RSI-PlanPkt] openScreen UPDATE: refreshing plan for {}",
                     plan.recipeId());
+            existing.updatePlan(plan);
             return;
         }
         try {
             mc.setScreen(new CraftingPlanScreen(plan));
-            RSIntegrationMod.LOGGER.info("[RSI-PlanPkt] CraftingPlanScreen opened successfully");
+            RSIntegrationMod.LOGGER.debug("[RSI-PlanPkt] CraftingPlanScreen opened successfully");
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.error("[RSI-PlanPkt] Failed to open CraftingPlanScreen:", e);
         }

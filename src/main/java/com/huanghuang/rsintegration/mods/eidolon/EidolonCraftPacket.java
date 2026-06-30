@@ -111,7 +111,7 @@ public final class EidolonCraftPacket {
                 tryCraft(player, packet.recipeId, packet.dim, packet.pos);
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.error("[RSI-Eidolon] Crucible craft failed for {}:", packet.recipeId, e);
-                player.sendSystemMessage(Component.translatable("rsi.eidolon.error.craft_failed", e.getMessage()));
+                player.sendSystemMessage(Component.translatable("rsi.eidolon.error.craft_failed"));
             }
         });
         context.setPacketHandled(true);
@@ -273,7 +273,7 @@ public final class EidolonCraftPacket {
 
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.error("[RSI-Eidolon] Extraction/step creation failed for {}:", recipeId, e);
-            player.sendSystemMessage(Component.translatable("rsi.generic.error.prepare_failed", e.getMessage()));
+            player.sendSystemMessage(Component.translatable("rsi.generic.error.prepare_failed"));
             return;
         }
 
@@ -307,7 +307,7 @@ public final class EidolonCraftPacket {
                     player.getName().getString(), recipeId);
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.error("[RSI-Eidolon] Failed to spawn result for {}:", recipeId, e);
-            player.sendSystemMessage(Component.translatable("rsi.eidolon.error.result_failed", e.getMessage()));
+            player.sendSystemMessage(Component.translatable("rsi.eidolon.error.result_failed"));
             // Refund committed items — use actual extracted items, not ingredient.getItems()[0]
             for (ItemStack refundStack : allExtracted) {
                 if (refundStack.isEmpty()) continue;

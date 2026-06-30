@@ -125,10 +125,10 @@ public final class OpenBoundMachineGuiPacket {
                             .getKey(level.getBlockState(packet.pos).getBlock()).toString();
                     isStonecutter = blockId.contains("stonecutter");
                     isSmithing = blockId.contains("smithing_table");
-                    RSIntegrationMod.LOGGER.info("[RSI-Prefill] Block={} stonecutter={} smithing={}",
+                    RSIntegrationMod.LOGGER.debug("[RSI-Prefill] Block={} stonecutter={} smithing={}",
                             blockId, isStonecutter, isSmithing);
                 } else {
-                    RSIntegrationMod.LOGGER.info("[RSI-Prefill] BE present but not furnace: {}",
+                    RSIntegrationMod.LOGGER.debug("[RSI-Prefill] BE present but not furnace: {}",
                             be != null ? be.getClass().getSimpleName() : "null");
                 }
             }
@@ -338,7 +338,7 @@ public final class OpenBoundMachineGuiPacket {
     /** Fill smithing table: template (slot 0), base (slot 1), addition (slot 2) from RS. */
     private static void prefillSmithingMenu(ServerPlayer player, ServerLevel level,
                                              ResourceLocation recipeId) {
-        RSIntegrationMod.LOGGER.info("[RSI-Prefill] Smithing start: recipe={} menu={}",
+        RSIntegrationMod.LOGGER.debug("[RSI-Prefill] Smithing start: recipe={} menu={}",
                 recipeId, player.containerMenu != null ? player.containerMenu.getClass().getSimpleName() : "null");
 
         if (!(player.containerMenu instanceof SmithingMenu menu)) {
@@ -357,12 +357,12 @@ public final class OpenBoundMachineGuiPacket {
         if (network == null) return;
 
         List<Ingredient> ingredients = recipe.getIngredients();
-        RSIntegrationMod.LOGGER.info("[RSI-Prefill] Smithing ingredients count={}", ingredients.size());
+        RSIntegrationMod.LOGGER.debug("[RSI-Prefill] Smithing ingredients count={}", ingredients.size());
         // SmithingRecipe (1.20 abstract base) doesn't override getIngredients() — use reflection
         if (ingredients.isEmpty() && (recipe instanceof net.minecraft.world.item.crafting.SmithingTransformRecipe
                 || recipe instanceof net.minecraft.world.item.crafting.SmithingTrimRecipe)) {
             ingredients = extractSmithingIngredients(recipe);
-            RSIntegrationMod.LOGGER.info("[RSI-Prefill] Smithing reflection ingredients count={}", ingredients.size());
+            RSIntegrationMod.LOGGER.debug("[RSI-Prefill] Smithing reflection ingredients count={}", ingredients.size());
         }
         if (ingredients.size() < 3) {
             RSIntegrationMod.LOGGER.warn("[RSI-Prefill] Smithing ingredients < 3: {}", ingredients.size());
@@ -373,13 +373,13 @@ public final class OpenBoundMachineGuiPacket {
         for (int slotIdx = 0; slotIdx < 3; slotIdx++) {
             Ingredient ing = ingredients.get(slotIdx);
             if (ing.isEmpty()) {
-                RSIntegrationMod.LOGGER.info("[RSI-Prefill] Slot {} ingredient is empty", slotIdx);
+                RSIntegrationMod.LOGGER.debug("[RSI-Prefill] Slot {} ingredient is empty", slotIdx);
                 continue;
             }
 
             ItemStack existing = menu.getSlot(slotIdx).getItem();
             if (!existing.isEmpty()) {
-                RSIntegrationMod.LOGGER.info("[RSI-Prefill] Slot {} already has {} — {}", slotIdx,
+                RSIntegrationMod.LOGGER.debug("[RSI-Prefill] Slot {} already has {} — {}", slotIdx,
                         existing.getCount(), ing.test(existing) ? "matches, skip" : "non-match, skip");
                 continue;
             }
@@ -388,13 +388,13 @@ public final class OpenBoundMachineGuiPacket {
             if (!extracted.isEmpty()) {
                 menu.getSlot(slotIdx).set(extracted.copy());
                 filled++;
-                RSIntegrationMod.LOGGER.info("[RSI-Prefill] Slot {} filled with {}", slotIdx, extracted);
+                RSIntegrationMod.LOGGER.debug("[RSI-Prefill] Slot {} filled with {}", slotIdx, extracted);
             } else {
                 RSIntegrationMod.LOGGER.warn("[RSI-Prefill] Slot {} extraction failed for ingredient", slotIdx);
             }
         }
 
-        RSIntegrationMod.LOGGER.info("[RSI-Prefill] Smithing done: filled={}/3", filled);
+        RSIntegrationMod.LOGGER.debug("[RSI-Prefill] Smithing done: filled={}/3", filled);
         if (filled > 0) {
             menu.broadcastChanges();
             player.displayClientMessage(

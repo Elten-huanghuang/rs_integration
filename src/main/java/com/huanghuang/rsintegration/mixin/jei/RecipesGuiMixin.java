@@ -26,7 +26,7 @@ public class RecipesGuiMixin {
                 int plusSize = AltarCraftButtons.getPositions().size();
                 int mgIndex = AltarCraftButtons.hitTestMachineGui(mouseX, mouseY);
                 if (mgIndex >= 0) {
-                    RSIntegrationMod.LOGGER.info("[RSI-RecipesGui] MachineGUI hit: index={} at ({},{})", mgIndex, mouseX, mouseY);
+                    RSIntegrationMod.LOGGER.debug("[RSI-RecipesGui] MachineGUI hit: index={} at ({},{})", mgIndex, mouseX, mouseY);
                     AltarCraftButtons.triggerMachineGui(mgIndex);
                     cir.setReturnValue(true);
                     cir.cancel();
@@ -34,7 +34,7 @@ public class RecipesGuiMixin {
                 }
                 int index = AltarCraftButtons.hitTest(mouseX, mouseY);
                 if (index >= 0) {
-                    RSIntegrationMod.LOGGER.info("[RSI-RecipesGui] Plus hit: index={} at ({},{}) modType={} recipeId={}",
+                    RSIntegrationMod.LOGGER.debug("[RSI-RecipesGui] Plus hit: index={} at ({},{}) modType={} recipeId={}",
                             index, mouseX, mouseY,
                             AltarCraftButtons.getButtonData(index) != null ? AltarCraftButtons.getButtonData(index).modType() : "null",
                             AltarCraftButtons.getButtonData(index) != null ? AltarCraftButtons.getButtonData(index).recipeId() : "null");
@@ -50,11 +50,11 @@ public class RecipesGuiMixin {
                     long t = System.currentTimeMillis();
                     if (missLastLogged == 0 || t - missLastLogged > 1000) {
                         missLastLogged = t;
-                        RSIntegrationMod.LOGGER.info("[RSI-RecipesGui] Miss: ({},{}) mgBtns={} plusBtns={}",
+                        RSIntegrationMod.LOGGER.debug("[RSI-RecipesGui] Miss: ({},{}) mgBtns={} plusBtns={}",
                                 (int) mouseX, (int) mouseY, mgSize, plusSize);
                         if (plusSize > 0) {
                             int[] p0 = AltarCraftButtons.getPositions().get(0);
-                            RSIntegrationMod.LOGGER.info("[RSI-RecipesGui] Plus[0]=({},{},{},{}) last=({},{},{},{})",
+                            RSIntegrationMod.LOGGER.debug("[RSI-RecipesGui] Plus[0]=({},{},{},{}) last=({},{},{},{})",
                                     p0[0], p0[1], p0[2], p0[3],
                                     AltarCraftButtons.getPositions().get(plusSize - 1)[0],
                                     AltarCraftButtons.getPositions().get(plusSize - 1)[1],

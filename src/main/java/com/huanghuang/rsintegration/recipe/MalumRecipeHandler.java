@@ -16,12 +16,12 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
-final class MalumRecipeHandler implements ModRecipeHandler {
+public final class MalumRecipeHandler implements ModRecipeHandler {
 
     private static final String IWC_CLASS = "team.lodestar.lodestone.systems.recipe.IngredientWithCount";
 
     @Override
-    public ModType modType() { return ModType.MALUM; }
+    public ModType modType() { return ModType.byId("malum"); }
 
     @Override
     public boolean canHandle(Recipe<?> recipe) {

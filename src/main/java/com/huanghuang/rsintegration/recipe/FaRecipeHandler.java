@@ -16,10 +16,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
-final class FaRecipeHandler implements ModRecipeHandler {
+public final class FaRecipeHandler implements ModRecipeHandler {
 
     @Override
-    public ModType modType() { return ModType.FORBIDDEN_ARCANUS; }
+    public ModType modType() { return ModType.byId("forbidden_arcanus"); }
 
     @Override
     public boolean canHandle(Recipe<?> recipe) {

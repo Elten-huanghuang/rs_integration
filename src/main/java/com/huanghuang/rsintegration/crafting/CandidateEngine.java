@@ -20,6 +20,9 @@ final class CandidateEngine {
 
     private CandidateEngine() {}
 
+    private static final int INGREDIENT_SCAN_LIMIT = 64;
+    private static final int PREFERRED_RECIPE_BONUS = 10000;
+
     public record CandidateDiagnostic(ResourceLocation recipeId, int score, ModType modType,
                                        boolean skipped, String skipReason) {}
 
@@ -38,7 +41,7 @@ final class CandidateEngine {
         // Phase 1: collect unique entries by recipe ID (cheap — no getResultItem calls)
         Map<ResourceLocation, RecipeIndex.Entry> byId = new LinkedHashMap<>();
         ItemStack[] items = ingredient.getItems();
-        int limit = Math.min(items.length, 64);
+        int limit = Math.min(items.length, INGREDIENT_SCAN_LIMIT);
         for (int idx = 0; idx < limit; idx++) {
             ItemStack stack = items[idx];
             if (stack.isEmpty()) continue;
@@ -161,7 +164,7 @@ final class CandidateEngine {
         ItemStack output = ModRecipeHandlers.tryGetResultItem(entry.recipe(), ctx.level.registryAccess());
         if (!output.isEmpty()) {
             if (isPreferred(entry, ctx)) {
-                score += 10000;
+                score += PREFERRED_RECIPE_BONUS;
             }
             if (output.getCount() > 1) {
                 score += cappedOutputBonus(output.getCount());
@@ -177,7 +180,7 @@ final class CandidateEngine {
         if (outputKey != null && ctx.preferredRecipes != null) {
             ResourceLocation preferred = ctx.preferredRecipes.get(outputKey);
             if (preferred != null && preferred.equals(recipe.getId())) {
-                score += 10000;
+                score += PREFERRED_RECIPE_BONUS;
             }
         }
 

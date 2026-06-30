@@ -15,10 +15,10 @@ import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.List;
 
-final class EidolonRecipeHandler implements ModRecipeHandler {
+public final class EidolonRecipeHandler implements ModRecipeHandler {
 
     @Override
-    public ModType modType() { return ModType.EIDOLON; }
+    public ModType modType() { return ModType.byId("eidolon"); }
 
     @Override
     public boolean canHandle(Recipe<?> recipe) {

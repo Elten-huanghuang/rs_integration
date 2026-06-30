@@ -15,7 +15,7 @@ import java.util.List;
 public final class VanillaMachineRecipeHandler implements ModRecipeHandler {
 
     @Override
-    public ModType modType() { return ModType.VANILLA_MACHINE; }
+    public ModType modType() { return ModType.byId("vanilla_machine"); }
 
     @Override
     public boolean canHandle(Recipe<?> recipe) {

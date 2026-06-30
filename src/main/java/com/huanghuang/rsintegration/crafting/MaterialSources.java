@@ -12,12 +12,13 @@ import net.minecraft.world.item.ItemStack;
 
 import javax.annotation.Nullable;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 public final class MaterialSources {
 
-    private static final Map<String, Map<StackKey, Integer>> cache = new HashMap<>();
+    private static final Map<String, Map<StackKey, Integer>> cache = new ConcurrentHashMap<>();
     private static final Object cacheLock = new Object();
-    private static int lastTick = -1;
+    private static volatile int lastTick = -1;
 
     private MaterialSources() {}
 
@@ -61,37 +62,39 @@ public final class MaterialSources {
      * avoid redundant RS storage scans (can be called 2-3 times within a
      * single craft request).
      *
-     * <p>All cache access is synchronized on {@code cacheLock} because
-     * network-thread packet handlers and the server tick thread can both
-     * call this method concurrently.</p>
+     * <p>Cache lookup is lock-free; tick advancement uses double-checked
+     * locking. Expensive network scans are performed outside any lock.</p>
      */
     public static Map<StackKey, Integer> listAllAvailable(ServerPlayer player, @Nullable INetwork network) {
         MinecraftServer server = player.getServer();
         int currentTick = server != null ? server.getTickCount() : 0;
         String cacheKey = player.getUUID() + ":" + (network != null);
-        synchronized (cacheLock) {
-            if (currentTick != lastTick) {
-                cache.clear();
-                lastTick = currentTick;
-            }
-            return cache.computeIfAbsent(cacheKey, k -> {
-                Map<StackKey, Integer> available = countInventory(player);
-                if (network != null) {
-                    addNetworkItems(available, network);
+
+        if (currentTick != lastTick) {
+            synchronized (cacheLock) {
+                if (currentTick != lastTick) {
+                    cache.clear();
+                    lastTick = currentTick;
                 }
-                return available;
-            });
+            }
         }
+
+        Map<StackKey, Integer> cached = cache.get(cacheKey);
+        if (cached != null) return cached;
+
+        Map<StackKey, Integer> available = countInventory(player);
+        if (network != null) {
+            addNetworkItems(available, network);
+        }
+
+        cache.putIfAbsent(cacheKey, available);
+        return available;
     }
 
     /** Invalidate cached counts for a player after items are consumed mid-tick. */
     public static void invalidateFor(ServerPlayer player) {
-        String withNet = player.getUUID() + ":true";
-        String withoutNet = player.getUUID() + ":false";
-        synchronized (cacheLock) {
-            cache.remove(withNet);
-            cache.remove(withoutNet);
-        }
+        cache.remove(player.getUUID() + ":true");
+        cache.remove(player.getUUID() + ":false");
     }
 
 }

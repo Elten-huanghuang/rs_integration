@@ -182,7 +182,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.error("[RSI-Batch-FA] Enhancer check failed", e);
             player.sendSystemMessage(Component.translatable(
-                    "rsi.fa.error.enhancer_check_failed", e.toString()));
+                    "rsi.fa.error.enhancer_check_failed"));
             return false;
         }
 
@@ -379,11 +379,11 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
             Reflect.getMethodOrThrow(FaRitualHelper.ritualManagerClass, "updateValidRitual", "updateValidRitual", FaRitualHelper.essencesDefinitionClass)
                     .invoke(ritualManager, curEssences);
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] cachedIngredients/updateValidRitual failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] cachedIngredients/updateValidRitual failed: {}");
         }
 
         // Phase 3: require a RitualStarterItem
-        RSIntegrationMod.LOGGER.info("[RSI-Batch-FA] (single) Searching for RitualStarterItem...");
+        RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] (single) Searching for RitualStarterItem...");
         final ItemStack starterStack = findRitualStarterItem(player, network);
         if (starterStack.isEmpty()) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-FA] tryStartSingleCraft: no usable RitualStarterItem in inventory or RS");
@@ -392,7 +392,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
             ledger.rollback(player);
             return false;
         }
-        RSIntegrationMod.LOGGER.info("[RSI-Batch-FA] (single) Found starter '{}' from {}",
+        RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] (single) Found starter '{}' from {}",
                 starterStack.getHoverName().getString(), starterFromRS != null ? "RS" : "inventory");
 
         // Phase 4: start the ritual BEFORE committing ledger
@@ -405,11 +405,11 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
                     new Class<?>[]{FaRitualHelper.booleanConsumerClass},
                     callback);
 
-            RSIntegrationMod.LOGGER.info("[RSI-Batch-FA] (single) Invoking tryStartRitual with starter='{}'",
+            RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] (single) Invoking tryStartRitual with starter='{}'",
                     starterStack.getHoverName().getString());
             Reflect.getMethodOrThrow(FaRitualHelper.ritualManagerClass, "tryStartRitual", "tryStartRitual", FaRitualHelper.essencesStorageClass, FaRitualHelper.booleanConsumerClass)
                     .invoke(ritualManager, essencesStorage, proxy);
-            RSIntegrationMod.LOGGER.info("[RSI-Batch-FA] (single) tryStartRitual returned: wasCalled={} accepted={}",
+            RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] (single) tryStartRitual returned: wasCalled={} accepted={}",
                     callback.wasCalled, callback.accepted);
 
             if (callback.wasCalled && !callback.accepted) {
@@ -569,7 +569,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.error("[RSI-Batch-FA] tryStartWithMaterials: placement failed:", e);
             rollbackAll();
-            player.sendSystemMessage(Component.translatable("rsi.fa.error.craft_failed", e.toString()));
+            player.sendSystemMessage(Component.translatable("rsi.fa.error.craft_failed"));
             return false;
         }
 
@@ -608,11 +608,11 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
                 RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] validRitual check failed (harmless): {}", vEx.toString());
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Batch-FA] cachedIngredients/updateValidRitual failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-Batch-FA] cachedIngredients/updateValidRitual failed: {}");
         }
 
         // Require a RitualStarterItem
-        RSIntegrationMod.LOGGER.info("[RSI-Batch-FA] Searching for RitualStarterItem...");
+        RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Searching for RitualStarterItem...");
         final ItemStack starterStack = findRitualStarterItem(player, network);
         if (starterStack.isEmpty()) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-FA] tryStartWithMaterials: no usable RitualStarterItem in inventory or RS");
@@ -620,7 +620,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
             rollbackAll();
             return false;
         }
-        RSIntegrationMod.LOGGER.info("[RSI-Batch-FA] Found starter '{}' from {}",
+        RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Found starter '{}' from {}",
                 starterStack.getHoverName().getString(), starterFromRS != null ? "RS" : "inventory");
 
         // Start the ritual
@@ -633,11 +633,11 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
                     new Class<?>[]{FaRitualHelper.booleanConsumerClass},
                     callback);
 
-            RSIntegrationMod.LOGGER.info("[RSI-Batch-FA] Invoking tryStartRitual (withMaterials) with starter='{}'",
+            RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Invoking tryStartRitual (withMaterials) with starter='{}'",
                     starterStack.getHoverName().getString());
             Reflect.getMethodOrThrow(FaRitualHelper.ritualManagerClass, "tryStartRitual", "tryStartRitual", FaRitualHelper.essencesStorageClass, FaRitualHelper.booleanConsumerClass)
                     .invoke(ritualManager, essencesStorage, proxy);
-            RSIntegrationMod.LOGGER.info("[RSI-Batch-FA] tryStartRitual (withMaterials) returned: wasCalled={} accepted={}",
+            RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] tryStartRitual (withMaterials) returned: wasCalled={} accepted={}",
                     callback.wasCalled, callback.accepted);
 
             if (callback.wasCalled && !callback.accepted) {
@@ -684,13 +684,13 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
             Throwable root = e.getCause() != null ? e.getCause() : e;
             RSIntegrationMod.LOGGER.error("[RSI-Batch-FA] tryStartRitual failed (withMaterials) — forge rejected: {}", root.toString());
             rollbackAll();
-            player.sendSystemMessage(Component.translatable("rsi.fa.error.craft_failed", root.toString()));
+            player.sendSystemMessage(Component.translatable("rsi.fa.error.craft_failed"));
             returnStarterToSource(starterStack);
             return false;
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.error("[RSI-Batch-FA] tryStartWithMaterials: start ritual failed:", e);
             rollbackAll();
-            player.sendSystemMessage(Component.translatable("rsi.fa.error.craft_failed", e.toString()));
+            player.sendSystemMessage(Component.translatable("rsi.fa.error.craft_failed"));
             returnStarterToSource(starterStack);
             return false;
         }
@@ -917,7 +917,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
         Object ritual = wrapper.ritual();
         if (ritual == null) return warnings;
 
-        RSIntegrationMod.LOGGER.info("[RSI-Batch-FA] getPlanWarnings called for recipe={} dim={} pos={}",
+        RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] getPlanWarnings called for recipe={} dim={} pos={}",
                 recipe.getId(), dim, pos);
 
         Object requirements = FaRitualHelper.invoke(ritual, "requirements");
@@ -959,7 +959,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
                         }
                     }
                 } catch (Exception e) {
-                    RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Plan essence read failed: {}", e.toString());
+                    RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Plan essence read failed: {}");
                 }
             }
 
@@ -1025,7 +1025,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
                     }
                 }
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Plan essence slot check failed: {}", e.toString());
+                RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Plan essence slot check failed: {}");
             }
         }
 
@@ -1051,7 +1051,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
                     }
                 }
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Plan tier check failed: {}", e.toString());
+                RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Plan tier check failed: {}");
             }
         }
 
@@ -1116,7 +1116,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
                             "rsi.fa.warn.cant_check_enhancers").getString());
                 }
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Plan enhancer check failed: {}", e.toString());
+                RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Plan enhancer check failed: {}");
                 warnings.add(Component.translatable(
                         "rsi.fa.warn.cant_check_enhancers").getString());
             }

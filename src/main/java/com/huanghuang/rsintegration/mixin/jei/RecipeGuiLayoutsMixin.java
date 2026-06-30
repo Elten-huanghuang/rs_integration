@@ -84,6 +84,8 @@ public class RecipeGuiLayoutsMixin {
             new ResourceLocation("minecraft", "stonecutting");
     private static final ResourceLocation SMITHING_UID =
             new ResourceLocation("minecraft", "smithing");
+    private static final ResourceLocation FARMINGFORBLOCKHEADS_MARKET_UID =
+            new ResourceLocation("farmingforblockheads", "market");
 
     @Shadow
     private List<RecipeLayoutWithButtons<?>> recipeLayoutsWithButtons;
@@ -147,7 +149,7 @@ public class RecipeGuiLayoutsMixin {
                     || recipeClassName.startsWith("com.github.tartaricacid.touhoulittlemaid.");
             if (isFa) {
                 faSeen++;
-                RSIntegrationMod.LOGGER.info("[RSI-JEI-Mixin] FA recipe detected: class={}, uid={}",
+                RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] FA recipe detected: class={}, uid={}",
                         recipeClassName, rsi$safeCategoryUid(recipeLayout));
             }
 
@@ -285,7 +287,7 @@ public class RecipeGuiLayoutsMixin {
             }
         }
 
-        RSIntegrationMod.LOGGER.info("[RSI-JEI-Mixin] Layouts processed: totalRecipes={} buttonsAdded={} "
+        RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] Layouts processed: totalRecipes={} buttonsAdded={} "
                         + "skipped(filter={} recipeId={} binding={} noRecipe={}) "
                         + "| FA: seen={} noRecipe={} noFilter={} noRecipeId={} noBinding={}",
                 totalRecipes, buttonsAdded,
@@ -436,7 +438,9 @@ public class RecipeGuiLayoutsMixin {
             if (WR_WORKBENCH_UID.equals(uid)) return "arcane_workbench";
             if (WR_CRYSTAL_RITUAL_UID.equals(uid)) return "crystal_ritual";
             if (WR_CRYSTAL_INFUSION_UID.equals(uid)) return "crystal_ritual";
-            if (FA_HEPHAESTUS_SMITHING_UID.equals(uid)) return "hephaestus_forge";
+            // FA hephaestus_smithing recipes use vanilla SmithingTransformRecipe
+            // and run on a smithing table, not the Hephaestus Forge (which is for rituals).
+            if (FA_HEPHAESTUS_SMITHING_UID.equals(uid)) return "block.minecraft.smithing_table";
             if (FA_HEPHAESTUS_UPGRADING_UID.equals(uid)) return "hephaestus_forge";
             if (EIDOLON_CRUCIBLE_UID.equals(uid)) return "crucible";
             if (EIDOLON_WORKTABLE_UID.equals(uid)) return "worktable";
@@ -450,6 +454,7 @@ public class RecipeGuiLayoutsMixin {
             if (CAMPFIRE_UID.equals(uid)) return "block.minecraft.campfire";
             if (STONECUTTING_UID.equals(uid)) return "block.minecraft.stonecutter";
             if (SMITHING_UID.equals(uid)) return "block.minecraft.smithing_table";
+            if (FARMINGFORBLOCKHEADS_MARKET_UID.equals(uid)) return "farmingforblockheads";
         } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] Reflection probe failed", e); }
 
         String recipeClassName = recipe.getClass().getName();
@@ -484,6 +489,8 @@ public class RecipeGuiLayoutsMixin {
             return "ritual";
         if (recipeClassName.startsWith("elucent.eidolon"))
             return "crucible";
+        if (recipeClassName.startsWith("net.blay09.mods.farmingforblockheads."))
+            return "farmingforblockheads";
 
         return null;
     }
@@ -521,6 +528,12 @@ public class RecipeGuiLayoutsMixin {
         // TLM-specific: AltarRecipeWrapper wraps AltarRecipe but loses the ID
         if (className.equals("com.github.tartaricacid.touhoulittlemaid.compat.jei.altar.AltarRecipeWrapper")) {
             ResourceLocation id = rsi$getTlmWrapperRecipeId(recipe);
+            if (id != null) return id;
+        }
+
+        // FarmingForBlockheads Market: IMarketEntry → UUID → ResourceLocation
+        if (className.startsWith("net.blay09.mods.farmingforblockheads.")) {
+            ResourceLocation id = rsi$getMarketEntryId(recipe);
             if (id != null) return id;
         }
 
@@ -857,7 +870,7 @@ public class RecipeGuiLayoutsMixin {
                     RSIntegrationMod.LOGGER.error("[RSI-JEI] Failed to create GenericCraftPacket (generic): recipeId={}", recipeId, e);
                     return;
                 }
-                RSIntegrationMod.LOGGER.info("[RSI-JEI] Sending GenericCraftPacket (generic): recipeId={}", recipeId);
+                RSIntegrationMod.LOGGER.debug("[RSI-JEI] Sending GenericCraftPacket (generic): recipeId={}", recipeId);
                 BatchCraftNetworkHandler.CHANNEL.sendToServer(pkt);
             };
         }
@@ -872,7 +885,7 @@ public class RecipeGuiLayoutsMixin {
                 RSIntegrationMod.LOGGER.error("[RSI-JEI] Failed to create GenericCraftPacket: recipeId={} dim={} pos={}", recipeId, dim, machinePos, e);
                 return;
             }
-            RSIntegrationMod.LOGGER.info("[RSI-JEI] Sending GenericCraftPacket: recipeId={} dim={} pos={}", recipeId, dim, machinePos);
+            RSIntegrationMod.LOGGER.debug("[RSI-JEI] Sending GenericCraftPacket: recipeId={} dim={} pos={}", recipeId, dim, machinePos);
             BatchCraftNetworkHandler.CHANNEL.sendToServer(pkt);
         };
     }
@@ -947,6 +960,24 @@ public class RecipeGuiLayoutsMixin {
     }
 
     @Unique
+    @javax.annotation.Nullable
+    private static ResourceLocation rsi$getMarketEntryId(Object recipe) {
+        try {
+            java.lang.reflect.Method getEntryId = Reflect.findMethod(recipe.getClass(),
+                    "getEntryId", new Class<?>[0]);
+            if (getEntryId != null) {
+                Object result = getEntryId.invoke(recipe);
+                if (result instanceof java.util.UUID uuid) {
+                    return new ResourceLocation("farmingforblockheads", "market/" + uuid);
+                }
+            }
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] getMarketEntryId failed", e);
+        }
+        return null;
+    }
+
+    @Unique
     private static boolean rsi$isGoetyRitual(Object recipe) {
         return ModList.get().isLoaded("goety")
                 && recipe.getClass().getName().equals("com.Polarice3.Goety.common.crafting.RitualRecipe");
@@ -988,6 +1019,10 @@ public class RecipeGuiLayoutsMixin {
 
     @Unique
     private static ModType computeModType(Object recipe) {
+        String className = recipe.getClass().getName();
+        if (className.startsWith("net.blay09.mods.farmingforblockheads.")) {
+            return ModType.byId("farmingforblockheads");
+        }
         if (recipe instanceof Recipe<?> r) {
             ModType mt = ModType.classifyRecipe(r);
             if (mt != null) return mt;

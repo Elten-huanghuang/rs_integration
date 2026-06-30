@@ -43,7 +43,7 @@ public final class RSIntegration {
         net = resolveFromNearbyNode(player);
         if (net != null) return net;
 
-        RSIntegrationMod.LOGGER.info("[RSI] resolveNetworkFromPlayer: all paths failed");
+        RSIntegrationMod.LOGGER.debug("[RSI] resolveNetworkFromPlayer: all paths failed");
         return null;
     }
 
@@ -67,7 +67,7 @@ public final class RSIntegration {
                 clazz = clazz.getSuperclass();
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.info("[RSI] getNetworkFromContainer error: {}", e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI] getNetworkFromContainer error: {}", e.toString());
         }
         return null;
     }
@@ -101,8 +101,8 @@ public final class RSIntegration {
                     }
                 }
             }
-        } catch (Throwable e) {
-            RSIntegrationMod.LOGGER.info("[RSI] Curios scan error: {}", e.toString());
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI] Curios scan error: {}", e.toString());
         }
         return null;
     }
@@ -115,20 +115,20 @@ public final class RSIntegration {
         try {
             ServerLevel level = server.getLevel(dimension);
             if (level == null) {
-                RSIntegrationMod.LOGGER.info("[RSI] resolveNetwork: null level for dim {}", dimension.location());
+                RSIntegrationMod.LOGGER.debug("[RSI] resolveNetwork: null level for dim {}", dimension.location());
                 return null;
             }
             com.huanghuang.rsintegration.util.ChunkUtils.loadChunk(level, controllerPos);
             BlockEntity be = level.getBlockEntity(controllerPos);
             if (be == null) {
-                RSIntegrationMod.LOGGER.info("[RSI] resolveNetwork: no BlockEntity at pos={} dim={}",
+                RSIntegrationMod.LOGGER.debug("[RSI] resolveNetwork: no BlockEntity at pos={} dim={}",
                         controllerPos, dimension.location());
                 return null;
             }
             if (be instanceof INetworkNode node) {
                 INetwork net = node.getNetwork();
                 if (net != null) return net;
-                RSIntegrationMod.LOGGER.info("[RSI] resolveNetwork: INetworkNode at {} has null network", controllerPos);
+                RSIntegrationMod.LOGGER.debug("[RSI] resolveNetwork: INetworkNode at {} has null network", controllerPos);
             }
             // Fallback: ControllerBlockEntity (and some other RS blocks) do not implement
             // INetworkNode but still have a getNetwork() method via their own hierarchy.
@@ -136,17 +136,17 @@ public final class RSIntegration {
                 java.lang.reflect.Method getNetwork = be.getClass().getMethod("getNetwork");
                 Object result = getNetwork.invoke(be);
                 if (result instanceof INetwork net) {
-                    RSIntegrationMod.LOGGER.info("[RSI] resolveNetwork: got network via reflection from {}",
+                    RSIntegrationMod.LOGGER.debug("[RSI] resolveNetwork: got network via reflection from {}",
                             be.getClass().getName());
                     return net;
                 }
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.debug("[RSI] resolveNetwork: getNetwork() not available on {}", be.getClass().getName());
             }
-            RSIntegrationMod.LOGGER.info("[RSI] resolveNetwork: BE at {} is {} (no network accessible)",
+            RSIntegrationMod.LOGGER.debug("[RSI] resolveNetwork: BE at {} is {} (no network accessible)",
                     controllerPos, be.getClass().getName());
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.info("[RSI] resolveNetwork error: {}", e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI] resolveNetwork error: {}", e.toString());
         }
         return null;
     }
@@ -171,7 +171,7 @@ public final class RSIntegration {
                         NetworkItem.getZ(stack));
                 INetwork net = resolveNetwork(player.server, dim, pos);
                 if (net != null) return net;
-                RSIntegrationMod.LOGGER.info("[RSI] NetworkItem valid but resolveNetwork "
+                RSIntegrationMod.LOGGER.debug("[RSI] NetworkItem valid but resolveNetwork "
                         + "returned null for pos={} dim={}", pos, dim.location());
             }
         } else {
@@ -409,7 +409,7 @@ public final class RSIntegration {
                 }
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.info("[RSI] hasItemInNetwork error: {}", e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI] hasItemInNetwork error: {}", e.toString());
         }
         return false;
     }

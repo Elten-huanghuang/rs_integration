@@ -74,14 +74,20 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
 
         BlockEntity be = level.getBlockEntity(pos);
         if (be == null) {
-            // Some vanilla blocks have no BlockEntity (e.g., Smithing Table).
-            // Verify the block itself is a known vanilla machine, then use VIRTUAL path.
             String blockId = net.minecraft.core.registries.BuiltInRegistries.BLOCK
                     .getKey(level.getBlockState(pos).getBlock()).toString();
+            // Smithing Table has no BE — always VIRTUAL.
             if (blockId.contains("smithing_table") || blockId.contains("campfire")) {
                 this.kind = MachineKind.VIRTUAL;
+            } else if (recipe instanceof AbstractCookingRecipe
+                    && blockMatchesCooking(blockId, recipe)) {
+                // VIRTUAL fallback for furnace/blast/smoker when the chunk isn't
+                // fully loaded. Only accept if the block ID matches the recipe type
+                // so a smithing table doesn't steal smelting recipes.
+                this.kind = MachineKind.VIRTUAL;
             } else {
-                player.sendSystemMessage(Component.translatable("rsi.vanilla.error.machine_not_found"));
+                // Wrong machine for this recipe — return false so AsyncChain
+                // tries the next bound machine.
                 return false;
             }
         } else if (be instanceof AbstractFurnaceBlockEntity fbe) {
@@ -381,6 +387,13 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
                     recipe.getId(), e);
         }
         return ItemStack.EMPTY;
+    }
+
+    private static boolean blockMatchesCooking(String blockId, Recipe<?> recipe) {
+        if (recipe instanceof BlastingRecipe) return blockId.contains("blast_furnace");
+        if (recipe instanceof SmokingRecipe) return blockId.contains("smoker");
+        if (recipe instanceof CampfireCookingRecipe) return blockId.contains("campfire");
+        return blockId.contains("furnace") && !blockId.contains("blast");
     }
 
     // ── polling / collection ──────────────────────────────────────

@@ -38,6 +38,7 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.BooleanValue ENABLE_TOUHOU_LITTLE_MAID;
     public static ForgeConfigSpec.BooleanValue ENABLE_EMBERS_ALCHEMY;
     public static ForgeConfigSpec.BooleanValue ENABLE_AETHERWORKS;
+    public static ForgeConfigSpec.BooleanValue ENABLE_FARMINGFORBLOCKHEADS;
     public static ForgeConfigSpec.BooleanValue ENABLE_EMBERS_ALCHEMY_CALC;
     public static ForgeConfigSpec.BooleanValue ENABLE_VANILLA_MACHINES;
     public static ForgeConfigSpec.IntValue EMBERS_INFER_MAX_ATTEMPTS;
@@ -247,7 +248,7 @@ public final class RSIntegrationConfig {
                         "eidolon, wizards_reborn")
                 .defineList("machineGuiWhitelist",
                         List.of("vanilla_machine"),
-                        obj -> obj instanceof String);
+                        obj -> obj instanceof String s && !s.isBlank());
         MACHINE_TAB_THRESHOLD = b
                 .comment("Maximum number of machine shortcut tabs displayed before auto-collapsing",
                         "into a single Hub control-panel button. Set to 0 to always use Hub mode.")
@@ -261,13 +262,19 @@ public final class RSIntegrationConfig {
                         "Set to 0 to disable distance checks (unlimited range).",
                         "This is a server-side security control to prevent cross-dimension GUI abuse.")
                 .defineInRange("machineGuiMaxDistance", 0, 0, Integer.MAX_VALUE);
+        ENABLE_FARMINGFORBLOCKHEADS = b
+                .comment("Enable FarmingForBlockheads Market integration for recursive crafting.",
+                        "Allows the Market to participate in JEI-to-RS auto-crafting chains.",
+                        "When enabled, you can bind a Market block and use its exchange trades",
+                        "as crafting steps in recursive plans.")
+                .define("enableFarmingForBlockheads", true);
         CUSTOM_GUI_MACHINE_MODS = b
                 .comment("Mod IDs to register as GUI-type machines without writing any Java code.",
                         "Machines from these mods appear in the Machine Hub, can be remotely opened,",
                         "and can be managed via the machineGuiWhitelist using \"custom_gui\".",
                         "No batch-crafting — this is purely for remote GUI access.",
                         "Example: [\"aether\", \"crabbersdelight\"]")
-                .defineList("customGuiMachineMods", List.of("aether", "crabbersdelight"),
+                .defineList("customGuiMachineMods", List.of("aether", "crabbersdelight", "farmingforblockheads"),
                         obj -> obj instanceof String);
         b.pop();
 

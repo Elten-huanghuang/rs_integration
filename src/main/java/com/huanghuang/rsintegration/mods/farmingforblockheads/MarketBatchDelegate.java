@@ -1,0 +1,320 @@
+package com.huanghuang.rsintegration.mods.farmingforblockheads;
+
+import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.crafting.ExtractionLedger;
+import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.crafting.MarketRecipeWrapper;
+import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
+import com.huanghuang.rsintegration.network.RSIntegration;
+import com.huanghuang.rsintegration.util.Reflect;
+import com.refinedmods.refinedstorage.api.network.INetwork;
+import com.refinedmods.refinedstorage.api.util.Action;
+import net.minecraft.core.BlockPos;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.crafting.Ingredient;
+import net.minecraft.world.item.crafting.Recipe;
+import net.minecraftforge.items.ItemHandlerHelper;
+
+import javax.annotation.Nullable;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.UUID;
+
+/**
+ * Virtual batch delegate for FarmingForBlockheads Market trades.
+ *
+ * <p>The Market has no processing inventory — trades are instant exchanges.
+ * This delegate bypasses the Market block entirely: payment is extracted
+ * from the RS network and the result is deposited directly.</p>
+ *
+ * <p>The bound Market block serves as an access gate: you must have a
+ * Market bound to use its trades in auto-crafting. The physical block
+ * is not interacted with during execution.</p>
+ */
+public final class MarketBatchDelegate extends AbstractBatchDelegate {
+
+    // Reflection — Market API
+    private static volatile boolean probed;
+    private static volatile boolean available;
+    private static volatile Object marketRegistryInstance;
+
+    private MarketRecipeWrapper wrapper;
+    private ServerPlayer player;
+    private boolean done;
+
+    private static void probe() {
+        if (probed) return;
+        probed = true;
+        try {
+            Class<?> registryClass = Class.forName(
+                    "net.blay09.mods.farmingforblockheads.registry.MarketRegistry");
+            java.lang.reflect.Field instField = registryClass.getField("INSTANCE");
+            marketRegistryInstance = instField.get(null);
+            available = marketRegistryInstance != null;
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-Market] MarketRegistry not available: {}", e.toString());
+            available = false;
+        }
+    }
+
+    // ── IBatchDelegate contract ────────────────────────────────────
+
+    @Override
+    public boolean tryStartSingleCraft(ServerPlayer player) {
+        if (network == null || wrapper == null) return false;
+
+        // No shared ledger — extract payment from RS ourselves
+        ItemStack cost = wrapper.costItem();
+        if (!cost.isEmpty()) {
+            ItemStack extracted = RSIntegration.extractFromNetwork(
+                    network, Ingredient.of(cost), cost.getCount());
+            if (extracted.isEmpty() || extracted.getCount() < cost.getCount()) {
+                RSIntegrationMod.LOGGER.warn("[RSI-Market] Failed to extract payment: {}x {}",
+                        cost.getCount(), cost.getHoverName().getString());
+                return false;
+            }
+        }
+
+        ItemStack result = wrapper.getResultItem(player.serverLevel().registryAccess());
+        if (!result.isEmpty()) {
+            ItemStack remainder = network.insertItem(ItemHandlerHelper.copyStackWithSize(
+                    result, result.getCount()), result.getCount(), Action.PERFORM);
+            if (!remainder.isEmpty()) {
+                RSIntegrationMod.LOGGER.warn("[RSI-Market] RS network full, result not inserted: {}",
+                        remainder.getCount());
+                return false;
+            }
+        }
+
+        done = true;
+        return true;
+    }
+
+    @Override
+    public boolean tryStartSingleCraft(ServerPlayer player, ExtractionLedger sharedLedger) {
+        this.player = player;
+        this.sharedLedger = sharedLedger;
+        this.usingSharedLedger = true;
+
+        if (network == null || wrapper == null) return false;
+
+        // Payment already reserved in sharedLedger by chain — just deposit result
+        ItemStack result = wrapper.getResultItem(player.serverLevel().registryAccess());
+        if (!result.isEmpty()) {
+            ItemStack remainder = network.insertItem(ItemHandlerHelper.copyStackWithSize(
+                    result, result.getCount()), result.getCount(), Action.PERFORM);
+            if (!remainder.isEmpty()) {
+                RSIntegrationMod.LOGGER.warn("[RSI-Market] RS network full, result not inserted: {}",
+                        remainder.getCount());
+                return false;
+            }
+        }
+
+        sharedLedger.commit(network, player);
+        done = true;
+        return true;
+    }
+
+    // ── validateAndInit ────────────────────────────────────────────
+
+    @Override
+    public boolean validateAndInit(ServerPlayer player, ResourceLocation recipeId,
+                                   @Nullable ResourceLocation dim, BlockPos pos) {
+        this.player = player;
+        this.done = false;
+
+        // Check that the block at pos is a Market
+        ServerLevel level = player.serverLevel();
+        if (pos == null) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Market] validateAndInit: pos is null");
+            return false;
+        }
+        var be = level.getBlockEntity(pos);
+        if (be == null) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Market] validateAndInit: no block entity at {}", pos);
+            return false;
+        }
+        String beClass = be.getClass().getName();
+        if (!beClass.equals("net.blay09.mods.farmingforblockheads.block.entity.MarketBlockEntity")) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Market] validateAndInit: not a MarketBlockEntity, got {}", beClass);
+            return false;
+        }
+
+        // Look up the recipe wrapper (created by RecipeIndex or resolveRecipe)
+        probe();
+        Recipe<?> recipe = resolveWrapper(recipeId);
+        if (!(recipe instanceof MarketRecipeWrapper mrw)) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Market] validateAndInit: recipe {} is not a MarketRecipeWrapper", recipeId);
+            return false;
+        }
+        this.wrapper = mrw;
+
+        // Get RS network
+        network = RSIntegration.resolveNetworkFromPlayer(player);
+        if (network == null) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Market] validateAndInit: no RS network for player {}", player.getGameProfile().getName());
+            return false;
+        }
+
+        return true;
+    }
+
+    @Nullable
+    private static Recipe<?> resolveWrapper(ResourceLocation recipeId) {
+        String path = recipeId.getPath();
+        if (!path.startsWith("market/")) return null;
+        String uuidStr = path.substring("market/".length());
+        UUID uuid;
+        try {
+            uuid = UUID.fromString(uuidStr);
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+        return resolveMarketEntry(uuid);
+    }
+
+    @Nullable
+    private static Recipe<?> resolveMarketEntry(UUID entryId) {
+        probe();
+        if (!available || marketRegistryInstance == null) return null;
+        try {
+            Class<?> registryClass = marketRegistryInstance.getClass();
+            java.lang.reflect.Method getEntryById = Reflect.findMethod(registryClass,
+                    "getEntryById", new Class<?>[]{UUID.class});
+            if (getEntryById == null) {
+                RSIntegrationMod.LOGGER.warn("[RSI-Market] getEntryById method not found");
+                return null;
+            }
+            Object entry = getEntryById.invoke(marketRegistryInstance, entryId);
+            if (entry == null) return null;
+            return wrapEntry(entry);
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Market] Failed to resolve entry {}: {}", entryId, e.toString());
+            return null;
+        }
+    }
+
+    /**
+     * Create a MarketRecipeWrapper from an IMarketEntry via reflection.
+     * Also used by GenericCraftPacket when resolving a plan preview.
+     */
+    @Nullable
+    public static Recipe<?> wrapEntry(Object entry) {
+        if (entry == null) return null;
+        try {
+            java.lang.reflect.Method getOutput = Reflect.findMethod(entry.getClass(),
+                    "getOutputItem", new Class<?>[0]);
+            java.lang.reflect.Method getCost = Reflect.findMethod(entry.getClass(),
+                    "getCostItem", new Class<?>[0]);
+            java.lang.reflect.Method getEntryId = Reflect.findMethod(entry.getClass(),
+                    "getEntryId", new Class<?>[0]);
+            if (getOutput == null || getCost == null || getEntryId == null) return null;
+
+            ItemStack output = (ItemStack) getOutput.invoke(entry);
+            ItemStack cost = (ItemStack) getCost.invoke(entry);
+            UUID entryId = (UUID) getEntryId.invoke(entry);
+
+            if (output.isEmpty() || cost.isEmpty()) return null;
+            return new MarketRecipeWrapper(entryId, output, cost);
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-Market] Failed to wrap entry: {}", e.toString());
+            return null;
+        }
+    }
+
+    // ── Materials ──────────────────────────────────────────────────
+
+    @Nullable
+    @Override
+    public List<IngredientSpec> getRequiredMaterials() {
+        if (wrapper == null) return null;
+        ItemStack cost = wrapper.costItem();
+        if (cost.isEmpty()) return null;
+        return List.of(new IngredientSpec(Ingredient.of(cost), cost.getCount()));
+    }
+
+    // ── Virtual execution ──────────────────────────────────────────
+
+    @Override
+    public boolean tryStartWithMaterials(ServerPlayer player, List<ItemStack> materials,
+                                         ExtractionLedger sharedLedger) {
+        this.player = player;
+        this.sharedLedger = sharedLedger;
+        this.usingSharedLedger = true;
+
+        if (wrapper == null || materials.isEmpty()) return false;
+
+        // Deposit result directly into RS network
+        ItemStack result = wrapper.getResultItem(player.serverLevel().registryAccess());
+        if (!result.isEmpty()) {
+            ItemStack remainder = network.insertItem(ItemHandlerHelper.copyStackWithSize(
+                    result, result.getCount()), result.getCount(), Action.PERFORM);
+            if (!remainder.isEmpty()) {
+                RSIntegrationMod.LOGGER.warn("[RSI-Market] RS network full, result not inserted: {}",
+                        remainder.getCount());
+                return false;
+            }
+        }
+
+        sharedLedger.commit(network, player);
+        done = true;
+        return true;
+    }
+
+    // ── Polling ────────────────────────────────────────────────────
+
+    @Override
+    public boolean isCraftComplete(ServerLevel level) {
+        return done;
+    }
+
+    @Override
+    public ItemStack collectResult(ServerPlayer player) {
+        done = false;
+        if (wrapper != null) {
+            return wrapper.getResultItem(player.serverLevel().registryAccess());
+        }
+        return ItemStack.EMPTY;
+    }
+
+    // ── Cleanup ────────────────────────────────────────────────────
+
+    @Override
+    public void onBatchFailed(ServerPlayer player, String reason) {
+        done = false;
+        resetState();
+    }
+
+    @Override
+    public void onBatchFinished(ServerPlayer player) {
+        done = false;
+        resetState();
+    }
+
+    @Override
+    public BlockPos getMachinePos() {
+        return BlockPos.ZERO;
+    }
+
+    // ── Plan-time warnings ─────────────────────────────────────────
+
+    public static List<String> getPlanWarnings(ServerPlayer player, Recipe<?> recipe,
+                                               @Nullable ResourceLocation dim,
+                                               @Nullable BlockPos pos) {
+        List<String> warnings = new ArrayList<>();
+        if (!(recipe instanceof MarketRecipeWrapper mrw)) return warnings;
+
+        ItemStack cost = mrw.costItem();
+        ItemStack output = mrw.getResultItem(player.serverLevel().registryAccess());
+        if (!cost.isEmpty() && !output.isEmpty()) {
+            warnings.add(cost.getCount() + "x "
+                    + cost.getHoverName().getString()
+                    + " → " + output.getCount() + "x "
+                    + output.getHoverName().getString());
+        }
+        return warnings;
+    }
+}

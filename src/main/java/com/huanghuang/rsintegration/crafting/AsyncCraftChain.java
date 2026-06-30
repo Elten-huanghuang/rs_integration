@@ -24,7 +24,9 @@ import net.minecraft.world.level.Level;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -73,16 +75,16 @@ public final class AsyncCraftChain {
         this.server = server;
         this.network = network;
         this.steps = steps;
-        RSIntegrationMod.LOGGER.info("[RSI-AsyncChain] Created for {}: {} steps",
+        RSIntegrationMod.LOGGER.debug("[RSI-AsyncChain] Created for {}: {} steps",
                 playerId, steps.size());
         if (RSIntegrationMod.LOGGER.isDebugEnabled()) {
             StringBuilder sb = new StringBuilder("[RSI-AsyncChain] Steps: [");
-            for (int i = 0; i < steps.size(); i++) {
-                if (i > 0) sb.append(", ");
-                sb.append(steps.get(i).recipeId());
-            }
-            sb.append("]");
-            RSIntegrationMod.LOGGER.debug(sb.toString());
+                for (int i = 0; i < steps.size(); i++) {
+                    if (i > 0) sb.append(", ");
+                    sb.append(steps.get(i).recipeId());
+                }
+                sb.append("]");
+                RSIntegrationMod.LOGGER.debug(sb.toString());
         }
     }
 
@@ -142,10 +144,12 @@ public final class AsyncCraftChain {
                         addToVirtualInventory(result);
                     }
                     // Add secondary byproducts from multi-block recipes
-                    Recipe<?> mbRecipe = server.overworld().getRecipeManager()
+                    ServerLevel overworld = server.overworld();
+                    if (overworld == null) return true;
+                    Recipe<?> mbRecipe = overworld.getRecipeManager()
                             .byKey(steps.get(currentStepIdx).recipeId()).orElse(null);
                     if (mbRecipe != null) {
-                        for (ItemStack secondary : com.huanghuang.rsintegration.recipe.ModRecipeHandlers.tryGetSecondaryOutputs(mbRecipe, server.overworld().registryAccess())) {
+                        for (ItemStack secondary : com.huanghuang.rsintegration.recipe.ModRecipeHandlers.tryGetSecondaryOutputs(mbRecipe, overworld.registryAccess())) {
                             addToVirtualInventory(secondary);
                         }
                     }
@@ -165,8 +169,7 @@ public final class AsyncCraftChain {
                 }
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.error("[RSI-AsyncChain] Error polling craft completion", e);
-                String msg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
-                abort("Craft polling error: " + msg);
+                abort("Internal error during craft polling");
                 return true;
             }
             return false; // still waiting
@@ -246,7 +249,9 @@ public final class AsyncCraftChain {
      * and ledger so intermediate outputs feed forward across the entire chain.
      */
     private boolean executeVanillaStepsInline(List<ResourceLocation> stepIds, ServerPlayer online) {
-        RecipeManager rm = server.overworld().getRecipeManager();
+        ServerLevel overworld = server.overworld();
+        if (overworld == null) return false;
+        RecipeManager rm = overworld.getRecipeManager();
         RSIntegrationMod.LOGGER.debug("[RSI-AsyncChain] executeVanillaStepsInline: {} vanilla steps, currentStepIdx={}",
                 stepIds.size(), currentStepIdx);
         logVirtualInventory("before batch");
@@ -261,23 +266,21 @@ public final class AsyncCraftChain {
             RSIntegrationMod.LOGGER.debug("[RSI-AsyncChain]   processing step: {}", stepId);
 
             if (recipe instanceof net.minecraft.world.item.crafting.CraftingRecipe cr) {
-                // Snapshot virtual inventory before consuming — if this step fails
-                // we must restore it so intermediate products from prior committed
-                // steps survive the abort and are flushed to RS.
-                List<ItemStack> viSnapshot = new ArrayList<>(virtualInventory.size());
-                for (ItemStack vi : virtualInventory) viSnapshot.add(vi.copy());
+                // Track only the slots actually modified so we can roll back
+                // just those slots on failure — avoids full-inventory snapshot copies.
+                Map<Integer, ItemStack> modifiedSlots = new HashMap<>();
 
                 for (Ingredient ing : cr.getIngredients()) {
                     if (ing.isEmpty()) continue;
                     int stillNeeded = 1;
-                    var iter = virtualInventory.iterator();
-                    while (iter.hasNext() && stillNeeded > 0) {
-                        ItemStack vi = iter.next();
+                    for (int i = 0; i < virtualInventory.size() && stillNeeded > 0; i++) {
+                        ItemStack vi = virtualInventory.get(i);
+                        if (vi.isEmpty()) continue;
                         if (ing.test(vi)) {
+                            modifiedSlots.putIfAbsent(i, vi.copy());
                             int take = Math.min(stillNeeded, vi.getCount());
                             vi.shrink(take);
                             stillNeeded -= take;
-                            if (vi.isEmpty()) iter.remove();
                         }
                     }
                     if (stillNeeded > 0) {
@@ -286,13 +289,16 @@ public final class AsyncCraftChain {
                             reserved = ledger.reserveFromInventory(ing, stillNeeded, online);
                         }
                         if (reserved.isEmpty()) {
+                            modifiedSlots.forEach((idx, originalStack) -> {
+                                if (idx < virtualInventory.size()) {
+                                    virtualInventory.set(idx, originalStack);
+                                } else {
+                                    virtualInventory.add(originalStack);
+                                }
+                            });
                             logMissingIngredient(ing, stepId);
                             logVirtualInventory("at failure for step " + stepId);
                             logLedgerState();
-                            // Restore virtual inventory snapshot so prior-step
-                            // outputs survive the abort flush.
-                            virtualInventory.clear();
-                            virtualInventory.addAll(viSnapshot);
                             abort("Missing: " + describeIngredientSafe(ing));
                             return false;
                         }
@@ -363,7 +369,7 @@ public final class AsyncCraftChain {
                                 addToVirtualInventory(remainder.copyWithCount(spec.count()));
                                 break;
                             }
-                        } catch (Throwable e) {
+                        } catch (Exception e) {
                             RSIntegrationMod.LOGGER.debug("[RSI-AsyncChain] getCraftingRemainingItem failed", e);
                         }
                     }
@@ -500,7 +506,7 @@ public final class AsyncCraftChain {
             return null;
         }
 
-        RSIntegrationMod.LOGGER.info("[RSI-AsyncChain] Multi-block step started OK: recipe={} delegate={}",
+        RSIntegrationMod.LOGGER.debug("[RSI-AsyncChain] Multi-block step started OK: recipe={} delegate={}",
                 step.recipeId(), delegate.getClass().getSimpleName());
         return delegate;
     }
@@ -631,6 +637,7 @@ public final class AsyncCraftChain {
         }
         if (server != null) {
             var spawnLevel = server.overworld();
+            if (spawnLevel == null) return;
             var spawnPos = spawnLevel.getSharedSpawnPos();
             spawnLevel.addFreshEntity(
                 new ItemEntity(spawnLevel,
@@ -761,35 +768,14 @@ public final class AsyncCraftChain {
     // ── safe item give ───────────────────────────────────────────
 
     private void safeGiveToPlayer(ServerPlayer player, ItemStack stack) {
-        if (stack.isEmpty()) return;
-        if (player.level().hasChunkAt(player.blockPosition())) {
-            net.minecraftforge.items.ItemHandlerHelper.giveItemToPlayer(player, stack);
-            return;
-        }
-        if (network != null) {
-            network.insertItem(stack, stack.getCount(), com.refinedmods.refinedstorage.api.util.Action.PERFORM);
-            RSIntegrationMod.LOGGER.warn("[RSI] Refund redirected to RS network (player chunk unloaded): {} x{}",
-                stack.getHoverName().getString(), stack.getCount());
-        } else {
-            var spawnLevel = player.getServer().overworld();
-            var spawnPos = spawnLevel.getSharedSpawnPos();
-            spawnLevel.addFreshEntity(
-                new ItemEntity(spawnLevel,
-                    spawnPos.getX() + 0.5, spawnPos.getY() + 0.5, spawnPos.getZ() + 0.5, stack));
-            RSIntegrationMod.LOGGER.warn("[RSI] Refund dropped at world spawn (player {} in unloaded chunk): {} x{}",
-                player.getGameProfile().getName(), stack.getHoverName().getString(), stack.getCount());
-        }
+        com.huanghuang.rsintegration.util.PlayerUtils.safeGiveToPlayer(player, stack, network);
     }
 
     // ── debug helpers ────────────────────────────────────────────
 
     private static String describeIngredientSafe(Ingredient ing) {
         for (ItemStack stack : ing.getItems()) {
-            if (!stack.isEmpty()) {
-                net.minecraft.resources.ResourceLocation rl =
-                        net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stack.getItem());
-                return rl != null ? rl.toString() : stack.getDescriptionId();
-            }
+            if (!stack.isEmpty()) return stack.getHoverName().getString();
         }
         return "Unknown";
     }

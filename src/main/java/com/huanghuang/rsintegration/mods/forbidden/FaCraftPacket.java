@@ -83,7 +83,7 @@ public final class FaCraftPacket {
                 tryCraft(player, packet.ritualId, packet.dim, packet.pos);
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.error("[RSI-FA] Ritual craft failed for {}:", packet.ritualId, e);
-                player.sendSystemMessage(Component.translatable("rsi.fa.error.craft_failed", e.getMessage()));
+                player.sendSystemMessage(Component.translatable("rsi.fa.error.craft_failed"));
             }
         });
         context.setPacketHandled(true);
@@ -333,7 +333,7 @@ public final class FaCraftPacket {
             RSIntegrationMod.LOGGER.error("[RSI-FA] Placement failed for ritual {}:", ritualId, e);
             rollbackAll(player, be, filledPedestals, network);
             ledger.rollback(player);
-            player.sendSystemMessage(Component.translatable("rsi.generic.error.prepare_failed", e.getMessage()));
+            player.sendSystemMessage(Component.translatable("rsi.generic.error.prepare_failed"));
             return;
         }
 
@@ -374,7 +374,7 @@ public final class FaCraftPacket {
             RSIntegrationMod.LOGGER.error("[RSI-FA] Ledger commit failed for ritual {}", ritualId);
             rollbackAll(player, be, filledPedestals, network);
             FaRitualHelper.returnStarterToSource(starterStack, player, starterNetwork);
-            player.sendSystemMessage(Component.translatable("rsi.fa.error.craft_failed", "commit failed"));
+            player.sendSystemMessage(Component.translatable("rsi.fa.error.craft_failed"));
             return;
         }
 
@@ -406,14 +406,14 @@ public final class FaCraftPacket {
             rollbackAll(player, be, filledPedestals, network);
             ledger.rollback(player);
             FaRitualHelper.returnStarterToSource(starterStack, player, starterNetwork);
-            player.sendSystemMessage(Component.translatable("rsi.fa.error.craft_failed", root.getMessage()));
+            player.sendSystemMessage(Component.translatable("rsi.fa.error.craft_failed"));
             return;
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.error("[RSI-FA] Failed to start ritual {}:", ritualId, e);
             rollbackAll(player, be, filledPedestals, network);
             ledger.rollback(player);
             FaRitualHelper.returnStarterToSource(starterStack, player, starterNetwork);
-            player.sendSystemMessage(Component.translatable("rsi.fa.error.craft_failed", e.getMessage()));
+            player.sendSystemMessage(Component.translatable("rsi.fa.error.craft_failed"));
             return;
         }
 

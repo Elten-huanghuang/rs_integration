@@ -7,6 +7,7 @@ import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.util.Diagnostics;
 import com.huanghuang.rsintegration.util.Reflect;
+import net.minecraft.core.RegistryAccess;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Item;
@@ -17,8 +18,10 @@ import net.minecraft.world.item.crafting.RecipeManager;
 import net.minecraft.world.level.Level;
 import net.minecraftforge.registries.ForgeRegistries;
 
+import javax.annotation.Nullable;
 import java.lang.reflect.Method;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Unified recipe index replacing the split {@code CraftingPlanManager} +
@@ -106,6 +109,9 @@ public final class RecipeIndex {
             // ── FA rituals (FARegistries.RITUAL, not RecipeManager) ──────
             int faIndexed = indexFARituals(level, idx, seen);
 
+            // ── Market entries (MarketRegistry, not RecipeManager) ────
+            int marketIndexed = indexMarketEntries(idx, seen);
+
             index = idx;
             source = rm;
 
@@ -115,12 +121,13 @@ public final class RecipeIndex {
                     idx.size() + " items, " + seen.size() + " entries, " + elapsed + "ms"
                     + " (skipped: " + skippedUnknown + " unknown, " + skippedEmptyResult
                     + " empty-result, " + skippedIdentity + " identity"
-                    + ", " + faIndexed + " FA rituals)");
+                    + ", " + faIndexed + " FA rituals"
+                    + ", " + marketIndexed + " market)");
             RSIntegrationMod.LOGGER.info("[RecipeIndex] built: {} items, {} entries in {}ms"
                             + " (skipped: {} unknown, {} empty-result, {} identity"
-                            + ", {} FA rituals)",
+                            + ", {} FA rituals, {} market)",
                     idx.size(), seen.size(), elapsed, skippedUnknown, skippedEmptyResult,
-                    skippedIdentity, faIndexed);
+                    skippedIdentity, faIndexed, marketIndexed);
             return idx;
         }
     }
@@ -229,7 +236,7 @@ public final class RecipeIndex {
                         output = rsi$makeFaUpgradeOutput(to);
                         if (output.isEmpty()) continue;
                         FaRitualWrapper wrapper = new FaRitualWrapper(id, ritual, output, from, to);
-                        Entry entryObj = new Entry(wrapper, ModType.FORBIDDEN_ARCANUS,
+                        Entry entryObj = new Entry(wrapper, ModType.byId("forbidden_arcanus"),
                                 new ResourceLocation("forbidden_arcanus", "hephaestus_forge"));
                         idx.computeIfAbsent(output.getItem(),
                                 k -> new ArrayList<>()).add(entryObj);
@@ -239,7 +246,7 @@ public final class RecipeIndex {
                     if (output.isEmpty()) continue;
 
                     FaRitualWrapper wrapper = new FaRitualWrapper(id, ritual, output);
-                    Entry entryObj = new Entry(wrapper, ModType.FORBIDDEN_ARCANUS,
+                    Entry entryObj = new Entry(wrapper, ModType.byId("forbidden_arcanus"),
                             new ResourceLocation("forbidden_arcanus", "hephaestus_forge"));
                     idx.computeIfAbsent(output.getItem(),
                             k -> new ArrayList<>()).add(entryObj);
@@ -251,6 +258,89 @@ public final class RecipeIndex {
             }
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RecipeIndex] FA ritual scan failed: {}", e.toString());
+        }
+        return count;
+    }
+
+    // ── Market entry indexing ──────────────────────────────────────
+
+    private static volatile boolean marketClassesProbed;
+    private static volatile boolean marketAvailable;
+    private static volatile Object marketRegistryInst;
+
+    private static void probeMarket() {
+        if (marketClassesProbed) return;
+        marketClassesProbed = true;
+        try {
+            Class<?> registryClass = Class.forName(
+                    "net.blay09.mods.farmingforblockheads.registry.MarketRegistry");
+            java.lang.reflect.Field instField = registryClass.getField("INSTANCE");
+            marketRegistryInst = instField.get(null);
+            marketAvailable = marketRegistryInst != null;
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RecipeIndex] MarketRegistry not available: {}", e.toString());
+            marketAvailable = false;
+        }
+    }
+
+    private static int indexMarketEntries(Map<Item, List<Entry>> idx,
+                                           Set<ResourceLocation> seen) {
+        probeMarket();
+        if (!marketAvailable || marketRegistryInst == null) return 0;
+        int count = 0;
+        try {
+            Class<?> registryClass = marketRegistryInst.getClass();
+            java.lang.reflect.Method getEntries = Reflect.findMethod(registryClass,
+                    "getEntries", new Class<?>[0]);
+            if (getEntries == null) return 0;
+            @SuppressWarnings("unchecked")
+            Collection<Object> entries = (Collection<Object>) getEntries.invoke(marketRegistryInst);
+            if (entries == null) return 0;
+
+            Class<?> entryClass = null;
+            java.lang.reflect.Method getOutput = null;
+            java.lang.reflect.Method getCost = null;
+            java.lang.reflect.Method getEntryId = null;
+
+            for (Object entry : entries) {
+                if (entry == null) continue;
+                try {
+                    if (entryClass == null) {
+                        entryClass = entry.getClass();
+                        getOutput = Reflect.findMethod(entryClass, "getOutputItem", new Class<?>[0]);
+                        getCost = Reflect.findMethod(entryClass, "getCostItem", new Class<?>[0]);
+                        getEntryId = Reflect.findMethod(entryClass, "getEntryId", new Class<?>[0]);
+                        if (getOutput == null || getCost == null || getEntryId == null) {
+                            RSIntegrationMod.LOGGER.warn("[RecipeIndex] Market entry methods not found");
+                            return 0;
+                        }
+                    }
+
+                    ItemStack output = (ItemStack) getOutput.invoke(entry);
+                    ItemStack cost = (ItemStack) getCost.invoke(entry);
+                    UUID uuid = (UUID) getEntryId.invoke(entry);
+
+                    if (output.isEmpty() || cost.isEmpty()) continue;
+
+                    // Skip identity entries (cost == output) — would create circular deps
+                    if (ItemStack.isSameItem(output, cost)) continue;
+
+                    ResourceLocation rid = new ResourceLocation("farmingforblockheads", "market/" + uuid);
+                    if (!seen.add(rid)) continue;
+
+                    com.huanghuang.rsintegration.crafting.MarketRecipeWrapper wrapper =
+                            new com.huanghuang.rsintegration.crafting.MarketRecipeWrapper(uuid, output, cost);
+                    ModType type = ModType.FARMINGFORBLOCKHEADS_MARKET;
+                    Entry indexEntry = new Entry(wrapper, type,
+                            new ResourceLocation("farmingforblockheads", "market"));
+                    idx.computeIfAbsent(output.getItem(), k -> new ArrayList<>()).add(indexEntry);
+                    count++;
+                } catch (Exception e) {
+                    RSIntegrationMod.LOGGER.debug("[RecipeIndex] Failed to index market entry: {}", e.toString());
+                }
+            }
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RecipeIndex] Market entry scan failed: {}", e.toString());
         }
         return count;
     }
@@ -286,5 +376,171 @@ public final class RecipeIndex {
     public static void invalidate() {
         index = null;
         source = null;
+    }
+
+    // ── result-item extraction (formerly in ModRecipeIndex) ─────
+
+    private static final Map<Class<?>, Method> resultMethodCache = new ConcurrentHashMap<>();
+
+    public static ItemStack tryGetResultItem(Recipe<?> recipe, RegistryAccess access) {
+        if (recipe == null) return ItemStack.EMPTY;
+        if (recipe instanceof CraftingRecipe cr) {
+            return cr.getResultItem(access);
+        }
+        var handler = ModRecipeHandlers.handlerFor(recipe);
+        if (handler != null) {
+            ItemStack result = handler.getResultItem(recipe, access);
+            if (!result.isEmpty()) return result;
+        }
+        Class<?> clazz = recipe.getClass();
+        Method m = resultMethodCache.get(clazz);
+        if (m != null) {
+            try {
+                Object result;
+                if (m.getParameterCount() == 1) {
+                    result = m.invoke(recipe, access);
+                } else {
+                    result = m.invoke(recipe);
+                }
+                if (result instanceof ItemStack s && !s.isEmpty()) return s;
+            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
+        }
+        for (String methodName : new String[]{"getResultItem", "getResult", "getOutput", "getOutputCopy", "getAssembledItem"}) {
+            boolean isResultItem = "getResultItem".equals(methodName);
+            for (Method method : clazz.getMethods()) {
+                if (method.getName().equals(methodName)
+                        && ItemStack.class.isAssignableFrom(method.getReturnType())
+                        && method.getParameterCount() == 1) {
+                    try {
+                        Object result = method.invoke(recipe, access);
+                        if (result instanceof ItemStack s && !s.isEmpty()) {
+                            resultMethodCache.put(clazz, method);
+                            return s;
+                        }
+                    } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
+                }
+            }
+            // Skip no-arg getResultItem() — the deprecated overload that mods
+            // abuse to return machine block icons.
+            if (isResultItem) continue;
+            for (Method method : clazz.getMethods()) {
+                if (method.getName().equals(methodName)
+                        && ItemStack.class.isAssignableFrom(method.getReturnType())
+                        && method.getParameterCount() == 0) {
+                    try {
+                        Object result = method.invoke(recipe);
+                        if (result instanceof ItemStack s && !s.isEmpty()) {
+                            resultMethodCache.put(clazz, method);
+                            return s;
+                        }
+                    } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
+                }
+            }
+        }
+        ItemStack fieldResult = tryGetOutputField(recipe);
+        if (!fieldResult.isEmpty()) return fieldResult;
+        return ItemStack.EMPTY;
+    }
+
+    @Nullable
+    private static ItemStack tryGetOutputField(Recipe<?> recipe) {
+        Class<?> scan = recipe.getClass();
+        while (scan != null && scan != Object.class) {
+            for (java.lang.reflect.Field field : scan.getDeclaredFields()) {
+                if (!ItemStack.class.isAssignableFrom(field.getType())) continue;
+                String name = field.getName().toLowerCase(Locale.ROOT);
+                if (name.contains("output") || name.contains("result") || name.contains("assembled")) {
+                    field.setAccessible(true);
+                    try {
+                        Object val = field.get(recipe);
+                        if (val instanceof ItemStack s && !s.isEmpty()) return s;
+                    } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
+                }
+            }
+            scan = scan.getSuperclass();
+        }
+        return ItemStack.EMPTY;
+    }
+
+    public static List<ItemStack> tryGetSecondaryOutputs(Recipe<?> recipe, RegistryAccess access) {
+        List<ItemStack> results = new ArrayList<>();
+        if (recipe == null) return results;
+        try {
+            Method m = Reflect.findMethod(recipe.getClass(), "getRemainingItems", new Class<?>[0]);
+            if (m != null) {
+                Object obj = m.invoke(recipe);
+                if (obj instanceof List<?> list) {
+                    for (Object e : list) {
+                        if (e instanceof ItemStack s && !s.isEmpty()) results.add(s.copy());
+                    }
+                } else if (obj instanceof ItemStack[] arr) {
+                    for (ItemStack s : arr) {
+                        if (!s.isEmpty()) results.add(s.copy());
+                    }
+                }
+            }
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
+        try {
+            Method m = Reflect.findMethod(recipe.getClass(), "getByproducts", new Class<?>[0]);
+            if (m != null) {
+                Object obj = m.invoke(recipe);
+                if (obj instanceof List<?> list) {
+                    for (Object e : list) {
+                        if (e instanceof ItemStack s && !s.isEmpty()) results.add(s.copy());
+                    }
+                }
+            }
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
+        try {
+            Method m = Reflect.findMethod(recipe.getClass(), "getRollResults", new Class<?>[0]);
+            if (m != null) {
+                Object obj = m.invoke(recipe);
+                if (obj instanceof List<?> list) {
+                    for (Object e : list) {
+                        if (e instanceof ItemStack s && !s.isEmpty()) results.add(s.copy());
+                    }
+                }
+            }
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
+        try {
+            Object obj = recipe.getClass().getMethod("getOutputs").invoke(recipe);
+            if (obj instanceof List<?> list) {
+                for (Object e : list) {
+                    if (e instanceof ItemStack s && !s.isEmpty()) results.add(s.copy());
+                }
+            } else if (obj instanceof ItemStack[] arr) {
+                for (ItemStack s : arr) {
+                    if (!s.isEmpty()) results.add(s.copy());
+                }
+            }
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
+        trySecondaryOutputFields(recipe, results);
+        return results;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void trySecondaryOutputFields(Recipe<?> recipe, List<ItemStack> results) {
+        Class<?> scan = recipe.getClass();
+        while (scan != null && scan != Object.class) {
+            for (java.lang.reflect.Field field : scan.getDeclaredFields()) {
+                String name = field.getName().toLowerCase(Locale.ROOT);
+                if (!name.contains("byproduct") && !name.contains("secondary")
+                        && !name.contains("extra") && !name.contains("bonus")
+                        && !name.contains("roll"))
+                    continue;
+                field.setAccessible(true);
+                try {
+                    Object val = field.get(recipe);
+                    if (val instanceof List<?> list) {
+                        for (Object e : list) {
+                            if (e instanceof ItemStack s && !s.isEmpty()) results.add(s.copy());
+                        }
+                    } else if (val instanceof ItemStack s && !s.isEmpty()) {
+                        results.add(s.copy());
+                    }
+                } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
+            }
+            scan = scan.getSuperclass();
+        }
     }
 }

@@ -1064,7 +1064,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
                 return f.getInt(tank);
             } catch (NoSuchFieldException e) { /* fall through */ }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Batch-Eidolon] Failed to read current water amount", e);
+            RSIntegrationMod.LOGGER.warn("[RSI-Batch-Eidolon] Failed to read current water amount", e);
         }
         return Integer.MAX_VALUE; // can't determine -- don't block
     }

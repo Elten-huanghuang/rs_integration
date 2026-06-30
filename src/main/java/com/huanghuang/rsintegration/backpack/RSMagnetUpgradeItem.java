@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.backpack;
 
+import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.util.TextBuilder;
 import com.refinedmods.refinedstorage.blockentity.ControllerBlockEntity;
 import net.minecraft.core.BlockPos;
@@ -28,8 +29,6 @@ import java.util.function.IntSupplier;
 
 public class RSMagnetUpgradeItem extends MagnetUpgradeItem {
 
-    private static final int[] RS_FLOW_COLORS = {0x3355FF, 0x7733FF, 0xCC33FF, 0x3355FF};
-
     public RSMagnetUpgradeItem(IntSupplier radius, IntSupplier filterSlotCount,
                                 IUpgradeCountLimitConfig countLimitConfig) {
         super(radius, filterSlotCount, countLimitConfig);
@@ -47,6 +46,10 @@ public class RSMagnetUpgradeItem extends MagnetUpgradeItem {
 
     @Override
     public boolean isFoil(ItemStack stack) {
+        return isBoundToRS(stack);
+    }
+
+    public static boolean isBoundToRS(ItemStack stack) {
         CompoundTag tag = stack.getTag();
         return tag != null && tag.contains("RSBlockPos") && tag.contains("RSBlockDimension");
     }
@@ -69,7 +72,7 @@ public class RSMagnetUpgradeItem extends MagnetUpgradeItem {
             if (!dimKey.isEmpty() && tag.contains("RSBlockPos")) {
                 BlockPos pos = BlockPos.of(tag.getLong("RSBlockPos"));
                 tooltip.add(TextBuilder.translate("item.sophisticatedbackpacks.rs_network.tooltip")
-                        .colorFlow(1500L, 0.0F, RS_FLOW_COLORS).build());
+                        .colorFlow(1500L, 0.0F, RSIntegrationMod.RS_FLOW_COLORS).build());
                 tooltip.add(TextBuilder.of("  " + dimDisplayName(dimKey) + " " + pos.toShortString())
                         .cornflowerBlue().build());
             } else {

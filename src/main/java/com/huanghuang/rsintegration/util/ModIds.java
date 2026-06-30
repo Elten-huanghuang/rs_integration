@@ -12,6 +12,7 @@ public final class ModIds {
     public static final String TOUHOU_LITTLE_MAID = "touhou_little_maid";
     public static final String EMBERS = "embers";
     public static final String AETHERWORKS = "aetherworks";
+    public static final String FARMINGFORBLOCKHEADS = "farmingforblockheads";
 
     // Dependencies
     public static final String REFINED_STORAGE = "refinedstorage";

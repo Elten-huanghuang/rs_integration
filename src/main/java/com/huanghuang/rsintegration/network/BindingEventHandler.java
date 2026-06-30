@@ -15,8 +15,8 @@ import net.minecraftforge.common.ForgeConfigSpec;
 import net.minecraftforge.event.entity.player.PlayerInteractEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.ModList;
-import net.minecraftforge.registries.ForgeRegistries;
 import net.minecraftforge.fml.common.Mod;
+import net.minecraftforge.registries.ForgeRegistries;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
@@ -67,7 +67,7 @@ public final class BindingEventHandler {
             if (!inCustomList) return;
             BlockEntity be = event.getLevel().getBlockEntity(event.getPos());
             if (!(be instanceof MenuProvider)) return;
-            matched = new MachineBindingTarget(regName.getNamespace(), ModType.CUSTOM_GUI,
+            matched = new MachineBindingTarget(regName.getNamespace(), ModType.byId("custom_gui"),
                     RSIntegrationConfig.ENABLE_MACHINE_GUI_TABS, List.of(), null);
         }
 
@@ -87,6 +87,7 @@ public final class BindingEventHandler {
             player.displayClientMessage(
                     Component.translatable("gui.rs_integration.altar.unbound", blockName),
                     true);
+            sendBindingRefresh(player);
         } else {
             Optional<AltarBinding> binding = hook.get().createBinding(held);
             if (binding.isPresent()) {
@@ -96,6 +97,7 @@ public final class BindingEventHandler {
                         Component.translatable("gui.rs_integration.altar.bound",
                                 blockName, binding.get().displayName()),
                         true);
+                sendBindingRefresh(player);
             }
         }
         }
@@ -156,5 +158,13 @@ public final class BindingEventHandler {
     @Nullable
     public static MachineBindingTarget findTargetByClass(String className) {
         return CLASS_TARGET_MAP.get(className);
+    }
+
+    private static void sendBindingRefresh(ServerPlayer player) {
+        try {
+            com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler.sendBindingSync(player);
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-Bind] Failed to send binding sync: {}", e.toString());
+        }
     }
 }

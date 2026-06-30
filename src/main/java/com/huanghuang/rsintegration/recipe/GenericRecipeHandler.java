@@ -15,7 +15,7 @@ import java.util.List;
 final class GenericRecipeHandler implements ModRecipeHandler {
 
     @Override
-    public ModType modType() { return ModType.GENERIC; }
+    public ModType modType() { return ModType.byId("generic"); }
 
     @Override
     public boolean canHandle(Recipe<?> recipe) {

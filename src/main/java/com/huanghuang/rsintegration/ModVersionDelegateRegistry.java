@@ -1,7 +1,5 @@
-package com.huanghuang.rsintegration.registry;
+package com.huanghuang.rsintegration;
 
-import com.huanghuang.rsintegration.ModType;
-import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.api.VersionRange;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import org.apache.maven.artifact.versioning.ComparableVersion;

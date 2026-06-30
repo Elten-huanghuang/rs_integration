@@ -28,7 +28,7 @@ final class StepExecutor {
     static boolean craftOnce(CraftingRecipe recipe, ResolutionContext ctx, int depth,
                              List<ResourceLocation> altIds, List<String> altModTypes) {
         if (ctx.timedOut()) {
-            com.huanghuang.rsintegration.debug.PerformanceMonitor.recordResolveTimeout();
+            com.huanghuang.rsintegration.command.PerformanceMonitor.recordResolveTimeout();
             return false;
         }
         if (depth > MAX_DEPTH) return false;
@@ -62,7 +62,7 @@ final class StepExecutor {
     static boolean craftOnce(RecipeIndex.Entry entry, ResolutionContext ctx, int depth,
                              List<ResourceLocation> altIds, List<String> altModTypes) {
         if (ctx.timedOut()) {
-            com.huanghuang.rsintegration.debug.PerformanceMonitor.recordResolveTimeout();
+            com.huanghuang.rsintegration.command.PerformanceMonitor.recordResolveTimeout();
             return false;
         }
         if (depth > MAX_DEPTH) return false;
@@ -198,7 +198,7 @@ final class StepExecutor {
                     ctx.add(remainder.copyWithCount(count));
                     return;
                 }
-            } catch (Throwable e) {
+            } catch (Exception e) {
                 RSIntegrationMod.LOGGER.debug("[RSI] getCraftingRemainingItem probe failed", e);
             }
         }

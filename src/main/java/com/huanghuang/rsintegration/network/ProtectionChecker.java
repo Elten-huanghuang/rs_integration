@@ -155,7 +155,7 @@ public final class ProtectionChecker {
             return false;
 
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("{} FTB Chunks check error: {}", TAG, e.toString());
+            RSIntegrationMod.LOGGER.warn("{} FTB Chunks check error (fail-open): {}", TAG, e.toString());
             return true; // fail-open
         }
     }
@@ -474,7 +474,7 @@ public final class ProtectionChecker {
             return false;
 
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("{} Cadmus check error: {}", TAG, e.toString());
+            RSIntegrationMod.LOGGER.warn("{} Cadmus check error (fail-open): {}", TAG, e.toString());
             return true; // fail-open
         }
     }

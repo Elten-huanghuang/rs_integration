@@ -1,4 +1,4 @@
-package com.huanghuang.rsintegration.debug;
+package com.huanghuang.rsintegration.command;
 
 import com.huanghuang.rsintegration.crafting.AsyncCraftManager;
 

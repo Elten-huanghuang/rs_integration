@@ -13,10 +13,10 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 
-final class EreAlchemyRecipeHandler implements ModRecipeHandler {
+public final class EreAlchemyRecipeHandler implements ModRecipeHandler {
 
     @Override
-    public ModType modType() { return ModType.EMBERS_ALCHEMY; }
+    public ModType modType() { return ModType.byId("embers_alchemy"); }
 
     @Override
     public boolean canHandle(Recipe<?> recipe) {

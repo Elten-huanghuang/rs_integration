@@ -39,7 +39,7 @@ public final class RSJeiPlugin implements IModPlugin {
         cachedRuntime = jeiRuntime;
         if (!RSIntegrationConfig.ENABLE_JEI.get()) return;
         if (RSIntegrationConfig.ENABLE_GOETY.get() && ModList.get().isLoaded(ModIds.GOETY)) {
-            GoetyRSModule.onJeiRuntimeAvailable(jeiRuntime);
+            GoetyRSModule.INSTANCE.onJeiRuntimeAvailable(jeiRuntime);
         }
     }
 
@@ -47,14 +47,14 @@ public final class RSJeiPlugin implements IModPlugin {
     public void onRuntimeUnavailable() {
         cachedRuntime = null;
         if (RSIntegrationConfig.ENABLE_GOETY.get() && ModList.get().isLoaded(ModIds.GOETY)) {
-            GoetyRSModule.onJeiRuntimeUnavailable();
+            GoetyRSModule.INSTANCE.onJeiRuntimeUnavailable();
         }
     }
 
     @Override
     public void registerRecipeTransferHandlers(IRecipeTransferRegistration registration) {
         if (RSIntegrationConfig.ENABLE_GOETY.get() && ModList.get().isLoaded(ModIds.GOETY)) {
-            GoetyRSModule.registerRecipeTransferHandlers(registration);
+            GoetyRSModule.INSTANCE.registerRecipeTransferHandlers(registration);
         }
         if (RSIntegrationConfig.ENABLE_RS_SIDE_PANEL.get()
                 && ModList.get().isLoaded(ModIds.REFINED_STORAGE)) {

@@ -1,7 +1,7 @@
-package com.huanghuang.rsintegration.crafting.chain;
+package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
-import com.huanghuang.rsintegration.crafting.AsyncCraftChain;
+import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.util.PlayerUtils;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
@@ -15,7 +15,6 @@ import java.util.UUID;
  * repeated across async chain resolution paths.
  */
 public final class ChainRepeatController {
-    private static final int MAX_TOTAL_REPEATS = 999;
 
     private ChainRepeatController() {}
 
@@ -49,9 +48,10 @@ public final class ChainRepeatController {
         }
 
         int next = remainingRepeats - 1;
-        if (next > MAX_TOTAL_REPEATS) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Repeat] Clamping repeat count {} -> {}", next, MAX_TOTAL_REPEATS);
-            next = MAX_TOTAL_REPEATS;
+        int maxRepeats = RSIntegrationConfig.REPEAT_COUNT_MAX.get();
+        if (next > maxRepeats) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Repeat] Clamping repeat count {} -> {}", next, maxRepeats);
+            next = maxRepeats;
         }
 
         ServerPlayer online = server.getPlayerList().getPlayer(playerId);

@@ -142,7 +142,7 @@ public final class AsyncCraftManager {
                 }
             }
         }
-        com.huanghuang.rsintegration.debug.PerformanceMonitor.recordTick(
+        com.huanghuang.rsintegration.command.PerformanceMonitor.recordTick(
                 System.nanoTime() - tickStart);
     }
 }

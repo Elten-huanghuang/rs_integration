@@ -32,14 +32,19 @@ import net.minecraftforge.items.ItemHandlerHelper;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 public final class CraftPacketUtils {
 
     private CraftPacketUtils() {}
+
+    private static final Map<Class<?>, List<Ingredient>> ingredientCache = new ConcurrentHashMap<>();
+    private static final Map<Class<?>, Boolean> emptyIngredientMarkers = new ConcurrentHashMap<>();
 
     // ── shared utilities used by all craft packets ──────────────
 
@@ -55,11 +60,11 @@ public final class CraftPacketUtils {
         return (ServerLevel) player.level();
     }
 
-    public static net.minecraft.network.chat.Component describeIngredient(Ingredient ingredient) {
+    public static Component describeIngredient(Ingredient ingredient) {
         for (ItemStack stack : ingredient.getItems()) {
-            if (!stack.isEmpty()) return net.minecraft.network.chat.Component.translatable(stack.getDescriptionId());
+            if (!stack.isEmpty()) return stack.getHoverName();
         }
-        return net.minecraft.network.chat.Component.literal("Unknown Item");
+        return Component.literal("Unknown Item");
     }
 
     /**
@@ -133,7 +138,7 @@ public final class CraftPacketUtils {
                             net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(result.getItem()) + "x" + result.getCount());
                 }
                 // Add secondary outputs (byproducts) to virtual inventory
-                for (ItemStack secondary : ModRecipeIndex.tryGetSecondaryOutputs(craftingRecipe, player.serverLevel().registryAccess())) {
+                for (ItemStack secondary : RecipeIndex.tryGetSecondaryOutputs(craftingRecipe, player.serverLevel().registryAccess())) {
                     addToVirtual(virtualInventory, secondary);
                 }
                 for (ItemStack remainder : getRecipeRemainders(craftingRecipe)) {
@@ -181,7 +186,7 @@ public final class CraftPacketUtils {
                     }
                 }
 
-                ItemStack result = ModRecipeIndex.tryGetResultItem(recipe, player.serverLevel().registryAccess());
+                ItemStack result = RecipeIndex.tryGetResultItem(recipe, player.serverLevel().registryAccess());
                 if (!result.isEmpty()) {
                     addToVirtual(virtualInventory, result);
                     RSIntegrationMod.LOGGER.debug("[RSI-exec] Step {}/{} {}: produced {} to virtual",
@@ -189,7 +194,7 @@ public final class CraftPacketUtils {
                             net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(result.getItem()) + "x" + result.getCount());
                 }
                 // Add secondary outputs (byproducts) to virtual inventory
-                for (ItemStack secondary : ModRecipeIndex.tryGetSecondaryOutputs(recipe, player.serverLevel().registryAccess())) {
+                for (ItemStack secondary : RecipeIndex.tryGetSecondaryOutputs(recipe, player.serverLevel().registryAccess())) {
                     addToVirtual(virtualInventory, secondary);
                 }
                 if (result.isEmpty()) {
@@ -325,8 +330,12 @@ public final class CraftPacketUtils {
     public static List<Ingredient> extractIngredients(Object recipe) {
         Class<?> clazz = recipe.getClass();
 
+        List<Ingredient> cached = ingredientCache.get(clazz);
+        if (cached != null) return cached;
+        if (emptyIngredientMarkers.containsKey(clazz)) return null;
+
         List<Ingredient> result = tryGetIngredients(recipe, "getIngredients");
-        if (result != null) return filterWRCrystal(recipe, result);
+        if (result != null) return cacheAndReturn(clazz, filterWRCrystal(recipe, result));
 
         Class<?> scan = clazz;
         while (scan != null && scan != Object.class) {
@@ -337,7 +346,7 @@ public final class CraftPacketUtils {
                     try {
                         List<?> list = (List<?>) field.get(recipe);
                         if (!list.isEmpty() && list.get(0) instanceof Ingredient) {
-                            return filterWRCrystal(recipe, (List<Ingredient>) list);
+                            return cacheAndReturn(clazz, filterWRCrystal(recipe, (List<Ingredient>) list));
                         }
                     } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
                 }
@@ -347,23 +356,32 @@ public final class CraftPacketUtils {
 
         for (String name : new String[]{"getInputs", "getInputItems"}) {
             result = tryGetIngredients(recipe, name);
-            if (result != null) return filterWRCrystal(recipe, result);
+            if (result != null) return cacheAndReturn(clazz, filterWRCrystal(recipe, result));
         }
 
-        // Probe step-based recipes (Eidolon CrucibleRecipe: getSteps() → each step's matches field)
         result = tryExtractStepBasedIngredients(recipe);
-        if (result != null) return result;
+        if (result != null) return cacheAndReturn(clazz, result);
 
-        // Probe ritual-based recipes (FA Ritual: mainIngredient + inputs[].ingredient)
         result = tryExtractRitualBasedIngredients(recipe);
-        if (result != null) return result;
+        if (result != null) return cacheAndReturn(clazz, result);
 
         result = scanAllFieldsForIngredients(recipe);
-        if (result != null) return filterWRCrystal(recipe, result);
+        if (result != null) return cacheAndReturn(clazz, filterWRCrystal(recipe, result));
 
         result = extractLodestoneIngredients(recipe);
         if (result != null) result = filterWRCrystal(recipe, result);
-        return result;
+        if (result != null) return cacheAndReturn(clazz, result);
+
+        emptyIngredientMarkers.put(clazz, Boolean.TRUE);
+        return null;
+    }
+
+    @Nullable
+    private static List<Ingredient> cacheAndReturn(Class<?> clazz, @Nullable List<Ingredient> result) {
+        if (result == null) return null;
+        List<Ingredient> immutable = Collections.unmodifiableList(result);
+        ingredientCache.put(clazz, immutable);
+        return immutable;
     }
 
     /**
@@ -488,7 +506,7 @@ public final class CraftPacketUtils {
             }
             if (!isCrystal) filtered.add(ing);
         }
-        RSIntegrationMod.LOGGER.info("[RSI] filterWRCrystal: recipe={}, removed {} crystal ingredient(s), kept {} material ingredient(s)",
+        RSIntegrationMod.LOGGER.debug("[RSI] filterWRCrystal: recipe={}, removed {} crystal ingredient(s), kept {} material ingredient(s)",
                 className, ingredients.size() - filtered.size(), filtered.size());
         return filtered;
     }

@@ -67,7 +67,7 @@ public final class MalumCraftPacket {
                 tryCraft(player, packet.recipeId, packet.dim, packet.pos);
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.error("Malum craft failed for recipe {}:", packet.recipeId, e);
-                player.sendSystemMessage(Component.translatable("rsi.malum.error.craft_failed", e.getMessage()));
+                player.sendSystemMessage(Component.translatable("rsi.malum.error.craft_failed"));
             }
         });
         context.setPacketHandled(true);
@@ -126,7 +126,7 @@ public final class MalumCraftPacket {
             pedestals = capturePedestals(level, pos);
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.error("[RSI-Malum] Failed to capture pedestals", e);
-            player.sendSystemMessage(Component.translatable("rsi.malum.error.pedestal_failed", e.getMessage()));
+            player.sendSystemMessage(Component.translatable("rsi.malum.error.pedestal_failed"));
             return;
         }
         int emptyPedestalSlots = countEmptyPedestalSlots(pedestals);
@@ -209,7 +209,7 @@ public final class MalumCraftPacket {
             RSIntegrationMod.LOGGER.error("[RSI-Malum] Placement failed for recipe {}:", recipeId, e);
             clearAltarSlots(invMain, invSpirit, inputObj != null ? 1 : 0, spiritCount);
             clearPedestalsByIndex(pedestals, filledPedestalIndices);
-            player.sendSystemMessage(Component.translatable("rsi.malum.error.craft_failed", e.getMessage()));
+            player.sendSystemMessage(Component.translatable("rsi.malum.error.craft_failed"));
             return;
         }
 
@@ -235,7 +235,7 @@ public final class MalumCraftPacket {
             }
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.error("[RSI-Malum] craft(Recipe) threw for recipe {}:", recipeId, e);
-            player.sendSystemMessage(Component.translatable("rsi.malum.error.start_failed", e.getMessage()));
+            player.sendSystemMessage(Component.translatable("rsi.malum.error.start_failed"));
             refundAndClearAltar(invMain, invSpirit, inputObj != null ? 1 : 0, spiritCount, network, player);
             refundAndClearPedestals(pedestals, filledPedestalIndices, network, player);
             return;
@@ -247,7 +247,7 @@ public final class MalumCraftPacket {
                 altar.getClass().getMethod("craft").invoke(altar);
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.error("[RSI-Malum] craft() threw for recipe {}:", recipeId, e);
-                player.sendSystemMessage(Component.translatable("rsi.malum.error.start_failed", e.getMessage()));
+                player.sendSystemMessage(Component.translatable("rsi.malum.error.start_failed"));
                 refundAndClearAltar(invMain, invSpirit, inputObj != null ? 1 : 0, spiritCount, network, player);
                 refundAndClearPedestals(pedestals, filledPedestalIndices, network, player);
                 return;

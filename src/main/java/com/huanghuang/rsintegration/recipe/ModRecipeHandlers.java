@@ -11,6 +11,7 @@ import net.minecraft.world.item.crafting.Recipe;
 
 import javax.annotation.Nullable;
 import java.lang.reflect.Method;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -28,25 +29,28 @@ public final class ModRecipeHandlers {
     private static final Map<Class<?>, ModRecipeHandler> HANDLER_CACHE = new ConcurrentHashMap<>();
     /** Sentinel stored in HANDLER_CACHE for recipe classes that have no registered handler. */
     private static final ModRecipeHandler NO_HANDLER = new ModRecipeHandler() {
-        @Override public ModType modType() { return ModType.GENERIC; }
+        @Override public ModType modType() { return ModType.byId("generic"); }
         @Override public boolean canHandle(Recipe<?> recipe) { return false; }
         @Override public ItemStack getResultItem(Recipe<?> recipe, RegistryAccess access) { return ItemStack.EMPTY; }
         @Nullable
         @Override public List<IngredientSpec> getIngredients(Recipe<?> recipe) { return null; }
     };
 
-    private static final List<ModRecipeHandler> HANDLERS = List.of(
-            new GenericRecipeHandler(),
-            new VanillaMachineRecipeHandler(),
-            new MalumRecipeHandler(),
-            new EidolonRecipeHandler(),
-            new FaRecipeHandler(),
-            new GoetyRecipeHandler(),
-            new WRRecipeHandler(),
-            new TlmAltarRecipeHandler(),
-            new EreAlchemyRecipeHandler(),
-            new AetherworksRecipeHandler()
-    );
+    private static final List<ModRecipeHandler> HANDLERS = new ArrayList<>();
+
+    static {
+        HANDLERS.add(new GenericRecipeHandler());
+        HANDLERS.add(new VanillaMachineRecipeHandler());
+        HANDLERS.add(new MarketRecipeHandler());
+    }
+
+    /**
+     * Register a mod recipe handler. Call during mod construction from
+     * {@code IModIntegration.registerRecipeHandler()}.
+     */
+    public static void register(ModRecipeHandler handler) {
+        HANDLERS.add(handler);
+    }
 
     private ModRecipeHandlers() {}
 
@@ -109,7 +113,13 @@ public final class ModRecipeHandlers {
 
         // Probe known method names — prefer 1-param (RegistryAccess) overloads
         // to avoid no-arg getResultItem() that returns a machine block icon.
+        // getResultItem — only try the canonical 1-param overload.  The no-arg
+        // version is deprecated and several mods (WR, Malum) override it to
+        // return a machine block instead of the recipe output.  In 1.20.1 the
+        // 1-param getResultItem(RegistryAccess) always exists on Recipe, so
+        // the no-arg probe is never needed for getResultItem specifically.
         for (String name : new String[]{"getResultItem", "getResult", "getOutput", "getOutputCopy", "getAssembledItem"}) {
+            boolean isResultItem = "getResultItem".equals(name);
             // Try 1-param methods first
             for (Method m : clazz.getMethods()) {
                 if (!m.getName().equals(name)) continue;
@@ -126,7 +136,10 @@ public final class ModRecipeHandlers {
                             name, clazz.getName(), e.toString());
                 }
             }
-            // Fall back to no-arg methods
+            // Skip no-arg getResultItem() — the deprecated overload that mods
+            // abuse to return machine block icons.
+            if (isResultItem) continue;
+            // Fall back to no-arg methods (other method names)
             for (Method m : clazz.getMethods()) {
                 if (!m.getName().equals(name)) continue;
                 if (!ItemStack.class.isAssignableFrom(m.getReturnType())) continue;
@@ -167,6 +180,6 @@ public final class ModRecipeHandlers {
     // ── shared secondary-output extraction ────────────────────────
 
     public static List<ItemStack> tryGetSecondaryOutputs(Recipe<?> recipe, RegistryAccess access) {
-        return com.huanghuang.rsintegration.crafting.ModRecipeIndex.tryGetSecondaryOutputs(recipe, access);
+        return com.huanghuang.rsintegration.crafting.RecipeIndex.tryGetSecondaryOutputs(recipe, access);
     }
 }

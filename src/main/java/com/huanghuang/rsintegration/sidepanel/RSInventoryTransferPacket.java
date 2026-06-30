@@ -255,7 +255,7 @@ public final class RSInventoryTransferPacket {
             }
             if (!isCrystal) filtered.add(spec);
         }
-        RSIntegrationMod.LOGGER.info("[RSI-InvTransfer] WR crystal filter: {} specs → {} ({} crystal specs removed)",
+        RSIntegrationMod.LOGGER.debug("[RSI-InvTransfer] WR crystal filter: {} specs → {} ({} crystal specs removed)",
                 specs.size(), filtered.size(), specs.size() - filtered.size());
         return filtered;
     }

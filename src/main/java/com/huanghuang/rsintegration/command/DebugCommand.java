@@ -401,7 +401,7 @@ public final class DebugCommand {
     // ── perf snapshot ─────────────────────────────────────────────
 
     private static int perfSnapshot(CommandContext<CommandSourceStack> ctx) {
-        String snap = com.huanghuang.rsintegration.debug.PerformanceMonitor.snapshot();
+        String snap = com.huanghuang.rsintegration.command.PerformanceMonitor.snapshot();
         ctx.getSource().sendSuccess(() -> Component.literal(snap), false);
         return 1;
     }
@@ -426,7 +426,7 @@ public final class DebugCommand {
                     }
                 }
             }
-        } catch (Throwable e) { /* curios not present */ }
+        } catch (Exception e) { /* curios not present */ }
 
         int totalBindings = 0;
         for (ItemStack stack : allStacks) {
