@@ -49,7 +49,14 @@ public final class PlayerUtils {
     public static void safeGiveToPlayer(ServerPlayer player, ItemStack stack, @Nullable INetwork network) {
         if (stack.isEmpty()) return;
         if (player.level().hasChunkAt(player.blockPosition())) {
-            ItemHandlerHelper.giveItemToPlayer(player, stack);
+            // Split large stacks into max-size chunks to avoid spawning an
+            // excessive number of item entities when the player's inventory
+            // is full (e.g. batch crafting 1000 planks → 16 entities, not 1000).
+            while (!stack.isEmpty()) {
+                int split = Math.min(stack.getMaxStackSize(), stack.getCount());
+                ItemStack chunk = stack.split(split);
+                ItemHandlerHelper.giveItemToPlayer(player, chunk);
+            }
             return;
         }
         if (network != null) {

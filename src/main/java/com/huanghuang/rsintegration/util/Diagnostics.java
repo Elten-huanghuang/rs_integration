@@ -22,6 +22,10 @@ public final class Diagnostics {
     private static final Deque<Event> events = new ConcurrentLinkedDeque<>();
     private static volatile boolean enabled = false;
 
+    // Cached snapshot to avoid per-frame allocations when the UI polls
+    // recentEvents().  Rebuilt only on push(), zero-allocation otherwise.
+    private static volatile List<Event> cachedEvents = List.of();
+
     private Diagnostics() {}
 
     public static boolean isEnabled() { return enabled; }
@@ -77,9 +81,11 @@ public final class Diagnostics {
 
     // ── query ─────────────────────────────────────────────────────
 
-    /** Return a snapshot of all recorded events (newest first). */
+    /** Return a snapshot of all recorded events (newest first).
+     *  Returns a cached view rebuilt only when new events arrive —
+     *  safe to call from render loops without per-frame allocations. */
     public static List<Event> recentEvents() {
-        return List.copyOf(events);
+        return cachedEvents;
     }
 
     /** Return the last N events. */
@@ -103,10 +109,14 @@ public final class Diagnostics {
         }
     }
 
-    public static void clear() { events.clear(); }
+    public static void clear() {
+        events.clear();
+        cachedEvents = List.of();
+    }
 
     private static void push(Event e) {
         events.addLast(e);
         while (events.size() > MAX_EVENTS) events.removeFirst();
+        cachedEvents = List.copyOf(events);
     }
 }

@@ -42,18 +42,19 @@ public final class WizardsRebornRSModule implements IModIntegration {
 
     @Override
     public void registerBindingTargets() {
+        // All WR machines are in-world interaction, no container GUI.
         BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
                 "wizards_reborn", ModType.byId("wizards_reborn"),
                 RSIntegrationConfig.ENABLE_WIZARDS_REBORN, List.of(
                 "mod.maxbogomol.wizards_reborn.common.block.wissen_crystallizer.WissenCrystallizerBlock",
                 "mod.maxbogomol.wizards_reborn.common.block.arcane_iterator.ArcaneIteratorBlock",
                 "mod.maxbogomol.wizards_reborn.common.block.arcane_workbench.ArcaneWorkbenchBlock"
-        ), "wizards_reborn"));
+        ), "wizards_reborn", false));
         BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
                 "wizards_reborn", ModType.byId("wizards_reborn"),
                 RSIntegrationConfig.ENABLE_WIZARDS_REBORN, List.of(
                 "mod.maxbogomol.wizards_reborn.common.block.crystal.CrystalBlock"
-        ), "crystal_ritual"));
+        ), "crystal_ritual", false));
     }
 
     @Override

@@ -1,146 +1,181 @@
 package com.huanghuang.rsintegration.sidepanel.client;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
-import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+
 import com.huanghuang.rsintegration.machine.MachineHub;
 import com.huanghuang.rsintegration.machine.MachineHubRenderer;
 import com.huanghuang.rsintegration.mixin.rs.AbstractContainerScreenAccessor;
+import com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler;
+import com.huanghuang.rsintegration.sidepanel.network.ReturnToRSPacket;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
+import net.minecraft.core.BlockPos;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import net.minecraftforge.client.event.ClientPlayerNetworkEvent;
 import net.minecraftforge.client.event.ScreenEvent;
-import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.eventbus.api.EventPriority;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 
 /**
- * Caches the RS GridScreen before opening a bound machine GUI, so that
- * pressing ESC in the machine GUI returns to the RS terminal instead of
- * the game world.
+ * Manages the "return to RS Grid after closing machine GUI" flow.
  *
- * <p>Call {@link #pushCurrent()} before the machine GUI opens.
- * The {@code ScreenCloseMixin} (rs.ScreenCloseMixin) calls
- * {@link #onScreenRemoved(Screen)} when any screen is removed —
- * if the removed screen is NOT the cached screen, the cached screen
- * is restored.</p>
- *
- * <p>{@link #pushCurrent()} only sets {@code cachedScreen} once —
- * subsequent calls from intermediate screens (JEI, CraftingPlanScreen)
- * set {@code expectingReplace} so the intermediate removal is correctly
- * ignored by {@link #onScreenRemoved}.</p>
+ * <p>Instead of caching a live {@link Screen} (which holds a stale
+ * {@code ContainerMenu} that causes item duplication when restored),
+ * we store the RS Grid's {@link BlockPos} and send a
+ * {@link ReturnToRSPacket} so the server legally re-opens the grid
+ * through the normal Forge pipeline.</p>
  */
 @OnlyIn(Dist.CLIENT)
 public final class GuiNavStack {
-    private static Screen cachedScreen;
-    private static boolean pendingRestore;
-    /** true when we just called pushCurrent() and expect the cached
-     *  screen to be replaced by a mod-initiated GUI.  Distinguishes
-     *  "replaced by our GUI" from "user closed it manually". */
-    private static boolean expectingReplace;
-    private static boolean hookRegistered;
-    private static Screen restoreTarget;
+
+    private static BlockPos cachedGridPos;
+    private static ResourceLocation cachedGridDim;
+    private static int pendingRestores;
+    private static long pushTimestamp;
+    private static final long PUSH_TIMEOUT_MS = 5000;
 
     static {
         MinecraftForge.EVENT_BUS.register(GuiNavStack.class);
-        hookRegistered = true;
     }
 
     private GuiNavStack() {}
 
-    /** Save the currently displayed screen as the return target.
-     *  If a screen is already cached, does NOT overwrite it —
-     *  the first/outermost RS GridScreen is always the return target. */
+    /**
+     * Save the RS Grid's position before a machine GUI opens.  When the
+     * player presses ESC we'll ask the server to re-open the grid at this
+     * position instead of restoring a dead client-side Screen.
+     */
     public static void pushCurrent() {
         Screen current = Minecraft.getInstance().screen;
-        if (current != null) {
-            if (cachedScreen == null) {
-                cachedScreen = current;
-                pendingRestore = true;
-                registerLogoutHook();
-                RSIntegrationMod.LOGGER.debug("[RSI-GuiNav] Pushed screen: {}",
-                        current.getClass().getSimpleName());
+        if (current != null && cachedGridPos == null) {
+            extractGridPosition(current);
+        }
+        pendingRestores++;
+        pushTimestamp = System.currentTimeMillis();
+    }
+
+    /** Try to find the RS Grid's BlockPos from the current GridScreen. */
+    private static void extractGridPosition(Screen screen) {
+        try {
+            if (!(screen instanceof AbstractContainerScreen<?> acs)) return;
+            var menu = acs.getMenu();
+
+            // 1. Try getGrid() — RS GridContainerMenu may return IGrid (which is
+            //    implemented by GridBlockEntity but the interface itself does not
+            //    extend BlockEntity, so instanceof check fails for proxies/wrappers).
+            try {
+                var m = menu.getClass().getMethod("getGrid");
+                Object grid = m.invoke(menu);
+                BlockEntity be = unwrapBlockEntity(grid);
+                if (be != null) {
+                    cachePos(be, "getGrid()");
+                    return;
+                }
+            } catch (NoSuchMethodException ignored) {}
+
+            // 2. Scan all declared fields across the class hierarchy for any object
+            //    that can yield a BlockEntity (direct BlockEntity, IGrid, INetworkNode, etc.).
+            Class<?> clazz = menu.getClass();
+            while (clazz != null && clazz != Object.class) {
+                for (var field : clazz.getDeclaredFields()) {
+                    if (field.getType().isPrimitive()) continue;
+                    field.setAccessible(true);
+                    Object value = field.get(menu);
+                    if (value == null) continue;
+                    BlockEntity be = unwrapBlockEntity(value);
+                    if (be != null) {
+                        cachePos(be, "field " + field.getName());
+                        return;
+                    }
+                }
+                clazz = clazz.getSuperclass();
             }
-            expectingReplace = true;
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-GuiNav] Failed to extract grid position: {}", e.toString());
         }
     }
 
     /**
-     * Called from {@code ScreenCloseMixin} when any screen's {@code removed()}
-     * method fires.  If the removed screen is different from the cached screen
-     * (i.e. a machine GUI is closing), restore the cached RS GridScreen.
+     * Try to extract a {@link BlockEntity} from an arbitrary object.
+     * <ul>
+     *   <li>Direct instanceof BlockEntity</li>
+     *   <li>Try {@code getNode()}, {@code getNetworkNode()}, {@code getBlockEntity()}</li>
+     *   <li>Try {@code getOwner()} for IGrid proxies</li>
+     * </ul>
      */
-    public static void onScreenRemoved(Screen removed) {
-        if (!pendingRestore || removed == null) return;
-
-        Screen cached = cachedScreen;
-        if (cached == null) {
-            pendingRestore = false;
-            expectingReplace = false;
-            return;
+    private static BlockEntity unwrapBlockEntity(Object obj) {
+        if (obj == null) return null;
+        if (obj instanceof BlockEntity be) return be;
+        for (String methodName : new String[]{"getNode", "getNetworkNode", "getBlockEntity", "getOwner"}) {
+            try {
+                var m = obj.getClass().getMethod(methodName);
+                Object result = m.invoke(obj);
+                if (result instanceof BlockEntity be) return be;
+            } catch (Exception ignored) {}
         }
-
-        if (removed == cached) {
-            if (expectingReplace) {
-                // Cached screen is being replaced by our machine GUI / intermediate
-                // screen — keep it on standby for the eventual restore.
-                expectingReplace = false;
-                return;
-            }
-            // Cached screen was closed manually (user pressed E / ESC).
-            // Clear state so a stale screen isn't restored later.
-            pendingRestore = false;
-            cachedScreen = null;
-            expectingReplace = false;
-            RSIntegrationMod.LOGGER.debug("[RSI-GuiNav] Cached screen closed manually — cleared");
-            return;
-        }
-
-        // removed != cached — a machine GUI or intermediate screen is closing.
-        if (expectingReplace) {
-            // We're still in a replacement transition (e.g. intermediate
-            // screen replaced by the actual machine GUI).  Keep the cached
-            // screen on standby.
-            expectingReplace = false;
-            return;
-        }
-
-        // Genuine close of a machine GUI — restore the cached RS GridScreen.
-        pendingRestore = false;
-        cachedScreen = null;
-        if (!RSIntegrationConfig.RETURN_TO_RS_AFTER_MACHINE_GUI.get()) {
-            return;
-        }
-        // Defer to next client tick because we are inside
-        // Minecraft.setScreen(null) → oldScreen.removed().  If we
-        // called setScreen(cached) now, the outer setScreen would
-        // still set this.screen = null and destroy the restore.
-        restoreTarget = cached;
-        RSIntegrationMod.LOGGER.debug("[RSI-GuiNav] Scheduling restore of: {}",
-                cached.getClass().getSimpleName());
+        return null;
     }
 
-    /** Clear state on logout to prevent stale references. */
-    private static void registerLogoutHook() {
-        if (hookRegistered) return;
-        MinecraftForge.EVENT_BUS.register(GuiNavStack.class);
-        hookRegistered = true;
+    private static void cachePos(BlockEntity be, String source) {
+        cachedGridPos = be.getBlockPos();
+        cachedGridDim = Minecraft.getInstance().player.level().dimension().location();
+        RSIntegrationMod.LOGGER.debug("[RSI-GuiNav] Cached grid pos via {}: {} dim={}",
+                source, cachedGridPos, cachedGridDim);
+    }
+
+    /**
+     * Called from {@code MinecraftMixin} when the game is about to close
+     * the current screen ({@code setScreen(null)}).  Returns {@code null}
+     * — we never restore a cached Screen.  Instead we send a packet to
+     * let the server re-open the RS Grid.
+     */
+    public static Screen popRestoreTarget(Screen closing) {
+        if (pendingRestores > 0) pendingRestores--;
+
+        if (pendingRestores > 0) return null;
+
+        // Send packet to server to re-open RS Grid (if we have a position)
+        if (cachedGridPos != null && cachedGridDim != null) {
+            RSIntegrationMod.LOGGER.debug("[RSI-GuiNav] Requesting return to RS Grid at {} dim={}",
+                    cachedGridPos, cachedGridDim);
+            RSSidePanelNetworkHandler.CHANNEL.sendToServer(
+                    new ReturnToRSPacket(cachedGridDim, cachedGridPos));
+        }
+        clearPending();
+        return null; // Never restore a cached Screen
+    }
+
+    public static void onScreenChanged(Screen newScreen) {
+        if (newScreen != null && newScreen.getClass().getName().contains("PauseScreen")) {
+            clearPending();
+        }
+    }
+
+    public static void clearPending() {
+        pendingRestores = 0;
+        cachedGridPos = null;
+        cachedGridDim = null;
+    }
+
+    @SubscribeEvent
+    public static void onClientTick(net.minecraftforge.event.TickEvent.ClientTickEvent event) {
+        if (pendingRestores > 0 && System.currentTimeMillis() - pushTimestamp > PUSH_TIMEOUT_MS) {
+            RSIntegrationMod.LOGGER.debug("[RSI-GuiNav] Push timeout ({}ms) — clearing stale state",
+                    System.currentTimeMillis() - pushTimestamp);
+            clearPending();
+        }
     }
 
     @SubscribeEvent
     public static void onClientLogout(ClientPlayerNetworkEvent.LoggingOut event) {
-        cachedScreen = null;
-        pendingRestore = false;
-        expectingReplace = false;
+        clearPending();
     }
 
-    /**
-     * Renders the Hub overlay on top of everything including JEI.
-     * Uses LOWEST priority so it draws AFTER JEI's ingredient panel.
-     */
     @SubscribeEvent(priority = EventPriority.LOWEST)
     public static void onScreenRenderPost(ScreenEvent.Render.Post event) {
         if (!MachineHub.isVisible()) return;
@@ -151,17 +186,5 @@ public final class GuiNavStack {
         AbstractContainerScreenAccessor acc = (AbstractContainerScreenAccessor) acs;
         MachineHubRenderer.render(event.getGuiGraphics(), acc.getLeftPos(), acc.getTopPos(),
                 acc.getImageWidth(), event.getMouseX(), event.getMouseY());
-    }
-
-    @SubscribeEvent
-    public static void onClientTick(TickEvent.ClientTickEvent event) {
-        if (event.phase != TickEvent.Phase.START) return;
-        if (restoreTarget != null) {
-            Screen target = restoreTarget;
-            restoreTarget = null;
-            RSIntegrationMod.LOGGER.debug("[RSI-GuiNav] Restoring screen: {}",
-                    target.getClass().getSimpleName());
-            Minecraft.getInstance().setScreen(target);
-        }
     }
 }

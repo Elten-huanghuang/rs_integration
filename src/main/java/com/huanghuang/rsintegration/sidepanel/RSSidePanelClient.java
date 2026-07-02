@@ -20,7 +20,7 @@ import net.minecraftforge.client.settings.KeyConflictContext;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.eventbus.api.EventPriority;
-import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
+
 import net.minecraft.resources.ResourceLocation;
 import net.minecraftforge.registries.ForgeRegistries;
 
@@ -150,7 +150,7 @@ public final class RSSidePanelClient {
                 "key.categories.rsi"
         );
 
-        var modBus = FMLJavaModLoadingContext.get().getModEventBus();
+        var modBus = com.huanghuang.rsintegration.RSIntegrationMod.MOD_BUS;
         modBus.addListener((RegisterKeyMappingsEvent e) -> e.register(KEY_TOGGLE_PANEL));
 
         var bus = MinecraftForge.EVENT_BUS;
@@ -405,11 +405,30 @@ public final class RSSidePanelClient {
         doRenderContext(event.getGuiGraphics(), mc);
     }
 
+    // Screens where the side panel must NOT render — modal overlays that
+    // should draw on a clean background rather than on top of the RS grid.
+    private static final Set<String> SIDE_PANEL_BLOCKED_SCREENS = Set.of(
+            "com.huanghuang.rsintegration.crafting.plan.CraftingPlanScreen"
+    );
+
     @SuppressWarnings("resource")
+    private static long lastScreenDiagLogTime;
+
     private static void onScreenRenderPost(ScreenEvent.Render.Post event) {
         var mc = Minecraft.getInstance();
         if (mc.player == null || !panelVisible) return;
-        if (RS_SCREEN_CLASSES.contains(event.getScreen().getClass().getName())) return;
+        String screenName = event.getScreen().getClass().getName();
+
+        // Diagnostic: log active screen every 5s so we can tell whether
+        // the machine GUI actually opened or the RS screen stayed put.
+        long now = System.currentTimeMillis();
+        if (now - lastScreenDiagLogTime > 5000) {
+            lastScreenDiagLogTime = now;
+            RSIntegrationMod.LOGGER.debug("[RSI-SidePanel] Active screen: {}", screenName);
+        }
+
+        if (RS_SCREEN_CLASSES.contains(screenName)) return;
+        if (SIDE_PANEL_BLOCKED_SCREENS.contains(screenName)) return;
         doRenderContext(event.getGuiGraphics(), mc);
     }
 

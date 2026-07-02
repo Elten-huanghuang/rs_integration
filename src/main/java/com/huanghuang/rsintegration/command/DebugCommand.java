@@ -7,6 +7,7 @@ import com.huanghuang.rsintegration.network.AltarBindingRegistry;
 import com.huanghuang.rsintegration.network.BindingStorage;
 import com.huanghuang.rsintegration.network.RSIntegration;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
+import com.huanghuang.rsintegration.recipe.SlashBladeRecipeHandler;
 import com.huanghuang.rsintegration.crafting.MaterialSources;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.StringArgumentType;
@@ -68,6 +69,8 @@ public final class DebugCommand {
                 .then(Commands.literal("bindings")
                         .executes(DebugCommand::dumpBindings)));
     }
+
+    // ── cancel chain ──────────────────────────────────────────────
 
     // ── dump chain ───────────────────────────────────────────────
 
@@ -264,7 +267,7 @@ public final class DebugCommand {
         // Pre-check: count how many of the target item are already available
         int alreadyHave = 0;
         for (var entry : available.entrySet()) {
-            if (entry.getValue() > 0 && ingredient.test(entry.getKey().toStack())) {
+            if (entry.getValue() > 0 && (ingredient.test(entry.getKey().toStack()) || SlashBladeRecipeHandler.matchesStackKey(ingredient, entry.getKey()))) {
                 alreadyHave += entry.getValue();
             }
         }

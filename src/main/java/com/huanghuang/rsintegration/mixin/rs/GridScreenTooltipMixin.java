@@ -67,7 +67,16 @@ public abstract class GridScreenTooltipMixin {
 
         List<Component> lines = new ArrayList<>();
         // Title line: block name with flow animation (matching backpack RS upgrade style)
-        String blockDisplay = net.minecraft.client.resources.language.I18n.get(info.displayName());
+        // Use client-side block-name resolution so gun-pack workbench names work.
+        Component blockDisplay;
+        ItemStack ds = info.displayStack();
+        if (ds != null && !ds.isEmpty()) {
+            blockDisplay = com.huanghuang.rsintegration.network.BindingEventHandler
+                    .resolveBlockName(info.blockKey(), info.blockRegKey(), ds);
+        } else {
+            blockDisplay = Component.literal(
+                    net.minecraft.client.resources.language.I18n.get(info.displayName()));
+        }
         lines.add(TextBuilder.of(blockDisplay).colorFlow(1500L, 0.0F, RSIntegrationMod.RS_FLOW_COLORS).build());
 
         // Dimension + coordinates line in cornflower blue (matching backpack RS upgrade)

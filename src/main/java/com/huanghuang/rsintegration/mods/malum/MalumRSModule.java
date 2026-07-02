@@ -44,16 +44,22 @@ public final class MalumRSModule implements IModIntegration {
 
     @Override
     public void registerBindingTargets() {
+        // Spirit Altar is in-world interaction (items placed on altar, spirit pedestals around), no container GUI.
         BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
                 "malum", ModType.byId("malum"), RSIntegrationConfig.ENABLE_MALUM, List.of(
                 "com.sammy.malum.common.block.curiosities.spirit_altar.SpiritAltarBlock"
-        ), "malum"));
+        ), "malum", false));
 
+        // Spirit Crucible Core is in-world multiblock interaction, no container GUI.
         BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
                 "malum", ModType.byId("malum_spirit_crucible"), RSIntegrationConfig.ENABLE_MALUM, List.of(
-                "com.sammy.malum.common.block.curiosities.spirit_crucible.SpiritCrucibleCoreBlock",
+                "com.sammy.malum.common.block.curiosities.spirit_crucible.SpiritCrucibleCoreBlock"
+        ), "malum_spirit_crucible", false));
+        // Component blocks are multi-block parts with no GUI of their own.
+        BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
+                "malum", ModType.byId("malum_spirit_crucible"), RSIntegrationConfig.ENABLE_MALUM, List.of(
                 "com.sammy.malum.common.block.curiosities.spirit_crucible.SpiritCrucibleComponentBlock"
-        ), "malum_spirit_crucible"));
+        ), "malum_spirit_crucible_component", false));
     }
 
     @Override

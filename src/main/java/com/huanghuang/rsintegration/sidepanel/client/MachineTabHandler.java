@@ -1,8 +1,6 @@
 package com.huanghuang.rsintegration.sidepanel.client;
 
-import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
-import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.machine.MachineHub;
 import com.huanghuang.rsintegration.machine.MachineSlotType;
 import com.huanghuang.rsintegration.sidepanel.data.BindingCache;
@@ -43,11 +41,6 @@ public final class MachineTabHandler {
     }
 
     private static List<BindingInfo> filterByWhitelist(List<BindingInfo> list) {
-        var whitelist = RSIntegrationConfig.MACHINE_GUI_WHITELIST.get();
-        list.removeIf(info -> {
-            ModType mt = ModType.fromBlockKey(info.blockKey());
-            return mt != null && !whitelist.contains(mt.id());
-        });
         return list;
     }
 

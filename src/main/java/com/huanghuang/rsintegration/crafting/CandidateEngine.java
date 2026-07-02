@@ -9,6 +9,7 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.CraftingRecipe;
 import net.minecraft.world.item.crafting.Ingredient;
+import net.minecraftforge.common.crafting.StrictNBTIngredient;
 import net.minecraftforge.registries.ForgeRegistries;
 
 import java.util.*;
@@ -76,6 +77,14 @@ final class CandidateEngine {
         }
 
         // Phase 2: check output matching for each unique recipe (expensive calls once per recipe)
+        // Plain Ingredient.test() only checks item type, not NBT.  For items like
+        // tacz:attachment where every variant carries NBT to distinguish itself,
+        // that causes every variant to pass — the "or tree" becomes a flat soup of
+        // unrelated recipes.  StrictNBTIngredient already enforces the NBT check
+        // inside test(), so the extra guard only fires when the ingredient is a
+        // plain Ingredient whose items all carry NBT.
+        boolean nbtStrict = ingredient instanceof StrictNBTIngredient;
+        boolean ingredientAllNbt = !nbtStrict && allItemsHaveNbt(ingredient);
         Map<ResourceLocation, RecipeIndex.Entry> dedup = new LinkedHashMap<>();
         for (RecipeIndex.Entry entry : byId.values()) {
             ItemStack output;
@@ -88,12 +97,19 @@ final class CandidateEngine {
                 if (diag != null) logDiag(diag, null, entry, 0, entry.modType(), true, "Output does not match ingredient");
                 continue;
             }
+            // When the ingredient only contains NBT-bearing items, the output
+            // must match at least one of them by item AND NBT — otherwise
+            // unrelated tacz:attachment variants leak into the or-tree.
+            if (ingredientAllNbt && output.hasTag() && !anyIngredientItemMatchesNbt(ingredient, output)) {
+                if (diag != null) logDiag(diag, null, entry, 0, entry.modType(), true, "Output NBT does not match ingredient");
+                continue;
+            }
             dedup.put(entry.recipe().getId(), entry);
         }
 
         List<RecipeIndex.Entry> result = new ArrayList<>(dedup.values());
         result.sort((a, b) -> {
-            int cmp = Integer.compare(scoreEntry(b, ctx), scoreEntry(a, ctx));
+            int cmp = Integer.compare(scoreEntry(b, ctx, nbtStrict), scoreEntry(a, ctx, nbtStrict));
             if (cmp != 0) return cmp;
             // Tiebreak: prefer recipes whose ingredients are available
             cmp = Integer.compare(countAvailableIngredients(b, ctx),
@@ -109,7 +125,7 @@ final class CandidateEngine {
 
         if (diag != null) {
             for (RecipeIndex.Entry e : result) {
-                int s = scoreEntry(e, ctx);
+                int s = scoreEntry(e, ctx, nbtStrict);
                 String pref = isPreferred(e, ctx) ? " (PREFERRED)" : "";
                 logDiag(diag, null, e, s, e.modType(), false, "Score=" + s + pref);
             }
@@ -143,12 +159,15 @@ final class CandidateEngine {
         return pref != null && pref.equals(entry.recipe().getId());
     }
 
-    private static int scoreEntry(RecipeIndex.Entry entry, ResolutionContext ctx) {
+    private static int scoreEntry(RecipeIndex.Entry entry, ResolutionContext ctx, boolean nbtStrict) {
         if (entry.recipe() instanceof CraftingRecipe cr) {
-            return scoreRecipe(cr, ctx) + (entry.modType() == ModType.GENERIC ? 10 : 0);
+            return scoreRecipe(cr, ctx, nbtStrict) + (entry.modType() == ModType.GENERIC ? 10 : 0);
         }
         int score = 0;
         if (entry.modType() == ModType.GENERIC) score += 10;
+        // When the requested ingredient is NBT-strict, prefer NBT-sensitive
+        // recipes (mod machines) whose handlers apply NBT during crafting.
+        if (nbtStrict && entry.nbtSensitive()) score += 5;
         List<IngredientSpec> specs = CraftPacketUtils.extractIngredientSpecs(entry.recipe());
         if (specs != null) {
             int nonEmpty = 0;
@@ -173,7 +192,7 @@ final class CandidateEngine {
         return score;
     }
 
-    private static int scoreRecipe(CraftingRecipe recipe, ResolutionContext ctx) {
+    private static int scoreRecipe(CraftingRecipe recipe, ResolutionContext ctx, boolean nbtStrict) {
         int score = 0;
         ResourceLocation outputKey = ForgeRegistries.ITEMS.getKey(
                 recipe.getResultItem(ctx.level.registryAccess()).getItem());
@@ -225,5 +244,20 @@ final class CandidateEngine {
             if (!spec.isEmpty() && ctx.countMatching(spec.ingredient()) > 0) c++;
         }
         return c;
+    }
+
+    private static boolean allItemsHaveNbt(Ingredient ingredient) {
+        for (ItemStack stack : ingredient.getItems()) {
+            if (stack.isEmpty()) continue;
+            if (!stack.hasTag()) return false;
+        }
+        return true;
+    }
+
+    private static boolean anyIngredientItemMatchesNbt(Ingredient ingredient, ItemStack output) {
+        for (ItemStack stack : ingredient.getItems()) {
+            if (!stack.isEmpty() && ItemStack.isSameItemSameTags(stack, output)) return true;
+        }
+        return false;
     }
 }

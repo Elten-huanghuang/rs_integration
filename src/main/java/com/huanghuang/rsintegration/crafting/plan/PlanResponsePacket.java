@@ -107,6 +107,7 @@ public final class PlanResponsePacket {
         buf.writeVarLong(plan.embersSeed());
         buf.writeBoolean(plan.embersCanInfer());
         buf.writeBoolean(plan.embersCodeFromCache());
+        buf.writeBoolean(plan.executionMachineSupportsGui());
     }
 
     public static PlanResponsePacket decode(FriendlyByteBuf buf) {
@@ -207,11 +208,12 @@ public final class PlanResponsePacket {
         long embersSeed = buf.readVarLong();
         boolean embersCanInfer = buf.readBoolean();
         boolean embersCodeFromCache = buf.readBoolean();
+        boolean executionMachineSupportsGui = buf.readBoolean();
         return new PlanResponsePacket(new PlanResponse(success, targetName, targetResult,
                 steps, materials, missing, recipeId,
                 execModType, execDim, execX, execY, execZ, modWarnings, repeatCount,
                 embersCode, embersAspectNames, embersInputNames, embersSeed, embersCanInfer,
-                embersCodeFromCache));
+                embersCodeFromCache, executionMachineSupportsGui));
     }
 
     @SuppressWarnings("resource")

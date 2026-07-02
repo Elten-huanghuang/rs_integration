@@ -39,11 +39,12 @@ public final class AetherworksRSModule implements IModIntegration {
 
     @Override
     public void registerBindingTargets() {
+        // Aetherium Anvil: hammer right-click interaction on in-world items, no container GUI.
         BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
                 "aetherworks", ModType.byId("aetherworks_anvil"),
                 RSIntegrationConfig.ENABLE_AETHERWORKS,
                 List.of("net.sirplop.aetherworks.block.forge.AetheriumAnvilBlock"),
-                "aetherworks"
+                "aetherworks", false
         ));
     }
 
@@ -63,6 +64,6 @@ public final class AetherworksRSModule implements IModIntegration {
     @Override
     public Supplier<net.minecraftforge.fml.DistExecutor.SafeRunnable> clientInitSupplier() {
         return () -> () -> com.huanghuang.rsintegration.mods.aetherworks.client.AetherworksClientSetup
-                .init(net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext.get().getModEventBus());
+                .initClient();
     }
 }

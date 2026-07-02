@@ -274,6 +274,10 @@ public final class MalumCraftPacket {
 
     // -- Pedestal helpers --
 
+    private static boolean isSpiritCrucible(Object ap) {
+        return ap.getClass().getName().contains("spirit_crucible");
+    }
+
     private static void clearAltarSlots(Object invMain, Object invSpirit, int mainSlots, int spiritSlots) {
         for (int i = 0; i < mainSlots; i++) {
             try { setIHandlerSlot(invMain, i, ItemStack.EMPTY); } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
@@ -288,6 +292,7 @@ public final class MalumCraftPacket {
             if (idx < 0 || idx >= pedestals.size()) continue;
             try {
                 Object ap = pedestals.get(idx);
+                if (isSpiritCrucible(ap)) continue;
                 Object inv = ap.getClass().getMethod("getSuppliedInventory").invoke(ap);
                 inv.getClass().getMethod("setStackInSlot", int.class, ItemStack.class)
                         .invoke(inv, 0, ItemStack.EMPTY);
@@ -343,6 +348,7 @@ public final class MalumCraftPacket {
             if (idx < 0 || idx >= pedestals.size()) continue;
             try {
                 Object ap = pedestals.get(idx);
+                if (isSpiritCrucible(ap)) continue;
                 Object inv = ap.getClass().getMethod("getSuppliedInventory").invoke(ap);
                 ItemStack stack = (ItemStack) inv.getClass()
                         .getMethod("getStackInSlot", int.class).invoke(inv, 0);
@@ -375,6 +381,7 @@ public final class MalumCraftPacket {
     private static int countEmptyPedestalSlots(List<?> pedestals) {
         int count = 0;
         for (Object ap : pedestals) {
+            if (isSpiritCrucible(ap)) continue;
             try {
                 Object inv = ap.getClass().getMethod("getSuppliedInventory").invoke(ap);
                 boolean empty = (boolean) inv.getClass().getMethod("isEmpty").invoke(inv);
@@ -389,6 +396,7 @@ public final class MalumCraftPacket {
     private static int placeOnNextEmptyPedestal(List<?> pedestals, int startIdx, ItemStack stack) throws Exception {
         for (int i = startIdx; i < pedestals.size(); i++) {
             Object ap = pedestals.get(i);
+            if (isSpiritCrucible(ap)) continue;
             Object inv = ap.getClass().getMethod("getSuppliedInventory").invoke(ap);
             boolean empty = (boolean) inv.getClass().getMethod("isEmpty").invoke(inv);
             if (empty) {

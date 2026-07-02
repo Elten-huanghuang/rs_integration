@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.machine.MachineInteractType;
 import com.huanghuang.rsintegration.machine.MachineStatus;
 import com.huanghuang.rsintegration.machine.MachineStatusReader;
 import com.huanghuang.rsintegration.network.BindingStorage;
+import com.huanghuang.rsintegration.network.BindingEventHandler;
 import com.huanghuang.rsintegration.network.ConfigSyncPacket;
 import com.huanghuang.rsintegration.network.NetworkHandler;
 import com.huanghuang.rsintegration.network.GuiOpenRateLimiter;
@@ -14,13 +15,17 @@ import com.huanghuang.rsintegration.sidepanel.network.MachineCollectPacket;
 import com.huanghuang.rsintegration.sidepanel.network.MachineInsertPacket;
 import com.huanghuang.rsintegration.sidepanel.network.MachineStatusDeltaPacket;
 import com.huanghuang.rsintegration.sidepanel.network.OpenBoundMachineGuiPacket;
+import com.huanghuang.rsintegration.sidepanel.network.ReturnToRSPacket;
 import com.huanghuang.rsintegration.sidepanel.network.RSBindingSyncPacket;
 import com.refinedmods.refinedstorage.api.storage.cache.IStorageCache;
 import com.refinedmods.refinedstorage.api.storage.cache.IStorageCacheListener;
 import com.refinedmods.refinedstorage.api.util.StackListResult;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.network.chat.contents.TranslatableContents;
 import net.minecraft.world.item.ItemStack;
+
+import javax.annotation.Nullable;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import net.minecraftforge.common.MinecraftForge;
@@ -80,6 +85,8 @@ public final class RSSidePanelNetworkHandler {
                 RSItemLockPacket::encode, RSItemLockPacket::decode, RSItemLockPacket::handle);
         ch.registerMessage(NetworkHandler.nextId(), RSItemLockSyncPacket.class,
                 RSItemLockSyncPacket::encode, RSItemLockSyncPacket::decode, RSItemLockSyncPacket::handle);
+        ch.registerMessage(NetworkHandler.nextId(), ReturnToRSPacket.class,
+                ReturnToRSPacket::encode, ReturnToRSPacket::decode, ReturnToRSPacket::handle);
         registered = true;
 
         MinecraftForge.EVENT_BUS.register(RSSidePanelNetworkHandler.class);
@@ -309,17 +316,45 @@ public final class RSSidePanelNetworkHandler {
             var itemKey = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stack.getItem());
             if (itemKey == null) continue;
             for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
-                String displayName = resolveDisplayName(entry.blockKey());
+                if (!BindingEventHandler.supportsGuiByBlockKey(entry.blockKey())) continue;
+                String displayName = resolveDisplayName(entry.blockKey(), entry.blockRegKey(), entry.displayStack());
                 out.add(new BindingInfo(itemKey.toString(), entry.dim(), entry.pos(),
-                        entry.blockKey(), displayName));
+                        entry.blockKey(), displayName, entry.blockRegKey(), entry.displayStack()));
             }
         }
     }
 
-    private static String resolveDisplayName(String blockKey) {
+    private static String resolveDisplayName(String blockKey, @Nullable String blockRegKey,
+                                             @Nullable ItemStack displayStack) {
+        // Gun-pack workbenches carry their real translation key via the item's
+        // hover name (e.g. GunSmithTableItem.getName reads BlockId from NBT and
+        // returns Component.translatable("emxarms.block.emx_workbench_table")).
+        if (displayStack != null && !displayStack.isEmpty()) {
+            var contents = displayStack.getHoverName().getContents();
+            if (contents instanceof TranslatableContents translatable) {
+                String key = translatable.getKey();
+                // Only accept it if it differs from the generic fallback below,
+                // otherwise let the normal MULTI_PART_ROOT_MAP path handle it.
+                String mapped = blockRegKey != null
+                        ? com.huanghuang.rsintegration.network.BindingEventHandler.MULTI_PART_ROOT_MAP
+                            .get(blockRegKey)
+                        : null;
+                if (!key.equals(mapped)) {
+                    return key;
+                }
+            }
+        }
+
+        if (blockRegKey != null) {
+            String effectiveKey = com.huanghuang.rsintegration.network.BindingEventHandler.MULTI_PART_ROOT_MAP
+                    .getOrDefault(blockRegKey, blockRegKey);
+            var rl = net.minecraft.resources.ResourceLocation.tryParse(effectiveKey);
+            if (rl != null) {
+                var block = net.minecraftforge.registries.ForgeRegistries.BLOCKS.getValue(rl);
+                if (block != null) return block.getDescriptionId();
+            }
+        }
         if (blockKey == null || blockKey.isEmpty()) return "?";
-        // Strip optional prefix: "{prefix}||block.modid.name"
-        // The remainder is already a block description ID, usable directly by I18n.
         int sep = blockKey.indexOf("||");
         return sep >= 0 ? blockKey.substring(sep + 2) : blockKey;
     }
@@ -537,7 +572,7 @@ public final class RSSidePanelNetworkHandler {
     @SubscribeEvent
     public static void onContainerClose(PlayerContainerEvent.Close event) {
         if (event.getEntity() instanceof ServerPlayer sp) {
-            RemoteGuiAuth.deauthorize(sp.getUUID());
+            RemoteGuiAuth.deauthorize(sp.getUUID(), event.getContainer());
         }
     }
 

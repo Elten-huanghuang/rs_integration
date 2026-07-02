@@ -496,6 +496,7 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
                     collected.setCount(expected.getCount());
                 }
                 entity.getItem().shrink(collected.getCount());
+                entity.setItem(entity.getItem().copy());
                 if (entity.getItem().isEmpty()) entity.discard();
                 RSIntegrationMod.LOGGER.debug("[RSI-Batch-Malum] Collected ItemEntity: {} x{}",
                         collected.getHoverName().getString(), collected.getCount());
@@ -568,6 +569,7 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
                 if (idx < 0 || idx >= pedestals.size()) continue;
                 try {
                     Object ap = pedestals.get(idx);
+                    if (isSpiritCrucible(ap)) continue;
                     Object inv = ap.getClass().getMethod("getSuppliedInventory").invoke(ap);
                     ItemStack stack = (ItemStack) inv.getClass().getMethod("getStackInSlot", int.class).invoke(inv, 0);
                     if (stack != null && !stack.isEmpty()) {
@@ -642,6 +644,13 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
 
     // ── Pedestal helpers ─────────────────────────────────────────
 
+    /** Spirit crucible may appear in Malum's capturePedestals() result
+     *  for certain altar configurations — skip it so items aren't
+     *  misplaced onto the crucible instead of proper pedestals. */
+    private static boolean isSpiritCrucible(Object ap) {
+        return ap.getClass().getName().contains("spirit_crucible");
+    }
+
     private List<?> capturePedestals() throws Exception {
         return (List<?>) altarCraftingHelperClass.getMethod("capturePedestals", Level.class, BlockPos.class)
                 .invoke(null, myLevel, myPos);
@@ -650,6 +659,7 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
     private int countEmptyPedestalSlots(List<?> pedestals) {
         int count = 0;
         for (Object ap : pedestals) {
+            if (isSpiritCrucible(ap)) continue;
             try {
                 Object inv = ap.getClass().getMethod("getSuppliedInventory").invoke(ap);
                 boolean empty = (boolean) inv.getClass().getMethod("isEmpty").invoke(inv);
@@ -662,6 +672,7 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
     private int placeOnNextEmptyPedestal(List<?> pedestals, int startIdx, ItemStack stack) throws Exception {
         for (int i = startIdx; i < pedestals.size(); i++) {
             Object ap = pedestals.get(i);
+            if (isSpiritCrucible(ap)) continue;
             Object inv = ap.getClass().getMethod("getSuppliedInventory").invoke(ap);
             boolean empty = (boolean) inv.getClass().getMethod("isEmpty").invoke(inv);
             if (empty) {
@@ -679,6 +690,7 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
             if (idx < 0 || idx >= pedestals.size()) continue;
             try {
                 Object ap = pedestals.get(idx);
+                if (isSpiritCrucible(ap)) continue;
                 Object inv = ap.getClass().getMethod("getSuppliedInventory").invoke(ap);
                 // Extract item before clearing -- if items were committed from
                 // our own ledger, refund them to RS/player instead of destroying.

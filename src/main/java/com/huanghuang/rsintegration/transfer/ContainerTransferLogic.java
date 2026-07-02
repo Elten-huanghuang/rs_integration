@@ -9,11 +9,16 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
+import net.minecraftforge.fml.ModList;
 import net.minecraftforge.items.IItemHandler;
 import net.p3pp3rf1y.sophisticatedbackpacks.api.CapabilityBackpackWrapper;
+import net.p3pp3rf1y.sophisticatedbackpacks.api.IItemHandlerInteractionUpgrade;
+import net.p3pp3rf1y.sophisticatedbackpacks.upgrades.deposit.DepositUpgradeWrapper;
 import net.p3pp3rf1y.sophisticatedcore.api.IStorageWrapper;
 
 import javax.annotation.Nullable;
+import java.util.ArrayList;
+import java.util.List;
 
 final class ContainerTransferLogic {
 
@@ -32,8 +37,25 @@ final class ContainerTransferLogic {
         INetwork network = RSIntegration.resolveNetworkFromPlayer(player);
         if (network == null) {
             player.sendSystemMessage(
-                    Component.translatable("rsi.transfer.no_network"), true);
+                    Component.translatable("rsi.transfer.no_network"), false);
             return;
+        }
+
+        // When the open menu is a backpack, respect the deposit upgrade's
+        // filter so blacklisted items stay in the backpack.
+        List<DepositUpgradeWrapper> depositUpgrades = null;
+        if (isBackpackMenu(menu)) {
+            IStorageWrapper wrapper = findBackpackWrapper(player);
+            if (wrapper != null) {
+                List<IItemHandlerInteractionUpgrade> wrappers =
+                        wrapper.getUpgradeHandler().getWrappersThatImplement(
+                                IItemHandlerInteractionUpgrade.class);
+                depositUpgrades = new ArrayList<>();
+                for (IItemHandlerInteractionUpgrade upg : wrappers) {
+                    if (upg instanceof DepositUpgradeWrapper)
+                        depositUpgrades.add((DepositUpgradeWrapper) upg);
+                }
+            }
         }
 
         int totalStacks = 0;
@@ -45,6 +67,18 @@ final class ContainerTransferLogic {
             ItemStack stack = slot.getItem();
             if (stack.isEmpty()) continue;
             if (!slot.mayPickup(player)) continue;
+
+            // Skip items the deposit upgrade says should stay in the backpack.
+            if (depositUpgrades != null && !depositUpgrades.isEmpty()) {
+                boolean canDeposit = true;
+                for (DepositUpgradeWrapper upg : depositUpgrades) {
+                    if (!upg.getFilterLogic().matchesFilter(stack)) {
+                        canDeposit = false;
+                        break;
+                    }
+                }
+                if (!canDeposit) continue;
+            }
 
             int count = stack.getCount();
             network.getItemStorageTracker().changed(player, stack.copy());
@@ -68,26 +102,24 @@ final class ContainerTransferLogic {
 
         if (totalStacks > 0) {
             player.sendSystemMessage(
-                    Component.translatable("rsi.transfer.success", totalItems, totalStacks), true);
+                    Component.translatable("rsi.transfer.success", totalItems, totalStacks), false);
         } else {
             player.sendSystemMessage(
-                    Component.translatable("rsi.transfer.nothing"), true);
+                    Component.translatable("rsi.transfer.nothing"), false);
         }
     }
 
     private static void transferToBackpack(ServerPlayer player, AbstractContainerMenu menu) {
-        // If the open container IS a backpack, transferring "backpack → backpack"
-        // is a no-op at best and item-destroying at worst. Tell the user.
         if (isBackpackMenu(menu)) {
             player.sendSystemMessage(
-                    Component.translatable("rsi.transfer.backpack_self"), true);
+                    Component.translatable("rsi.transfer.backpack_self"), false);
             return;
         }
 
         IItemHandler backpackHandler = findBackpack(player);
         if (backpackHandler == null) {
             player.sendSystemMessage(
-                    Component.translatable("rsi.transfer.no_backpack"), true);
+                    Component.translatable("rsi.transfer.no_backpack"), false);
             return;
         }
 
@@ -132,19 +164,24 @@ final class ContainerTransferLogic {
 
         if (totalStacks > 0) {
             player.sendSystemMessage(
-                    Component.translatable("rsi.transfer.backpack_success", totalItems, totalStacks), true);
+                    Component.translatable("rsi.transfer.backpack_success", totalItems, totalStacks), false);
         } else {
             player.sendSystemMessage(
-                    Component.translatable("rsi.transfer.nothing"), true);
+                    Component.translatable("rsi.transfer.nothing"), false);
         }
     }
 
     @Nullable
     private static IItemHandler findBackpack(ServerPlayer player) {
-        // Priority 1: Curios slots (reflective — Curios is optional)
-        IItemHandler bh = findBackpackInCurios(player);
-        if (bh != null) return bh;
+        if (!ModList.get().isLoaded("sophisticatedbackpacks")) return null;
 
+        // Priority 1: Curios slots (reflective — Curios is optional)
+        if (ModList.get().isLoaded("curios")) {
+            IItemHandler bh = findBackpackInCurios(player);
+            if (bh != null) return bh;
+        }
+
+        IItemHandler bh;
         // Priority 2: Armor slots
         for (ItemStack armor : player.getInventory().armor) {
             bh = getBackpackHandler(armor);
@@ -175,22 +212,25 @@ final class ContainerTransferLogic {
      */
     @Nullable
     private static IItemHandler findBackpackInCurios(ServerPlayer player) {
+        if (!ModList.get().isLoaded("curios")) return null;
         try {
             Class<?> curiosApiClass = Class.forName("top.theillusivec4.curios.api.CuriosApi");
-            Object result = curiosApiClass.getMethod("getCuriosInventory", net.minecraft.world.entity.player.Player.class)
+            // getCuriosInventory takes LivingEntity (not Player — exact match required by reflection)
+            Object result = curiosApiClass.getMethod("getCuriosInventory", net.minecraft.world.entity.LivingEntity.class)
                     .invoke(null, player);
             if (result == null) return null;
 
-            // Curios 5.x returns java.util.Optional; older versions return LazyOptional
+            // Curios API returns LazyOptional; resolve() -> Optional<ICuriosItemHandler>
             Object handler;
-            if (result instanceof java.util.Optional<?> opt) {
-                handler = opt.orElse(null);
-            } else {
-                try {
-                    handler = result.getClass().getMethod("resolve").invoke(result);
-                } catch (NoSuchMethodException e) {
+            try {
+                Object opt = result.getClass().getMethod("resolve").invoke(result);
+                if (opt instanceof java.util.Optional<?> o) {
+                    handler = o.orElse(null);
+                } else {
                     return null;
                 }
+            } catch (NoSuchMethodException e) {
+                return null;
             }
             if (handler == null) return null;
             // handler.getCurios() -> Map<String, ICurioStacksHandler>
@@ -208,7 +248,73 @@ final class ContainerTransferLogic {
                 }
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI] Curios scan error in findBackpack: {}", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI] Curios backpack scan failed: {}", e.toString());
+        }
+        return null;
+    }
+
+    // ── backpack wrapper (for accessing upgrade handlers) ────────────
+
+    @Nullable
+    private static IStorageWrapper findBackpackWrapper(ServerPlayer player) {
+        if (!ModList.get().isLoaded("sophisticatedbackpacks")) return null;
+        IStorageWrapper w = findBackpackWrapperInCurios(player);
+        if (w != null) return w;
+        for (ItemStack armor : player.getInventory().armor) {
+            w = getBackpackWrapper(armor);
+            if (w != null) return w;
+        }
+        w = getBackpackWrapper(player.getOffhandItem());
+        if (w != null) return w;
+        var inv = player.getInventory();
+        for (int i = 0; i < inv.getContainerSize(); i++) {
+            w = getBackpackWrapper(inv.getItem(i));
+            if (w != null) return w;
+        }
+        return null;
+    }
+
+    @Nullable
+    private static IStorageWrapper getBackpackWrapper(ItemStack stack) {
+        if (stack.isEmpty()) return null;
+        return stack.getCapability(CapabilityBackpackWrapper.getCapabilityInstance())
+                .resolve().orElse(null);
+    }
+
+    @Nullable
+    private static IStorageWrapper findBackpackWrapperInCurios(ServerPlayer player) {
+        if (!ModList.get().isLoaded("curios")) return null;
+        try {
+            Class<?> curiosApiClass = Class.forName("top.theillusivec4.curios.api.CuriosApi");
+            Object result = curiosApiClass.getMethod("getCuriosInventory",
+                    net.minecraft.world.entity.LivingEntity.class).invoke(null, player);
+            if (result == null) return null;
+            Object handler;
+            try {
+                Object opt = result.getClass().getMethod("resolve").invoke(result);
+                if (opt instanceof java.util.Optional<?> o) {
+                    handler = o.orElse(null);
+                } else {
+                    return null;
+                }
+            } catch (NoSuchMethodException e) {
+                return null;
+            }
+            if (handler == null) return null;
+            Object curios = handler.getClass().getMethod("getCurios").invoke(handler);
+            @SuppressWarnings("unchecked")
+            java.util.Map<String, ?> curiosMap = (java.util.Map<String, ?>) curios;
+            for (var entry : curiosMap.values()) {
+                Object stacks = entry.getClass().getMethod("getStacks").invoke(entry);
+                if (stacks instanceof net.minecraftforge.items.IItemHandler itemHandler) {
+                    for (int s = 0; s < itemHandler.getSlots(); s++) {
+                        IStorageWrapper w = getBackpackWrapper(itemHandler.getStackInSlot(s));
+                        if (w != null) return w;
+                    }
+                }
+            }
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI] Curios backpack wrapper scan failed: {}", e.toString());
         }
         return null;
     }

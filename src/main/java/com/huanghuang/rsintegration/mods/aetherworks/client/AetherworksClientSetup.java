@@ -8,7 +8,6 @@ import net.minecraftforge.client.event.RegisterGuiOverlaysEvent;
 import net.minecraftforge.client.gui.overlay.VanillaGuiOverlay;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.TickEvent;
-import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.ModList;
 
@@ -19,8 +18,7 @@ public final class AetherworksClientSetup {
 
     private AetherworksClientSetup() {}
 
-    public static void init(IEventBus modEventBus) {
-        modEventBus.addListener(AetherworksClientSetup::onRegisterOverlays);
+    public static void initClient() {
         MinecraftForge.EVENT_BUS.register(AetherworksClientSetup.class);
 
         if (ModList.get().isLoaded("aetherworks")) {
@@ -29,7 +27,12 @@ public final class AetherworksClientSetup {
         }
     }
 
-    private static void onRegisterOverlays(RegisterGuiOverlaysEvent event) {
+    /**
+     * Registered on the MOD bus via {@code MOD_BUS.addListener()} in RSIntegrationMod.
+     * Must not carry @SubscribeEvent so the AUTO (MOD-bus) registration in
+     * ForgeEventBus registration within initClient() does not also pick it up.
+     */
+    public static void onRegisterOverlays(RegisterGuiOverlaysEvent event) {
         if (ModList.get().isLoaded("aetherworks")) {
             event.registerAbove(VanillaGuiOverlay.CROSSHAIR.id(), "anvil_hud", AnvilHUDOverlay.INSTANCE);
         }

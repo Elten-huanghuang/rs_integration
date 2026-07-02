@@ -18,6 +18,7 @@ import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.AbstractFurnaceBlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraftforge.registries.ForgeRegistries;
 import net.minecraftforge.common.ForgeHooks;
 import net.minecraftforge.items.ItemHandlerHelper;
 
@@ -74,7 +75,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
 
         BlockEntity be = level.getBlockEntity(pos);
         if (be == null) {
-            String blockId = net.minecraft.core.registries.BuiltInRegistries.BLOCK
+            String blockId = ForgeRegistries.BLOCKS
                     .getKey(level.getBlockState(pos).getBlock()).toString();
             // Smithing Table has no BE — always VIRTUAL.
             if (blockId.contains("smithing_table") || blockId.contains("campfire")) {
@@ -91,6 +92,13 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
                 return false;
             }
         } else if (be instanceof AbstractFurnaceBlockEntity fbe) {
+            // Non-cooking recipes (smithing, stonecutting) can't run on a furnace,
+            // but the furnace binding can still serve as a VIRTUAL proxy — the
+            // craft is computed directly without machine interaction.
+            if (!(recipe instanceof AbstractCookingRecipe)) {
+                this.kind = MachineKind.VIRTUAL;
+                return true;
+            }
             // Validate furnace type matches recipe type
             String beClassName = be.getClass().getName().toLowerCase();
             if (recipe instanceof BlastingRecipe && !beClassName.contains("blast")) {

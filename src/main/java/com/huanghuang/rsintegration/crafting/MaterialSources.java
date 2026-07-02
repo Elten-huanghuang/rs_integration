@@ -36,6 +36,20 @@ public final class MaterialSources {
                 map.merge(StackKey.of(stack, true), stack.getCount(), Integer::sum);
             }
         }
+        // Count backpack contents (including backpacks in curio slots)
+        if (player instanceof ServerPlayer sp && net.minecraftforge.fml.ModList.get().isLoaded("sophisticatedbackpacks")) {
+            try {
+                for (var bp : com.huanghuang.rsintegration.crafting.ExtractionLedger
+                        .findAllBackpackInventories(sp)) {
+                    for (int i = 0; i < bp.getSlots(); i++) {
+                        ItemStack stack = bp.getStackInSlot(i);
+                        if (!stack.isEmpty()) {
+                            map.merge(StackKey.of(stack, true), stack.getCount(), Integer::sum);
+                        }
+                    }
+                }
+            } catch (Exception ignored) {}
+        }
         return map;
     }
 

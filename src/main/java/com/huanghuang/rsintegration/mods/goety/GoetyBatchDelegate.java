@@ -551,6 +551,13 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         // which ejects items prematurely.
         Reflect.setField(brazier, "recipeId", ((Recipe<?>) brazierRecipeObj).getId());
         Reflect.setField(brazier, "recipe", brazierRecipeObj);
+        if (brazier instanceof BlockEntity be) {
+            be.setChanged();
+            Level lvl = be.getLevel();
+            if (lvl != null && !lvl.isClientSide()) {
+                lvl.sendBlockUpdated(myPos, be.getBlockState(), be.getBlockState(), 3);
+            }
+        }
 
         Object bzrRecipe = Reflect.getField(brazier, "recipe").orElse(null);
         if (bzrRecipe == null) {
@@ -762,6 +769,13 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         // which ejects items prematurely.
         Reflect.setField(brazier, "recipeId", ((Recipe<?>) brazierRecipeObj).getId());
         Reflect.setField(brazier, "recipe", brazierRecipeObj);
+        if (brazier instanceof BlockEntity be) {
+            be.setChanged();
+            Level lvl = be.getLevel();
+            if (lvl != null && !lvl.isClientSide()) {
+                lvl.sendBlockUpdated(myPos, be.getBlockState(), be.getBlockState(), 3);
+            }
+        }
 
         Object bzrRecipe = Reflect.getField(brazier, "recipe").orElse(null);
         if (bzrRecipe == null) {
@@ -885,6 +899,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
                     collected.setCount(expected.getCount());
                 }
                 entity.getItem().shrink(collected.getCount());
+                entity.setItem(entity.getItem().copy());
                 if (entity.getItem().isEmpty()) entity.discard();
                 return collected;
             }
@@ -937,6 +952,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
                     collected.setCount(expected.getCount());
                 }
                 entity.getItem().shrink(collected.getCount());
+                entity.setItem(entity.getItem().copy());
                 if (entity.getItem().isEmpty()) entity.discard();
                 RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] Collected brazier result: {} x{}",
                         collected.getDisplayName().getString(), collected.getCount());
@@ -1192,7 +1208,9 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         for (Object ped : filledPedestals) {
             ItemStack stack = readPedestalItem(ped);
             if (stack != null && !stack.isEmpty()) {
-                if (network != null) {
+                if (usingSharedLedger) {
+                    // Shared ledger owns the refund — don't double-insert.
+                } else if (network != null) {
                     ItemStack leftover = network.insertItem(stack, stack.getCount(),
                             com.refinedmods.refinedstorage.api.util.Action.PERFORM);
                     if (!leftover.isEmpty()) {
@@ -1211,7 +1229,10 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         for (Object ped : filledPedestals) {
             ItemStack stack = readPedestalItem(ped);
             if (stack != null && !stack.isEmpty()) {
-                if (network != null) {
+                if (usingSharedLedger) {
+                    // Shared ledger will refund the original extraction — do NOT
+                    // re-insert items into RS or we double-refund (dupe exploit).
+                } else if (network != null) {
                     ItemStack leftover = network.insertItem(stack, stack.getCount(),
                             com.refinedmods.refinedstorage.api.util.Action.PERFORM);
                     if (!leftover.isEmpty()) {
@@ -1374,33 +1395,43 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
 
     private ItemStack extractActivationFromPlayer(Ingredient ingredient) {
         var inv = player.getInventory();
+        ItemStack result = ItemStack.EMPTY;
+
         for (int i = 0; i < inv.items.size(); i++) {
             ItemStack stack = inv.items.get(i);
             if (ingredient.test(stack)) {
-                ItemStack result = stack.split(1);
+                result = stack.split(1);
                 if (stack.isEmpty()) inv.items.set(i, ItemStack.EMPTY);
-                return result;
+                break;
             }
         }
-        ItemStack[] options = ingredient.getItems();
-        if (options.length > 0) {
-            Item baseItem = options[0].getItem();
-            for (int i = 0; i < inv.items.size(); i++) {
-                ItemStack stack = inv.items.get(i);
-                if (stack.getItem() == baseItem) {
-                    ItemStack result = stack.split(1);
-                    if (stack.isEmpty()) inv.items.set(i, ItemStack.EMPTY);
-                    return result;
+        if (result.isEmpty()) {
+            ItemStack[] options = ingredient.getItems();
+            if (options.length > 0) {
+                Item baseItem = options[0].getItem();
+                for (int i = 0; i < inv.items.size(); i++) {
+                    ItemStack stack = inv.items.get(i);
+                    if (stack.getItem() == baseItem) {
+                        result = stack.split(1);
+                        if (stack.isEmpty()) inv.items.set(i, ItemStack.EMPTY);
+                        break;
+                    }
                 }
             }
         }
-        ItemStack offhand = player.getOffhandItem();
-        if (ingredient.test(offhand)) {
-            ItemStack result = offhand.split(1);
-            if (offhand.isEmpty()) player.getInventory().offhand.set(0, ItemStack.EMPTY);
-            return result;
+        if (result.isEmpty()) {
+            ItemStack offhand = player.getOffhandItem();
+            if (ingredient.test(offhand)) {
+                result = offhand.split(1);
+                if (offhand.isEmpty()) player.getInventory().offhand.set(0, ItemStack.EMPTY);
+            }
         }
-        return ItemStack.EMPTY;
+
+        if (!result.isEmpty()) {
+            player.getInventory().setChanged();
+            player.inventoryMenu.broadcastChanges();
+        }
+        return result;
     }
 
     // ── Reflection helpers ───────────────────────────────────────

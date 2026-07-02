@@ -18,7 +18,15 @@
     "sophisticatedbackpacks.FeedingUpgradeWrapperMixin",
     "sophisticatedbackpacks.UpgradeHandlerMixin",
     "sophisticatedbackpacks.StorageUpgradeSlotMixin",
-    "rs.ContainerDistanceMixin"
+    "rs.AbstractFurnaceAccessor",
+    "rs.ContainerDistanceMixin",
+    "rs.EntityMixin",
+    "rs.FurnaceMenuMixin",
+    "rs.ServerPlayerTickMixin",
+    "rs.ServerGamePacketListenerMixin",
+    "rs.SmithingTransformRecipeAccessor",
+    "rs.SmithingTrimRecipeAccessor",
+    "crockpot.CrockPotMenuMixin"
   ],
   "client": [
     "jei.GuiIconToggleButtonAccessor",
@@ -29,7 +37,7 @@
     "rs.GridScreenMouseMixin",
     "rs.GridScreenKeyboardMixin",
     "rs.GridScreenTooltipMixin",
-    "rs.ScreenCloseMixin"
+    "rs.MinecraftMixin"
   ],
   "injectors": {
     "defaultRequire": 0

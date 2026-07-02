@@ -38,11 +38,12 @@ public final class TlmRSModule implements IModIntegration {
 
     @Override
     public void registerBindingTargets() {
+        // Maid Altar is in-world interaction (maid stands at altar), no container GUI.
         BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
                 "touhou_little_maid", ModType.byId("touhou_little_maid"),
                 RSIntegrationConfig.ENABLE_TOUHOU_LITTLE_MAID, List.of(
                 "com.github.tartaricacid.touhoulittlemaid.block.BlockAltar"
-        ), "touhou_little_maid"));
+        ), "touhou_little_maid", false));
     }
 
     @Override

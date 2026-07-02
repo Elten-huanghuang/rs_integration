@@ -84,8 +84,20 @@ public class RecipeGuiLayoutsMixin {
             new ResourceLocation("minecraft", "stonecutting");
     private static final ResourceLocation SMITHING_UID =
             new ResourceLocation("minecraft", "smithing");
+    private static final ResourceLocation CROCKPOT_UID =
+            new ResourceLocation("crockpot", "crock_pot_cooking");
+    private static final ResourceLocation CRABBERSDELIGHT_CRAB_TRAP_UID =
+            new ResourceLocation("crabbersdelight", "crab_trap_loot");
     private static final ResourceLocation FARMINGFORBLOCKHEADS_MARKET_UID =
             new ResourceLocation("farmingforblockheads", "market");
+    private static final ResourceLocation AETHER_FREEZING_UID =
+            new ResourceLocation("aether", "freezing");
+    private static final ResourceLocation AETHER_INCUBATION_UID =
+            new ResourceLocation("aether", "incubation");
+    private static final ResourceLocation AETHER_ENCHANTING_UID =
+            new ResourceLocation("aether", "enchanting");
+    private static final ResourceLocation AETHER_REPAIRING_UID =
+            new ResourceLocation("aether", "repairing");
 
     @Shadow
     private List<RecipeLayoutWithButtons<?>> recipeLayoutsWithButtons;
@@ -199,6 +211,8 @@ public class RecipeGuiLayoutsMixin {
 
             ResourceLocation bindingDim;
             BlockPos machinePos;
+            String boundBlockKey = null;
+            String boundBlockRegKey = null;
             if (isGeneric) {
                 bindingDim = player.level().dimension().location();
                 machinePos = player.blockPosition();
@@ -215,6 +229,8 @@ public class RecipeGuiLayoutsMixin {
                 }
                 bindingDim = binding.dim();
                 machinePos = binding.pos();
+                boundBlockKey = binding.blockKey();
+                boundBlockRegKey = binding.blockRegKey();
             }
 
             Runnable handler = createHandler(recipe, recipeId, bindingDim, machinePos, filter);
@@ -243,6 +259,24 @@ public class RecipeGuiLayoutsMixin {
                 tooltipKey = "gui.rs_integration.jei.tlm_maid_altar_craft";
             } else if (filter.equals("embers")) {
                 tooltipKey = "gui.rs_integration.jei.embers_alchemy_craft";
+            } else if (filter.equals("aether_freezer")) {
+                tooltipKey = "gui.rs_integration.jei.aether_freezer_craft";
+            } else if (filter.equals("aether_incubator")) {
+                tooltipKey = "gui.rs_integration.jei.aether_incubator_craft";
+            } else if (filter.equals("aether_altar")) {
+                tooltipKey = "gui.rs_integration.jei.aether_altar_craft";
+            } else if (filter.equals("avaritia_crafting")) {
+                tooltipKey = "gui.rs_integration.jei.avaritia_crafting";
+            } else if (filter.equals("avaritia_compressor")) {
+                tooltipKey = "gui.rs_integration.jei.avaritia_compressor";
+            } else if (filter.equals("avaritia_smithing")) {
+                tooltipKey = "gui.rs_integration.jei.avaritia_smithing";
+            } else if (filter.equals("crabbersdelight")) {
+                tooltipKey = "gui.rs_integration.jei.crabbersdelight_trap";
+            } else if (filter.equals("crockpot")) {
+                tooltipKey = "gui.rs_integration.jei.crockpot_cook";
+            } else if (filter.equals("tacz")) {
+                tooltipKey = "gui.rs_integration.jei.tacz_craft";
             } else if (filter.startsWith("block.minecraft.")) {
                 tooltipKey = "gui.rs_integration.jei.vanilla_machine_craft";
             } else if (filter.equals("generic")) {
@@ -261,11 +295,10 @@ public class RecipeGuiLayoutsMixin {
                     bindingDim, machinePos, modType);
 
             // Register machine GUI button for non-generic (bound) recipes
-            // that are in the MACHINE_GUI_WHITELIST
+            // when the bound machine supports remote GUI.
             if (!isGeneric && bindingDim != null && machinePos != null
                     && modType != null
-                    && com.huanghuang.rsintegration.config.RSIntegrationConfig.MACHINE_GUI_WHITELIST.get()
-                            .contains(modType.id())) {
+                    && supportsGuiWithRegCheck(boundBlockKey, boundBlockRegKey)) {
                 ResourceLocation guiDim = bindingDim;
                 BlockPos guiPos = machinePos;
                 ResourceLocation jeiOpenRecipeId = recipeId;
@@ -453,13 +486,23 @@ public class RecipeGuiLayoutsMixin {
             if (EMBER_ALCHEMY_UID.equals(uid)) return "embers";
             if (AETHERWORKS_ANVIL_UID.equals(uid)) return "aetherworks";
             if (GOETY_BRAZIER_UID.equals(uid)) return "goety";
+            if (CROCKPOT_UID.equals(uid)) return "crockpot";
+            if (CRABBERSDELIGHT_CRAB_TRAP_UID.equals(uid)) return "crabbersdelight";
             if (SMELTING_UID.equals(uid)) return "block.minecraft.furnace";
             if (BLASTING_UID.equals(uid)) return "block.minecraft.blast_furnace";
             if (SMOKING_UID.equals(uid)) return "block.minecraft.smoker";
             if (CAMPFIRE_UID.equals(uid)) return "block.minecraft.campfire";
             if (STONECUTTING_UID.equals(uid)) return "block.minecraft.stonecutter";
-            if (SMITHING_UID.equals(uid)) return "block.minecraft.smithing_table";
+            if (SMITHING_UID.equals(uid)) {
+                if (recipe.getClass().getName().startsWith("committee.nova.mods.avaritia."))
+                    return "avaritia_smithing";
+                return "block.minecraft.smithing_table";
+            }
             if (FARMINGFORBLOCKHEADS_MARKET_UID.equals(uid)) return "farmingforblockheads";
+            if (AETHER_FREEZING_UID.equals(uid)) return "aether_freezer";
+            if (AETHER_INCUBATION_UID.equals(uid)) return "aether_incubator";
+            if (AETHER_ENCHANTING_UID.equals(uid)) return "aether_altar";
+            if (AETHER_REPAIRING_UID.equals(uid)) return "aether_altar";
         } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] Reflection probe failed", e); }
 
         String recipeClassName = recipe.getClass().getName();
@@ -487,6 +530,11 @@ public class RecipeGuiLayoutsMixin {
             return "embers";
         if (recipeClassName.startsWith("net.sirplop.aetherworks."))
             return "aetherworks";
+        if (recipeClassName.startsWith("com.aetherteam.aether.")) {
+            if (recipeClassName.contains("Freezing")) return "aether_freezer";
+            if (recipeClassName.contains("Incubation")) return "aether_incubator";
+            return "aether_altar";
+        }
         if (recipeClassName.equals("elucent.eidolon.recipe.WorktableRecipe"))
             return "worktable";
         if (recipeClassName.equals("elucent.eidolon.recipe.ItemRitualRecipe")
@@ -496,8 +544,45 @@ public class RecipeGuiLayoutsMixin {
             return "crucible";
         if (recipeClassName.startsWith("net.blay09.mods.farmingforblockheads."))
             return "farmingforblockheads";
+        // Avaritia — use class name to distinguish recipe types
+        if (recipeClassName.startsWith("committee.nova.mods.avaritia.common.crafting.recipe.")) {
+            if (recipeClassName.endsWith("ExtremeSmithingRecipe")) return "avaritia_smithing";
+            if (recipeClassName.endsWith("CompressorRecipe")) return "avaritia_compressor";
+            return "avaritia_crafting";
+        }
+        // CrabbersDelight crab trap recipes
+        if (recipeClassName.startsWith("alabaster.crabbersdelight."))
+            return "crabbersdelight";
+        // CrockPot cooking recipes
+        if (recipeClassName.startsWith("com.sihenzhang.crockpot."))
+            return "crockpot";
+        // TACZ gun smith table recipes
+        if (recipeClassName.equals("com.tacz.guns.crafting.GunSmithTableRecipe"))
+            return "tacz";
 
         return null;
+    }
+
+    /**
+     * Strip JEI pagination wrapper from recipe IDs.
+     * JEI pagination creates pseudo-IDs like {@code mod:jei.real_path/page}
+     * whose {@code getId()} doesn't match any real recipe.  Recover the
+     * original ID by removing the {@code jei.} prefix and {@code /N} suffix.
+     */
+    @Unique
+    private static ResourceLocation unwrapJeiId(ResourceLocation id) {
+        if (id == null) return null;
+        String path = id.getPath();
+        if (!path.startsWith("jei.")) return id;
+        // Strip "jei." prefix
+        String inner = path.substring(4);
+        // Strip trailing "/N" page number
+        int slash = inner.lastIndexOf('/');
+        if (slash > 0 && slash < inner.length() - 1) {
+            inner = inner.substring(0, slash);
+        }
+        RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] unwrapJeiId: {} -> {}", id, inner);
+        return new ResourceLocation(id.getNamespace(), inner);
     }
 
     @Unique
@@ -511,7 +596,7 @@ public class RecipeGuiLayoutsMixin {
             if (getId == null) getId = Reflect.findMethod(recipe.getClass(), "m_6423_", new Class<?>[0]);
             if (getId != null) {
                 Object result = getId.invoke(recipe);
-                if (result instanceof ResourceLocation id) return id;
+                if (result instanceof ResourceLocation id) return unwrapJeiId(id);
             }
         } catch (Exception e) { /* falls through to mod-specific handlers */ }
 
@@ -520,14 +605,14 @@ public class RecipeGuiLayoutsMixin {
             Method getRL = Reflect.findMethod(recipe.getClass(), "getResourceLocation", new Class<?>[0]);
             if (getRL != null) {
                 Object result = getRL.invoke(recipe);
-                if (result instanceof ResourceLocation id) return id;
+                if (result instanceof ResourceLocation id) return unwrapJeiId(id);
             }
         } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] getResourceLocation failed", e); }
 
         // FA-specific: Ritual is a Java Record stored in FARegistries.RITUAL custom registry
         if (className.startsWith("com.stal111.forbidden_arcanus")) {
             ResourceLocation id = rsi$getFARitualId(recipe);
-            if (id != null) return id;
+            if (id != null) return unwrapJeiId(id);
         }
 
         // TLM-specific: AltarRecipeWrapper wraps AltarRecipe but loses the ID
@@ -540,6 +625,21 @@ public class RecipeGuiLayoutsMixin {
         if (className.startsWith("net.blay09.mods.farmingforblockheads.")) {
             ResourceLocation id = rsi$getMarketEntryId(recipe);
             if (id != null) return id;
+        }
+
+        // CrabbersDelight: CrabTrapRecipeWrapper has no getId(), use input item as synthetic ID
+        if (className.equals("alabaster.crabbersdelight.integration.jei.CrabTrapRecipeWrapper")) {
+            try {
+                Method getInput = recipe.getClass().getMethod("getInput");
+                ItemStack input = (ItemStack) getInput.invoke(recipe);
+                if (!input.isEmpty()) {
+                    ResourceLocation itemId = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(input.getItem());
+                    if (itemId != null) return new ResourceLocation("crabbersdelight", "crab_trap_loot/" + itemId.getNamespace() + "/" + itemId.getPath());
+                }
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] CrabTrapRecipeWrapper getId failed", e);
+            }
+            return null;
         }
 
         RSIntegrationMod.LOGGER.warn("[RSI-JEI-Mixin] getRecipeId failed for {} — no strategy succeeded", className);
@@ -879,7 +979,7 @@ public class RecipeGuiLayoutsMixin {
                 BatchCraftNetworkHandler.CHANNEL.sendToServer(pkt);
             };
         }
-        // All mod recipes (including FA) route through the plan-preview flow.
+        // All mod recipes (including Aether) route through the plan-preview flow.
         // GenericCraftPacket now falls back to FARegistries.RITUAL when a recipe
         // is not found in RecipeManager, so FA rituals show the plan tree too.
         return () -> {
@@ -1033,6 +1133,23 @@ public class RecipeGuiLayoutsMixin {
             if (mt != null) return mt;
         }
         return ModType.GENERIC;
+    }
+
+    @Unique
+    private static boolean supportsGuiWithRegCheck(String blockKey, @javax.annotation.Nullable String blockRegKey) {
+        if (!com.huanghuang.rsintegration.network.BindingEventHandler.supportsGuiByBlockKey(blockKey)) return false;
+        if (blockRegKey != null) {
+            var rl = net.minecraft.resources.ResourceLocation.tryParse(blockRegKey);
+            if (rl != null) {
+                var block = net.minecraftforge.registries.ForgeRegistries.BLOCKS.getValue(rl);
+                if (block != null) {
+                    var target = com.huanghuang.rsintegration.network.BindingEventHandler.CLASS_TARGET_MAP
+                            .get(block.getClass().getName());
+                    if (target != null && !target.supportsGui) return false;
+                }
+            }
+        }
+        return true;
     }
 
     @Unique

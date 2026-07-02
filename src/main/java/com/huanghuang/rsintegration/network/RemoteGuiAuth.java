@@ -1,12 +1,17 @@
 package com.huanghuang.rsintegration.network;
 
+import com.huanghuang.rsintegration.RSIntegrationMod;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.level.Level;
+import net.minecraftforge.common.world.ForgeChunkManager;
+import net.minecraftforge.event.level.ChunkEvent;
+import net.minecraftforge.registries.ForgeRegistries;
+import net.minecraftforge.server.ServerLifecycleHooks;
 
 import java.util.Map;
 import java.util.UUID;
@@ -21,12 +26,16 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * <p><b>Safety:</b> Authorizations auto-expire after {@link #AUTH_TTL_MS} to prevent
  * permanent ghost-container access.  The {@code expectedBlock} field prevents
- * ghost-container access if the machine block is mined while the GUI is open.</p>
+ * ghost-container access if the machine block is mined while the GUI is open.
+ * Chunk force-loading via {@link ForgeChunkManager} prevents dupes from chunk
+ * unloads mid-interaction.</p>
  */
 public final class RemoteGuiAuth {
     private static final long AUTH_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
-    private record Authorization(ResourceKey<Level> dim, BlockPos pos, String expectedBlock, long timestamp) {}
+    private record Authorization(ResourceKey<Level> dim, BlockPos pos, String expectedBlock,
+                                  long timestamp, int staleContainerId,
+                                  int chunkX, int chunkZ) {}
 
     private static final Map<UUID, Authorization> ACTIVE = new ConcurrentHashMap<>();
 
@@ -36,69 +45,103 @@ public final class RemoteGuiAuth {
      * @param expectedBlock the registry name of the block (e.g. "minecraft:furnace"),
      *                      used to detect if the block is mined while the GUI is open */
     public static void authorize(ServerPlayer player, ResourceKey<Level> dim, BlockPos pos, String expectedBlock) {
-        ACTIVE.put(player.getUUID(), new Authorization(dim, pos, expectedBlock, System.currentTimeMillis()));
+        int staleId = player.containerMenu != null ? player.containerMenu.containerId : -1;
+        int cx = pos.getX() >> 4;
+        int cz = pos.getZ() >> 4;
+        ACTIVE.put(player.getUUID(), new Authorization(dim, pos, expectedBlock, System.currentTimeMillis(),
+                staleId, cx, cz));
+
+        // Force-load the machine's chunk while the GUI is open.
+        // BlockPos as owner: refcounted per-chunk; two players on the same
+        // machine both add tickets, and the chunk unloads only when the last
+        // one releases.
+        var server = player.getServer();
+        if (server != null) {
+            var targetLevel = server.getLevel(dim);
+            if (targetLevel != null) {
+                ForgeChunkManager.forceChunk(targetLevel, RSIntegrationMod.MOD_ID,
+                        pos, cx, cz, true, true);
+            }
+        }
     }
 
-    /** Check if a player is authorized for ANY remote container.
-     * Reference — should be used sparingly; prefer dimension-aware checks. */
+    /** Check if a player is authorized for ANY remote container. */
     public static boolean isAuthorized(ServerPlayer player, AbstractContainerMenu menu) {
         var auth = ACTIVE.get(player.getUUID());
         if (auth == null) return false;
         if (isExpired(auth)) {
-            ACTIVE.remove(player.getUUID());
+            releaseAndRemove(player.getUUID());
             return false;
         }
-
-        // Verify the block still exists at the authorized position (§13.7 F-1)
         if (!isBlockStillThere(player, auth)) {
-            ACTIVE.remove(player.getUUID());
+            releaseAndRemove(player.getUUID());
             return false;
         }
-
         return true;
     }
 
     /** Check that the authorized block hasn't been mined/replaced. */
     private static boolean isBlockStillThere(ServerPlayer player, Authorization auth) {
-        if (auth.expectedBlock() == null) return true; // legacy auth without block check
+        if (auth.expectedBlock() == null) return true;
         var level = player.level();
         if (level.dimension() != auth.dim()) {
-            // Cross-dimension: check via server
             var server = player.getServer();
             if (server == null) return false;
             level = server.getLevel(auth.dim());
             if (level == null) return false;
         }
-        ResourceLocation currentBlock = BuiltInRegistries.BLOCK.getKey(
+        if (level instanceof ServerLevel sl && !sl.hasChunkAt(auth.pos())) {
+            return true;
+        }
+        ResourceLocation currentBlock = ForgeRegistries.BLOCKS.getKey(
                 level.getBlockState(auth.pos()).getBlock());
         return auth.expectedBlock().equals(currentBlock.toString());
     }
 
-    /** Called when the player closes the remote GUI (onClose). */
-    public static void deauthorize(UUID playerId) {
-        ACTIVE.remove(playerId);
+    /** Called when the player closes ANY container.
+     *  Only removes the authorization if the closing container is NOT the stale
+     *  one (the RS Grid we just navigated away from). */
+    public static void deauthorize(UUID playerId, AbstractContainerMenu closingMenu) {
+        var auth = ACTIVE.get(playerId);
+        if (auth == null) return;
+        if (auth.staleContainerId() >= 0 && closingMenu != null
+                && closingMenu.containerId == auth.staleContainerId()) {
+            return;
+        }
+        releaseAndRemove(playerId);
     }
 
     /** Cleanup on player logout. */
     public static void onPlayerLogout(UUID playerId) {
-        ACTIVE.remove(playerId);
+        releaseAndRemove(playerId);
+    }
+
+    /** Release chunk force-load and remove the authorization. */
+    private static void releaseAndRemove(UUID playerId) {
+        var auth = ACTIVE.remove(playerId);
+        if (auth == null) return;
+        var server = ServerLifecycleHooks.getCurrentServer();
+        if (server == null) return;
+        var level = server.getLevel(auth.dim());
+        if (level == null) return;
+        ForgeChunkManager.forceChunk(level, RSIntegrationMod.MOD_ID,
+                auth.pos(), auth.chunkX(), auth.chunkZ(), false, true);
     }
 
     public static boolean hasActiveAuthorization(UUID playerId) {
         return hasActiveAuthorizationForBlock(playerId, null);
     }
 
-    /** Check if player has active authorization for a specific block type.
-     * When {@code block} is null, checks for any active authorization (backwards compat). */
+    /** Check if player has active authorization for a specific block type. */
     public static boolean hasActiveAuthorizationForBlock(UUID playerId, @javax.annotation.Nullable net.minecraft.world.level.block.Block block) {
         var auth = ACTIVE.get(playerId);
         if (auth == null) return false;
         if (isExpired(auth)) {
-            ACTIVE.remove(playerId);
+            releaseAndRemove(playerId);
             return false;
         }
         if (block != null && auth.expectedBlock() != null) {
-            ResourceLocation blockId = BuiltInRegistries.BLOCK.getKey(block);
+            ResourceLocation blockId = ForgeRegistries.BLOCKS.getKey(block);
             if (!auth.expectedBlock().equals(blockId.toString())) {
                 return false;
             }
@@ -111,8 +154,41 @@ public final class RemoteGuiAuth {
         var it = ACTIVE.entrySet().iterator();
         while (it.hasNext()) {
             var entry = it.next();
-            if (isExpired(entry.getValue())) it.remove();
+            if (isExpired(entry.getValue())) {
+                releaseAndRemove(entry.getKey());
+            }
         }
+    }
+
+    /**
+     * Safety net: when a chunk unloads, force-close any player's remote GUI
+     * whose machine is in that chunk.  This prevents ghost-container interaction
+     * with an unloaded BlockEntity (item dupes / loss).
+     */
+    public static void onChunkUnload(ChunkEvent.Unload event) {
+        if (!(event.getLevel() instanceof ServerLevel level)) return;
+        int cx = event.getChunk().getPos().x;
+        int cz = event.getChunk().getPos().z;
+        var it = ACTIVE.entrySet().iterator();
+        while (it.hasNext()) {
+            var entry = it.next();
+            var auth = entry.getValue();
+            if (auth.chunkX() != cx || auth.chunkZ() != cz) continue;
+            if (!auth.dim().equals(level.dimension())) continue;
+            var server = level.getServer();
+            if (server != null) {
+                var player = server.getPlayerList().getPlayer(entry.getKey());
+                if (player != null) {
+                    player.closeContainer();
+                }
+            }
+            releaseAndRemove(entry.getKey());
+        }
+    }
+
+    /** Number of active authorizations (for diagnostics). */
+    public static int activeCount() {
+        return ACTIVE.size();
     }
 
     private static boolean isExpired(Authorization auth) {

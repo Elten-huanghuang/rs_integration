@@ -7,10 +7,7 @@ import com.huanghuang.rsintegration.sidepanel.data.BindingInfo;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.Items;
-import net.minecraftforge.registries.ForgeRegistries;
 
 import java.util.List;
 
@@ -126,26 +123,7 @@ public final class MachineTabRenderer {
      * look up the block, falling back to the crafting table icon.
      */
     private static ItemStack resolveIcon(BindingInfo info) {
-        String key = info.blockKey();
-        if (key == null || key.isEmpty()) return new ItemStack(Items.CRAFTING_TABLE);
-
-        // Strip optional prefix:  "crystal_ritual||block.wizards_reborn.crystal"
-        int sep = key.indexOf("||");
-        String descId = sep >= 0 ? key.substring(sep + 2) : key;
-
-        // Convert "block.modid.name" → "modid:name"
-        if (descId.startsWith("block.")) {
-            String rest = descId.substring(6); // "modid.name"
-            int dot = rest.indexOf('.');
-            if (dot > 0) {
-                String registryKey = rest.substring(0, dot) + ":" + rest.substring(dot + 1);
-                var rl = ResourceLocation.tryParse(registryKey);
-                if (rl != null) {
-                    var block = ForgeRegistries.BLOCKS.getValue(rl);
-                    if (block != null) return new ItemStack(block.asItem());
-                }
-            }
-        }
-        return new ItemStack(Items.CRAFTING_TABLE);
+        return com.huanghuang.rsintegration.network.BindingEventHandler.resolveBlockIcon(
+                info.blockRegKey(), info.blockKey(), info.displayStack());
     }
 }

@@ -39,11 +39,12 @@ public final class EreAlchemyRSModule implements IModIntegration {
 
     @Override
     public void registerBindingTargets() {
+        // Alchemy Tablet is in-world interaction (items placed on pedestals), no container GUI.
         BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
                 "embers", ModType.byId("embers_alchemy"),
                 RSIntegrationConfig.ENABLE_EMBERS_ALCHEMY, List.of(
                 "com.rekindled.embers.block.AlchemyTabletBlock"
-        ), null));
+        ), "embers_alchemy", false));
     }
 
     @Override

@@ -220,7 +220,7 @@ public final class EidolonCraftPacket {
                     missing);
 
             if (!missing.isEmpty()) {
-                player.sendSystemMessage(Component.translatable("rsi.generic.error.missing_materials", String.join(", ", missing)));
+                player.sendSystemMessage(Component.translatable("rsi.generic.error.missing_materials", CraftPacketUtils.formatMissingSummary(missing)));
                 return;
             }
 

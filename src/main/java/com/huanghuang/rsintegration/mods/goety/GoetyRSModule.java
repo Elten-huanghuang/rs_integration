@@ -43,13 +43,22 @@ public final class GoetyRSModule implements IModIntegration {
 
     @Override
     public void registerBindingTargets() {
+        // NecroBrazier is an in-world ritual block, no container GUI.
         BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
                 "goety", ModType.byId("goety"), RSIntegrationConfig.ENABLE_GOETY, List.of(
-                "com.Polarice3.Goety.common.blocks.DarkAltarBlock",
-                "com.Polarice3.Goety.common.blocks.NecroBrazierBlock",
+                "com.Polarice3.Goety.common.blocks.NecroBrazierBlock"
+        ), "goety", false));
+        // Dark Altar is in-world interaction (place items on top, wand-trigger), no container GUI.
+        BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
+                "goety", ModType.byId("goety"), RSIntegrationConfig.ENABLE_GOETY, List.of(
+                "com.Polarice3.Goety.common.blocks.DarkAltarBlock"
+        ), "goety_altar", false));
+        // Multi-block components with no GUI of their own.
+        BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
+                "goety", ModType.byId("goety"), RSIntegrationConfig.ENABLE_GOETY, List.of(
                 "com.Polarice3.Goety.common.blocks.CursedCageBlock",
                 "com.Polarice3.Goety.common.blocks.SoulCandlestickBlock"
-        ), "goety"));
+        ), "goety_component", false));
     }
 
     @Override

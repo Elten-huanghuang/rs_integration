@@ -223,6 +223,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
         }
 
         if (hadStray) {
+            be.setChanged();
             RSIntegrationMod.LOGGER.debug("[RSI-Crucible] Recovered stray items from crucible at {}", pos);
         }
 
@@ -423,6 +424,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
             }
         }
 
+        be.setChanged();
         this.craftStarted = true;
         this.craftWasSeenActive = false;
         RSIntegrationMod.LOGGER.debug("[RSI-Crucible] Craft started for {} at {}", recipe.getId(), myPos);
@@ -459,6 +461,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
             spiritSlot++;
         }
 
+        be.setChanged();
         this.craftStarted = true;
         this.craftWasSeenActive = false;
         RSIntegrationMod.LOGGER.debug("[RSI-Crucible] Craft started with materials for {} at {}",
@@ -525,6 +528,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
             ItemEntity entity = entities.get(0);
             ItemStack result = entity.getItem().copy();
             entity.getItem().shrink(result.getCount());
+            entity.setItem(entity.getItem().copy());
             if (entity.getItem().isEmpty()) entity.discard();
             RSIntegrationMod.LOGGER.debug("[RSI-Crucible] Collected {}x{} from world",
                     result.getHoverName().getString(), result.getCount());
@@ -612,6 +616,9 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
                     setSlot(invSpirits, i, ItemStack.EMPTY);
                 }
             }
+        }
+        if (crucibleBE instanceof net.minecraft.world.level.block.entity.BlockEntity be) {
+            be.setChanged();
         }
     }
 

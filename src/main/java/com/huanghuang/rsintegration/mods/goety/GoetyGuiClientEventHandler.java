@@ -1,9 +1,6 @@
 package com.huanghuang.rsintegration.mods.goety;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
-import com.huanghuang.rsintegration.config.RSIntegrationConfig;
-import com.huanghuang.rsintegration.network.BindingStorage;
-import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.level.block.Block;
@@ -73,23 +70,6 @@ public final class GoetyGuiClientEventHandler {
             } else if (isGoetyBindingBlock(block)) {
                 event.getToolTip().add(
                         Component.translatable("gui.rs_integration.altar.binding.rs_bind_hint"));
-            }
-        }
-
-        List<BindingStorage.BindingEntry> bindings = BindingStorage.getBindings(event.getItemStack());
-        if (!bindings.isEmpty()) {
-            if (Screen.hasShiftDown()) {
-                event.getToolTip().add(
-                        Component.translatable("gui.rs_integration.altar.bound_item_header"));
-                for (BindingStorage.BindingEntry entry : bindings) {
-                    Component blockName = com.huanghuang.rsintegration.network.BindingEventHandler.resolveBlockName(entry.blockKey());
-                    event.getToolTip().add(
-                            Component.literal("  ").append(blockName)
-                                    .append(" @ " + entry.pos().toShortString()));
-                }
-            } else {
-                event.getToolTip().add(
-                        Component.translatable("gui.rs_integration.altar.shift_to_view"));
             }
         }
     }

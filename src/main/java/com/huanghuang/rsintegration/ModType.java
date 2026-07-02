@@ -138,6 +138,8 @@ public final class ModType {
             return byId(ModIds.FORBIDDEN_ARCANUS);
         }
         String cn = recipe.getClass().getName();
+        // ApplyModifierRecipe is a smithing-table recipe, not a Hephaestus Forge ritual
+        if (cn.endsWith("ApplyModifierRecipe")) return null;
         ModType best = null;
         int bestLen = 0;
         for (ModType mt : BY_ID.values()) {
@@ -229,11 +231,12 @@ public final class ModType {
     public String toString() { return id; }
 
     /**
+    /**
      * Supplier that lazily loads a delegate class via reflection to avoid
      * {@link ClassNotFoundException} when the target mod is absent.
+     * Shared lazy delegate supplier. Public so RSModules can use it.
      */
     @SuppressWarnings("unchecked")
-    /** Shared lazy delegate supplier. Public so RSModules can use it. */
     public static Supplier<IBatchDelegate> delegateSupplier(String className) {
         return () -> {
             try {

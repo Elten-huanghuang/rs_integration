@@ -630,7 +630,7 @@ public final class WRWandCraftPacket {
 
         if (!missing.isEmpty()) {
             player.displayClientMessage(
-                    Component.translatable("rsi.generic.error.missing_materials", String.join(", ", missing)), true);
+                    Component.translatable("rsi.generic.error.missing_materials", CraftPacketUtils.formatMissingSummary(missing)), true);
             return false;
         }
 

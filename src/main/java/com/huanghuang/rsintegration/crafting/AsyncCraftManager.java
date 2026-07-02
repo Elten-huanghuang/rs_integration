@@ -10,6 +10,7 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
  * Drives all active {@link AsyncCraftChain} instances every server tick
@@ -18,32 +19,21 @@ import java.util.UUID;
 public final class AsyncCraftManager {
 
     private static final AsyncCraftManager INSTANCE = new AsyncCraftManager();
-    private final List<AsyncCraftChain> activeChains = new ArrayList<>();
+    private final List<AsyncCraftChain> activeChains = new CopyOnWriteArrayList<>();
 
     private AsyncCraftManager() {}
 
     public static AsyncCraftManager getInstance() { return INSTANCE; }
 
     public void submit(AsyncCraftChain chain) {
-        // Multiple chains per player are allowed when the player has multiple
-        // bound machines of the same type.  startModStep() iterates all bound
-        // machines and skips busy ones, so independent chains route to different
-        // machines naturally.  If no free machine is found the second chain
-        // aborts itself without touching the first.
         UUID playerId = chain.getPlayerId();
-        synchronized (activeChains) {
-            activeChains.add(chain);
-            // Register callback so the chain notifies us when it terminates.
-            // Capture UUID (not ServerPlayer) to avoid zombie references.
-            final UUID capturedId = playerId;
-            chain.onDone(() -> {
-                synchronized (activeChains) {
-                    activeChains.remove(chain);
-                    RSIntegrationMod.LOGGER.debug("[RSI-AsyncMgr] Chain removed via callback: player={} state={}",
-                            capturedId, chain.state());
-                }
-            });
-        }
+        activeChains.add(chain);
+        final UUID capturedId = playerId;
+        chain.onDone(() -> {
+            activeChains.remove(chain);
+            RSIntegrationMod.LOGGER.debug("[RSI-AsyncMgr] Chain removed via callback: player={} state={}",
+                    capturedId, chain.state());
+        });
         RSIntegrationMod.LOGGER.debug("[RSI-AsyncMgr] Chain submitted: player={} steps={}",
                 playerId, chain.stepsCount());
     }
@@ -53,9 +43,7 @@ public final class AsyncCraftManager {
     }
 
     public int getActiveChainCount() {
-        synchronized (activeChains) {
-            return activeChains.size();
-        }
+        return activeChains.size();
     }
 
     @Nullable
@@ -65,19 +53,14 @@ public final class AsyncCraftManager {
 
     @Nullable
     public AsyncCraftChain getChain(UUID playerId) {
-        synchronized (activeChains) {
-            for (AsyncCraftChain chain : activeChains) {
-                if (chain.belongsTo(playerId)) return chain;
-            }
+        for (AsyncCraftChain chain : activeChains) {
+            if (chain.belongsTo(playerId)) return chain;
         }
         return null;
     }
 
-    /** Remove a specific chain instance from the active list without aborting. */
     public void remove(AsyncCraftChain chain) {
-        synchronized (activeChains) {
-            activeChains.remove(chain);
-        }
+        activeChains.remove(chain);
     }
 
     /**
@@ -102,17 +85,17 @@ public final class AsyncCraftManager {
     }
 
     public void cancelAllForPlayer(UUID playerId) {
-        // Collect first, then abort outside the lock — abort() → fireOnDone()
-        // callback removes from activeChains, which confuses the iterator.
-        List<AsyncCraftChain> toAbort;
-        synchronized (activeChains) {
-            toAbort = activeChains.stream()
-                    .filter(c -> c.belongsTo(playerId))
-                    .collect(java.util.stream.Collectors.toList());
+        cancelAllForPlayer(playerId, "Player disconnected");
+    }
+
+    public void cancelAllForPlayer(UUID playerId, String reason) {
+        List<AsyncCraftChain> toAbort = new ArrayList<>();
+        for (AsyncCraftChain chain : activeChains) {
+            if (chain.belongsTo(playerId)) toAbort.add(chain);
         }
         for (AsyncCraftChain chain : toAbort) {
-            chain.abort("Player disconnected");
-            RSIntegrationMod.LOGGER.debug("[RSI-AsyncMgr] Cancelled chain for disconnected player {}", playerId);
+            chain.abort(reason);
+            RSIntegrationMod.LOGGER.debug("[RSI-AsyncMgr] Cancelled chain for player {}: {}", playerId, reason);
         }
     }
 
@@ -124,22 +107,14 @@ public final class AsyncCraftManager {
 
         long tickStart = System.nanoTime();
 
-        // Snapshot to avoid CME: chain.tick() → fireOnDone() callback
-        // removes the chain from activeChains inside this synchronized block.
-        List<AsyncCraftChain> snapshot;
-        synchronized (activeChains) {
-            snapshot = new ArrayList<>(activeChains);
-        }
-        for (AsyncCraftChain chain : snapshot) {
+        for (AsyncCraftChain chain : activeChains) {
             try {
                 chain.tick();
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.error("[RSI-AsyncMgr] Chain tick error", e);
                 String msg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
                 chain.abort("Internal error: " + msg);
-                synchronized (activeChains) {
-                    activeChains.remove(chain);
-                }
+                activeChains.remove(chain);
             }
         }
         com.huanghuang.rsintegration.command.PerformanceMonitor.recordTick(

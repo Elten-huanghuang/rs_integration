@@ -416,6 +416,17 @@ public final class AsyncCraftChain {
                 : createDelegate(step.modType());
         if (delegate == null) return null;
 
+        // GenericBatchDelegate computes the result from pre-reserved materials
+        // without a physical machine.  Use the shared-ledger preReserve flow so
+        // intermediate outputs from prior chain steps (in virtualInventory) are
+        // visible to subsequent steps.
+        if (delegate instanceof com.huanghuang.rsintegration.crafting.batch.GenericBatchDelegate) {
+            if (!delegate.validateAndInit(online, step.recipeId(), null, null)) {
+                return null;
+            }
+            return startGenericStep(delegate, step, online);
+        }
+
         // Try each bound machine until one validates successfully.
         BoundMachine matchedMachine = null;
         for (BoundMachine m : machines) {
@@ -508,6 +519,73 @@ public final class AsyncCraftChain {
 
         RSIntegrationMod.LOGGER.debug("[RSI-AsyncChain] Multi-block step started OK: recipe={} delegate={}",
                 step.recipeId(), delegate.getClass().getSimpleName());
+        return delegate;
+    }
+
+    // ── generic (no-machine) delegate: shared-ledger pre-reserve flow ──
+
+    @Nullable
+    private IBatchDelegate startGenericStep(IBatchDelegate delegate,
+                                            CraftingResolver.ResolutionStep step,
+                                            ServerPlayer online) {
+        try {
+            List<IngredientSpec> specs = delegate.getRequiredMaterials();
+            if (specs != null && !specs.isEmpty()) {
+                List<ItemStack> materials = preReserveStepMaterials(specs, online);
+                if (materials == null) {
+                    RSIntegrationMod.LOGGER.warn("[RSI-AsyncChain] Failed to pre-reserve for generic step {}",
+                            step.recipeId());
+                    online.sendSystemMessage(Component.translatable(
+                            "rsi.generic.error.missing_materials", step.recipeId()));
+                    try { delegate.onBatchFailed(online, "pre-reserve failed"); } catch (Exception fe) {
+                        RSIntegrationMod.LOGGER.error("[RSI-AsyncChain] onBatchFailed threw during pre-reserve cleanup", fe);
+                    }
+                    return null;
+                }
+                if (!ledger.commit(network, online)) {
+                    RSIntegrationMod.LOGGER.warn("[RSI-AsyncChain] Ledger commit failed for generic step {}",
+                            step.recipeId());
+                    online.sendSystemMessage(Component.translatable(
+                            "rsi.generic.error.missing_materials", step.recipeId()));
+                    try { delegate.onBatchFailed(online, "commit failed"); } catch (Exception fe) {
+                        RSIntegrationMod.LOGGER.error("[RSI-AsyncChain] onBatchFailed threw during commit cleanup", fe);
+                    }
+                    return null;
+                }
+                if (!delegate.tryStartWithMaterials(online, materials, ledger)) {
+                    RSIntegrationMod.LOGGER.warn("[RSI-AsyncChain] tryStartWithMaterials failed for generic step {}",
+                            step.recipeId());
+                    online.sendSystemMessage(Component.translatable(
+                            "rsi.generic.error.craft_failed", step.recipeId()));
+                    try { delegate.onBatchFailed(online, "tryStartWithMaterials failed"); } catch (Exception fe) {
+                        RSIntegrationMod.LOGGER.error("[RSI-AsyncChain] onBatchFailed threw during tryStartWithMaterials cleanup", fe);
+                    }
+                    ledger.refundCommitted(network, online);
+                    return null;
+                }
+            } else {
+                // Fallback: delegate handles extraction on its own (legacy path).
+                // Note: this does NOT see virtualInventory; new delegates should
+                // implement getRequiredMaterials() + tryStartWithMaterials().
+                if (!delegate.tryStartSingleCraft(online, ledger)) {
+                    RSIntegrationMod.LOGGER.warn("[RSI-AsyncChain] tryStartSingleCraft failed for generic step {}",
+                            step.recipeId());
+                    try { delegate.onBatchFailed(online, "tryStartSingleCraft failed"); } catch (Exception fe) {
+                        RSIntegrationMod.LOGGER.error("[RSI-AsyncChain] onBatchFailed threw during cleanup", fe);
+                    }
+                    return null;
+                }
+            }
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.error("[RSI-AsyncChain] Error in generic step", e);
+            try { delegate.onBatchFailed(online, "exception in startGenericStep"); } catch (Exception fe) {
+                RSIntegrationMod.LOGGER.error("[RSI-AsyncChain] onBatchFailed threw during exception cleanup", fe);
+            }
+            return null;
+        }
+
+        RSIntegrationMod.LOGGER.debug("[RSI-AsyncChain] Generic step started OK: recipe={}",
+                step.recipeId());
         return delegate;
     }
 

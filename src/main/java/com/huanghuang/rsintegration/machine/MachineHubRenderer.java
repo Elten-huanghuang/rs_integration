@@ -1,6 +1,6 @@
 package com.huanghuang.rsintegration.machine;
 
-import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+
 import com.huanghuang.rsintegration.sidepanel.data.BindingInfo;
 import com.huanghuang.rsintegration.sidepanel.data.MachineStatusCache;
 import net.minecraft.client.Minecraft;
@@ -8,41 +8,39 @@ import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.resources.language.I18n;
 import net.minecraft.network.chat.Component;
-import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.Items;
-import net.minecraftforge.registries.ForgeRegistries;
 
-import java.util.List;
 
 /**
  * Renders the Terminal Hub overlay — a grid of machine icons displayed
- * anchored to the RS Grid screen, styled to match the RS dark-terminal aesthetic.
+ * anchored to the RS Grid screen, styled to match the RS light-gray aesthetic.
  */
 public final class MachineHubRenderer {
 
     private static final int SLOT_SIZE = 18;
-    private static final int CELL_GAP  = 2;
+    private static final int CELL_GAP  = 5;
     private static final int CELL_SIZE = SLOT_SIZE + CELL_GAP;
-    private static final int COLS = 5;
-    private static final int PADDING = 6;
+    private static final int COLS = 7;
+    private static final int PADDING = 8;
     private static final int TITLE_H = 14;
     private static final int FILTER_H = 14;
-    private static final int FOOTER_H = 10;
 
-    // ── Style (dark terminal theme) ──────────────────────────────────
-    private static final int PANEL_BORDER  = 0xFF3B4A5C;
-    private static final int PANEL_BG      = 0xFF121820;
-    private static final int HEADER_BG     = 0xFF1C2834;
-    private static final int SEPARATOR     = 0xFF2A3848;
-    private static final int FILTER_BG     = 0xFF0A1016;
-    private static final int FILTER_BORDER = 0xFF2A3848;
-    private static final int SLOT_BG       = 0xFF1A2430;
-    private static final int SLOT_HOVER    = 0x30FFFFFF;
-    private static final int SCROLL_TRACK  = 0x20FFFFFF;
-    private static final int SCROLL_THUMB  = 0x60FFFFFF;
-    private static final int TEXT_PRIMARY  = 0xFFE0E8F0;
-    private static final int TEXT_DIM      = 0xFF8899AA;
+    // ── Style (RS Classic Light Theme) ───────────────────────────────
+    private static final int PANEL_BORDER  = 0xFF373737;
+    private static final int PANEL_BG      = 0xFFC6C6C6;
+    private static final int HEADER_BG     = 0xFFC6C6C6;
+
+    private static final int FILTER_BG     = 0xFF000000;
+    private static final int FILTER_BORDER = 0xFF373737;
+    private static final int FILTER_TEXT   = 0xFFFFFFFF;
+
+    private static final int SLOT_BG       = 0xFF8B8B8B;
+    private static final int SLOT_HOVER    = 0x80FFFFFF;
+
+    private static final int SCROLL_TRACK  = 0xFF8B8B8B;
+    private static final int SCROLL_THUMB  = 0xFF373737;
+
+    private static final int TEXT_PRIMARY  = 0xFF404040;
 
     private MachineHubRenderer() {}
 
@@ -57,11 +55,10 @@ public final class MachineHubRenderer {
         int visibleRows = Math.min(rows, maxVisibleRows);
         int visibleGridH = visibleRows * CELL_SIZE - CELL_GAP;
 
-        // Ensure panel is wide enough for footer text + config toggle
         var font = Minecraft.getInstance().font;
         int contentMinW = Math.max(slotGridW, 150);
         int totalW = contentMinW + PADDING * 2;
-        int totalH = visibleGridH + TITLE_H + FILTER_H + FOOTER_H + PADDING * 3 + 2;
+        int totalH = visibleGridH + TITLE_H + FILTER_H + PADDING * 3;
 
         int sw = Minecraft.getInstance().getWindow().getGuiScaledWidth();
         int sh = Minecraft.getInstance().getWindow().getGuiScaledHeight();
@@ -90,8 +87,9 @@ public final class MachineHubRenderer {
         pose.pushPose();
         pose.translate(0, 0, 400f);
 
-        // ── Outer shadow ──────────────────────────────────────────────
-        g.fill(x + 2, y + 2, x + totalW + 2, y + totalH + 2, 0x40000000);
+        // ── Drop shadow (2-layer, soft) ──────────────────────────────
+        g.fill(x + 3, y + 3, x + totalW + 3, y + totalH + 3, 0x18000000);
+        g.fill(x + 1, y + 1, x + totalW + 1, y + totalH + 1, 0x38000000);
 
         // ── Panel background + border ────────────────────────────────
         g.fill(x, y, x + totalW, y + totalH, PANEL_BORDER);
@@ -100,9 +98,8 @@ public final class MachineHubRenderer {
         // ── Header ───────────────────────────────────────────────────
         int headerBottom = y + 1 + TITLE_H + PADDING * 2 - 2;
         g.fill(x + 1, y + 1, x + totalW - 1, headerBottom, HEADER_BG);
-        g.fill(x + 1, headerBottom, x + totalW - 1, headerBottom + 1, SEPARATOR);
 
-        // Title text (truncated to fit between close button and left edge)
+        // Title text
         String title = Component.translatable("rsi.hub.title", allMachines.size()).getString();
         int closeAreaW = 24;
         int titleMaxW = totalW - PADDING * 2 - closeAreaW - 4;
@@ -111,7 +108,7 @@ public final class MachineHubRenderer {
         int titleY = y + PADDING + 1;
         g.drawString(font, truncatedTitle, titleX, titleY, TEXT_PRIMARY);
 
-        // Close button — X symbol
+        // Close button (X)
         String xMark = "✕";
         int xW = font.width(xMark);
         int xX = x + totalW - PADDING - xW - 4;
@@ -119,32 +116,32 @@ public final class MachineHubRenderer {
         boolean closeHovered = mouseX >= xX - 2 && mouseX < xX + xW + 2
                 && mouseY >= xY - 2 && mouseY < xY + font.lineHeight + 2;
         MachineHub.setCloseButtonHovered(closeHovered);
-        int closeColor = closeHovered ? 0xFFFF5555 : TEXT_DIM;
+        int closeColor = closeHovered ? 0xFFFF3333 : TEXT_PRIMARY;
         g.drawString(font, xMark, xX, xY, closeColor);
 
-        // ── Filter bar ───────────────────────────────────────────────
+        // ── Filter bar (RS Black Style) ──────────────────────────────
         int filterX = x + PADDING;
-        int filterY = headerBottom + PADDING - 1;
+        int filterY = headerBottom;
         int filterW = totalW - PADDING * 2;
         g.fill(filterX, filterY, filterX + filterW, filterY + FILTER_H, FILTER_BORDER);
         g.fill(filterX + 1, filterY + 1, filterX + filterW - 1, filterY + FILTER_H - 1, FILTER_BG);
 
         String filterText = MachineHub.getFilterText();
-        // Count badge (right side of filter) — reserve space
         String countStr = machines.size() + "/" + allMachines.size();
         int countW = font.width(countStr);
         int filterTextMaxW = filterW - 8 - countW - 8;
+
         if (filterText.isEmpty()) {
             String hint = Component.translatable("rsi.hub.filter_hint").getString();
             g.drawString(font, font.plainSubstrByWidth(hint, filterTextMaxW),
-                    filterX + 4, filterY + 3, TEXT_DIM);
+                    filterX + 4, filterY + 3, 0xFF666666);
         } else {
             String display = font.plainSubstrByWidth(filterText, filterTextMaxW)
                     + (System.currentTimeMillis() % 1000 < 500 ? "|" : " ");
-            g.drawString(font, display, filterX + 4, filterY + 3, TEXT_PRIMARY);
+            g.drawString(font, display, filterX + 4, filterY + 3, FILTER_TEXT);
         }
 
-        g.drawString(font, countStr, filterX + filterW - countW - 5, filterY + 3, TEXT_DIM);
+        g.drawString(font, countStr, filterX + filterW - countW - 5, filterY + 3, 0xFF888888);
 
         // ── Machine grid ─────────────────────────────────────────────
         int gridY_ = filterY + FILTER_H + PADDING;
@@ -175,14 +172,14 @@ public final class MachineHubRenderer {
             // Slot background
             g.fill(sx, sy, sx + SLOT_SIZE, sy + SLOT_SIZE, SLOT_BG);
 
-            // Status-derived accent (left edge indicator)
+            // Status-derived accent
             int accentColor = switch (iStatus.state()) {
-                case HAS_OUTPUT -> 0xFF4488FF;
-                case WORKING   -> 0xFFFFAA00;
-                case IDLE      -> 0xFF22AA22;
-                default        -> 0xFF666666;
+                case HAS_OUTPUT -> 0xFF3388FF;
+                case WORKING   -> 0xFFFF8800;
+                case IDLE      -> 0xFF11AA11;
+                default        -> 0xFF999999;
             };
-            if (iType == MachineInteractType.GUI) accentColor = 0xFF8855CC;
+            if (iType == MachineInteractType.GUI) accentColor = 0xFF9944DD;
             g.fill(sx, sy, sx + 2, sy + SLOT_SIZE, accentColor);
 
             // Hover highlight
@@ -203,7 +200,7 @@ public final class MachineHubRenderer {
                     && iStatus.state() == MachineState.WORKING
                     && iStatus.maxProgress() > 0) {
                 int barW = Math.max(1, (int) ((SLOT_SIZE - 4) * iStatus.progressFraction()));
-                g.fill(sx + 2, sy + SLOT_SIZE - 3, sx + 2 + barW, sy + SLOT_SIZE - 1, 0xFFFFCC00);
+                g.fill(sx + 2, sy + SLOT_SIZE - 3, sx + 2 + barW, sy + SLOT_SIZE - 1, 0xFFFFB300);
             }
 
             // Output count badge
@@ -213,7 +210,7 @@ public final class MachineHubRenderer {
                 int cnt = iStatus.outputItem().getCount();
                 String cntStr = cnt > 99 ? "…" : String.valueOf(cnt);
                 int tw = font.width(cntStr);
-                g.fill(sx + SLOT_SIZE - tw - 3, sy + 1, sx + SLOT_SIZE - 1, sy + 9, 0xCC335599);
+                g.fill(sx + SLOT_SIZE - tw - 3, sy + 1, sx + SLOT_SIZE - 1, sy + 9, 0xDD224488);
                 g.drawString(font, cntStr, sx + SLOT_SIZE - tw - 2, sy + 2, 0xFFFFFF);
             }
 
@@ -223,13 +220,21 @@ public final class MachineHubRenderer {
                 int dy = sy + 1;
                 for (int r = 0; r < 2; r++)
                     for (int c = 0; c < 2; c++)
-                        g.fill(dx + c * 3, dy + r * 3, dx + c * 3 + 2, dy + r * 3 + 2, 0xFFBB88EE);
+                        g.fill(dx + c * 3, dy + r * 3, dx + c * 3 + 2, dy + r * 3 + 2, 0xFFCC77FF);
             }
 
             // Tooltip
             if (isHovered) {
                 var tip = new java.util.ArrayList<Component>();
-                tip.add(Component.literal(I18n.get(info.displayName())));
+                Component displayName;
+                ItemStack ds = info.displayStack();
+                if (ds != null && !ds.isEmpty()) {
+                    displayName = com.huanghuang.rsintegration.network.BindingEventHandler
+                            .resolveBlockName(info.blockKey(), info.blockRegKey(), ds);
+                } else {
+                    displayName = Component.literal(I18n.get(info.displayName()));
+                }
+                tip.add(displayName);
                 if (iType == MachineInteractType.QUICK) {
                     String st = switch (iStatus.state()) {
                         case HAS_OUTPUT -> "§b" + Component.translatable("rsi.hub.state.has_output").getString();
@@ -244,7 +249,8 @@ public final class MachineHubRenderer {
                             .withStyle(net.minecraft.ChatFormatting.LIGHT_PURPLE));
                 }
                 if (info.dim() != null) {
-                    tip.add(Component.literal("§7" + info.dim() + " " + info.pos().toShortString()));
+                    String dimName = I18n.get(info.dim().toString());
+                    tip.add(Component.literal("§7" + dimName + " " + info.pos().toShortString()));
                 }
                 if (iType == MachineInteractType.QUICK) {
                     if (iStatus.state() == MachineState.HAS_OUTPUT) {
@@ -252,11 +258,11 @@ public final class MachineHubRenderer {
                                 .withStyle(net.minecraft.ChatFormatting.AQUA));
                     } else {
                         tip.add(Component.translatable("rsi.hub.controls.quick_normal")
-                                .withStyle(net.minecraft.ChatFormatting.GRAY));
+                                .withStyle(net.minecraft.ChatFormatting.DARK_GRAY));
                     }
                 } else {
                     tip.add(Component.translatable("rsi.hub.controls.gui")
-                            .withStyle(net.minecraft.ChatFormatting.GRAY));
+                            .withStyle(net.minecraft.ChatFormatting.DARK_GRAY));
                 }
                 MachineHub.isRenderingOurTooltip = true;
                 g.renderTooltip(font, tip, java.util.Optional.empty(), mouseX, mouseY);
@@ -266,62 +272,14 @@ public final class MachineHubRenderer {
 
         // ── Scrollbar ────────────────────────────────────────────────
         if (maxScroll > 0) {
-            int sbX = x + totalW - 3;
+            int sbX = x + totalW - 4;
             int sbTop = gridY_;
             int sbH = visibleGridH;
             int thumbH = Math.max(16, sbH * sbH / totalRowsHeight);
             int thumbY = sbTop + (int) ((long) scrollOffset * (sbH - thumbH) / maxScroll);
-            g.fill(sbX, sbTop, sbX + 2, sbTop + sbH, SCROLL_TRACK);
-            g.fill(sbX, thumbY, sbX + 2, thumbY + thumbH, SCROLL_THUMB);
+            g.fill(sbX, sbTop, sbX + 3, sbTop + sbH, SCROLL_TRACK);
+            g.fill(sbX, thumbY, sbX + 3, thumbY + thumbH, SCROLL_THUMB);
         }
-
-        // ── Footer ───────────────────────────────────────────────────
-        int footerY = gridY_ + visibleGridH + 2;
-        g.fill(x + PADDING, footerY, x + totalW - PADDING, footerY + 1, SEPARATOR);
-        int footerTextY = footerY + 3;
-
-        // Config checkbox + label
-        boolean returnToRs = RSIntegrationConfig.RETURN_TO_RS_AFTER_MACHINE_GUI.get();
-        int cbSize = 11;
-        int cbX = x + PADDING + 2;
-        int cbY = footerTextY - 2;
-        String labelText = Component.translatable("rsi.hub.config_return_rs").getString();
-        int maxLabelW = totalW - PADDING * 2 - cbSize - 8;
-        String truncatedLabel = font.plainSubstrByWidth(labelText, maxLabelW);
-        int labelX = cbX + cbSize + 4;
-        int labelY = footerTextY;
-
-        // Hit area: checkbox + gap + label, with extra vertical padding
-        int hitH = cbSize + 6;
-        boolean toggleHovered = mouseX >= cbX && mouseX < cbX + cbSize + 4 + font.width(truncatedLabel)
-                && mouseY >= cbY - 3 && mouseY < cbY + hitH - 3;
-
-        // Checkbox border
-        g.fill(cbX - 1, cbY - 1, cbX + cbSize + 1, cbY + cbSize + 1, toggleHovered ? 0xFF8899AA : 0xFF4A5568);
-        g.fill(cbX, cbY, cbX + cbSize, cbY + cbSize, PANEL_BG);
-        // Checkbox fill when enabled
-        if (returnToRs) {
-            int fillColor = toggleHovered ? 0xFF88CC88 : 0xFF55AA55;
-            g.fill(cbX + 2, cbY + 2, cbX + cbSize - 2, cbY + cbSize - 2, fillColor);
-            // Checkmark
-            g.fill(cbX + 3, cbY + 5, cbX + 5, cbY + 8, 0xFFFFFFFF);
-            g.fill(cbX + 5, cbY + 6, cbX + 8, cbY + 3, 0xFFFFFFFF);
-        }
-        // Label
-        int labelColor = toggleHovered ? TEXT_PRIMARY : TEXT_DIM;
-        g.drawString(font, truncatedLabel, labelX, labelY, labelColor);
-
-        // Tooltip on hover
-        if (toggleHovered) {
-            MachineHub.isRenderingOurTooltip = true;
-            g.renderTooltip(font,
-                    List.of(Component.translatable("rsi.hub.config_return_rs_tooltip")),
-                    java.util.Optional.empty(), mouseX, mouseY);
-            MachineHub.isRenderingOurTooltip = false;
-        }
-
-        MachineHub.setConfigButtonHovered(toggleHovered);
-        MachineHub.setConfigButtonBounds(cbX, cbY - 3, cbSize + 4 + font.width(truncatedLabel), hitH);
 
         pose.popPose();
 
@@ -330,22 +288,7 @@ public final class MachineHubRenderer {
     }
 
     static ItemStack resolveIcon(BindingInfo info) {
-        String key = info.blockKey();
-        if (key == null || key.isEmpty()) return new ItemStack(Items.CRAFTING_TABLE);
-        int sep = key.indexOf("||");
-        String descId = sep >= 0 ? key.substring(sep + 2) : key;
-        if (descId.startsWith("block.")) {
-            String rest = descId.substring(6);
-            int dot = rest.indexOf('.');
-            if (dot > 0) {
-                String regKey = rest.substring(0, dot) + ":" + rest.substring(dot + 1);
-                var rl = ResourceLocation.tryParse(regKey);
-                if (rl != null) {
-                    var block = ForgeRegistries.BLOCKS.getValue(rl);
-                    if (block != null) return new ItemStack(block.asItem());
-                }
-            }
-        }
-        return new ItemStack(Items.CRAFTING_TABLE);
+        return com.huanghuang.rsintegration.network.BindingEventHandler.resolveBlockIcon(
+                info.blockRegKey(), info.blockKey(), info.displayStack());
     }
 }

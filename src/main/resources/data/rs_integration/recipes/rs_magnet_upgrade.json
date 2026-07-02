@@ -1,0 +1,11 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "conditions": [
+    { "type": "forge:mod_loaded", "modid": "sophisticatedbackpacks" }
+  ],
+  "ingredients": [
+    { "item": "sophisticatedbackpacks:advanced_magnet_upgrade" },
+    { "item": "minecraft:purple_dye" }
+  ],
+  "result": { "item": "rs_integration:rs_magnet_upgrade" }
+}

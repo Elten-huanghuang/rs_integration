@@ -15,8 +15,8 @@ import net.minecraft.world.item.crafting.CraftingRecipe;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.crafting.RecipeManager;
-import net.minecraft.world.level.ItemLike;
 import net.minecraft.world.level.Level;
+import net.minecraftforge.common.crafting.StrictNBTIngredient;
 import net.minecraftforge.registries.ForgeRegistries;
 
 import javax.annotation.Nullable;
@@ -62,10 +62,11 @@ public final class CraftingResolver {
                 available,
                 buildPreferredRecipes(level));
 
+        EdgeTracker edges = new EdgeTracker();
         for (ItemStack stack : needed) {
             if (stack.isEmpty()) continue;
-            Ingredient ing = ingredientOf(stack);
-            if (!ensureIngredient(ing, stack.getCount(), ctx, 0)) {
+            Ingredient ing = ingredientOf(stack, stack.hasTag());
+            if (!ensureIngredient(ing, stack.getCount(), ctx, 0, edges)) {
                 if (missingOut != null) {
                     missingOut.add(describeItem(stack));
                 }
@@ -84,9 +85,10 @@ public final class CraftingResolver {
                 available,
                 buildPreferredRecipes(level));
 
+        EdgeTracker edges = new EdgeTracker();
         for (Ingredient ing : needed) {
             if (ing.isEmpty()) continue;
-            if (!ensureIngredient(ing, 1, ctx, 0)) {
+            if (!ensureIngredient(ing, 1, ctx, 0, edges)) {
                 if (missingOut != null) {
                     missingOut.add(describeFirstItem(ing));
                 }
@@ -107,9 +109,10 @@ public final class CraftingResolver {
                 available,
                 prefs);
 
+        EdgeTracker edges = new EdgeTracker();
         for (Ingredient ing : needed) {
             if (ing.isEmpty()) continue;
-            if (!ensureIngredient(ing, 1, ctx, 0)) {
+            if (!ensureIngredient(ing, 1, ctx, 0, edges)) {
                 if (missingOut != null) {
                     missingOut.add(describeFirstItem(ing));
                 }
@@ -132,9 +135,10 @@ public final class CraftingResolver {
                 player,
                 network);
 
+        EdgeTracker edges = new EdgeTracker();
         for (Ingredient ing : needed) {
             if (ing.isEmpty()) continue;
-            if (!ensureIngredient(ing, 1, ctx, 0)) {
+            if (!ensureIngredient(ing, 1, ctx, 0, edges)) {
                 if (missingOut != null) {
                     missingOut.add(describeFirstItem(ing));
                 }
@@ -162,24 +166,8 @@ public final class CraftingResolver {
             @Nullable INetwork network,
             @Nullable List<String> missingOut,
             @Nullable Map<ResourceLocation, ResourceLocation> forcedOverrides) {
-        Map<ResourceLocation, ResourceLocation> prefs = mergeForcedOverrides(level, forcedOverrides);
-        ResolutionContext ctx = new ResolutionContext(level,
-                RecipeIndex.get(level),
-                availableKeyed,
-                prefs,
-                player,
-                network,
-                false, null);
-
-        for (Ingredient ing : needed) {
-            if (ing.isEmpty()) continue;
-            if (!ensureIngredient(ing, 1, ctx, 0)) {
-                if (missingOut != null) {
-                    missingOut.add(describeFirstItem(ing));
-                }
-            }
-        }
-        return new ArrayList<>(ctx.steps);
+        return resolveStepsForIngredientsWithTypes(needed, availableKeyed, level,
+                player, network, missingOut, forcedOverrides, false);
     }
 
     public static List<ResolutionStep> resolveStepsForIngredientsWithTypes(
@@ -201,9 +189,10 @@ public final class CraftingResolver {
                 bestEffort,
                 missingOut);
 
+        EdgeTracker edges = new EdgeTracker();
         for (Ingredient ing : needed) {
             if (ing.isEmpty()) continue;
-            if (!ensureIngredient(ing, 1, ctx, 0)) {
+            if (!ensureIngredient(ing, 1, ctx, 0, edges)) {
                 if (missingOut != null) {
                     missingOut.add(describeFirstItem(ing));
                 }
@@ -220,12 +209,13 @@ public final class CraftingResolver {
             @Nullable INetwork network,
             @Nullable List<String> missingOut) {
         return resolveStepsForIngredientsWithTypes(
-                needed.stream().map(CraftingResolver::ingredientOf).collect(Collectors.toList()),
+                needed.stream().map(s -> ingredientOf(s, s.hasTag())).collect(Collectors.toList()),
                 available,
                 level, player, network, missingOut);
     }
 
-    static boolean ensureIngredient(Ingredient ingredient, int count, ResolutionContext ctx, int depth) {
+    static boolean ensureIngredient(Ingredient ingredient, int count, ResolutionContext ctx, int depth,
+                                     EdgeTracker edges) {
         if (count <= 0) return true;
         if (ctx.timedOut()) {
             com.huanghuang.rsintegration.command.PerformanceMonitor.recordResolveTimeout();
@@ -236,19 +226,20 @@ public final class CraftingResolver {
         int minReserve = com.huanghuang.rsintegration.config.RSIntegrationConfig.getProtectedReserve(ingredient, ctx.player);
 
         ctx.beginUndo();
-        // Only consume directly if we can maintain the reserve after consumption.
+        edges.beginUndo();
+
         boolean mayConsumeDirect = minReserve <= 0
                 || ctx.countMatching(ingredient) >= count + minReserve;
         if (mayConsumeDirect && ctx.consumeMatching(ingredient, count)) {
             ctx.commitUndo();
+            edges.commitUndo();
             return true;
         }
         ctx.rollback();
+        edges.rollback();
 
         int alreadyHave = ctx.countMatching(ingredient);
         int remaining = count - alreadyHave;
-        // For protected items, inflate remaining so we craft extra copies
-        // and keep at least minReserve after consumption.
         if (minReserve > 0) {
             remaining += minReserve;
         }
@@ -268,20 +259,24 @@ public final class CraftingResolver {
             return false;
         }
 
-        // Pre-filter: exclude candidates that can never work (empty output, non-positive net gain).
-        // Contextual checks (cycle, self-input) stay in the per-candidate loop.
         record AliveCandidate(RecipeIndex.Entry entry, ItemStack output, int netGain) {}
         List<AliveCandidate> alive = new ArrayList<>();
         for (RecipeIndex.Entry candidate : candidates) {
             ItemStack out = com.huanghuang.rsintegration.recipe.ModRecipeHandlers.tryGetResultItem(
                     candidate.recipe(), ctx.level.registryAccess());
+            // If the result is bare (no NBT), scan fields for the real
+            // NBT-carrying output — TACZ/Applied Armorer hide it there.
+            if (!out.isEmpty() && !out.hasTag()) {
+                ItemStack hidden = extractHiddenOutput(candidate.recipe());
+                if (!hidden.isEmpty()) {
+                    out = hidden;
+                }
+            }
             if (out.isEmpty() || out.getCount() <= 0) {
-                ctx.diag("ensureIngredient SKIP " + candidate.recipe().getId() + ": output empty");
                 continue;
             }
-            int ng = netGainPerBatch(candidate, out);
+            int ng = netGainPerBatch(candidate, out, ctx.level.registryAccess());
             if (ng <= 0) {
-                ctx.diag("ensureIngredient SKIP " + candidate.recipe().getId() + ": netGain=" + ng);
                 continue;
             }
             alive.add(new AliveCandidate(candidate, out, ng));
@@ -297,7 +292,6 @@ public final class CraftingResolver {
         }
 
         for (AliveCandidate a : alive) {
-            // Build alternatives: all other alive candidates
             List<ResourceLocation> altIds = new ArrayList<>();
             List<String> altModTypes = new ArrayList<>();
             for (AliveCandidate other : alive) {
@@ -306,7 +300,6 @@ public final class CraftingResolver {
                 altModTypes.add(other.entry.modType().id());
             }
 
-            // Contextual checks
             String bk = branchKey(a.entry.recipe().getId(), a.output);
             if (ctx.resolving.contains(bk)) {
                 ctx.diag("ensureIngredient SKIP " + a.entry.recipe().getId() + ": cycle detected");
@@ -318,31 +311,54 @@ public final class CraftingResolver {
                 continue;
             }
 
+            // Ping-pong guard using StackKey (Item + NBT) to correctly distinguish
+            // NBT-differentiated items like TACZ attachments (all tacz:attachment).
+            Set<StackKey> inKeys = getRecipeInputKeys(a.entry.recipe(), ctx.level.registryAccess());
+            StackKey outKey = StackKey.of(a.output, a.output.hasTag());
+            boolean isPingPong = false;
+            for (StackKey inKey : inKeys) {
+                if (edges.containsReverse(inKey, outKey)) {
+                    isPingPong = true;
+                    break;
+                }
+            }
+            if (isPingPong) {
+                ctx.diag("ensureIngredient SKIP " + a.entry.recipe().getId()
+                        + ": ping-pong conversion cycle detected");
+                continue;
+            }
+
             int batches = Math.max(1, (int) Math.ceil((double) remaining / a.netGain));
+
             ctx.beginUndo();
+            edges.beginUndo();
             ctx.resolving.add(bk);
 
-            boolean allOk = true;
-            for (int b = 0; b < batches && allOk; b++) {
-                allOk = StepExecutor.craftOnce(a.entry, ctx, depth, altIds, altModTypes);
+            for (StackKey inKey : inKeys) {
+                edges.addEdge(inKey, outKey);
             }
+
+            boolean allOk = StepExecutor.craftBatched(a.entry, ctx, depth, altIds, altModTypes, edges, batches);
 
             ctx.resolving.remove(bk);
 
             if (!allOk) {
                 ctx.diag("ensureIngredient SKIP " + a.entry.recipe().getId() + ": craftOnce failed");
                 ctx.rollback();
+                edges.rollback();
                 continue;
             }
 
             if (ctx.consumeMatching(ingredient, count)) {
                 ctx.diag("ensureIngredient OK " + a.entry.recipe().getId());
                 ctx.commitUndo();
+                edges.commitUndo();
                 return true;
             }
 
             ctx.diag("ensureIngredient SKIP " + a.entry.recipe().getId() + ": consumeMatching failed after craft");
             ctx.rollback();
+            edges.rollback();
         }
 
         ctx.diag("ensureIngredient FAILED: exhausted " + alive.size() + " viable candidates for "
@@ -354,19 +370,60 @@ public final class CraftingResolver {
         return false;
     }
 
+    private static Set<StackKey> getRecipeInputKeys(Recipe<?> recipe) {
+        return getRecipeInputKeys(recipe, null);
+    }
+
+    private static Set<StackKey> getRecipeInputKeys(Recipe<?> recipe,
+                                                     @Nullable net.minecraft.core.RegistryAccess access) {
+        Set<StackKey> inputs = new HashSet<>();
+        if (recipe instanceof CraftingRecipe cr) {
+            for (Ingredient ing : cr.getIngredients()) {
+                if (ing.isEmpty()) continue;
+                for (ItemStack stack : ing.getItems()) {
+                    if (!stack.isEmpty()) inputs.add(StackKey.of(stack, stack.hasTag()));
+                }
+            }
+            return inputs;
+        }
+        List<IngredientSpec> specs = CraftPacketUtils.extractIngredientSpecs(recipe);
+        if (specs != null && !isIngredientDataBroken(specs)) {
+            for (IngredientSpec spec : specs) {
+                if (spec.isEmpty()) continue;
+                for (ItemStack stack : spec.ingredient().getItems()) {
+                    if (!stack.isEmpty()) inputs.add(StackKey.of(stack, stack.hasTag()));
+                }
+            }
+            return inputs;
+        }
+        // Standard path returned broken data — extract real inputs via reflection.
+        if (access != null) {
+            List<ItemStack> repaired = getRepairedInputStacks(recipe, access);
+            for (ItemStack stack : repaired) {
+                inputs.add(StackKey.of(stack, stack.hasTag()));
+            }
+        }
+        return inputs;
+    }
+
     private static boolean requiresMissingSelfInput(RecipeIndex.Entry entry,
                                                     ItemStack output, ResolutionContext ctx) {
         if (entry.recipe() instanceof CraftingRecipe cr) {
             return requiresMissingSelfInput(cr, output, ctx);
         }
         List<IngredientSpec> specs = CraftPacketUtils.extractIngredientSpecs(entry.recipe());
+        if (isIngredientDataBroken(specs)) {
+            List<ItemStack> repaired = getRepairedInputStacks(entry.recipe(), ctx.level.registryAccess());
+            for (ItemStack stack : repaired) {
+                Ingredient ing = ingredientOf(stack, stack.hasTag());
+                if (ing.test(output) && ctx.countMatching(ing) <= 0) return true;
+            }
+            return false;
+        }
         if (specs == null || specs.isEmpty()) return false;
 
         for (IngredientSpec spec : specs) {
             if (spec.isEmpty()) continue;
-            // Block self-referencing recipes only when the player has none
-            // of the self-referenced item — if they already have some, the
-            // recipe can still be useful (e.g. 1 cherry + 1 acacia = 1 acacia).
             if (spec.ingredient().test(output) && ctx.countMatching(spec.ingredient()) <= 0)
                 return true;
         }
@@ -381,22 +438,13 @@ public final class CraftingResolver {
         return false;
     }
 
-    /**
-     * Net items gained per batch — output count minus how many ingredients
-     * match the output itself. For self-referencing recipes like
-     * "1 calx + 1 dust = 2 calx", net gain is 1, not 2.
-     */
-    private static int netGainPerBatch(RecipeIndex.Entry entry, ItemStack output) {
+    private static int netGainPerBatch(RecipeIndex.Entry entry, ItemStack output,
+                                        net.minecraft.core.RegistryAccess access) {
         if (entry.recipe() instanceof CraftingRecipe cr) {
             int selfConsumed = 0;
             for (Ingredient ing : cr.getIngredients()) {
                 if (ing.isEmpty()) continue;
                 ItemStack[] items = ing.getItems();
-                // Only single-item ingredients can be reliably flagged as
-                // self-consuming.  Using ing.test(output) on a tag ingredient
-                // like #logs produces false positives when the output happens
-                // to be a log (e.g. "any log -> oak_wood").  The resolver
-                // would then underestimate netGain and skip the recipe.
                 if (items.length == 1 && !items[0].isEmpty()
                         && ItemStack.isSameItemSameTags(items[0], output)) {
                     selfConsumed++;
@@ -405,6 +453,15 @@ public final class CraftingResolver {
             return output.getCount() - selfConsumed;
         }
         List<IngredientSpec> specs = CraftPacketUtils.extractIngredientSpecs(entry.recipe());
+        if (isIngredientDataBroken(specs)) {
+            int selfConsumed = 0;
+            List<ItemStack> repaired = getRepairedInputStacks(entry.recipe(), access);
+            for (ItemStack stack : repaired) {
+                Ingredient ing = ingredientOf(stack, stack.hasTag());
+                if (ing.test(output)) selfConsumed += stack.getCount();
+            }
+            return output.getCount() - selfConsumed;
+        }
         if (specs == null || specs.isEmpty()) return output.getCount();
         int selfConsumed = 0;
         for (IngredientSpec spec : specs) {
@@ -418,46 +475,8 @@ public final class CraftingResolver {
     private static String branchKey(ResourceLocation recipeId, ItemStack output) {
         ResourceLocation rl = ForgeRegistries.ITEMS.getKey(output.getItem());
         String itemKey = rl != null ? rl.toString() : "unreg:" + output.getItem().hashCode();
-        String nbt = stableNbtString(output.getTag());
+        String nbt = output.getTag() != null ? output.getTag().toString() : "";
         return recipeId + "|" + itemKey + "|" + nbt;
-    }
-
-    private static final int MAX_NBT_DEPTH = 32;
-
-    /** Produce a deterministic string from a CompoundTag, sorting keys at each level. */
-    private static String stableNbtString(@Nullable net.minecraft.nbt.CompoundTag tag) {
-        return stableNbtStringDepth(tag, 0);
-    }
-
-    private static String stableNbtStringDepth(@Nullable net.minecraft.nbt.CompoundTag tag, int depth) {
-        if (tag == null || tag.isEmpty()) return "";
-        if (depth > MAX_NBT_DEPTH) return "[too-deep]";
-        List<String> keys = new java.util.ArrayList<>(tag.getAllKeys());
-        java.util.Collections.sort(keys);
-        StringBuilder sb = new StringBuilder();
-        for (String key : keys) {
-            if (!sb.isEmpty()) sb.append(',');
-            sb.append(key).append('=');
-            net.minecraft.nbt.Tag val = tag.get(key);
-            if (val instanceof net.minecraft.nbt.CompoundTag child) {
-                sb.append('{').append(stableNbtStringDepth(child, depth + 1)).append('}');
-            } else {
-                sb.append(val);
-            }
-        }
-        return sb.toString();
-    }
-
-
-    private static ItemStack stackFromKey(StackKey key) {
-        ItemStack stack = new ItemStack(key.item());
-        if (key.tag() != null) {
-            try {
-                CompoundTag tag = TagParser.parseTag(key.tag());
-                stack.setTag(tag);
-            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] NBT parse failed: {}", e.toString()); }
-        }
-        return stack;
     }
 
     private static List<ItemStack> stacksFromCounts(Map<Item, Integer> counts) {
@@ -480,7 +499,7 @@ public final class CraftingResolver {
                 ItemStack stack = new ItemStack(key.item(), count);
                 if (key.tag() != null) {
                     try {
-                        stack.setTag(net.minecraft.nbt.TagParser.parseTag(key.tag()));
+                        stack.setTag(TagParser.parseTag(key.tag()));
                     } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] NBT parse failed: {}", e.toString()); }
                 }
                 list.add(stack);
@@ -534,12 +553,17 @@ public final class CraftingResolver {
     }
 
     private static String describeFirstItem(Ingredient ingredient) {
+        String base = null;
         for (ItemStack stack : ingredient.getItems()) {
             if (!stack.isEmpty()) {
-                return stack.getHoverName().getString();
+                base = stack.getHoverName().getString();
+                break;
             }
         }
-        return "???";
+        if (base == null) return "???";
+        String nbtHint = com.huanghuang.rsintegration.recipe.SlashBladeRecipeHandler
+                .describeNbtRequirements(ingredient);
+        return nbtHint != null ? base + nbtHint : base;
     }
 
     public record ResolutionStep(
@@ -554,21 +578,15 @@ public final class CraftingResolver {
             alternativeIds = List.copyOf(alternativeIds);
             alternativeModTypes = List.copyOf(alternativeModTypes);
         }
-
-        /** Backward-compatible constructor — no alternatives, no infer. */
         public ResolutionStep(ResourceLocation recipeId, ModType modType,
                               @Nullable ResourceLocation recipeTypeId) {
             this(recipeId, modType, recipeTypeId, List.of(), List.of(), false);
         }
-
-        /** Constructor with infer mode only (Embers Mode 1). */
         public ResolutionStep(ResourceLocation recipeId, ModType modType,
                               @Nullable ResourceLocation recipeTypeId,
                               boolean inferMode) {
             this(recipeId, modType, recipeTypeId, List.of(), List.of(), inferMode);
         }
-
-        /** Constructor with alternatives only. */
         public ResolutionStep(ResourceLocation recipeId, ModType modType,
                               @Nullable ResourceLocation recipeTypeId,
                               List<ResourceLocation> alternativeIds,
@@ -580,10 +598,107 @@ public final class CraftingResolver {
     public record TraceEntry(ResourceLocation recipeId, ModType modType, int score,
                               boolean skipped, String reason) {}
 
+    // ── Hidden NBT output extraction ──────────────────────────────────
+    //
+    // Some mods (TACZ, Applied Armorer) have getResultItem() return a bare
+    // item without NBT while the real crafted output (with AttachmentId etc.)
+    // lives in a private ItemStack field.  Scan every ItemStack field on
+    // the recipe class and return the first one that carries NBT — that is
+    // almost certainly the real output the mod author intended.
+
+    public static ItemStack extractHiddenOutput(Recipe<?> recipe) {
+        Class<?> clazz = recipe.getClass();
+        while (clazz != null && clazz != Object.class) {
+            for (java.lang.reflect.Field f : clazz.getDeclaredFields()) {
+                if (f.getType() != ItemStack.class) continue;
+                f.setAccessible(true);
+                try {
+                    ItemStack stack = (ItemStack) f.get(recipe);
+                    if (stack != null && !stack.isEmpty() && stack.hasTag()) {
+                        return stack.copy();
+                    }
+                } catch (Exception ignored) {}
+            }
+            clazz = clazz.getSuperclass();
+        }
+        return ItemStack.EMPTY;
+    }
+
+    // ── Broken ingredient repair ───────────────────────────────────
+    //
+    // Some mods (TACZ, Applied Armorer) implement getIngredients() by
+    // returning bare items without NBT or even AIR placeholders, while
+    // the real ingredient data lives in private fields.  When the
+    // standard extraction path produces garbage, these helpers detect
+    // it and fall back to reflection-based field scanning.
+
+    private static boolean isIngredientDataBroken(List<IngredientSpec> specs) {
+        if (specs == null || specs.isEmpty()) return true;
+        for (IngredientSpec spec : specs) {
+            if (spec.isEmpty()) continue;
+            for (ItemStack stack : spec.ingredient().getItems()) {
+                if (stack.isEmpty()) continue;
+                if (stack.getItem() == net.minecraft.world.item.Items.AIR) return true;
+                ResourceLocation rl = ForgeRegistries.ITEMS.getKey(stack.getItem());
+                if (rl != null && !stack.hasTag()) {
+                    String ns = rl.getNamespace();
+                    if ("tacz".equals(ns) || "applied_armorer".equals(ns)) return true;
+                }
+            }
+        }
+        return false;
+    }
+
     /**
-     * Produce a diagnostic trace of all candidate recipes considered for an
-     * ingredient, including skipped candidates and their skip reasons.
+     * Extract real ingredient stacks from a recipe whose standard
+     * {@code getIngredients()} / {@code extractIngredientSpecs()} path
+     * returned broken data.  Scans private {@code ItemStack} and
+     * {@code List<ItemStack>} fields, skipping fields that match the
+     * recipe output.
      */
+    public static List<ItemStack> getRepairedInputStacks(Recipe<?> recipe, net.minecraft.core.RegistryAccess access) {
+        ItemStack output = com.huanghuang.rsintegration.recipe.ModRecipeHandlers.tryGetResultItem(recipe, access);
+        if (output.isEmpty() || !output.hasTag()) {
+            output = extractHiddenOutput(recipe);
+        }
+
+        List<ItemStack> repaired = new ArrayList<>();
+        Class<?> clazz = recipe.getClass();
+
+        while (clazz != null && clazz != Object.class) {
+            for (java.lang.reflect.Field f : clazz.getDeclaredFields()) {
+                String name = f.getName().toLowerCase(java.util.Locale.ROOT);
+                if (name.contains("out") || name.contains("result")) continue;
+
+                f.setAccessible(true);
+                try {
+                    Object val = f.get(recipe);
+                    if (val instanceof ItemStack stack) {
+                        if (!stack.isEmpty() && stack.getItem() != net.minecraft.world.item.Items.AIR) {
+                            if (!ItemStack.isSameItemSameTags(stack, output)) {
+                                repaired.add(stack.copy());
+                            }
+                        }
+                    } else if (val instanceof List<?> list) {
+                        for (Object elem : list) {
+                            if (elem instanceof ItemStack stack) {
+                                if (!stack.isEmpty() && stack.getItem() != net.minecraft.world.item.Items.AIR) {
+                                    if (!ItemStack.isSameItemSameTags(stack, output)) {
+                                        repaired.add(stack.copy());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } catch (Exception ignored) {}
+            }
+            clazz = clazz.getSuperclass();
+        }
+        return repaired;
+    }
+
+    // ── Trace ──────────────────────────────────────────────────────
+
     public static List<TraceEntry> traceCandidates(Ingredient ingredient,
                                                     Level level,
                                                     @Nullable ServerPlayer player) {
@@ -605,12 +720,14 @@ public final class CraftingResolver {
         return out;
     }
 
-    /**
-     * Creates an NBT-agnostic Ingredient from an ItemStack.
-     * Strips NBT to avoid {@code StrictNBTIngredient} which would fail to match
-     * recipe outputs that carry different NBT than the requested item.
-     */
     static Ingredient ingredientOf(ItemStack stack) {
+        return ingredientOf(stack, false);
+    }
+
+    static Ingredient ingredientOf(ItemStack stack, boolean strictNbt) {
+        if (strictNbt && stack.hasTag()) {
+            return StrictNBTIngredient.of(stack.copy());
+        }
         if (stack.hasTag()) {
             return Ingredient.of(new ItemStack(stack.getItem()));
         }
@@ -622,7 +739,7 @@ public final class CraftingResolver {
             Item item = stack.getItem();
             String tag = null;
             if (includeNbt && stack.getTag() != null && !stack.getTag().isEmpty()) {
-                tag = stableNbtString(stack.getTag());
+                tag = stack.getTag().toString();
             }
             return new StackKey(item, tag);
         }
@@ -635,6 +752,59 @@ public final class CraftingResolver {
                 } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] NBT parse failed: {}", e.toString()); }
             }
             return stack;
+        }
+    }
+
+    /** Tracks directed conversion edges (StackKey → StackKey) with transactional undo/redo.
+     *  Using StackKey (Item + NBT) instead of plain Item prevents false ping-pong
+     *  detection for NBT-differentiated items like TACZ attachments. */
+    public static class EdgeTracker {
+        private final Set<String> activeEdges = new HashSet<>();
+        private final List<List<String>> history = new ArrayList<>();
+
+        public void beginUndo() {
+            history.add(new ArrayList<>());
+        }
+
+        public void commitUndo() {
+            if (history.size() > 1) {
+                List<String> current = history.remove(history.size() - 1);
+                history.get(history.size() - 1).addAll(current);
+            } else if (history.size() == 1) {
+                history.remove(0);
+            }
+        }
+
+        public void rollback() {
+            if (!history.isEmpty()) {
+                List<String> current = history.remove(history.size() - 1);
+                activeEdges.removeAll(current);
+            }
+        }
+
+        public void addEdge(StackKey in, StackKey out) {
+            ResourceLocation inRl = ForgeRegistries.ITEMS.getKey(in.item());
+            ResourceLocation outRl = ForgeRegistries.ITEMS.getKey(out.item());
+            if (inRl == null || outRl == null) return;
+
+            String inStr = inRl + (in.tag() != null ? "|" + in.tag() : "");
+            String outStr = outRl + (out.tag() != null ? "|" + out.tag() : "");
+
+            String edge = inStr + "->" + outStr;
+            if (activeEdges.add(edge) && !history.isEmpty()) {
+                history.get(history.size() - 1).add(edge);
+            }
+        }
+
+        public boolean containsReverse(StackKey in, StackKey out) {
+            ResourceLocation inRl = ForgeRegistries.ITEMS.getKey(in.item());
+            ResourceLocation outRl = ForgeRegistries.ITEMS.getKey(out.item());
+            if (inRl == null || outRl == null) return false;
+
+            String inStr = inRl + (in.tag() != null ? "|" + in.tag() : "");
+            String outStr = outRl + (out.tag() != null ? "|" + out.tag() : "");
+
+            return activeEdges.contains(outStr + "->" + inStr);
         }
     }
 }

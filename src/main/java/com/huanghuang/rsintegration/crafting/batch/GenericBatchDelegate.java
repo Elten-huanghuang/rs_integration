@@ -111,24 +111,39 @@ public final class GenericBatchDelegate implements IBatchDelegate {
     }
 
     private ItemStack computeResult(ServerPlayer player) {
-        try {
-            Object result = recipe.getClass().getMethod("getResultItem",
-                    net.minecraft.core.RegistryAccess.class)
-                    .invoke(recipe, player.serverLevel().registryAccess());
-            if (result instanceof ItemStack stack && !stack.isEmpty()) {
-                return stack.copy();
-            }
-        } catch (Exception e) {
-            try {
-                Object result = recipe.getClass().getMethod("getResultItem").invoke(recipe);
-                if (result instanceof ItemStack stack && !stack.isEmpty()) {
-                    return stack.copy();
-                }
-            } catch (Exception ex) {
-                RSIntegrationMod.LOGGER.error("[RSI-Batch-Generic] Failed to get result for recipe {}", recipe.getId(), ex);
-            }
+        return com.huanghuang.rsintegration.crafting.RecipeIndex
+                .tryGetResultItem(recipe, player.serverLevel().registryAccess()).copy();
+    }
+
+    // ── shared-ledger path for AsyncCraftChain ───────────────────────
+
+    @Override
+    @Nullable
+    public List<IngredientSpec> getRequiredMaterials() {
+        return CraftPacketUtils.extractIngredientSpecs(recipe);
+    }
+
+    @Override
+    public boolean tryStartWithMaterials(ServerPlayer player,
+                                         List<ItemStack> materials,
+                                         ExtractionLedger sharedLedger) {
+        this.player = player;
+        this.ledger = sharedLedger;
+        this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+        this.craftDone = false;
+
+        this.pendingResult = computeResult(player);
+        if (this.pendingResult.isEmpty()) {
+            RSIntegrationMod.LOGGER.error("[RSI-Batch-Generic] Cannot determine result for recipe {}",
+                    recipe != null ? recipe.getId() : "null");
+            return false;
         }
-        return ItemStack.EMPTY;
+
+        // Materials were already reserved and committed by the chain's
+        // preReserveStepMaterials flow — just mark as done so the chain
+        // collects the result via collectResult().
+        this.craftDone = true;
+        return true;
     }
 
     @Override
@@ -174,7 +189,7 @@ public final class GenericBatchDelegate implements IBatchDelegate {
             if (craftDone && !pendingResult.isEmpty() && network != null) {
                 var leftover = network.insertItem(pendingResult.copy(),
                         pendingResult.getCount(), com.refinedmods.refinedstorage.api.util.Action.PERFORM);
-                if (!leftover.isEmpty() && player != null) {
+                if (!leftover.isEmpty() && player != null && !player.hasDisconnected() && !player.isRemoved()) {
                     ItemHandlerHelper.giveItemToPlayer(player, leftover);
                 }
                 RSIntegrationMod.LOGGER.warn("[RSI-Batch-Generic] Recovery: inserted result {}x{} after commit failure",

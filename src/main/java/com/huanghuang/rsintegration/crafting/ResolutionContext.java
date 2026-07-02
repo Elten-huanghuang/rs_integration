@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.recipe.SlashBladeRecipeHandler;
 import com.huanghuang.rsintegration.util.Diagnostics;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.resources.ResourceLocation;
@@ -141,7 +142,9 @@ final class ResolutionContext {
         for (var entry : counts.entrySet()) {
             if (entry.getValue() > 0) {
                 ItemStack stack = entry.getKey().toStack();
-                if (ingredient.test(stack)) total += entry.getValue();
+                if (ingredient.test(stack) || SlashBladeRecipeHandler.matchesStackKey(ingredient, entry.getKey())) {
+                    total += entry.getValue();
+                }
             }
         }
         return total;
@@ -157,7 +160,7 @@ final class ResolutionContext {
             if (remaining <= 0) return true;
             int available = counts.getOrDefault(key, 0);
             if (available <= 0) continue;
-            if (!ingredient.test(key.toStack())) continue;
+            if (!ingredient.test(key.toStack()) && !SlashBladeRecipeHandler.matchesStackKey(ingredient, key)) continue;
             int take = Math.min(available, remaining);
             decrement(key, take);
             remaining -= take;

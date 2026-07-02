@@ -62,10 +62,10 @@ public final class PerformanceMonitor {
 
     /** Snapshot for debug commands / logs. */
     public static String snapshot() {
-        return String.format(
-            "PerformanceMonitor: ticks=%d avg=%dμs max=%dμs timeout=%d chains=%d",
-            getTickCount(), getAvgTickMicros(), getMaxTickMicros(),
-            getResolveTimeouts(), getActiveChainCount()
-        );
+        return "PerformanceMonitor: ticks=" + getTickCount()
+             + " avg=" + getAvgTickMicros() + "μs"
+             + " max=" + getMaxTickMicros() + "μs"
+             + " timeout=" + getResolveTimeouts()
+             + " chains=" + getActiveChainCount();
     }
 }

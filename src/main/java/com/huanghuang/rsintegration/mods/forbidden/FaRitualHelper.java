@@ -20,8 +20,10 @@ import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Shared reflection helpers for FA (Forbidden &amp; Arcanus) Hephaestus Forge rituals.
@@ -49,6 +51,8 @@ public final class FaRitualHelper {
     static Class<?> essenceModifierClass;
 
     private static volatile ResourceKey<?> cachedFaRitualKey;
+    /** Built once from the FA ritual registry — O(1) lookups thereafter. */
+    private static volatile Map<ResourceLocation, Object> cachedRitualMap;
 
     static void ensureClasses() {
         if (!com.huanghuang.rsintegration.util.ModClassLoader.ensureClasses("forbidden_arcanus",
@@ -121,14 +125,32 @@ public final class FaRitualHelper {
     }
 
     @Nullable
-    static Object getRitualById(ResourceLocation id, ServerLevel level) {
+    public static Object getRitualById(ResourceLocation id, ServerLevel level) {
         ensureClasses();
         ResourceKey<?> key = getFARegistryKey();
         if (key == null) return null;
         try {
             net.minecraft.core.Registry<?> registry = level.registryAccess().registryOrThrow(
                     (ResourceKey<? extends net.minecraft.core.Registry<?>>) (Object) key);
-            return registry.get(id);
+
+            // Build the cache once — entrySet() iteration is O(N) and this is
+            // on the recipe-resolution hot path.  After the first call every
+            // lookup is an O(1) HashMap.get().
+            Map<ResourceLocation, Object> map = cachedRitualMap;
+            if (map == null) {
+                synchronized (FaRitualHelper.class) {
+                    map = cachedRitualMap;
+                    if (map == null) {
+                        map = new ConcurrentHashMap<>();
+                        for (var entry : registry.entrySet()) {
+                            map.put(entry.getKey().location(), entry.getValue());
+                        }
+                        cachedRitualMap = map;
+                    }
+                }
+            }
+
+            return map.get(id);
         } catch (Exception e) {
             return null;
         }

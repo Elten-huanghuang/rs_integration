@@ -212,10 +212,9 @@ public final class CraftingPlanScreen extends Screen {
         int btnY = height - 24;
 
         // "Open Machine" button — only when a bound machine position is known
-        // AND the mod type is in the config whitelist (machines that actually have GUIs)
+        // AND the execution machine actually supports remote GUI.
         boolean hasMachineGui = plan.executionModTypeId() != null
-                && com.huanghuang.rsintegration.config.RSIntegrationConfig.MACHINE_GUI_WHITELIST.get()
-                        .contains(plan.executionModTypeId());
+                && plan.executionMachineSupportsGui();
         if (plan.executionDim() != null && !plan.executionDim().isEmpty() && hasMachineGui) {
             int openBtnW = 90;
             addRenderableWidget(Button.builder(

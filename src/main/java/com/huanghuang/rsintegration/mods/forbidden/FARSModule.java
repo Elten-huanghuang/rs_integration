@@ -39,11 +39,12 @@ public final class FaRSModule implements IModIntegration {
 
     @Override
     public void registerBindingTargets() {
+        // Hephaestus Forge: essence status panel only, no item I/O container GUI. All materials placed in-world.
         BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
                 "forbidden_arcanus", ModType.byId("forbidden_arcanus"),
                 RSIntegrationConfig.ENABLE_FORBIDDEN_ARCANUS, List.of(
                 "com.stal111.forbidden_arcanus.common.block.HephaestusForgeBlock"
-        ), "forbidden_arcanus"));
+        ), "forbidden_arcanus", false));
     }
 
     @Override

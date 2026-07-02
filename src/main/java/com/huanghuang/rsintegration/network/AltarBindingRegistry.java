@@ -14,6 +14,8 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.level.Level;
+import net.minecraftforge.event.server.ServerStoppedEvent;
+import net.minecraftforge.eventbus.api.SubscribeEvent;
 
 import javax.annotation.Nullable;
 import java.util.*;
@@ -36,6 +38,20 @@ public final class AltarBindingRegistry {
 
     private static final Map<GlobalPos, List<AltarBinding>> BINDINGS = new ConcurrentHashMap<>();
     private static final Map<ResourceLocation, IBindingHook> HOOKS = new ConcurrentHashMap<>();
+
+    // Per-player tick-scoped cache for hasAnyBindingForType.  During recipe
+    // resolution the same inventory is probed repeatedly for different ModTypes;
+    // building the full set once per tick avoids redundant NBT scans of 41+ slots.
+    private static final Map<UUID, TickCache> SCAN_CACHE = new ConcurrentHashMap<>();
+
+    private static class TickCache {
+        final long tick;
+        final Set<String> modTypeIds;
+        TickCache(long tick, Set<String> modTypeIds) {
+            this.tick = tick;
+            this.modTypeIds = modTypeIds;
+        }
+    }
 
     private AltarBindingRegistry() {}
 
@@ -175,8 +191,9 @@ public final class AltarBindingRegistry {
             level = server.getLevel(dim);
             if (level == null) return true;
         }
-        if (!com.huanghuang.rsintegration.util.ChunkUtils.loadChunk(level, pos))
-            return true; // chunk load failed, don't invalidate
+        // Never force-load a chunk during a freshness probe — if the chunk
+        // is asleep no-one can have broken the machine, so remain optimistic.
+        if (!level.isLoaded(pos)) return true;
         net.minecraft.world.level.block.entity.BlockEntity be = level.getBlockEntity(pos);
         if (be == null) return false;
         String currentId = be.getBlockState().getBlock().getDescriptionId();
@@ -389,7 +406,8 @@ public final class AltarBindingRegistry {
 
     // ── multi-block machine query ───────────────────────────────
 
-    public record BoundMachine(ResourceLocation dim, BlockPos pos, ModType type) {}
+    public record BoundMachine(ResourceLocation dim, BlockPos pos, ModType type,
+                                @javax.annotation.Nullable String blockKey) {}
 
     /**
      * Check whether the player has a bound machine compatible with the given
@@ -457,47 +475,123 @@ public final class AltarBindingRegistry {
 
     /**
      * Check whether the player has at least one binding to a machine of the
-     * given mod type. Scans main inventory, offhand, armor, and Curios slots.
+     * given mod type.  Uses a per-player tick-scoped cache so that repeated
+     * probes during recipe resolution only scan the full inventory once.
      */
     public static boolean hasAnyBindingForType(ServerPlayer player, ModType type) {
         if (type == ModType.GENERIC) return true;
-        RSIntegrationMod.LOGGER.debug(
-                "[RSI-DIAG] hasAnyBindingForType called: type={}, player={}",
-                type.id(), player.getName().getString());
+
+        long tick = player.level().getGameTime();
+        UUID pid = player.getUUID();
+        TickCache cache = SCAN_CACHE.get(pid);
+        if (cache != null && cache.tick == tick) {
+            boolean result = cache.modTypeIds.contains(type.id());
+            RSIntegrationMod.LOGGER.debug("[RSI-DIAG] hasAnyBindingForType (cached): type={} → {}",
+                    type.id(), result);
+            return result;
+        }
+
+        // Build the full set of ModType IDs this player has bindings for.
+        Set<String> found = new HashSet<>();
         var inv = player.getInventory();
-        if (scanBindingsForType(inv.items, player, type)) {
-            RSIntegrationMod.LOGGER.debug(
-                    "[RSI-DIAG] hasAnyBindingForType → TRUE (main inventory)");
-            return true;
-        }
-        if (scanBindingsForType(inv.offhand, player, type)) {
-            RSIntegrationMod.LOGGER.debug(
-                    "[RSI-DIAG] hasAnyBindingForType → TRUE (offhand)");
-            return true;
-        }
-        if (scanBindingsForType(inv.armor, player, type)) {
-            RSIntegrationMod.LOGGER.debug(
-                    "[RSI-DIAG] hasAnyBindingForType → TRUE (armor)");
-            return true;
-        }
+        collectBoundTypeIds(inv.items, player, found);
+        collectBoundTypeIds(inv.offhand, player, found);
+        collectBoundTypeIds(inv.armor, player, found);
         try {
             var opt = top.theillusivec4.curios.api.CuriosApi.getCuriosInventory(player).resolve();
             if (opt.isPresent()) {
                 for (var handler : opt.get().getCurios().values()) {
                     var stacks = handler.getStacks();
                     for (int s = 0; s < stacks.getSlots(); s++) {
-                        if (scanBindingsForType(List.of(stacks.getStackInSlot(s)), player, type)) {
-                            RSIntegrationMod.LOGGER.debug(
-                                    "[RSI-DIAG] hasAnyBindingForType → TRUE (curios slot {})", s);
-                            return true;
-                        }
+                        collectBoundTypeIds(List.of(stacks.getStackInSlot(s)), player, found);
                     }
                 }
             }
         } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
-        RSIntegrationMod.LOGGER.debug(
-                "[RSI-DIAG] hasAnyBindingForType → FALSE for type={}", type.id());
-        return false;
+
+        SCAN_CACHE.put(pid, new TickCache(tick, found));
+        boolean result = found.contains(type.id());
+        RSIntegrationMod.LOGGER.debug("[RSI-DIAG] hasAnyBindingForType (fresh scan): type={} player={} → {} types={}",
+                type.id(), player.getName().getString(), result, found);
+        return result;
+    }
+
+    /** Collect all ModType IDs that this stack list has fresh bindings for. */
+    private static void collectBoundTypeIds(List<ItemStack> stacks, ServerPlayer player,
+                                            Set<String> out) {
+        for (ItemStack stack : stacks) {
+            if (stack.isEmpty()) continue;
+            for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
+                ModType entryType = ModType.fromBlockKey(entry.blockKey());
+                if (entryType == null) continue;
+                ResourceKey<Level> altarDim = ResourceKey.create(
+                        net.minecraft.core.registries.Registries.DIMENSION, entry.dim());
+                ServerLevel entryLevel = player.server.getLevel(altarDim);
+                if (!isBindingFresh(entryLevel, altarDim, entry.pos(), entry.blockKey())) continue;
+                INetwork net = resolveNetworkForAltar(player, altarDim, entry.pos());
+                if (net != null) {
+                    out.add(entryType.id());
+                }
+            }
+        }
+    }
+
+    // ── event handlers ──────────────────────────────────────────
+
+    @SubscribeEvent
+    public static void onServerStopped(ServerStoppedEvent event) {
+        BINDINGS.clear();
+        SCAN_CACHE.clear();
+    }
+
+    @SubscribeEvent
+    public static void onBlockBreak(net.minecraftforge.event.level.BlockEvent.BreakEvent event) {
+        if (!com.huanghuang.rsintegration.config.RSIntegrationConfig.ENABLE_BINDING.get()) return;
+        if (!(event.getLevel() instanceof Level level)) return;
+        ResourceKey<Level> dim = level.dimension();
+        BlockPos pos = event.getPos();
+        if (!isBound(dim, pos)) return;
+
+        unbindAll(dim, pos);
+        SCAN_CACHE.clear();
+        RSIntegrationMod.LOGGER.debug("[RSI-Bind] Auto-cleaned binding at dim={} pos={} (block broken)",
+                dim.location(), pos);
+
+        // Clean up all online players' NBT and sync their side panels.
+        // Only cleaning the breaker would leave stale bindings on other
+        // players' items and out-of-date MachineHub tabs on their clients.
+        net.minecraft.server.MinecraftServer server = level.getServer();
+        if (server != null) {
+            for (ServerPlayer p : server.getPlayerList().getPlayers()) {
+                cleanupPlayerNBT(p, dim.location(), pos);
+                com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler.sendBindingSync(p);
+            }
+        }
+    }
+
+    private static void cleanupPlayerNBT(ServerPlayer player, ResourceLocation dim, BlockPos pos) {
+        var inv = player.getInventory();
+        for (ItemStack stack : inv.items) cleanupBindingEntry(stack, dim, pos);
+        for (ItemStack stack : inv.offhand) cleanupBindingEntry(stack, dim, pos);
+        for (ItemStack stack : inv.armor) cleanupBindingEntry(stack, dim, pos);
+        try {
+            var opt = top.theillusivec4.curios.api.CuriosApi.getCuriosInventory(player).resolve();
+            if (opt.isPresent()) {
+                for (var handler : opt.get().getCurios().values()) {
+                    for (int s = 0; s < handler.getStacks().getSlots(); s++) {
+                        cleanupBindingEntry(handler.getStacks().getStackInSlot(s), dim, pos);
+                    }
+                }
+            }
+        } catch (Exception e) { /* curios not present */ }
+    }
+
+    private static void cleanupBindingEntry(ItemStack stack, ResourceLocation dim, BlockPos pos) {
+        if (stack.isEmpty()) return;
+        if (BindingStorage.hasBinding(stack, dim, pos)) {
+            BindingStorage.removeBinding(stack, dim, pos);
+            RSIntegrationMod.LOGGER.debug("[RSI-Bind] Removed stale NBT binding: dim={} pos={}", dim, pos);
+        }
     }
 
     /**
@@ -583,7 +677,7 @@ public final class AltarBindingRegistry {
                         net.minecraft.core.registries.Registries.DIMENSION, entry.dim());
                 ServerLevel entryLevel = player.server.getLevel(altarDim);
                 if (!isBindingFresh(entryLevel, altarDim, entry.pos(), entry.blockKey())) continue;
-                out.add(new BoundMachine(entry.dim(), entry.pos(), type));
+                out.add(new BoundMachine(entry.dim(), entry.pos(), type, entry.blockKey()));
             }
         }
     }
@@ -625,7 +719,25 @@ public final class AltarBindingRegistry {
         if (ModType.byId("aetherworks_anvil") == type && "aetherium_anvil".equals(hint)) {
             return "forge_anvil";
         }
+        // TACZ gun smith table handles all recipe types (gun/ammo/attachments).
+        // Sub-type filtering would reject ammo & attachment recipes since the
+        // blockKey "tacz||block.tacz.workbench_a" doesn't contain those prefixes.
+        if (ModIds.TACZ.equals(type.id())) {
+            return null;
+        }
         if (ModIds.GOETY.equals(type.id())) {
+            return null;
+        }
+        // CrockPot recipe IDs use "crock_pot_cooking" as the path prefix,
+        // but the block registry key is "crockpot:crock_pot".  There's only
+        // one machine type so sub-type filtering is unnecessary.
+        if (ModIds.CROCKPOT.equals(type.id())) {
+            return null;
+        }
+        // Aether recipe path prefixes (freezing/incubating/enchanting) don't
+        // match block keys (freezer/incubator/altar).  Sub-type filtering
+        // is handled by validateAndInit() in AetherFurnaceBatchDelegate.
+        if (ModIds.AETHER.equals(type.id())) {
             return null;
         }
         return hint;

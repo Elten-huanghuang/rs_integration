@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.sidepanel.network;
 
+import com.huanghuang.rsintegration.api.ISmithingRecipeAccessor;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.network.AltarBindingRegistry;
 import com.huanghuang.rsintegration.network.BlockGuiRegistry;
@@ -23,6 +24,7 @@ import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.inventory.SmithingMenu;
+import net.minecraftforge.registries.ForgeRegistries;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -101,7 +103,7 @@ public final class OpenBoundMachineGuiPacket {
             PlayerInteractEvent.RightClickBlock event = new PlayerInteractEvent.RightClickBlock(
                     player, InteractionHand.MAIN_HAND, packet.pos,
                     new BlockHitResult(new Vec3(packet.pos.getX() + 0.5,
-                            packet.pos.getY() + 0.5, packet.pos.getZ() + 0.5),
+                            packet.pos.getY() + 1.0, packet.pos.getZ() + 0.5),
                             Direction.UP, packet.pos, false));
             MinecraftForge.EVENT_BUS.post(event);
             if (event.isCanceled()) {
@@ -121,7 +123,7 @@ public final class OpenBoundMachineGuiPacket {
                 if (be instanceof AbstractFurnaceBlockEntity) {
                     isFurnace = true;
                 } else if (be == null) {
-                    String blockId = net.minecraft.core.registries.BuiltInRegistries.BLOCK
+                    String blockId = ForgeRegistries.BLOCKS
                             .getKey(level.getBlockState(packet.pos).getBlock()).toString();
                     isStonecutter = blockId.contains("stonecutter");
                     isSmithing = blockId.contains("smithing_table");
@@ -145,7 +147,7 @@ public final class OpenBoundMachineGuiPacket {
                 if (isStonecutter) {
                     prefillStonecutterMenu(player, level, packet.recipeId);
                 } else if (isSmithing) {
-                    prefillSmithingMenu(player, level, packet.recipeId);
+                    prefillSmithingTable(player, level, packet.recipeId);
                 }
             }
 
@@ -336,7 +338,7 @@ public final class OpenBoundMachineGuiPacket {
     }
 
     /** Fill smithing table: template (slot 0), base (slot 1), addition (slot 2) from RS. */
-    private static void prefillSmithingMenu(ServerPlayer player, ServerLevel level,
+    public static void prefillSmithingTable(ServerPlayer player, ServerLevel level,
                                              ResourceLocation recipeId) {
         RSIntegrationMod.LOGGER.debug("[RSI-Prefill] Smithing start: recipe={} menu={}",
                 recipeId, player.containerMenu != null ? player.containerMenu.getClass().getSimpleName() : "null");
@@ -348,6 +350,12 @@ public final class OpenBoundMachineGuiPacket {
         }
 
         Recipe<?> recipe = level.getRecipeManager().byKey(recipeId).orElse(null);
+        // FA ApplyModifierRecipe lives under smithing/ subdirectory
+        if (recipe == null && "forbidden_arcanus".equals(recipeId.getNamespace())) {
+            recipe = level.getRecipeManager().byKey(
+                    new ResourceLocation(recipeId.getNamespace(),
+                            "smithing/" + recipeId.getPath())).orElse(null);
+        }
         if (recipe == null) {
             RSIntegrationMod.LOGGER.warn("[RSI-Prefill] Recipe not found: {}", recipeId);
             return;
@@ -355,6 +363,13 @@ public final class OpenBoundMachineGuiPacket {
 
         INetwork network = RSIntegration.resolveNetworkFromPlayer(player);
         if (network == null) return;
+
+        // FA ApplyModifierRecipe: only template (slot 0) and addition (slot 2).
+        // Slot 1 (base) is left empty for the player to insert their own item.
+        if (recipe.getClass().getSimpleName().equals("ApplyModifierRecipe")) {
+            prefillFaApplyModifier(player, recipe, network, menu);
+            return;
+        }
 
         List<Ingredient> ingredients = recipe.getIngredients();
         RSIntegrationMod.LOGGER.debug("[RSI-Prefill] Smithing ingredients count={}", ingredients.size());
@@ -402,38 +417,83 @@ public final class OpenBoundMachineGuiPacket {
         }
     }
 
+    /** Fill only template (slot 0) and addition (slot 2) for FA ApplyModifierRecipe. */
+    private static void prefillFaApplyModifier(ServerPlayer player, Recipe<?> recipe,
+                                                INetwork network, SmithingMenu menu) {
+        try {
+            java.lang.reflect.Method getTemplate = recipe.getClass().getMethod("getTemplate");
+            java.lang.reflect.Method getAddition = recipe.getClass().getMethod("getAddition");
+            Ingredient template = (Ingredient) getTemplate.invoke(recipe);
+            Ingredient addition = (Ingredient) getAddition.invoke(recipe);
+
+            int filled = 0;
+            // Slot 0: template
+            if (!template.isEmpty()) {
+                ItemStack existing = menu.getSlot(0).getItem();
+                if (existing.isEmpty()) {
+                    ItemStack extracted = extractIngredientFromRS(network, template, 1);
+                    if (!extracted.isEmpty()) {
+                        menu.getSlot(0).set(extracted.copy());
+                        filled++;
+                    }
+                }
+            }
+            // Slot 2: addition
+            if (!addition.isEmpty()) {
+                ItemStack existing = menu.getSlot(2).getItem();
+                if (existing.isEmpty()) {
+                    ItemStack extracted = extractIngredientFromRS(network, addition, 1);
+                    if (!extracted.isEmpty()) {
+                        menu.getSlot(2).set(extracted.copy());
+                        filled++;
+                    }
+                }
+            }
+
+            if (filled > 0) {
+                menu.broadcastChanges();
+                player.displayClientMessage(
+                        Component.translatable("rsi.vanilla.info.smithing_filled", filled), true);
+            }
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Prefill] FA smithing prefill failed: {}", e.toString());
+        }
+    }
+
     /** Extract up to {@code count} of an ingredient from RS. */
     private static ItemStack extractIngredientFromRS(INetwork network, Ingredient ingredient, int count) {
         var stacks = network.getItemStorageCache().getList().getStacks();
+        ItemStack result = ItemStack.EMPTY;
+        int remaining = count;
         for (var entry : stacks) {
+            if (remaining <= 0) break;
             ItemStack stack = entry.getStack();
             if (stack.isEmpty()) continue;
             if (ingredient.test(stack)) {
-                int toExtract = Math.min(count, stack.getCount());
+                int toExtract = Math.min(remaining, stack.getCount());
                 ItemStack extracted = network.extractItem(
                         stack.copyWithCount(1), toExtract, Action.PERFORM);
-                if (!extracted.isEmpty()) return extracted;
-            }
-        }
-        return ItemStack.EMPTY;
-    }
-
-    /** Extract template/base/addition from SmithingRecipe subclasses via reflection,
-     *  since SmithingRecipe (1.20.1) does not override getIngredients(). */
-    private static List<Ingredient> extractSmithingIngredients(Recipe<?> recipe) {
-        List<Ingredient> result = new ArrayList<>();
-        Class<?> clazz = recipe.getClass();
-        while (clazz != null && clazz != Object.class) {
-            for (java.lang.reflect.Field f : clazz.getDeclaredFields()) {
-                if (f.getType() == Ingredient.class) {
-                    f.setAccessible(true);
-                    try {
-                        Ingredient ing = (Ingredient) f.get(recipe);
-                        if (ing != null && !ing.isEmpty()) result.add(ing);
-                    } catch (Exception ignored) {}
+                if (!extracted.isEmpty()) {
+                    if (result.isEmpty()) {
+                        result = extracted;
+                    } else {
+                        result.grow(extracted.getCount());
+                    }
+                    remaining -= extracted.getCount();
                 }
             }
-            clazz = clazz.getSuperclass();
+        }
+        return result;
+    }
+
+    /** Extract template/base/addition from SmithingRecipe subclasses via accessors.
+     *  Slot order is guaranteed: [0]=template, [1]=base, [2]=addition. */
+    private static List<Ingredient> extractSmithingIngredients(Recipe<?> recipe) {
+        List<Ingredient> result = new ArrayList<>(3);
+        if (recipe instanceof ISmithingRecipeAccessor acc) {
+            result.add(acc.rsi$getTemplate());
+            result.add(acc.rsi$getBase());
+            result.add(acc.rsi$getAddition());
         }
         return result;
     }

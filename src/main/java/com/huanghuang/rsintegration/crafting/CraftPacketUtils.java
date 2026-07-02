@@ -8,6 +8,7 @@ import com.huanghuang.rsintegration.network.BindingStorage;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.ResolutionStep;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.network.RSIntegration;
+import com.huanghuang.rsintegration.util.PlayerUtils;
 import com.huanghuang.rsintegration.util.Reflect;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
@@ -18,9 +19,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.SimpleContainer;
-import net.minecraft.world.entity.player.StackedContents;
-import net.minecraft.world.inventory.CraftingContainer;
+import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.CraftingRecipe;
@@ -28,7 +27,6 @@ import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.crafting.RecipeManager;
 import net.minecraft.world.level.Level;
-import net.minecraftforge.items.ItemHandlerHelper;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
@@ -74,6 +72,25 @@ public final class CraftPacketUtils {
         return Component.literal("Unknown Item");
     }
 
+    /** Merge duplicate item names with counts: "大地精魂, 大地精魂, 大地精魂" → "大地精魂 x3". */
+    public static String formatMissingSummary(List<String> missing) {
+        java.util.LinkedHashMap<String, Integer> counts = new java.util.LinkedHashMap<>();
+        for (String name : missing) {
+            counts.merge(name, 1, Integer::sum);
+        }
+        StringBuilder sb = new StringBuilder();
+        boolean first = true;
+        for (java.util.Map.Entry<String, Integer> entry : counts.entrySet()) {
+            if (!first) sb.append(", ");
+            first = false;
+            sb.append(entry.getKey());
+            if (entry.getValue() > 1) {
+                sb.append(" x").append(entry.getValue());
+            }
+        }
+        return sb.toString();
+    }
+
     /**
      * Execute crafting steps using virtual inventory forward-feeding.
      *
@@ -106,15 +123,19 @@ public final class CraftPacketUtils {
                     virtualInventory.stream().map(s -> net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(s.getItem()) + "x" + s.getCount()).toList());
 
             if (recipe instanceof CraftingRecipe craftingRecipe) {
-                for (Ingredient ing : craftingRecipe.getIngredients()) {
+                List<Ingredient> ingredients = craftingRecipe.getIngredients();
+                ItemStack[] consumed = new ItemStack[ingredients.size()];
+                for (int idx = 0; idx < ingredients.size(); idx++) {
+                    Ingredient ing = ingredients.get(idx);
                     if (ing.isEmpty()) continue;
 
                     int stillNeeded = 1;
                     var iter = virtualInventory.iterator();
                     while (iter.hasNext() && stillNeeded > 0) {
                         ItemStack vItem = iter.next();
-                        if (ing.test(vItem)) {
+                        if (ing.test(vItem) && matchesIngredientTags(vItem, ing)) {
                             int take = Math.min(stillNeeded, vItem.getCount());
+                            consumed[idx] = vItem.copyWithCount(1);
                             vItem.shrink(take);
                             stillNeeded -= take;
                             if (vItem.isEmpty()) iter.remove();
@@ -131,13 +152,19 @@ public final class CraftPacketUtils {
                                     stepIdx + 1, steps.size(), stepId);
                             return false;
                         }
+                        consumed[idx] = reserved.copyWithCount(1);
                         RSIntegrationMod.LOGGER.debug("[RSI-exec] Step {}/{} {}: reserved {} from ledger",
                                 stepIdx + 1, steps.size(), stepId,
                                 net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(reserved.getItem()) + "x" + reserved.getCount());
                     }
                 }
 
-                ItemStack result = craftingRecipe.getResultItem(player.serverLevel().registryAccess());
+                ItemStack result;
+                if (isSlashBladeRecipe(craftingRecipe)) {
+                    result = assembleBladeOutput(craftingRecipe, consumed, player);
+                } else {
+                    result = craftingRecipe.getResultItem(player.serverLevel().registryAccess());
+                }
                 if (!result.isEmpty()) {
                     addToVirtual(virtualInventory, result);
                     RSIntegrationMod.LOGGER.debug("[RSI-exec] Step {}/{} {}: produced {} to virtual",
@@ -166,7 +193,7 @@ public final class CraftPacketUtils {
                     var iter = virtualInventory.iterator();
                     while (iter.hasNext() && stillNeeded > 0) {
                         ItemStack vItem = iter.next();
-                        if (spec.ingredient().test(vItem)) {
+                        if (spec.ingredient().test(vItem) && matchesIngredientTags(vItem, spec.ingredient())) {
                             int take = Math.min(stillNeeded, vItem.getCount());
                             vItem.shrink(take);
                             stillNeeded -= take;
@@ -218,7 +245,8 @@ public final class CraftPacketUtils {
         }
 
         // Phase 3: flush remaining virtual inventory into RS network;
-        // any remainder that doesn't fit goes to the player
+        // any remainder that doesn't fit goes to the player (split into
+        // max-stack-size chunks to prevent item-entity explosions).
         for (ItemStack vi : virtualInventory) {
             if (!vi.isEmpty()) {
                 var tracker = network.getItemStorageTracker();
@@ -226,12 +254,35 @@ public final class CraftPacketUtils {
                 ItemStack remainder = network.insertItem(vi.copy(), vi.getCount(),
                         com.refinedmods.refinedstorage.api.util.Action.PERFORM);
                 if (!remainder.isEmpty()) {
-                    ItemHandlerHelper.giveItemToPlayer(player, remainder);
+                    PlayerUtils.safeGiveToPlayer(player, remainder, network);
                 }
             }
         }
 
         return true;
+    }
+
+    /**
+     * When a virtual inventory item carries NBT, verify that at least one
+     * variant of the ingredient also specifies matching tags.  Some mod
+     * ingredients match on item type alone (ignoring NBT), and feeding a
+     * tag-mismatched intermediate item to a real machine would cause the
+     * recipe to fail — detection here avoids "the plan said OK but the
+     * machine rejected it" bugs.
+     */
+    private static boolean matchesIngredientTags(ItemStack candidate, Ingredient ingredient) {
+        if (!candidate.hasTag()) return true;
+        for (ItemStack opt : ingredient.getItems()) {
+            if (ItemStack.isSameItemSameTags(candidate, opt)) return true;
+        }
+        // Custom ingredients (e.g. SlashBladeIngredient) use ingredient.test()
+        // for real NBT validation but return bare template items from getItems().
+        // ingredient.test() already passed — trust it if the item type matches.
+        Item candidateItem = candidate.getItem();
+        for (ItemStack opt : ingredient.getItems()) {
+            if (opt.getItem() == candidateItem) return true;
+        }
+        return false;
     }
 
     private static void addToVirtual(List<ItemStack> virtualInventory, ItemStack result) {
@@ -255,7 +306,11 @@ public final class CraftPacketUtils {
      */
     public static List<ItemStack> getRecipeRemainders(CraftingRecipe recipe) {
         List<Ingredient> ingredients = recipe.getIngredients();
-        var container = new DummyCraftingContainer(3, 3);
+        AbstractContainerMenu dummyMenu = new AbstractContainerMenu(null, -1) {
+            @Override public ItemStack quickMoveStack(net.minecraft.world.entity.player.Player p, int i) { return ItemStack.EMPTY; }
+            @Override public boolean stillValid(net.minecraft.world.entity.player.Player p) { return false; }
+        };
+        var container = new net.minecraft.world.inventory.TransientCraftingContainer(dummyMenu, 3, 3);
         for (int i = 0; i < Math.min(ingredients.size(), 9); i++) {
             Ingredient ing = ingredients.get(i);
             if (!ing.isEmpty()) {
@@ -273,25 +328,30 @@ public final class CraftPacketUtils {
         return result;
     }
 
-    private static class DummyCraftingContainer extends SimpleContainer
-            implements CraftingContainer {
-        private final int width;
-        private final int height;
+    public static boolean isSlashBladeRecipe(CraftingRecipe recipe) {
+        String name = recipe.getClass().getName();
+        return name.startsWith("mods.flammpfeil.slashblade.recipe.SlashBlade");
+    }
 
-        DummyCraftingContainer(int width, int height) {
-            super(width * height);
-            this.width = width;
-            this.height = height;
+    /**
+     * Assemble a SlashBlade recipe output by feeding the real consumed items
+     * into a 3×3 crafting container and calling {@code recipe.assemble()}.
+     * This transfers input blade stats (ProudSoul, KillCount, Refine,
+     * enchantments) to the output, which {@code getResultItem()} skips.
+     */
+    private static ItemStack assembleBladeOutput(CraftingRecipe recipe, ItemStack[] consumed,
+                                                  ServerPlayer player) {
+        AbstractContainerMenu dummyMenu = new AbstractContainerMenu(null, -1) {
+            @Override public ItemStack quickMoveStack(net.minecraft.world.entity.player.Player p, int i) { return ItemStack.EMPTY; }
+            @Override public boolean stillValid(net.minecraft.world.entity.player.Player p) { return false; }
+        };
+        var container = new net.minecraft.world.inventory.TransientCraftingContainer(dummyMenu, 3, 3);
+        for (int i = 0; i < consumed.length && i < 9; i++) {
+            if (consumed[i] != null && !consumed[i].isEmpty()) {
+                container.setItem(i, consumed[i].copy());
+            }
         }
-
-        @Override public int getWidth() { return width; }
-        @Override public int getHeight() { return height; }
-        @Override public List<ItemStack> getItems() {
-            NonNullList<ItemStack> list = NonNullList.withSize(getContainerSize(), ItemStack.EMPTY);
-            for (int i = 0; i < getContainerSize(); i++) list.set(i, getItem(i));
-            return list;
-        }
-        @Override public void fillStackedContents(StackedContents c) { /* no-op */ }
+        return recipe.assemble(container, player.serverLevel().registryAccess());
     }
 
     /**
@@ -324,7 +384,11 @@ public final class CraftPacketUtils {
                     aggregated.grow(take);
                 }
                 stillNeeded -= take;
-                if (stillNeeded <= 0) return aggregated;
+                if (stillNeeded <= 0) {
+                    player.getInventory().setChanged();
+                    player.inventoryMenu.broadcastChanges();
+                    return aggregated;
+                }
             }
         }
         return ItemStack.EMPTY; // Unreachable — first pass verified sufficiency
@@ -532,7 +596,7 @@ public final class CraftPacketUtils {
                     if (list.get(0) instanceof ItemStack) {
                         List<Ingredient> wrapped = new ArrayList<>();
                         for (Object obj : list) {
-                            if (obj instanceof ItemStack stack) wrapped.add(CraftingResolver.ingredientOf(stack));
+                            if (obj instanceof ItemStack stack) wrapped.add(CraftingResolver.ingredientOf(stack, stack.hasTag()));
                         }
                         if (!wrapped.isEmpty()) return wrapped;
                     }
@@ -814,8 +878,9 @@ public final class CraftPacketUtils {
                 if (hasMultiblock) {
                     AsyncCraftChain chain = new AsyncCraftChain(player.getUUID(), player.getServer(), network, steps);
                     AsyncCraftManager.getInstance().submit(chain);
-                    player.sendSystemMessage(Component.translatable(
-                            "rsi.async.chain_started", steps.size()));
+                    player.sendSystemMessage(
+                            com.huanghuang.rsintegration.util.TextBuilder.translate("rsi.async.chain_started", steps.size())
+                                    .build());
                     return false; // items not yet available — chain is running async
                 }
                 // All vanilla — execute inline

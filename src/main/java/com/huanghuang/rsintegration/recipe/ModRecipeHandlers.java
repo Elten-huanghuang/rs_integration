@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.mods.vanilla.VanillaMachineRecipeHandler;
+import com.huanghuang.rsintegration.mods.vanilla.SmithingRecipeHandler;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.CraftingRecipe;
@@ -27,6 +28,8 @@ public final class ModRecipeHandlers {
 
     private static final Map<Class<?>, Method> RESULT_METHOD_CACHE = new ConcurrentHashMap<>();
     private static final Map<Class<?>, ModRecipeHandler> HANDLER_CACHE = new ConcurrentHashMap<>();
+    /** Prevents infinite recursion when a handler's getResultItem() calls back into tryGetResultItem(). */
+    private static final ThreadLocal<Class<?>> DISPATCH_GUARD = new ThreadLocal<>();
     /** Sentinel stored in HANDLER_CACHE for recipe classes that have no registered handler. */
     private static final ModRecipeHandler NO_HANDLER = new ModRecipeHandler() {
         @Override public ModType modType() { return ModType.byId("generic"); }
@@ -41,6 +44,7 @@ public final class ModRecipeHandlers {
     static {
         HANDLERS.add(new GenericRecipeHandler());
         HANDLERS.add(new VanillaMachineRecipeHandler());
+        HANDLERS.add(new SmithingRecipeHandler());
         HANDLERS.add(new MarketRecipeHandler());
     }
 
@@ -62,7 +66,10 @@ public final class ModRecipeHandlers {
         Class<?> clazz = recipe.getClass();
         ModRecipeHandler cached = HANDLER_CACHE.get(clazz);
         if (cached != null) return cached == NO_HANDLER ? null : cached;
-        for (ModRecipeHandler h : HANDLERS) {
+        // Iterate in reverse so mod-specific handlers (registered later)
+        // take priority over GenericRecipeHandler registered first.
+        for (int i = HANDLERS.size() - 1; i >= 0; i--) {
+            ModRecipeHandler h = HANDLERS.get(i);
             if (h.canHandle(recipe)) {
                 HANDLER_CACHE.put(clazz, h);
                 return h;
@@ -90,17 +97,25 @@ public final class ModRecipeHandlers {
         if (recipe instanceof CraftingRecipe cr) {
             return cr.getResultItem(access);
         }
-        // Handler dispatch first — if handler returns EMPTY it has
-        // explicitly rejected the recipe (e.g. CrystalRitualRecipe).
-        ModRecipeHandler handler = handlerFor(recipe);
-        if (handler != null) {
-            ItemStack result = handler.getResultItem(recipe, access);
-            if (!result.isEmpty()) return result;
-            // Handler exists and returned EMPTY — don't fall through.
-            // The reflection probe would call getResultItem(RegistryAccess)
-            // which delegates to deprecated 0-arg getResultItem() that many
-            // mods override to return the machine block icon.
-            return ItemStack.EMPTY;
+        // Re-entry guard: when a handler's getResultItem() calls back into
+        // tryGetResultItem() for the same recipe class, skip handler dispatch
+        // and fall through to reflection to avoid StackOverflowError.
+        if (DISPATCH_GUARD.get() != recipe.getClass()) {
+            ModRecipeHandler handler = handlerFor(recipe);
+            if (handler != null) {
+                DISPATCH_GUARD.set(recipe.getClass());
+                try {
+                    ItemStack result = handler.getResultItem(recipe, access);
+                    if (!result.isEmpty()) return result;
+                } finally {
+                    DISPATCH_GUARD.remove();
+                }
+                // Handler exists and returned EMPTY — don't fall through.
+                // The reflection probe would call getResultItem(RegistryAccess)
+                // which delegates to deprecated 0-arg getResultItem() that many
+                // mods override to return the machine block icon.
+                return ItemStack.EMPTY;
+            }
         }
         Class<?> clazz = recipe.getClass();
 

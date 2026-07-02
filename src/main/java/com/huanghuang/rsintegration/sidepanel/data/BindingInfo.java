@@ -4,6 +4,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 
 /**
@@ -14,8 +15,10 @@ public record BindingInfo(
     String itemKey,          // ItemStack NBT key matching the binding item
     ResourceLocation dim,    // Dimension RegistryKey location (e.g. "minecraft:overworld")
     BlockPos pos,            // Machine block position
-    String blockKey,         // Block RegistryKey location (e.g. "forbidden_arcanus:hephaestus_forge")
-    String displayName       // Human-readable machine name for UI
+    String blockKey,         // Block description ID with optional prefix (e.g. "tacz||block.tacz.workbench_b")
+    String displayName,      // Human-readable machine name for UI
+    @javax.annotation.Nullable String blockRegKey,  // Block registry key (e.g. "tacz:workbench_b"), nullable for legacy
+    @javax.annotation.Nullable ItemStack displayStack  // Full NBT-bearing ItemStack from getCloneItemStack (TACZ etc.)
 ) {
     public ResourceKey<Level> dimensionKey() {
         return ResourceKey.create(net.minecraft.core.registries.Registries.DIMENSION, dim);
@@ -28,6 +31,12 @@ public record BindingInfo(
         buf.writeBlockPos(info.pos);
         buf.writeUtf(info.blockKey, 256);
         buf.writeUtf(info.displayName, 128);
+        boolean hasReg = info.blockRegKey != null;
+        buf.writeBoolean(hasReg);
+        if (hasReg) buf.writeUtf(info.blockRegKey, 128);
+        boolean hasDisp = info.displayStack != null && !info.displayStack.isEmpty();
+        buf.writeBoolean(hasDisp);
+        if (hasDisp) buf.writeItemStack(info.displayStack, false);
     }
 
     /** Deserialize from network buffer (called client-side). */
@@ -37,7 +46,9 @@ public record BindingInfo(
             buf.readResourceLocation(),
             buf.readBlockPos(),
             buf.readUtf(),
-            buf.readUtf()
+            buf.readUtf(),
+            buf.readBoolean() ? buf.readUtf() : null,
+            buf.readBoolean() ? buf.readItem() : null
         );
     }
 }

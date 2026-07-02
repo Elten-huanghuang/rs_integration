@@ -128,6 +128,16 @@ public abstract class GridScreenMouseMixin {
         }
     }
 
+    @Inject(method = "m_7979_", at = @At("HEAD"), cancellable = true, remap = false)
+    private void rsi$onMouseDragged(double mouseX, double mouseY, int button,
+                                     double dragX, double dragY,
+                                     CallbackInfoReturnable<Boolean> cir) {
+        if (MachineHubInputHandler.isConsumingInput()) {
+            MachineHub.updateDrag((int) mouseX, (int) mouseY);
+            cir.setReturnValue(true);
+        }
+    }
+
     @Inject(method = "m_6050_", at = @At("HEAD"), cancellable = true, remap = false)
     private void rsi$onMouseScrolled(double mouseX, double mouseY, double delta,
                                       CallbackInfoReturnable<Boolean> cir) {

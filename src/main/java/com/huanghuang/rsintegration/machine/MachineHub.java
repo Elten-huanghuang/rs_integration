@@ -1,11 +1,17 @@
 package com.huanghuang.rsintegration.machine;
 
-import com.huanghuang.rsintegration.ModType;
+import com.github.stuxuhai.jpinyin.PinyinFormat;
+import com.github.stuxuhai.jpinyin.PinyinHelper;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.sidepanel.data.BindingInfo;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.resources.language.I18n;
 import net.minecraft.util.Mth;
+import net.minecraftforge.client.event.ClientPlayerNetworkEvent;
+import net.minecraftforge.common.MinecraftForge;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.eventbus.api.SubscribeEvent;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -18,114 +24,130 @@ import java.util.List;
  * showing all bound machines.</p>
  *
  * <p>States: {@code HIDDEN → ANIMATING_IN → VISIBLE → ANIMATING_OUT → HIDDEN}</p>
+ *
+ * <p>This class uses a singleton holder pattern: state is stored in instance fields rather than
+ * static fields to prevent cross-server contamination when joining different worlds in succession.
+ * Public static methods remain for backwards compatibility and delegate to the singleton.</p>
  */
+@OnlyIn(Dist.CLIENT)
 public final class MachineHub {
 
     public enum State { HIDDEN, ANIMATING_IN, VISIBLE, ANIMATING_OUT }
 
     private static final long ANIM_DURATION_MS = 200;
 
-    private static State state = State.HIDDEN;
-    private static long stateEnteredAt;
-    private static float animProgress; // 0..1
-    private static final List<BindingInfo> machines = new ArrayList<>();
-    private static final List<BindingInfo> filteredMachines = new ArrayList<>();
-    private static int hoveredIndex = -1;
-    private static boolean closeButtonHovered;
-    private static boolean configButtonHovered;
-    private static int configBtnX, configBtnY, configBtnW, configBtnH;
-    private static String filterText = "";
-    private static int scrollOffset;
+    // ── Singleton holder ──────────────────────────────────────────
+
+    private static final MachineHub INSTANCE = new MachineHub();
+
+    /** Returns the singleton instance. Prefer this for new internal callers;
+     *  existing callers may continue using the static delegation methods. */
+    public static MachineHub getInstance() { return INSTANCE; }
+
+    // ── Instance state ────────────────────────────────────────────
+
+    private State state = State.HIDDEN;
+    private long stateEnteredAt;
+    private float animProgress; // 0..1
+    private final List<BindingInfo> machines = new ArrayList<>();
+    private final List<BindingInfo> filteredMachines = new ArrayList<>();
+    private int hoveredIndex = -1;
+    private boolean closeButtonHovered;
+    private String filterText = "";
+    private int scrollOffset;
 
     // ── Drag state ─────────────────────────────────────────────────
-    private static int dragOffsetX, dragOffsetY;
-    private static boolean isDragging;
-    private static int dragStartMouseX, dragStartMouseY;
-    private static int dragStartOffsetX, dragStartOffsetY;
+    private int dragOffsetX, dragOffsetY;
+    private boolean isDragging;
+    private int dragStartMouseX, dragStartMouseY;
+    private int dragStartOffsetX, dragStartOffsetY;
 
     // store last-rendered hub bounds for title-bar hit testing
-    private static int hubX, hubY, hubW, hubH;
+    private int hubX, hubY, hubW, hubH;
 
-    // Tooltip bleed guard — set while the Hub is rendering its own tooltips
+    // Tooltip bleed guard — set while the Hub is rendering its own tooltips.
+    // Kept static because it is cross-cutting (per-frame ephemeral, accessed
+    // from RSSidePanelClient and GridScreenTooltipMixin for tooltip suppression).
     public static volatile boolean isRenderingOurTooltip;
 
     private MachineHub() {}
 
+    static {
+        MinecraftForge.EVENT_BUS.register(INSTANCE);
+    }
+
     // ── State queries ─────────────────────────────────────────────
 
-    public static State getState() { return state; }
-    public static float getAnimProgress() { return animProgress; }
-    public static boolean isVisible() { return state == State.VISIBLE || state == State.ANIMATING_IN || state == State.ANIMATING_OUT; }
-    public static int getHoveredIndex() { return hoveredIndex; }
-    public static void setHoveredIndex(int idx) { hoveredIndex = idx; }
-    public static boolean isCloseButtonHovered() { return closeButtonHovered; }
-    public static void setCloseButtonHovered(boolean v) { closeButtonHovered = v; }
-    public static boolean isConfigButtonHovered() { return configButtonHovered; }
-    public static void setConfigButtonHovered(boolean v) { configButtonHovered = v; }
-    public static void setConfigButtonBounds(int x, int y, int w, int h) {
-        configBtnX = x; configBtnY = y; configBtnW = w; configBtnH = h;
+    public static State getState() { return INSTANCE.state; }
+    public static float getAnimProgress() { return INSTANCE.animProgress; }
+    public static boolean isVisible() {
+        return INSTANCE.state == State.VISIBLE
+                || INSTANCE.state == State.ANIMATING_IN
+                || INSTANCE.state == State.ANIMATING_OUT;
     }
-    public static boolean isWithinConfigButton(int mouseX, int mouseY) {
-        return mouseX >= configBtnX && mouseX < configBtnX + configBtnW
-                && mouseY >= configBtnY && mouseY < configBtnY + configBtnH;
-    }
-    public static List<BindingInfo> getMachines() { return filteredMachines; }
-    public static List<BindingInfo> getAllMachines() { return machines; }
-    public static String getFilterText() { return filterText; }
-    public static int getScrollOffset() { return scrollOffset; }
-    public static void setScrollOffset(int off) { scrollOffset = off; }
+    public static int getHoveredIndex() { return INSTANCE.hoveredIndex; }
+    public static void setHoveredIndex(int idx) { INSTANCE.hoveredIndex = idx; }
+    public static boolean isCloseButtonHovered() { return INSTANCE.closeButtonHovered; }
+    public static void setCloseButtonHovered(boolean v) { INSTANCE.closeButtonHovered = v; }
+    public static List<BindingInfo> getMachines() { return INSTANCE.filteredMachines; }
+    public static List<BindingInfo> getAllMachines() { return INSTANCE.machines; }
+    public static String getFilterText() { return INSTANCE.filterText; }
+    public static int getScrollOffset() { return INSTANCE.scrollOffset; }
+    public static void setScrollOffset(int off) { INSTANCE.scrollOffset = off; }
 
     // ── Drag ───────────────────────────────────────────────────────
 
-    public static int getDragOffsetX() { return dragOffsetX; }
-    public static int getDragOffsetY() { return dragOffsetY; }
-    public static boolean isDragging() { return isDragging; }
-    public static void setHubBounds(int x, int y, int w, int h) { hubX = x; hubY = y; hubW = w; hubH = h; }
+    public static int getDragOffsetX() { return INSTANCE.dragOffsetX; }
+    public static int getDragOffsetY() { return INSTANCE.dragOffsetY; }
+    public static boolean isDragging() { return INSTANCE.isDragging; }
+    public static void setHubBounds(int x, int y, int w, int h) {
+        INSTANCE.hubX = x; INSTANCE.hubY = y; INSTANCE.hubW = w; INSTANCE.hubH = h;
+    }
     public static boolean isWithinBounds(int mouseX, int mouseY) {
-        return mouseX >= hubX && mouseX < hubX + hubW && mouseY >= hubY && mouseY < hubY + hubH;
+        return mouseX >= INSTANCE.hubX && mouseX < INSTANCE.hubX + INSTANCE.hubW
+                && mouseY >= INSTANCE.hubY && mouseY < INSTANCE.hubY + INSTANCE.hubH;
     }
 
     /** Start a drag from the title bar. */
     public static boolean tryStartDrag(double mouseX, double mouseY) {
-        // title bar area: top PADDING + TITLE_H
-        int titleBottom = hubY + 4 + 12 + 4; // PADDING + TITLE_H + margin
-        if (mouseX >= hubX && mouseX < hubX + hubW
-                && mouseY >= hubY && mouseY < titleBottom) {
-            isDragging = true;
-            dragStartMouseX = (int) mouseX;
-            dragStartMouseY = (int) mouseY;
-            dragStartOffsetX = dragOffsetX;
-            dragStartOffsetY = dragOffsetY;
+        int titleBottom = INSTANCE.hubY + 4 + 12 + 4;
+        if (mouseX >= INSTANCE.hubX && mouseX < INSTANCE.hubX + INSTANCE.hubW
+                && mouseY >= INSTANCE.hubY && mouseY < titleBottom) {
+            INSTANCE.isDragging = true;
+            INSTANCE.dragStartMouseX = (int) mouseX;
+            INSTANCE.dragStartMouseY = (int) mouseY;
+            INSTANCE.dragStartOffsetX = INSTANCE.dragOffsetX;
+            INSTANCE.dragStartOffsetY = INSTANCE.dragOffsetY;
             return true;
         }
         return false;
     }
 
-    public static void endDrag() { isDragging = false; }
+    public static void endDrag() { INSTANCE.isDragging = false; }
 
     public static void updateDrag(int mouseX, int mouseY) {
-        if (!isDragging) return;
-        dragOffsetX = dragStartOffsetX + (mouseX - dragStartMouseX);
-        dragOffsetY = dragStartOffsetY + (mouseY - dragStartMouseY);
+        if (!INSTANCE.isDragging) return;
+        INSTANCE.dragOffsetX = INSTANCE.dragStartOffsetX + (mouseX - INSTANCE.dragStartMouseX);
+        INSTANCE.dragOffsetY = INSTANCE.dragStartOffsetY + (mouseY - INSTANCE.dragStartMouseY);
     }
 
     public static void appendFilterChar(char c) {
-        filterText += c;
-        refilter();
+        INSTANCE.filterText += c;
+        INSTANCE.refilter();
     }
 
     public static void backspaceFilter() {
-        if (filterText.isEmpty()) return;
-        filterText = filterText.substring(0, filterText.length() - 1);
-        refilter();
+        if (INSTANCE.filterText.isEmpty()) return;
+        INSTANCE.filterText = INSTANCE.filterText.substring(0, INSTANCE.filterText.length() - 1);
+        INSTANCE.refilter();
     }
 
     public static void clearFilter() {
-        filterText = "";
-        refilter();
+        INSTANCE.filterText = "";
+        INSTANCE.refilter();
     }
 
-    private static void refilter() {
+    private void refilter() {
         filteredMachines.clear();
         if (filterText.isEmpty()) {
             filteredMachines.addAll(machines);
@@ -135,6 +157,23 @@ public final class MachineHub {
                 String localized = I18n.get(m.displayName()).toLowerCase();
                 if (localized.contains(lower) || m.displayName().toLowerCase().contains(lower)) {
                     filteredMachines.add(m);
+                    continue;
+                }
+                // Pinyin search (same as side panel DisplayListManager)
+                if (matchesPinyin(I18n.get(m.displayName()), lower)) {
+                    filteredMachines.add(m);
+                    continue;
+                }
+                // Also search the client-side resolved name — cover gun-pack
+                // workbench names even when BlockId is nested in BlockEntityTag.
+                var ds = m.displayStack();
+                if (ds != null && !ds.isEmpty()) {
+                    String resolved = com.huanghuang.rsintegration.network.BindingEventHandler
+                            .resolveBlockName(m.blockKey(), m.blockRegKey(), ds)
+                            .getString().toLowerCase();
+                    if (resolved.contains(lower) || matchesPinyin(resolved, lower)) {
+                        filteredMachines.add(m);
+                    }
                 }
             }
         }
@@ -142,67 +181,76 @@ public final class MachineHub {
         hoveredIndex = -1;
     }
 
+    private static boolean matchesPinyin(String text, String lowerQuery) {
+        try {
+            String pinyin = PinyinHelper.convertToPinyinString(text, "",
+                    PinyinFormat.WITHOUT_TONE);
+            if (pinyin.toLowerCase().contains(lowerQuery)) return true;
+            String shortPinyin = PinyinHelper.getShortPinyin(text);
+            if (shortPinyin != null && shortPinyin.toLowerCase().contains(lowerQuery))
+                return true;
+            return false;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     // ── State transitions ─────────────────────────────────────────
 
     /** Set the machine list and transition to ANIMATING_IN (or VISIBLE if already animating). */
     public static void show(List<BindingInfo> list) {
-        machines.clear();
-        var whitelist = RSIntegrationConfig.MACHINE_GUI_WHITELIST.get();
-        for (var info : list) {
-            ModType mt = ModType.fromBlockKey(info.blockKey());
-            if (mt != null && !whitelist.contains(mt.id())) continue;
-            machines.add(info);
-        }
-        if (state == State.VISIBLE) {
-            refilter();
+        INSTANCE.machines.clear();
+        INSTANCE.machines.addAll(list);
+        if (INSTANCE.state == State.VISIBLE) {
+            INSTANCE.refilter();
             return;
         }
-        filterText = "";
-        refilter();
-        state = State.ANIMATING_IN;
-        stateEnteredAt = System.currentTimeMillis();
-        animProgress = 0.001f; // avoid alpha=0 gate on same-frame render
+        INSTANCE.filterText = "";
+        INSTANCE.refilter();
+        INSTANCE.state = State.ANIMATING_IN;
+        INSTANCE.stateEnteredAt = System.currentTimeMillis();
+        INSTANCE.animProgress = 0.001f;
     }
 
     /** Refresh machine list from BindingCache without animation. */
     public static void refreshMachines() {
-        if (state != State.VISIBLE && state != State.HIDDEN) return;
-        machines.clear();
-        var list = com.huanghuang.rsintegration.sidepanel.client.MachineTabHandler.getAllMachines();
-        var whitelist = RSIntegrationConfig.MACHINE_GUI_WHITELIST.get();
-        for (var info : list) {
-            ModType mt = ModType.fromBlockKey(info.blockKey());
-            if (mt != null && !whitelist.contains(mt.id())) continue;
-            machines.add(info);
-        }
-        refilter();
-        if (machines.isEmpty() && state == State.VISIBLE) {
+        if (INSTANCE.state != State.VISIBLE && INSTANCE.state != State.HIDDEN) return;
+        INSTANCE.machines.clear();
+        INSTANCE.machines.addAll(com.huanghuang.rsintegration.sidepanel.client.MachineTabHandler.getAllMachines());
+        INSTANCE.refilter();
+        if (INSTANCE.machines.isEmpty() && INSTANCE.state == State.VISIBLE) {
             hide();
         }
     }
 
     /** Start hide animation. */
     public static void hide() {
-        if (state == State.HIDDEN) return;
-        state = State.ANIMATING_OUT;
-        stateEnteredAt = System.currentTimeMillis();
-        animProgress = 1f;
+        if (INSTANCE.state == State.HIDDEN) return;
+        INSTANCE.state = State.ANIMATING_OUT;
+        INSTANCE.stateEnteredAt = System.currentTimeMillis();
+        INSTANCE.animProgress = 1f;
     }
 
     /** Force immediate hide (no animation). */
     public static void hideImmediate() {
-        state = State.HIDDEN;
-        animProgress = 0f;
-        machines.clear();
-        filteredMachines.clear();
-        filterText = "";
-        scrollOffset = 0;
-        hoveredIndex = -1;
+        INSTANCE.state = State.HIDDEN;
+        INSTANCE.animProgress = 0f;
+        INSTANCE.machines.clear();
+        INSTANCE.filteredMachines.clear();
+        INSTANCE.filterText = "";
+        INSTANCE.scrollOffset = 0;
+        INSTANCE.hoveredIndex = -1;
+    }
+
+    /** Clear all state on logout to prevent cross-server contamination. */
+    @SubscribeEvent
+    public void onClientLogout(ClientPlayerNetworkEvent.LoggingOut event) {
+        hideImmediate();
     }
 
     /** Toggle visibility with animation. */
     public static void toggle(List<BindingInfo> list) {
-        if (state == State.VISIBLE || state == State.ANIMATING_IN) {
+        if (INSTANCE.state == State.VISIBLE || INSTANCE.state == State.ANIMATING_IN) {
             hide();
         } else {
             show(list);
@@ -213,23 +261,23 @@ public final class MachineHub {
 
     /** Call once per client tick. Advances animation progress. */
     public static void tick() {
-        switch (state) {
+        switch (INSTANCE.state) {
             case ANIMATING_IN -> {
-                long elapsed = System.currentTimeMillis() - stateEnteredAt;
-                animProgress = Mth.clamp((float) elapsed / ANIM_DURATION_MS, 0f, 1f);
-                if (animProgress >= 1f) {
-                    state = State.VISIBLE;
-                    animProgress = 1f;
+                long elapsed = System.currentTimeMillis() - INSTANCE.stateEnteredAt;
+                INSTANCE.animProgress = Mth.clamp((float) elapsed / ANIM_DURATION_MS, 0f, 1f);
+                if (INSTANCE.animProgress >= 1f) {
+                    INSTANCE.state = State.VISIBLE;
+                    INSTANCE.animProgress = 1f;
                 }
             }
             case ANIMATING_OUT -> {
-                long elapsed = System.currentTimeMillis() - stateEnteredAt;
-                animProgress = Mth.clamp(1f - (float) elapsed / ANIM_DURATION_MS, 0f, 1f);
-                if (animProgress <= 0f) {
-                    state = State.HIDDEN;
-                    animProgress = 0f;
-                    machines.clear();
-                    hoveredIndex = -1;
+                long elapsed = System.currentTimeMillis() - INSTANCE.stateEnteredAt;
+                INSTANCE.animProgress = Mth.clamp(1f - (float) elapsed / ANIM_DURATION_MS, 0f, 1f);
+                if (INSTANCE.animProgress <= 0f) {
+                    INSTANCE.state = State.HIDDEN;
+                    INSTANCE.animProgress = 0f;
+                    INSTANCE.machines.clear();
+                    INSTANCE.hoveredIndex = -1;
                 }
             }
             default -> {}
@@ -240,7 +288,7 @@ public final class MachineHub {
     public static boolean shouldUseHub(int machineCount) {
         if (machineCount == 0) return false;
         int threshold = RSIntegrationConfig.MACHINE_TAB_THRESHOLD.get();
-        if (threshold == 0) return true; // 0 = always use Hub when machines exist
+        if (threshold == 0) return true;
         return machineCount > threshold;
     }
 }

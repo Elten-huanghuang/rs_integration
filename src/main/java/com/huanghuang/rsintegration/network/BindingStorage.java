@@ -18,7 +18,9 @@ public final class BindingStorage {
 
     private BindingStorage() {}
 
-    public record BindingEntry(ResourceLocation dim, BlockPos pos, String blockKey) {
+    public record BindingEntry(ResourceLocation dim, BlockPos pos, String blockKey,
+                                @javax.annotation.Nullable String blockRegKey,
+                                @javax.annotation.Nullable ItemStack displayStack) {
         public CompoundTag toTag() {
             CompoundTag tag = new CompoundTag();
             tag.putString("dim", dim.toString());
@@ -26,6 +28,10 @@ public final class BindingStorage {
             tag.putInt("y", pos.getY());
             tag.putInt("z", pos.getZ());
             tag.putString("block", blockKey);
+            if (blockRegKey != null) tag.putString("reg", blockRegKey);
+            if (displayStack != null && !displayStack.isEmpty()) {
+                tag.put("disp", displayStack.save(new CompoundTag()));
+            }
             return tag;
         }
 
@@ -39,13 +45,31 @@ public final class BindingStorage {
             }
             BlockPos pos = new BlockPos(tag.getInt("x"), tag.getInt("y"), tag.getInt("z"));
             String blockKey = tag.getString("block");
-            return new BindingEntry(dim, pos, blockKey);
+            String regKey = null;
+            if (tag.contains("reg")) {
+                String raw = tag.getString("reg");
+                if (ResourceLocation.tryParse(raw) != null) {
+                    regKey = raw;
+                } else {
+                    RSIntegrationMod.LOGGER.warn(
+                            "[RSI] BindingStorage: invalid reg key '{}' — treating as null", raw);
+                }
+            }
+            ItemStack dispStack = null;
+            if (tag.contains("disp", Tag.TAG_COMPOUND)) {
+                dispStack = ItemStack.of(tag.getCompound("disp"));
+            }
+            return new BindingEntry(dim, pos, blockKey, regKey, dispStack);
         }
 
         }
 
         /** Read-only — called from server and client (JEI) threads.
-         *  Does NOT mutate the tag, so concurrent reads are safe.
+         *  Does NOT mutate the tag.  Concurrent reads are safe because
+         *  {@link #addBinding}/{@link #removeBinding} use Copy-on-Write
+         *  (clone → mutate → swap via {@code ItemStack.setTag}) and
+         *  {@code ItemStack.tag} is a volatile reference, guaranteeing
+         *  that readers always see a fully-constructed tag snapshot.
          *  Falls back to reading legacy format without migrating. */
         public static List<BindingEntry> getBindings(ItemStack stack) {
         CompoundTag tag = stack.getTag();
@@ -94,13 +118,15 @@ public final class BindingStorage {
                 tag.getInt("aec_bound_y"),
                 tag.getInt("aec_bound_z"));
         String blockKey = tag.getString("aec_bound_block");
-        return new BindingEntry(dim, pos, blockKey);
+        return new BindingEntry(dim, pos, blockKey, null, null);
     }
 
     /** Copy-on-write: clone the tag, mutate the copy, then atomically swap.
      *  Prevents the client render thread (JEI) from seeing a half-mutated
      *  CompoundTag when reading {@link #getBindings} concurrently. */
-    public static boolean addBinding(ItemStack stack, ResourceLocation dim, BlockPos pos, String blockKey) {
+    public static boolean addBinding(ItemStack stack, ResourceLocation dim, BlockPos pos,
+                                      String blockKey, @javax.annotation.Nullable String blockRegKey,
+                                      @javax.annotation.Nullable ItemStack displayStack) {
         CompoundTag oldTag = stack.getTag();
         CompoundTag tag = oldTag != null ? oldTag.copy() : new CompoundTag();
         migrateFromLegacy(tag);
@@ -114,12 +140,12 @@ public final class BindingStorage {
                 return false;
             }
         }
-        BindingEntry entry = new BindingEntry(dim, pos, blockKey);
+        BindingEntry entry = new BindingEntry(dim, pos, blockKey, blockRegKey, displayStack);
         list.add(entry.toTag());
         tag.put(KEY_BINDINGS, list);
         stack.setTag(tag);
-        RSIntegrationMod.LOGGER.debug("[RSI-Bind] addBinding: item={} dim={} pos={} blockKey={} totalBindings={}",
-                stack.getItem(), dim, pos, blockKey, list.size());
+        RSIntegrationMod.LOGGER.debug("[RSI-Bind] addBinding: item={} dim={} pos={} blockKey={} regKey={} totalBindings={}",
+                stack.getItem(), dim, pos, blockKey, blockRegKey, list.size());
         return true;
     }
 
@@ -151,16 +177,26 @@ public final class BindingStorage {
     public static boolean hasBinding(ItemStack stack, ResourceLocation dim, BlockPos pos) {
         if (!stack.hasTag()) return false;
         CompoundTag tag = stack.getTag();
-        if (tag == null || !tag.contains(KEY_BINDINGS, Tag.TAG_LIST)) return false;
-        ListTag list = tag.getList(KEY_BINDINGS, Tag.TAG_COMPOUND);
-        for (int i = 0; i < list.size(); i++) {
-            CompoundTag entryTag = list.getCompound(i);
-            if (dim.toString().equals(entryTag.getString("dim"))
-                    && pos.getX() == entryTag.getInt("x")
-                    && pos.getY() == entryTag.getInt("y")
-                    && pos.getZ() == entryTag.getInt("z")) {
-                return true;
+        if (tag == null) return false;
+        if (tag.contains(KEY_BINDINGS, Tag.TAG_LIST)) {
+            ListTag list = tag.getList(KEY_BINDINGS, Tag.TAG_COMPOUND);
+            for (int i = 0; i < list.size(); i++) {
+                CompoundTag entryTag = list.getCompound(i);
+                if (dim.toString().equals(entryTag.getString("dim"))
+                        && pos.getX() == entryTag.getInt("x")
+                        && pos.getY() == entryTag.getInt("y")
+                        && pos.getZ() == entryTag.getInt("z")) {
+                    return true;
+                }
             }
+            return false;
+        }
+        // Legacy format fallback (matches getBindings behaviour)
+        if (tag.contains("aec_bound_x")) {
+            return dim.toString().equals(tag.getString("aec_bound_dim"))
+                    && pos.getX() == tag.getInt("aec_bound_x")
+                    && pos.getY() == tag.getInt("aec_bound_y")
+                    && pos.getZ() == tag.getInt("aec_bound_z");
         }
         return false;
     }
@@ -199,7 +235,7 @@ public final class BindingStorage {
         tag.remove("aec_bound_block");
 
         ListTag list = tag.getList(KEY_BINDINGS, Tag.TAG_COMPOUND);
-        BindingEntry entry = new BindingEntry(dim, pos, blockKey);
+        BindingEntry entry = new BindingEntry(dim, pos, blockKey, null, null);
         list.add(entry.toTag());
         tag.put(KEY_BINDINGS, list);
     }

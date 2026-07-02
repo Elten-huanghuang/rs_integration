@@ -53,16 +53,13 @@ repositories {
     flatDir { dirs 'libs' }
 }
 
-configurations {
-    shade
-    implementation.extendsFrom shade
-}
-
 dependencies {
     minecraft "net.minecraftforge:forge:1.20.1-47.3.22"
 
-    // Pinyin search
-    shade 'com.github.stuxuhai:jpinyin:1.1.8'
+    // Pinyin search — jarJar so it stays bundled without split-package risk.
+    implementation(jarJar("com.github.stuxuhai:jpinyin:1.1.8")) {
+        jarJar.ranged(it, "[1.1.8,)")
+    }
 
     // All mod jars in libs — must go through fg.deobf() so ForgeGradle
     // remaps the classes to match the dev-environment mappings.
@@ -76,6 +73,19 @@ dependencies {
     compileOnly fg.deobf(files('libs/curios-forge-5.14.1+1.20.1.jar'))
 
     annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
+
+    // MixinExtras — common API for @WrapOperation etc. (compile + AP).
+    // The annotation processor lives in mixinextras-common.
+    compileOnly(annotationProcessor("io.github.llamalad7:mixinextras-common:0.3.6"))
+
+    // Jar-in-Jar: ForgeGradle nests mixinextras-forge.jar inside
+    // META-INF/jarjar/ so Forge can do version arbitration at launch.
+    // Avoids JPMS split-package conflicts with other mods that also
+    // bundle MixinExtras.  Never shade or shadow — that extracts classes
+    // into the root and triggers ResolutionException.
+    implementation(jarJar("io.github.llamalad7:mixinextras-forge:0.3.6")) {
+        jarJar.ranged(it, "[0.3.6,)")
+    }
 }
 
 compileJava {
@@ -108,9 +118,27 @@ jar {
                 "MixinConfigs"            : "rs_integration.mixins.json"
         ])
     }
-    from {
-        configurations.shade.collect { it.isDirectory() ? it : zipTree(it) }
-    }
 }
 
 jar.finalizedBy('reobfJar')
+
+// jarJar normally creates rs_integration-1.0.7-all.jar as a
+// separate artifact.  Drop the classifier so it overwrites the
+// standard jar.  Must wait for reobfJar so its input is already
+// SRG-mapped; reobfJarJar runs afterward and understands the
+// jar-in-jar layout (won't touch the nested jars).
+tasks.named('jarJar', Jar) {
+    dependsOn 'reobfJar'
+    archiveClassifier = ''
+    manifest {
+        attributes([
+                "Specification-Title"     : mod_id,
+                "Specification-Vendor"    : "Huanghuang",
+                "Specification-Version"   : "1",
+                "Implementation-Title"    : project.name,
+                "Implementation-Version"  : project.jar.archiveVersion,
+                "Implementation-Vendor"   : "Huanghuang",
+                "MixinConfigs"            : "rs_integration.mixins.json"
+        ])
+    }
+}

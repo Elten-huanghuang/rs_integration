@@ -13,6 +13,11 @@ public final class ModIds {
     public static final String EMBERS = "embers";
     public static final String AETHERWORKS = "aetherworks";
     public static final String FARMINGFORBLOCKHEADS = "farmingforblockheads";
+    public static final String SLASHBLADE = "slashblade";
+    public static final String AETHER = "aether";
+    public static final String CROCKPOT = "crockpot";
+    public static final String TACZ = "tacz";
+    public static final String AVARITIA = "avaritia";
 
     // Dependencies
     public static final String REFINED_STORAGE = "refinedstorage";

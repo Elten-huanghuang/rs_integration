@@ -33,7 +33,11 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public final class RecipeIndex {
 
-    public record Entry(Recipe<?> recipe, ModType modType, ResourceLocation recipeTypeId) {}
+    public record Entry(Recipe<?> recipe, ModType modType, ResourceLocation recipeTypeId, boolean nbtSensitive) {
+        public Entry(Recipe<?> recipe, ModType modType, ResourceLocation recipeTypeId) {
+            this(recipe, modType, recipeTypeId, modType != ModType.GENERIC);
+        }
+    }
 
     private static volatile Map<Item, List<Entry>> index;
     private static volatile RecipeManager source;
@@ -189,6 +193,29 @@ public final class RecipeIndex {
         }
     }
 
+    /** Fallback output for FA rituals whose {@code result()} is null or
+     *  has an unrecognized type (e.g. {@code apply_eternal_modifier}). */
+    @Nullable
+    private static ItemStack rsi$faFallbackOutput(Object ritual, ResourceLocation id) {
+        try {
+            var m = Reflect.findMethod(ritual.getClass(), "mainIngredient", new Class<?>[0]);
+            if (m == null) return ItemStack.EMPTY;
+            Object main = m.invoke(ritual);
+            if (main instanceof net.minecraft.world.item.crafting.Ingredient ing && !ing.isEmpty()) {
+                ItemStack[] items = ing.getItems();
+                if (items.length > 0 && !items[0].isEmpty()) {
+                    RSIntegrationMod.LOGGER.debug("[RecipeIndex] FA fallback output for {}: {}",
+                            id, items[0].getHoverName().getString());
+                    return items[0].copy();
+                }
+            }
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RecipeIndex] FA fallback output failed for {}: {}",
+                    id, e.toString());
+        }
+        return ItemStack.EMPTY;
+    }
+
     /**
      * Scan {@code FARegistries.RITUAL} and add item-producing rituals
      * to the index.  Returns the number of rituals indexed.
@@ -213,12 +240,10 @@ public final class RecipeIndex {
                 try {
                     Method getResult = Reflect.findMethod(ritual.getClass(),
                             "result", new Class<?>[0]);
-                    if (getResult == null) continue;
-                    Object result = getResult.invoke(ritual);
-                    if (result == null) continue;
+                    Object result = getResult != null ? getResult.invoke(ritual) : null;
 
                     ItemStack output = ItemStack.EMPTY;
-                    if (faCreateItemResultClass.isInstance(result)) {
+                    if (result != null && faCreateItemResultClass.isInstance(result)) {
                         Method getStack = Reflect.findMethod(result.getClass(),
                                 "getResult", new Class<?>[0]);
                         if (getStack != null) {
@@ -226,7 +251,7 @@ public final class RecipeIndex {
                             if (s instanceof ItemStack st && !st.isEmpty())
                                 output = st;
                         }
-                    } else if (faUpgradeTierResultClass != null
+                    } else if (result != null && faUpgradeTierResultClass != null
                             && faUpgradeTierResultClass.isInstance(result)) {
                         int from = 0, to = 0;
                         try {
@@ -244,6 +269,13 @@ public final class RecipeIndex {
                                 k -> new ArrayList<>()).add(entryObj);
                         count++;
                         continue;
+                    }
+
+                    // Fallback: rituals that modify items in-place (e.g.
+                    // apply_eternal_modifier) may have null result.  Use
+                    // mainIngredient's first matching item as the output.
+                    if (output.isEmpty()) {
+                        output = rsi$faFallbackOutput(ritual, id);
                     }
                     if (output.isEmpty()) continue;
 
@@ -348,9 +380,15 @@ public final class RecipeIndex {
     }
 
     /**
-     * Returns true if the recipe's output item matches any of its input
-     * items.  Identity recipes (e.g. CraftTweater {@code .copy()} recipes)
-     * create circular auto-crafting dependencies and are skipped.
+     * Returns true if the recipe's output item matches EVERY non-empty input
+     * item type.  A true identity recipe (e.g. CraftTweater {@code .copy()})
+     * creates circular auto-crafting dependencies and must be skipped.
+     *
+     * <p>Recipes where the output matches only SOME inputs (e.g. smithing
+     * transform: template + weapon + addition → modified weapon) are
+     * <em>not</em> identity — they consume a second distinct item and are
+     * therefore transformative, even if the output item type happens to
+     * match one of the input slots.</p>
      */
     private static boolean isIdentityRecipe(Recipe<?> recipe, ItemStack result,
                                             ModRecipeHandler handler) {
@@ -366,12 +404,20 @@ public final class RecipeIndex {
         } else {
             ingredients = recipe.getIngredients();
         }
+        boolean anyNonEmpty = false;
         for (var ing : ingredients) {
+            if (ing.isEmpty()) continue;
+            anyNonEmpty = true;
+            boolean found = false;
             for (ItemStack opt : ing.getItems()) {
-                if (opt.getItem() == resultItem) return true;
+                if (opt.getItem() == resultItem) {
+                    found = true;
+                    break;
+                }
             }
+            if (!found) return false; // distinct ingredient → transformative, not identity
         }
-        return false;
+        return anyNonEmpty;
     }
 
     /** Invalidate the cached index (e.g. on recipe reload). */

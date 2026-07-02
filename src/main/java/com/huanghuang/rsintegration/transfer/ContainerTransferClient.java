@@ -17,7 +17,7 @@ import net.minecraftforge.client.event.RegisterKeyMappingsEvent;
 import net.minecraftforge.client.event.ScreenEvent;
 import net.minecraftforge.client.settings.KeyConflictContext;
 import net.minecraftforge.common.MinecraftForge;
-import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
+
 import net.minecraftforge.fml.loading.FMLPaths;
 import org.lwjgl.glfw.GLFW;
 
@@ -59,7 +59,7 @@ public final class ContainerTransferClient {
                 "key.categories.rsi"
         );
 
-        var modBus = FMLJavaModLoadingContext.get().getModEventBus();
+        var modBus = com.huanghuang.rsintegration.RSIntegrationMod.MOD_BUS;
         modBus.addListener((RegisterKeyMappingsEvent event) -> {
             event.register(KEY_STORE_ALL);
             event.register(KEY_TOGGLE_MODE);

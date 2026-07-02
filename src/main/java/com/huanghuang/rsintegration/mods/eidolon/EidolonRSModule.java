@@ -41,10 +41,14 @@ public final class EidolonRSModule implements IModIntegration {
     public void registerBindingTargets() {
         BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
                 "eidolon", ModType.byId("eidolon"), RSIntegrationConfig.ENABLE_EIDOLON, List.of(
-                "elucent.eidolon.common.block.CrucibleBlock",
-                "elucent.eidolon.common.block.WorktableBlock",
-                "elucent.eidolon.common.block.BrazierBlock"
+                "elucent.eidolon.common.block.WorktableBlock"
         ), "eidolon"));
+        // Crucible and Brazier are in-world ritual blocks, no container GUI.
+        BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
+                "eidolon", ModType.byId("eidolon"), RSIntegrationConfig.ENABLE_EIDOLON, List.of(
+                "elucent.eidolon.common.block.CrucibleBlock",
+                "elucent.eidolon.common.block.BrazierBlock"
+        ), "eidolon_ritual", false));
     }
 
     @Override

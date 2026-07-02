@@ -230,7 +230,7 @@ public final class FaCraftPacket {
             List<ResourceLocation> autoSteps = CraftingResolver.resolveStepsForStacks(needed, allAvailable, level, missing);
 
             if (!missing.isEmpty()) {
-                player.sendSystemMessage(Component.translatable("rsi.generic.error.missing_materials", String.join(", ", missing)));
+                player.sendSystemMessage(Component.translatable("rsi.generic.error.missing_materials", CraftPacketUtils.formatMissingSummary(missing)));
                 return;
             }
 

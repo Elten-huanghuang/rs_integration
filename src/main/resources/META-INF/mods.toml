@@ -32,69 +32,59 @@ logoFile = ""
 [[dependencies.${mod_id}]]
     modId = "sophisticatedcore"
     mandatory = false
-    versionRange = "[1.2,)"
-    ordering = "AFTER"
+    versionRange = "[0,)"
     side = "BOTH"
 
 [[dependencies.${mod_id}]]
     modId = "sophisticatedbackpacks"
     mandatory = false
-    versionRange = "[3.23,)"
-    ordering = "AFTER"
+    versionRange = "[0,)"
     side = "BOTH"
 
 [[dependencies.${mod_id}]]
     modId = "goety"
     mandatory = false
-    versionRange = "[2.47,)"
-    ordering = "AFTER"
+    versionRange = "[0,)"
     side = "BOTH"
 
 [[dependencies.${mod_id}]]
     modId = "wizards_reborn"
     mandatory = false
-    versionRange = "[0.12,)"
-    ordering = "AFTER"
+    versionRange = "[0,)"
     side = "BOTH"
 
 [[dependencies.${mod_id}]]
     modId = "jei"
     mandatory = false
-    versionRange = "[15,)"
-    ordering = "AFTER"
+    versionRange = "[0,)"
     side = "CLIENT"
 
 [[dependencies.${mod_id}]]
     modId = "malum"
     mandatory = false
-    versionRange = "[1.6,)"
-    ordering = "AFTER"
+    versionRange = "[0,)"
     side = "BOTH"
 
 [[dependencies.${mod_id}]]
     modId = "eidolon"
     mandatory = false
-    versionRange = "[0.3,)"
-    ordering = "AFTER"
+    versionRange = "[0,)"
     side = "BOTH"
 
 [[dependencies.${mod_id}]]
     modId = "curios"
     mandatory = false
-    versionRange = "[5.14,)"
-    ordering = "AFTER"
+    versionRange = "[0,)"
     side = "BOTH"
 
 [[dependencies.${mod_id}]]
     modId = "forbidden_arcanus"
     mandatory = false
-    versionRange = "[1.0,)"
-    ordering = "AFTER"
+    versionRange = "[0,)"
     side = "BOTH"
 
 [[dependencies.${mod_id}]]
     modId = "antientropycore"
     mandatory = false
-    versionRange = "[1.4,)"
-    ordering = "AFTER"
+    versionRange = "[0,)"
     side = "BOTH"
