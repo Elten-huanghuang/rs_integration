@@ -609,8 +609,11 @@ public final class GenericCraftPacket {
             }
         }
 
+        // Smithing recipes don't need a bound machine — they compute results
+        // directly via getResultItem().  Skip the async chain path.
         if (!(recipe instanceof CraftingRecipe) && effectiveDim != null && effectivePos != null
-                && network != null && RSIntegrationConfig.ENABLE_MULTIBLOCK_AUTO_CRAFTING.get()) {
+                && network != null && RSIntegrationConfig.ENABLE_MULTIBLOCK_AUTO_CRAFTING.get()
+                && modType != ModType.byId("smithing")) {
             if (modType != null) {
                 // Expand ingredient specs into flat list for typed resolver
                 List<Ingredient> expanded = new ArrayList<>();
