@@ -77,6 +77,8 @@ public final class GenericCraftPacket {
     @Nullable private final net.minecraft.core.BlockPos pos;
     private final int repeatCount;
     private final boolean inferMode;
+    /** JEI-provided base item for FA ApplyModifierRecipe prefill */
+    @Nullable private final ItemStack baseItem;
 
     /** Preview mode: compute plan and send GUI to client. */
     public GenericCraftPacket(ResourceLocation recipeId, boolean preview) {
@@ -112,6 +114,16 @@ public final class GenericCraftPacket {
                               @Nullable ResourceLocation dim,
                               @Nullable net.minecraft.core.BlockPos pos,
                               int repeatCount, boolean inferMode) {
+        this(recipeId, preview, forcedRecipes, dim, pos, repeatCount, inferMode, null);
+    }
+
+    /** Full constructor with repeat count, infer mode, and JEI base item. */
+    public GenericCraftPacket(ResourceLocation recipeId, boolean preview,
+                              Map<String, String> forcedRecipes,
+                              @Nullable ResourceLocation dim,
+                              @Nullable net.minecraft.core.BlockPos pos,
+                              int repeatCount, boolean inferMode,
+                              @Nullable ItemStack baseItem) {
         this.recipeId = recipeId;
         this.preview = preview;
         this.forcedRecipes = forcedRecipes != null ? forcedRecipes : Collections.emptyMap();
@@ -119,6 +131,7 @@ public final class GenericCraftPacket {
         this.pos = pos;
         this.repeatCount = Math.max(1, Math.min(repeatCount, RSIntegrationConfig.REPEAT_COUNT_MAX.get()));
         this.inferMode = inferMode;
+        this.baseItem = baseItem != null ? baseItem.copy() : null;
     }
 
     /** Convenience: execute mode. */
@@ -131,6 +144,15 @@ public final class GenericCraftPacket {
                               @Nullable ResourceLocation dim,
                               @Nullable net.minecraft.core.BlockPos pos) {
         this(recipeId, preview, Collections.emptyMap(), dim, pos, 1);
+    }
+
+    /** JEI-initiated preview with repeat, inferMode, and specific base item. */
+    public GenericCraftPacket(ResourceLocation recipeId, boolean preview,
+                              @Nullable ResourceLocation dim,
+                              @Nullable net.minecraft.core.BlockPos pos,
+                              int repeatCount, boolean inferMode,
+                              @Nullable ItemStack baseItem) {
+        this(recipeId, preview, Collections.emptyMap(), dim, pos, repeatCount, inferMode, baseItem);
     }
 
     public void encode(FriendlyByteBuf buf) {
@@ -147,6 +169,8 @@ public final class GenericCraftPacket {
         if (pos != null) buf.writeBlockPos(pos);
         buf.writeVarInt(repeatCount);
         buf.writeBoolean(inferMode);
+        buf.writeBoolean(baseItem != null);
+        if (baseItem != null) buf.writeItem(baseItem);
     }
 
     public static GenericCraftPacket decode(FriendlyByteBuf buf) {
@@ -175,7 +199,8 @@ public final class GenericCraftPacket {
         }
         int repeatCount = Math.max(1, Math.min(buf.readVarInt(), RSIntegrationConfig.REPEAT_COUNT_MAX.get()));
         boolean inferMode = buf.readBoolean();
-        return new GenericCraftPacket(recipeId, preview, forced, dim, pos, repeatCount, inferMode);
+        ItemStack baseItem = buf.readBoolean() ? buf.readItem() : null;
+        return new GenericCraftPacket(recipeId, preview, forced, dim, pos, repeatCount, inferMode, baseItem);
     }
 
     public static void handle(GenericCraftPacket packet, Supplier<NetworkEvent.Context> contextSupplier) {
@@ -233,7 +258,7 @@ public final class GenericCraftPacket {
                 } else {
                     RSIntegrationMod.LOGGER.debug("[RSI-Generic] handle() → tryResolve: recipeId={}", packet.recipeId);
                     tryResolve(player, packet.recipeId, packet.dim, packet.pos,
-                            packet.repeatCount, packet.inferMode);
+                            packet.repeatCount, packet.inferMode, packet.baseItem);
                 }
             } catch (Throwable e) {
                 RSIntegrationMod.LOGGER.error("[RSI-Generic] Failed for {}:", packet.recipeId, e);
@@ -556,7 +581,8 @@ public final class GenericCraftPacket {
     private static void tryResolve(ServerPlayer player, ResourceLocation recipeId,
                                    @Nullable ResourceLocation dim,
                                    @Nullable net.minecraft.core.BlockPos pos,
-                                   int repeatCount, boolean inferMode) {
+                                   int repeatCount, boolean inferMode,
+                                   @Nullable ItemStack baseItem) {
         Recipe<?> recipe = resolveRecipe(player.serverLevel(), recipeId);
         if (recipe == null) {
             player.sendSystemMessage(Component.translatable("rsi.generic.error.recipe_not_found", recipeId.toString()));
@@ -566,7 +592,7 @@ public final class GenericCraftPacket {
         // FA ApplyModifierRecipe: no fixed base item, so auto-crafting is impossible.
         // Redirect to opening the smithing table GUI with template & addition pre-filled.
         if (isFaApplyModifier(recipe)) {
-            openSmithingForFaModifier(player, recipeId);
+            openSmithingForFaModifier(player, recipeId, baseItem);
             return;
         }
 
@@ -642,7 +668,7 @@ public final class GenericCraftPacket {
                     AsyncCraftManager.getInstance().remove(chain);
                     com.huanghuang.rsintegration.crafting.ChainRepeatController.scheduleNext(
                             chain, capturedServerA, capturedUuidA, repeatCount,
-                            (p, rem) -> tryResolve(p, recipeId, dim, pos, rem, inferMode));
+                            (p, rem) -> tryResolve(p, recipeId, dim, pos, rem, inferMode, baseItem));
                 });
                 player.sendSystemMessage(
                         com.huanghuang.rsintegration.util.TextBuilder.translate("rsi.async.chain_started", modSteps.size())
@@ -671,7 +697,7 @@ public final class GenericCraftPacket {
                         AsyncCraftManager.getInstance().remove(chain);
                         com.huanghuang.rsintegration.crafting.ChainRepeatController.scheduleNext(
                                 chain, capturedServerB, capturedUuidB, repeatCount,
-                                (p, rem) -> tryResolve(p, recipeId, dim, pos, rem, inferMode));
+                                (p, rem) -> tryResolve(p, recipeId, dim, pos, rem, inferMode, baseItem));
                     });
                     player.sendSystemMessage(
                             com.huanghuang.rsintegration.util.TextBuilder.translate("rsi.async.chain_started", allSteps.size())
@@ -716,7 +742,7 @@ public final class GenericCraftPacket {
                         AsyncCraftManager.getInstance().remove(chain);
                         com.huanghuang.rsintegration.crafting.ChainRepeatController.scheduleNext(
                                 chain, capturedServerC, capturedUuidC, repeatCount,
-                                (p, rem) -> tryResolve(p, recipeId, dim, pos, rem, inferMode));
+                                (p, rem) -> tryResolve(p, recipeId, dim, pos, rem, inferMode, baseItem));
                     });
                     player.sendSystemMessage(
                             com.huanghuang.rsintegration.util.TextBuilder.translate("rsi.async.chain_started", planSteps.size())
@@ -1837,9 +1863,10 @@ public final class GenericCraftPacket {
 
     /**
      * Open the bound smithing table GUI and pre-fill template + addition.
-     * The player places their own base item in slot 1.
+     * If baseItem is provided (from JEI), it is used for slot 1.
      */
-    private static void openSmithingForFaModifier(ServerPlayer player, ResourceLocation recipeId) {
+    private static void openSmithingForFaModifier(ServerPlayer player, ResourceLocation recipeId,
+                                                   @Nullable ItemStack baseItem) {
         ModType smithing = ModType.byId("smithing");
         if (smithing == null) {
             player.sendSystemMessage(Component.translatable("rsi.generic.error.no_bound_machine", "smithing"));
@@ -1866,9 +1893,9 @@ public final class GenericCraftPacket {
             return;
         }
 
-        // Pre-fill template & addition from RS
+        // Pre-fill template, base, addition
         com.huanghuang.rsintegration.sidepanel.network.OpenBoundMachineGuiPacket
-                .prefillSmithingTable(player, level, recipeId);
+                .prefillSmithingTable(player, level, recipeId, baseItem);
     }
 
 }

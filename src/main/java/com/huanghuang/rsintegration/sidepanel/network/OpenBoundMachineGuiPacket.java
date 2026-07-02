@@ -53,18 +53,27 @@ public final class OpenBoundMachineGuiPacket {
     private final String itemKey;
     @Nullable
     private final ResourceLocation recipeId;
+    @Nullable
+    private final ItemStack baseItem;
 
     public OpenBoundMachineGuiPacket(ResourceLocation dim, BlockPos pos, String itemKey,
                                      @Nullable ResourceLocation recipeId) {
+        this(dim, pos, itemKey, recipeId, null);
+    }
+
+    public OpenBoundMachineGuiPacket(ResourceLocation dim, BlockPos pos, String itemKey,
+                                     @Nullable ResourceLocation recipeId,
+                                     @Nullable ItemStack baseItem) {
         this.dim = dim;
         this.pos = pos;
         this.itemKey = itemKey;
         this.recipeId = recipeId;
+        this.baseItem = baseItem != null ? baseItem.copy() : null;
     }
 
     /** Backward-compat: no recipe pre-fill. */
     public OpenBoundMachineGuiPacket(ResourceLocation dim, BlockPos pos, String itemKey) {
-        this(dim, pos, itemKey, null);
+        this(dim, pos, itemKey, null, null);
     }
 
     public void encode(FriendlyByteBuf buf) {
@@ -73,6 +82,8 @@ public final class OpenBoundMachineGuiPacket {
         buf.writeUtf(itemKey, 256);
         buf.writeBoolean(recipeId != null);
         if (recipeId != null) buf.writeResourceLocation(recipeId);
+        buf.writeBoolean(baseItem != null);
+        if (baseItem != null) buf.writeItem(baseItem);
     }
 
     public static OpenBoundMachineGuiPacket decode(FriendlyByteBuf buf) {
@@ -80,7 +91,8 @@ public final class OpenBoundMachineGuiPacket {
         BlockPos pos = buf.readBlockPos();
         String key = buf.readUtf();
         ResourceLocation rid = buf.readBoolean() ? buf.readResourceLocation() : null;
-        return new OpenBoundMachineGuiPacket(dim, pos, key, rid);
+        ItemStack base = buf.readBoolean() ? buf.readItem() : null;
+        return new OpenBoundMachineGuiPacket(dim, pos, key, rid, base);
     }
 
     public static void handle(OpenBoundMachineGuiPacket packet, Supplier<NetworkEvent.Context> ctx) {
@@ -147,7 +159,7 @@ public final class OpenBoundMachineGuiPacket {
                 if (isStonecutter) {
                     prefillStonecutterMenu(player, level, packet.recipeId);
                 } else if (isSmithing) {
-                    prefillSmithingTable(player, level, packet.recipeId);
+                    prefillSmithingTable(player, level, packet.recipeId, packet.baseItem);
                 }
             }
 
@@ -339,7 +351,8 @@ public final class OpenBoundMachineGuiPacket {
 
     /** Fill smithing table: template (slot 0), base (slot 1), addition (slot 2) from RS. */
     public static void prefillSmithingTable(ServerPlayer player, ServerLevel level,
-                                             ResourceLocation recipeId) {
+                                             ResourceLocation recipeId,
+                                             @Nullable ItemStack baseItem) {
         RSIntegrationMod.LOGGER.debug("[RSI-Prefill] Smithing start: recipe={} menu={}",
                 recipeId, player.containerMenu != null ? player.containerMenu.getClass().getSimpleName() : "null");
 
@@ -364,10 +377,9 @@ public final class OpenBoundMachineGuiPacket {
         INetwork network = RSIntegration.resolveNetworkFromPlayer(player);
         if (network == null) return;
 
-        // FA ApplyModifierRecipe: only template (slot 0) and addition (slot 2).
-        // Slot 1 (base) is left empty for the player to insert their own item.
+        // FA ApplyModifierRecipe: template (slot 0), base (slot 1 from baseItem or RS), addition (slot 2).
         if (recipe.getClass().getSimpleName().equals("ApplyModifierRecipe")) {
-            prefillFaApplyModifier(player, recipe, network, menu);
+            prefillFaApplyModifier(player, recipe, network, menu, baseItem);
             return;
         }
 
@@ -417,14 +429,31 @@ public final class OpenBoundMachineGuiPacket {
         }
     }
 
-    /** Fill only template (slot 0) and addition (slot 2) for FA ApplyModifierRecipe. */
+    /** Fill template (slot 0), base (slot 1 from explicit baseItem or RS scan),
+     *  and addition (slot 2) for FA ApplyModifierRecipe. */
     private static void prefillFaApplyModifier(ServerPlayer player, Recipe<?> recipe,
-                                                INetwork network, SmithingMenu menu) {
+                                                INetwork network, SmithingMenu menu,
+                                                @Nullable ItemStack baseItem) {
         try {
             java.lang.reflect.Method getTemplate = recipe.getClass().getMethod("getTemplate");
             java.lang.reflect.Method getAddition = recipe.getClass().getMethod("getAddition");
+            java.lang.reflect.Method getModifier = recipe.getClass().getMethod("getModifier");
             Ingredient template = (Ingredient) getTemplate.invoke(recipe);
             Ingredient addition = (Ingredient) getAddition.invoke(recipe);
+            Object modifier = getModifier.invoke(recipe);
+
+            // Probe canItemContainModifier method (used when baseItem is null)
+            java.lang.reflect.Method canContain = null;
+            if (baseItem == null || baseItem.isEmpty()) {
+                for (java.lang.reflect.Method m : modifier.getClass().getMethods()) {
+                    if (m.getName().equals("canItemContainModifier")
+                            && m.getParameterCount() == 1
+                            && m.getParameterTypes()[0].isAssignableFrom(ItemStack.class)) {
+                        canContain = m;
+                        break;
+                    }
+                }
+            }
 
             int filled = 0;
             // Slot 0: template
@@ -435,6 +464,34 @@ public final class OpenBoundMachineGuiPacket {
                     if (!extracted.isEmpty()) {
                         menu.getSlot(0).set(extracted.copy());
                         filled++;
+                    }
+                }
+            }
+            // Slot 1: fill base item — prefer explicit JEI-provided item, else scan RS
+            if (menu.getSlot(1).getItem().isEmpty()) {
+                if (baseItem != null && !baseItem.isEmpty()) {
+                    ItemStack extracted = network.extractItem(baseItem.copyWithCount(1), 1,
+                            com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                    if (!extracted.isEmpty()) {
+                        menu.getSlot(1).set(extracted.copy());
+                        filled++;
+                    }
+                } else if (canContain != null) {
+                    for (var entry : network.getItemStorageCache().getList().getStacks()) {
+                        ItemStack candidate = entry.getStack();
+                        if (candidate.isEmpty()) continue;
+                        try {
+                            if ((boolean) canContain.invoke(modifier, candidate)) {
+                                ItemStack extracted = network.extractItem(
+                                        candidate.copyWithCount(1), 1,
+                                        com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                                if (!extracted.isEmpty()) {
+                                    menu.getSlot(1).set(extracted.copy());
+                                    filled++;
+                                }
+                                break;
+                            }
+                        } catch (Exception ignored) {}
                     }
                 }
             }

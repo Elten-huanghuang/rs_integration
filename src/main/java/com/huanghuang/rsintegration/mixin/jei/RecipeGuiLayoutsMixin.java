@@ -982,15 +982,26 @@ public class RecipeGuiLayoutsMixin {
         // All mod recipes (including Aether) route through the plan-preview flow.
         // GenericCraftPacket now falls back to FARegistries.RITUAL when a recipe
         // is not found in RecipeManager, so FA rituals show the plan tree too.
+        ItemStack jeiBaseItem = null;
+        if (recipe instanceof Recipe<?> r && recipeId.getNamespace().equals("forbidden_arcanus")
+                && r.getIngredients().size() >= 3) {
+            Ingredient baseIng = r.getIngredients().get(1);
+            if (!baseIng.isEmpty()) {
+                ItemStack[] stacks = baseIng.getItems();
+                if (stacks.length > 0) jeiBaseItem = stacks[0].copy();
+            }
+        }
+        final ItemStack capturedBase = jeiBaseItem;
         return () -> {
             GenericCraftPacket pkt;
             try {
-                pkt = new GenericCraftPacket(recipeId, true, dim, machinePos);
+                pkt = new GenericCraftPacket(recipeId, true, dim, machinePos, 1, false, capturedBase);
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.error("[RSI-JEI] Failed to create GenericCraftPacket: recipeId={} dim={} pos={}", recipeId, dim, machinePos, e);
                 return;
             }
-            RSIntegrationMod.LOGGER.debug("[RSI-JEI] Sending GenericCraftPacket: recipeId={} dim={} pos={}", recipeId, dim, machinePos);
+            RSIntegrationMod.LOGGER.debug("[RSI-JEI] Sending GenericCraftPacket: recipeId={} dim={} pos={} baseItem={}",
+                    recipeId, dim, machinePos, capturedBase != null ? capturedBase.getHoverName().getString() : "null");
             BatchCraftNetworkHandler.CHANNEL.sendToServer(pkt);
         };
     }
