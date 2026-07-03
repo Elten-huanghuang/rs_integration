@@ -85,7 +85,6 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
     // Storage block positions and their TileEntityAltars (the 8 surrounding blocks)
     private List<BlockPos> storagePositions;
     private List<Object> storageBlockEntities; // TileEntityAltar for each position
-               // centre of storage positions, up(2) = output spawn
     private boolean[] slotsFilled;            // tracks which slots we put items into
 
     // ── IBatchDelegate impl ───────────────────────────────────────

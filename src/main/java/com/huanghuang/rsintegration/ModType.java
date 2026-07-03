@@ -231,7 +231,6 @@ public final class ModType {
     public String toString() { return id; }
 
     /**
-    /**
      * Supplier that lazily loads a delegate class via reflection to avoid
      * {@link ClassNotFoundException} when the target mod is absent.
      * Shared lazy delegate supplier. Public so RSModules can use it.

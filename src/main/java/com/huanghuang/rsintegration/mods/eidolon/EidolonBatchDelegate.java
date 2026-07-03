@@ -28,7 +28,6 @@ import java.lang.reflect.Constructor;
 import java.util.ArrayList;
 import java.util.List;
 
-
 public final class EidolonBatchDelegate extends AbstractBatchDelegate {
 
     // ── Shared class refs ────────────────────────────────────────

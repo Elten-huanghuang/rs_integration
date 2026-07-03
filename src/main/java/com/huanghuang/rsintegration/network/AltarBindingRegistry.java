@@ -460,7 +460,8 @@ public final class AltarBindingRegistry {
         for (ItemStack stack : stacks) {
             if (stack.isEmpty()) continue;
             for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
-                if (ModType.fromBlockKey(entry.blockKey()) != type) continue;
+                ModType entryType = ModType.fromBlockKey(entry.blockKey());
+                if (entryType == null || !entryType.id().equals(type.id())) continue;
                 // If we can't determine sub-type, accept any machine of this mod
                 if (subType == null) return true;
                 // Match sub-type against block key (e.g. block key contains "wissen_crystallizer")
@@ -669,7 +670,8 @@ public final class AltarBindingRegistry {
         for (ItemStack stack : stacks) {
             if (stack.isEmpty()) continue;
             for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
-                if (ModType.fromBlockKey(entry.blockKey()) != type) continue;
+                ModType entryType = ModType.fromBlockKey(entry.blockKey());
+                if (entryType == null || !entryType.id().equals(type.id())) continue;
                 if (normalized != null && entry.blockKey() != null
                         && !entry.blockKey().toLowerCase(java.util.Locale.ROOT).contains(normalized))
                     continue;

@@ -8,7 +8,6 @@ import com.huanghuang.rsintegration.crafting.CraftingResolver;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.ResolutionStep;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.crafting.RecipeIndex;
-import com.huanghuang.rsintegration.crafting.RecipeIndex;
 import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
 import com.huanghuang.rsintegration.crafting.plan.PlanResponse;
 import com.huanghuang.rsintegration.crafting.plan.PlanResponsePacket;
@@ -91,7 +90,7 @@ public final class GenericCraftPacket {
         this(recipeId, preview, forcedRecipes, null, null, 1);
     }
 
-    /** Full constructor with optional machine binding for mod recipes. */
+    /** Convenience: without explicit machine binding. */
     public GenericCraftPacket(ResourceLocation recipeId, boolean preview,
                               Map<String, String> forcedRecipes,
                               @Nullable ResourceLocation dim,
@@ -99,7 +98,7 @@ public final class GenericCraftPacket {
         this(recipeId, preview, forcedRecipes, dim, pos, 1);
     }
 
-    /** Full constructor with repeat count for batch execution. */
+    /** Convenience: with repeat count, no infer mode. */
     public GenericCraftPacket(ResourceLocation recipeId, boolean preview,
                               Map<String, String> forcedRecipes,
                               @Nullable ResourceLocation dim,
@@ -108,7 +107,7 @@ public final class GenericCraftPacket {
         this(recipeId, preview, forcedRecipes, dim, pos, repeatCount, false);
     }
 
-    /** Full constructor with repeat count and infer mode. */
+    /** Convenience: with infer mode, no base item. */
     public GenericCraftPacket(ResourceLocation recipeId, boolean preview,
                               Map<String, String> forcedRecipes,
                               @Nullable ResourceLocation dim,
@@ -117,7 +116,7 @@ public final class GenericCraftPacket {
         this(recipeId, preview, forcedRecipes, dim, pos, repeatCount, inferMode, null);
     }
 
-    /** Full constructor with repeat count, infer mode, and JEI base item. */
+    /** All parameters, including JEI base item for FA smithing prefill. */
     public GenericCraftPacket(ResourceLocation recipeId, boolean preview,
                               Map<String, String> forcedRecipes,
                               @Nullable ResourceLocation dim,
@@ -287,7 +286,6 @@ public final class GenericCraftPacket {
 
     private static void probeFa() {
         if (faProbed) return;
-        faProbed = true;
         try {
             Class<?> faRegistries = Class.forName(
                     "com.stal111.forbidden_arcanus.core.registry.FARegistries");
@@ -303,6 +301,7 @@ public final class GenericCraftPacket {
             RSIntegrationMod.LOGGER.debug("[RSI-Generic] FA not available: {}", e.toString());
             faOk = false;
         }
+        faProbed = true;
     }
 
     /** Create a HephaestusForgeBlock ItemStack with {@code upgradedTier}
@@ -541,7 +540,6 @@ public final class GenericCraftPacket {
         }
     }
 
-    /** Strip JEI pagination prefix from pseudo-IDs like {@code mod:jei.real_path/page}. */
     /** Returns the blockKey keyword that a machine must contain to be
      *  compatible with the given recipe, or {@code null} for unknown types. */
     @javax.annotation.Nullable
@@ -566,6 +564,7 @@ public final class GenericCraftPacket {
         return null; // non-vanilla or unknown — don't filter
     }
 
+    /** Strip JEI pagination prefix from pseudo-IDs like {@code mod:jei.real_path/page}. */
     private static ResourceLocation unwrapJeiId(ResourceLocation id) {
         if (id == null) return null;
         String path = id.getPath();
@@ -810,6 +809,34 @@ public final class GenericCraftPacket {
                 : CraftPacketUtils.resolveNetworkForCraft(player,
                         player.serverLevel().dimension(), player.blockPosition());
 
+        // Resolve intermediate crafting steps for smithing recipes.
+        // Smithing skips the CraftingRecipe-only paths above, so intermediates
+        // (e.g. diamond from diamond block) would not be crafted otherwise.
+        if (modType == ModType.byId("smithing") && network != null
+                && RSIntegrationConfig.ENABLE_MULTIBLOCK_AUTO_CRAFTING.get()) {
+            List<Ingredient> smithingIngredients = new ArrayList<>();
+            for (IngredientSpec spec : specs) {
+                if (!spec.isEmpty()) smithingIngredients.add(spec.ingredient());
+            }
+            if (!smithingIngredients.isEmpty()) {
+                Map<StackKey, Integer> avail = MaterialSources.listAllAvailable(player, network);
+                List<String> missing = new ArrayList<>();
+                List<ResolutionStep> interSteps = CraftingResolver.resolveStepsForIngredientsWithTypes(
+                        smithingIngredients, avail, player.serverLevel(), player, network, missing);
+                if (interSteps != null && !interSteps.isEmpty() && missing.isEmpty()) {
+                    if (interSteps.stream().allMatch(s -> s.modType() == ModType.GENERIC)) {
+                        List<ResourceLocation> stepIds = interSteps.stream()
+                                .map(ResolutionStep::recipeId).collect(Collectors.toList());
+                        if (!CraftPacketUtils.executeCraftingSteps(player, stepIds, network)) {
+                            player.sendSystemMessage(Component.translatable(
+                                    "rsi.generic.error.craft_failed", "Smithing intermediate failed"));
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+
         for (int r = 0; r < repeatCount; r++) {
             List<ItemStack> allExtracted = new ArrayList<>();
             ExtractionLedger ledger = new ExtractionLedger();
@@ -952,6 +979,11 @@ public final class GenericCraftPacket {
         Recipe<?> recipe = resolveRecipe(player.serverLevel(), recipeId);
         if (recipe == null) {
             sendPlanError(player, Component.translatable("rsi.generic.error.recipe_not_found", recipeId.toString()).getString());
+            return;
+        }
+
+        if (isFaApplyModifier(recipe)) {
+            sendPlanError(player, Component.translatable("rsi.generic.error.fa_open_smithing").getString());
             return;
         }
 
@@ -1868,10 +1900,6 @@ public final class GenericCraftPacket {
     private static void openSmithingForFaModifier(ServerPlayer player, ResourceLocation recipeId,
                                                    @Nullable ItemStack baseItem) {
         ModType smithing = ModType.byId("smithing");
-        if (smithing == null) {
-            player.sendSystemMessage(Component.translatable("rsi.generic.error.no_bound_machine", "smithing"));
-            return;
-        }
 
         List<com.huanghuang.rsintegration.network.AltarBindingRegistry.BoundMachine> machines =
                 com.huanghuang.rsintegration.network.AltarBindingRegistry

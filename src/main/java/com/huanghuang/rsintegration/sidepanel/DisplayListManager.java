@@ -100,7 +100,7 @@ final class DisplayListManager {
         return list;
     }
 
-    // 【核心修复】：彻底翻转了 .thenComparing 的顺序，并使用了安全的比较器
+    // Reversed .thenComparing order with null-safe comparators to fix sort stability
     static void resort(List<PanelStack> list) {
         if (!RSSidePanelClient.canSort()) return;
         int sm = RSSidePanelClient.sortMode;

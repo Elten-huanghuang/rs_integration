@@ -175,7 +175,7 @@ public final class RSIntegrationMod {
                             "vanilla_machine"
                     ));
 
-            // Smithing table → separate ModType so it shows "锻造台" rather than "熔炉烧炼"
+            // Smithing table → separate ModType so it shows as smithing, not furnace
             ModType.register("smithing",
                     new String[]{
                             "net.minecraft.world.item.crafting.SmithingTransformRecipe",

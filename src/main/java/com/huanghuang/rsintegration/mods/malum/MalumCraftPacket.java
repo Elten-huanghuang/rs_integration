@@ -62,7 +62,8 @@ public final class MalumCraftPacket {
         if (player == null || player instanceof net.minecraftforge.common.util.FakePlayer) {
             context.setPacketHandled(true);
             return;
-        }        context.enqueueWork(() -> {
+        }
+        context.enqueueWork(() -> {
             try {
                 tryCraft(player, packet.recipeId, packet.dim, packet.pos);
             } catch (Exception e) {

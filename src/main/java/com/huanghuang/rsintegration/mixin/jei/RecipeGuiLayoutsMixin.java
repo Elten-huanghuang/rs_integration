@@ -988,7 +988,7 @@ public class RecipeGuiLayoutsMixin {
             Ingredient baseIng = r.getIngredients().get(1);
             if (!baseIng.isEmpty()) {
                 ItemStack[] stacks = baseIng.getItems();
-                if (stacks.length > 0) jeiBaseItem = stacks[0].copy();
+                if (stacks.length > 0 && !stacks[0].isEmpty()) jeiBaseItem = stacks[0].copy();
             }
         }
         final ItemStack capturedBase = jeiBaseItem;
@@ -1012,7 +1012,7 @@ public class RecipeGuiLayoutsMixin {
         var player = Minecraft.getInstance().player;
         if (player == null) return null;
 
-        boolean debugFaTlm = filter.equals("hephaestus_forge") || filter.equals("touhou_little_maid");
+		boolean debugFaTlm = filter.equals("hephaestus_forge") || filter.equals("touhou_little_maid");
 		boolean debugVanilla = filter != null && filter.startsWith("block.minecraft.");
 		boolean debug = debugFaTlm || debugVanilla;
         List<String> allBlockKeys = debug ? new ArrayList<>() : null;

@@ -257,7 +257,7 @@ public final class OpenBoundMachineGuiPacket {
     }
 
     private static ItemStack extractIngredientFromRS(INetwork network, Ingredient ingredient) {
-        var stacks = network.getItemStorageCache().getList().getStacks();
+        var stacks = new ArrayList<>(network.getItemStorageCache().getList().getStacks());
         for (var entry : stacks) {
             ItemStack stack = entry.getStack();
             if (stack.isEmpty()) continue;
@@ -272,7 +272,7 @@ public final class OpenBoundMachineGuiPacket {
 
     private static void supplyFuelFromRS(INetwork network, AbstractFurnaceBlockEntity furnace,
                                           Recipe<?> recipe, int cookingTime, ServerPlayer player) {
-        var stacks = network.getItemStorageCache().getList().getStacks();
+        var stacks = new ArrayList<>(network.getItemStorageCache().getList().getStacks());
         for (var entry : stacks) {
             ItemStack candidate = entry.getStack();
             if (candidate.isEmpty()) continue;
@@ -477,7 +477,7 @@ public final class OpenBoundMachineGuiPacket {
                         filled++;
                     }
                 } else if (canContain != null) {
-                    for (var entry : network.getItemStorageCache().getList().getStacks()) {
+                    for (var entry : new ArrayList<>(network.getItemStorageCache().getList().getStacks())) {
                         ItemStack candidate = entry.getStack();
                         if (candidate.isEmpty()) continue;
                         try {
@@ -519,7 +519,7 @@ public final class OpenBoundMachineGuiPacket {
 
     /** Extract up to {@code count} of an ingredient from RS. */
     private static ItemStack extractIngredientFromRS(INetwork network, Ingredient ingredient, int count) {
-        var stacks = network.getItemStorageCache().getList().getStacks();
+        var stacks = new ArrayList<>(network.getItemStorageCache().getList().getStacks());
         ItemStack result = ItemStack.EMPTY;
         int remaining = count;
         for (var entry : stacks) {

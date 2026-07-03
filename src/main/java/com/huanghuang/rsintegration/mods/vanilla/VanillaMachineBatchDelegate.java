@@ -256,11 +256,17 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         // Commit private ledger
         if (!usingSharedLedger && ledger != null && !ledger.isCommitted()) {
             if (!ledger.commit(network, player)) {
-                // Refund everything
+                // Refund input
                 ItemStack refund = furnaceBE.getItem(0);
                 if (!refund.isEmpty()) {
                     furnaceBE.setItem(0, ItemStack.EMPTY);
                     ItemHandlerHelper.giveItemToPlayer(player, refund);
+                }
+                // Refund fuel (extracted outside ledger)
+                ItemStack fuelRefund = furnaceBE.getItem(1);
+                if (!fuelRefund.isEmpty()) {
+                    furnaceBE.setItem(1, ItemStack.EMPTY);
+                    ItemHandlerHelper.giveItemToPlayer(player, fuelRefund);
                 }
                 player.sendSystemMessage(Component.translatable(
                         "rsi.generic.error.craft_failed", "Extraction commit failed"));
@@ -326,7 +332,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
 
         // Scan RS storage for burnable items
         this.fuelStacks = new ArrayList<>();
-        var stacks = network.getItemStorageCache().getList().getStacks();
+        var stacks = new ArrayList<>(network.getItemStorageCache().getList().getStacks());
         for (var entry : stacks) {
             ItemStack candidate = entry.getStack();
             if (candidate.isEmpty()) continue;

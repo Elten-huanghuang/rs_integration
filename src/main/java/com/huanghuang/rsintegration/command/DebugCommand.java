@@ -70,8 +70,6 @@ public final class DebugCommand {
                         .executes(DebugCommand::dumpBindings)));
     }
 
-    // ── cancel chain ──────────────────────────────────────────────
-
     // ── dump chain ───────────────────────────────────────────────
 
     private static int dumpChain(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {

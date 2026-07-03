@@ -62,7 +62,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
     private Object ritualManager;
     private Object essencesStorage;
     private List<Object> filledPedestals;
-    private List<Object> emptyPedestals; // saved pedestal list for cleanup
+    private List<Object> emptyPedestals;
     private boolean ritualEverSeenActive; // guards against premature completion
 
     // ── IBatchDelegate impl ───────────────────────────────────────

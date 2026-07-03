@@ -1,6 +1,5 @@
 package com.huanghuang.rsintegration.machine;
 
-
 import com.huanghuang.rsintegration.machine.MachineSlotType;
 import com.huanghuang.rsintegration.sidepanel.data.BindingInfo;
 import com.huanghuang.rsintegration.sidepanel.data.MachineStatusCache;

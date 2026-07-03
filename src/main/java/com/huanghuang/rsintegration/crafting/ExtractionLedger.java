@@ -77,8 +77,8 @@ public final class ExtractionLedger {
             ItemStack matched = findAvailableInNetwork(network, ingredient, count);
             if (!matched.isEmpty()) {
                 ItemStack result = matched.copyWithCount(count);
-                // 💡 修复点：传入原始 Ingredient 而不是用 Ingredient.of(result)，解决 Tag 无法批量跨品种提取的 Bug
-                // pendingNet already tracked inside findAvailableInNetwork
+                // Pass original Ingredient (not Ingredient.of(result)) so tag-based
+                // extraction can pull across different item types within the same tag.
                 recordEntry(new Entry(Source.NETWORK, ingredient, result.copy(), null, null, null, network));
                 return result;
             }
@@ -93,7 +93,6 @@ public final class ExtractionLedger {
                     ItemStack result = matched.copyWithCount(count);
                     recordEntry(new Entry(Source.ALTAR_BINDING, ingredient, result.copy(),
                             null, altarDim, altarPos, bindingNet));
-                    // pendingNet already tracked inside findAvailableInNetwork
                     return result;
                 }
             }
@@ -104,7 +103,6 @@ public final class ExtractionLedger {
             if (!matched.isEmpty()) {
                 ItemStack result = matched.copyWithCount(count);
                 recordEntry(new Entry(Source.PLAYER_INVENTORY, ingredient, result.copy(), null, null, null, null));
-                // pendingInv already tracked inside findAvailableInInventory
                 return result;
             }
         }
@@ -122,7 +120,6 @@ public final class ExtractionLedger {
 
         ItemStack template = matched.copyWithCount(count);
         recordEntry(new Entry(Source.NETWORK, ingredient, template.copy(), null, null, null, network));
-        // pendingNet already tracked inside findAvailableInNetwork
         return template;
     }
 
@@ -136,7 +133,6 @@ public final class ExtractionLedger {
 
         ItemStack template = matched.copyWithCount(count);
         recordEntry(new Entry(Source.PLAYER_INVENTORY, ingredient, template.copy(), null, null, null, null));
-        // pendingInv already tracked inside findAvailableInInventory
         return template;
     }
 
@@ -354,7 +350,7 @@ public final class ExtractionLedger {
         return switch (entry.source) {
             case ALTAR_BINDING -> {
                 if (entry.preExtracted != null) yield entry.preExtracted.copy();
-                // 使用原版原始 Ingredient 防止因为聚合提取而抛出错误
+                // Use original Ingredient to avoid errors from aggregated extraction
                 yield AltarBindingRegistry.tryExtractFromBindings(player,
                         entry.altarDim, entry.altarPos,
                         entry.originalIngredient, entry.count);

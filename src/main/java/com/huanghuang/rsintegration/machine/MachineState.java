@@ -17,7 +17,7 @@ public enum MachineState {
         buf.writeByte(ordinal());
     }
 
-    public static MachineState decode(FriendlyByteBuf buf) {    
+    public static MachineState decode(FriendlyByteBuf buf) {
         int idx = buf.readByte();
         MachineState[] values = values();
         return idx >= 0 && idx < values.length ? values[idx] : UNKNOWN;

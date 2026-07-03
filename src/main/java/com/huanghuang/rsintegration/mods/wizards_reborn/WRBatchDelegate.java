@@ -31,7 +31,6 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 
-
 public final class WRBatchDelegate extends AbstractBatchDelegate {
 
     // ── Machine type enum ────────────────────────────────────────
@@ -242,11 +241,10 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
     }
 
     private boolean validateIdle(ServerPlayer player, ServerLevel level) {
-        // ── Every machine type must pass an "is crafting?" check first.
-        //     Even if all slots / pedestals appear empty (some machines
-        //     consume items immediately when the craft starts), the ticking
-        //     craft state should still be detectable.
-        // ────────────────────────────────────────────────────────────────
+        // Every machine type must pass an "is crafting?" check first.
+        // Even if all slots / pedestals appear empty (some machines
+        // consume items immediately when the craft starts), the ticking
+        // craft state should still be detectable.
         // ARCANE_ITERATOR has its own crafting check below (wissenInCraft).
         // isMachineCrafting() scans for "startCraft"/"active" which can be
         // stuck true on iterators even when idle (parent BlockEntityBase).
@@ -517,7 +515,6 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         RSIntegrationMod.LOGGER.debug("[RSI-Batch-WR] Crystal setup validation PASSED at {}", myPos);
         return true;
     }
-
 
     @Override
     public boolean tryStartSingleCraft(ServerPlayer player) {
@@ -1748,12 +1745,6 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         WRContainerHelper.syncBlockEntity(be);
     }
 
-    // ── Crystal ritual pre-flight checks ──────────────────────────
-
-    /**
-     * Check whether the crystal block is on cooldown (has been recently used).
-     * Tries multiple method/field names to accommodate different WR versions.
-     */
     // ── Wissen energy check ───────────────────────────────────────
 
     /**

@@ -354,7 +354,7 @@ public final class AetherFurnaceBatchDelegate implements IBatchDelegate {
 
     /** Extract one fuel item from the RS network that is valid for this machine. */
     private static ItemStack extractFuelForMachine(BlockEntity be, INetwork network) {
-        for (var entry : network.getItemStorageCache().getList().getStacks()) {
+        for (var entry : new java.util.ArrayList<>(network.getItemStorageCache().getList().getStacks())) {
             ItemStack stack = entry.getStack();
             if (stack.isEmpty()) continue;
             if (isValidFuelForMachine(be, stack)) {

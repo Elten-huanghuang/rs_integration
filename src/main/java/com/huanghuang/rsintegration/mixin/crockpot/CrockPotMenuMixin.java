@@ -28,7 +28,7 @@ public abstract class CrockPotMenuMixin {
         }
     }
 
-    // 顺便把 getBurningProgress 也防御一下，防止接下来又崩这里
+    // Also guard getBurningProgress to prevent cascading NPEs
     @Inject(method = "getBurningProgress", at = @At("HEAD"), cancellable = true, remap = false)
     public void rsi$safeGetBurningProgress(CallbackInfoReturnable<Integer> cir) {
         if (this.blockEntity == null) {
