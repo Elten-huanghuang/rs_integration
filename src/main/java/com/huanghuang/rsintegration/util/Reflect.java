@@ -55,7 +55,11 @@ public final class Reflect {
             try {
                 var f = holder.getClass().getDeclaredField(name);
                 f.setAccessible(true);
-                return f.get(holder);
+                Object raw = f.get(holder);
+                if (raw instanceof java.util.function.Supplier<?> s) {
+                    return s.get();
+                }
+                return raw;
             } catch (Exception ignored) {}
         }
         // Brute-force: return first non-synthetic Object field
@@ -64,7 +68,13 @@ public final class Reflect {
             if (f.isSynthetic()) continue;
             if (f.getType() == Object.class) {
                 f.setAccessible(true);
-                try { return f.get(holder); } catch (Exception ignored) {}
+                try {
+                    Object raw = f.get(holder);
+                    if (raw instanceof java.util.function.Supplier<?> s) {
+                        return s.get();
+                    }
+                    return raw;
+                } catch (Exception ignored) {}
             }
         }
         return null;

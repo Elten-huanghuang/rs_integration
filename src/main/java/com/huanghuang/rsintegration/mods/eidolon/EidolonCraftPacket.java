@@ -9,6 +9,9 @@ import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.MaterialSources;
 import com.huanghuang.rsintegration.network.RSIntegration;
+import com.huanghuang.rsintegration.util.ChunkUtils;
+import com.huanghuang.rsintegration.util.ModClassLoader;
+import com.huanghuang.rsintegration.util.Reflect;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;
@@ -49,7 +52,7 @@ public final class EidolonCraftPacket {
     private static volatile java.lang.reflect.Field stepsField;
 
     private static void ensureClasses() {
-        if (!com.huanghuang.rsintegration.util.ModClassLoader.ensureClasses("eidolon",
+        if (!ModClassLoader.ensureClasses("eidolon",
                 "elucent.eidolon.recipe.CrucibleRecipe",
                 "elucent.eidolon.recipe.CrucibleRecipe$Step",
                 "elucent.eidolon.common.tile.CrucibleTileEntity",
@@ -139,7 +142,7 @@ public final class EidolonCraftPacket {
             return;
         }
 
-        com.huanghuang.rsintegration.util.ChunkUtils.loadChunk(level, pos);
+        ChunkUtils.loadChunk(level, pos);
         BlockEntity be = level.getBlockEntity(pos);
         if (be == null || !crucibleTileEntityClass.isInstance(be)) {
             player.sendSystemMessage(Component.translatable("rsi.eidolon.error.crucible_not_found"));
@@ -262,7 +265,7 @@ public final class EidolonCraftPacket {
                 crucibleSteps.add(step);
             }
 
-            java.lang.reflect.Method matchesMethod = com.huanghuang.rsintegration.util.Reflect.findMethod(
+            java.lang.reflect.Method matchesMethod = Reflect.findMethod(
                     recipe.getClass(), "matches", new Class<?>[]{List.class});
             if (matchesMethod == null) throw new NoSuchMethodException(recipe.getClass().getName() + ".matches");
             boolean matches = (boolean) matchesMethod.invoke(recipe, crucibleSteps);
@@ -286,7 +289,7 @@ public final class EidolonCraftPacket {
 
         // Get result first — validate before consuming resources
         try {
-            java.lang.reflect.Method getResultMethod = com.huanghuang.rsintegration.util.Reflect.findMethod(
+            java.lang.reflect.Method getResultMethod = Reflect.findMethod(
                     recipe.getClass(), "getResult", new Class<?>[0]);
             if (getResultMethod == null) throw new NoSuchMethodException(recipe.getClass().getName() + ".getResult");
             ItemStack result = ((ItemStack) getResultMethod.invoke(recipe)).copy();

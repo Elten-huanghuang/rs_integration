@@ -9,6 +9,7 @@ import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.MaterialSources;
 import com.huanghuang.rsintegration.network.RSIntegration;
+import com.huanghuang.rsintegration.util.ChunkUtils;
 import com.huanghuang.rsintegration.util.Reflect;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
@@ -106,7 +107,7 @@ public final class FaCraftPacket {
             return;
         }
 
-        com.huanghuang.rsintegration.util.ChunkUtils.loadChunk(level, pos);
+        ChunkUtils.loadChunk(level, pos);
         BlockEntity be = level.getBlockEntity(pos);
         if (be == null || !FaRitualHelper.hephaestusForgeBEClass.isInstance(be)) {
             player.sendSystemMessage(Component.translatable("rsi.fa.error.forge_not_found"));
@@ -124,7 +125,7 @@ public final class FaCraftPacket {
         } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-FA] Reflection probe failed", e); }
 
         // Check forge tier
-        int forgeTier = FaRitualHelper.getForgeTier(state);
+        int forgeTier = FaRitualHelper.getForgeTier(state, be);
         int requiredTier = FaRitualHelper.getRitualRequiredTier(ritual);
         if (forgeTier < requiredTier) {
             player.sendSystemMessage(Component.translatable("rsi.fa.error.tier_insufficient", requiredTier, forgeTier));

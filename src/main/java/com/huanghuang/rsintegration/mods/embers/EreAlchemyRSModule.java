@@ -35,6 +35,10 @@ public final class EreAlchemyRSModule implements IModIntegration {
                 new String[0],
                 ModType.delegateSupplier("com.huanghuang.rsintegration.mods.embers.EreAlchemyBatchDelegate"),
                 ModType.delegateSupplier("com.huanghuang.rsintegration.mods.embers.EreAlchemyInferDelegate"));
+        ModType.configureJei("embers_alchemy",
+                new String[][]{{"embers:alchemy", "embers"}},
+                new String[][]{{"com.rekindled.embers.", "embers"}},
+                null);
     }
 
     @Override

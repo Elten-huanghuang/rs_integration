@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.network.AltarBindingRegistry;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
+import com.huanghuang.rsintegration.recipe.SlashBladeRecipeHandler;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -94,8 +95,23 @@ final class CandidateEngine {
                 output = ModRecipeHandlers.tryGetResultItem(entry.recipe(), ctx.level.registryAccess());
             }
             if (output.isEmpty() || !ingredient.test(output)) {
-                if (diag != null) logDiag(diag, null, entry, 0, entry.modType(), true, "Output does not match ingredient");
-                continue;
+                // SlashBlade: getResultItem() returns bare blade without NBT,
+                // so SlashBladeIngredient.test() rejects it. Allow the chain
+                // if the output item type matches — real NBT validation
+                // happens via matchesStackKey / assembleBladeOutput later.
+                boolean slashBladeChain = false;
+                if (SlashBladeRecipeHandler.isSlashBladeIngredient(ingredient) && !output.isEmpty()) {
+                    for (ItemStack ingItem : ingredient.getItems()) {
+                        if (!ingItem.isEmpty() && ingItem.getItem() == output.getItem()) {
+                            slashBladeChain = true;
+                            break;
+                        }
+                    }
+                }
+                if (!slashBladeChain) {
+                    if (diag != null) logDiag(diag, null, entry, 0, entry.modType(), true, "Output does not match ingredient");
+                    continue;
+                }
             }
             // When the ingredient only contains NBT-bearing items, the output
             // must match at least one of them by item AND NBT — otherwise

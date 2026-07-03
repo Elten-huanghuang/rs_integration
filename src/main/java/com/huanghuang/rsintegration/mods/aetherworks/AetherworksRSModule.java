@@ -35,6 +35,10 @@ public final class AetherworksRSModule implements IModIntegration {
                 new String[]{"aetherworks", "aetherium", "anvil"},
                 new String[0],
                 ModType.delegateSupplier("com.huanghuang.rsintegration.mods.aetherworks.AetherworksBatchDelegate"));
+        ModType.configureJei("aetherworks_anvil",
+                new String[][]{{"aetherworks:anvil", "aetherworks"}},
+                new String[][]{{"net.sirplop.aetherworks.", "aetherworks"}},
+                null);
     }
 
     @Override

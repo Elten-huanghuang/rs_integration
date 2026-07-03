@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.crafting;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.command.PerformanceMonitor;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
@@ -31,7 +32,7 @@ final class StepExecutor {
                                 List<ResourceLocation> altIds, List<String> altModTypes,
                                 CraftingResolver.EdgeTracker edges, int batches) {
         if (ctx.timedOut()) {
-            com.huanghuang.rsintegration.command.PerformanceMonitor.recordResolveTimeout();
+            PerformanceMonitor.recordResolveTimeout();
             return false;
         }
         if (depth > maxDepth()) return false;
@@ -71,7 +72,7 @@ final class StepExecutor {
                                 List<ResourceLocation> altIds, List<String> altModTypes,
                                 CraftingResolver.EdgeTracker edges, int batches) {
         if (ctx.timedOut()) {
-            com.huanghuang.rsintegration.command.PerformanceMonitor.recordResolveTimeout();
+            PerformanceMonitor.recordResolveTimeout();
             return false;
         }
         if (depth > maxDepth()) return false;

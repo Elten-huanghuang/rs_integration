@@ -9,6 +9,8 @@ import com.huanghuang.rsintegration.network.RSIntegration;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.recipe.SlashBladeRecipeHandler;
 import com.huanghuang.rsintegration.crafting.MaterialSources;
+import com.huanghuang.rsintegration.mods.embers.KnownCodeSavedData;
+import com.huanghuang.rsintegration.mods.embers.EreAlchemyLock;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.context.CommandContext;
@@ -382,7 +384,7 @@ public final class DebugCommand {
 
     private static int embersClearCache(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
         var level = ctx.getSource().getServer().overworld();
-        var data = com.huanghuang.rsintegration.mods.embers.KnownCodeSavedData.get(level);
+        var data = KnownCodeSavedData.get(level);
         int count = data.size();
         data.clearAll();
         ctx.getSource().sendSuccess(() -> Component.literal(
@@ -393,7 +395,7 @@ public final class DebugCommand {
     // ── embers clearlocks ──────────────────────────────────────────
 
     private static int embersClearLocks(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
-        int count = com.huanghuang.rsintegration.mods.embers.EreAlchemyLock.clearAll();
+        int count = EreAlchemyLock.clearAll();
         ctx.getSource().sendSuccess(() -> Component.literal(
                 "Cleared " + count + " Embers tablet lock(s)."), true);
         return 1;
@@ -402,7 +404,7 @@ public final class DebugCommand {
     // ── perf snapshot ─────────────────────────────────────────────
 
     private static int perfSnapshot(CommandContext<CommandSourceStack> ctx) {
-        String snap = com.huanghuang.rsintegration.command.PerformanceMonitor.snapshot();
+        String snap = PerformanceMonitor.snapshot();
         ctx.getSource().sendSuccess(() -> Component.literal(snap), false);
         return 1;
     }

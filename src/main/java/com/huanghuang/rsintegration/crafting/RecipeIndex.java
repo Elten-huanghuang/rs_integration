@@ -362,8 +362,8 @@ public final class RecipeIndex {
                     ResourceLocation rid = new ResourceLocation("farmingforblockheads", "market/" + uuid);
                     if (!seen.add(rid)) continue;
 
-                    com.huanghuang.rsintegration.crafting.MarketRecipeWrapper wrapper =
-                            new com.huanghuang.rsintegration.crafting.MarketRecipeWrapper(uuid, output, cost);
+                    MarketRecipeWrapper wrapper =
+                            new MarketRecipeWrapper(uuid, output, cost);
                     ModType type = ModType.FARMINGFORBLOCKHEADS_MARKET;
                     Entry indexEntry = new Entry(wrapper, type,
                             new ResourceLocation("farmingforblockheads", "market"));

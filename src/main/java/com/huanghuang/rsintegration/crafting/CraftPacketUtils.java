@@ -8,8 +8,10 @@ import com.huanghuang.rsintegration.network.BindingStorage;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.ResolutionStep;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.network.RSIntegration;
+import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.util.PlayerUtils;
 import com.huanghuang.rsintegration.util.Reflect;
+import com.huanghuang.rsintegration.util.TextBuilder;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.NonNullList;
@@ -707,7 +709,7 @@ public final class CraftPacketUtils {
     public static List<IngredientSpec> extractIngredientSpecs(Object recipe) {
         // Try registered handler first (explicit per-mod logic)
         if (recipe instanceof net.minecraft.world.item.crafting.Recipe<?> r) {
-            var handler = com.huanghuang.rsintegration.recipe.ModRecipeHandlers.handlerFor(r);
+            var handler = ModRecipeHandlers.handlerFor(r);
             if (handler != null) {
                 List<IngredientSpec> result = handler.getIngredients(r);
                 if (result != null) return result;
@@ -846,7 +848,7 @@ public final class CraftPacketUtils {
 
     @Nullable
     private static java.lang.reflect.Field findAnyField(Class<?> clazz, String name) {
-        return com.huanghuang.rsintegration.util.Reflect.findField(clazz, name).orElse(null);
+        return Reflect.findField(clazz, name).orElse(null);
     }
 
     // ── multi-block chain helper ──────────────────────────────────
@@ -879,7 +881,7 @@ public final class CraftPacketUtils {
                     AsyncCraftChain chain = new AsyncCraftChain(player.getUUID(), player.getServer(), network, steps);
                     AsyncCraftManager.getInstance().submit(chain);
                     player.sendSystemMessage(
-                            com.huanghuang.rsintegration.util.TextBuilder.translate("rsi.async.chain_started", steps.size())
+                            TextBuilder.translate("rsi.async.chain_started", steps.size())
                                     .build());
                     return false; // items not yet available — chain is running async
                 }
@@ -1133,5 +1135,39 @@ public final class CraftPacketUtils {
                     vanillaSteps.size(), recipe.getId());
             executeCraftingSteps(player, vanillaSteps, network);
         }
+    }
+
+    /**
+     * Adds estimated fuel to the material requirements for machines that
+     * consume burnable fuel items (CrockPot, vanilla furnaces, etc.).
+     * Fuel burn time varies by item (coal=1600t, stick=100t, etc.) so the
+     * exact count is an estimate.  One fuel item typically lasts for several
+     * crafts; we estimate conservatively.
+     */
+    public static void addFuelToMaterials(Map<Item, Integer> itemAvailable,
+                                           Map<Item, Ingredient> itemSource,
+                                           Map<Item, Integer> neededCounts,
+                                           int repeatCount) {
+        Item bestFuel = null;
+        int bestScore = 0;
+        for (var entry : itemAvailable.entrySet()) {
+            try {
+                if (new ItemStack(entry.getKey()).getBurnTime(null) > 0) {
+                    int score = entry.getValue();
+                    ResourceLocation rl = net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(entry.getKey());
+                    if (rl != null && "minecraft".equals(rl.getNamespace())) score += 64;
+                    if (score > bestScore) {
+                        bestScore = score;
+                        bestFuel = entry.getKey();
+                    }
+                }
+            } catch (Exception ignored) {}
+        }
+        if (bestFuel == null) {
+            bestFuel = net.minecraft.world.item.Items.COAL;
+        }
+        int fuelNeeded = Math.max(1, repeatCount / 4);
+        neededCounts.merge(bestFuel, fuelNeeded, Integer::sum);
+        itemSource.putIfAbsent(bestFuel, Ingredient.of(bestFuel));
     }
 }

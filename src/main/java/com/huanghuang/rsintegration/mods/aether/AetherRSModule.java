@@ -34,6 +34,10 @@ public final class AetherRSModule implements IModIntegration {
                 new String[]{"freezer", "incubator", "altar"},
                 new String[0],
                 AetherFurnaceBatchDelegate::new);
+        ModType.configureJei("aether",
+                new String[][]{{"aether:freezing", "aether_freezer"}, {"aether:incubation", "aether_incubator"}, {"aether:enchanting", "aether_altar"}, {"aether:repairing", "aether_altar"}},
+                new String[][]{{"com.aetherteam.aether.", "aether_altar"}},
+                null);
     }
 
     @Override

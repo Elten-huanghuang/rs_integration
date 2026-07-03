@@ -3,7 +3,10 @@ package com.huanghuang.rsintegration.crafting;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.command.PerformanceMonitor;
 import com.huanghuang.rsintegration.network.AltarBindingRegistry;
+import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
+import com.huanghuang.rsintegration.recipe.SlashBladeRecipeHandler;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.TagParser;
@@ -218,12 +221,12 @@ public final class CraftingResolver {
                                      EdgeTracker edges) {
         if (count <= 0) return true;
         if (ctx.timedOut()) {
-            com.huanghuang.rsintegration.command.PerformanceMonitor.recordResolveTimeout();
+            PerformanceMonitor.recordResolveTimeout();
             return false;
         }
         if (++ctx.ensureCalls > MAX_ENSURE_CALLS) return false;
 
-        int minReserve = com.huanghuang.rsintegration.config.RSIntegrationConfig.getProtectedReserve(ingredient, ctx.player);
+        int minReserve = RSIntegrationConfig.getProtectedReserve(ingredient, ctx.player);
 
         ctx.beginUndo();
         edges.beginUndo();
@@ -262,7 +265,7 @@ public final class CraftingResolver {
         record AliveCandidate(RecipeIndex.Entry entry, ItemStack output, int netGain) {}
         List<AliveCandidate> alive = new ArrayList<>();
         for (RecipeIndex.Entry candidate : candidates) {
-            ItemStack out = com.huanghuang.rsintegration.recipe.ModRecipeHandlers.tryGetResultItem(
+            ItemStack out = ModRecipeHandlers.tryGetResultItem(
                     candidate.recipe(), ctx.level.registryAccess());
             // If the result is bare (no NBT), scan fields for the real
             // NBT-carrying output — TACZ/Applied Armorer hide it there.
@@ -523,7 +526,7 @@ public final class CraftingResolver {
             if (recipe instanceof CraftingRecipe cr) {
                 result = cr.getResultItem(level.registryAccess());
             } else if (recipe != null) {
-                result = com.huanghuang.rsintegration.recipe.ModRecipeHandlers.tryGetResultItem(recipe, level.registryAccess());
+                result = ModRecipeHandlers.tryGetResultItem(recipe, level.registryAccess());
             } else {
                 continue;
             }
@@ -561,7 +564,7 @@ public final class CraftingResolver {
             }
         }
         if (base == null) return "???";
-        String nbtHint = com.huanghuang.rsintegration.recipe.SlashBladeRecipeHandler
+        String nbtHint = SlashBladeRecipeHandler
                 .describeNbtRequirements(ingredient);
         return nbtHint != null ? base + nbtHint : base;
     }
@@ -657,7 +660,7 @@ public final class CraftingResolver {
      * recipe output.
      */
     public static List<ItemStack> getRepairedInputStacks(Recipe<?> recipe, net.minecraft.core.RegistryAccess access) {
-        ItemStack output = com.huanghuang.rsintegration.recipe.ModRecipeHandlers.tryGetResultItem(recipe, access);
+        ItemStack output = ModRecipeHandlers.tryGetResultItem(recipe, access);
         if (output.isEmpty() || !output.hasTag()) {
             output = extractHiddenOutput(recipe);
         }

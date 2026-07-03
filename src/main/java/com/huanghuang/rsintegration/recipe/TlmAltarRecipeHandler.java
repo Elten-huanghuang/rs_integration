@@ -44,6 +44,29 @@ public final class TlmAltarRecipeHandler implements ModRecipeHandler {
                 }
             }
         }
+        // AltarRecipe stores the output in a private resultItem field.
+        // Entity-summoning recipes have an empty resultItem (output is
+        // an entity), but item-crafting recipes have a real ItemStack
+        // that getResultItem(RegistryAccess) returns.
+        ItemStack field = tryGetOutputField(recipe);
+        if (!field.isEmpty()) return field;
+        return ItemStack.EMPTY;
+    }
+
+    /** Scan fields for an ItemStack that looks like a recipe output. */
+    private static ItemStack tryGetOutputField(Recipe<?> recipe) {
+        Class<?> scan = recipe.getClass();
+        while (scan != null && scan != Object.class) {
+            for (java.lang.reflect.Field f : scan.getDeclaredFields()) {
+                if (!ItemStack.class.isAssignableFrom(f.getType())) continue;
+                f.setAccessible(true);
+                try {
+                    ItemStack s = (ItemStack) f.get(recipe);
+                    if (s != null && !s.isEmpty()) return s.copy();
+                } catch (Exception ignored) {}
+            }
+            scan = scan.getSuperclass();
+        }
         return ItemStack.EMPTY;
     }
 

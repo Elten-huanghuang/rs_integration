@@ -108,6 +108,8 @@ public final class PlanResponsePacket {
         buf.writeBoolean(plan.embersCanInfer());
         buf.writeBoolean(plan.embersCodeFromCache());
         buf.writeBoolean(plan.executionMachineSupportsGui());
+        buf.writeBoolean(plan.baseItem() != null);
+        if (plan.baseItem() != null) buf.writeItem(plan.baseItem());
     }
 
     public static PlanResponsePacket decode(FriendlyByteBuf buf) {
@@ -209,11 +211,12 @@ public final class PlanResponsePacket {
         boolean embersCanInfer = buf.readBoolean();
         boolean embersCodeFromCache = buf.readBoolean();
         boolean executionMachineSupportsGui = buf.readBoolean();
+        ItemStack baseItem = buf.readBoolean() ? buf.readItem() : null;
         return new PlanResponsePacket(new PlanResponse(success, targetName, targetResult,
                 steps, materials, missing, recipeId,
                 execModType, execDim, execX, execY, execZ, modWarnings, repeatCount,
                 embersCode, embersAspectNames, embersInputNames, embersSeed, embersCanInfer,
-                embersCodeFromCache, executionMachineSupportsGui));
+                embersCodeFromCache, executionMachineSupportsGui, baseItem));
     }
 
     @SuppressWarnings("resource")

@@ -59,6 +59,18 @@ public final class AvaritiaRSModule implements IModIntegration {
         // GUI-only machines — no recipes, no delegate
         ModType.register("avaritia_gui",
                 new String[0], new String[0], new String[0], null);
+        ModType.configureJei("avaritia_crafting",
+                null,
+                new String[][]{{"committee.nova.mods.avaritia.common.crafting.recipe.", "avaritia_crafting"}},
+                null);
+        ModType.configureJei("avaritia_compressor",
+                null,
+                new String[][]{{"committee.nova.mods.avaritia.common.crafting.recipe.CompressorRecipe", "avaritia_compressor"}},
+                null);
+        ModType.configureJei("avaritia_smithing",
+                null,
+                new String[][]{{"committee.nova.mods.avaritia.common.crafting.recipe.ExtremeSmithingRecipe", "avaritia_smithing"}},
+                null);
     }
 
     @Override

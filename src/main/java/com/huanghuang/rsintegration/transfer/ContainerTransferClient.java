@@ -42,7 +42,11 @@ public final class ContainerTransferClient {
 
     private ContainerTransferClient() {}
 
-    public static void init() {
+    /**
+     * Must be called during mod construction so the key-mapping listener is
+     * added before {@code RegisterKeyMappingsEvent} fires.
+     */
+    public static void registerKeyMappings() {
         KEY_STORE_ALL = new KeyMapping(
                 "key.rsi.store_all",
                 KeyConflictContext.GUI,
@@ -59,11 +63,15 @@ public final class ContainerTransferClient {
                 "key.categories.rsi"
         );
 
-        var modBus = com.huanghuang.rsintegration.RSIntegrationMod.MOD_BUS;
-        modBus.addListener((RegisterKeyMappingsEvent event) -> {
+        com.huanghuang.rsintegration.RSIntegrationMod.MOD_BUS.addListener(
+                (RegisterKeyMappingsEvent event) -> {
             event.register(KEY_STORE_ALL);
             event.register(KEY_TOGGLE_MODE);
         });
+    }
+
+    public static void init() {
+        registerKeyMappings();
         MinecraftForge.EVENT_BUS.addListener(ContainerTransferClient::onScreenKeyPressed);
         MinecraftForge.EVENT_BUS.addListener(ContainerTransferClient::onKeyInput);
 

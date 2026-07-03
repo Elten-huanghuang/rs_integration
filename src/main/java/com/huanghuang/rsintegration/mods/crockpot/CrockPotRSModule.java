@@ -34,6 +34,10 @@ public final class CrockPotRSModule implements IModIntegration {
                 new String[]{"crock_pot", "portable_crock_pot"},
                 new String[0],
                 CrockPotBatchDelegate::new);
+        ModType.configureJei("crockpot",
+                new String[][]{{"crockpot:crock_pot_cooking"}},
+                new String[][]{{"com.sihenzhang.crockpot.", "crockpot"}},
+                "gui.rs_integration.jei.crockpot_cook");
     }
 
     @Override

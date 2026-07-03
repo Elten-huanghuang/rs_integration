@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.machine;
 
+import com.huanghuang.rsintegration.network.BindingEventHandler;
 import com.huanghuang.rsintegration.sidepanel.data.BindingInfo;
 import com.huanghuang.rsintegration.sidepanel.data.MachineStatusCache;
 import net.minecraft.client.Minecraft;
@@ -227,7 +228,7 @@ public final class MachineHubRenderer {
                 Component displayName;
                 ItemStack ds = info.displayStack();
                 if (ds != null && !ds.isEmpty()) {
-                    displayName = com.huanghuang.rsintegration.network.BindingEventHandler
+                    displayName = BindingEventHandler
                             .resolveBlockName(info.blockKey(), info.blockRegKey(), ds);
                 } else {
                     displayName = Component.literal(I18n.get(info.displayName()));
@@ -286,7 +287,7 @@ public final class MachineHubRenderer {
     }
 
     static ItemStack resolveIcon(BindingInfo info) {
-        return com.huanghuang.rsintegration.network.BindingEventHandler.resolveBlockIcon(
+        return BindingEventHandler.resolveBlockIcon(
                 info.blockRegKey(), info.blockKey(), info.displayStack());
     }
 }

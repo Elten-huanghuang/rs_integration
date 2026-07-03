@@ -47,6 +47,8 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.BooleanValue ENABLE_EMBERS_ALCHEMY_CALC;
     public static ForgeConfigSpec.BooleanValue ENABLE_SLASHBLADE;
     public static ForgeConfigSpec.BooleanValue ENABLE_AVARITIA;
+    public static ForgeConfigSpec.BooleanValue ENABLE_CONFLUENCE;
+    public static ForgeConfigSpec.BooleanValue ENABLE_IMMORTERS_DELIGHT;
     public static ForgeConfigSpec.BooleanValue ENABLE_VANILLA_MACHINES;
     public static ForgeConfigSpec.BooleanValue ENABLE_SOPHISTICATED_BACKPACKS;
     public static ForgeConfigSpec.BooleanValue ENABLE_JEI;
@@ -129,6 +131,12 @@ public final class RSIntegrationConfig {
                 .comment("Enable RS integration with Avaritia (Dire Crafting Tables, Neutron Compressor,",
                         "Extreme Smithing Table, Neutron Collector, Chest, Tesseract, Anvil).")
                 .define("enableAvaritia", true);
+        ENABLE_CONFLUENCE = c
+                .comment("Enable RS integration with TerraCurio (Confluence Workshop recursive crafting).")
+                .define("enableConfluence", true);
+        ENABLE_IMMORTERS_DELIGHT = c
+                .comment("Enable RS integration with Immortaler's Delight (Enchantal Cooler remote crafting).")
+                .define("enableImmortersDelight", true);
         ENABLE_AETHERWORKS = c
                 .comment("Enable RS integration with Embers Aetherworks Addon",
                         "(Aetherium Anvil remote crafting with auto-hammer support).")
@@ -214,7 +222,7 @@ public final class RSIntegrationConfig {
                         "Mods that already have full module support (aether, crockpot, tacz, etc.)",
                         "should NOT be listed here — their modules handle binding automatically.",
                         "Example: [\"crabbersdelight\", \"metalbarrels\"]")
-                .defineList("customGuiMachineMods", List.of("crabbersdelight", "farmingforblockheads", "metalbarrels", "pgp", "emxarms", "apotheosis", "confluence", "ancientreforging"),
+                .defineList("customGuiMachineMods", List.of("crabbersdelight", "metalbarrels", "pgp", "emxarms", "apotheosis", "ancientreforging"),
                         obj -> obj instanceof String);
         c.pop();
 

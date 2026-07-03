@@ -18,6 +18,8 @@ public final class ModIds {
     public static final String CROCKPOT = "crockpot";
     public static final String TACZ = "tacz";
     public static final String AVARITIA = "avaritia";
+    public static final String CONFLUENCE = "confluence";
+    public static final String IMMORTERS_DELIGHT = "immortalers_delight";
 
     // Dependencies
     public static final String REFINED_STORAGE = "refinedstorage";

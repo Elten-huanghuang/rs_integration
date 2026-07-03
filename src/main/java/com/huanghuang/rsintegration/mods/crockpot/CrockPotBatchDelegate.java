@@ -15,6 +15,7 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
@@ -29,6 +30,7 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 public final class CrockPotBatchDelegate implements com.huanghuang.rsintegration.crafting.batch.IBatchDelegate {
 
@@ -304,6 +306,20 @@ public final class CrockPotBatchDelegate implements com.huanghuang.rsintegration
     public BlockPos getMachinePos() { return myPos; }
 
     // ── plan warnings (called from GenericCraftPacket.tryBuildPlan) ──
+
+    /**
+     * Add fuel items to the plan material requirements for CrockPot recipes.
+     * No-op for non-CrockPot recipe types.
+     */
+    public static void addFuelIfNeeded(@Nullable String recipeModTypeId,
+                                       Map<Item, Integer> itemAvailable,
+                                       Map<Item, Ingredient> itemSource,
+                                       Map<Item, Integer> neededCounts,
+                                       int repeatCount) {
+        if (!"crockpot".equals(recipeModTypeId)) return;
+        CraftPacketUtils.addFuelToMaterials(
+                itemAvailable, itemSource, neededCounts, repeatCount);
+    }
 
     public static List<String> getPlanWarnings(ServerPlayer player, Recipe<?> recipe,
                                                 @Nullable ResourceLocation dim,

@@ -3,6 +3,8 @@ package com.huanghuang.rsintegration.machine;
 import com.github.stuxuhai.jpinyin.PinyinFormat;
 import com.github.stuxuhai.jpinyin.PinyinHelper;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.network.BindingEventHandler;
+import com.huanghuang.rsintegration.sidepanel.client.MachineTabHandler;
 import com.huanghuang.rsintegration.sidepanel.data.BindingInfo;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.resources.language.I18n;
@@ -168,7 +170,7 @@ public final class MachineHub {
                 // workbench names even when BlockId is nested in BlockEntityTag.
                 var ds = m.displayStack();
                 if (ds != null && !ds.isEmpty()) {
-                    String resolved = com.huanghuang.rsintegration.network.BindingEventHandler
+                    String resolved = BindingEventHandler
                             .resolveBlockName(m.blockKey(), m.blockRegKey(), ds)
                             .getString().toLowerCase();
                     if (resolved.contains(lower) || matchesPinyin(resolved, lower)) {
@@ -216,7 +218,7 @@ public final class MachineHub {
     public static void refreshMachines() {
         if (INSTANCE.state != State.VISIBLE && INSTANCE.state != State.HIDDEN) return;
         INSTANCE.machines.clear();
-        INSTANCE.machines.addAll(com.huanghuang.rsintegration.sidepanel.client.MachineTabHandler.getAllMachines());
+        INSTANCE.machines.addAll(MachineTabHandler.getAllMachines());
         INSTANCE.refilter();
         if (INSTANCE.machines.isEmpty() && INSTANCE.state == State.VISIBLE) {
             hide();

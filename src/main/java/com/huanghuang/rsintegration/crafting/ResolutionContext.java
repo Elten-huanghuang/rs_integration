@@ -142,12 +142,22 @@ final class ResolutionContext {
         for (var entry : counts.entrySet()) {
             if (entry.getValue() > 0) {
                 ItemStack stack = entry.getKey().toStack();
-                if (ingredient.test(stack) || SlashBladeRecipeHandler.matchesStackKey(ingredient, entry.getKey())) {
+                if (ingredient.test(stack) || SlashBladeRecipeHandler.matchesStackKey(ingredient, entry.getKey())
+                        || matchesSlashBladeFallback(ingredient, entry.getKey())) {
                     total += entry.getValue();
                 }
             }
         }
         return total;
+    }
+
+    private static boolean matchesSlashBladeFallback(Ingredient ingredient, CraftingResolver.StackKey key) {
+        if (!SlashBladeRecipeHandler.isSlashBladeIngredient(ingredient)) return false;
+        if (key.tag() != null) return false; // handled by matchesStackKey
+        for (ItemStack ingItem : ingredient.getItems()) {
+            if (!ingItem.isEmpty() && ingItem.getItem() == key.item()) return true;
+        }
+        return false;
     }
 
     boolean consumeMatching(Ingredient ingredient, int needed) {
@@ -160,7 +170,8 @@ final class ResolutionContext {
             if (remaining <= 0) return true;
             int available = counts.getOrDefault(key, 0);
             if (available <= 0) continue;
-            if (!ingredient.test(key.toStack()) && !SlashBladeRecipeHandler.matchesStackKey(ingredient, key)) continue;
+            if (!ingredient.test(key.toStack()) && !SlashBladeRecipeHandler.matchesStackKey(ingredient, key)
+                    && !matchesSlashBladeFallback(ingredient, key)) continue;
             int take = Math.min(available, remaining);
             decrement(key, take);
             remaining -= take;

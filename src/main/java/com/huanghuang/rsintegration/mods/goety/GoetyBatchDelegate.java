@@ -7,6 +7,7 @@ import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.RecipeIndex;
+import com.huanghuang.rsintegration.util.ModClassLoader;
 import com.huanghuang.rsintegration.util.Reflect;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
@@ -59,7 +60,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
     private static volatile Class<?> ritualBlockEntityClass;
 
     private static void ensureClasses() {
-        if (!com.huanghuang.rsintegration.util.ModClassLoader.ensureClasses("goety",
+        if (!ModClassLoader.ensureClasses("goety",
                 "com.Polarice3.Goety.common.blocks.entities.DarkAltarBlockEntity",
                 "com.Polarice3.Goety.utils.SEHelper",
                 "com.Polarice3.Goety.common.blocks.entities.CursedCageBlockEntity",

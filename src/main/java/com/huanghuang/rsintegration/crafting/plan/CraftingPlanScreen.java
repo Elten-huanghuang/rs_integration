@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting.plan;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
 import com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket;
 import com.huanghuang.rsintegration.ModType;
@@ -173,7 +174,7 @@ public final class CraftingPlanScreen extends Screen {
             embersCardsH = 0;
         }
         // Show mode toggle only when both modes are available (calc enabled AND tablet bound)
-        int embersModeH = (showEmbersModeToggle = canInfer && com.huanghuang.rsintegration.config.RSIntegrationConfig.ENABLE_EMBERS_ALCHEMY_CALC.get()) ? 28 : 0;
+        int embersModeH = (showEmbersModeToggle = canInfer && RSIntegrationConfig.ENABLE_EMBERS_ALCHEMY_CALC.get()) ? 28 : 0;
         embersPedestalH = embersCardsH + embersModeH;
         // Default mode: Calculate if code is known (from cache or computed), Infer otherwise
         embersInferMode = !hasEmbers;
@@ -253,7 +254,7 @@ public final class CraftingPlanScreen extends Screen {
                             plan.executionPosX(), plan.executionPosY(), plan.executionPosZ());
                 }
                 BatchCraftNetworkHandler.CHANNEL.sendToServer(
-                        new GenericCraftPacket(id, false, Collections.emptyMap(), execDim, execPos, repeatCount, embersInferMode));
+                        new GenericCraftPacket(id, false, Collections.emptyMap(), execDim, execPos, repeatCount, embersInferMode, plan.baseItem()));
             }
         }
         onClose();
@@ -267,7 +268,7 @@ public final class CraftingPlanScreen extends Screen {
         ResourceLocation recipeId = ResourceLocation.tryParse(plan.recipeId());
         GuiNavStack.pushCurrent();
         RSSidePanelNetworkHandler.CHANNEL.sendToServer(
-                new OpenBoundMachineGuiPacket(dim, pos, plan.recipeId(), recipeId));
+                new OpenBoundMachineGuiPacket(dim, pos, plan.recipeId(), recipeId, plan.baseItem()));
     }
 
     private void requestPlanRefresh() {
@@ -294,7 +295,7 @@ public final class CraftingPlanScreen extends Screen {
                 Map<String, String> forced = LAST_FORCED.isEmpty() ? Collections.emptyMap()
                         : new HashMap<>(LAST_FORCED);
                 BatchCraftNetworkHandler.CHANNEL.sendToServer(
-                        new GenericCraftPacket(id, true, forced, execDim, execPos, currentRepeat));
+                        new GenericCraftPacket(id, true, forced, execDim, execPos, currentRepeat, false, plan.baseItem()));
             }
         }
     }
@@ -822,7 +823,7 @@ public final class CraftingPlanScreen extends Screen {
                         plan.executionPosX(), plan.executionPosY(), plan.executionPosZ());
             }
             BatchCraftNetworkHandler.CHANNEL.sendToServer(
-                    new GenericCraftPacket(rid, true, forced, execDim, execPos, currentRepeat));
+                    new GenericCraftPacket(rid, true, forced, execDim, execPos, currentRepeat, false, plan.baseItem()));
         }
     }
 
@@ -1193,18 +1194,6 @@ public final class CraftingPlanScreen extends Screen {
     }
 
     // ── Color helpers ─────────────────────────────────────────────
-
-    /** Left accent bar color per mod type — used for badges only now. */
-    private static int accentColor(String modTypeId) {
-        return switch (modTypeId) {
-            case ModIds.MALUM              -> 0xFF6633AA;
-            case ModIds.EIDOLON            -> 0xFF338855;
-            case ModIds.FORBIDDEN_ARCANUS  -> 0xFF994422;
-            case ModIds.GOETY              -> 0xFF334488;
-            case ModIds.WIZARDS_REBORN     -> 0xFF6655AA;
-            default                        -> 0xFF44AA66;
-        };
-    }
 
     /** Badge fill color per mod type. */
     private static int badgeColor(String modTypeId) {

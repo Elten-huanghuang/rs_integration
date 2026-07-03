@@ -7,11 +7,18 @@ import com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.mods.ModCraftNetworkHandlers;
 import com.huanghuang.rsintegration.network.BindingStorage;
+import com.huanghuang.rsintegration.network.BindingEventHandler;
+import com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler;
 import com.huanghuang.rsintegration.sidepanel.client.AltarCraftButtons;
+import com.huanghuang.rsintegration.sidepanel.client.GuiNavStack;
+import com.huanghuang.rsintegration.sidepanel.network.OpenBoundMachineGuiPacket;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.mods.goety.GoetyRSNetworkHandler;
 import com.huanghuang.rsintegration.mods.goety.RSClientAvailabilityCache;
 import mezz.jei.api.gui.IRecipeLayoutDrawable;
+import mezz.jei.api.gui.ingredient.IRecipeSlotView;
+import mezz.jei.api.gui.ingredient.IRecipeSlotsView;
+import mezz.jei.api.recipe.RecipeIngredientRole;
 import mezz.jei.common.util.ImmutableRect2i;
 import mezz.jei.gui.recipes.RecipeGuiLayouts;
 import mezz.jei.gui.recipes.RecipeLayoutWithButtons;
@@ -42,36 +49,10 @@ import java.util.Optional;
 @Mixin(value = RecipeGuiLayouts.class, remap = false)
 public class RecipeGuiLayoutsMixin {
 
-    private static final ResourceLocation WR_CRYSTALLIZER_UID =
-            new ResourceLocation("wizards_reborn", "wissen_crystallizer");
-    private static final ResourceLocation WR_ITERATOR_UID =
-            new ResourceLocation("wizards_reborn", "arcane_iterator");
-    private static final ResourceLocation MALUM_SPIRIT_INFUSION_UID =
-            new ResourceLocation("malum", "spirit_infusion");
-    private static final ResourceLocation MALUM_SPIRIT_FOCUSING_UID =
-            new ResourceLocation("malum", "spirit_focusing");
-    private static final ResourceLocation WR_WORKBENCH_UID =
-            new ResourceLocation("wizards_reborn", "arcane_workbench");
-    private static final ResourceLocation WR_CRYSTAL_RITUAL_UID =
-            new ResourceLocation("wizards_reborn", "crystal_ritual");
-    private static final ResourceLocation WR_CRYSTAL_INFUSION_UID =
-            new ResourceLocation("wizards_reborn", "crystal_infusion");
+    // UID constants: only those NOT covered by ModType.filterForJeiUid() remain.
+    // FA_HEPHAESTUS_SMITHING_UID is also used by extractFaSmithingBaseItem.
     private static final ResourceLocation FA_HEPHAESTUS_SMITHING_UID =
             new ResourceLocation("forbidden_arcanus", "hephaestus_smithing");
-    private static final ResourceLocation FA_HEPHAESTUS_UPGRADING_UID =
-            new ResourceLocation("forbidden_arcanus", "hephaestus_forge_upgrading");
-    private static final ResourceLocation EIDOLON_CRUCIBLE_UID =
-            new ResourceLocation("eidolon", "crucible");
-    private static final ResourceLocation EIDOLON_WORKTABLE_UID =
-            new ResourceLocation("eidolon", "worktable");
-    private static final ResourceLocation EIDOLON_RITUAL_UID =
-            new ResourceLocation("eidolon", "rituals");
-    private static final ResourceLocation EMBER_ALCHEMY_UID =
-            new ResourceLocation("embers", "alchemy");
-    private static final ResourceLocation AETHERWORKS_ANVIL_UID =
-            new ResourceLocation("aetherworks", "anvil");
-    private static final ResourceLocation GOETY_BRAZIER_UID =
-            new ResourceLocation("goety", "brazier");
     private static final ResourceLocation SMELTING_UID =
             new ResourceLocation("minecraft", "smelting");
     private static final ResourceLocation BLASTING_UID =
@@ -84,20 +65,10 @@ public class RecipeGuiLayoutsMixin {
             new ResourceLocation("minecraft", "stonecutting");
     private static final ResourceLocation SMITHING_UID =
             new ResourceLocation("minecraft", "smithing");
-    private static final ResourceLocation CROCKPOT_UID =
-            new ResourceLocation("crockpot", "crock_pot_cooking");
     private static final ResourceLocation CRABBERSDELIGHT_CRAB_TRAP_UID =
             new ResourceLocation("crabbersdelight", "crab_trap_loot");
-    private static final ResourceLocation FARMINGFORBLOCKHEADS_MARKET_UID =
-            new ResourceLocation("farmingforblockheads", "market");
-    private static final ResourceLocation AETHER_FREEZING_UID =
-            new ResourceLocation("aether", "freezing");
-    private static final ResourceLocation AETHER_INCUBATION_UID =
-            new ResourceLocation("aether", "incubation");
-    private static final ResourceLocation AETHER_ENCHANTING_UID =
-            new ResourceLocation("aether", "enchanting");
-    private static final ResourceLocation AETHER_REPAIRING_UID =
-            new ResourceLocation("aether", "repairing");
+    private static final ResourceLocation ANVIL_UID =
+            new ResourceLocation("minecraft", "anvil");
 
     @Shadow
     private List<RecipeLayoutWithButtons<?>> recipeLayoutsWithButtons;
@@ -111,6 +82,23 @@ public class RecipeGuiLayoutsMixin {
     private final List<ResourceLocation> rsi$recipeIds = new ArrayList<>();
     @Unique
     private final List<Boolean> rsi$hasMachineGui = new ArrayList<>();
+
+    @Inject(method = "setRecipeLayoutsWithButtons", at = @At("HEAD"))
+    private void rsi$onLayoutsSetHead(List<RecipeLayoutWithButtons<?>> layouts, CallbackInfo ci) {
+        if (layouts == null || layouts.isEmpty()) {
+            RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] setRecipeLayoutsWithButtons HEAD: EMPTY list");
+        } else {
+            try {
+                String catUid = layouts.get(0).recipeLayout().getRecipeCategory()
+                        .getRecipeType().getUid().toString();
+                RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] setRecipeLayoutsWithButtons HEAD: {} recipes, uid={}",
+                        layouts.size(), catUid);
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] setRecipeLayoutsWithButtons HEAD: {} recipes, uid=? err={}",
+                        layouts.size(), e.toString());
+            }
+        }
+    }
 
     @Inject(method = "setRecipeLayoutsWithButtons", at = @At("RETURN"))
     private void rsi$onLayoutsSet(CallbackInfo ci) {
@@ -233,64 +221,76 @@ public class RecipeGuiLayoutsMixin {
                 boundBlockRegKey = binding.blockRegKey();
             }
 
-            Runnable handler = createHandler(recipe, recipeId, bindingDim, machinePos, filter);
+            // FA smithing: ApplyModifierRecipe has no fixed base ingredient,
+            // so extract the displayed base from JEI's visual slots instead.
+            // Two paths reach here:
+            //   1. FA's own hephaestus_smithing category → isFa=true (Ritual class)
+            //   2. Vanilla minecraft:smithing category → isFa=false for
+            //      SmithingTransformRecipe, but recipeId namespace is
+            //      forbidden_arcanus.  Check that so we don't miss it.
+            // FA smithing: ApplyModifierRecipe has no fixed base ingredient,
+            // so extract the displayed base from JEI's visual slots instead.
+            // Two paths reach here:
+            //   1. FA's own hephaestus_smithing category → isFa=true (Ritual class)
+            //   2. Vanilla minecraft:smithing category → isFa=false for
+            //      SmithingTransformRecipe, but recipeId namespace is
+            //      forbidden_arcanus.  Check that so we don't miss it.
+            ItemStack faSmithingBase = null;
+            boolean isSmithingFilter = filter.equals("block.minecraft.smithing_table");
+            boolean isForgeFilter = filter.equals("hephaestus_forge");
+            boolean faSmithing = (isSmithingFilter || isForgeFilter) && (isFa
+                    || recipeId.getNamespace().equals("forbidden_arcanus"));
+            if (faSmithing) {
+                faSmithingBase = extractFaSmithingBaseItem(recipeLayout);
+                RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] FA smithing base extraction: result={} isFa={} class={}",
+                        faSmithingBase != null ? faSmithingBase.getHoverName().getString() : "null",
+                        isFa, recipeClassName);
+            } else if (isSmithingFilter && !faSmithing) {
+                RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] Non-FA smithing filter matched, class={}", recipeClassName);
+            }
+            Runnable handler = createHandler(recipe, recipeId, bindingDim, machinePos, filter, faSmithingBase);
             if (handler == null) continue;
+
+            ModType modType = computeModType(recipe);
 
             String tooltipKey;
             if (rsi$isGoetyRitual(recipe)) {
                 tooltipKey = "gui.rs_integration.jei.altar_craft";
             } else if (rsi$isGoetyBrazierRecipe(recipe)) {
                 tooltipKey = "gui.rs_integration.jei.goety_brazier_craft";
-            } else if (filter.equals("spirit_altar")) {
-                tooltipKey = "gui.rs_integration.jei.malum_spirit_craft";
-            } else if (filter.equals("spirit_crucible")) {
-                tooltipKey = "gui.rs_integration.jei.malum_crucible_craft";
-            } else if (filter.equals("crystal_ritual")) {
-                tooltipKey = "gui.rs_integration.jei.wr_crystal_craft";
-            } else if (filter.equals("hephaestus_forge")) {
-                tooltipKey = "gui.rs_integration.jei.fa_ritual_craft";
-            } else if (filter.equals("crucible")) {
-                tooltipKey = "gui.rs_integration.jei.eidolon_crucible_craft";
-            } else if (filter.equals("worktable")) {
-                tooltipKey = "gui.rs_integration.jei.eidolon_worktable_craft";
-            } else if (filter.equals("ritual")) {
-                tooltipKey = "gui.rs_integration.jei.eidolon_ritual_craft";
-            } else if (filter.equals("touhou_little_maid")) {
-                tooltipKey = "gui.rs_integration.jei.tlm_maid_altar_craft";
-            } else if (filter.equals("embers")) {
-                tooltipKey = "gui.rs_integration.jei.embers_alchemy_craft";
-            } else if (filter.equals("aether_freezer")) {
-                tooltipKey = "gui.rs_integration.jei.aether_freezer_craft";
-            } else if (filter.equals("aether_incubator")) {
-                tooltipKey = "gui.rs_integration.jei.aether_incubator_craft";
-            } else if (filter.equals("aether_altar")) {
-                tooltipKey = "gui.rs_integration.jei.aether_altar_craft";
-            } else if (filter.equals("avaritia_crafting")) {
-                tooltipKey = "gui.rs_integration.jei.avaritia_crafting";
-            } else if (filter.equals("avaritia_compressor")) {
-                tooltipKey = "gui.rs_integration.jei.avaritia_compressor";
-            } else if (filter.equals("avaritia_smithing")) {
-                tooltipKey = "gui.rs_integration.jei.avaritia_smithing";
-            } else if (filter.equals("crabbersdelight")) {
-                tooltipKey = "gui.rs_integration.jei.crabbersdelight_trap";
-            } else if (filter.equals("crockpot")) {
-                tooltipKey = "gui.rs_integration.jei.crockpot_cook";
-            } else if (filter.equals("tacz")) {
-                tooltipKey = "gui.rs_integration.jei.tacz_craft";
+            } else if (modType != null && modType.jeiTooltipKey() != null) {
+                tooltipKey = modType.jeiTooltipKey();
             } else if (filter.startsWith("block.minecraft.")) {
                 tooltipKey = "gui.rs_integration.jei.vanilla_machine_craft";
             } else if (filter.equals("generic")) {
                 tooltipKey = "gui.rs_integration.jei.rs_auto_craft";
             } else {
-                tooltipKey = "gui.rs_integration.jei.wr_remote_craft";
+                // Filter-based lookup for mods without jeiTooltipKey configured
+                tooltipKey = switch (filter) {
+                    case "spirit_altar" -> "gui.rs_integration.jei.malum_spirit_craft";
+                    case "spirit_crucible" -> "gui.rs_integration.jei.malum_crucible_craft";
+                    case "crystal_ritual" -> "gui.rs_integration.jei.wr_crystal_craft";
+                    case "hephaestus_forge" -> "gui.rs_integration.jei.fa_ritual_craft";
+                    case "crucible" -> "gui.rs_integration.jei.eidolon_crucible_craft";
+                    case "worktable" -> "gui.rs_integration.jei.eidolon_worktable_craft";
+                    case "ritual" -> "gui.rs_integration.jei.eidolon_ritual_craft";
+                    case "touhou_little_maid" -> "gui.rs_integration.jei.tlm_maid_altar_craft";
+                    case "embers" -> "gui.rs_integration.jei.embers_alchemy_craft";
+                    case "aether_freezer" -> "gui.rs_integration.jei.aether_freezer_craft";
+                    case "aether_incubator" -> "gui.rs_integration.jei.aether_incubator_craft";
+                    case "aether_altar" -> "gui.rs_integration.jei.aether_altar_craft";
+                    case "avaritia_crafting" -> "gui.rs_integration.jei.avaritia_crafting";
+                    case "avaritia_compressor" -> "gui.rs_integration.jei.avaritia_compressor";
+                    case "avaritia_smithing" -> "gui.rs_integration.jei.avaritia_smithing";
+                    case "crabbersdelight" -> "gui.rs_integration.jei.crabbersdelight_trap";
+                    default -> "gui.rs_integration.jei.wr_remote_craft";
+                };
             }
 
             rsi$layoutIndices.add(i);
             rsi$positions.add(new int[]{0, 0, 10, 10});
 
             rsi$recipeIds.add(recipeId);
-
-            ModType modType = computeModType(recipe);
             AltarCraftButtons.add(0, 0, 10, 10, handler, tooltipKey, recipeId,
                     bindingDim, machinePos, modType);
 
@@ -302,11 +302,12 @@ public class RecipeGuiLayoutsMixin {
                 ResourceLocation guiDim = bindingDim;
                 BlockPos guiPos = machinePos;
                 ResourceLocation jeiOpenRecipeId = recipeId;
+                ItemStack capturedBaseForMachine = faSmithingBase;
                 AltarCraftButtons.addMachineGui(0, 0, 10, 10, () -> {
-                    com.huanghuang.rsintegration.sidepanel.client.GuiNavStack.pushCurrent();
-                    com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler.CHANNEL.sendToServer(
-                            new com.huanghuang.rsintegration.sidepanel.network.OpenBoundMachineGuiPacket(
-                                    guiDim, guiPos, jeiOpenRecipeId.toString(), jeiOpenRecipeId));
+                    GuiNavStack.pushCurrent();
+                    RSSidePanelNetworkHandler.CHANNEL.sendToServer(
+                            new OpenBoundMachineGuiPacket(
+                                    guiDim, guiPos, jeiOpenRecipeId.toString(), jeiOpenRecipeId, capturedBaseForMachine));
                 });
                 rsi$hasMachineGui.add(true);
             } else {
@@ -469,97 +470,49 @@ public class RecipeGuiLayoutsMixin {
 
         try {
             ResourceLocation uid = recipeLayout.getRecipeCategory().getRecipeType().getUid();
-            if (MALUM_SPIRIT_INFUSION_UID.equals(uid)) return "spirit_altar";
-            if (MALUM_SPIRIT_FOCUSING_UID.equals(uid)) return "spirit_crucible";
-            if (WR_CRYSTALLIZER_UID.equals(uid)) return "wissen_crystallizer";
-            if (WR_ITERATOR_UID.equals(uid)) return "arcane_iterator";
-            if (WR_WORKBENCH_UID.equals(uid)) return "arcane_workbench";
-            if (WR_CRYSTAL_RITUAL_UID.equals(uid)) return "crystal_ritual";
-            if (WR_CRYSTAL_INFUSION_UID.equals(uid)) return "crystal_ritual";
-            // FA hephaestus_smithing recipes use vanilla SmithingTransformRecipe
-            // and run on a smithing table, not the Hephaestus Forge (which is for rituals).
-            if (FA_HEPHAESTUS_SMITHING_UID.equals(uid)) return "block.minecraft.smithing_table";
-            if (FA_HEPHAESTUS_UPGRADING_UID.equals(uid)) return "hephaestus_forge";
-            if (EIDOLON_CRUCIBLE_UID.equals(uid)) return "crucible";
-            if (EIDOLON_WORKTABLE_UID.equals(uid)) return "worktable";
-            if (EIDOLON_RITUAL_UID.equals(uid)) return "ritual";
-            if (EMBER_ALCHEMY_UID.equals(uid)) return "embers";
-            if (AETHERWORKS_ANVIL_UID.equals(uid)) return "aetherworks";
-            if (GOETY_BRAZIER_UID.equals(uid)) return "goety";
-            if (CROCKPOT_UID.equals(uid)) return "crockpot";
-            if (CRABBERSDELIGHT_CRAB_TRAP_UID.equals(uid)) return "crabbersdelight";
+
+            // 1. ModType UID → filter lookup (replaces per-mod if/else chain)
+            String filter = ModType.filterForJeiUid(uid.toString());
+            if (filter != null) return filter;
+
+            // 2. Vanilla / unregistered UIDs not covered by ModType registry
+            if (SMITHING_UID.equals(uid)) {
+                String cn = recipe.getClass().getName();
+                if (cn.startsWith("com.stal111.forbidden_arcanus.")) return "hephaestus_forge";
+                if (cn.startsWith("committee.nova.mods.avaritia.")) return "avaritia_smithing";
+                return "block.minecraft.smithing_table";
+            }
             if (SMELTING_UID.equals(uid)) return "block.minecraft.furnace";
             if (BLASTING_UID.equals(uid)) return "block.minecraft.blast_furnace";
             if (SMOKING_UID.equals(uid)) return "block.minecraft.smoker";
             if (CAMPFIRE_UID.equals(uid)) return "block.minecraft.campfire";
             if (STONECUTTING_UID.equals(uid)) return "block.minecraft.stonecutter";
-            if (SMITHING_UID.equals(uid)) {
-                if (recipe.getClass().getName().startsWith("committee.nova.mods.avaritia."))
-                    return "avaritia_smithing";
-                return "block.minecraft.smithing_table";
-            }
-            if (FARMINGFORBLOCKHEADS_MARKET_UID.equals(uid)) return "farmingforblockheads";
-            if (AETHER_FREEZING_UID.equals(uid)) return "aether_freezer";
-            if (AETHER_INCUBATION_UID.equals(uid)) return "aether_incubator";
-            if (AETHER_ENCHANTING_UID.equals(uid)) return "aether_altar";
-            if (AETHER_REPAIRING_UID.equals(uid)) return "aether_altar";
+            if (ANVIL_UID.equals(uid)) return "block.minecraft.anvil";
+            if (CRABBERSDELIGHT_CRAB_TRAP_UID.equals(uid)) return "crabbersdelight";
         } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] Reflection probe failed", e); }
 
+        // 3. Class name fallback (recipes without standard JEI UIDs, or edge cases)
         String recipeClassName = recipe.getClass().getName();
+
         if (recipeClassName.equals("com.Polarice3.Goety.common.crafting.BrazierRecipe"))
             return "goety";
-        if (recipeClassName.equals("com.sammy.malum.common.recipe.SpiritInfusionRecipe"))
-            return "spirit_altar";
-        if (recipeClassName.startsWith("com.sammy.malum.common.recipe.SpiritFocusingRecipe"))
-            return "spirit_crucible";
-        if (recipeClassName.startsWith("mod.maxbogomol.wizards_reborn.common.recipe.WissenCrystallizer"))
-            return "wissen_crystallizer";
-        if (recipeClassName.startsWith("mod.maxbogomol.wizards_reborn.common.recipe.ArcaneIterator"))
-            return "arcane_iterator";
-        if (recipeClassName.startsWith("mod.maxbogomol.wizards_reborn.common.recipe.ArcaneWorkbench"))
-            return "arcane_workbench";
-        if (recipeClassName.startsWith("mod.maxbogomol.wizards_reborn.common.recipe.CrystalRitual"))
-            return "crystal_ritual";
-        if (recipeClassName.startsWith("mod.maxbogomol.wizards_reborn.common.recipe.CrystalInfusion"))
-            return "crystal_ritual";
-        if (recipeClassName.startsWith("com.stal111.forbidden_arcanus"))
-            return "hephaestus_forge";
-        if (recipeClassName.startsWith("com.github.tartaricacid.touhoulittlemaid."))
-            return "touhou_little_maid";
-        if (recipeClassName.startsWith("com.rekindled.embers."))
-            return "embers";
-        if (recipeClassName.startsWith("net.sirplop.aetherworks."))
-            return "aetherworks";
-        if (recipeClassName.startsWith("com.aetherteam.aether.")) {
-            if (recipeClassName.contains("Freezing")) return "aether_freezer";
-            if (recipeClassName.contains("Incubation")) return "aether_incubator";
-            return "aether_altar";
-        }
-        if (recipeClassName.equals("elucent.eidolon.recipe.WorktableRecipe"))
-            return "worktable";
-        if (recipeClassName.equals("elucent.eidolon.recipe.ItemRitualRecipe")
-                || recipeClassName.equals("elucent.eidolon.recipe.GenericRitualRecipe"))
-            return "ritual";
-        if (recipeClassName.startsWith("elucent.eidolon"))
-            return "crucible";
-        if (recipeClassName.startsWith("net.blay09.mods.farmingforblockheads."))
-            return "farmingforblockheads";
-        // Avaritia — use class name to distinguish recipe types
+
+        // Avaritia — multiple sub-types with different filters; not resolved by single-ModType lookup
         if (recipeClassName.startsWith("committee.nova.mods.avaritia.common.crafting.recipe.")) {
             if (recipeClassName.endsWith("ExtremeSmithingRecipe")) return "avaritia_smithing";
             if (recipeClassName.endsWith("CompressorRecipe")) return "avaritia_compressor";
             return "avaritia_crafting";
         }
-        // CrabbersDelight crab trap recipes
+
+        // ModType class-name → filter lookup
+        String classFilter = ModType.filterForRecipeClass(recipeClassName);
+        if (classFilter != null) return classFilter;
+
         if (recipeClassName.startsWith("alabaster.crabbersdelight."))
             return "crabbersdelight";
-        // CrockPot cooking recipes
-        if (recipeClassName.startsWith("com.sihenzhang.crockpot."))
-            return "crockpot";
-        // TACZ gun smith table recipes
-        if (recipeClassName.equals("com.tacz.guns.crafting.GunSmithTableRecipe"))
-            return "tacz";
 
+        RSIntegrationMod.LOGGER.warn("[RSI-JEI-Mixin] getBindingFilter returned NULL: uid={} class={}",
+                    rsi$safeCategoryUid(recipeLayout), recipe.getClass().getName());
         return null;
     }
 
@@ -640,6 +593,12 @@ public class RecipeGuiLayoutsMixin {
                 RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] CrabTrapRecipeWrapper getId failed", e);
             }
             return null;
+        }
+
+        // JEI AnvilRecipe (repair, enchantment combine, rename)
+        if (recipe instanceof mezz.jei.api.recipe.vanilla.IJeiAnvilRecipe anvilRecipe) {
+            ResourceLocation uid = anvilRecipe.getUid();
+            if (uid != null) return uid;
         }
 
         RSIntegrationMod.LOGGER.warn("[RSI-JEI-Mixin] getRecipeId failed for {} — no strategy succeeded", className);
@@ -965,7 +924,8 @@ public class RecipeGuiLayoutsMixin {
 
     @Unique
     private static Runnable createHandler(Object recipe, ResourceLocation recipeId,
-                                           ResourceLocation dim, BlockPos machinePos, String filter) {
+                                           ResourceLocation dim, BlockPos machinePos, String filter,
+                                           @javax.annotation.Nullable ItemStack faSmithingBase) {
         if (filter.equals("generic")) {
             return () -> {
                 GenericCraftPacket pkt;
@@ -979,31 +939,90 @@ public class RecipeGuiLayoutsMixin {
                 BatchCraftNetworkHandler.CHANNEL.sendToServer(pkt);
             };
         }
+        // Anvil recipes can't be auto-crafted (no persistent inventory, XP cost).
+        // Open the remote anvil GUI directly instead of building a plan.
+        if (filter.equals("block.minecraft.anvil")) {
+            ResourceLocation anvilDim = dim;
+            BlockPos anvilPos = machinePos;
+            ResourceLocation anvilRecipeId = recipeId;
+            return () -> {
+                GuiNavStack.pushCurrent();
+                RSSidePanelNetworkHandler.CHANNEL.sendToServer(
+                        new OpenBoundMachineGuiPacket(anvilDim, anvilPos,
+                                anvilRecipeId.toString(), anvilRecipeId));
+            };
+        }
         // All mod recipes (including Aether) route through the plan-preview flow.
         // GenericCraftPacket now falls back to FARegistries.RITUAL when a recipe
         // is not found in RecipeManager, so FA rituals show the plan tree too.
-        ItemStack jeiBaseItem = null;
-        if (recipe instanceof Recipe<?> r && recipeId.getNamespace().equals("forbidden_arcanus")
+        // FA smithing base item: prefer JEI visual-slot extraction (handles both
+        // hephaestus_smithing and vanilla smithing layouts); fall back to
+        // getIngredients() for synthetic SmithingTransformRecipe objects.
+        ItemStack capturedBase = faSmithingBase;
+        if (capturedBase == null
+                && recipe instanceof Recipe<?> r
+                && recipeId.getNamespace().equals("forbidden_arcanus")
                 && r.getIngredients().size() >= 3) {
             Ingredient baseIng = r.getIngredients().get(1);
             if (!baseIng.isEmpty()) {
                 ItemStack[] stacks = baseIng.getItems();
-                if (stacks.length > 0 && !stacks[0].isEmpty()) jeiBaseItem = stacks[0].copy();
+                if (stacks.length > 0 && !stacks[0].isEmpty()) capturedBase = stacks[0].copy();
             }
         }
-        final ItemStack capturedBase = jeiBaseItem;
+        final ItemStack finalCapturedBase = capturedBase;
         return () -> {
             GenericCraftPacket pkt;
             try {
-                pkt = new GenericCraftPacket(recipeId, true, dim, machinePos, 1, false, capturedBase);
+                pkt = new GenericCraftPacket(recipeId, true, dim, machinePos, 1, false, finalCapturedBase);
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.error("[RSI-JEI] Failed to create GenericCraftPacket: recipeId={} dim={} pos={}", recipeId, dim, machinePos, e);
                 return;
             }
             RSIntegrationMod.LOGGER.debug("[RSI-JEI] Sending GenericCraftPacket: recipeId={} dim={} pos={} baseItem={}",
-                    recipeId, dim, machinePos, capturedBase != null ? capturedBase.getHoverName().getString() : "null");
+                    recipeId, dim, machinePos, finalCapturedBase != null ? finalCapturedBase.getHoverName().getString() : "null");
             BatchCraftNetworkHandler.CHANNEL.sendToServer(pkt);
         };
+    }
+
+    /**
+     * Extracts the specific base item displayed in JEI for an FA
+     * smithing recipe.  Two layouts exist:
+     * <ul>
+     *   <li>{@code hephaestus_smithing} — FA's own category; the
+     *       {@code mainIngredient} is the <b>first</b> INPUT slot (index 0).</li>
+     *   <li>{@code minecraft:smithing} — synthetic {@code SmithingTransformRecipe};
+     *       standard vanilla layout: template(0), <b>base(1)</b>, addition(2).</li>
+     * </ul>
+     */
+    @Unique
+    @javax.annotation.Nullable
+    private static ItemStack extractFaSmithingBaseItem(IRecipeLayoutDrawable<?> recipeLayout) {
+        try {
+            IRecipeSlotsView slotsView = recipeLayout.getRecipeSlotsView();
+            ResourceLocation uid = recipeLayout.getRecipeCategory().getRecipeType().getUid();
+
+            // FA hephaestus_smithing: mainIngredient is INPUT slot 0
+            if (FA_HEPHAESTUS_SMITHING_UID.equals(uid)) {
+                var inputSlots = slotsView.getSlotViews(RecipeIngredientRole.INPUT);
+                if (!inputSlots.isEmpty()) {
+                    return inputSlots.get(0).getDisplayedItemStack().orElse(null);
+                }
+            }
+
+            // Vanilla smithing: standard layout template/base/addition
+            // Named "base" slot first, then index 1
+            java.util.Optional<IRecipeSlotView> named = slotsView.findSlotByName("base");
+            if (named.isPresent()) {
+                return named.get().getDisplayedItemStack().orElse(null);
+            }
+            var inputSlots = slotsView.getSlotViews(RecipeIngredientRole.INPUT);
+            if (inputSlots.size() >= 2) {
+                return inputSlots.get(1).getDisplayedItemStack().orElse(null);
+            }
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-JEI-Mixin] Failed to extract FA smithing base item: {}", e.toString());
+        }
+        return null;
     }
 
     @javax.annotation.Nullable
@@ -1148,13 +1167,13 @@ public class RecipeGuiLayoutsMixin {
 
     @Unique
     private static boolean supportsGuiWithRegCheck(String blockKey, @javax.annotation.Nullable String blockRegKey) {
-        if (!com.huanghuang.rsintegration.network.BindingEventHandler.supportsGuiByBlockKey(blockKey)) return false;
+        if (!BindingEventHandler.supportsGuiByBlockKey(blockKey)) return false;
         if (blockRegKey != null) {
             var rl = net.minecraft.resources.ResourceLocation.tryParse(blockRegKey);
             if (rl != null) {
                 var block = net.minecraftforge.registries.ForgeRegistries.BLOCKS.getValue(rl);
                 if (block != null) {
-                    var target = com.huanghuang.rsintegration.network.BindingEventHandler.CLASS_TARGET_MAP
+                    var target = BindingEventHandler.CLASS_TARGET_MAP
                             .get(block.getClass().getName());
                     if (target != null && !target.supportsGui) return false;
                 }

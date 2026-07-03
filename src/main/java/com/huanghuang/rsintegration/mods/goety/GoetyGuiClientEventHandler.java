@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.mods.goety;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.util.ModClassLoader;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.level.block.Block;
@@ -27,7 +28,7 @@ public final class GoetyGuiClientEventHandler {
     private static volatile Class<?> soulCandlestickBlockClass;
 
     private static void ensureClasses() {
-        if (!com.huanghuang.rsintegration.util.ModClassLoader.ensureClasses("goety",
+        if (!ModClassLoader.ensureClasses("goety",
                 "com.Polarice3.Goety.common.blocks.DarkAltarBlock",
                 "com.Polarice3.Goety.common.blocks.NecroBrazierBlock",
                 "com.Polarice3.Goety.common.blocks.CursedCageBlock",

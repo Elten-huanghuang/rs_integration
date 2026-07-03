@@ -7,6 +7,8 @@ import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.world.inventory.CraftingContainer;
+import net.minecraft.world.inventory.ResultSlot;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.fml.ModList;
@@ -61,8 +63,14 @@ final class ContainerTransferLogic {
         int totalStacks = 0;
         int totalItems = 0;
 
+        // Only skip result slots in crafting-type containers (workshop, crafting table).
+        // Furnace output is also a ResultSlot and should still be extractable.
+        boolean hasCrafting = hasCraftingContainer(menu);
+
         for (Slot slot : menu.slots) {
             if (slot.container == player.getInventory()) continue;
+            if (hasCrafting && isResultSlot(slot)) continue;
+            if (slot.container instanceof CraftingContainer) continue;
 
             ItemStack stack = slot.getItem();
             if (stack.isEmpty()) continue;
@@ -126,8 +134,12 @@ final class ContainerTransferLogic {
         int totalStacks = 0;
         int totalItems = 0;
 
+        boolean hasCrafting = hasCraftingContainer(menu);
+
         for (Slot slot : menu.slots) {
             if (slot.container == player.getInventory()) continue;
+            if (hasCrafting && isResultSlot(slot)) continue;
+            if (slot.container instanceof CraftingContainer) continue;
 
             ItemStack stack = slot.getItem();
             if (stack.isEmpty()) continue;
@@ -324,6 +336,30 @@ final class ContainerTransferLogic {
     private static boolean isBackpackMenu(AbstractContainerMenu menu) {
         String name = menu.getClass().getName();
         return name.contains("sophisticatedbackpacks") || name.contains("sophisticated");
+    }
+
+    // Skip result/output slots so containers where input and output
+    // coexist (e.g. TerraCurio workshop) don't get their output duped.
+    private static boolean isResultSlot(Slot slot) {
+        if (slot instanceof ResultSlot) return true;
+        Class<?> clazz = slot.getClass();
+        do {
+            String name = clazz.getSimpleName().toLowerCase();
+            if (name.contains("result") || name.contains("output") || name.contains("craftresult"))
+                return true;
+            clazz = clazz.getSuperclass();
+        } while (clazz != null && clazz != Object.class);
+        return false;
+    }
+
+    // Returns true when the menu contains a CraftingContainer,
+    // which means this is a crafting-type GUI (workshop, crafting table)
+    // where result slots must be skipped to prevent duping.
+    private static boolean hasCraftingContainer(AbstractContainerMenu menu) {
+        for (Slot slot : menu.slots) {
+            if (slot.container instanceof CraftingContainer) return true;
+        }
+        return false;
     }
 
     @Nullable

@@ -74,7 +74,6 @@ public final class BindingStorage {
         public static List<BindingEntry> getBindings(ItemStack stack) {
         CompoundTag tag = stack.getTag();
         if (tag == null) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Bind] getBindings: stack has no tag, item={}", stack.getItem());
             return Collections.emptyList();
         }
         if (tag.contains(KEY_BINDINGS, Tag.TAG_LIST)) {
@@ -84,7 +83,6 @@ public final class BindingStorage {
                 BindingEntry entry = BindingEntry.fromTag(list.getCompound(i));
                 if (entry != null) entries.add(entry);
             }
-            RSIntegrationMod.LOGGER.debug("[RSI-Bind] getBindings: item={} found={} bindings", stack.getItem(), entries.size());
             return Collections.unmodifiableList(entries);
         }
         // Read-only legacy fallback: parse old format without mutating the tag.
@@ -92,12 +90,9 @@ public final class BindingStorage {
         if (tag.contains("aec_bound_x")) {
             BindingEntry entry = readLegacyEntry(tag);
             if (entry != null) {
-                RSIntegrationMod.LOGGER.debug("[RSI-Bind] getBindings: item={} found 1 legacy binding", stack.getItem());
                 return Collections.singletonList(entry);
             }
         }
-        RSIntegrationMod.LOGGER.debug("[RSI-Bind] getBindings: tag present but no aec_bindings key, item={} keys={}",
-                stack.getItem(), tag.getAllKeys());
         return Collections.emptyList();
     }
 

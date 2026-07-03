@@ -40,6 +40,10 @@ public final class MalumRSModule implements IModIntegration {
                 new String[]{"malum"},
                 new String[0],
                 ModType.delegateSupplier("com.huanghuang.rsintegration.mods.malum.MalumBatchDelegate"));
+        ModType.configureJei("malum",
+                new String[][]{{"malum:spirit_infusion", "spirit_altar"}, {"malum:spirit_focusing", "spirit_crucible"}},
+                new String[][]{{"com.sammy.malum.common.recipe.SpiritFocusingRecipe", "spirit_crucible"}, {"com.sammy.malum.common.recipe.SpiritInfusionRecipe", "spirit_altar"}, {"com.sammy.malum.", "malum"}},
+                null);
     }
 
     @Override

@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.crafting;
 
+import com.huanghuang.rsintegration.RSICraftException;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.network.AltarBindingRegistry;
 import com.huanghuang.rsintegration.network.RSIntegration;
@@ -42,7 +43,7 @@ public final class ExtractionLedger {
         for (State s : allowed) {
             if (state == s) return;
         }
-        throw com.huanghuang.rsintegration.RSICraftException.ledgerStateViolation(
+        throw RSICraftException.ledgerStateViolation(
                 java.util.Arrays.toString(allowed), state.name());
     }
 

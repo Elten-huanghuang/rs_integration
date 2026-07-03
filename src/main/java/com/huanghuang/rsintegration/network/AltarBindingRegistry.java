@@ -195,8 +195,15 @@ public final class AltarBindingRegistry {
         // is asleep no-one can have broken the machine, so remain optimistic.
         if (!level.isLoaded(pos)) return true;
         net.minecraft.world.level.block.entity.BlockEntity be = level.getBlockEntity(pos);
-        if (be == null) return false;
-        String currentId = be.getBlockState().getBlock().getDescriptionId();
+        String currentId;
+        if (be != null) {
+            currentId = be.getBlockState().getBlock().getDescriptionId();
+        } else {
+            // Some bound blocks (e.g. Confluence WorkshopBlock) have no
+            // BlockEntity.  Verify via block state directly — this also
+            // covers removed blocks (air → "block.minecraft.air" won't match).
+            currentId = level.getBlockState(pos).getBlock().getDescriptionId();
+        }
         if (blockKey != null && blockKey.contains("||")) {
             String expectedId = blockKey.substring(blockKey.indexOf("||") + 2);
             return currentId.equals(expectedId);

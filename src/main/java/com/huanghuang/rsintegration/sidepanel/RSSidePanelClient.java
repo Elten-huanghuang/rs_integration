@@ -135,11 +135,11 @@ public final class RSSidePanelClient {
 
     // ── Init ─────────────────────────────────────────────────────
 
-    public static void init() {
-        panelX = RSIntegrationConfig.RS_SIDE_PANEL_X.get();
-        panelY = RSIntegrationConfig.RS_SIDE_PANEL_Y.get();
-        panelHidden = RSIntegrationConfig.RS_SIDE_PANEL_HIDDEN.get();
-
+    /**
+     * Must be called during mod construction so the key-mapping listener is
+     * added before {@code RegisterKeyMappingsEvent} fires.
+     */
+    public static void registerKeyMappings() {
         KEY_TOGGLE_PANEL = new KeyMapping(
                 "key.rsi.side_panel",
                 KeyConflictContext.UNIVERSAL,
@@ -148,8 +148,16 @@ public final class RSSidePanelClient {
                 "key.categories.rsi"
         );
 
-        var modBus = com.huanghuang.rsintegration.RSIntegrationMod.MOD_BUS;
-        modBus.addListener((RegisterKeyMappingsEvent e) -> e.register(KEY_TOGGLE_PANEL));
+        com.huanghuang.rsintegration.RSIntegrationMod.MOD_BUS.addListener(
+                (RegisterKeyMappingsEvent e) -> e.register(KEY_TOGGLE_PANEL));
+    }
+
+    public static void init() {
+        panelX = RSIntegrationConfig.RS_SIDE_PANEL_X.get();
+        panelY = RSIntegrationConfig.RS_SIDE_PANEL_Y.get();
+        panelHidden = RSIntegrationConfig.RS_SIDE_PANEL_HIDDEN.get();
+
+        registerKeyMappings();
 
         var bus = MinecraftForge.EVENT_BUS;
         bus.addListener(RSSidePanelClient::onClientTick);

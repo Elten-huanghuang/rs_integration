@@ -7,7 +7,9 @@ import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.network.AltarBindingRegistry;
+import com.huanghuang.rsintegration.network.BindingStorage;
 import com.huanghuang.rsintegration.network.RSIntegration;
+import com.huanghuang.rsintegration.util.ChunkUtils;
 import com.huanghuang.rsintegration.util.Reflect;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
@@ -103,7 +105,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
         }
         this.ritual = foundRitual;
 
-        com.huanghuang.rsintegration.util.ChunkUtils.loadChunk(level, pos);
+        ChunkUtils.loadChunk(level, pos);
         BlockEntity be = level.getBlockEntity(pos);
         if (be == null || !FaRitualHelper.hephaestusForgeBEClass.isInstance(be)) {
             player.sendSystemMessage(Component.translatable("rsi.fa.error.forge_not_found"));
@@ -113,7 +115,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
 
         // Check forge tier
         BlockState state = level.getBlockState(pos);
-        int forgeTier = FaRitualHelper.getForgeTier(state);
+        int forgeTier = FaRitualHelper.getForgeTier(state, be);
         int requiredTier = FaRitualHelper.getRitualRequiredTier(ritual);
         if (forgeTier < requiredTier) {
             player.sendSystemMessage(Component.translatable("rsi.fa.error.tier_insufficient", requiredTier, forgeTier));
@@ -920,6 +922,60 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
         RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] getPlanWarnings called for recipe={} dim={} pos={}",
                 recipe.getId(), dim, pos);
 
+        // When dim/pos point to a non-forge machine (e.g. smithing table
+        // for ApplyModifier recipes), resolve the actual Hephaestus Forge
+        // position from the player's bindings so tier/essence/enhancer
+        // checks work correctly.
+        if (dim != null && pos != null) {
+            try {
+                ServerLevel probeLevel = CraftPacketUtils.resolveLevel(player.server, dim, player);
+                if (probeLevel != null && probeLevel.isLoaded(pos)) {
+                    ChunkUtils.loadChunk(probeLevel, pos);
+                    BlockEntity probeBe = probeLevel.getBlockEntity(pos);
+                    if (probeBe == null || !FaRitualHelper.hephaestusForgeBEClass.isInstance(probeBe)) {
+                        RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] pos is not a forge, searching player bindings...");
+                        // Scan player inventory + offhand + curios for a forge binding
+                        List<ItemStack> allStacks = new ArrayList<>();
+                        allStacks.addAll(player.getInventory().items);
+                        allStacks.addAll(player.getInventory().offhand);
+                        allStacks.addAll(player.getInventory().armor);
+                        try {
+                            var opt = top.theillusivec4.curios.api.CuriosApi.getCuriosInventory(player).resolve();
+                            if (opt.isPresent()) {
+                                for (var handler : opt.get().getCurios().values()) {
+                                    var stacks = handler.getStacks();
+                                    for (int s = 0; s < stacks.getSlots(); s++) {
+                                        allStacks.add(stacks.getStackInSlot(s));
+                                    }
+                                }
+                            }
+                        } catch (Exception ignored) {}
+                        ResourceLocation foundDim = null;
+                        BlockPos foundPos = null;
+                        outer:
+                        for (ItemStack stack : allStacks) {
+                            if (stack.isEmpty()) continue;
+                            for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
+                                if (entry.blockKey() != null && entry.blockKey().contains("hephaestus_forge")) {
+                                    foundDim = entry.dim();
+                                    foundPos = entry.pos();
+                                    break outer;
+                                }
+                            }
+                        }
+                        if (foundPos != null) {
+                            RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Resolved forge from bindings: dim={} pos={}",
+                                    foundDim, foundPos);
+                            dim = foundDim;
+                            pos = foundPos;
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Forge pos resolution failed: {}", e.toString());
+            }
+        }
+
         Object requirements = FaRitualHelper.invoke(ritual, "requirements");
 
         // ── Essence check ──────────────────────────────────────────
@@ -936,6 +992,11 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
                 try {
                     ServerLevel level = CraftPacketUtils.resolveLevel(player.server, dim, player);
                     if (level != null && level.isLoaded(pos)) {
+                        // Force chunk to fully load so BlockEntity is available.
+                        // Without this, getBlockEntity may return null even when
+                        // isLoaded() returns true (chunk data present but BEs not
+                        // yet instantiated).
+                        ChunkUtils.loadChunk(level, pos);
                         BlockEntity be = level.getBlockEntity(pos);
                         if (be != null && FaRitualHelper.hephaestusForgeBEClass.isInstance(be)) {
                             Object ritualManager = Reflect.getMethodOrThrow(FaRitualHelper.hephaestusForgeBEClass, "getRitualManager", "getRitualManager").invoke(be);
@@ -982,6 +1043,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
                 if (dim != null && pos != null) {
                     ServerLevel level = CraftPacketUtils.resolveLevel(player.server, dim, player);
                     if (level != null && level.isLoaded(pos)) {
+                        ChunkUtils.loadChunk(level, pos);
                         BlockEntity be = level.getBlockEntity(pos);
                         if (be != null && FaRitualHelper.hephaestusForgeBEClass.isInstance(be)) {
                             java.lang.reflect.Field slotMapField = Reflect.findField(
@@ -1037,8 +1099,10 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
                     if (dim != null && pos != null) {
                         ServerLevel level = CraftPacketUtils.resolveLevel(player.server, dim, player);
                         if (level != null && level.isLoaded(pos)) {
+                            ChunkUtils.loadChunk(level, pos);
                             BlockState state = level.getBlockState(pos);
-                            int forgeTier = FaRitualHelper.getForgeTier(state);
+                            BlockEntity be = level.getBlockEntity(pos);
+                            int forgeTier = FaRitualHelper.getForgeTier(state, be);
                             if (forgeTier < requiredTier) {
                                 warnings.add(Component.translatable(
                                         "rsi.fa.warn.tier_insufficient",
@@ -1059,17 +1123,25 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
         if (requirements != null) {
             try {
                 List<?> requiredEnhancers = FaRitualHelper.invokeList(requirements, "enhancers");
+                RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Plan enhancers: required={}",
+                        requiredEnhancers != null ? requiredEnhancers.size() : "null");
                 if (requiredEnhancers != null && !requiredEnhancers.isEmpty()) {
                     List<String> reqNames = new ArrayList<>();
                     for (Object holder : requiredEnhancers) {
                         Object reqDef = Reflect.extractHolderValue(holder);
+                        RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Plan enhancer holder {} → def {}",
+                                holder != null ? holder.getClass().getSimpleName() : "null",
+                                reqDef != null ? reqDef.getClass().getSimpleName() : "null");
                         if (reqDef != null) {
                             reqNames.add(FaRitualHelper.enhancerDefName(reqDef));
                         }
                     }
+                    RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Plan enhancer names: {} (total required: {})",
+                            reqNames, requiredEnhancers.size());
                     if (dim != null && pos != null) {
                         ServerLevel level = CraftPacketUtils.resolveLevel(player.server, dim, player);
                         if (level != null && level.isLoaded(pos)) {
+                            ChunkUtils.loadChunk(level, pos);
                             BlockEntity be = level.getBlockEntity(pos);
                             if (be != null && FaRitualHelper.hephaestusForgeBEClass.isInstance(be)) {
                                 Object rm = Reflect.getMethodOrThrow(FaRitualHelper.hephaestusForgeBEClass, "getRitualManager", "getRitualManager").invoke(be);

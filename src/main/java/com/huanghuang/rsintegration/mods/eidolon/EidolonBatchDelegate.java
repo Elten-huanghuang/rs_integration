@@ -2,6 +2,8 @@ package com.huanghuang.rsintegration.mods.eidolon;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
+import com.huanghuang.rsintegration.util.ChunkUtils;
+import com.huanghuang.rsintegration.util.ModClassLoader;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
@@ -43,7 +45,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
     private static volatile Class<?> brazierTileEntityClass;
 
     private static void ensureClasses() {
-        if (!com.huanghuang.rsintegration.util.ModClassLoader.ensureClasses("eidolon",
+        if (!ModClassLoader.ensureClasses("eidolon",
                 "elucent.eidolon.recipe.CrucibleRecipe",
                 "elucent.eidolon.recipe.CrucibleRecipe$Step",
                 "elucent.eidolon.common.tile.CrucibleTileEntity",
@@ -115,7 +117,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
         this.myPos = pos;
         this.player = player;
 
-        com.huanghuang.rsintegration.util.ChunkUtils.loadChunk(level, pos);
+        ChunkUtils.loadChunk(level, pos);
         BlockEntity be = level.getBlockEntity(pos);
         var blockState = level.getBlockState(pos);
 

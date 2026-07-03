@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.mods.forbidden;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.util.ModClassLoader;
 import com.huanghuang.rsintegration.util.Reflect;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
@@ -11,6 +12,8 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.crafting.Ingredient;
+import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraftforge.items.ItemHandlerHelper;
@@ -55,7 +58,7 @@ public final class FaRitualHelper {
     private static volatile Map<ResourceLocation, Object> cachedRitualMap;
 
     static void ensureClasses() {
-        if (!com.huanghuang.rsintegration.util.ModClassLoader.ensureClasses("forbidden_arcanus",
+        if (!ModClassLoader.ensureClasses("forbidden_arcanus",
                 "com.stal111.forbidden_arcanus.common.block.entity.forge.HephaestusForgeBlockEntity",
                 "com.stal111.forbidden_arcanus.common.block.entity.PedestalBlockEntity",
                 "com.stal111.forbidden_arcanus.common.block.entity.forge.ritual.Ritual",
@@ -158,15 +161,104 @@ public final class FaRitualHelper {
 
     // ── Tier ─────────────────────────────────────────────────────
 
-    static int getForgeTier(BlockState state) {
+    static int getForgeTier(BlockState state, @Nullable BlockEntity be) {
+        // 1. Try blockstate property (some FA versions expose tier here)
         try {
+            boolean foundTier = false;
             for (net.minecraft.world.level.block.state.properties.Property<?> prop : state.getProperties()) {
                 if (prop.getName().equals("tier")) {
+                    foundTier = true;
                     Comparable<?> val = state.getValue(prop);
-                    if (val instanceof Number n) return n.intValue();
+                    if (val instanceof Number n) {
+                        RSIntegrationMod.LOGGER.debug("[RSI-FA] getForgeTier blockstate → {}", n.intValue());
+                        return n.intValue();
+                    } else {
+                        RSIntegrationMod.LOGGER.debug("[RSI-FA] getForgeTier blockstate 'tier' value is not Number: {} (type={})",
+                                val, val != null ? val.getClass().getName() : "null");
+                    }
                 }
             }
-        } catch (Exception e) { /* ignore */ }
+            if (!foundTier) {
+                // Diagnostic: dump block identity + all properties
+                StringBuilder props = new StringBuilder();
+                for (net.minecraft.world.level.block.state.properties.Property<?> prop : state.getProperties()) {
+                    if (props.length() > 0) props.append(", ");
+                    props.append(prop.getName()).append("=").append(state.getValue(prop));
+                }
+                ResourceLocation blockId = net.minecraftforge.registries.ForgeRegistries.BLOCKS.getKey(state.getBlock());
+                RSIntegrationMod.LOGGER.debug("[RSI-FA] getForgeTier blockstate has NO 'tier' property. block={} props=[{}]",
+                        blockId, props.toString());
+            }
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-FA] getForgeTier blockstate probe failed: {}", e.toString());
+        }
+
+        // 2. Try BlockEntity.getTier() / getForgeTier() (older FA versions)
+        if (be != null && hephaestusForgeBEClass != null && hephaestusForgeBEClass.isInstance(be)) {
+            try {
+                java.lang.reflect.Method getTier = Reflect.findMethod(
+                        hephaestusForgeBEClass, "getTier", new Class<?>[0]);
+                if (getTier == null) {
+                    getTier = Reflect.findMethod(
+                            hephaestusForgeBEClass, "getForgeTier", new Class<?>[0]);
+                }
+                if (getTier != null) {
+                    Object val = getTier.invoke(be);
+                    if (val instanceof Number n) {
+                        RSIntegrationMod.LOGGER.debug("[RSI-FA] getForgeTier method → {}", n.intValue());
+                        return n.intValue();
+                    }
+                }
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.debug("[RSI-FA] getForgeTier method probe failed: {}", e.toString());
+            }
+
+            // 3. Try tier / forgeTier field directly (older FA versions)
+            try {
+                java.lang.reflect.Field f = Reflect.findField(hephaestusForgeBEClass, "tier").orElse(null);
+                if (f == null) {
+                    f = Reflect.findField(hephaestusForgeBEClass, "forgeTier").orElse(null);
+                }
+                if (f != null) {
+                    f.setAccessible(true);
+                    int v = f.getInt(be);
+                    RSIntegrationMod.LOGGER.debug("[RSI-FA] getForgeTier field → {}", v);
+                    return v;
+                }
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.debug("[RSI-FA] getForgeTier field probe failed: {}", e.toString());
+            }
+
+            // 4. FA 2.2.x: ValueNotifier<HephaestusForgeLevel> forgeLevel
+            try {
+                java.lang.reflect.Field flField = Reflect.findField(hephaestusForgeBEClass, "forgeLevel").orElse(null);
+                if (flField != null) {
+                    flField.setAccessible(true);
+                    Object notifier = flField.get(be);
+                    RSIntegrationMod.LOGGER.debug("[RSI-FA] getForgeTier forgeLevel field found, notifier={}", notifier);
+                    if (notifier != null) {
+                        // ValueNotifier.get() → HephaestusForgeLevel (implements IntSupplier)
+                        Object level = notifier.getClass().getMethod("get").invoke(notifier);
+                        RSIntegrationMod.LOGGER.debug("[RSI-FA] getForgeTier ValueNotifier.get() → {}", level);
+                        if (level != null) {
+                            int result = (int) level.getClass().getMethod("getAsInt").invoke(level);
+                            RSIntegrationMod.LOGGER.debug("[RSI-FA] getForgeTier HephaestusForgeLevel.getAsInt() → {}", result);
+                            return result;
+                        }
+                    }
+                } else {
+                    RSIntegrationMod.LOGGER.debug("[RSI-FA] getForgeTier forgeLevel field NOT FOUND on {}", hephaestusForgeBEClass.getName());
+                }
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.debug("[RSI-FA] getForgeTier forgeLevel probe failed: {}", e.toString());
+            }
+        } else {
+            RSIntegrationMod.LOGGER.debug("[RSI-FA] getForgeTier BE check skipped: be={} beClass={} isInstance={}",
+                    be != null ? be.getClass().getName() : "null",
+                    hephaestusForgeBEClass != null ? hephaestusForgeBEClass.getName() : "null",
+                    be != null && hephaestusForgeBEClass != null ? hephaestusForgeBEClass.isInstance(be) : false);
+        }
+        RSIntegrationMod.LOGGER.debug("[RSI-FA] getForgeTier FALLBACK → 1");
         return 1;
     }
 
@@ -719,5 +811,119 @@ public final class FaRitualHelper {
             return c.getString();
         }
         return enhancerDef.toString();
+    }
+
+    // ── Recipe resolution (used by GenericCraftPacket) ────────────
+
+    private static volatile Item faForgeBlockItem;
+    private static volatile java.lang.reflect.Method faSetTierOnStack;
+
+    /** Create a HephaestusForgeBlock ItemStack with {@code upgradedTier}
+     *  applied via {@code setTierOnStack}, matching FA's own JEI display. */
+    @Nullable
+    public static ItemStack makeFaUpgradeOutput(int upgradedTier) {
+        try {
+            if (faForgeBlockItem == null) {
+                net.minecraft.world.level.block.Block block =
+                        net.minecraftforge.registries.ForgeRegistries.BLOCKS.getValue(
+                                new ResourceLocation("forbidden_arcanus", "hephaestus_forge"));
+                if (block == null) return ItemStack.EMPTY;
+                faForgeBlockItem = block.asItem();
+            }
+            if (faSetTierOnStack == null) {
+                Class<?> hfbClass = Class.forName(
+                        "com.stal111.forbidden_arcanus.common.block.HephaestusForgeBlock");
+                faSetTierOnStack = Reflect.findMethod(hfbClass, "setTierOnStack",
+                        new Class<?>[]{ItemStack.class, int.class});
+            }
+            if (faSetTierOnStack == null) return ItemStack.EMPTY;
+            ItemStack stack = new ItemStack(faForgeBlockItem);
+            return (ItemStack) faSetTierOnStack.invoke(null, stack, upgradedTier);
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-FA] Upgrade output failed", e);
+            return ItemStack.EMPTY;
+        }
+    }
+
+    /** Fallback output for FA rituals whose {@code result()} is null or has an
+     *  unrecognized type. Reads {@code mainIngredient} and returns the first
+     *  matching item stack. */
+    @Nullable
+    public static ItemStack faFallbackOutput(Object ritual, ResourceLocation recipeId) {
+        try {
+            java.lang.reflect.Method getMain = Reflect.findMethod(ritual.getClass(), "mainIngredient", new Class<?>[0]);
+            if (getMain == null) return ItemStack.EMPTY;
+            Object main = getMain.invoke(ritual);
+            if (main instanceof Ingredient ing && !ing.isEmpty()) {
+                ItemStack[] items = ing.getItems();
+                if (items.length > 0 && !items[0].isEmpty()) {
+                    return items[0].copy();
+                }
+            }
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-FA] Fallback output failed for {}: {}", recipeId, e.toString());
+        }
+        return ItemStack.EMPTY;
+    }
+
+    /** Scan FA ritual registry by iterating entries — O(N) fallback when the
+     *  cached HashMap lookup misses due to key-format differences. */
+    @Nullable
+    public static Recipe<?> resolveFARitualScan(ServerLevel level, ResourceLocation recipeId) {
+        ResourceKey<?> key = getFARegistryKey();
+        if (key == null) return null;
+        try {
+            @SuppressWarnings({"unchecked", "rawtypes"})
+            net.minecraft.core.Registry<?> registry = level.registryAccess()
+                    .registryOrThrow((ResourceKey<? extends net.minecraft.core.Registry<?>>) (Object) key);
+            for (var entry : registry.entrySet()) {
+                if (entry.getKey().location().equals(recipeId)) {
+                    return wrapFaRitual(recipeId, entry.getValue());
+                }
+            }
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-FA] Scan failed: {}", e.toString());
+        }
+        return null;
+    }
+
+    /** Wrap a raw FA ritual object into a {@link FaRitualWrapper}. */
+    @Nullable
+    public static Recipe<?> wrapFaRitual(ResourceLocation recipeId, Object ritual) {
+        try {
+            ensureClasses();
+            java.lang.reflect.Method getResult = Reflect.findMethod(ritual.getClass(), "result", new Class<?>[0]);
+            Object result = getResult != null ? getResult.invoke(ritual) : null;
+
+            ItemStack output = ItemStack.EMPTY;
+            if (result != null && createItemResultClass.isInstance(result)) {
+                java.lang.reflect.Method getStack = Reflect.findMethod(result.getClass(),
+                        "getResult", new Class<?>[0]);
+                if (getStack != null) {
+                    Object s = getStack.invoke(result);
+                    if (s instanceof ItemStack st && !st.isEmpty())
+                        output = st;
+                }
+            } else if (result != null && upgradeTierResultClass != null
+                    && upgradeTierResultClass.isInstance(result)) {
+                java.lang.reflect.Method getFrom = Reflect.findMethod(result.getClass(), "getRequiredTier", new Class<?>[0]);
+                java.lang.reflect.Method getTo = Reflect.findMethod(result.getClass(), "getUpgradedTier", new Class<?>[0]);
+                int from = 0, to = 0;
+                try { if (getFrom != null) from = (int) getFrom.invoke(result); } catch (Exception ignored) {}
+                try { if (getTo != null) to = (int) getTo.invoke(result); } catch (Exception ignored) {}
+                output = makeFaUpgradeOutput(to);
+                if (!output.isEmpty()) return new FaRitualWrapper(recipeId, ritual, output, from, to);
+            }
+
+            if (output.isEmpty()) {
+                output = faFallbackOutput(ritual, recipeId);
+            }
+            if (output.isEmpty()) return null;
+
+            return new FaRitualWrapper(recipeId, ritual, output);
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-FA] wrapFaRitual failed for {}: {}", recipeId, e.toString());
+            return null;
+        }
     }
 }

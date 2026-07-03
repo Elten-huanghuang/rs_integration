@@ -2,6 +2,8 @@ package com.huanghuang.rsintegration.mods.goety;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
+import com.huanghuang.rsintegration.util.ChunkUtils;
+import com.huanghuang.rsintegration.util.ModClassLoader;
 import com.huanghuang.rsintegration.util.Reflect;
 
 import net.minecraft.core.BlockPos;
@@ -44,7 +46,7 @@ public final class GoetyGuiSelectRitualPacket {
     private static volatile Class<?> enchantItemRitualClass;
 
     private static void ensureClasses() {
-        if (!com.huanghuang.rsintegration.util.ModClassLoader.ensureClasses("goety",
+        if (!ModClassLoader.ensureClasses("goety",
                 "com.Polarice3.Goety.common.blocks.entities.DarkAltarBlockEntity",
                 "com.Polarice3.Goety.common.blocks.entities.PedestalBlockEntity",
                 "com.Polarice3.Goety.common.crafting.RitualRecipe",
@@ -129,7 +131,7 @@ public final class GoetyGuiSelectRitualPacket {
             }
             Object ritualRecipe = recipe;
 
-            com.huanghuang.rsintegration.util.ChunkUtils.loadChunk(level, packet.pos);
+            ChunkUtils.loadChunk(level, packet.pos);
             BlockEntity be = level.getBlockEntity(packet.pos);
             if (darkAltarBEClass == null || !darkAltarBEClass.isInstance(be)) {
                 player.sendSystemMessage(Component.translatable("rsi.goety.error.altar_not_found"));

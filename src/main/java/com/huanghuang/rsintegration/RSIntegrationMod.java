@@ -78,7 +78,11 @@ public final class RSIntegrationMod {
             new ModuleEntry("slashblade", RSIntegrationConfig.ENABLE_SLASHBLADE,
                     () -> com.huanghuang.rsintegration.mods.slashblade.SlashBladeRSModule.INSTANCE),
             new ModuleEntry(ModIds.AVARITIA, RSIntegrationConfig.ENABLE_AVARITIA,
-                    () -> com.huanghuang.rsintegration.mods.avaritia.AvaritiaRSModule.INSTANCE)
+                    () -> com.huanghuang.rsintegration.mods.avaritia.AvaritiaRSModule.INSTANCE),
+            new ModuleEntry(ModIds.CONFLUENCE, RSIntegrationConfig.ENABLE_CONFLUENCE,
+                    () -> com.huanghuang.rsintegration.mods.confluence.ConfluenceRSModule.INSTANCE),
+            new ModuleEntry("immortalers_delight", RSIntegrationConfig.ENABLE_IMMORTERS_DELIGHT,
+                    () -> com.huanghuang.rsintegration.mods.immortalers_delight.ImmortalersDelightRSModule.INSTANCE)
     );
 
     public RSIntegrationMod() {
@@ -97,6 +101,14 @@ public final class RSIntegrationMod {
         if (enabled(RSIntegrationConfig.ENABLE_SOPHISTICATED_BACKPACKS, ModIds.SOPHISTICATED_BACKPACKS)) {
             com.huanghuang.rsintegration.backpack.SophisticatedBackpacksItems.init(MOD_BUS);
         }
+
+        // Key mappings must be registered during mod construction so the
+        // RegisterKeyMappingsEvent listener is added before the event fires.
+        // (FMLCommonSetupEvent may run too late.)
+        DistExecutor.safeRunWhenOn(Dist.CLIENT,
+                () -> com.huanghuang.rsintegration.transfer.ContainerTransferClient::registerKeyMappings);
+        DistExecutor.safeRunWhenOn(Dist.CLIENT,
+                () -> com.huanghuang.rsintegration.sidepanel.RSSidePanelClient::registerKeyMappings);
 
         // Defer all heavy initialization to FMLCommonSetupEvent so the
         // constructor finishes instantly.  This minimises RSI's impact
@@ -123,15 +135,15 @@ public final class RSIntegrationMod {
         if (enabled(RSIntegrationConfig.ENABLE_FARMINGFORBLOCKHEADS, ModIds.FARMINGFORBLOCKHEADS))
             com.huanghuang.rsintegration.mods.farmingforblockheads.FarmingForBlockheadsRSModule.initCommon();
 
-        // --- Confluence Workshop (must be explicit — customGuiMachineMods
-        //     fallback requires MenuProvider, which WorkshopBlock may lack) ---
+        // --- Confluence Workshop — binding target registered by the module;
+        //     this fallback ensures it works even when the full module is disabled ---
         if (ModList.get().isLoaded("confluence")) {
             com.huanghuang.rsintegration.network.BindingEventHandler.registerTarget(
                     new com.huanghuang.rsintegration.network.BindingEventHandler.MachineBindingTarget(
-                            "confluence", ModType.byId("custom_gui"),
-                            RSIntegrationConfig.ENABLE_MACHINE_GUI_TABS,
+                            "confluence", ModType.byId("confluence"),
+                            RSIntegrationConfig.ENABLE_CONFLUENCE,
                             List.of("org.confluence.mod.block.WorkshopBlock"),
-                            "confluence"
+                            "confluence", true
                     ));
         }
 

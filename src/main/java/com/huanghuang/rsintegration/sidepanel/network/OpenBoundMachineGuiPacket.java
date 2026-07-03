@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.sidepanel.network;
 
 import com.huanghuang.rsintegration.api.ISmithingRecipeAccessor;
+import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.network.AltarBindingRegistry;
 import com.huanghuang.rsintegration.network.BlockGuiRegistry;
@@ -396,6 +397,8 @@ public final class OpenBoundMachineGuiPacket {
             return;
         }
 
+        // 1.20 SmithingMenu: ingredients=[template, base, addition]
+        // container slots: 0=template, 1=base, 2=addition
         int filled = 0;
         for (int slotIdx = 0; slotIdx < 3; slotIdx++) {
             Ingredient ing = ingredients.get(slotIdx);
@@ -406,7 +409,7 @@ public final class OpenBoundMachineGuiPacket {
 
             ItemStack existing = menu.getSlot(slotIdx).getItem();
             if (!existing.isEmpty()) {
-                RSIntegrationMod.LOGGER.debug("[RSI-Prefill] Slot {} already has {} — {}", slotIdx,
+                RSIntegrationMod.LOGGER.debug("[RSI-Prefill] Container slot {} already has {} — {}", slotIdx,
                         existing.getCount(), ing.test(existing) ? "matches, skip" : "non-match, skip");
                 continue;
             }
@@ -415,9 +418,9 @@ public final class OpenBoundMachineGuiPacket {
             if (!extracted.isEmpty()) {
                 menu.getSlot(slotIdx).set(extracted.copy());
                 filled++;
-                RSIntegrationMod.LOGGER.debug("[RSI-Prefill] Slot {} filled with {}", slotIdx, extracted);
+                RSIntegrationMod.LOGGER.debug("[RSI-Prefill] Container slot {} filled with {}", slotIdx, extracted);
             } else {
-                RSIntegrationMod.LOGGER.warn("[RSI-Prefill] Slot {} extraction failed for ingredient", slotIdx);
+                RSIntegrationMod.LOGGER.warn("[RSI-Prefill] Container slot {} extraction failed for ingredient", slotIdx);
             }
         }
 
@@ -429,8 +432,8 @@ public final class OpenBoundMachineGuiPacket {
         }
     }
 
-    /** Fill template (slot 0), base (slot 1 from explicit baseItem or RS scan),
-     *  and addition (slot 2) for FA ApplyModifierRecipe. */
+    /** Fill smithing table for FA ApplyModifierRecipe.
+     *  1.20 SmithingMenu: 0=template, 1=base, 2=addition. */
     private static void prefillFaApplyModifier(ServerPlayer player, Recipe<?> recipe,
                                                 INetwork network, SmithingMenu menu,
                                                 @Nullable ItemStack baseItem) {
@@ -442,21 +445,8 @@ public final class OpenBoundMachineGuiPacket {
             Ingredient addition = (Ingredient) getAddition.invoke(recipe);
             Object modifier = getModifier.invoke(recipe);
 
-            // Probe canItemContainModifier method (used when baseItem is null)
-            java.lang.reflect.Method canContain = null;
-            if (baseItem == null || baseItem.isEmpty()) {
-                for (java.lang.reflect.Method m : modifier.getClass().getMethods()) {
-                    if (m.getName().equals("canItemContainModifier")
-                            && m.getParameterCount() == 1
-                            && m.getParameterTypes()[0].isAssignableFrom(ItemStack.class)) {
-                        canContain = m;
-                        break;
-                    }
-                }
-            }
-
             int filled = 0;
-            // Slot 0: template
+            // container slot 0 = template
             if (!template.isEmpty()) {
                 ItemStack existing = menu.getSlot(0).getItem();
                 if (existing.isEmpty()) {
@@ -467,7 +457,7 @@ public final class OpenBoundMachineGuiPacket {
                     }
                 }
             }
-            // Slot 1: fill base item — prefer explicit JEI-provided item, else scan RS
+            // container slot 1 = base
             if (menu.getSlot(1).getItem().isEmpty()) {
                 if (baseItem != null && !baseItem.isEmpty()) {
                     ItemStack extracted = network.extractItem(baseItem.copyWithCount(1), 1,
@@ -476,26 +466,9 @@ public final class OpenBoundMachineGuiPacket {
                         menu.getSlot(1).set(extracted.copy());
                         filled++;
                     }
-                } else if (canContain != null) {
-                    for (var entry : new ArrayList<>(network.getItemStorageCache().getList().getStacks())) {
-                        ItemStack candidate = entry.getStack();
-                        if (candidate.isEmpty()) continue;
-                        try {
-                            if ((boolean) canContain.invoke(modifier, candidate)) {
-                                ItemStack extracted = network.extractItem(
-                                        candidate.copyWithCount(1), 1,
-                                        com.refinedmods.refinedstorage.api.util.Action.PERFORM);
-                                if (!extracted.isEmpty()) {
-                                    menu.getSlot(1).set(extracted.copy());
-                                    filled++;
-                                }
-                                break;
-                            }
-                        } catch (Exception ignored) {}
-                    }
                 }
             }
-            // Slot 2: addition
+            // container slot 2 = addition
             if (!addition.isEmpty()) {
                 ItemStack existing = menu.getSlot(2).getItem();
                 if (existing.isEmpty()) {
@@ -553,5 +526,41 @@ public final class OpenBoundMachineGuiPacket {
             result.add(acc.rsi$getAddition());
         }
         return result;
+    }
+
+    // ── FA ApplyModifierRecipe: dispatch ──────────────────────────
+
+    /** True if {@code recipe} is an FA {@code ApplyModifierRecipe}
+     *  (no fixed base item — base is determined at runtime). */
+    public static boolean isFaApplyModifier(Recipe<?> recipe) {
+        return recipe.getClass().getSimpleName().equals("ApplyModifierRecipe");
+    }
+
+    /** Open the bound smithing table GUI and pre-fill template + addition.
+     *  If baseItem is provided (from JEI), it is used for slot 1. */
+    public static void openSmithingForFaModifier(ServerPlayer player, ResourceLocation recipeId,
+                                                  @Nullable ItemStack baseItem) {
+        ModType smithing = ModType.byId("smithing");
+
+        List<AltarBindingRegistry.BoundMachine> machines =
+                AltarBindingRegistry.getBoundMachinesForType(player, smithing);
+        if (machines.isEmpty()) {
+            player.sendSystemMessage(Component.translatable("rsi.generic.error.no_bound_machine", "smithing"));
+            return;
+        }
+
+        var m = machines.get(0);
+        ResourceKey<Level> dimKey = ResourceKey.create(
+                net.minecraft.core.registries.Registries.DIMENSION, m.dim());
+        ServerLevel level = player.getServer().getLevel(dimKey);
+        if (level == null) return;
+
+        boolean success = BlockGuiRegistry.openGui(player, dimKey, m.pos());
+        if (!success) {
+            player.sendSystemMessage(Component.translatable("rsi.generic.machine_gui_failed"));
+            return;
+        }
+
+        prefillSmithingTable(player, level, recipeId, baseItem);
     }
 }

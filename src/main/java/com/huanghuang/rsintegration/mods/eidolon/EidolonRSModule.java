@@ -35,6 +35,10 @@ public final class EidolonRSModule implements IModIntegration {
                 new String[]{"eidolon"},
                 new String[0],
                 ModType.delegateSupplier("com.huanghuang.rsintegration.mods.eidolon.EidolonBatchDelegate"));
+        ModType.configureJei("eidolon",
+                new String[][]{{"eidolon:crucible", "crucible"}, {"eidolon:worktable", "worktable"}, {"eidolon:rituals", "ritual"}},
+                new String[][]{{"elucent.eidolon.recipe.WorktableRecipe", "worktable"}, {"elucent.eidolon.recipe.ItemRitualRecipe", "ritual"}, {"elucent.eidolon.recipe.GenericRitualRecipe", "ritual"}, {"elucent.eidolon.", "crucible"}},
+                null);
     }
 
     @Override

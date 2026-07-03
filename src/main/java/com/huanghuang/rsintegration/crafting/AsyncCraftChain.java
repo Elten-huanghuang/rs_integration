@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.crafting.batch.GenericBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
@@ -8,6 +9,8 @@ import com.huanghuang.rsintegration.network.AltarBindingRegistry;
 import com.huanghuang.rsintegration.network.AltarBindingRegistry.BoundMachine;
 import com.huanghuang.rsintegration.network.ProtectionChecker;
 import com.huanghuang.rsintegration.util.Diagnostics;
+import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
+import com.huanghuang.rsintegration.util.PlayerUtils;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
@@ -149,7 +152,7 @@ public final class AsyncCraftChain {
                     Recipe<?> mbRecipe = overworld.getRecipeManager()
                             .byKey(steps.get(currentStepIdx).recipeId()).orElse(null);
                     if (mbRecipe != null) {
-                        for (ItemStack secondary : com.huanghuang.rsintegration.recipe.ModRecipeHandlers.tryGetSecondaryOutputs(mbRecipe, overworld.registryAccess())) {
+                        for (ItemStack secondary : ModRecipeHandlers.tryGetSecondaryOutputs(mbRecipe, overworld.registryAccess())) {
                             addToVirtualInventory(secondary);
                         }
                     }
@@ -309,7 +312,7 @@ public final class AsyncCraftChain {
                 if (!result.isEmpty()) {
                     addToVirtualInventory(result);
                 }
-                for (ItemStack secondary : com.huanghuang.rsintegration.recipe.ModRecipeHandlers.tryGetSecondaryOutputs(cr, server.overworld().registryAccess())) {
+                for (ItemStack secondary : ModRecipeHandlers.tryGetSecondaryOutputs(cr, server.overworld().registryAccess())) {
                     addToVirtualInventory(secondary);
                 }
                 for (ItemStack remainder : CraftPacketUtils.getRecipeRemainders(cr)) {
@@ -317,11 +320,11 @@ public final class AsyncCraftChain {
                 }
             } else {
                 // Non-crafting GENERIC recipe (e.g. sawmill, custom mod type)
-                List<com.huanghuang.rsintegration.crafting.IngredientSpec> specs =
+                List<IngredientSpec> specs =
                         CraftPacketUtils.extractIngredientSpecs(recipe);
                 if (specs == null || specs.isEmpty()) continue;
 
-                for (com.huanghuang.rsintegration.crafting.IngredientSpec spec : specs) {
+                for (IngredientSpec spec : specs) {
                     if (spec.isEmpty()) continue;
                     int stillNeeded = spec.count();
                     var iter = virtualInventory.iterator();
@@ -351,12 +354,12 @@ public final class AsyncCraftChain {
                     }
                 }
 
-                ItemStack result = com.huanghuang.rsintegration.recipe.ModRecipeHandlers.tryGetResultItem(
+                ItemStack result = ModRecipeHandlers.tryGetResultItem(
                         recipe, server.overworld().registryAccess());
                 if (!result.isEmpty()) {
                     addToVirtualInventory(result);
                 }
-                for (ItemStack secondary : com.huanghuang.rsintegration.recipe.ModRecipeHandlers.tryGetSecondaryOutputs(recipe, server.overworld().registryAccess())) {
+                for (ItemStack secondary : ModRecipeHandlers.tryGetSecondaryOutputs(recipe, server.overworld().registryAccess())) {
                     addToVirtualInventory(secondary);
                 }
                 for (IngredientSpec spec : specs) {
@@ -420,7 +423,7 @@ public final class AsyncCraftChain {
         // without a physical machine.  Use the shared-ledger preReserve flow so
         // intermediate outputs from prior chain steps (in virtualInventory) are
         // visible to subsequent steps.
-        if (delegate instanceof com.huanghuang.rsintegration.crafting.batch.GenericBatchDelegate) {
+        if (delegate instanceof GenericBatchDelegate) {
             if (!delegate.validateAndInit(online, step.recipeId(), null, null)) {
                 return null;
             }
@@ -678,12 +681,12 @@ public final class AsyncCraftChain {
         while (iter.hasNext()) {
             ItemStack vi = iter.next();
             if (!vi.isEmpty()) {
+                ItemStack leftover = network.insertItem(vi.copy(), vi.getCount(),
+                        com.refinedmods.refinedstorage.api.util.Action.PERFORM);
                 if (online != null) {
                     var tracker = network.getItemStorageTracker();
                     if (tracker != null) tracker.changed(online, vi.copy());
                 }
-                ItemStack leftover = network.insertItem(vi.copy(), vi.getCount(),
-                        com.refinedmods.refinedstorage.api.util.Action.PERFORM);
                 if (online != null && !leftover.isEmpty()) {
                     safeGiveToPlayer(online, leftover);
                 } else if (online == null && !leftover.isEmpty()) {
@@ -739,10 +742,10 @@ public final class AsyncCraftChain {
         if (network != null) {
             for (ItemStack vi : virtualInventory) {
                 if (!vi.isEmpty()) {
-                    var tracker = network.getItemStorageTracker();
-                    if (tracker != null) tracker.changed(online, vi.copy());
                     ItemStack leftover = network.insertItem(vi.copy(), vi.getCount(),
                             com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                    var tracker = network.getItemStorageTracker();
+                    if (tracker != null) tracker.changed(online, vi.copy());
                     if (!leftover.isEmpty()) {
                         safeGiveToPlayer(online, leftover);
                     }
@@ -846,7 +849,7 @@ public final class AsyncCraftChain {
     // ── safe item give ───────────────────────────────────────────
 
     private void safeGiveToPlayer(ServerPlayer player, ItemStack stack) {
-        com.huanghuang.rsintegration.util.PlayerUtils.safeGiveToPlayer(player, stack, network);
+        PlayerUtils.safeGiveToPlayer(player, stack, network);
     }
 
     // ── debug helpers ────────────────────────────────────────────

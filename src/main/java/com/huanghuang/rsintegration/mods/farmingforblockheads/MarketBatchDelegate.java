@@ -198,6 +198,24 @@ public final class MarketBatchDelegate extends AbstractBatchDelegate {
     }
 
     /**
+     * Resolve a Market entry from a recipeId with format
+     * {@code farmingforblockheads:market/<uuid>}.
+     */
+    @Nullable
+    public static Recipe<?> resolveMarketEntry(ResourceLocation recipeId) {
+        String path = recipeId.getPath();
+        if (!path.startsWith("market/")) return null;
+        String uuidStr = path.substring("market/".length());
+        UUID uuid;
+        try {
+            uuid = UUID.fromString(uuidStr);
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+        return resolveMarketEntry(uuid);
+    }
+
+    /**
      * Create a MarketRecipeWrapper from an IMarketEntry via reflection.
      * Also used by GenericCraftPacket when resolving a plan preview.
      */

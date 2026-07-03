@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.command.PerformanceMonitor;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.event.TickEvent;
@@ -117,7 +118,7 @@ public final class AsyncCraftManager {
                 activeChains.remove(chain);
             }
         }
-        com.huanghuang.rsintegration.command.PerformanceMonitor.recordTick(
+        PerformanceMonitor.recordTick(
                 System.nanoTime() - tickStart);
     }
 }

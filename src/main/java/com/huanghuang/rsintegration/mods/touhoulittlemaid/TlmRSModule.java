@@ -34,6 +34,10 @@ public final class TlmRSModule implements IModIntegration {
                 new String[]{"touhou_little_maid"},
                 new String[0],
                 ModType.delegateSupplier("com.huanghuang.rsintegration.mods.touhoulittlemaid.TlmAltarBatchDelegate"));
+        ModType.configureJei("touhou_little_maid",
+                null,
+                new String[][]{{"com.github.tartaricacid.touhoulittlemaid.", "touhou_little_maid"}},
+                null);
     }
 
     @Override

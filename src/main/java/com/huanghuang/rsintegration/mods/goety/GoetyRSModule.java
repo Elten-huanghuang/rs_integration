@@ -39,6 +39,10 @@ public final class GoetyRSModule implements IModIntegration {
                 new String[]{"goety"},
                 new String[0],
                 ModType.delegateSupplier("com.huanghuang.rsintegration.mods.goety.GoetyBatchDelegate"));
+        ModType.configureJei("goety",
+                new String[][]{{"goety:brazier"}},
+                new String[][]{{"com.Polarice3.Goety.", "goety"}},
+                null);
     }
 
     @Override

@@ -35,16 +35,20 @@ public final class FaRSModule implements IModIntegration {
                 new String[]{"forbidden_arcanus"},
                 new String[0],
                 ModType.delegateSupplier("com.huanghuang.rsintegration.mods.forbidden.FaBatchDelegate"));
+        ModType.configureJei("forbidden_arcanus",
+                new String[][]{{"forbidden_arcanus:hephaestus_smithing", "hephaestus_forge"}, {"forbidden_arcanus:hephaestus_forge_upgrading", "hephaestus_forge"}},
+                new String[][]{{"com.stal111.forbidden_arcanus.", "hephaestus_forge"}},
+                null);
     }
 
     @Override
     public void registerBindingTargets() {
-        // Hephaestus Forge: essence status panel only, no item I/O container GUI. All materials placed in-world.
+        // Hephaestus Forge: has an interactive GUI (essence, rituals, tier info)
         BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
                 "forbidden_arcanus", ModType.byId("forbidden_arcanus"),
                 RSIntegrationConfig.ENABLE_FORBIDDEN_ARCANUS, List.of(
                 "com.stal111.forbidden_arcanus.common.block.HephaestusForgeBlock"
-        ), "forbidden_arcanus", false));
+        ), "forbidden_arcanus", true));
     }
 
     @Override

@@ -32,6 +32,13 @@ public final class ModType {
     private final Supplier<IBatchDelegate> delegateFactory;
     @Nullable private final Supplier<IBatchDelegate> inferDelegateFactory;
 
+    // JEI integration — set via configureJei() after register()
+    // uidToFilter: [[jeiUid, filterString], ...] — filterString is what getBindingFilter returns
+    // recipePrefixes: [[classPrefix, filterString], ...] — single-element [prefix] defaults to id
+    @Nullable private String[][] jeiUidToFilter;
+    @Nullable private String[][] jeiRecipePrefixes;
+    @Nullable private String jeiTooltipKey;
+
     // ── built-in constants (registered in static {}) ──────────────
 
     public static final ModType GENERIC;
@@ -54,6 +61,10 @@ public final class ModType {
                 new String[]{"market", "farmingforblockheads"},
                 new String[]{"market"},
                 delegateSupplier("com.huanghuang.rsintegration.mods.farmingforblockheads.MarketBatchDelegate"));
+        configureJei("farmingforblockheads",
+                new String[][]{{"farmingforblockheads:market"}},
+                new String[][]{{"net.blay09.mods.farmingforblockheads.", "farmingforblockheads"}},
+                "gui.rs_integration.jei.market_craft");
     }
 
     // ── constructors ──────────────────────────────────────────────
@@ -122,6 +133,82 @@ public final class ModType {
     /** Get a registered ModType by id. Never returns null — falls back to GENERIC. */
     public static ModType byId(String id) {
         return BY_ID.getOrDefault(id, GENERIC);
+    }
+
+    /** Call after {@link #register} to link JEI category UIDs and tooltip key.
+     *  @param jeiUidToFilter [jeiUid, filterString] pairs — filterString is what
+     *                         {@code getBindingFilter} returns.  When the array is
+     *                         a single-element {@code [uid]}, filter defaults to
+     *                         the mod type's {@code id}.
+     *  @param jeiRecipePrefixes [classPrefix, filterString] pairs — filterString is
+     *                         what {@code getBindingFilter} returns.  When the array
+     *                         is a single-element {@code [prefix]}, filter defaults
+     *                         to the mod type's {@code id}. */
+    public static void configureJei(String id, @Nullable String[][] jeiUidToFilter,
+                                    @Nullable String[][] jeiRecipePrefixes,
+                                    @Nullable String jeiTooltipKey) {
+        ModType mt = byId(id);
+        if (mt == GENERIC) return;
+        mt.jeiUidToFilter = jeiUidToFilter;
+        mt.jeiRecipePrefixes = jeiRecipePrefixes;
+        mt.jeiTooltipKey = jeiTooltipKey;
+    }
+
+    /** Returns the tooltip key for this mod type's JEI button, or null. */
+    @Nullable
+    public String jeiTooltipKey() { return jeiTooltipKey; }
+
+    /** Look up a JEI category UID and return the corresponding filter string
+     *  for {@code getBindingFilter}, or null if no match. */
+    @Nullable
+    public static String filterForJeiUid(String uid) {
+        for (ModType mt : BY_ID.values()) {
+            if (mt.jeiUidToFilter != null) {
+                for (String[] pair : mt.jeiUidToFilter) {
+                    if (pair[0].equals(uid)) return pair.length >= 2 ? pair[1] : mt.id;
+                }
+            }
+        }
+        return null;
+    }
+
+    /** Find a ModType by recipe class name prefix (longest-match). Returns null if no match. */
+    @Nullable
+    public static ModType findByRecipeClass(String className) {
+        ModType best = null;
+        int bestLen = 0;
+        for (ModType mt : BY_ID.values()) {
+            if (mt.jeiRecipePrefixes != null) {
+                for (String[] pair : mt.jeiRecipePrefixes) {
+                    String prefix = pair[0];
+                    if (className.startsWith(prefix) && prefix.length() > bestLen) {
+                        best = mt;
+                        bestLen = prefix.length();
+                    }
+                }
+            }
+        }
+        return best;
+    }
+
+    /** Find the binding filter string by recipe class name prefix (longest-match).
+     *  Returns null if no match.  Mirrors {@link #filterForJeiUid} for class-name fallback. */
+    @Nullable
+    public static String filterForRecipeClass(String className) {
+        String best = null;
+        int bestLen = 0;
+        for (ModType mt : BY_ID.values()) {
+            if (mt.jeiRecipePrefixes != null) {
+                for (String[] pair : mt.jeiRecipePrefixes) {
+                    String prefix = pair[0];
+                    if (className.startsWith(prefix) && prefix.length() > bestLen) {
+                        best = pair.length >= 2 ? pair[1] : mt.id;
+                        bestLen = prefix.length();
+                    }
+                }
+            }
+        }
+        return best;
     }
 
     // ── classification ────────────────────────────────────────────

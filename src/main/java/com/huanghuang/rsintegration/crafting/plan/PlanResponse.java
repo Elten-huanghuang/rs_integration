@@ -33,7 +33,8 @@ public record PlanResponse(
         long embersSeed,                      // world seed used for calculation (0 = not set)
         boolean embersCanInfer,               // true when a tablet is bound and Mode 1 is available
         boolean embersCodeFromCache,          // true when embersCode was loaded from KnownCodeSavedData (previously inferred)
-        boolean executionMachineSupportsGui   // true when the bound execution machine supports remote GUI
+        boolean executionMachineSupportsGui,  // true when the bound execution machine supports remote GUI
+        @Nullable ItemStack baseItem          // JEI-provided base item for FA ApplyModifierRecipe prefill
 ) {
     public record Availability(int needed, int available) {
         public boolean isEnough() { return available >= needed; }
@@ -46,7 +47,7 @@ public record PlanResponse(
                         List<String> missing, String recipeId) {
         this(success, targetName, targetResult, steps, materials, missing, recipeId,
                 null, null, 0, 0, 0, Collections.emptyList(), 1,
-                null, null, null, 0, false, false, false);
+                null, null, null, 0, false, false, false, null);
     }
 
     /** Backward-compat: no mod warnings. */
@@ -59,7 +60,7 @@ public record PlanResponse(
         this(success, targetName, targetResult, steps, materials, missing, recipeId,
                 executionModTypeId, executionDim, executionPosX, executionPosY, executionPosZ,
                 Collections.emptyList(), 1,
-                null, null, null, 0, false, false, false);
+                null, null, null, 0, false, false, false, null);
     }
 
     /** Backward-compat: no embers data. */
@@ -73,6 +74,6 @@ public record PlanResponse(
         this(success, targetName, targetResult, steps, materials, missing, recipeId,
                 executionModTypeId, executionDim, executionPosX, executionPosY, executionPosZ,
                 modWarnings, repeatCount,
-                null, null, null, 0, false, false, false);
+                null, null, null, 0, false, false, false, null);
     }
 }
