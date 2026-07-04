@@ -1,4 +1,4 @@
-package com.huanghuang.rsintegration.mixin.rs;
+package com.huanghuang.rsintegration.mixin.minecraft;
 
 import com.huanghuang.rsintegration.network.RemoteGuiAuth;
 import net.minecraft.world.inventory.AbstractContainerMenu;
@@ -17,10 +17,6 @@ public abstract class ContainerDistanceMixin {
             at = @At("HEAD"), cancellable = true)
     private static void rsi$bypassDistanceCheck(ContainerLevelAccess access, Player player, Block block,
                                                  CallbackInfoReturnable<Boolean> cir) {
-        // Client: always bypass — the client has no Auth data and
-        // the server is authoritative for security (it sends a
-        // close-packet if the authorization is missing).
-        // Server: check the authorization before bypassing.
         if (player.level().isClientSide
                 || RemoteGuiAuth.hasActiveAuthorization(player.getUUID())) {
             cir.setReturnValue(true);

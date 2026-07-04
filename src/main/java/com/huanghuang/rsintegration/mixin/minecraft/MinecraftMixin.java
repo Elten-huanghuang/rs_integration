@@ -1,4 +1,4 @@
-package com.huanghuang.rsintegration.mixin.rs;
+package com.huanghuang.rsintegration.mixin.minecraft;
 
 import com.huanghuang.rsintegration.sidepanel.client.GuiNavStack;
 import net.minecraft.client.Minecraft;
@@ -8,13 +8,6 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
-/**
- * Intercepts {@link Minecraft#setScreen(Screen)} instead of listening to
- * {@link Screen#removed()}.  When the game tries to close the current screen
- * ({@code screen == null}) we check whether a cached RS GridScreen should be
- * restored.  This avoids the state-machine fragility of tracking every
- * intermediate screen removal.
- */
 @Mixin(Minecraft.class)
 public abstract class MinecraftMixin {
 

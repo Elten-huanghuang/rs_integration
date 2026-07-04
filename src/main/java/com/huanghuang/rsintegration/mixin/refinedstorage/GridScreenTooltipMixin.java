@@ -1,4 +1,4 @@
-package com.huanghuang.rsintegration.mixin.rs;
+package com.huanghuang.rsintegration.mixin.refinedstorage;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.machine.MachineHub;
@@ -26,11 +26,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
-/**
- * Suppresses the default RS grid item tooltip and draws a machine-name
- * tooltip instead when the player is hovering a machine shortcut tab or Hub button.
- * Target: com.refinedmods.refinedstorage.screen.grid.GridScreen
- */
 @Mixin(value = com.refinedmods.refinedstorage.screen.grid.GridScreen.class, remap = false)
 public abstract class GridScreenTooltipMixin {
 
@@ -47,7 +42,6 @@ public abstract class GridScreenTooltipMixin {
             if (!machines.isEmpty() && idx < machines.size()) {
                 drawMachineTooltip(gfx, mouseX, mouseY, machines.get(idx));
             } else if (machines.isEmpty()) {
-                // Hub button tooltip
                 int total = MachineTabHandler.getAllMachines().size();
                 if (total > 0 && MachineHub.shouldUseHub(total)) {
                     List<Component> hubTip = new ArrayList<>();
@@ -67,8 +61,6 @@ public abstract class GridScreenTooltipMixin {
         MachineStatus status = MachineStatusCache.getInstance().get(info);
 
         List<Component> lines = new ArrayList<>();
-        // Title line: block name with flow animation (matching backpack RS upgrade style)
-        // Use client-side block-name resolution so gun-pack workbench names work.
         Component blockDisplay;
         ItemStack ds = info.displayStack();
         if (ds != null && !ds.isEmpty()) {
@@ -80,7 +72,6 @@ public abstract class GridScreenTooltipMixin {
         }
         lines.add(TextBuilder.of(blockDisplay).colorFlow(1500L, 0.0F, RSIntegrationMod.RS_FLOW_COLORS).build());
 
-        // Dimension + coordinates line in cornflower blue (matching backpack RS upgrade)
         String dimDisplay = dimDisplayName(info.dim());
         lines.add(TextBuilder.of("  " + dimDisplay + " " + info.pos().toShortString())
                 .cornflowerBlue().build());
@@ -88,7 +79,6 @@ public abstract class GridScreenTooltipMixin {
         lines.add(Component.empty());
 
         if (type == MachineInteractType.QUICK) {
-            // State line with color
             Component stateLine = switch (status.state()) {
                 case HAS_OUTPUT -> Component.translatable("rsi.machine.state.has_output")
                     .withStyle(ChatFormatting.BLUE);
@@ -104,7 +94,6 @@ public abstract class GridScreenTooltipMixin {
             };
             lines.add(stateLine);
 
-            // Items in slots
             ItemStack input = status.inputItem();
             ItemStack output = status.outputItem();
             ItemStack fuel = status.fuelItem();
@@ -121,7 +110,6 @@ public abstract class GridScreenTooltipMixin {
                     fuel.getCount(), fuel.getHoverName()).withStyle(ChatFormatting.GRAY));
             }
 
-            // Action hints
             if (status.state() == MachineState.HAS_OUTPUT) {
                 lines.add(Component.translatable("rsi.machine.hint.collect")
                     .withStyle(ChatFormatting.AQUA));
@@ -132,7 +120,6 @@ public abstract class GridScreenTooltipMixin {
                     .withStyle(ChatFormatting.GRAY));
             }
         } else {
-            // GUI type
             lines.add(Component.translatable("rsi.machine.type.gui")
                 .withStyle(ChatFormatting.LIGHT_PURPLE));
             lines.add(Component.translatable("rsi.machine.hint.open_gui")

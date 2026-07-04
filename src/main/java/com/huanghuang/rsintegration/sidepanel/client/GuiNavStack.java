@@ -4,7 +4,7 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 
 import com.huanghuang.rsintegration.machine.MachineHub;
 import com.huanghuang.rsintegration.machine.MachineHubRenderer;
-import com.huanghuang.rsintegration.mixin.rs.AbstractContainerScreenAccessor;
+import com.huanghuang.rsintegration.mixin.minecraft.AbstractContainerScreenAccessor;
 import com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler;
 import com.huanghuang.rsintegration.sidepanel.network.ReturnToRSPacket;
 import net.minecraft.client.Minecraft;

@@ -1,4 +1,4 @@
-package com.huanghuang.rsintegration.mixin.rs;
+package com.huanghuang.rsintegration.mixin.minecraft;
 
 import com.huanghuang.rsintegration.network.RemoteGuiAuth;
 import net.minecraft.world.entity.Entity;

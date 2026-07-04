@@ -1,9 +1,10 @@
-package com.huanghuang.rsintegration.mixin.rs;
+package com.huanghuang.rsintegration.mixin.refinedstorage;
 
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.machine.MachineHub;
 import com.huanghuang.rsintegration.machine.MachineInteractType;
 import com.huanghuang.rsintegration.machine.MachineStatus;
+import com.huanghuang.rsintegration.mixin.minecraft.AbstractContainerScreenAccessor;
 import com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler;
 import com.huanghuang.rsintegration.sidepanel.client.MachineTabHandler;
 import com.huanghuang.rsintegration.sidepanel.client.MachineTabRenderer;
@@ -19,28 +20,18 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 import java.util.List;
 
-/**
- * Injects machine shortcut tabs / Hub button into the RS GridScreen foreground layer.
- * Target: com.refinedmods.refinedstorage.screen.grid.GridScreen
- *
- * <p>renderForeground has the PoseStack translated by (leftPos, topPos),
- * so draw coordinates are RELATIVE to the grid top-left.</p>
- */
 @Mixin(value = com.refinedmods.refinedstorage.screen.grid.GridScreen.class, remap = false)
 public abstract class GridScreenMachineTabMixin {
 
     private static final int HUB_BUTTON_W = 18;
     private static final int HUB_BUTTON_H = 18;
-    private static final int GRID_W = 174;  // RS grid image width
+    private static final int GRID_W = 174;
     private static boolean rsi$bindingSyncRequested;
 
     @Inject(method = "renderForeground", at = @At("TAIL"), remap = false)
     private void rsi$renderMachineTabs(GuiGraphics gfx, int mouseX, int mouseY, CallbackInfo ci) {
         if (!RSIntegrationConfig.ENABLE_MACHINE_GUI_TABS.get()) return;
 
-        // Request machine binding data from server on first render.
-        // Without this, the Hub button won't appear until the side panel is opened.
-        // Also clear any stale Hub overlay state from a previous screen session.
         if (!rsi$bindingSyncRequested) {
             rsi$bindingSyncRequested = true;
             MachineHub.hideImmediate();
@@ -54,11 +45,9 @@ public abstract class GridScreenMachineTabMixin {
         List<BindingInfo> allMachines = MachineTabHandler.getAllMachines();
 
         if (machines.isEmpty()) {
-            // Hub mode: render a single "Hub" button on the LEFT side
             if (allMachines.isEmpty()) return;
             int cnt = allMachines.size();
             if (MachineHub.shouldUseHub(cnt)) {
-                // Relative draw coords (pose is already translated by (leftPos, topPos))
                 int hubRelX = -HUB_BUTTON_W - 2;
                 int sideButtonBottom = 0;
                 try {
@@ -71,8 +60,6 @@ public abstract class GridScreenMachineTabMixin {
                 } catch (Exception ignored) {}
                 int hubRelY = sideButtonBottom + 4;
 
-                // Hit-test in RELATIVE coords — mouseX/mouseY are already
-                // translated by (leftPos, topPos) by the caller (BaseScreen).
                 boolean hubHovered = mouseX >= hubRelX && mouseX < hubRelX + HUB_BUTTON_W
                         && mouseY >= hubRelY && mouseY < hubRelY + HUB_BUTTON_H;
                 boolean hubActive = MachineHub.isVisible();
@@ -87,7 +74,6 @@ public abstract class GridScreenMachineTabMixin {
                 gfx.fill(hubRelX, hubRelY, hubRelX + HUB_BUTTON_W, hubRelY + HUB_BUTTON_H, hubColor);
                 gfx.renderOutline(hubRelX, hubRelY, HUB_BUTTON_W, HUB_BUTTON_H, outlineColor);
 
-                // Grid icon (2x2 dots) centered in the 18x18 button
                 int iconX = hubRelX + 5;
                 int iconY = hubRelY + 5;
                 int dotColor = hubActive ? 0xFFAADDEE : 0xFFAAAACC;
@@ -97,7 +83,6 @@ public abstract class GridScreenMachineTabMixin {
                     }
                 }
 
-                // Machine count label
                 Font font = Minecraft.getInstance().font;
                 String label = allMachines.size() > 99 ? "…" : String.valueOf(allMachines.size());
                 int labelW = font.width(label);
@@ -108,12 +93,10 @@ public abstract class GridScreenMachineTabMixin {
                 MachineTabHandler.setHoveredTabIndex(hubHovered ? 0 : -1);
             }
         } else {
-            // Individual tabs on the LEFT side, rendered rightward
             int tabRelX = -MachineTabRenderer.getTotalWidth(machines.size()) - 2;
             int tabRelY = 6;
             int maxRelX = GRID_W;
 
-            // Hit-test in screen space
             int tabScrX = leftPos + tabRelX;
             int tabScrY = topPos + tabRelY;
             int maxScrX = leftPos + maxRelX;
@@ -136,7 +119,4 @@ public abstract class GridScreenMachineTabMixin {
     private void rsi$onClose(CallbackInfo ci) {
         rsi$bindingSyncRequested = false;
     }
-
-    // Hub overlay is now rendered via ScreenEvent.Render.Post (in GuiNavStack)
-    // so that it draws above JEI's ingredient panel.
 }

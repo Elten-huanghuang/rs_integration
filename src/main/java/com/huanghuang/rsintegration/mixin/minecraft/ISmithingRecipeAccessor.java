@@ -1,15 +1,9 @@
-package com.huanghuang.rsintegration.mixin.rs;
+package com.huanghuang.rsintegration.mixin.minecraft;
 
 import com.huanghuang.rsintegration.api.ISmithingRecipeAccessor;
 import net.minecraft.world.item.crafting.Ingredient;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.gen.Accessor;
-
-/**
- * Mixin-side implementations of {@link ISmithingRecipeAccessor}.
- * The parent interface lives in the {@code api} package so external code
- * can reference it without violating Mixin's package-ownership rules.
- */
 
 @Mixin(net.minecraft.world.item.crafting.SmithingTransformRecipe.class)
 interface SmithingTransformRecipeAccessor extends ISmithingRecipeAccessor {

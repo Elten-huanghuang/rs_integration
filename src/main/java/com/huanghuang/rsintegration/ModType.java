@@ -56,7 +56,7 @@ public final class ModType {
                 GenericBatchDelegate::new);
 
         FARMINGFORBLOCKHEADS_MARKET = register("farmingforblockheads",
-                new String[]{"com.huanghuang.rsintegration.crafting.MarketRecipeWrapper"},
+                new String[]{"com.huanghuang.rsintegration.mods.farmingforblockheads.MarketRecipeWrapper"},
                 new String[]{"market", "farmingforblockheads"},
                 new String[]{"market"},
                 delegateSupplier("com.huanghuang.rsintegration.mods.farmingforblockheads.MarketBatchDelegate"));

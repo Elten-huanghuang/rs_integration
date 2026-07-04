@@ -2,7 +2,7 @@ package com.huanghuang.rsintegration.recipe;
 
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
-import com.huanghuang.rsintegration.crafting.MarketRecipeWrapper;
+import com.huanghuang.rsintegration.mods.farmingforblockheads.MarketRecipeWrapper;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Recipe;

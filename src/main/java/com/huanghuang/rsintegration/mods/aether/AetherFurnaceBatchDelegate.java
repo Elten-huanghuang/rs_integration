@@ -5,7 +5,7 @@ import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
-import com.huanghuang.rsintegration.mixin.rs.AbstractFurnaceAccessor;
+import com.huanghuang.rsintegration.mixin.minecraft.AbstractFurnaceAccessor;
 import com.huanghuang.rsintegration.network.RSIntegration;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.refinedmods.refinedstorage.api.network.INetwork;

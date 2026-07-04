@@ -1,4 +1,4 @@
-package com.huanghuang.rsintegration.crafting;
+package com.huanghuang.rsintegration.mods.farmingforblockheads;
 
 import net.minecraft.core.NonNullList;
 import net.minecraft.core.RegistryAccess;
@@ -13,15 +13,7 @@ import net.minecraft.world.level.Level;
 
 import java.util.UUID;
 
-/**
- * Lightweight {@link Recipe} wrapper for a FarmingForBlockheads
- * {@code IMarketEntry} so it can be stored in {@code RecipeIndex}
- * and discovered by the crafting plan resolver.
- *
- * <p>Market entries are not standard recipes — they are shop trades
- * loaded from JSON by {@code MarketRegistry}. This wrapper bridges
- * the gap, following the same pattern as {@code FaRitualWrapper}.</p>
- */
+/** Virtual Recipe wrapper for FarmingForBlockheads market entries. */
 public final class MarketRecipeWrapper implements Recipe<Container> {
 
     private final ResourceLocation id;
@@ -38,8 +30,6 @@ public final class MarketRecipeWrapper implements Recipe<Container> {
 
     public UUID entryId() { return entryId; }
     public ItemStack costItem() { return cost.copy(); }
-
-    // Recipe contract
 
     @Override
     public boolean matches(Container container, Level level) { return false; }
@@ -70,8 +60,6 @@ public final class MarketRecipeWrapper implements Recipe<Container> {
         list.add(Ingredient.of(cost.copy()));
         return list;
     }
-
-    // Object contract
 
     @Override
     public boolean equals(Object o) {

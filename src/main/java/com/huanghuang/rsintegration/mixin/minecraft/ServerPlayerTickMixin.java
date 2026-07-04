@@ -1,4 +1,4 @@
-package com.huanghuang.rsintegration.mixin.rs;
+package com.huanghuang.rsintegration.mixin.minecraft;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.network.RemoteGuiAuth;
@@ -12,15 +12,6 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
-/**
- * Bypasses the per-tick {@code stillValid} distance check for remote GUI
- * access.  In 1.20.1 the check lives in {@code ServerPlayer.tick()} (SRG
- * {@code m_8119_}), not {@code doTick()}.
- *
- * <p>Uses {@code @WrapOperation} instead of {@code @Redirect} so multiple
- * mods can intercept the same call site without silently overriding one
- * another.
- */
 @Mixin(ServerPlayer.class)
 public abstract class ServerPlayerTickMixin {
 

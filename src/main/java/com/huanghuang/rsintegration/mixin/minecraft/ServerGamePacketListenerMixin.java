@@ -1,4 +1,4 @@
-package com.huanghuang.rsintegration.mixin.rs;
+package com.huanghuang.rsintegration.mixin.minecraft;
 
 import com.huanghuang.rsintegration.network.RemoteGuiAuth;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
@@ -9,11 +9,6 @@ import net.minecraft.world.inventory.AbstractContainerMenu;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 
-/**
- * Bypasses per-packet {@code stillValid} checks for authorized remote GUI
- * access.  Uses {@code @WrapOperation} so multiple mods chain without
- * silently overriding one another.
- */
 @Mixin(ServerGamePacketListenerImpl.class)
 public abstract class ServerGamePacketListenerMixin {
 

@@ -1,4 +1,4 @@
-package com.huanghuang.rsintegration.mixin.rs;
+package com.huanghuang.rsintegration.mixin.refinedstorage;
 
 import com.huanghuang.rsintegration.machine.MachineHubInputHandler;
 import com.huanghuang.rsintegration.sidepanel.client.MachineTabHandler;
@@ -8,17 +8,12 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
-/**
- * Intercepts keyboard events on the RS GridScreen to handle Hub / machine tab keys.
- * Target: com.refinedmods.refinedstorage.screen.grid.GridScreen
- */
 @Mixin(value = com.refinedmods.refinedstorage.screen.grid.GridScreen.class, remap = false)
 public abstract class GridScreenKeyboardMixin {
 
     @Inject(method = "m_7933_", at = @At("HEAD"), cancellable = true, remap = false)
     private void rsi$onKeyPressed(int keyCode, int scanCode, int modifiers,
                                    CallbackInfoReturnable<Boolean> cir) {
-        // Hub overlay steals keyboard input first
         if (MachineHubInputHandler.isConsumingInput()) {
             boolean consumed = MachineHubInputHandler.keyPressed(keyCode);
             if (consumed) {
@@ -30,7 +25,6 @@ public abstract class GridScreenKeyboardMixin {
         if (MachineTabHandler.getHoveredTabIndex() < 0) return;
         if (keyCode != 257 && keyCode != 32) return;
 
-        // Don't consume Enter/Space if a text field is focused
         GuiEventListener focused = ((net.minecraft.client.gui.screens.Screen) (Object) this).getFocused();
         if (focused instanceof net.minecraft.client.gui.components.EditBox) return;
 

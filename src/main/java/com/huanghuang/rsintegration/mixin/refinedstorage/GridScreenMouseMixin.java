@@ -1,4 +1,4 @@
-package com.huanghuang.rsintegration.mixin.rs;
+package com.huanghuang.rsintegration.mixin.refinedstorage;
 
 import com.huanghuang.rsintegration.machine.MachineHub;
 import com.huanghuang.rsintegration.machine.MachineHubInputHandler;
@@ -6,6 +6,7 @@ import com.huanghuang.rsintegration.machine.MachineInteractType;
 import com.huanghuang.rsintegration.machine.MachineSlotType;
 import com.huanghuang.rsintegration.machine.MachineState;
 import com.huanghuang.rsintegration.machine.MachineStatus;
+import com.huanghuang.rsintegration.mixin.minecraft.AbstractContainerScreenAccessor;
 import com.huanghuang.rsintegration.sidepanel.RSItemLockPacket;
 import com.huanghuang.rsintegration.sidepanel.RSSidePanelClient;
 import com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler;
@@ -25,18 +26,12 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 import java.util.List;
 
-/**
- * Intercepts mouse clicks and scroll on the RS GridScreen to handle machine tab / Hub clicks
- * and Ctrl+Left-Click item locking.
- * Target: com.refinedmods.refinedstorage.screen.grid.GridScreen
- */
 @Mixin(value = com.refinedmods.refinedstorage.screen.grid.GridScreen.class, remap = false)
 public abstract class GridScreenMouseMixin {
 
     @Inject(method = "m_6375_", at = @At("HEAD"), cancellable = true, remap = false)
     private void rsi$onMouseClicked(double mouseX, double mouseY, int button,
                                      CallbackInfoReturnable<Boolean> cir) {
-        // Ctrl+Left Click on grid item → toggle item lock
         if (button == 0 && Screen.hasControlDown()) {
             if (rsi$tryLockGridItem(mouseX, mouseY)) {
                 cir.setReturnValue(true);
@@ -44,7 +39,6 @@ public abstract class GridScreenMouseMixin {
             }
         }
 
-        // Hub overlay steals input first
         if (MachineHubInputHandler.isConsumingInput()) {
             boolean consumed = MachineHubInputHandler.mouseClicked(mouseX, mouseY, button);
             if (consumed) {
@@ -53,9 +47,6 @@ public abstract class GridScreenMouseMixin {
             }
         }
 
-        // Hub button click — must be before individual tab hover check,
-        // since hovered == -1 when hub button is showing (tabs collapsed).
-        // hoveredTabIndex is set to 0 by renderForeground when mouse is over the hub.
         if (button == 0) {
             int ht = MachineTabHandler.getHoveredTabIndex();
             List<BindingInfo> visibleTabs = MachineTabHandler.getVisibleTabs();
@@ -75,7 +66,6 @@ public abstract class GridScreenMouseMixin {
         if (!visibleTabs.isEmpty() && hovered < visibleTabs.size()) {
             BindingInfo info = visibleTabs.get(hovered);
 
-            // Right-click always opens GUI
             if (button == 1) {
                 MachineTabHandler.onClick(info);
                 cir.setReturnValue(true);
@@ -85,14 +75,12 @@ public abstract class GridScreenMouseMixin {
             if (button == 0) {
                 MachineInteractType type = MachineInteractType.fromBlockKey(info.blockKey());
 
-                // GUI type: always open GUI
                 if (type == MachineInteractType.GUI) {
                     MachineTabHandler.onClick(info);
                     cir.setReturnValue(true);
                     return;
                 }
 
-                // Quick type: differentiate by cursor + state
                 boolean shift = Minecraft.getInstance().screen != null
                         && Minecraft.getInstance().screen.hasShiftDown();
                 Minecraft mc = Minecraft.getInstance();
@@ -107,7 +95,6 @@ public abstract class GridScreenMouseMixin {
                     MachineSlotType slot = shift ? MachineSlotType.FUEL : MachineSlotType.INPUT;
                     MachineTabHandler.onInsert(info, slot);
                 } else {
-                    // Fallback: open GUI
                     MachineTabHandler.onClick(info);
                 }
                 cir.setReturnValue(true);
@@ -149,10 +136,6 @@ public abstract class GridScreenMouseMixin {
         }
     }
 
-    /**
-     * Attempts to toggle item lock for the grid item under the mouse cursor.
-     * @return true if a lock toggle was performed and the click should be consumed.
-     */
     private boolean rsi$tryLockGridItem(double mouseX, double mouseY) {
         com.refinedmods.refinedstorage.screen.grid.GridScreen screen =
             (com.refinedmods.refinedstorage.screen.grid.GridScreen) (Object) this;
