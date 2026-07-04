@@ -6,6 +6,7 @@ import com.huanghuang.rsintegration.mods.forbidden.FaRitualWrapper;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.util.Diagnostics;
+import com.huanghuang.rsintegration.util.ModIds;
 import com.huanghuang.rsintegration.util.Reflect;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.resources.ResourceKey;
@@ -174,7 +175,7 @@ public final class RecipeIndex {
         try {
             if (faForgeBlockItem == null) {
                 net.minecraft.world.level.block.Block block = ForgeRegistries.BLOCKS.getValue(
-                        new ResourceLocation("forbidden_arcanus", "hephaestus_forge"));
+                        new ResourceLocation(ModIds.FORBIDDEN_ARCANUS, "hephaestus_forge"));
                 if (block == null) return ItemStack.EMPTY;
                 faForgeBlockItem = block.asItem();
             }
@@ -263,8 +264,8 @@ public final class RecipeIndex {
                         output = rsi$makeFaUpgradeOutput(to);
                         if (output.isEmpty()) continue;
                         FaRitualWrapper wrapper = new FaRitualWrapper(id, ritual, output, from, to);
-                        Entry entryObj = new Entry(wrapper, ModType.byId("forbidden_arcanus"),
-                                new ResourceLocation("forbidden_arcanus", "hephaestus_forge"));
+                        Entry entryObj = new Entry(wrapper, ModType.byId(ModIds.FORBIDDEN_ARCANUS),
+                                new ResourceLocation(ModIds.FORBIDDEN_ARCANUS, "hephaestus_forge"));
                         idx.computeIfAbsent(output.getItem(),
                                 k -> new ArrayList<>()).add(entryObj);
                         count++;
@@ -280,8 +281,8 @@ public final class RecipeIndex {
                     if (output.isEmpty()) continue;
 
                     FaRitualWrapper wrapper = new FaRitualWrapper(id, ritual, output);
-                    Entry entryObj = new Entry(wrapper, ModType.byId("forbidden_arcanus"),
-                            new ResourceLocation("forbidden_arcanus", "hephaestus_forge"));
+                    Entry entryObj = new Entry(wrapper, ModType.byId(ModIds.FORBIDDEN_ARCANUS),
+                            new ResourceLocation(ModIds.FORBIDDEN_ARCANUS, "hephaestus_forge"));
                     idx.computeIfAbsent(output.getItem(),
                             k -> new ArrayList<>()).add(entryObj);
                     count++;
@@ -359,14 +360,14 @@ public final class RecipeIndex {
                     // Skip identity entries (cost == output) — would create circular deps
                     if (ItemStack.isSameItem(output, cost)) continue;
 
-                    ResourceLocation rid = new ResourceLocation("farmingforblockheads", "market/" + uuid);
+                    ResourceLocation rid = new ResourceLocation(ModIds.FARMINGFORBLOCKHEADS, "market/" + uuid);
                     if (!seen.add(rid)) continue;
 
                     MarketRecipeWrapper wrapper =
                             new MarketRecipeWrapper(uuid, output, cost);
                     ModType type = ModType.FARMINGFORBLOCKHEADS_MARKET;
                     Entry indexEntry = new Entry(wrapper, type,
-                            new ResourceLocation("farmingforblockheads", "market"));
+                            new ResourceLocation(ModIds.FARMINGFORBLOCKHEADS, "market"));
                     idx.computeIfAbsent(output.getItem(), k -> new ArrayList<>()).add(indexEntry);
                     count++;
                 } catch (Exception e) {

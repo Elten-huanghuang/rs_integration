@@ -33,7 +33,6 @@ import java.util.List;
 
 public final class WRBatchDelegate extends AbstractBatchDelegate {
 
-    // ── Machine type enum ────────────────────────────────────────
     private enum MachineType {
         WISSEN_CRYSTALLIZER,
         ARCANE_ITERATOR,
@@ -42,7 +41,6 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         UNKNOWN
     }
 
-    // ── Shared class refs (loaded via Class.forName) ─────────────
     private static volatile Class<?> wissenCrystallizerBEClass;
     private static volatile Class<?> arcaneIteratorBEClass;
     private static volatile Class<?> arcaneWorkbenchBEClass;
@@ -105,7 +103,6 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         } catch (ClassNotFoundException ignored) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-WR] RunicPedestal class not found — mod variant may differ"); }
     }
 
-    // ── Instance state ───────────────────────────────────────────
     private ServerPlayer player;
     private ResourceKey<Level> myDim;
     private BlockPos myPos;
@@ -135,8 +132,6 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
     // Stall threshold kicks in at 5 seconds of no progress.
     private static final int MAX_WAIT_TICKS = 7200;
     private static final int STALL_THRESHOLD = 100; // 5 seconds
-
-    // ── IBatchDelegate impl ───────────────────────────────────────
 
     @Override
     public boolean validateAndInit(ServerPlayer player, ResourceLocation recipeId,
@@ -346,12 +341,10 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         return true;
     }
 
-    /** Check whether the crystallizer is actively processing a craft. */
     private boolean isCrystallizerCrafting() {
         return isMachineCrafting();
     }
 
-    /** Check whether the arcane workbench is actively processing a craft. */
     private boolean isWorkbenchCrafting() {
         return isMachineCrafting();
     }
@@ -570,8 +563,6 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         return ok;
     }
 
-    // ── Wissen Crystallizer ──────────────────────────────────────
-
     private boolean tryStartWissenCrystallizer(ServerPlayer player, List<Ingredient> ingredients) {
         int totalSlots = getContainerSize(be);
         if (totalSlots <= 0 || ingredients.size() > totalSlots) return false;
@@ -629,8 +620,6 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
 
         return true;
     }
-
-    // ── Arcane Iterator ──────────────────────────────────────────
 
     private boolean tryStartArcaneIterator(ServerPlayer player, List<Ingredient> ingredients) {
         List<?> pedestals;
@@ -702,8 +691,6 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         return true;
     }
 
-    // ── Arcane Workbench ─────────────────────────────────────────
-
     private boolean tryStartArcaneWorkbench(ServerPlayer player, List<Ingredient> ingredients) {
         ItemStackHandler itemHandler = getWorkbenchItemHandler(be);
         if (itemHandler == null) {
@@ -765,8 +752,6 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
 
         return true;
     }
-
-    // ── Crystal Ritual ───────────────────────────────────────────
 
     private boolean tryStartCrystalRitual(ServerPlayer player, List<Ingredient> ingredients) {
         Object ritual = extractRitual(recipe);
@@ -870,8 +855,6 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
 
         return true;
     }
-
-    // ── Chain support: pre-reserved materials ────────────────────
 
     @Override
     @Nullable
@@ -1131,8 +1114,6 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         return true;
     }
 
-    // ── Completion detection ─────────────────────────────────────
-
     @Override
     public boolean isCraftComplete(ServerLevel level) {
         if (!craftStarted) return false;
@@ -1234,7 +1215,6 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         }
     }
 
-    /** Check whether the Arcane Iterator is actively processing a craft. */
     private boolean isIteratorCraftRunning() {
         if (be == null) return false;
         try {
@@ -1265,7 +1245,6 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         return -1;
     }
 
-    /** Check whether the crystal block's ritual is still in progress. */
     private boolean isCrystalRitualRunning() {
         if (be == null) return false;
         try {
@@ -1532,8 +1511,6 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         return filledSlotIndices != null && filledSlotIndices.contains(idx);
     }
 
-    // ── Cleanup ──────────────────────────────────────────────────
-
     @Override
     public void onBatchFailed(ServerPlayer player, String reason) {
         // WR commits ledger before placement, so items are already
@@ -1569,7 +1546,6 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         return myPos;
     }
 
-    // ── Cleanup helpers ──────────────────────────────────────────
     //
     // WR commits the ledger BEFORE placing items (unlike Goety), so
     // every clear MUST recover the actual items back to RS/player.
@@ -1634,7 +1610,6 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         }
     }
 
-    /** Recover items from ArcaneWorkbench slots (handler version), then clear. */
     private void clearFilledSlotsForHandler(ItemStackHandler handler) {
         if (filledSlotIndices == null) return;
         for (int idx : filledSlotIndices) {
@@ -1646,7 +1621,6 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         }
     }
 
-    /** Recover items from Arcane Iterator / Crystal Ritual pedestals, then clear. */
     private void clearFilledPedestals() {
         if (filledPedestals == null) return;
         for (Object ped : filledPedestals) {
@@ -1673,8 +1647,6 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
             }
         }
     }
-
-    // ── Container helpers ────────────────────────────────────────
 
     @Nullable
     private static ItemStackHandler getWorkbenchItemHandler(Object be) {
@@ -1739,13 +1711,9 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         WRContainerHelper.setContainerItem(be, slot, stack);
     }
 
-    // ── Client sync ──────────────────────────────────────────────
-
     private static void syncBlockEntity(Object be) {
         WRContainerHelper.syncBlockEntity(be);
     }
-
-    // ── Wissen energy check ───────────────────────────────────────
 
     /**
      * Check whether the machine has enough Wissen energy for the recipe.
@@ -1821,8 +1789,6 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         return -1; // can't determine — fail safe
     }
 
-    // ── Ritual extraction ────────────────────────────────────────
-
     @Nullable
     private static Object extractRitual(Object recipe) {
         Class<?> clazz = recipe.getClass();
@@ -1839,8 +1805,6 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         }
         return null;
     }
-
-    // ── Plan warnings ─────────────────────────────────────────────
 
     public static List<String> getPlanWarnings(ServerPlayer player, Recipe<?> recipe,
                                                @Nullable ResourceLocation dim,

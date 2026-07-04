@@ -725,7 +725,7 @@ public final class AltarBindingRegistry {
         }
         // Aetherworks names its recipe category "aetherium_anvil" but the
         // block description ID uses "forge_anvil".
-        if (ModType.byId("aetherworks_anvil") == type && "aetherium_anvil".equals(hint)) {
+        if (ModType.byId(ModIds.ID_AETHERWORKS_ANVIL) == type && "aetherium_anvil".equals(hint)) {
             return "forge_anvil";
         }
         // TACZ gun smith table handles all recipe types (gun/ammo/attachments).

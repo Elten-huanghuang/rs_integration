@@ -20,11 +20,6 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.List;
 
-/**
- * Reflection-based helper for Aetherworks access.
- * All external mod references go through Class.forName — safe when mods are absent.
- * Each subsystem initializes independently so one failure doesn't cascade.
- */
 @OnlyIn(Dist.CLIENT)
 final class AetherworksHelper {
 
@@ -32,28 +27,23 @@ final class AetherworksHelper {
 
     private static final boolean LOADED;
 
-    // --- Type checks ---
     @Nullable private static Class<?> anvilClass;
     @Nullable private static Class<?> forgeClass;
 
-    // --- Anvil fields (essential for HUD) ---
     @Nullable private static Field f_anvil_progress;
     @Nullable private static Field f_anvil_hitTimeout;
     @Nullable private static Field f_anvil_mistakes;
     @Nullable private static Field f_anvil_inventory;
 
-    // --- Forge capability fields ---
     @Nullable private static Field f_forge_heatCap;
     @Nullable private static Field f_forge_emberCap;
 
-    // --- Capability methods ---
     // IHeatCapability is from Aetherworks: net.sirplop.aetherworks.api.capabilities.IHeatCapability
     @Nullable private static Method m_heat_getHeat;
     // IEmberCapability is from Embers: com.rekindled.embers.api.power.IEmberCapability
     @Nullable private static Method m_ember_getEmber;
     @Nullable private static Method m_ember_getCapacity;
 
-    // --- Recipe access ---
     @Nullable private static Object recipeType;
     @Nullable private static Method m_recipe_getDisplayInput;
     @Nullable private static Method m_recipe_getNumberOfHits;
@@ -61,7 +51,6 @@ final class AetherworksHelper {
     @Nullable private static Method m_recipe_getTemperatureMax;
     @Nullable private static Method m_recipe_getEmberPerHit;
 
-    // --- Hammer ---
     @Nullable private static Item hammerItem;
 
     static {
@@ -130,11 +119,7 @@ final class AetherworksHelper {
 
     private AetherworksHelper() {}
 
-    // --- Mod presence ---
-
     static boolean isLoaded() { return LOADED; }
-
-    // --- Type checks ---
 
     static boolean isAnvil(@Nullable BlockEntity be) {
         return LOADED && anvilClass != null && anvilClass.isInstance(be);
@@ -144,13 +129,9 @@ final class AetherworksHelper {
         return LOADED && forgeClass != null && forgeClass.isInstance(be);
     }
 
-    // --- Hammer ---
-
     static boolean isHoldingHammer(Player player) {
         return hammerItem != null && player.getMainHandItem().is(hammerItem);
     }
-
-    // --- Anvil field access ---
 
     static int getAnvilProgress(BlockEntity anvil) {
         if (f_anvil_progress == null) return 0;
@@ -174,8 +155,6 @@ final class AetherworksHelper {
             return handler.getStackInSlot(slot);
         } catch (Exception e) { return ItemStack.EMPTY; }
     }
-
-    // --- Forge field access ---
 
     static double getForgeHeat(BlockEntity forge) {
         if (f_forge_heatCap == null || m_heat_getHeat == null) return 0;
@@ -204,8 +183,6 @@ final class AetherworksHelper {
         } catch (Exception e) { return 0; }
     }
 
-    // --- Recipe lookup ---
-
     @Nullable
     static Object findRecipe(Level level, ItemStack item) {
         if (recipeType == null || item.isEmpty()) return null;
@@ -220,8 +197,6 @@ final class AetherworksHelper {
         } catch (Exception ignored) {}
         return null;
     }
-
-    // --- Recipe accessors ---
 
     static int getRecipeHits(Object recipe) {
         if (m_recipe_getNumberOfHits == null) return 0;
@@ -242,8 +217,6 @@ final class AetherworksHelper {
         if (m_recipe_getEmberPerHit == null) return 0;
         try { return (int) m_recipe_getEmberPerHit.invoke(recipe); } catch (Exception e) { return 0; }
     }
-
-    // --- Scanning ---
 
     @Nullable
     static BlockEntity findForge(Level level, BlockPos anvilPos) {

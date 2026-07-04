@@ -7,6 +7,7 @@ import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.RecipeIndex;
+import com.huanghuang.rsintegration.util.ModIds;
 import com.huanghuang.rsintegration.util.Reflect;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
@@ -48,7 +49,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
     private static volatile Object powerCapToken;
 
     private static void ensureClasses() {
-        if (!com.huanghuang.rsintegration.util.ModClassLoader.ensureClasses("touhou_little_maid",
+        if (!com.huanghuang.rsintegration.util.ModClassLoader.ensureClasses(ModIds.TOUHOU_LITTLE_MAID,
                 "com.github.tartaricacid.touhoulittlemaid.tileentity.TileEntityAltar",
                 "com.github.tartaricacid.touhoulittlemaid.block.BlockAltar",
                 "com.github.tartaricacid.touhoulittlemaid.crafting.AltarRecipe",
@@ -713,7 +714,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
 
     /** Item that can be right-clicked to absorb into the player's P-Power capability. */
     private static final ResourceLocation PP_ID =
-            new ResourceLocation("touhou_little_maid", "power_point");
+            new ResourceLocation(ModIds.TOUHOU_LITTLE_MAID, "power_point");
 
     /**
      * Returns plan-time warnings for TLM altar recipes.

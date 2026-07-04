@@ -9,7 +9,7 @@ import org.apache.maven.artifact.versioning.ComparableVersion;
  *
  * <p>When a mod API changes between versions (e.g. Goety field renames,
  * FA ritual record additions), version-specific delegate classes can be
- * dispatched via {@link com.huanghuang.rsintegration.registry.ModVersionDelegateRegistry}.</p>
+ * dispatched via {@link com.huanghuang.rsintegration.ModVersionDelegateRegistry}.</p>
  */
 public final class VersionRange {
 

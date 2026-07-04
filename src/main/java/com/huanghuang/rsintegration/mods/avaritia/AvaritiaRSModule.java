@@ -2,6 +2,8 @@ package com.huanghuang.rsintegration.mods.avaritia;
 
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.crafting.batch.GenericBatchDelegate;
+import com.huanghuang.rsintegration.util.ModIds;
 import com.huanghuang.rsintegration.mods.IModIntegration;
 import com.huanghuang.rsintegration.network.BindingEventHandler;
 import com.huanghuang.rsintegration.recipe.AvaritiaRecipeHandler;
@@ -26,7 +28,7 @@ public final class AvaritiaRSModule implements IModIntegration {
     @Override
     public void registerModType() {
         // Crafting tables — real IItemHandler insertion + assemble
-        ModType.register("avaritia_crafting",
+        ModType.register(ModIds.ID_AVARITIA_CRAFTING,
                 new String[]{
                         "committee.nova.mods.avaritia.common.crafting.recipe.ShapedTableCraftingRecipe",
                         "committee.nova.mods.avaritia.common.crafting.recipe.ShapelessTableCraftingRecipe"
@@ -34,42 +36,42 @@ public final class AvaritiaRSModule implements IModIntegration {
                 new String[]{"compressed_crafting_table", "double_compressed_crafting_table",
                         "end_crafting_table", "nether_crafting_table",
                         "sculk_crafting_table", "extreme_crafting_table"},
-                new String[]{"avaritia_crafting"},
+                new String[]{ModIds.ID_AVARITIA_CRAFTING},
                 CraftingTableBatchDelegate::new);
 
         // Compressors — real IItemHandler insertion + tick polling
-        ModType.register("avaritia_compressor",
+        ModType.register(ModIds.ID_AVARITIA_COMPRESSOR,
                 new String[]{
                         "committee.nova.mods.avaritia.common.crafting.recipe.CompressorRecipe"
                 },
                 new String[]{"neutron_compressor", "dense_neutron_compressor",
                         "denser_neutron_compressor", "densest_neutron_compressor"},
-                new String[]{"avaritia_compressor"},
+                new String[]{ModIds.ID_AVARITIA_COMPRESSOR},
                 CompressorBatchDelegate::new);
 
         // Smithing table — virtual (no BlockEntity)
-        ModType.register("avaritia_smithing",
+        ModType.register(ModIds.ID_AVARITIA_SMITHING,
                 new String[]{
                         "committee.nova.mods.avaritia.common.crafting.recipe.ExtremeSmithingRecipe"
                 },
                 new String[]{"extreme_smithing_table"},
-                new String[]{"avaritia_smithing"},
-                com.huanghuang.rsintegration.crafting.batch.GenericBatchDelegate::new);
+                new String[]{ModIds.ID_AVARITIA_SMITHING},
+                GenericBatchDelegate::new);
 
         // GUI-only machines — no recipes, no delegate
         ModType.register("avaritia_gui",
                 new String[0], new String[0], new String[0], null);
-        ModType.configureJei("avaritia_crafting",
+        ModType.configureJei(ModIds.ID_AVARITIA_CRAFTING,
                 null,
-                new String[][]{{"committee.nova.mods.avaritia.common.crafting.recipe.", "avaritia_crafting"}},
+                new String[][]{{"committee.nova.mods.avaritia.common.crafting.recipe.", ModIds.ID_AVARITIA_CRAFTING}},
                 null);
-        ModType.configureJei("avaritia_compressor",
+        ModType.configureJei(ModIds.ID_AVARITIA_COMPRESSOR,
                 null,
-                new String[][]{{"committee.nova.mods.avaritia.common.crafting.recipe.CompressorRecipe", "avaritia_compressor"}},
+                new String[][]{{"committee.nova.mods.avaritia.common.crafting.recipe.CompressorRecipe", ModIds.ID_AVARITIA_COMPRESSOR}},
                 null);
-        ModType.configureJei("avaritia_smithing",
+        ModType.configureJei(ModIds.ID_AVARITIA_SMITHING,
                 null,
-                new String[][]{{"committee.nova.mods.avaritia.common.crafting.recipe.ExtremeSmithingRecipe", "avaritia_smithing"}},
+                new String[][]{{"committee.nova.mods.avaritia.common.crafting.recipe.ExtremeSmithingRecipe", ModIds.ID_AVARITIA_SMITHING}},
                 null);
     }
 
@@ -77,28 +79,28 @@ public final class AvaritiaRSModule implements IModIntegration {
     public void registerBindingTargets() {
         // ── Crafting tables ──
         BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
-                "avaritia", ModType.byId("avaritia_crafting"),
+                "avaritia", ModType.byId(ModIds.ID_AVARITIA_CRAFTING),
                 RSIntegrationConfig.ENABLE_AVARITIA,
                 List.of(
                         "committee.nova.mods.avaritia.common.block.craft.CompressedCraftTableBlock",
                         "committee.nova.mods.avaritia.common.block.craft.DoubleCompressedCraftTableBlock",
                         "committee.nova.mods.avaritia.common.block.craft.TierCraftTableBlock"
                 ),
-                "avaritia_crafting"));
+                ModIds.ID_AVARITIA_CRAFTING));
 
         // ── Neutron Compressors ──
         BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
-                "avaritia", ModType.byId("avaritia_compressor"),
+                "avaritia", ModType.byId(ModIds.ID_AVARITIA_COMPRESSOR),
                 RSIntegrationConfig.ENABLE_AVARITIA,
                 List.of("committee.nova.mods.avaritia.common.block.compressor.NeutronCompressorBlock"),
-                "avaritia_compressor"));
+                ModIds.ID_AVARITIA_COMPRESSOR));
 
         // ── Extreme Smithing Table ──
         BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
-                "avaritia", ModType.byId("avaritia_smithing"),
+                "avaritia", ModType.byId(ModIds.ID_AVARITIA_SMITHING),
                 RSIntegrationConfig.ENABLE_AVARITIA,
                 List.of("committee.nova.mods.avaritia.common.block.extreme.ExtremeSmithingTableBlock"),
-                "avaritia_smithing"));
+                ModIds.ID_AVARITIA_SMITHING));
 
         // ── Neutron Collector (no GUI, passive output only) ──
         BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(

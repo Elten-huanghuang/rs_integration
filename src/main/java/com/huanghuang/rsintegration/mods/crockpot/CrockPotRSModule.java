@@ -7,6 +7,7 @@ import com.huanghuang.rsintegration.network.BindingEventHandler;
 import com.huanghuang.rsintegration.recipe.CrockPotRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import net.minecraftforge.common.ForgeConfigSpec;
+import net.minecraftforge.fml.DistExecutor;
 
 import java.util.List;
 import java.util.function.Supplier;
@@ -62,7 +63,7 @@ public final class CrockPotRSModule implements IModIntegration {
     public void initCommon() {}
 
     @Override
-    public Supplier<net.minecraftforge.fml.DistExecutor.SafeRunnable> clientInitSupplier() {
+    public Supplier<DistExecutor.SafeRunnable> clientInitSupplier() {
         return () -> () -> {};
     }
 }

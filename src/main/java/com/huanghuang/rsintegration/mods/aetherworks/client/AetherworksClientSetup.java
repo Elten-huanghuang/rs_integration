@@ -9,6 +9,7 @@ import net.minecraftforge.client.gui.overlay.VanillaGuiOverlay;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
+import com.huanghuang.rsintegration.util.ModIds;
 import net.minecraftforge.fml.ModList;
 
 @OnlyIn(Dist.CLIENT)
@@ -21,7 +22,7 @@ public final class AetherworksClientSetup {
     public static void initClient() {
         MinecraftForge.EVENT_BUS.register(AetherworksClientSetup.class);
 
-        if (ModList.get().isLoaded("aetherworks")) {
+        if (ModList.get().isLoaded(ModIds.AETHERWORKS)) {
             MinecraftForge.EVENT_BUS.register(AutoHammerHandler.class);
             MinecraftForge.EVENT_BUS.register(LeverInterceptHandler.class);
         }
@@ -33,7 +34,7 @@ public final class AetherworksClientSetup {
      * ForgeEventBus registration within initClient() does not also pick it up.
      */
     public static void onRegisterOverlays(RegisterGuiOverlaysEvent event) {
-        if (ModList.get().isLoaded("aetherworks")) {
+        if (ModList.get().isLoaded(ModIds.AETHERWORKS)) {
             event.registerAbove(VanillaGuiOverlay.CROSSHAIR.id(), "anvil_hud", AnvilHUDOverlay.INSTANCE);
         }
     }
@@ -53,7 +54,7 @@ public final class AetherworksClientSetup {
     @SubscribeEvent
     public static void onClientTick(TickEvent.ClientTickEvent event) {
         if (event.phase != TickEvent.Phase.START) return;
-        if (!ModList.get().isLoaded("aetherworks")) return;
+        if (!ModList.get().isLoaded(ModIds.AETHERWORKS)) return;
 
         LeverBinder.onTick();
 

@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.transfer;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.network.RSIntegration;
+import com.huanghuang.rsintegration.util.ModIds;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.network.chat.Component;
@@ -185,10 +186,10 @@ final class ContainerTransferLogic {
 
     @Nullable
     private static IItemHandler findBackpack(ServerPlayer player) {
-        if (!ModList.get().isLoaded("sophisticatedbackpacks")) return null;
+        if (!ModList.get().isLoaded(ModIds.SOPHISTICATED_BACKPACKS)) return null;
 
         // Priority 1: Curios slots (reflective — Curios is optional)
-        if (ModList.get().isLoaded("curios")) {
+        if (ModList.get().isLoaded(ModIds.CURIOS)) {
             IItemHandler bh = findBackpackInCurios(player);
             if (bh != null) return bh;
         }
@@ -224,7 +225,7 @@ final class ContainerTransferLogic {
      */
     @Nullable
     private static IItemHandler findBackpackInCurios(ServerPlayer player) {
-        if (!ModList.get().isLoaded("curios")) return null;
+        if (!ModList.get().isLoaded(ModIds.CURIOS)) return null;
         try {
             Class<?> curiosApiClass = Class.forName("top.theillusivec4.curios.api.CuriosApi");
             // getCuriosInventory takes LivingEntity (not Player — exact match required by reflection)
@@ -269,7 +270,7 @@ final class ContainerTransferLogic {
 
     @Nullable
     private static IStorageWrapper findBackpackWrapper(ServerPlayer player) {
-        if (!ModList.get().isLoaded("sophisticatedbackpacks")) return null;
+        if (!ModList.get().isLoaded(ModIds.SOPHISTICATED_BACKPACKS)) return null;
         IStorageWrapper w = findBackpackWrapperInCurios(player);
         if (w != null) return w;
         for (ItemStack armor : player.getInventory().armor) {
@@ -295,7 +296,7 @@ final class ContainerTransferLogic {
 
     @Nullable
     private static IStorageWrapper findBackpackWrapperInCurios(ServerPlayer player) {
-        if (!ModList.get().isLoaded("curios")) return null;
+        if (!ModList.get().isLoaded(ModIds.CURIOS)) return null;
         try {
             Class<?> curiosApiClass = Class.forName("top.theillusivec4.curios.api.CuriosApi");
             Object result = curiosApiClass.getMethod("getCuriosInventory",
@@ -335,7 +336,7 @@ final class ContainerTransferLogic {
     // meaning the player is looking at the inside of a backpack.
     private static boolean isBackpackMenu(AbstractContainerMenu menu) {
         String name = menu.getClass().getName();
-        return name.contains("sophisticatedbackpacks") || name.contains("sophisticated");
+        return name.contains(ModIds.SOPHISTICATED_BACKPACKS) || name.contains("sophisticated");
     }
 
     // Skip result/output slots so containers where input and output

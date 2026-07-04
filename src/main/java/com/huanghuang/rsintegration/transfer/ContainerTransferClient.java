@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.transfer;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.network.RSJeiPlugin;
 import com.mojang.blaze3d.platform.InputConstants;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
@@ -63,7 +64,7 @@ public final class ContainerTransferClient {
                 "key.categories.rsi"
         );
 
-        com.huanghuang.rsintegration.RSIntegrationMod.MOD_BUS.addListener(
+        RSIntegrationMod.MOD_BUS.addListener(
                 (RegisterKeyMappingsEvent event) -> {
             event.register(KEY_STORE_ALL);
             event.register(KEY_TOGGLE_MODE);
@@ -189,7 +190,7 @@ public final class ContainerTransferClient {
     private static boolean isRecipeViewerFocused() {
         // --- JEI ---
         try {
-            var runtime = com.huanghuang.rsintegration.network.RSJeiPlugin.getRuntime();
+            var runtime = RSJeiPlugin.getRuntime();
             if (runtime != null) {
                 var overlay = runtime.getIngredientListOverlay();
                 if (overlay != null) {

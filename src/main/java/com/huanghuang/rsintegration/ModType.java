@@ -2,7 +2,9 @@ package com.huanghuang.rsintegration;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.crafting.batch.GenericBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
+import com.huanghuang.rsintegration.mods.forbidden.FaRitualWrapper;
 import com.huanghuang.rsintegration.util.ModIds;
 import net.minecraft.world.item.crafting.Recipe;
 
@@ -23,8 +25,6 @@ public final class ModType {
 
     private static final Map<String, ModType> BY_ID = new LinkedHashMap<>();
 
-    // ── instance fields ───────────────────────────────────────────
-
     private final String id;
     private final String[] recipePrefixes;
     private final String[] blockKeyKeywords;
@@ -39,7 +39,6 @@ public final class ModType {
     @Nullable private String[][] jeiRecipePrefixes;
     @Nullable private String jeiTooltipKey;
 
-    // ── built-in constants (registered in static {}) ──────────────
 
     public static final ModType GENERIC;
     public static final ModType CUSTOM_GUI;
@@ -48,13 +47,13 @@ public final class ModType {
     static {
         GENERIC = register("generic",
                 new String[0], new String[0], new String[0],
-                com.huanghuang.rsintegration.crafting.batch.GenericBatchDelegate::new);
+                GenericBatchDelegate::new);
 
         CUSTOM_GUI = register("custom_gui",
                 new String[0],
                 new String[0],
                 new String[0],
-                com.huanghuang.rsintegration.crafting.batch.GenericBatchDelegate::new);
+                GenericBatchDelegate::new);
 
         FARMINGFORBLOCKHEADS_MARKET = register("farmingforblockheads",
                 new String[]{"com.huanghuang.rsintegration.crafting.MarketRecipeWrapper"},
@@ -67,8 +66,6 @@ public final class ModType {
                 "gui.rs_integration.jei.market_craft");
     }
 
-    // ── constructors ──────────────────────────────────────────────
-
     private ModType(String id, String[] recipePrefixes, String[] blockKeyKeywords,
                     String[] blockKeyPrefixes, Supplier<IBatchDelegate> delegateFactory,
                     @Nullable Supplier<IBatchDelegate> inferDelegateFactory) {
@@ -79,8 +76,6 @@ public final class ModType {
         this.delegateFactory = delegateFactory;
         this.inferDelegateFactory = inferDelegateFactory;
     }
-
-    // ── public API ────────────────────────────────────────────────
 
     public String id() { return id; }
 
@@ -95,8 +90,6 @@ public final class ModType {
         if (inferDelegateFactory != null) return inferDelegateFactory.get();
         return createDelegate();
     }
-
-    // ── registry ──────────────────────────────────────────────────
 
     /**
      * Register a new mod type. Call once per mod during mod construction.
@@ -211,8 +204,6 @@ public final class ModType {
         return best;
     }
 
-    // ── classification ────────────────────────────────────────────
-
     /**
      * Classify a recipe using longest-prefix matching across all registered
      * mod types. Longer prefixes take priority (e.g. SpiritFocusingRecipe
@@ -221,7 +212,7 @@ public final class ModType {
      */
     @Nullable
     public static ModType classifyRecipe(Recipe<?> recipe) {
-        if (recipe instanceof com.huanghuang.rsintegration.mods.forbidden.FaRitualWrapper) {
+        if (recipe instanceof FaRitualWrapper) {
             return byId(ModIds.FORBIDDEN_ARCANUS);
         }
         String cn = recipe.getClass().getName();
@@ -311,8 +302,6 @@ public final class ModType {
         }
         return false;
     }
-
-    // ── helpers ───────────────────────────────────────────────────
 
     @Override
     public String toString() { return id; }

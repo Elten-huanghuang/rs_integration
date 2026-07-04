@@ -397,6 +397,7 @@
   "gui.rs_integration.jei.aether_altar_craft": "通过天境祭坛合成",
   "gui.rs_integration.jei.crockpot_cook": "通过烹饪锅远程烹饪",
   "gui.rs_integration.jei.immortalers_cooler_craft": "通过魔凝机远程合成",
+  "rsi.batch.mod.crabbersdelight": "蟹笼诱捕",
   "rsi.batch.mod.crockpot": "烹饪锅",
   "rsi.aether.incubation_warning": "§6孵化配方产出的是实体而非物品，RS 无法回收结果",
   "rsi.aether.fuel_warning": "§7天境机器（冷冻器/祭坛/孵化器）使用专用燃料而非普通熔炉燃料，请在 JEI 中确认有效燃料",
@@ -410,5 +411,8 @@
   "gui.rs_integration.jei.avaritia_compressor": "通过中子压缩机制作",
   "gui.rs_integration.jei.avaritia_smithing": "通过终极锻造台制作",
   "rsi.batch.mod.tacz": "枪械工作台",
-  "gui.rs_integration.jei.tacz_craft": "通过枪械工作台制作"
+  "gui.rs_integration.jei.tacz_craft": "通过枪械工作台制作",
+
+  "rsi.crabtrap.error.not_crab_trap": "§c此位置不是蟹笼",
+  "rsi.crabtrap.error.bait_insert_failed": "§c无法将诱饵放入蟹笼"
 }

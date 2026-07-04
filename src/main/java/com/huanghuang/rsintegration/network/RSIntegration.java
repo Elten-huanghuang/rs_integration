@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.network;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.util.ChunkUtils;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.network.grid.INetworkAwareGrid;
 import com.refinedmods.refinedstorage.api.network.node.INetworkNode;
@@ -38,7 +39,7 @@ public final class RSIntegration {
         net = resolveFromContainerTerminal(player);
         if (net != null) { logResolved("terminal", net); return net; }
 
-        net = com.huanghuang.rsintegration.network.AltarBindingRegistry.resolveNetworkFromAnyBinding(player);
+        net = AltarBindingRegistry.resolveNetworkFromAnyBinding(player);
         if (net != null) { logResolved("binding", net); return net; }
 
         net = resolveFromNearbyNode(player);
@@ -141,7 +142,7 @@ public final class RSIntegration {
                 RSIntegrationMod.LOGGER.debug("[RSI] resolveNetwork: null level for dim {}", dimension.location());
                 return null;
             }
-            com.huanghuang.rsintegration.util.ChunkUtils.loadChunk(level, controllerPos);
+            ChunkUtils.loadChunk(level, controllerPos);
             BlockEntity be = level.getBlockEntity(controllerPos);
             if (be == null) {
                 RSIntegrationMod.LOGGER.debug("[RSI] resolveNetwork: no BlockEntity at pos={} dim={}",

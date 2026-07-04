@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.recipe;
 
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.util.ModIds;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
@@ -14,7 +15,7 @@ import java.util.List;
 public final class AetherworksRecipeHandler implements ModRecipeHandler {
 
     @Override
-    public ModType modType() { return ModType.byId("aetherworks_anvil"); }
+    public ModType modType() { return ModType.byId(ModIds.ID_AETHERWORKS_ANVIL); }
 
     @Override
     public boolean canHandle(Recipe<?> recipe) {

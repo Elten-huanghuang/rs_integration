@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.recipe;
 
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.util.ModIds;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.world.item.ItemStack;
@@ -18,7 +19,7 @@ public final class AvaritiaRecipeHandler implements ModRecipeHandler {
     private static final String RECIPE_PKG = "committee.nova.mods.avaritia.common.crafting.recipe.";
 
     @Override
-    public ModType modType() { return ModType.byId("avaritia_crafting"); }
+    public ModType modType() { return ModType.byId(ModIds.ID_AVARITIA_CRAFTING); }
 
     @Override
     public boolean canHandle(Recipe<?> recipe) {

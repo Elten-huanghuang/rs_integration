@@ -76,6 +76,7 @@ extends AbstractBatchDelegate {
     private ItemStack successResult = ItemStack.EMPTY;
     private boolean succeeded;
     private List<IngredientSpec> firstAttemptSpecs;
+    private int[] aspectEquivClasses;
 
     private static void ensureClasses() {
         if (!ModClassLoader.ensureClasses("embers", (String[])new String[]{"com.rekindled.embers.blockentity.AlchemyTabletBlockEntity", "com.rekindled.embers.blockentity.AlchemyPedestalTopBlockEntity", "com.rekindled.embers.blockentity.AlchemyPedestalBlockEntity", "com.rekindled.embers.recipe.AlchemyRecipe", "com.rekindled.embers.api.tile.IBin"})) {
@@ -184,6 +185,7 @@ extends AbstractBatchDelegate {
         }
         this.aspectsSize = this.aspects.size();
         this.inputsSize = this.inputs.size();
+        this.aspectEquivClasses = computeAspectEquivClasses(this.aspects);
         this.pedestals = EreAlchemyBatchDelegate.scanPedestals((Level)lvl, pos);
         if (this.pedestals.size() < this.inputsSize) {
             RSIntegrationMod.LOGGER.warn("[RSI-Embers-Infer] Need {} pedestals, found {}", (Object)this.inputsSize, (Object)this.pedestals.size());
@@ -552,7 +554,7 @@ extends AbstractBatchDelegate {
         for (int[] c : this.candidates) {
             HashMap<Long, Integer> partitions = new HashMap<Long, Integer>();
             for (int[] r : this.candidates) {
-                MatchStats s = EreAlchemyInferDelegate.matchStats(c, r);
+                MatchStats s = matchStats(c, r);
                 long key = (long)s.correct << 32 | (long)s.valueOnly & 0xFFFFFFFFL;
                 partitions.merge(key, 1, Integer::sum);
             }
@@ -572,34 +574,63 @@ extends AbstractBatchDelegate {
         return bestCandidate;
     }
 
-    private static MatchStats matchStats(int[] guess, int[] target) {
-        int i;
+    private MatchStats matchStats(int[] guess, int[] target) {
         int correct = 0;
         int valueOnly = 0;
         boolean[] gu = new boolean[guess.length];
         boolean[] tu = new boolean[target.length];
-        for (i = 0; i < guess.length; ++i) {
-            if (guess[i] != target[i]) continue;
-            ++correct;
-            tu[i] = true;
-            gu[i] = true;
+        for (int i = 0; i < guess.length; i++) {
+            if (aspectEquivClasses[guess[i]] == aspectEquivClasses[target[i]]) {
+                correct++;
+                tu[i] = true;
+                gu[i] = true;
+            }
         }
-        block1: for (i = 0; i < guess.length; ++i) {
+        outer: for (int i = 0; i < guess.length; i++) {
             if (gu[i]) continue;
-            for (int j = 0; j < target.length; ++j) {
-                if (tu[j] || guess[i] != target[j]) continue;
-                ++valueOnly;
-                tu[j] = true;
-                continue block1;
+            for (int j = 0; j < target.length; j++) {
+                if (tu[j]) continue;
+                if (aspectEquivClasses[guess[i]] == aspectEquivClasses[target[j]]) {
+                    valueOnly++;
+                    tu[j] = true;
+                    continue outer;
+                }
             }
         }
         return new MatchStats(correct, valueOnly);
     }
 
+    private static int[] computeAspectEquivClasses(List<Ingredient> aspects) {
+        int n = aspects.size();
+        int[] equiv = new int[n];
+        int nextClass = 0;
+        for (int i = 0; i < n; i++) {
+            boolean found = false;
+            for (int j = 0; j < i; j++) {
+                if (areIngredientsCompatible(aspects.get(i), aspects.get(j))) {
+                    equiv[i] = equiv[j];
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                equiv[i] = nextClass++;
+            }
+        }
+        return equiv;
+    }
+
+    private static boolean areIngredientsCompatible(Ingredient a, Ingredient b) {
+        ItemStack[] itemsA = a.getItems();
+        ItemStack[] itemsB = b.getItems();
+        if (itemsA.length == 0 || itemsB.length == 0) return false;
+        return ItemStack.isSameItem(itemsA[0], itemsB[0]);
+    }
+
     private void filterCandidates(int blackPins, int whitePins) {
         ArrayList<int[]> filtered = new ArrayList<int[]>();
         for (int[] c : this.candidates) {
-            MatchStats s = EreAlchemyInferDelegate.matchStats(this.currentGuess, c);
+            MatchStats s = matchStats(this.currentGuess, c);
             if (s.correct != blackPins || s.valueOnly != whitePins) continue;
             filtered.add(c);
         }

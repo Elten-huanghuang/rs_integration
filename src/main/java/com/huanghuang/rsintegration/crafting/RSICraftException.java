@@ -1,4 +1,4 @@
-package com.huanghuang.rsintegration;
+package com.huanghuang.rsintegration.crafting;
 
 public final class RSICraftException extends RuntimeException {
 
@@ -17,8 +17,6 @@ public final class RSICraftException extends RuntimeException {
     public String code() { return code; }
 
     public String translationKey() { return "rsi.craft.error." + code; }
-
-    // ── Common error codes ────────────────────────────────────────
 
     public static RSICraftException recipeUnresolvable(String recipeId) {
         return new RSICraftException("recipe_unresolvable",

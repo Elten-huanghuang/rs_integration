@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.mods.embers;
 
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.util.ModIds;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.mods.IModIntegration;
 import com.huanghuang.rsintegration.network.BindingEventHandler;
@@ -29,13 +30,13 @@ public final class EreAlchemyRSModule implements IModIntegration {
 
     @Override
     public void registerModType() {
-        ModType.register("embers_alchemy",
+        ModType.register(ModIds.ID_EMBERS_ALCHEMY,
                 new String[]{"com.rekindled.embers."},
                 new String[]{"embers"},
                 new String[0],
                 ModType.delegateSupplier("com.huanghuang.rsintegration.mods.embers.EreAlchemyBatchDelegate"),
                 ModType.delegateSupplier("com.huanghuang.rsintegration.mods.embers.EreAlchemyInferDelegate"));
-        ModType.configureJei("embers_alchemy",
+        ModType.configureJei(ModIds.ID_EMBERS_ALCHEMY,
                 new String[][]{{"embers:alchemy", "embers"}},
                 new String[][]{{"com.rekindled.embers.", "embers"}},
                 null);
@@ -45,10 +46,10 @@ public final class EreAlchemyRSModule implements IModIntegration {
     public void registerBindingTargets() {
         // Alchemy Tablet is in-world interaction (items placed on pedestals), no container GUI.
         BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
-                "embers", ModType.byId("embers_alchemy"),
+                "embers", ModType.byId(ModIds.ID_EMBERS_ALCHEMY),
                 RSIntegrationConfig.ENABLE_EMBERS_ALCHEMY, List.of(
                 "com.rekindled.embers.block.AlchemyTabletBlock"
-        ), "embers_alchemy", false));
+        ), ModIds.ID_EMBERS_ALCHEMY, false));
     }
 
     @Override

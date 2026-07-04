@@ -1,10 +1,11 @@
 package com.huanghuang.rsintegration.crafting;
 
-import com.huanghuang.rsintegration.RSICraftException;
+import com.huanghuang.rsintegration.crafting.RSICraftException;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.network.AltarBindingRegistry;
 import com.huanghuang.rsintegration.network.RSIntegration;
 import com.huanghuang.rsintegration.util.Diagnostics;
+import com.huanghuang.rsintegration.util.ModIds;
 import com.huanghuang.rsintegration.util.PlayerUtils;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;
@@ -137,14 +138,7 @@ public final class ExtractionLedger {
         return template;
     }
 
-    /**
-     * Atomically commit all reservations in three phases:
-     * <ol>
-     *   <li>Pre-check — verify every entry can still be satisfied</li>
-     *   <li>Batch extract — extract all entries; if any fail, roll back everything</li>
-     *   <li>Confirm — mark committed</li>
-     * </ol>
-     */
+    // Three-phase atomic commit: pre-check, batch extract, confirm.
     public boolean commit(@Nullable INetwork network, ServerPlayer player) {
         if (state == State.COMMITTED) return true;
         // Allow IDLE only for no-op commit (no entries)
@@ -643,7 +637,7 @@ public final class ExtractionLedger {
     @Nullable
     private static IItemHandler getBackpackInventory(ItemStack stack) {
         if (stack.isEmpty()) return null;
-        if (!ModList.get().isLoaded("sophisticatedbackpacks")) return null;
+        if (!ModList.get().isLoaded(ModIds.SOPHISTICATED_BACKPACKS)) return null;
         try {
             var opt = stack.getCapability(
                     net.p3pp3rf1y.sophisticatedbackpacks.api.CapabilityBackpackWrapper.getCapabilityInstance())
@@ -660,7 +654,7 @@ public final class ExtractionLedger {
     /** Collect internal inventories of all backpacks found on the player (including curio slots). */
     static List<IItemHandler> findAllBackpackInventories(ServerPlayer player) {
         List<IItemHandler> result = new ArrayList<>();
-        if (!ModList.get().isLoaded("sophisticatedbackpacks")) return result;
+        if (!ModList.get().isLoaded(ModIds.SOPHISTICATED_BACKPACKS)) return result;
 
         // Main inventory
         for (ItemStack stack : player.getInventory().items) {
@@ -683,7 +677,7 @@ public final class ExtractionLedger {
 
     @SuppressWarnings("unchecked")
     private static void scanCurioSlotsForBackpacks(ServerPlayer player, List<IItemHandler> sink) {
-        if (!ModList.get().isLoaded("curios")) return;
+        if (!ModList.get().isLoaded(ModIds.CURIOS)) return;
         try {
             Class<?> curiosApiClass = Class.forName("top.theillusivec4.curios.api.CuriosApi");
             Object result = curiosApiClass.getMethod("getCuriosInventory",

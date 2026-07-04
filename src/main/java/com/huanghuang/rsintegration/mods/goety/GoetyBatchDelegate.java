@@ -8,6 +8,7 @@ import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.RecipeIndex;
 import com.huanghuang.rsintegration.util.ModClassLoader;
+import com.huanghuang.rsintegration.util.ModIds;
 import com.huanghuang.rsintegration.util.Reflect;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
@@ -60,7 +61,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
     private static volatile Class<?> ritualBlockEntityClass;
 
     private static void ensureClasses() {
-        if (!ModClassLoader.ensureClasses("goety",
+        if (!ModClassLoader.ensureClasses(ModIds.GOETY,
                 "com.Polarice3.Goety.common.blocks.entities.DarkAltarBlockEntity",
                 "com.Polarice3.Goety.utils.SEHelper",
                 "com.Polarice3.Goety.common.blocks.entities.CursedCageBlockEntity",
@@ -1537,7 +1538,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
                     return item.getDefaultInstance().getDisplayName().getString();
             }
 
-            Item item = BuiltInRegistries.ITEM.get(new ResourceLocation("goety", scrollPath));
+            Item item = BuiltInRegistries.ITEM.get(new ResourceLocation(ModIds.GOETY, scrollPath));
             if (item != null && item != net.minecraft.world.item.Items.AIR)
                 return item.getDefaultInstance().getDisplayName().getString();
 

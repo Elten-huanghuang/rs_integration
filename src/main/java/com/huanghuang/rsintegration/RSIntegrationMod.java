@@ -1,25 +1,53 @@
 package com.huanghuang.rsintegration;
 
+import com.huanghuang.rsintegration.backpack.SophisticatedBackpacksItems;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.crafting.AsyncCraftManager;
 import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
 import com.huanghuang.rsintegration.mods.IModIntegration;
+import com.huanghuang.rsintegration.mods.aether.AetherRSModule;
+import com.huanghuang.rsintegration.mods.aetherworks.AetherworksRSModule;
+import com.huanghuang.rsintegration.mods.aetherworks.client.AetherworksClientSetup;
+import com.huanghuang.rsintegration.mods.avaritia.AvaritiaRSModule;
+import com.huanghuang.rsintegration.mods.confluence.ConfluenceRSModule;
+import com.huanghuang.rsintegration.mods.crockpot.CrockPotRSModule;
+import com.huanghuang.rsintegration.mods.eidolon.EidolonRSModule;
+import com.huanghuang.rsintegration.mods.embers.EreAlchemyRSModule;
+import com.huanghuang.rsintegration.mods.farmingforblockheads.FarmingForBlockheadsRSModule;
+import com.huanghuang.rsintegration.mods.forbidden.FaRSModule;
+import com.huanghuang.rsintegration.mods.goety.GoetyRSModule;
+import com.huanghuang.rsintegration.mods.immortalers_delight.ImmortalersDelightRSModule;
+import com.huanghuang.rsintegration.mods.malum.MalumRSModule;
+import com.huanghuang.rsintegration.mods.slashblade.SlashBladeRSModule;
+import com.huanghuang.rsintegration.mods.tacz.TaczRSModule;
+import com.huanghuang.rsintegration.mods.touhoulittlemaid.TlmRSModule;
+import com.huanghuang.rsintegration.mods.wizards_reborn.WizardsRebornRSModule;
 import com.huanghuang.rsintegration.network.AltarBinding;
 import com.huanghuang.rsintegration.network.AltarBindingRegistry;
+import com.huanghuang.rsintegration.network.BindingEventHandler;
+import com.huanghuang.rsintegration.network.BindingTooltipHandler;
 import com.huanghuang.rsintegration.network.RSBindingHook;
+import com.huanghuang.rsintegration.network.RemoteGuiAuth;
 import com.huanghuang.rsintegration.network.RSIntegration;
-import com.huanghuang.rsintegration.util.ModIds;
+import com.huanghuang.rsintegration.sidepanel.RSSidePanelClient;
+import com.huanghuang.rsintegration.sidepanel.RSSidePanelModule;
 import com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler;
+import com.huanghuang.rsintegration.transfer.ContainerTransferClient;
+import com.huanghuang.rsintegration.transfer.ContainerTransferNetworkHandler;
+import com.huanghuang.rsintegration.util.ModIds;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 
 import java.util.List;
 import java.util.function.Supplier;
 
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraftforge.event.server.ServerStoppingEvent;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.common.ForgeConfigSpec;
 import net.minecraftforge.common.MinecraftForge;
+import net.minecraftforge.common.world.ForgeChunkManager;
 import net.minecraftforge.event.entity.player.PlayerEvent;
+import net.minecraftforge.event.server.ServerStoppingEvent;
+import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.fml.DistExecutor;
 import net.minecraftforge.fml.IExtensionPoint;
 import net.minecraftforge.fml.ModList;
@@ -37,89 +65,71 @@ public final class RSIntegrationMod {
     public static final String MOD_ID = "rs_integration";
     public static final String MOD_NAME = "RS Integration";
     public static final Logger LOGGER = LogManager.getLogger(MOD_NAME);
-    /** RS-themed flow colors used by magnet tooltip and machine hub tooltip. */
     public static final int[] RS_FLOW_COLORS = {0x3355FF, 0x7733FF, 0xCC33FF, 0x3355FF};
-    /** Captured mod event bus — safe to use from FMLCommonSetupEvent listeners
-     *  where {@code FMLJavaModLoadingContext.get()} is no longer available. */
-    public static final net.minecraftforge.eventbus.api.IEventBus MOD_BUS =
-            net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext.get().getModEventBus();
+
+    public static final IEventBus MOD_BUS =
+            FMLJavaModLoadingContext.get().getModEventBus();
 
     static {
         DistExecutor.safeRunWhenOn(Dist.CLIENT, () -> () ->
-                MOD_BUS.addListener(com.huanghuang.rsintegration.mods.aetherworks.client.AetherworksClientSetup::onRegisterOverlays));
+                MOD_BUS.addListener(AetherworksClientSetup::onRegisterOverlays));
     }
 
     private record ModuleEntry(String modId, ForgeConfigSpec.BooleanValue configFlag,
                                Supplier<IModIntegration> supplier) {}
 
     private static final List<ModuleEntry> MODULES = List.of(
-            new ModuleEntry("goety", RSIntegrationConfig.ENABLE_GOETY,
-                    () -> com.huanghuang.rsintegration.mods.goety.GoetyRSModule.INSTANCE),
-            new ModuleEntry("malum", RSIntegrationConfig.ENABLE_MALUM,
-                    () -> com.huanghuang.rsintegration.mods.malum.MalumRSModule.INSTANCE),
-            new ModuleEntry("eidolon", RSIntegrationConfig.ENABLE_EIDOLON,
-                    () -> com.huanghuang.rsintegration.mods.eidolon.EidolonRSModule.INSTANCE),
-            new ModuleEntry("forbidden_arcanus", RSIntegrationConfig.ENABLE_FORBIDDEN_ARCANUS,
-                    () -> com.huanghuang.rsintegration.mods.forbidden.FaRSModule.INSTANCE),
-            new ModuleEntry("wizards_reborn", RSIntegrationConfig.ENABLE_WIZARDS_REBORN,
-                    () -> com.huanghuang.rsintegration.mods.wizards_reborn.WizardsRebornRSModule.INSTANCE),
-            new ModuleEntry("touhou_little_maid", RSIntegrationConfig.ENABLE_TOUHOU_LITTLE_MAID,
-                    () -> com.huanghuang.rsintegration.mods.touhoulittlemaid.TlmRSModule.INSTANCE),
-            new ModuleEntry("embers", RSIntegrationConfig.ENABLE_EMBERS_ALCHEMY,
-                    () -> com.huanghuang.rsintegration.mods.embers.EreAlchemyRSModule.INSTANCE),
-            new ModuleEntry("aetherworks", RSIntegrationConfig.ENABLE_AETHERWORKS,
-                    () -> com.huanghuang.rsintegration.mods.aetherworks.AetherworksRSModule.INSTANCE),
-            new ModuleEntry("aether", RSIntegrationConfig.ENABLE_AETHER,
-                    () -> com.huanghuang.rsintegration.mods.aether.AetherRSModule.INSTANCE),
-            new ModuleEntry("crockpot", RSIntegrationConfig.ENABLE_CROCKPOT,
-                    () -> com.huanghuang.rsintegration.mods.crockpot.CrockPotRSModule.INSTANCE),
-            new ModuleEntry("tacz", RSIntegrationConfig.ENABLE_TACZ,
-                    () -> com.huanghuang.rsintegration.mods.tacz.TaczRSModule.INSTANCE),
-            new ModuleEntry("slashblade", RSIntegrationConfig.ENABLE_SLASHBLADE,
-                    () -> com.huanghuang.rsintegration.mods.slashblade.SlashBladeRSModule.INSTANCE),
+            new ModuleEntry(ModIds.GOETY, RSIntegrationConfig.ENABLE_GOETY,
+                    () -> GoetyRSModule.INSTANCE),
+            new ModuleEntry(ModIds.MALUM, RSIntegrationConfig.ENABLE_MALUM,
+                    () -> MalumRSModule.INSTANCE),
+            new ModuleEntry(ModIds.EIDOLON, RSIntegrationConfig.ENABLE_EIDOLON,
+                    () -> EidolonRSModule.INSTANCE),
+            new ModuleEntry(ModIds.FORBIDDEN_ARCANUS, RSIntegrationConfig.ENABLE_FORBIDDEN_ARCANUS,
+                    () -> FaRSModule.INSTANCE),
+            new ModuleEntry(ModIds.WIZARDS_REBORN, RSIntegrationConfig.ENABLE_WIZARDS_REBORN,
+                    () -> WizardsRebornRSModule.INSTANCE),
+            new ModuleEntry(ModIds.TOUHOU_LITTLE_MAID, RSIntegrationConfig.ENABLE_TOUHOU_LITTLE_MAID,
+                    () -> TlmRSModule.INSTANCE),
+            new ModuleEntry(ModIds.EMBERS, RSIntegrationConfig.ENABLE_EMBERS_ALCHEMY,
+                    () -> EreAlchemyRSModule.INSTANCE),
+            new ModuleEntry(ModIds.AETHERWORKS, RSIntegrationConfig.ENABLE_AETHERWORKS,
+                    () -> AetherworksRSModule.INSTANCE),
+            new ModuleEntry(ModIds.AETHER, RSIntegrationConfig.ENABLE_AETHER,
+                    () -> AetherRSModule.INSTANCE),
+            new ModuleEntry(ModIds.CROCKPOT, RSIntegrationConfig.ENABLE_CROCKPOT,
+                    () -> CrockPotRSModule.INSTANCE),
+            new ModuleEntry(ModIds.TACZ, RSIntegrationConfig.ENABLE_TACZ,
+                    () -> TaczRSModule.INSTANCE),
+            new ModuleEntry(ModIds.SLASHBLADE, RSIntegrationConfig.ENABLE_SLASHBLADE,
+                    () -> SlashBladeRSModule.INSTANCE),
             new ModuleEntry(ModIds.AVARITIA, RSIntegrationConfig.ENABLE_AVARITIA,
-                    () -> com.huanghuang.rsintegration.mods.avaritia.AvaritiaRSModule.INSTANCE),
+                    () -> AvaritiaRSModule.INSTANCE),
             new ModuleEntry(ModIds.CONFLUENCE, RSIntegrationConfig.ENABLE_CONFLUENCE,
-                    () -> com.huanghuang.rsintegration.mods.confluence.ConfluenceRSModule.INSTANCE),
-            new ModuleEntry("immortalers_delight", RSIntegrationConfig.ENABLE_IMMORTERS_DELIGHT,
-                    () -> com.huanghuang.rsintegration.mods.immortalers_delight.ImmortalersDelightRSModule.INSTANCE)
+                    () -> ConfluenceRSModule.INSTANCE),
+            new ModuleEntry(ModIds.IMMORTERS_DELIGHT, RSIntegrationConfig.ENABLE_IMMORTERS_DELIGHT,
+                    () -> ImmortalersDelightRSModule.INSTANCE)
     );
 
     public RSIntegrationMod() {
         registerDisplayTest();
         RSIntegrationConfig.register();
         AltarBindingRegistry.registerHook(AltarBinding.RS_NETWORK, RSBindingHook.INSTANCE);
-        // Enable ForgeChunkManager.forceChunk for this mod (used by
-        // RemoteGuiAuth to prevent chunk-unload dupes during remote GUI).
-        // Null callback causes NPE in reinstatePersistentChunks on world
-        // load if any ticket data leaked to disk — use a no-op instead.
-        net.minecraftforge.common.world.ForgeChunkManager.setForcedChunkLoadingCallback(
+        ForgeChunkManager.setForcedChunkLoadingCallback(
                 MOD_ID, (level, ticketHelper) -> {});
-        // Backpack upgrades: DeferredRegister must be registered NOW
-        // (during mod construction) so Forge's registry events pick them up.
-        // Waiting until FMLCommonSetupEvent is too late.
         if (enabled(RSIntegrationConfig.ENABLE_SOPHISTICATED_BACKPACKS, ModIds.SOPHISTICATED_BACKPACKS)) {
-            com.huanghuang.rsintegration.backpack.SophisticatedBackpacksItems.init(MOD_BUS);
+            SophisticatedBackpacksItems.init(MOD_BUS);
         }
 
-        // Key mappings must be registered during mod construction so the
-        // RegisterKeyMappingsEvent listener is added before the event fires.
-        // (FMLCommonSetupEvent may run too late.)
         DistExecutor.safeRunWhenOn(Dist.CLIENT,
-                () -> com.huanghuang.rsintegration.transfer.ContainerTransferClient::registerKeyMappings);
+                () -> ContainerTransferClient::registerKeyMappings);
         DistExecutor.safeRunWhenOn(Dist.CLIENT,
-                () -> com.huanghuang.rsintegration.sidepanel.RSSidePanelClient::registerKeyMappings);
+                () -> RSSidePanelClient::registerKeyMappings);
 
-        // Defer all heavy initialization to FMLCommonSetupEvent so the
-        // constructor finishes instantly.  This minimises RSI's impact
-        // on Forge's parallel mod-loading schedule and avoids exposing
-        // latent race conditions in other mods (e.g. l2hostility CME,
-        // Enigmatic Legacy NPE).
         FMLJavaModLoadingContext.get().getModEventBus().addListener(this::onCommonSetup);
     }
 
     private void onCommonSetup(final FMLCommonSetupEvent event) {
-        // Per-mod init via IModIntegration interface.
         for (ModuleEntry entry : MODULES) {
             if (!entry.configFlag().get() || !ModList.get().isLoaded(entry.modId())) continue;
             IModIntegration module = entry.supplier().get();
@@ -133,13 +143,13 @@ public final class RSIntegrationMod {
 
         // --- FarmingForBlockheads Market (virtual exchange, no IModIntegration) ---
         if (enabled(RSIntegrationConfig.ENABLE_FARMINGFORBLOCKHEADS, ModIds.FARMINGFORBLOCKHEADS))
-            com.huanghuang.rsintegration.mods.farmingforblockheads.FarmingForBlockheadsRSModule.initCommon();
+            FarmingForBlockheadsRSModule.initCommon();
 
         // --- Confluence Workshop — binding target registered by the module;
         //     this fallback ensures it works even when the full module is disabled ---
         if (ModList.get().isLoaded("confluence")) {
-            com.huanghuang.rsintegration.network.BindingEventHandler.registerTarget(
-                    new com.huanghuang.rsintegration.network.BindingEventHandler.MachineBindingTarget(
+            BindingEventHandler.registerTarget(
+                    new BindingEventHandler.MachineBindingTarget(
                             "confluence", ModType.byId("confluence"),
                             RSIntegrationConfig.ENABLE_CONFLUENCE,
                             List.of("org.confluence.mod.block.WorkshopBlock"),
@@ -147,15 +157,32 @@ public final class RSIntegrationMod {
                     ));
         }
 
-        // --- Apotheosis Reforging Table (must be explicit — customGuiMachineMods
-        //     fallback requires MenuProvider, which ReforgingTableBlock may lack) ---
+        // --- Apotheosis Reforging Table ---
         if (ModList.get().isLoaded("apotheosis")) {
-            com.huanghuang.rsintegration.network.BindingEventHandler.registerTarget(
-                    new com.huanghuang.rsintegration.network.BindingEventHandler.MachineBindingTarget(
+            BindingEventHandler.registerTarget(
+                    new BindingEventHandler.MachineBindingTarget(
                             "apotheosis", ModType.byId("custom_gui"),
                             RSIntegrationConfig.ENABLE_MACHINE_GUI_TABS,
                             List.of("dev.shadowsoffire.apotheosis.adventure.affix.reforging.ReforgingTableBlock"),
                             "apotheosis"
+                    ));
+        }
+
+        // --- CrabbersDelight Crab Trap (loot-table driven, needs dedicated delegate) ---
+        if (ModList.get().isLoaded("crabbersdelight")) {
+            ModType.register("crabbersdelight",
+                    new String[]{
+                            "com.huanghuang.rsintegration.mods.crabbersdelight.CrabTrapLootWrapper"
+                    },
+                    new String[]{"crab_trap", "crabbersdelight"},
+                    new String[]{"crabbersdelight"},
+                    ModType.delegateSupplier("com.huanghuang.rsintegration.mods.crabbersdelight.CrabTrapBatchDelegate"));
+            BindingEventHandler.registerTarget(
+                    new BindingEventHandler.MachineBindingTarget(
+                            "crabbersdelight", ModType.byId("crabbersdelight"),
+                            RSIntegrationConfig.ENABLE_MACHINE_GUI_TABS,
+                            List.of("alabaster.crabbersdelight.common.block.CrabTrapBlock"),
+                            "crabbersdelight", true
                     ));
         }
 
@@ -172,8 +199,8 @@ public final class RSIntegrationMod {
                     new String[]{"furnace", "smoker", "stonecutter"},
                     new String[]{"vanilla_machine"},
                     ModType.delegateSupplier("com.huanghuang.rsintegration.mods.vanilla.VanillaMachineBatchDelegate"));
-            com.huanghuang.rsintegration.network.BindingEventHandler.registerTarget(
-                    new com.huanghuang.rsintegration.network.BindingEventHandler.MachineBindingTarget(
+            BindingEventHandler.registerTarget(
+                    new BindingEventHandler.MachineBindingTarget(
                             "minecraft", ModType.byId("vanilla_machine"),
                             RSIntegrationConfig.ENABLE_VANILLA_MACHINES,
                             List.of(
@@ -187,7 +214,7 @@ public final class RSIntegrationMod {
                             "vanilla_machine"
                     ));
 
-            // Smithing table → separate ModType so it shows as smithing, not furnace
+            // Smithing table -> separate ModType so it shows as smithing, not furnace
             ModType.register("smithing",
                     new String[]{
                             "net.minecraft.world.item.crafting.SmithingTransformRecipe",
@@ -196,8 +223,8 @@ public final class RSIntegrationMod {
                     new String[]{"smithing_table"},
                     new String[]{"smithing"},
                     ModType.delegateSupplier("com.huanghuang.rsintegration.mods.vanilla.VanillaMachineBatchDelegate"));
-            com.huanghuang.rsintegration.network.BindingEventHandler.registerTarget(
-                    new com.huanghuang.rsintegration.network.BindingEventHandler.MachineBindingTarget(
+            BindingEventHandler.registerTarget(
+                    new BindingEventHandler.MachineBindingTarget(
                             "minecraft", ModType.byId("smithing"),
                             RSIntegrationConfig.ENABLE_VANILLA_MACHINES,
                             List.of(
@@ -209,31 +236,30 @@ public final class RSIntegrationMod {
 
         // Subsystems
         if (RSIntegrationConfig.ENABLE_CONTAINER_TRANSFER.get()) {
-            com.huanghuang.rsintegration.transfer.ContainerTransferNetworkHandler.register();
+            ContainerTransferNetworkHandler.register();
             DistExecutor.safeRunWhenOn(Dist.CLIENT,
-                    () -> com.huanghuang.rsintegration.transfer.ContainerTransferClient::init);
+                    () -> ContainerTransferClient::init);
         }
         if (RSIntegrationConfig.ENABLE_RS_SIDE_PANEL.get()) {
             DistExecutor.safeRunWhenOn(Dist.CLIENT,
-                    () -> com.huanghuang.rsintegration.sidepanel.RSSidePanelModule::initClient);
-            com.huanghuang.rsintegration.sidepanel.RSSidePanelModule.initCommon();
+                    () -> RSSidePanelModule::initClient);
+            RSSidePanelModule.initCommon();
         }
 
-        // Binding tooltip handler — shows bound machine list on Shift for any item with BindingStorage data
+        // Binding tooltip handler
         DistExecutor.safeRunWhenOn(Dist.CLIENT,
-                () -> () -> MinecraftForge.EVENT_BUS.register(
-                        com.huanghuang.rsintegration.network.BindingTooltipHandler.class));
+                () -> () -> MinecraftForge.EVENT_BUS.register(BindingTooltipHandler.class));
         // Crafting
         BatchCraftNetworkHandler.register();
 
         // Altar binding registry (BINDINGS cache + scan caches)
-        MinecraftForge.EVENT_BUS.register(com.huanghuang.rsintegration.network.AltarBindingRegistry.class);
+        MinecraftForge.EVENT_BUS.register(AltarBindingRegistry.class);
 
         // Async craft chains
-        MinecraftForge.EVENT_BUS.register(com.huanghuang.rsintegration.crafting.AsyncCraftManager.getInstance());
+        MinecraftForge.EVENT_BUS.register(AsyncCraftManager.getInstance());
         MinecraftForge.EVENT_BUS.addListener((PlayerEvent.PlayerLoggedOutEvent e) -> {
             if (e.getEntity() instanceof ServerPlayer sp)
-                com.huanghuang.rsintegration.crafting.AsyncCraftManager.getInstance().cancelAllForPlayer(sp.getUUID());
+                AsyncCraftManager.getInstance().cancelAllForPlayer(sp.getUUID());
         });
 
         // Cross-dimension: unpin the old dimension's IStorageCache listener
@@ -253,20 +279,19 @@ public final class RSIntegrationMod {
         // Server shutdown: abort all active async craft chains so committed
         // materials are refunded rather than silently lost.
         MinecraftForge.EVENT_BUS.addListener((ServerStoppingEvent e) -> {
-            com.huanghuang.rsintegration.crafting.AsyncCraftManager.abortAll();
+            AsyncCraftManager.abortAll();
         });
 
-        // Chunk unload safety net: force-close any remote GUI whose machine
-        // chunk is being unloaded.  Primary prevention is ForgeChunkManager
+        // Chunk unload safety net: force-close remote GUI whose machine
+        // chunk is being unloaded. Primary prevention is ForgeChunkManager
         // force-loading in RemoteGuiAuth.authorize(); this catches edge cases
         // (e.g. another mod force-unloading the chunk).
-        MinecraftForge.EVENT_BUS.addListener(
-                com.huanghuang.rsintegration.network.RemoteGuiAuth::onChunkUnload);
+        MinecraftForge.EVENT_BUS.addListener(RemoteGuiAuth::onChunkUnload);
 
         LOGGER.info("{} initialized.", MOD_NAME);
     }
 
-    private static boolean enabled(net.minecraftforge.common.ForgeConfigSpec.BooleanValue config, String modId) {
+    private static boolean enabled(ForgeConfigSpec.BooleanValue config, String modId) {
         if (!config.get()) return false;
         if (!ModList.get().isLoaded(modId)) return false;
         return true;

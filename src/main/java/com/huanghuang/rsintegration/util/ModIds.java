@@ -28,4 +28,11 @@ public final class ModIds {
     public static final String FTB_CHUNKS = "ftbchunks";
     public static final String CADMUS = "cadmus";
     public static final String SOPHISTICATED_BACKPACKS = "sophisticatedbackpacks";
+
+    // Composite ModType IDs (one mod → multiple machine types)
+    public static final String ID_EMBERS_ALCHEMY = "embers_alchemy";
+    public static final String ID_AETHERWORKS_ANVIL = "aetherworks_anvil";
+    public static final String ID_AVARITIA_CRAFTING = "avaritia_crafting";
+    public static final String ID_AVARITIA_COMPRESSOR = "avaritia_compressor";
+    public static final String ID_AVARITIA_SMITHING = "avaritia_smithing";
 }

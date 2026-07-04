@@ -15,6 +15,7 @@ import com.huanghuang.rsintegration.sidepanel.network.OpenBoundMachineGuiPacket;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.mods.goety.GoetyRSNetworkHandler;
 import com.huanghuang.rsintegration.mods.goety.RSClientAvailabilityCache;
+import com.huanghuang.rsintegration.util.ModIds;
 import mezz.jei.api.gui.IRecipeLayoutDrawable;
 import mezz.jei.api.gui.ingredient.IRecipeSlotView;
 import mezz.jei.api.gui.ingredient.IRecipeSlotsView;
@@ -52,7 +53,7 @@ public class RecipeGuiLayoutsMixin {
     // UID constants: only those NOT covered by ModType.filterForJeiUid() remain.
     // FA_HEPHAESTUS_SMITHING_UID is also used by extractFaSmithingBaseItem.
     private static final ResourceLocation FA_HEPHAESTUS_SMITHING_UID =
-            new ResourceLocation("forbidden_arcanus", "hephaestus_smithing");
+            new ResourceLocation(ModIds.FORBIDDEN_ARCANUS, "hephaestus_smithing");
     private static final ResourceLocation SMELTING_UID =
             new ResourceLocation("minecraft", "smelting");
     private static final ResourceLocation BLASTING_UID =
@@ -114,7 +115,7 @@ public class RecipeGuiLayoutsMixin {
         var player = Minecraft.getInstance().player;
 
         // Compute once: RS available = mod loaded (server handler fails gracefully if no network)
-        boolean rsAvailable = ModList.get().isLoaded("refinedstorage");
+        boolean rsAvailable = ModList.get().isLoaded(ModIds.REFINED_STORAGE);
 
         int totalRecipes = 0;
         int buttonsAdded = 0;
@@ -135,7 +136,7 @@ public class RecipeGuiLayoutsMixin {
             if (recipe == null) {
                 try {
                     String catUid = recipeLayout.getRecipeCategory().getRecipeType().getUid().toString();
-                    if (catUid.startsWith("forbidden_arcanus")) {
+                    if (catUid.startsWith(ModIds.FORBIDDEN_ARCANUS)) {
                         faNoRecipe++;
                         RSIntegrationMod.LOGGER.warn("[RSI-JEI-Mixin] FA category {} returned null recipe from getRecipe()", catUid);
                     }
@@ -239,7 +240,7 @@ public class RecipeGuiLayoutsMixin {
             boolean isSmithingFilter = filter.equals("block.minecraft.smithing_table");
             boolean isForgeFilter = filter.equals("hephaestus_forge");
             boolean faSmithing = (isSmithingFilter || isForgeFilter) && (isFa
-                    || recipeId.getNamespace().equals("forbidden_arcanus"));
+                    || recipeId.getNamespace().equals(ModIds.FORBIDDEN_ARCANUS));
             if (faSmithing) {
                 faSmithingBase = extractFaSmithingBaseItem(recipeLayout);
                 RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] FA smithing base extraction: result={} isFa={} class={}",
@@ -274,14 +275,14 @@ public class RecipeGuiLayoutsMixin {
                     case "crucible" -> "gui.rs_integration.jei.eidolon_crucible_craft";
                     case "worktable" -> "gui.rs_integration.jei.eidolon_worktable_craft";
                     case "ritual" -> "gui.rs_integration.jei.eidolon_ritual_craft";
-                    case "touhou_little_maid" -> "gui.rs_integration.jei.tlm_maid_altar_craft";
-                    case "embers" -> "gui.rs_integration.jei.embers_alchemy_craft";
+                    case ModIds.TOUHOU_LITTLE_MAID -> "gui.rs_integration.jei.tlm_maid_altar_craft";
+                    case ModIds.EMBERS -> "gui.rs_integration.jei.embers_alchemy_craft";
                     case "aether_freezer" -> "gui.rs_integration.jei.aether_freezer_craft";
                     case "aether_incubator" -> "gui.rs_integration.jei.aether_incubator_craft";
                     case "aether_altar" -> "gui.rs_integration.jei.aether_altar_craft";
-                    case "avaritia_crafting" -> "gui.rs_integration.jei.avaritia_crafting";
-                    case "avaritia_compressor" -> "gui.rs_integration.jei.avaritia_compressor";
-                    case "avaritia_smithing" -> "gui.rs_integration.jei.avaritia_smithing";
+                    case ModIds.ID_AVARITIA_CRAFTING -> "gui.rs_integration.jei.avaritia_crafting";
+                    case ModIds.ID_AVARITIA_COMPRESSOR -> "gui.rs_integration.jei.avaritia_compressor";
+                    case ModIds.ID_AVARITIA_SMITHING -> "gui.rs_integration.jei.avaritia_smithing";
                     case "crabbersdelight" -> "gui.rs_integration.jei.crabbersdelight_trap";
                     default -> "gui.rs_integration.jei.wr_remote_craft";
                 };
@@ -466,7 +467,7 @@ public class RecipeGuiLayoutsMixin {
 
     @Unique
     private static String getBindingFilter(Object recipe, IRecipeLayoutDrawable<?> recipeLayout) {
-        if (rsi$isGoetyRitual(recipe)) return "goety";
+        if (rsi$isGoetyRitual(recipe)) return ModIds.GOETY;
 
         try {
             ResourceLocation uid = recipeLayout.getRecipeCategory().getRecipeType().getUid();
@@ -479,7 +480,7 @@ public class RecipeGuiLayoutsMixin {
             if (SMITHING_UID.equals(uid)) {
                 String cn = recipe.getClass().getName();
                 if (cn.startsWith("com.stal111.forbidden_arcanus.")) return "hephaestus_forge";
-                if (cn.startsWith("committee.nova.mods.avaritia.")) return "avaritia_smithing";
+                if (cn.startsWith("committee.nova.mods.avaritia.")) return ModIds.ID_AVARITIA_SMITHING;
                 return "block.minecraft.smithing_table";
             }
             if (SMELTING_UID.equals(uid)) return "block.minecraft.furnace";
@@ -495,13 +496,13 @@ public class RecipeGuiLayoutsMixin {
         String recipeClassName = recipe.getClass().getName();
 
         if (recipeClassName.equals("com.Polarice3.Goety.common.crafting.BrazierRecipe"))
-            return "goety";
+            return ModIds.GOETY;
 
         // Avaritia — multiple sub-types with different filters; not resolved by single-ModType lookup
         if (recipeClassName.startsWith("committee.nova.mods.avaritia.common.crafting.recipe.")) {
-            if (recipeClassName.endsWith("ExtremeSmithingRecipe")) return "avaritia_smithing";
-            if (recipeClassName.endsWith("CompressorRecipe")) return "avaritia_compressor";
-            return "avaritia_crafting";
+            if (recipeClassName.endsWith("ExtremeSmithingRecipe")) return ModIds.ID_AVARITIA_SMITHING;
+            if (recipeClassName.endsWith("CompressorRecipe")) return ModIds.ID_AVARITIA_COMPRESSOR;
+            return ModIds.ID_AVARITIA_CRAFTING;
         }
 
         // ModType class-name → filter lookup
@@ -961,7 +962,7 @@ public class RecipeGuiLayoutsMixin {
         ItemStack capturedBase = faSmithingBase;
         if (capturedBase == null
                 && recipe instanceof Recipe<?> r
-                && recipeId.getNamespace().equals("forbidden_arcanus")
+                && recipeId.getNamespace().equals(ModIds.FORBIDDEN_ARCANUS)
                 && r.getIngredients().size() >= 3) {
             Ingredient baseIng = r.getIngredients().get(1);
             if (!baseIng.isEmpty()) {
@@ -1114,13 +1115,13 @@ public class RecipeGuiLayoutsMixin {
 
     @Unique
     private static boolean rsi$isGoetyRitual(Object recipe) {
-        return ModList.get().isLoaded("goety")
+        return ModList.get().isLoaded(ModIds.GOETY)
                 && recipe.getClass().getName().equals("com.Polarice3.Goety.common.crafting.RitualRecipe");
     }
 
     @Unique
     private static boolean rsi$isGoetyBrazierRecipe(Object recipe) {
-        return ModList.get().isLoaded("goety")
+        return ModList.get().isLoaded(ModIds.GOETY)
                 && recipe.getClass().getName().equals("com.Polarice3.Goety.common.crafting.BrazierRecipe");
     }
 

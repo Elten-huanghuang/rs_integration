@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.mods.forbidden;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.util.ModClassLoader;
+import com.huanghuang.rsintegration.util.ModIds;
 import com.huanghuang.rsintegration.util.Reflect;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
@@ -58,7 +59,7 @@ public final class FaRitualHelper {
     private static volatile Map<ResourceLocation, Object> cachedRitualMap;
 
     static void ensureClasses() {
-        if (!ModClassLoader.ensureClasses("forbidden_arcanus",
+        if (!ModClassLoader.ensureClasses(ModIds.FORBIDDEN_ARCANUS,
                 "com.stal111.forbidden_arcanus.common.block.entity.forge.HephaestusForgeBlockEntity",
                 "com.stal111.forbidden_arcanus.common.block.entity.PedestalBlockEntity",
                 "com.stal111.forbidden_arcanus.common.block.entity.forge.ritual.Ritual",
@@ -826,7 +827,7 @@ public final class FaRitualHelper {
             if (faForgeBlockItem == null) {
                 net.minecraft.world.level.block.Block block =
                         net.minecraftforge.registries.ForgeRegistries.BLOCKS.getValue(
-                                new ResourceLocation("forbidden_arcanus", "hephaestus_forge"));
+                                new ResourceLocation(ModIds.FORBIDDEN_ARCANUS, "hephaestus_forge"));
                 if (block == null) return ItemStack.EMPTY;
                 faForgeBlockItem = block.asItem();
             }

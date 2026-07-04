@@ -1,6 +1,8 @@
 package com.huanghuang.rsintegration.mods.embers;
 
+import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.util.ModIds;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.util.Reflect;
 import com.refinedmods.refinedstorage.api.network.INetwork;
@@ -32,7 +34,7 @@ public record EmbersPlanInfo(
                                        @Nullable String recipeModTypeId,
                                        @Nullable ResourceLocation dim,
                                        @Nullable net.minecraft.core.BlockPos pos) {
-        if (!"embers_alchemy".equals(recipeModTypeId)) {
+        if (!ModIds.ID_EMBERS_ALCHEMY.equals(recipeModTypeId)) {
             return new EmbersPlanInfo(null, null, null, 0, false, false);
         }
 

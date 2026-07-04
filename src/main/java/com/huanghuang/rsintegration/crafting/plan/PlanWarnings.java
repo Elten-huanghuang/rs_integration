@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.crafting.plan;
 
+import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.mods.aether.AetherFurnaceBatchDelegate;
 import com.huanghuang.rsintegration.mods.aetherworks.AetherworksBatchDelegate;
 import com.huanghuang.rsintegration.mods.crockpot.CrockPotBatchDelegate;
@@ -12,6 +13,7 @@ import com.huanghuang.rsintegration.mods.goety.GoetyBatchDelegate;
 import com.huanghuang.rsintegration.mods.malum.MalumBatchDelegate;
 import com.huanghuang.rsintegration.mods.touhoulittlemaid.TlmAltarBatchDelegate;
 import com.huanghuang.rsintegration.mods.wizards_reborn.WRBatchDelegate;
+import com.huanghuang.rsintegration.util.ModIds;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
@@ -28,45 +30,45 @@ public final class PlanWarnings {
                                         @Nullable ResourceLocation dim, @Nullable BlockPos pos) {
         List<String> warnings = new ArrayList<>();
         switch (typeId) {
-            case "aether":
+            case ModIds.AETHER:
                 warnings.addAll(AetherFurnaceBatchDelegate.getPlanWarnings(player, recipe, dim, pos));
                 break;
-            case "goety":
+            case ModIds.GOETY:
                 warnings.addAll(GoetyBatchDelegate.getPlanWarnings(player, recipe, dim, pos));
                 break;
-            case "forbidden_arcanus":
+            case ModIds.FORBIDDEN_ARCANUS:
                 warnings.addAll(FaBatchDelegate.getPlanWarnings(player, recipe, dim, pos));
                 break;
-            case "wizards_reborn":
+            case ModIds.WIZARDS_REBORN:
                 warnings.addAll(WRBatchDelegate.getPlanWarnings(player, recipe, dim, pos));
                 break;
-            case "malum":
+            case ModIds.MALUM:
                 warnings.addAll(MalumBatchDelegate.getPlanWarnings(player, recipe, dim, pos));
                 break;
-            case "eidolon":
+            case ModIds.EIDOLON:
                 warnings.addAll(EidolonBatchDelegate.getPlanWarnings(player, recipe, dim, pos));
                 break;
-            case "embers_alchemy":
+            case ModIds.ID_EMBERS_ALCHEMY:
                 warnings.addAll(EreAlchemyBatchDelegate.getPlanWarnings(player, recipe, dim, pos));
                 break;
-            case "aetherworks_anvil":
+            case ModIds.ID_AETHERWORKS_ANVIL:
                 warnings.addAll(AetherworksBatchDelegate.getPlanWarnings(player, recipe, dim, pos));
                 break;
-            case "crockpot":
+            case ModIds.CROCKPOT:
                 warnings.addAll(CrockPotBatchDelegate.getPlanWarnings(player, recipe, dim, pos));
                 break;
-            case "farmingforblockheads":
+            case ModIds.FARMINGFORBLOCKHEADS:
                 warnings.addAll(MarketBatchDelegate.getPlanWarnings(player, recipe, dim, pos));
                 break;
-            case "touhou_little_maid":
+            case ModIds.TOUHOU_LITTLE_MAID:
                 warnings.addAll(TlmAltarBatchDelegate.getPlanWarnings(player, recipe, dim, pos));
                 break;
-            case "immortalers_delight":
+            case ModIds.IMMORTERS_DELIGHT:
                 warnings.addAll(EnchantalCoolerBatchDelegate.getPlanWarnings(player, recipe, dim, pos));
                 break;
-            case "avaritia_crafting":
-            case "avaritia_compressor":
-            case "avaritia_smithing":
+            case ModIds.ID_AVARITIA_CRAFTING:
+            case ModIds.ID_AVARITIA_COMPRESSOR:
+            case ModIds.ID_AVARITIA_SMITHING:
                 break;
             default:
                 break;

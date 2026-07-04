@@ -32,8 +32,6 @@ public final class LeverBinder {
 
     private LeverBinder() {}
 
-    // ---- Public API ----
-
     public static boolean isBound() { return boundLeverPos != null; }
     @Nullable public static BlockPos getBoundLever() { return boundLeverPos; }
     public static int getTempMin() { return tempMin; }
@@ -50,8 +48,6 @@ public final class LeverBinder {
         if (mc.level == null) return false;
         return mc.level.getBlockState(boundLeverPos).getValue(LeverBlock.POWERED);
     }
-
-    // ---- Temp auto-detect from nearby anvil ----
 
     private static boolean tryAutoSetTempFromAnvil(Minecraft mc) {
         for (int dx = -5; dx <= 5; dx++)
@@ -77,8 +73,6 @@ public final class LeverBinder {
         return false;
     }
 
-    // ---- Bind / Unbind ----
-
     public static void bindLever(BlockPos leverPos) {
         boundLeverPos = leverPos;
         Minecraft mc = Minecraft.getInstance();
@@ -100,8 +94,6 @@ public final class LeverBinder {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player != null) mc.player.displayClientMessage(Component.literal("§c已解绑拉杆"), true);
     }
-
-    // ---- Tick ----
 
     public static void onTick() {
         Minecraft mc = Minecraft.getInstance();
@@ -164,8 +156,6 @@ public final class LeverBinder {
             lastSeenItem = ItemStack.EMPTY;
         }
     }
-
-    // ---- Actions ----
 
     private static void toggleLever() {
         if (boundLeverPos == null) return;

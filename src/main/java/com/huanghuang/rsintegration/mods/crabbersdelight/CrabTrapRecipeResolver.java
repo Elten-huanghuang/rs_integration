@@ -9,9 +9,13 @@ import net.minecraft.world.item.crafting.Recipe;
 import javax.annotation.Nullable;
 
 /**
- * Resolves CrabbersDelight crab trap loot recipes from synthetic JEI IDs.
+ * Resolves CrabbersDelight crab trap loot entries from synthetic JEI IDs.
  * The JEI wrapper has no getId(), so the client sends a synthetic ID:
- * {@code crabbersdelight:crab_trap_loot/namespace/path}.
+ * {@code crabbersdelight:crab_trap_loot/<namespace>/<path>}.
+ * <p>
+ * Crab trap bait→loot mappings use loot tables, not standard recipes,
+ * so this resolver creates a {@link CrabTrapLootWrapper} that bridges
+ * the gap for the batch crafting system.
  */
 public final class CrabTrapRecipeResolver {
     private CrabTrapRecipeResolver() {}
@@ -21,7 +25,7 @@ public final class CrabTrapRecipeResolver {
         if (!"crabbersdelight".equals(recipeId.getNamespace())) return null;
         String path = recipeId.getPath();
         if (!path.startsWith("crab_trap_loot/")) return null;
-        // Path: crab_trap_loot/<itemNamespace>/<itemPath>
+
         String rest = path.substring("crab_trap_loot/".length());
         int slash = rest.indexOf('/');
         if (slash <= 0) return null;
@@ -29,15 +33,12 @@ public final class CrabTrapRecipeResolver {
         String itemPath = rest.substring(slash + 1);
         ResourceLocation itemId = new ResourceLocation(itemNs, itemPath);
 
-        for (Recipe<?> r : level.getRecipeManager().getRecipes()) {
-            if (!"crabbersdelight".equals(r.getId().getNamespace())) continue;
-            if (!r.getIngredients().isEmpty()) {
-                for (ItemStack match : r.getIngredients().get(0).getItems()) {
-                    ResourceLocation key = BuiltInRegistries.ITEM.getKey(match.getItem());
-                    if (itemId.equals(key)) return r;
-                }
-            }
-        }
-        return null;
+        // Resolve the bait item from the registry
+        var item = BuiltInRegistries.ITEM.get(itemId);
+        if (item == null) return null;
+        ItemStack bait = new ItemStack(item);
+
+        // Return a virtual wrapper — crab trap uses loot tables, not recipes
+        return new CrabTrapLootWrapper(recipeId, bait);
     }
 }

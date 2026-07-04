@@ -396,6 +396,7 @@
   "gui.rs_integration.jei.aether_altar_craft": "Craft via Aether Altar",
   "gui.rs_integration.jei.crockpot_cook": "Cook via Crock Pot",
   "gui.rs_integration.jei.immortalers_cooler_craft": "Craft via Enchantal Cooler",
+  "rsi.batch.mod.crabbersdelight": "Crab Trap",
   "rsi.batch.mod.crockpot": "Crock Pot Cooking",
   "rsi.aether.incubation_warning": "§6Incubation recipes produce entities, not items. RS cannot recover the result.",
   "rsi.aether.fuel_warning": "§7Aether machines (Freezer/Altar/Incubator) require machine-specific fuel, not regular furnace fuel. Check JEI for valid fuel items.",
@@ -409,5 +410,7 @@
   "gui.rs_integration.jei.avaritia_compressor": "Compress via Neutron Compressor",
   "gui.rs_integration.jei.avaritia_smithing": "Smith via Extreme Smithing Table",
   "rsi.batch.mod.tacz": "Gun Smith Table",
-  "gui.rs_integration.jei.tacz_craft": "Craft via Gun Smith Table"
+  "gui.rs_integration.jei.tacz_craft": "Craft via Gun Smith Table",
+  "rsi.crabtrap.error.not_crab_trap": "Not a Crab Trap at this location",
+  "rsi.crabtrap.error.bait_insert_failed": "Failed to insert bait into Crab Trap"
 }

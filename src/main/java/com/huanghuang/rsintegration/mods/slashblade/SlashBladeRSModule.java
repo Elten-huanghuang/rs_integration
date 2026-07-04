@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.mods.slashblade;
 
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.crafting.batch.GenericBatchDelegate;
 import com.huanghuang.rsintegration.mods.IModIntegration;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.recipe.SlashBladeRecipeHandler;
@@ -30,7 +31,7 @@ public final class SlashBladeRSModule implements IModIntegration {
         ModType.register("slashblade",
                 new String[]{"mods.flammpfeil.slashblade.recipe.SlashBladeShapedRecipe"},
                 new String[0], new String[0],
-                com.huanghuang.rsintegration.crafting.batch.GenericBatchDelegate::new);
+                GenericBatchDelegate::new);
     }
 
     @Override

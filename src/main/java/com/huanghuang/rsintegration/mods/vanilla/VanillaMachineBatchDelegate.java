@@ -67,6 +67,18 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         this.myDim = level.dimension();
 
         Recipe<?> found = level.getRecipeManager().byKey(recipeId).orElse(null);
+        // CraftTweaker wraps vanilla recipes with IDs like
+        //   crafttweaker:minecraft.coast_armor_trim_smithing_template
+        // Recover the original key: replace first dot in path with colon.
+        if (found == null && "crafttweaker".equals(recipeId.getNamespace())) {
+            String path = recipeId.getPath();
+            int dot = path.indexOf('.');
+            if (dot > 0) {
+                ResourceLocation vanillaKey = new ResourceLocation(
+                        path.substring(0, dot), path.substring(dot + 1));
+                found = level.getRecipeManager().byKey(vanillaKey).orElse(null);
+            }
+        }
         if (found == null) {
             player.sendSystemMessage(Component.translatable("rsi.generic.error.recipe_not_found", recipeId.toString()));
             return false;

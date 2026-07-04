@@ -33,6 +33,7 @@ import com.huanghuang.rsintegration.crafting.PreviewRateLimiter;
 import com.huanghuang.rsintegration.network.BindingEventHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.util.TextBuilder;
+import com.huanghuang.rsintegration.util.ModIds;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
@@ -303,7 +304,7 @@ public final class GenericCraftPacket {
         // RecipeManager (e.g. forbidden_arcanus:smithing/apply_eternal_modifier)
         // but the JEI fake recipe sends only the synthetic ID
         // (e.g. forbidden_arcanus:apply_eternal_modifier).
-        if ("forbidden_arcanus".equals(recipeId.getNamespace())) {
+        if (ModIds.FORBIDDEN_ARCANUS.equals(recipeId.getNamespace())) {
             recipe = level.getRecipeManager().byKey(
                     new ResourceLocation(recipeId.getNamespace(),
                             "smithing/" + recipeId.getPath())).orElse(null);
@@ -889,11 +890,11 @@ public final class GenericCraftPacket {
                     targetOutput.getCount(), targetOutput.isEmpty(),
                     recipeModType != null ? recipeModType.id() : "null");
             if (targetOutput.isEmpty() && recipeModType != null
-                    && !"embers_alchemy".equals(recipeModType.id())
-                    && !"aetherworks_anvil".equals(recipeModType.id())
-                    && !"touhou_little_maid".equals(recipeModType.id())
-                    && !"forbidden_arcanus".equals(recipeModType.id())
-                    && !"aether".equals(recipeModType.id())) {
+                    && !ModIds.ID_EMBERS_ALCHEMY.equals(recipeModType.id())
+                    && !ModIds.ID_AETHERWORKS_ANVIL.equals(recipeModType.id())
+                    && !ModIds.TOUHOU_LITTLE_MAID.equals(recipeModType.id())
+                    && !ModIds.FORBIDDEN_ARCANUS.equals(recipeModType.id())
+                    && !ModIds.AETHER.equals(recipeModType.id())) {
                 sendPlanError(player, Component.translatable("rsi.generic.error.unsupported_machine", recipe.getClass().getSimpleName()).getString());
                 return;
             }

@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.recipe;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.util.ModIds;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.util.Reflect;
 import net.minecraft.core.RegistryAccess;
@@ -16,7 +17,7 @@ import java.util.List;
 public final class EreAlchemyRecipeHandler implements ModRecipeHandler {
 
     @Override
-    public ModType modType() { return ModType.byId("embers_alchemy"); }
+    public ModType modType() { return ModType.byId(ModIds.ID_EMBERS_ALCHEMY); }
 
     @Override
     public boolean canHandle(Recipe<?> recipe) {
