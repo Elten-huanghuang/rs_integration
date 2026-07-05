@@ -139,7 +139,11 @@ public final class RSSidePanelClient {
      * Must be called during mod construction so the key-mapping listener is
      * added before {@code RegisterKeyMappingsEvent} fires.
      */
+    private static volatile boolean keyMappingsRegistered;
+
     public static void registerKeyMappings() {
+        if (keyMappingsRegistered) return;
+        keyMappingsRegistered = true;
         KEY_TOGGLE_PANEL = new KeyMapping(
                 "key.rsi.side_panel",
                 KeyConflictContext.UNIVERSAL,

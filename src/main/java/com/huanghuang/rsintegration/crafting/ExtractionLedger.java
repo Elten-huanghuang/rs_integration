@@ -480,9 +480,15 @@ public final class ExtractionLedger {
                 }
             }
 
+            // Prefer untagged stacks; only skip tagged ones when pass1 alone
+            // is sufficient.  Otherwise we MUST draw from both pools or the
+            // pendingNet reservation won't cover the full needed count,
+            // cascading into false negatives for subsequent specs.
+            boolean pass1Sufficient = pass1Total >= needed;
             ItemStack chosen = ItemStack.EMPTY;
-            if (pass1Total >= needed && !pass1Template.isEmpty()) chosen = pass1Template;
-            else if (pass1Total + pass2Total >= needed) {
+            if (pass1Sufficient && !pass1Template.isEmpty()) {
+                chosen = pass1Template;
+            } else if (pass1Total + pass2Total >= needed) {
                 if (!pass1Template.isEmpty()) chosen = pass1Template;
                 else if (!pass2Template.isEmpty()) chosen = pass2Template;
             }
@@ -496,8 +502,7 @@ public final class ExtractionLedger {
                 int available = stored.getCount()
                         - pendingNet.getOrDefault(CraftingResolver.StackKey.of(stored, true), 0);
                 if (available <= 0) continue;
-                // Only distribute within the chosen pass (no-tag priority)
-                if (chosen == pass1Template && stored.hasTag()) continue;
+                if (pass1Sufficient && stored.hasTag()) continue;
                 int contrib = Math.min(remaining, available);
                 pendingNet.merge(CraftingResolver.StackKey.of(stored, true), contrib, Integer::sum);
                 remaining -= contrib;
@@ -592,9 +597,11 @@ public final class ExtractionLedger {
             }
         }
 
+        boolean pass1Sufficient = pass1Total >= needed;
         ItemStack chosen = ItemStack.EMPTY;
-        if (pass1Total >= needed && !pass1Template.isEmpty()) chosen = pass1Template;
-        else if (pass1Total + pass2Total >= needed) {
+        if (pass1Sufficient && !pass1Template.isEmpty()) {
+            chosen = pass1Template;
+        } else if (pass1Total + pass2Total >= needed) {
             if (!pass1Template.isEmpty()) chosen = pass1Template;
             else if (!pass2Template.isEmpty()) chosen = pass2Template;
         }
@@ -608,7 +615,7 @@ public final class ExtractionLedger {
             int available = stack.getCount()
                     - pendingInv.getOrDefault(CraftingResolver.StackKey.of(stack, true), 0);
             if (available <= 0) continue;
-            if (chosen == pass1Template && stack.hasTag()) continue;
+            if (pass1Sufficient && stack.hasTag()) continue;
             int contrib = Math.min(remaining, available);
             pendingInv.merge(CraftingResolver.StackKey.of(stack, true), contrib, Integer::sum);
             remaining -= contrib;
@@ -623,7 +630,7 @@ public final class ExtractionLedger {
                 int available = stack.getCount()
                         - pendingInv.getOrDefault(CraftingResolver.StackKey.of(stack, true), 0);
                 if (available <= 0) continue;
-                if (chosen == pass1Template && stack.hasTag()) continue;
+                if (pass1Sufficient && stack.hasTag()) continue;
                 int contrib = Math.min(remaining, available);
                 pendingInv.merge(CraftingResolver.StackKey.of(stack, true), contrib, Integer::sum);
                 remaining -= contrib;

@@ -18,8 +18,10 @@ import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.AbstractFurnaceBlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraftforge.registries.ForgeRegistries;
 import net.minecraftforge.common.ForgeHooks;
+import net.minecraftforge.common.world.ForgeChunkManager;
 import net.minecraftforge.items.ItemHandlerHelper;
 
 import javax.annotation.Nullable;
@@ -43,7 +45,44 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
 
     private enum MachineKind {
         FURNACE,
+        CAMPFIRE,
         VIRTUAL
+    }
+
+    // CAMPFIRE path state
+    private int campfireSlot = -1;
+    private Object campfireBE;
+    private boolean campfireChunkForced;
+    private static final java.lang.reflect.Field CAMPFIRE_ITEMS;
+    private static final java.lang.reflect.Field CAMPFIRE_COOKING_PROGRESS;
+    private static final java.lang.reflect.Field CAMPFIRE_COOKING_TIME;
+
+    static {
+        java.lang.reflect.Field items = null;
+        java.lang.reflect.Field cookingProgress = null;
+        java.lang.reflect.Field cookingTime = null;
+        try {
+            Class<?> cfb = Class.forName(
+                    "net.minecraft.world.level.block.entity.CampfireBlockEntity");
+            items = resolveCampfireField(cfb, "items", "f_59042_");
+            cookingProgress = resolveCampfireField(cfb, "cookingProgress", "f_59043_");
+            cookingTime = resolveCampfireField(cfb, "cookingTime", "f_59044_");
+        } catch (Exception ignored) {}
+        CAMPFIRE_ITEMS = items;
+        CAMPFIRE_COOKING_PROGRESS = cookingProgress;
+        CAMPFIRE_COOKING_TIME = cookingTime;
+    }
+
+    @Nullable
+    private static java.lang.reflect.Field resolveCampfireField(Class<?> clazz, String official, String srg) {
+        for (String name : new String[]{official, srg}) {
+            try {
+                java.lang.reflect.Field f = clazz.getDeclaredField(name);
+                f.setAccessible(true);
+                return f;
+            } catch (NoSuchFieldException ignored) {}
+        }
+        return null;
     }
 
     @Override
@@ -89,8 +128,11 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         if (be == null) {
             String blockId = ForgeRegistries.BLOCKS
                     .getKey(level.getBlockState(pos).getBlock()).toString();
-            // Smithing Table has no BE — always VIRTUAL.
-            if (blockId.contains("smithing_table") || blockId.contains("campfire")) {
+            // Smithing Table and Stonecutter have no BE (or BE is unloaded)
+            // — always VIRTUAL. Campfire also falls back to VIRTUAL when
+            // the chunk is not loaded.
+            if (blockId.contains("smithing_table") || blockId.contains("campfire")
+                    || blockId.contains("stonecutter")) {
                 this.kind = MachineKind.VIRTUAL;
             } else if (recipe instanceof AbstractCookingRecipe
                     && blockMatchesCooking(blockId, recipe)) {
@@ -111,20 +153,25 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
                 this.kind = MachineKind.VIRTUAL;
                 return true;
             }
-            // Validate furnace type matches recipe type
+            // Validate furnace type matches recipe type (safety net —
+            // classification should route recipes to the correct ModType,
+            // but mismatched bindings could still exist from older data).
             String beClassName = be.getClass().getName().toLowerCase();
             if (recipe instanceof BlastingRecipe && !beClassName.contains("blast")) {
-                player.sendSystemMessage(Component.translatable("rsi.vanilla.error.wrong_furnace_type"));
+                RSIntegrationMod.LOGGER.debug("[RSI-Vanilla] Type mismatch: BlastingRecipe on non-blast machine {} at {}",
+                        beClassName, myPos);
                 return false;
             }
             if (recipe instanceof SmokingRecipe && !beClassName.contains("smoker")) {
-                player.sendSystemMessage(Component.translatable("rsi.vanilla.error.wrong_furnace_type"));
+                RSIntegrationMod.LOGGER.debug("[RSI-Vanilla] Type mismatch: SmokingRecipe on non-smoker machine {} at {}",
+                        beClassName, myPos);
                 return false;
             }
             if (recipe instanceof SmeltingRecipe
                     && (beClassName.contains("blast") || beClassName.contains("smoker"))) {
                 if (!beClassName.contains("furnace") || beClassName.contains("blast")) {
-                    player.sendSystemMessage(Component.translatable("rsi.vanilla.error.wrong_furnace_type"));
+                    RSIntegrationMod.LOGGER.debug("[RSI-Vanilla] Type mismatch: SmeltingRecipe on wrong furnace type {} at {}",
+                            beClassName, myPos);
                     return false;
                 }
             }
@@ -145,8 +192,36 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
 
             this.furnaceBE = fbe;
             this.kind = MachineKind.FURNACE;
+        } else if (CAMPFIRE_ITEMS != null
+                && be.getClass().getName().equals(
+                        "net.minecraft.world.level.block.entity.CampfireBlockEntity")) {
+            if (!(recipe instanceof CampfireCookingRecipe)) {
+                this.kind = MachineKind.VIRTUAL;
+                return true;
+            }
+            try {
+                @SuppressWarnings("unchecked")
+                net.minecraft.core.NonNullList<ItemStack> items =
+                        (net.minecraft.core.NonNullList<ItemStack>) CAMPFIRE_ITEMS.get(be);
+                // Find an empty slot
+                int slot = -1;
+                for (int i = 0; i < items.size(); i++) {
+                    if (items.get(i).isEmpty()) { slot = i; break; }
+                }
+                if (slot < 0) {
+                    player.sendSystemMessage(Component.translatable(
+                            "rsi.vanilla.error.campfire_full"));
+                    return false;
+                }
+                this.campfireBE = be;
+                this.campfireSlot = slot;
+                this.kind = MachineKind.CAMPFIRE;
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.error("[RSI-Vanilla] Campfire reflection failed", e);
+                return false;
+            }
         } else {
-            // Other BE-backed machines: Campfire (has BE), Stonecutter (has BE)
+            // Other BE-backed machines: Stonecutter (has BE)
             this.kind = MachineKind.VIRTUAL;
         }
 
@@ -169,6 +244,8 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
 
         if (kind == MachineKind.FURNACE) {
             return tryStartFurnace(player);
+        } else if (kind == MachineKind.CAMPFIRE) {
+            return tryStartCampfire(player);
         } else {
             return tryStartVirtual(player);
         }
@@ -190,6 +267,8 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
 
         if (kind == MachineKind.FURNACE) {
             return tryStartFurnace(player);
+        } else if (kind == MachineKind.CAMPFIRE) {
+            return tryStartCampfire(player);
         } else {
             return tryStartVirtual(player);
         }
@@ -219,6 +298,8 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
 
         if (kind == MachineKind.FURNACE) {
             return tryStartFurnaceWithMaterials(materials);
+        } else if (kind == MachineKind.CAMPFIRE) {
+            return tryStartCampfireWithMaterials(materials);
         } else {
             // Virtual: materials already committed by chain, compute result directly
             this.pendingResult = computeResult();
@@ -415,6 +496,145 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         return ItemStack.EMPTY;
     }
 
+    // ── CAMPFIRE path ──────────────────────────────────────────────
+
+    private void ensureCampfireLit() {
+        net.minecraft.world.level.block.state.BlockState state = myLevel.getBlockState(myPos);
+        if (state.hasProperty(BlockStateProperties.LIT) && !state.getValue(BlockStateProperties.LIT)) {
+            myLevel.setBlock(myPos, state.setValue(BlockStateProperties.LIT, true), 3);
+        }
+    }
+
+    private boolean tryStartCampfire(ServerPlayer player) {
+        List<Ingredient> ingredients = recipe.getIngredients();
+        if (ingredients.isEmpty()) return false;
+
+        Ingredient input = ingredients.get(0);
+        if (!input.isEmpty()) {
+            ExtractionLedger activeLedger = usingSharedLedger ? sharedLedger : ledger;
+            ItemStack extracted = CraftPacketUtils.ensureMaterialAvailable(
+                    player, myDim, myPos, input, 1, activeLedger);
+            if (extracted.isEmpty()) {
+                player.sendSystemMessage(Component.translatable(
+                        "rsi.generic.error.missing_materials",
+                        CraftPacketUtils.describeIngredient(input)));
+                return false;
+            }
+            int cookTime = recipe instanceof CampfireCookingRecipe ccr ? ccr.getCookingTime() : 600;
+            try {
+                @SuppressWarnings("unchecked")
+                net.minecraft.core.NonNullList<ItemStack> items =
+                        (net.minecraft.core.NonNullList<ItemStack>) CAMPFIRE_ITEMS.get(campfireBE);
+                items.set(campfireSlot, extracted.copy());
+                int[] prog = (int[]) CAMPFIRE_COOKING_PROGRESS.get(campfireBE);
+                prog[campfireSlot] = 0;
+                int[] times = (int[]) CAMPFIRE_COOKING_TIME.get(campfireBE);
+                times[campfireSlot] = cookTime;
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.error("[RSI-Vanilla] Campfire placement failed", e);
+                return false;
+            }
+        }
+
+        if (!usingSharedLedger && ledger != null && !ledger.isCommitted()) {
+            if (!ledger.commit(network, player)) {
+                clearCampfireSlot();
+                return false;
+            }
+        }
+
+        ensureCampfireLit();
+        if (campfireBE instanceof BlockEntity be) be.setChanged();
+        myLevel.sendBlockUpdated(myPos,
+                myLevel.getBlockState(myPos), myLevel.getBlockState(myPos), 3);
+        campfireForceLoad(true);
+        return true;
+    }
+
+    private boolean tryStartCampfireWithMaterials(List<ItemStack> materials) {
+        if (materials.isEmpty()) return false;
+
+        int cookTime = recipe instanceof CampfireCookingRecipe ccr ? ccr.getCookingTime() : 600;
+        try {
+            @SuppressWarnings("unchecked")
+            net.minecraft.core.NonNullList<ItemStack> items =
+                    (net.minecraft.core.NonNullList<ItemStack>) CAMPFIRE_ITEMS.get(campfireBE);
+            items.set(campfireSlot, materials.get(0).copy());
+            int[] prog = (int[]) CAMPFIRE_COOKING_PROGRESS.get(campfireBE);
+            prog[campfireSlot] = 0;
+            int[] times = (int[]) CAMPFIRE_COOKING_TIME.get(campfireBE);
+            times[campfireSlot] = cookTime;
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.error("[RSI-Vanilla] Campfire placement failed", e);
+            return false;
+        }
+
+        ensureCampfireLit();
+        if (campfireBE instanceof BlockEntity be) be.setChanged();
+        myLevel.sendBlockUpdated(myPos,
+                myLevel.getBlockState(myPos), myLevel.getBlockState(myPos), 3);
+        campfireForceLoad(true);
+        return true;
+    }
+
+    private boolean isCampfireComplete() {
+        // Vanilla CampfireBlockEntity.cookTick increments cookingProgress
+        // each tick; when it reaches cookingTime the result is spawned as an
+        // ItemEntity and the slot is cleared.  Detect completion by the slot
+        // being empty.
+        try {
+            @SuppressWarnings("unchecked")
+            net.minecraft.core.NonNullList<ItemStack> items =
+                    (net.minecraft.core.NonNullList<ItemStack>) CAMPFIRE_ITEMS.get(campfireBE);
+            return items.get(campfireSlot).isEmpty();
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private ItemStack collectCampfireResult() {
+        campfireForceLoad(false);
+
+        // Vanilla spawned the result as an ItemEntity above the campfire.
+        // Capture it for full NBT fidelity.
+        if (myLevel != null && myLevel.isLoaded(myPos)) {
+            List<net.minecraft.world.entity.item.ItemEntity> entities =
+                    myLevel.getEntitiesOfClass(net.minecraft.world.entity.item.ItemEntity.class,
+                            new net.minecraft.world.phys.AABB(myPos).inflate(2.0));
+            for (net.minecraft.world.entity.item.ItemEntity entity : entities) {
+                if (!entity.isRemoved()) {
+                    ItemStack stack = entity.getItem();
+                    if (!stack.isEmpty()) {
+                        entity.discard();
+                        return stack.copy();
+                    }
+                }
+            }
+        }
+
+        // Fallback: entity already despawned or chunk unloaded
+        return computeResult();
+    }
+
+    private void clearCampfireSlot() {
+        try {
+            @SuppressWarnings("unchecked")
+            net.minecraft.core.NonNullList<ItemStack> items =
+                    (net.minecraft.core.NonNullList<ItemStack>) CAMPFIRE_ITEMS.get(campfireBE);
+            ItemStack slotItem = items.get(campfireSlot);
+            if (!slotItem.isEmpty()) {
+                refundToRSNetwork(slotItem.copy());
+            }
+            items.set(campfireSlot, ItemStack.EMPTY);
+            int[] prog = (int[]) CAMPFIRE_COOKING_PROGRESS.get(campfireBE);
+            prog[campfireSlot] = 0;
+            int[] times = (int[]) CAMPFIRE_COOKING_TIME.get(campfireBE);
+            times[campfireSlot] = 0;
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.error("[RSI-Vanilla] Campfire clear failed", e);
+        }
+    }
+
     private static boolean blockMatchesCooking(String blockId, Recipe<?> recipe) {
         if (recipe instanceof BlastingRecipe) return blockId.contains("blast_furnace");
         if (recipe instanceof SmokingRecipe) return blockId.contains("smoker");
@@ -427,6 +647,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
     @Override
     public boolean isCraftComplete(ServerLevel level) {
         if (kind == MachineKind.VIRTUAL) return craftDone;
+        if (kind == MachineKind.CAMPFIRE) return isCampfireComplete();
 
         if (furnaceBE == null) return true;
 
@@ -442,6 +663,9 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
             pendingResult = ItemStack.EMPTY;
             craftDone = false;
             return r;
+        }
+        if (kind == MachineKind.CAMPFIRE) {
+            return collectCampfireResult();
         }
 
         if (furnaceBE == null) return ItemStack.EMPTY;
@@ -482,6 +706,10 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
             // Do NOT refund fuel from slot 1 (already partially consumed)
             furnaceBE.setChanged();
         }
+        if (kind == MachineKind.CAMPFIRE && campfireBE != null) {
+            campfireForceLoad(false);
+            clearCampfireSlot();
+        }
 
         // Rollback uncommitted private ledger
         if (!usingSharedLedger && ledger != null && !ledger.isCommitted()) {
@@ -496,6 +724,9 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public void onBatchFinished(ServerPlayer player) {
+        if (kind == MachineKind.CAMPFIRE) {
+            campfireForceLoad(false);
+        }
         pendingResult = ItemStack.EMPTY;
         craftDone = false;
         fuelStacks = null;
@@ -508,6 +739,19 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
     }
 
     // ── helpers ───────────────────────────────────────────────────
+
+    private void campfireForceLoad(boolean load) {
+        if (campfireChunkForced == load) return;
+        try {
+            int cx = myPos.getX() >> 4;
+            int cz = myPos.getZ() >> 4;
+            ForgeChunkManager.forceChunk(myLevel, RSIntegrationMod.MOD_ID,
+                    myPos, cx, cz, load, true);
+            campfireChunkForced = load;
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-Vanilla] Campfire chunk force-load failed: {}", e.toString());
+        }
+    }
 
     private void refundToRSNetwork(ItemStack stack) {
         if (network != null) {

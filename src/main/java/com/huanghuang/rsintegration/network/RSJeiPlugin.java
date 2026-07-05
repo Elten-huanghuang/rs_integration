@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.network;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.jei.JeiMarqueeSelector;
 import com.huanghuang.rsintegration.mods.goety.GoetyRSModule;
 import com.huanghuang.rsintegration.sidepanel.RSInventoryTransferHandler;
 import com.huanghuang.rsintegration.util.ModIds;
@@ -38,6 +39,7 @@ public final class RSJeiPlugin implements IModPlugin {
     public void onRuntimeAvailable(@NotNull IJeiRuntime jeiRuntime) {
         cachedRuntime = jeiRuntime;
         if (!RSIntegrationConfig.ENABLE_JEI.get()) return;
+        JeiMarqueeSelector.register();
         if (RSIntegrationConfig.ENABLE_GOETY.get() && ModList.get().isLoaded(ModIds.GOETY)) {
             GoetyRSModule.INSTANCE.onJeiRuntimeAvailable(jeiRuntime);
         }
@@ -45,6 +47,7 @@ public final class RSJeiPlugin implements IModPlugin {
 
     @Override
     public void onRuntimeUnavailable() {
+        JeiMarqueeSelector.unregister();
         cachedRuntime = null;
         if (RSIntegrationConfig.ENABLE_GOETY.get() && ModList.get().isLoaded(ModIds.GOETY)) {
             GoetyRSModule.INSTANCE.onJeiRuntimeUnavailable();

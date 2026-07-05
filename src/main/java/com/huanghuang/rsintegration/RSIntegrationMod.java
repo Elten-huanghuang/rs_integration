@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration;
 
 import com.huanghuang.rsintegration.backpack.SophisticatedBackpacksItems;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.client.RSIKeyBindings;
 import com.huanghuang.rsintegration.crafting.AsyncCraftManager;
 import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
 import com.huanghuang.rsintegration.mods.IModIntegration;
@@ -12,6 +13,8 @@ import com.huanghuang.rsintegration.mods.avaritia.AvaritiaRSModule;
 import com.huanghuang.rsintegration.mods.confluence.ConfluenceRSModule;
 import com.huanghuang.rsintegration.mods.crockpot.CrockPotRSModule;
 import com.huanghuang.rsintegration.mods.eidolon.EidolonRSModule;
+import com.huanghuang.rsintegration.mods.farmersdelight.FarmersDelightRSModule;
+import com.huanghuang.rsintegration.mods.farmersrespite.FarmersRespiteRSModule;
 import com.huanghuang.rsintegration.mods.embers.EreAlchemyRSModule;
 import com.huanghuang.rsintegration.mods.farmingforblockheads.FarmingForBlockheadsRSModule;
 import com.huanghuang.rsintegration.mods.forbidden.FaRSModule;
@@ -22,6 +25,7 @@ import com.huanghuang.rsintegration.mods.slashblade.SlashBladeRSModule;
 import com.huanghuang.rsintegration.mods.tacz.TaczRSModule;
 import com.huanghuang.rsintegration.mods.touhoulittlemaid.TlmRSModule;
 import com.huanghuang.rsintegration.mods.wizards_reborn.WizardsRebornRSModule;
+import com.huanghuang.rsintegration.mods.youkaishomecoming.YoukaisHomecomingRSModule;
 import com.huanghuang.rsintegration.network.AltarBinding;
 import com.huanghuang.rsintegration.network.AltarBindingRegistry;
 import com.huanghuang.rsintegration.network.BindingEventHandler;
@@ -108,7 +112,13 @@ public final class RSIntegrationMod {
             new ModuleEntry(ModIds.CONFLUENCE, RSIntegrationConfig.ENABLE_CONFLUENCE,
                     () -> ConfluenceRSModule.INSTANCE),
             new ModuleEntry(ModIds.IMMORTERS_DELIGHT, RSIntegrationConfig.ENABLE_IMMORTERS_DELIGHT,
-                    () -> ImmortalersDelightRSModule.INSTANCE)
+                    () -> ImmortalersDelightRSModule.INSTANCE),
+            new ModuleEntry(ModIds.FARMERSDELIGHT, RSIntegrationConfig.ENABLE_FARMERSDELIGHT,
+                    () -> FarmersDelightRSModule.INSTANCE),
+            new ModuleEntry(ModIds.YOUKAISHOMECOMING, RSIntegrationConfig.ENABLE_YOUKAISHOMECOMING,
+                    () -> YoukaisHomecomingRSModule.INSTANCE),
+            new ModuleEntry(ModIds.FARMERSRESPITE, RSIntegrationConfig.ENABLE_FARMERSRESPITE,
+                    () -> FarmersRespiteRSModule.INSTANCE)
     );
 
     public RSIntegrationMod() {
@@ -125,6 +135,8 @@ public final class RSIntegrationMod {
                 () -> ContainerTransferClient::registerKeyMappings);
         DistExecutor.safeRunWhenOn(Dist.CLIENT,
                 () -> RSSidePanelClient::registerKeyMappings);
+        DistExecutor.safeRunWhenOn(Dist.CLIENT,
+                () -> RSIKeyBindings::registerKeyMappings);
 
         FMLJavaModLoadingContext.get().getModEventBus().addListener(this::onCommonSetup);
     }
@@ -188,31 +200,116 @@ public final class RSIntegrationMod {
 
         // --- Vanilla Machines (built-in, not IModIntegration) ----------
         if (RSIntegrationConfig.ENABLE_VANILLA_MACHINES.get()) {
-            ModType.register("vanilla_machine",
-                    new String[]{
-                            "net.minecraft.world.item.crafting.SmeltingRecipe",
-                            "net.minecraft.world.item.crafting.BlastingRecipe",
-                            "net.minecraft.world.item.crafting.SmokingRecipe",
-                            "net.minecraft.world.item.crafting.CampfireCookingRecipe",
-                            "net.minecraft.world.item.crafting.StonecutterRecipe"
-                    },
-                    new String[]{"furnace", "smoker", "stonecutter"},
-                    new String[]{"vanilla_machine"},
-                    ModType.delegateSupplier("com.huanghuang.rsintegration.mods.vanilla.VanillaMachineBatchDelegate"));
+            String delegateClass = "com.huanghuang.rsintegration.mods.vanilla.VanillaMachineBatchDelegate";
+
+            // ── Furnace ────────────────────────────────────────────
+            ModType.register("vanilla_furnace",
+                    new String[]{"net.minecraft.world.item.crafting.SmeltingRecipe"},
+                    new String[]{"furnace"},
+                    new String[]{"vanilla_furnace"},
+                    ModType.delegateSupplier(delegateClass));
+            ModType.configureJei("vanilla_furnace",
+                    new String[][]{{"minecraft:smelting", "vanilla_furnace"}},
+                    new String[][]{{"net.minecraft.world.item.crafting.SmeltingRecipe", "vanilla_furnace"}},
+                    "gui.rs_integration.jei.vanilla_furnace_craft");
             BindingEventHandler.registerTarget(
                     new BindingEventHandler.MachineBindingTarget(
-                            "minecraft", ModType.byId("vanilla_machine"),
+                            "minecraft", ModType.byId("vanilla_furnace"),
                             RSIntegrationConfig.ENABLE_VANILLA_MACHINES,
-                            List.of(
-                                    "net.minecraft.world.level.block.FurnaceBlock",
-                                    "net.minecraft.world.level.block.BlastFurnaceBlock",
-                                    "net.minecraft.world.level.block.SmokerBlock",
-                                    "net.minecraft.world.level.block.StonecutterBlock",
-                                    "net.minecraft.world.level.block.AnvilBlock",
-                                    "net.minecraft.world.level.block.EnchantmentTableBlock"
-                            ),
-                            "vanilla_machine"
-                    ));
+                            List.of("net.minecraft.world.level.block.FurnaceBlock"),
+                            "vanilla_furnace"));
+
+            // ── Blast Furnace ──────────────────────────────────────
+            ModType.register("vanilla_blast_furnace",
+                    new String[]{"net.minecraft.world.item.crafting.BlastingRecipe"},
+                    new String[]{"blast_furnace"},
+                    new String[]{"vanilla_blast_furnace"},
+                    ModType.delegateSupplier(delegateClass));
+            ModType.configureJei("vanilla_blast_furnace",
+                    new String[][]{{"minecraft:blasting", "vanilla_blast_furnace"}},
+                    new String[][]{{"net.minecraft.world.item.crafting.BlastingRecipe", "vanilla_blast_furnace"}},
+                    "gui.rs_integration.jei.vanilla_blast_furnace_craft");
+            BindingEventHandler.registerTarget(
+                    new BindingEventHandler.MachineBindingTarget(
+                            "minecraft", ModType.byId("vanilla_blast_furnace"),
+                            RSIntegrationConfig.ENABLE_VANILLA_MACHINES,
+                            List.of("net.minecraft.world.level.block.BlastFurnaceBlock"),
+                            "vanilla_blast_furnace"));
+
+            // ── Smoker ─────────────────────────────────────────────
+            ModType.register("vanilla_smoker",
+                    new String[]{"net.minecraft.world.item.crafting.SmokingRecipe"},
+                    new String[]{"smoker"},
+                    new String[]{"vanilla_smoker"},
+                    ModType.delegateSupplier(delegateClass));
+            ModType.configureJei("vanilla_smoker",
+                    new String[][]{{"minecraft:smoking", "vanilla_smoker"}},
+                    new String[][]{{"net.minecraft.world.item.crafting.SmokingRecipe", "vanilla_smoker"}},
+                    "gui.rs_integration.jei.vanilla_smoker_craft");
+            BindingEventHandler.registerTarget(
+                    new BindingEventHandler.MachineBindingTarget(
+                            "minecraft", ModType.byId("vanilla_smoker"),
+                            RSIntegrationConfig.ENABLE_VANILLA_MACHINES,
+                            List.of("net.minecraft.world.level.block.SmokerBlock"),
+                            "vanilla_smoker"));
+
+            // ── Campfire (no GUI) ──────────────────────────────────
+            // When FD is loaded, farmersdelight_skillet handles all
+            // CampfireCookingRecipe classification and campfire binding.
+            // Avoid registering vanilla_campfire at all — if both it and
+            // farmersdelight_skillet are registered with the same recipe
+            // prefix, classifyRecipe's >= tiebreaker picks whichever was
+            // registered last (vanilla, since modules run first in
+            // onCommonSetup).  That would route campfire recipes to
+            // vanilla_campfire, whose bindings don't exist (campfires are
+            // bound under farmersdelight_skillet by FD's module).
+            if (!ModList.get().isLoaded("farmersdelight")) {
+                ModType.register("vanilla_campfire",
+                        new String[]{"net.minecraft.world.item.crafting.CampfireCookingRecipe"},
+                        new String[]{"campfire"},
+                        new String[]{"vanilla_campfire"},
+                        ModType.delegateSupplier(delegateClass));
+                ModType.configureJei("vanilla_campfire",
+                        new String[][]{{"minecraft:campfire_cooking", "vanilla_campfire"}},
+                        new String[][]{{"net.minecraft.world.item.crafting.CampfireCookingRecipe", "vanilla_campfire"}},
+                        "gui.rs_integration.jei.vanilla_campfire_craft");
+                BindingEventHandler.registerTarget(
+                        new BindingEventHandler.MachineBindingTarget(
+                                "minecraft", ModType.byId("vanilla_campfire"),
+                                RSIntegrationConfig.ENABLE_VANILLA_MACHINES,
+                                List.of("net.minecraft.world.level.block.CampfireBlock"),
+                                "vanilla_campfire", false));
+            }
+
+            // ── Stonecutter ────────────────────────────────────────
+            ModType.register("vanilla_stonecutter",
+                    new String[]{"net.minecraft.world.item.crafting.StonecutterRecipe"},
+                    new String[]{"stonecutter"},
+                    new String[]{"vanilla_stonecutter"},
+                    ModType.delegateSupplier(delegateClass));
+            ModType.configureJei("vanilla_stonecutter",
+                    new String[][]{{"minecraft:stonecutting", "vanilla_stonecutter"}},
+                    new String[][]{{"net.minecraft.world.item.crafting.StonecutterRecipe", "vanilla_stonecutter"}},
+                    "gui.rs_integration.jei.vanilla_stonecutter_craft");
+            BindingEventHandler.registerTarget(
+                    new BindingEventHandler.MachineBindingTarget(
+                            "minecraft", ModType.byId("vanilla_stonecutter"),
+                            RSIntegrationConfig.ENABLE_VANILLA_MACHINES,
+                            List.of("net.minecraft.world.level.block.StonecutterBlock"),
+                            "vanilla_stonecutter"));
+
+            // ── Anvil (JEI-only, opens remote GUI) ─────────────────
+            ModType.register("vanilla_anvil",
+                    new String[0],
+                    new String[]{"anvil"},
+                    new String[]{"vanilla_anvil"},
+                    ModType.delegateSupplier(delegateClass));
+            BindingEventHandler.registerTarget(
+                    new BindingEventHandler.MachineBindingTarget(
+                            "minecraft", ModType.byId("vanilla_anvil"),
+                            RSIntegrationConfig.ENABLE_VANILLA_MACHINES,
+                            List.of("net.minecraft.world.level.block.AnvilBlock"),
+                            "vanilla_anvil"));
 
             // Smithing table -> separate ModType so it shows as smithing, not furnace
             ModType.register("smithing",

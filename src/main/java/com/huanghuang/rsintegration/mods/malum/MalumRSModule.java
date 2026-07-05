@@ -35,14 +35,23 @@ public final class MalumRSModule implements IModIntegration {
                 new String[]{"spirit_crucible"},
                 new String[]{"malum_spirit_crucible"},
                 ModType.delegateSupplier("com.huanghuang.rsintegration.mods.malum.MalumSpiritCrucibleBatchDelegate"));
+        ModType.register("malum_runic_workbench",
+                new String[]{"com.sammy.malum.common.recipe.RunicWorkbenchRecipe"},
+                new String[]{"runic_workbench"},
+                new String[0],
+                MalumRunicWorkbenchBatchDelegate::new);
         ModType.register("malum",
                 new String[]{"com.sammy.malum."},
                 new String[]{"malum"},
-                new String[0],
+                new String[]{"malum"},
                 ModType.delegateSupplier("com.huanghuang.rsintegration.mods.malum.MalumBatchDelegate"));
         ModType.configureJei("malum",
                 new String[][]{{"malum:spirit_infusion", "spirit_altar"}, {"malum:spirit_focusing", "spirit_crucible"}},
                 new String[][]{{"com.sammy.malum.common.recipe.SpiritFocusingRecipe", "spirit_crucible"}, {"com.sammy.malum.common.recipe.SpiritInfusionRecipe", "spirit_altar"}, {"com.sammy.malum.", "malum"}},
+                null);
+        ModType.configureJei("malum_runic_workbench",
+                new String[][]{{"malum:runeworking", "runic_workbench"}},
+                new String[][]{{"com.sammy.malum.common.recipe.RunicWorkbenchRecipe", "malum_runic_workbench"}},
                 null);
     }
 
@@ -64,6 +73,12 @@ public final class MalumRSModule implements IModIntegration {
                 "malum", ModType.byId("malum_spirit_crucible"), RSIntegrationConfig.ENABLE_MALUM, List.of(
                 "com.sammy.malum.common.block.curiosities.spirit_crucible.SpiritCrucibleComponentBlock"
         ), "malum_spirit_crucible_component", false));
+
+        // Runic Workbench — instant-craft in-world interaction (primary on table, secondary in hand right-click)
+        BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
+                "malum", ModType.byId("malum_runic_workbench"), RSIntegrationConfig.ENABLE_MALUM, List.of(
+                "com.sammy.malum.common.block.curiosities.runic_workbench.RunicWorkbenchBlock"
+        ), "malum_runic_workbench", false));
     }
 
     @Override

@@ -32,6 +32,7 @@
     "jei.GuiIconToggleButtonAccessor",
     "jei.RecipeGuiLayoutsMixin",
     "jei.RecipesGuiMixin",
+    "jei.RecipeBookmarkMixin",
     "minecraft.AbstractContainerScreenAccessor",
     "minecraft.MinecraftMixin",
     "refinedstorage.GridScreenMachineTabMixin",

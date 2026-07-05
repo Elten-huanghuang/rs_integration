@@ -61,7 +61,7 @@ public final class MalumRecipeHandler implements ModRecipeHandler {
             countField.setAccessible(true);
             List<IngredientSpec> result = new ArrayList<>();
 
-            // Single input field (IngredientWithCount)
+            // Spirit/Focusing recipes: single "input" field (IngredientWithCount)
             Reflect.findField(recipe.getClass(), "input").ifPresent(inputField -> {
                 if (iwcClass.get().isAssignableFrom(inputField.getType())) {
                     inputField.setAccessible(true);
@@ -76,12 +76,15 @@ public final class MalumRecipeHandler implements ModRecipeHandler {
                 }
             });
 
+            // RunicWorkbenchRecipe: primaryInput + secondaryInput (IngredientWithCount)
+            for (String fn : new String[]{"primaryInput", "secondaryInput"}) {
+                readIwcField(recipe, fn, iwcClass.get(), ingField, countField, result);
+            }
+
             // extraItems list (IngredientWithCount objects)
             readIwcList(recipe, "extraItems", iwcClass.get(), ingField, countField, result);
 
             // spirits list — SpiritWithCount implements IRecipeComponent, NOT IngredientWithCount.
-            // SpiritWithCount has: public final MalumSpiritType type, public final int count,
-            // public Item getItem() → type.spiritShard.get()
             readSpiritList(recipe, "spirits", result);
 
             return result.isEmpty() ? null : result;
@@ -105,6 +108,22 @@ public final class MalumRecipeHandler implements ModRecipeHandler {
                         int count = countField.getInt(iwc);
                         if (ing != null && count > 0) out.add(new IngredientSpec(ing, count));
                     }
+                }
+            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
+        });
+    }
+
+    private void readIwcField(Object recipe, String fieldName, Class<?> iwcClass,
+                               Field ingField, Field countField, List<IngredientSpec> out) {
+        Reflect.findField(recipe.getClass(), fieldName).ifPresent(f -> {
+            if (!iwcClass.isAssignableFrom(f.getType())) return;
+            f.setAccessible(true);
+            try {
+                Object iwc = f.get(recipe);
+                if (iwc != null) {
+                    Ingredient ing = (Ingredient) ingField.get(iwc);
+                    int count = countField.getInt(iwc);
+                    if (ing != null && count > 0) out.add(new IngredientSpec(ing, count));
                 }
             } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
         });

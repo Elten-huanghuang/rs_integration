@@ -140,6 +140,8 @@ public final class CrabTrapBatchDelegate extends AbstractBatchDelegate {
 
         if (materials.isEmpty() || wrapper == null) return false;
 
+        myLevel.getChunk(myPos);
+
         BlockEntity be = myLevel.getBlockEntity(myPos);
         if (be == null || !be.getClass().getName().equals(BE_CLASS)) {
             RSIntegrationMod.LOGGER.warn("[RSI-CrabTrap] BlockEntity missing at {}", myPos);
@@ -248,6 +250,7 @@ public final class CrabTrapBatchDelegate extends AbstractBatchDelegate {
     }
 
     private void clearMachineSlotsAndRefund() {
+        myLevel.getChunk(myPos);
         BlockEntity be = myLevel.getBlockEntity(myPos);
         if (be == null) return;
         if (!be.getClass().getName().equals(BE_CLASS)) return;
@@ -297,12 +300,13 @@ public final class CrabTrapBatchDelegate extends AbstractBatchDelegate {
     @Nullable
     private static IItemHandler getInventory(BlockEntity be) {
         probeReflection();
-        if (inventoryField == null) return null;
-        try {
-            return (IItemHandler) inventoryField.get(be);
-        } catch (Exception e) {
-            return null;
+        if (inventoryField != null) {
+            try {
+                return (IItemHandler) inventoryField.get(be);
+            } catch (Exception ignored) {}
         }
+        return be.getCapability(net.minecraftforge.common.capabilities.ForgeCapabilities.ITEM_HANDLER)
+                .resolve().orElse(null);
     }
 
     private void forceChunkLoad(boolean load) {

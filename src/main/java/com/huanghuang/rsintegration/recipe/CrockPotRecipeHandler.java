@@ -15,11 +15,13 @@ import net.minecraftforge.registries.ForgeRegistries;
 import javax.annotation.Nullable;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 public final class CrockPotRecipeHandler implements ModRecipeHandler {
 
     private static final String RECIPE_CLASS = "com.sihenzhang.crockpot.recipe.cooking.CrockPotCookingRecipe";
+    public static final int CAT_COUNT = 10;
 
     @Override
     public ModType modType() { return ModType.byId("crockpot"); }
@@ -37,6 +39,22 @@ public final class CrockPotRecipeHandler implements ModRecipeHandler {
     @Nullable
     @Override
     public List<IngredientSpec> getIngredients(Recipe<?> recipe) {
+        // For recipes with category constraints, don't pad with the config
+        // filler — the plan shows only real ingredients (with food-value
+        // requirements as warnings) and execution fills remaining slots via
+        // food-value-aware selection at runtime.
+        return getSpecificIngredients(recipe, !hasCategoryConstraints(recipe));
+    }
+
+    /**
+     * Return ingredient specs for display or extraction.
+     * @param padWithFiller if true, pad remaining slots with the config filler
+     *                      for correct plan display; if false, return only the
+     *                      actual recipe requirements (used by batch delegate
+     *                      Phase 1 extraction before food-value slot filling).
+     */
+    @Nullable
+    public static List<IngredientSpec> getSpecificIngredients(Recipe<?> recipe, boolean padWithFiller) {
         try {
             Method getRequirements = recipe.getClass().getMethod("getRequirements");
             List<?> requirements = (List<?>) getRequirements.invoke(recipe);
@@ -47,14 +65,14 @@ public final class CrockPotRecipeHandler implements ModRecipeHandler {
                 slotCount += collectIngredients(req, specs);
             }
 
-            // Pad remaining slots with filler item so the plan shows exactly what
-            // the pot consumes per craft.
-            int potLevel = getPotLevel(recipe);
-            int remaining = potLevel - slotCount;
-            if (remaining > 0) {
-                Ingredient filler = resolveFillerIngredient();
-                if (filler != null) {
-                    specs.add(new IngredientSpec(filler, remaining));
+            if (padWithFiller) {
+                int potLevel = getPotLevel(recipe);
+                int remaining = potLevel - slotCount;
+                if (remaining > 0) {
+                    Ingredient filler = resolveFillerIngredient();
+                    if (filler != null) {
+                        specs.add(new IngredientSpec(filler, remaining));
+                    }
                 }
             }
 
@@ -84,32 +102,28 @@ public final class CrockPotRecipeHandler implements ModRecipeHandler {
             } else if (className.endsWith("RequirementCombinationOr")) {
                 Method getFirst = requirement.getClass().getMethod("getFirst");
                 Method getSecond = requirement.getClass().getMethod("getSecond");
-                // OR occupies 1 slot but collects both options as alternatives
                 int a = collectIngredients(getFirst.invoke(requirement), specs);
                 int b = collectIngredients(getSecond.invoke(requirement), specs);
                 return Math.max(a, b);
             }
-            // RequirementCategoryMax/Min/MaxExclusive/MinExclusive — food-value
-            // constraints that don't correspond to specific item slots.
-            // These are surfaced as plan warnings via CrockPotBatchDelegate.
             return 0;
         } catch (Exception ignored) {
             return 0;
         }
     }
 
-    private static int getPotLevel(Recipe<?> recipe) {
+    public static int getPotLevel(Recipe<?> recipe) {
         try {
             Method m = recipe.getClass().getMethod("getPotLevel");
             int level = (int) m.invoke(recipe);
-            return level > 0 ? level : 4; // 0 means "any level" → use 4 (basic pot)
+            return level > 0 ? level : 4;
         } catch (Exception e) {
-            return 4; // fallback: standard CrockPot
+            return 4;
         }
     }
 
     @Nullable
-    private static Ingredient resolveFillerIngredient() {
+    public static Ingredient resolveFillerIngredient() {
         String id = RSIntegrationConfig.CROCKPOT_FILLER_ITEM.get();
         ResourceLocation rl = ResourceLocation.tryParse(id);
         if (rl == null) return null;
@@ -118,10 +132,6 @@ public final class CrockPotRecipeHandler implements ModRecipeHandler {
         return Ingredient.of(new ItemStack(item));
     }
 
-    /**
-     * Returns the number of non-category requirements (slot-occupying items)
-     * this recipe requires, without adding filler items.
-     */
     public static int countSlotRequirements(Recipe<?> recipe) {
         try {
             Method getRequirements = recipe.getClass().getMethod("getRequirements");
@@ -159,18 +169,80 @@ public final class CrockPotRecipeHandler implements ModRecipeHandler {
         }
     }
 
-    /**
-     * Returns true if the recipe has any food-value category constraints
-     * that are not captured as concrete ingredient specs.
-     */
     public static boolean hasCategoryConstraints(Recipe<?> recipe) {
         try {
             Method getRequirements = recipe.getClass().getMethod("getRequirements");
             List<?> requirements = (List<?>) getRequirements.invoke(recipe);
             for (Object req : requirements) {
-                if (req.getClass().getName().contains("RequirementCategory")) return true;
+                if (hasCategoryConstraint(req)) return true;
             }
         } catch (Exception ignored) {}
         return false;
+    }
+
+    private static boolean hasCategoryConstraint(Object req) {
+        String name = req.getClass().getName();
+        if (name.contains("RequirementCategory")) return true;
+        if (name.endsWith("RequirementCombinationAnd")
+                || name.endsWith("RequirementCombinationOr")) {
+            try {
+                Method getFirst = req.getClass().getMethod("getFirst");
+                Method getSecond = req.getClass().getMethod("getSecond");
+                if (hasCategoryConstraint(getFirst.invoke(req))) return true;
+                if (hasCategoryConstraint(getSecond.invoke(req))) return true;
+            } catch (Exception ignored) {}
+        }
+        return false;
+    }
+
+    /**
+     * Parse category constraints from a CrockPotCookingRecipe.
+     * @return float[2][10] — [0]=mins, [1]=maxs.
+     *         mins[c] = minimum required value (0 = no min).
+     *         maxs[c] = maximum allowed value (Float.MAX_VALUE = no max).
+     */
+    public static float[][] parseCategoryConstraints(Recipe<?> recipe) {
+        float[] mins = new float[CAT_COUNT];
+        float[] maxs = new float[CAT_COUNT];
+        Arrays.fill(maxs, Float.MAX_VALUE);
+
+        try {
+            Method getRequirements = recipe.getClass().getMethod("getRequirements");
+            List<?> requirements = (List<?>) getRequirements.invoke(recipe);
+            for (Object req : requirements) {
+                collectCategoryConstraints(req, mins, maxs);
+            }
+        } catch (Exception ignored) {}
+
+        return new float[][]{mins, maxs};
+    }
+
+    private static void collectCategoryConstraints(Object req, float[] mins, float[] maxs) {
+        try {
+            String name = req.getClass().getSimpleName();
+            if (name.equals("RequirementCategoryMin")) {
+                int cat = ((Enum<?>) req.getClass().getMethod("getCategory").invoke(req)).ordinal();
+                float min = (float) req.getClass().getMethod("getMin").invoke(req);
+                mins[cat] = Math.max(mins[cat], min);
+            } else if (name.equals("RequirementCategoryMinExclusive")) {
+                int cat = ((Enum<?>) req.getClass().getMethod("getCategory").invoke(req)).ordinal();
+                float min = (float) req.getClass().getMethod("getMin").invoke(req);
+                mins[cat] = Math.max(mins[cat], min + 0.01f);
+            } else if (name.equals("RequirementCategoryMax")) {
+                int cat = ((Enum<?>) req.getClass().getMethod("getCategory").invoke(req)).ordinal();
+                float max = (float) req.getClass().getMethod("getMax").invoke(req);
+                maxs[cat] = Math.min(maxs[cat], max);
+            } else if (name.equals("RequirementCategoryMaxExclusive")) {
+                int cat = ((Enum<?>) req.getClass().getMethod("getCategory").invoke(req)).ordinal();
+                float max = (float) req.getClass().getMethod("getMax").invoke(req);
+                maxs[cat] = Math.min(maxs[cat], max - 0.01f);
+            } else if (name.equals("RequirementCombinationAnd")
+                    || name.equals("RequirementCombinationOr")) {
+                Method getFirst = req.getClass().getMethod("getFirst");
+                Method getSecond = req.getClass().getMethod("getSecond");
+                collectCategoryConstraints(getFirst.invoke(req), mins, maxs);
+                collectCategoryConstraints(getSecond.invoke(req), mins, maxs);
+            }
+        } catch (Exception ignored) {}
     }
 }

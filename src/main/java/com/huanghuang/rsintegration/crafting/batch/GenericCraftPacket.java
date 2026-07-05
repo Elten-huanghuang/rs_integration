@@ -16,7 +16,9 @@ import com.huanghuang.rsintegration.crafting.plan.PlanStep;
 import com.huanghuang.rsintegration.crafting.plan.PlanWarnings;
 import com.huanghuang.rsintegration.mods.crabbersdelight.CrabTrapRecipeResolver;
 import com.huanghuang.rsintegration.mods.crockpot.CrockPotBatchDelegate;
+import com.huanghuang.rsintegration.mods.farmersdelight.CookingPotBatchDelegate;
 import com.huanghuang.rsintegration.mods.immortalers_delight.EnchantalCoolerBatchDelegate;
+import com.huanghuang.rsintegration.mods.youkaishomecoming.moka.MokaPotBatchDelegate;
 import com.huanghuang.rsintegration.mods.embers.EmbersPlanInfo;
 import com.huanghuang.rsintegration.mods.farmingforblockheads.MarketBatchDelegate;
 import com.huanghuang.rsintegration.mods.forbidden.FaRitualHelper;
@@ -894,7 +896,9 @@ public final class GenericCraftPacket {
                     && !ModIds.ID_AETHERWORKS_ANVIL.equals(recipeModType.id())
                     && !ModIds.TOUHOU_LITTLE_MAID.equals(recipeModType.id())
                     && !ModIds.FORBIDDEN_ARCANUS.equals(recipeModType.id())
-                    && !ModIds.AETHER.equals(recipeModType.id())) {
+                    && !ModIds.AETHER.equals(recipeModType.id())
+                    && !ModIds.ID_YHK_KETTLE.equals(recipeModType.id())
+                    && !ModIds.ID_FR_KETTLE.equals(recipeModType.id())) {
                 sendPlanError(player, Component.translatable("rsi.generic.error.unsupported_machine", recipe.getClass().getSimpleName()).getString());
                 return;
             }
@@ -1366,13 +1370,30 @@ public final class GenericCraftPacket {
             } else {
                 stepIngs = CraftPacketUtils.extractIngredients(stepRecipe);
             }
-            if (stepIngs == null) continue;
-            for (Ingredient ing : stepIngs) {
-                if (ing.isEmpty()) continue;
-                ItemStack matched = matchAndConsume(ing, matAvailable);
-                if (matched != null) {
-                    neededCounts.merge(matched.getItem(), step.batches(), Integer::sum);
-                    itemSource.putIfAbsent(matched.getItem(), ing);
+            // Fallback: some mod recipes (e.g. CrockPot) don't expose
+            // getIngredients() — use extractIngredientSpecs which goes through
+            // the registered ModRecipeHandler and preserves per-ingredient counts.
+            if (stepIngs == null) {
+                List<IngredientSpec> fallbackSpecs = CraftPacketUtils.extractIngredientSpecs(stepRecipe);
+                if (fallbackSpecs != null) {
+                    for (IngredientSpec spec : fallbackSpecs) {
+                        if (spec.isEmpty()) continue;
+                        ItemStack matched = matchAndConsume(spec.ingredient(), matAvailable);
+                        if (matched != null) {
+                            neededCounts.merge(matched.getItem(),
+                                    spec.count() * step.batches(), Integer::sum);
+                            itemSource.putIfAbsent(matched.getItem(), spec.ingredient());
+                        }
+                    }
+                }
+            } else {
+                for (Ingredient ing : stepIngs) {
+                    if (ing.isEmpty()) continue;
+                    ItemStack matched = matchAndConsume(ing, matAvailable);
+                    if (matched != null) {
+                        neededCounts.merge(matched.getItem(), step.batches(), Integer::sum);
+                        itemSource.putIfAbsent(matched.getItem(), ing);
+                    }
                 }
             }
         }
@@ -1398,6 +1419,12 @@ public final class GenericCraftPacket {
                 itemAvailable, itemSource, neededCounts, repeatCount);
         // EnchantalCooler: lapis lazuli or fuel tag items
         EnchantalCoolerBatchDelegate.addFuelIfNeeded(
+                recipeModType != null ? recipeModType.id() : null,
+                itemAvailable, itemSource, neededCounts, repeatCount);
+        CookingPotBatchDelegate.addFuelIfNeeded(
+                recipeModType != null ? recipeModType.id() : null,
+                itemAvailable, itemSource, neededCounts, repeatCount);
+        MokaPotBatchDelegate.addFuelIfNeeded(
                 recipeModType != null ? recipeModType.id() : null,
                 itemAvailable, itemSource, neededCounts, repeatCount);
 

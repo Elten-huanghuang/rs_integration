@@ -171,7 +171,14 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
             List<BlockPos> allBlockPositions = Reflect.invokeExact(blockPosData, "getData",
                     new Class<?>[0]).map(l -> (List<BlockPos>) l).orElse(null);
             if (allBlockPositions != null && !allBlockPositions.isEmpty()) {
-                int targetY = myPos.getY() - 2;
+                // Find the altar bottom Y (minimum Y in blockPosList).
+                // TLM's getCentrePos uses altarY-2 where altarY is the
+                // storage-layer Y (bottom + 2), so targetY = bottom.
+                int minY = Integer.MAX_VALUE;
+                for (BlockPos bp : allBlockPositions) {
+                    if (bp.getY() < minY) minY = bp.getY();
+                }
+                int targetY = minY;
                 long sumX = 0, sumZ = 0;
                 int count = 0;
                 for (BlockPos bp : allBlockPositions) {

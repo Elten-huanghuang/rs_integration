@@ -19,7 +19,13 @@ public final class AetherworksRecipeHandler implements ModRecipeHandler {
 
     @Override
     public boolean canHandle(Recipe<?> recipe) {
-        return recipe.getClass().getName().startsWith("net.sirplop.aetherworks.");
+        // Only handle IAetheriumAnvilRecipe; IToolStationRecipe is handled separately.
+        for (Class<?> iface : recipe.getClass().getInterfaces()) {
+            if ("net.sirplop.aetherworks.recipe.IAetheriumAnvilRecipe".equals(iface.getName())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @Override

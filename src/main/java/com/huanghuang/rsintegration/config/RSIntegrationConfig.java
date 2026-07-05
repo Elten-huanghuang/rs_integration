@@ -49,6 +49,9 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.BooleanValue ENABLE_AVARITIA;
     public static ForgeConfigSpec.BooleanValue ENABLE_CONFLUENCE;
     public static ForgeConfigSpec.BooleanValue ENABLE_IMMORTERS_DELIGHT;
+    public static ForgeConfigSpec.BooleanValue ENABLE_FARMERSDELIGHT;
+    public static ForgeConfigSpec.BooleanValue ENABLE_YOUKAISHOMECOMING;
+    public static ForgeConfigSpec.BooleanValue ENABLE_FARMERSRESPITE;
     public static ForgeConfigSpec.BooleanValue ENABLE_VANILLA_MACHINES;
     public static ForgeConfigSpec.BooleanValue ENABLE_SOPHISTICATED_BACKPACKS;
     public static ForgeConfigSpec.BooleanValue ENABLE_JEI;
@@ -137,6 +140,15 @@ public final class RSIntegrationConfig {
         ENABLE_IMMORTERS_DELIGHT = c
                 .comment("Enable RS integration with Immortaler's Delight (Enchantal Cooler remote crafting).")
                 .define("enableImmortersDelight", true);
+        ENABLE_FARMERSDELIGHT = c
+                .comment("Enable RS integration with Farmer's Delight (Cooking Pot + Skillet remote crafting).")
+                .define("enableFarmersDelight", true);
+        ENABLE_YOUKAISHOMECOMING = c
+                .comment("Enable RS integration with Youkai's Homecoming (Moka Pot + Steamer Pot remote crafting).")
+                .define("enableYoukaisHomecoming", true);
+        ENABLE_FARMERSRESPITE = c
+                .comment("Enable RS integration with Farmer's Respite (Kettle fluid brewing).")
+                .define("enableFarmersRespite", true);
         ENABLE_AETHERWORKS = c
                 .comment("Enable RS integration with Embers Aetherworks Addon",
                         "(Aetherium Anvil remote crafting with auto-hammer support).")

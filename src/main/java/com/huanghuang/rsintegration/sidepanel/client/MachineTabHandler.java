@@ -41,6 +41,8 @@ public final class MachineTabHandler {
     }
 
     private static List<BindingInfo> filterByWhitelist(List<BindingInfo> list) {
+        list.removeIf(info -> !com.huanghuang.rsintegration.network.BindingEventHandler
+                .supportsGuiByInfo(info));
         return list;
     }
 

@@ -218,18 +218,58 @@ public final class ModType {
         String cn = recipe.getClass().getName();
         // ApplyModifierRecipe is a smithing-table recipe, not a Hephaestus Forge ritual
         if (cn.endsWith("ApplyModifierRecipe")) return null;
+
+        // Cooking pot recipes: distinguish by result's crafting remainder (the bowl/pot type)
+        if (cn.startsWith("dev.xkmc.youkaishomecoming.content.pot.cooking.")) {
+            return classifyCookingPotRecipe(recipe);
+        }
+
         ModType best = null;
         int bestLen = 0;
         for (ModType mt : BY_ID.values()) {
             if (mt == GENERIC) continue;
             for (String prefix : mt.recipePrefixes) {
-                if (cn.startsWith(prefix) && prefix.length() > bestLen) {
+                if (cn.startsWith(prefix) && prefix.length() >= bestLen) {
                     best = mt;
                     bestLen = prefix.length();
                 }
             }
         }
         return best;
+    }
+
+    /**
+     * Classify a YHK cooking pot recipe by the pot/bowl type its result
+     * needs as a container (stored as {@code getCraftingRemainingItem}).
+     * Falls back to {@code youkaishomecoming_cooking_small} if undetermined.
+     */
+    @Nullable
+    private static ModType classifyCookingPotRecipe(Recipe<?> recipe) {
+        try {
+            java.lang.reflect.Method getResult = recipe.getClass().getMethod("getResult");
+            net.minecraft.world.item.ItemStack result =
+                    (net.minecraft.world.item.ItemStack) getResult.invoke(recipe);
+            if (!result.isEmpty() && result.hasCraftingRemainingItem()) {
+                net.minecraft.world.item.ItemStack container = result.getCraftingRemainingItem();
+                net.minecraft.resources.ResourceLocation key =
+                        net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(
+                                container.getItem());
+                String k = key.toString();
+                // IRON_BOWL  → small_iron_pot   (SmallCookingPotBlockEntity)
+                // IRON_POT   → short_iron_pot   (MidCookingPotBlockEntity)
+                // STOCKPOT   → stockpot         (LargeCookingPotBlockEntity)
+                if ("youkaishomecoming:short_iron_pot".equals(k))
+                    return byId("youkaishomecoming_cooking_short");
+                if ("youkaishomecoming:stockpot".equals(k))
+                    return byId("youkaishomecoming_cooking_large");
+                if ("youkaishomecoming:small_iron_pot".equals(k))
+                    return byId("youkaishomecoming_cooking_small");
+            }
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI] Cooking pot recipe classification failed: {}",
+                    e.toString());
+        }
+        return byId("youkaishomecoming_cooking_small");
     }
 
     /**
@@ -243,7 +283,9 @@ public final class ModType {
         if (blockKey == null) return null;
         String lower = blockKey.toLowerCase(Locale.ROOT);
 
-        // 1. Longest explicit prefix match
+        // 1. Longest explicit prefix match (longest prefix wins; ties
+        //    go to the first match — iteration order is not deterministic
+        //    so tying prefixes must be avoided by using distinct names).
         ModType best = null;
         int bestLen = 0;
         for (ModType mt : BY_ID.values()) {
@@ -258,7 +300,12 @@ public final class ModType {
         }
         if (best != null) return best;
 
-        // 2. Segment keyword matching — longest keyword wins
+        // 2. Segment keyword matching — longest keyword wins.
+        //    Use > (not >=) so that when two keywords have the same
+        //    length the first match sticks; HashMap iteration order is
+        //    non-deterministic and with >= the later entry silently
+        //    steals the match (e.g. aether "altar" stealing malum||
+        //    spirit_altar from the malum ModType).
         best = null;
         bestLen = 0;
         for (ModType mt : BY_ID.values()) {

@@ -112,6 +112,8 @@ public final class CraftingTableBatchDelegate implements IBatchDelegate {
     @Override
     public boolean tryStartWithMaterials(ServerPlayer player, List<ItemStack> materials,
                                          ExtractionLedger sharedLedger) {
+        myLevel.getChunk(myPos);
+
         BlockEntity be = myLevel.getBlockEntity(myPos);
         if (be == null) return false;
 

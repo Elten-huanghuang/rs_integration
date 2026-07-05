@@ -155,6 +155,8 @@ public final class AetherFurnaceBatchDelegate implements IBatchDelegate {
         this.usingSharedLedger = true;
         this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
 
+        myLevel.getChunk(myPos);
+
         BlockEntity be = myLevel.getBlockEntity(myPos);
         if (be == null) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-Aether] No BE at {}", myPos);
@@ -232,6 +234,7 @@ public final class AetherFurnaceBatchDelegate implements IBatchDelegate {
 
     @Override
     public ItemStack collectResult(ServerPlayer player) {
+        myLevel.getChunk(myPos);
         BlockEntity be = myLevel.getBlockEntity(myPos);
         if (be == null) return ItemStack.EMPTY;
 
@@ -252,6 +255,7 @@ public final class AetherFurnaceBatchDelegate implements IBatchDelegate {
         // In the shared-ledger (chain) path the chain already refunded materials
         // via refundCommitted(), so we just void the machine slots.
         // In the private-ledger (direct) path we need to refund back to RS.
+        myLevel.getChunk(myPos);
         BlockEntity be = myLevel.getBlockEntity(myPos);
         if (be instanceof AbstractFurnaceBlockEntity furnace) {
             ItemStack slot0 = furnace.getItem(0);

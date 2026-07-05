@@ -24,12 +24,23 @@ public final class AnvilHUDOverlay implements IGuiOverlay {
         if (mc.player == null || mc.level == null || mc.options.hideGui) return;
         if (mc.screen != null) return;
 
-        BlockEntity anvil = AetherworksHelper.getTargetAnvil();
-        if (anvil == null) return;
+        BlockEntity machine = AetherworksHelper.getTargetAnvil();
+        if (machine == null) return;
 
-        ItemStack item = AetherworksHelper.getAnvilSlot(anvil, 0);
-        Object recipe = AetherworksHelper.findRecipe(mc.level, item);
-        BlockEntity forge = AetherworksHelper.findForge(mc.level, anvil.getBlockPos());
+        boolean isTs = AetherworksHelper.isToolStation(machine);
+        boolean isAnvil = AetherworksHelper.isAnvil(machine);
+
+        ItemStack item;
+        Object recipe;
+        BlockEntity forge = AetherworksHelper.findForge(mc.level, machine.getBlockPos());
+
+        if (isTs) {
+            item = AetherworksHelper.getTsSlot(machine, 0);
+            recipe = AetherworksHelper.findTsRecipe(mc.level, item);
+        } else {
+            item = AetherworksHelper.getAnvilSlot(machine, 0);
+            recipe = AetherworksHelper.findRecipe(mc.level, item);
+        }
 
         Font font = mc.font;
         int x = w / 2 + 20;
@@ -49,45 +60,95 @@ public final class AnvilHUDOverlay implements IGuiOverlay {
         }
         y += lineHeight + gap;
 
-        if (recipe != null) {
-            // Progress
-            int hits = AetherworksHelper.getAnvilProgress(anvil);
-            int total = AetherworksHelper.getRecipeHits(recipe);
-            graphics.drawString(font,
-                    Component.translatable("rsi.aetherworks.hud.progress", hits, total), x, y, color);
+        if (isAnvil) {
+            // Progress — always visible, with or without a matched recipe
+            int hits = AetherworksHelper.getAnvilProgress(machine);
+            if (recipe != null) {
+                int total = AetherworksHelper.getRecipeHits(recipe);
+                graphics.drawString(font,
+                        Component.translatable("rsi.aetherworks.hud.progress", hits, total), x, y, color);
+            } else {
+                graphics.drawString(font,
+                        Component.literal("敲击: " + hits), x, y, color);
+            }
             y += lineHeight;
 
-            // Temperature with recipe range
+            // Forge heat / ember
             if (forge != null) {
                 double heat = AetherworksHelper.getForgeHeat(forge);
-                int minT = AetherworksHelper.getRecipeTempMin(recipe);
-                int maxT = AetherworksHelper.getRecipeTempMax(recipe);
-                boolean tempOk = heat >= minT && heat <= maxT;
-                graphics.drawString(font,
-                        Component.literal(String.format("温度: %.0f°  [%d-%d°]", heat, minT, maxT)),
-                        x, y, tempOk ? goodColor : badColor);
-                y += lineHeight;
-
-                // Ember
                 double ember = AetherworksHelper.getForgeEmber(forge);
                 double emberMax = AetherworksHelper.getForgeEmberCapacity(forge);
-                int cost = AetherworksHelper.getRecipeEmberPerHit(recipe);
-                boolean emberOk = ember >= cost;
-                graphics.drawString(font,
-                        Component.literal(String.format("余烬: %.0f/%.0f EM (消耗 %d/锤)", ember, emberMax, cost)),
-                        x, y, emberOk ? goodColor : badColor);
+
+                if (recipe != null) {
+                    int minT = AetherworksHelper.getRecipeTempMin(recipe);
+                    int maxT = AetherworksHelper.getRecipeTempMax(recipe);
+                    boolean tempOk = heat >= minT && heat <= maxT;
+                    graphics.drawString(font,
+                            Component.literal(String.format("温度: %.0f°  [%d-%d°]", heat, minT, maxT)),
+                            x, y, tempOk ? goodColor : badColor);
+                    y += lineHeight;
+
+                    int cost = AetherworksHelper.getRecipeEmberPerHit(recipe);
+                    boolean emberOk = ember >= cost;
+                    graphics.drawString(font,
+                            Component.literal(String.format("余烬: %.0f/%.0f EM (消耗 %d/锤)", ember, emberMax, cost)),
+                            x, y, emberOk ? goodColor : badColor);
+                } else {
+                    graphics.drawString(font,
+                            Component.literal(String.format("温度: %.0f°", heat)), x, y, color);
+                    y += lineHeight;
+                    graphics.drawString(font,
+                            Component.literal(String.format("余烬: %.0f/%.0f EM", ember, emberMax)), x, y, color);
+                }
                 y += lineHeight;
             } else {
                 graphics.drawString(font, Component.translatable("rsi.aetherworks.warn.no_forge"), x, y, warnColor);
                 y += lineHeight;
             }
 
-            // Mistakes
-            int mistakes = AetherworksHelper.getAnvilMistakes(anvil);
-            if (mistakes > 0) {
-                int mcColor = mistakes >= 2 ? badColor : warnColor;
+            // Mistakes (recipe-dependent)
+            if (recipe != null) {
+                int mistakes = AetherworksHelper.getAnvilMistakes(machine);
+                if (mistakes > 0) {
+                    int mcColor = mistakes >= 2 ? badColor : warnColor;
+                    graphics.drawString(font,
+                            Component.translatable("rsi.aetherworks.hud.mistakes", mistakes, 3), x, y, mcColor);
+                    y += lineHeight;
+                }
+            }
+
+            // No-recipe warning (after progress + forge, so those are visible)
+            if (recipe == null && !item.isEmpty()) {
+                graphics.drawString(font, Component.translatable("rsi.aetherworks.hud.no_recipe"), x, y, badColor);
+                y += lineHeight;
+            }
+        } else if (isTs) {
+            // Tool station: always show forge heat if available
+            if (forge != null) {
+                double heat = AetherworksHelper.getForgeHeat(forge);
+                if (recipe != null) {
+                    int target = AetherworksHelper.getTsRecipeTemp(recipe);
+                    boolean tempOk = Math.abs(heat - target) <= 50;
+                    graphics.drawString(font,
+                            Component.literal(String.format("温度: %.0f°  [需求 %d°]", heat, target)),
+                            x, y, tempOk ? goodColor : badColor);
+                } else {
+                    graphics.drawString(font,
+                            Component.literal(String.format("温度: %.0f°", heat)), x, y, color);
+                }
+                y += lineHeight;
+            } else if (recipe != null) {
+                int target = AetherworksHelper.getTsRecipeTemp(recipe);
                 graphics.drawString(font,
-                        Component.translatable("rsi.aetherworks.hud.mistakes", mistakes, 3), x, y, mcColor);
+                        Component.literal(String.format("温度需求: %d°", target)),
+                        x, y, target > 0 ? color : warnColor);
+                y += lineHeight;
+                graphics.drawString(font, Component.translatable("rsi.aetherworks.warn.no_forge"), x, y, warnColor);
+                y += lineHeight;
+            }
+
+            if (recipe == null && !item.isEmpty()) {
+                graphics.drawString(font, Component.translatable("rsi.aetherworks.hud.no_recipe"), x, y, badColor);
                 y += lineHeight;
             }
         } else if (!item.isEmpty()) {

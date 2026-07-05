@@ -90,6 +90,18 @@ public final class BindingEventHandler {
 
         BlockPos pos = event.getPos();
         BlockPos bindingPos = resolveRootPos(event.getLevel(), pos, block, className);
+
+        // If root resolution moved us to the master block, recompute identity
+        // from the root position so blockKey/blockRegKey/displayStack reflect
+        // the master, not the slave half that was clicked.
+        if (!bindingPos.equals(pos)) {
+            BlockState rootState = event.getLevel().getBlockState(bindingPos);
+            Block rootBlock = rootState.getBlock();
+            block = rootBlock;
+            className = rootBlock.getClass().getName();
+            pos = bindingPos;
+        }
+
         ResourceLocation dim = event.getLevel().dimension().location();
         BlockState state = event.getLevel().getBlockState(pos);
         String blockKey = matched.blockKey(block);
@@ -101,20 +113,23 @@ public final class BindingEventHandler {
         ItemStack displayStack = state.getBlock().getCloneItemStack(event.getLevel(), pos, state);
         net.minecraft.world.level.block.entity.BlockEntity be = event.getLevel().getBlockEntity(pos);
         if (be != null && !displayStack.isEmpty()) {
-            net.minecraft.nbt.CompoundTag beData = be.saveWithoutMetadata();
-            if (!beData.isEmpty()) {
-                beData.remove("Items");
-                beData.remove("Inventory");
-                beData.remove("inventory");
-                beData.remove("Energy");
-                displayStack.getOrCreateTag().put("BlockEntityTag", beData);
-                // Lift BlockId to root level so GunSmithTableItem.getName()
-                // (used by getHoverName() client-side) can find it.  TACZ's
-                // getCloneItemStack() is not overridden and returns a bare
-                // stack; the BlockId only exists inside BlockEntityTag after
-                // our addition above, but getName() reads from the root tag.
-                if (beData.contains("BlockId", net.minecraft.nbt.Tag.TAG_STRING)) {
-                    displayStack.getOrCreateTag().putString("BlockId", beData.getString("BlockId"));
+            // TACZ gun workbenches need the full BlockEntityTag for BEWLR
+            // rendering and getName() / getHoverName().  Other BEs (YHK
+            // fermentation tanks, etc.) must NOT have their full data stored
+            // — large fluid tank / recipe progress NBT bloats the binding
+            // item and breaks RS Addons network item detection.
+            boolean isTacz = be.getClass().getName().contains("GunSmithTable");
+            if (isTacz) {
+                net.minecraft.nbt.CompoundTag beData = be.saveWithoutMetadata();
+                if (!beData.isEmpty()) {
+                    beData.remove("Items");
+                    beData.remove("Inventory");
+                    beData.remove("inventory");
+                    beData.remove("Energy");
+                    displayStack.getOrCreateTag().put("BlockEntityTag", beData);
+                    if (beData.contains("BlockId", net.minecraft.nbt.Tag.TAG_STRING)) {
+                        displayStack.getOrCreateTag().putString("BlockId", beData.getString("BlockId"));
+                    }
                 }
             }
         }
@@ -151,21 +166,30 @@ public final class BindingEventHandler {
         final ForgeConfigSpec.BooleanValue configFlag;
         private final List<String> blockClassNames;
         @Nullable
+        private final List<String> blockRegistryKeys;
+        @Nullable
         private final String blockKeyPrefix;
         public final boolean supportsGui;
 
         public MachineBindingTarget(String modId, ModType modType, ForgeConfigSpec.BooleanValue configFlag,
                                      List<String> blockClassNames, @Nullable String blockKeyPrefix) {
-            this(modId, modType, configFlag, blockClassNames, blockKeyPrefix, true);
+            this(modId, modType, configFlag, blockClassNames, null, blockKeyPrefix, true);
         }
 
         public MachineBindingTarget(String modId, ModType modType, ForgeConfigSpec.BooleanValue configFlag,
                                      List<String> blockClassNames, @Nullable String blockKeyPrefix,
                                      boolean supportsGui) {
+            this(modId, modType, configFlag, blockClassNames, null, blockKeyPrefix, supportsGui);
+        }
+
+        public MachineBindingTarget(String modId, ModType modType, ForgeConfigSpec.BooleanValue configFlag,
+                                     List<String> blockClassNames, @Nullable List<String> blockRegistryKeys,
+                                     @Nullable String blockKeyPrefix, boolean supportsGui) {
             this.modId = modId;
             this.modType = modType;
             this.configFlag = configFlag;
             this.blockClassNames = blockClassNames;
+            this.blockRegistryKeys = blockRegistryKeys;
             this.blockKeyPrefix = blockKeyPrefix;
             this.supportsGui = supportsGui;
         }
@@ -185,6 +209,17 @@ public final class BindingEventHandler {
                     if (clazz.getName().equals(name)) return true;
                 }
                 clazz = clazz.getSuperclass();
+            }
+            // Try registry key matching for blocks with generic classes
+            // (e.g. L2ModularBlock DelegateBlock used by Youkai's Homecoming).
+            if (blockRegistryKeys != null) {
+                ResourceLocation regKey = ForgeRegistries.BLOCKS.getKey(block);
+                if (regKey != null) {
+                    String regStr = regKey.toString();
+                    for (String key : blockRegistryKeys) {
+                        if (regStr.equals(key)) return true;
+                    }
+                }
             }
             return false;
         }
@@ -499,21 +534,95 @@ public final class BindingEventHandler {
     }
 
     private static BlockPos resolveRootPos(Level level, BlockPos pos, Block block, String className) {
-        if (!className.contains("GunSmithTableBlock")) return pos;
-        BlockEntity be = level.getBlockEntity(pos);
-        if (be == null) return pos;
-        try {
-            for (var method : be.getClass().getMethods()) {
-                if (!method.getName().equals("getRootPos") || method.getParameterCount() != 2) continue;
-                if (!java.lang.reflect.Modifier.isStatic(method.getModifiers())) continue;
-                BlockPos root = (BlockPos) method.invoke(null, level, pos);
+        // TACZ: 1×2 gun workbench — getRootPos is on the block, not the BE
+        if (className.contains("GunSmithTableBlock")) {
+            try {
+                java.lang.reflect.Method getRootPos = block.getClass()
+                        .getMethod("getRootPos", BlockPos.class, net.minecraft.world.level.block.state.BlockState.class);
+                BlockPos root = (BlockPos) getRootPos.invoke(block, pos, level.getBlockState(pos));
                 if (root != null && !root.equals(pos)) {
                     return root;
                 }
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.debug("[RSI-Bind] TACZ root-pos resolution failed: {}", e.toString());
             }
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Bind] Root-pos resolution failed for {}: {}", className, e.toString());
+            return pos;
         }
+
+        // TLM: 3×8×6 altar — every block is BlockAltar with a BE.
+        // Compute the canonical centre so all clicks on the same altar
+        // resolve to one binding, preventing duplicates.
+        if (className.equals("com.github.tartaricacid.touhoulittlemaid.block.BlockAltar")) {
+            BlockEntity be = level.getBlockEntity(pos);
+            if (be != null) {
+                BlockPos centre = resolveTlmAltarCentre(be, pos);
+                if (centre != null) return centre;
+            }
+        }
+
+        // Youkai's Homecoming: Steamer multiblock (pot + racks + lid).
+        // Blocks use DelegateBlock / DelegateBlockImpl / DelegateEntityBlockImpl;
+        // the pot is always at the bottom.
+        if (isL2ModularBlock(block)) {
+            ResourceLocation regKey = ForgeRegistries.BLOCKS.getKey(block);
+            if (regKey != null) {
+                String rk = regKey.toString();
+                if (rk.equals("youkaishomecoming:steamer_rack")
+                        || rk.equals("youkaishomecoming:steamer_lid")) {
+                    // Walk downward to find the steamer pot
+                    BlockPos.MutableBlockPos cursor = pos.mutable();
+                    for (int i = 0; i < 16; i++) {
+                        cursor.move(net.minecraft.core.Direction.DOWN);
+                        BlockState below = level.getBlockState(cursor);
+                        ResourceLocation belowKey = ForgeRegistries.BLOCKS.getKey(below.getBlock());
+                        if (belowKey != null
+                                && belowKey.toString().equals("youkaishomecoming:steamer_pot")) {
+                            return cursor.immutable();
+                        }
+                    }
+                }
+            }
+        }
+
         return pos;
+    }
+
+    private static boolean isL2ModularBlock(Block block) {
+        Class<?> clazz = block.getClass();
+        while (clazz != null) {
+            String name = clazz.getName();
+            if (name.equals("dev.xkmc.l2modularblock.DelegateBlock")
+                    || name.equals("dev.xkmc.l2modularblock.DelegateBlockImpl")
+                    || name.equals("dev.xkmc.l2modularblock.DelegateEntityBlockImpl")) {
+                return true;
+            }
+            clazz = clazz.getSuperclass();
+        }
+        return false;
+    }
+
+    /**
+     * Returns a canonical position for a TLM altar multiblock.
+     * Every BlockAltar in the structure carries the same {@code blockPosList},
+     * so we use the first entry — it is always inside the altar and consistent
+     * across all clicks on the same multiblock.
+     */
+    @Nullable
+    private static BlockPos resolveTlmAltarCentre(BlockEntity be, BlockPos pos) {
+        try {
+            java.lang.reflect.Method getBlockPosList = be.getClass().getMethod("getBlockPosList");
+            Object posListData = getBlockPosList.invoke(be);
+            if (posListData == null) return null;
+
+            java.lang.reflect.Method getData = posListData.getClass().getMethod("getData");
+            Object data = getData.invoke(posListData);
+            if (!(data instanceof List<?> list) || list.isEmpty()) return null;
+
+            BlockPos canonical = (BlockPos) list.get(0);
+            if (!canonical.equals(pos)) return canonical;
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-Bind] TLM altar centre resolution failed: {}", e.toString());
+        }
+        return null;
     }
 }

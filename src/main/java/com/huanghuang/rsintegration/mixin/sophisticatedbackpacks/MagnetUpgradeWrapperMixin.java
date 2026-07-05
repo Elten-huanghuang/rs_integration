@@ -6,7 +6,11 @@ import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 import net.p3pp3rf1y.sophisticatedcore.api.IStorageWrapper;
@@ -47,6 +51,24 @@ public abstract class MagnetUpgradeWrapperMixin
     @Unique
     private boolean rsi$voidUpgrade = false;
 
+    @Unique
+    private static volatile Class<?> rsi$debrisClass;
+    @Unique
+    private static volatile boolean rsi$debrisProbed;
+
+    @Unique
+    private static boolean rsi$isDebrisEntity(Entity e) {
+        if (!rsi$debrisProbed) {
+            rsi$debrisProbed = true;
+            try {
+                rsi$debrisClass = Class.forName(
+                        "fuzs.mutantmonsters.world.entity.MutantSkeletonBodyPart");
+            } catch (ClassNotFoundException ignored) {
+            }
+        }
+        return rsi$debrisClass != null && rsi$debrisClass.isInstance(e);
+    }
+
     protected MagnetUpgradeWrapperMixin(IStorageWrapper storageWrapper, ItemStack upgrade,
                                          Consumer<ItemStack> upgradeSaveHandler) {
         super(storageWrapper, upgrade, upgradeSaveHandler);
@@ -54,6 +76,9 @@ public abstract class MagnetUpgradeWrapperMixin
 
     @Shadow(remap = false)
     public abstract ContentsFilterLogic getFilterLogic();
+
+    @Shadow(remap = false)
+    public abstract boolean shouldPickupItems();
 
     @Inject(method = "<init>", at = @At(value = "RETURN"), remap = false)
     private void onInit(IStorageWrapper storageWrapper, ItemStack upgrade,
@@ -91,6 +116,18 @@ public abstract class MagnetUpgradeWrapperMixin
                 this.rsi$rsBlockPos, this.rsi$rsDimensionKey,
                 rsi$getUpgradesOfType(VoidUpgradeWrapper.class), this.rsi$voidUpgrade));
         cir.cancel();
+    }
+
+    @Inject(method = "tick", at = @At(value = "RETURN"), remap = false)
+    private void rsi$onTick(Entity entity, Level level, BlockPos pos, CallbackInfo ci) {
+        if (!(entity instanceof Player player)) return;
+        if (!this.shouldPickupItems()) return;
+        int radius = this.upgradeItem.getRadius();
+        AABB area = new AABB(pos).inflate(radius);
+        for (Entity e : level.getEntitiesOfClass(Entity.class, area, e -> e.isAlive()
+                && rsi$isDebrisEntity(e))) {
+            e.interact(player, InteractionHand.MAIN_HAND);
+        }
     }
 
     @Unique

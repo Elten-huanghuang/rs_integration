@@ -206,7 +206,15 @@ public final class AltarBindingRegistry {
         }
         if (blockKey != null && blockKey.contains("||")) {
             String expectedId = blockKey.substring(blockKey.indexOf("||") + 2);
-            return currentId.equals(expectedId);
+            if (currentId.equals(expectedId)) return true;
+            // Some blocks (e.g. YHK cooking pots) change their descriptionId
+            // during operation: small_iron_pot → cooking_small_iron_pot.
+            // Strip "cooking_" from both sides so the binding stays fresh.
+            String normCurrent = currentId.contains(".cooking_")
+                    ? currentId.replace(".cooking_", ".") : currentId;
+            String normExpected = expectedId.contains(".cooking_")
+                    ? expectedId.replace(".cooking_", ".") : expectedId;
+            return normCurrent.equals(normExpected);
         }
         return currentId.equals(blockKey);
     }
@@ -678,10 +686,19 @@ public final class AltarBindingRegistry {
             if (stack.isEmpty()) continue;
             for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
                 ModType entryType = ModType.fromBlockKey(entry.blockKey());
+                RSIntegrationMod.LOGGER.info(
+                        "[RSI-DIAG] collectBindingsForType: item={}, blockKey={}, entryType={}, lookingFor={}",
+                        stack.getItem(), entry.blockKey(),
+                        entryType != null ? entryType.id() : "null",
+                        type.id());
                 if (entryType == null || !entryType.id().equals(type.id())) continue;
                 if (normalized != null && entry.blockKey() != null
-                        && !entry.blockKey().toLowerCase(java.util.Locale.ROOT).contains(normalized))
+                        && !entry.blockKey().toLowerCase(java.util.Locale.ROOT).contains(normalized)) {
+                    RSIntegrationMod.LOGGER.info(
+                            "[RSI-DIAG] collectBindingsForType: filtered out — blockKey={} doesn't contain normalized={}",
+                            entry.blockKey(), normalized);
                     continue;
+                }
                 ResourceKey<Level> altarDim = ResourceKey.create(
                         net.minecraft.core.registries.Registries.DIMENSION, entry.dim());
                 ServerLevel entryLevel = player.server.getLevel(altarDim);
@@ -723,10 +740,34 @@ public final class AltarBindingRegistry {
         if ("malum_spirit_crucible".equals(type.id())) {
             return null;
         }
+        // malum_runic_workbench — same situation.  The JEI recipe type
+        // "runeworking" is not a substring of "runic_workbench", so the
+        // sub-type filter would reject all bindings.
+        if ("malum_runic_workbench".equals(type.id())) {
+            return null;
+        }
         // Aetherworks names its recipe category "aetherium_anvil" but the
         // block description ID uses "forge_anvil".
         if (ModType.byId(ModIds.ID_AETHERWORKS_ANVIL) == type && "aetherium_anvil".equals(hint)) {
             return "forge_anvil";
+        }
+        // CrockPot registers campfire recipes under "campfire_cooking/" but
+        // the blockKey uses vanilla description IDs (e.g. "block.minecraft.campfire").
+        // When FD is loaded, farmersdelight_skillet handles all campfire recipes
+        // and campfire bindings (including vanilla campfires).  The blockKey
+        // prefix "farmersdelight_skillet||" needs "campfire" extracted from
+        // the hint so it can match against the description-ID segment.
+        if ("campfire_cooking".equals(hint)
+                && ("vanilla_campfire".equals(type.id()) || "farmersdelight_skillet".equals(type.id()))) {
+            return "campfire";
+        }
+        // CrockPot registers smoker recipes under "smoking/" but the
+        // blockKey uses "block.minecraft.smoker" — not "smoking".
+        if ("vanilla_smoker".equals(type.id()) && "smoking".equals(hint)) {
+            return "smoker";
+        }
+        if (ModIds.CROCKPOT.equals(type.id())) {
+            return null;
         }
         // TACZ gun smith table handles all recipe types (gun/ammo/attachments).
         // Sub-type filtering would reject ammo & attachment recipes since the
@@ -737,10 +778,10 @@ public final class AltarBindingRegistry {
         if (ModIds.GOETY.equals(type.id())) {
             return null;
         }
-        // CrockPot recipe IDs use "crock_pot_cooking" as the path prefix,
-        // but the block registry key is "crockpot:crock_pot".  There's only
-        // one machine type so sub-type filtering is unnecessary.
-        if (ModIds.CROCKPOT.equals(type.id())) {
+        // farmersdelight_skillet handles both skillet and campfire blocks —
+        // sub-type filtering by recipe path (e.g. "campfire_cooking") would
+        // reject skillet bindings even though they accept the recipe.
+        if (ModIds.ID_FD_SKILLET.equals(type.id())) {
             return null;
         }
         // Aether recipe path prefixes (freezing/incubating/enchanting) don't

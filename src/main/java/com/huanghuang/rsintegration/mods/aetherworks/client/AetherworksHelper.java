@@ -29,11 +29,14 @@ final class AetherworksHelper {
 
     @Nullable private static Class<?> anvilClass;
     @Nullable private static Class<?> forgeClass;
+    @Nullable private static Class<?> toolStationClass;
 
     @Nullable private static Field f_anvil_progress;
     @Nullable private static Field f_anvil_hitTimeout;
     @Nullable private static Field f_anvil_mistakes;
     @Nullable private static Field f_anvil_inventory;
+
+    @Nullable private static Field f_ts_inventory;
 
     @Nullable private static Field f_forge_heatCap;
     @Nullable private static Field f_forge_emberCap;
@@ -50,6 +53,10 @@ final class AetherworksHelper {
     @Nullable private static Method m_recipe_getTemperatureMin;
     @Nullable private static Method m_recipe_getTemperatureMax;
     @Nullable private static Method m_recipe_getEmberPerHit;
+
+    @Nullable private static Object tsRecipeType;
+    @Nullable private static Method m_ts_recipe_getDisplayInputs;
+    @Nullable private static Method m_ts_recipe_getTemperature;
 
     @Nullable private static Item hammerItem;
 
@@ -68,6 +75,13 @@ final class AetherworksHelper {
                 f_anvil_inventory = anvilClass.getField("inventory");
 
                 ok = true; // Core HUD and auto-hammer can work
+
+                // Tool station (non-essential for HUD)
+                try {
+                    toolStationClass = Class.forName(
+                            "net.sirplop.aetherworks.blockentity.ToolStationBlockEntity");
+                    f_ts_inventory = toolStationClass.getField("inventory");
+                } catch (Exception ignored) {}
             } catch (Exception e) {
                 // Aetherworks not properly installed — core classes missing
             }
@@ -105,6 +119,19 @@ final class AetherworksHelper {
                     recipeType = ro.getClass().getMethod("get").invoke(ro);
                 } catch (Exception ignored) {}
 
+                // Non-essential: tool station recipe access
+                try {
+                    Class<?> tsRClass = Class.forName(
+                            "net.sirplop.aetherworks.recipe.IToolStationRecipe");
+                    m_ts_recipe_getDisplayInputs = tsRClass.getMethod("getDisplayInputs");
+                    m_ts_recipe_getTemperature = tsRClass.getMethod("getTemperature");
+
+                    Class<?> awReg = Class.forName("net.sirplop.aetherworks.AWRegistry");
+                    Field f2 = awReg.getField("TOOL_STATION");
+                    Object ro2 = f2.get(null);
+                    tsRecipeType = ro2.getClass().getMethod("get").invoke(ro2);
+                } catch (Exception ignored) {}
+
                 // Non-essential: hammer
                 try {
                     Class<?> regMan = Class.forName("com.rekindled.embers.RegistryManager");
@@ -123,6 +150,10 @@ final class AetherworksHelper {
 
     static boolean isAnvil(@Nullable BlockEntity be) {
         return LOADED && anvilClass != null && anvilClass.isInstance(be);
+    }
+
+    static boolean isToolStation(@Nullable BlockEntity be) {
+        return LOADED && toolStationClass != null && toolStationClass.isInstance(be);
     }
 
     static boolean isForge(@Nullable BlockEntity be) {
@@ -152,6 +183,14 @@ final class AetherworksHelper {
         if (f_anvil_inventory == null) return ItemStack.EMPTY;
         try {
             IItemHandler handler = (IItemHandler) f_anvil_inventory.get(anvil);
+            return handler.getStackInSlot(slot);
+        } catch (Exception e) { return ItemStack.EMPTY; }
+    }
+
+    static ItemStack getTsSlot(BlockEntity ts, int slot) {
+        if (f_ts_inventory == null) return ItemStack.EMPTY;
+        try {
+            IItemHandler handler = (IItemHandler) f_ts_inventory.get(ts);
             return handler.getStackInSlot(slot);
         } catch (Exception e) { return ItemStack.EMPTY; }
     }
@@ -232,13 +271,38 @@ final class AetherworksHelper {
     }
 
     @Nullable
+    static Object findTsRecipe(Level level, ItemStack item) {
+        if (tsRecipeType == null || item.isEmpty()) return null;
+        try {
+            @SuppressWarnings({"unchecked", "rawtypes"})
+            List<Object> recipes = (List<Object>)
+                    level.getRecipeManager().getAllRecipesFor((RecipeType) tsRecipeType);
+            for (Object r : recipes) {
+                @SuppressWarnings("unchecked")
+                List<Ingredient> inputs = (List<Ingredient>) m_ts_recipe_getDisplayInputs.invoke(r);
+                if (inputs != null) {
+                    for (Ingredient ing : inputs) {
+                        if (ing.test(item)) return r;
+                    }
+                }
+            }
+        } catch (Exception ignored) {}
+        return null;
+    }
+
+    static int getTsRecipeTemp(Object recipe) {
+        if (m_ts_recipe_getTemperature == null) return 0;
+        try { return (int) m_ts_recipe_getTemperature.invoke(recipe); } catch (Exception e) { return 0; }
+    }
+
+    @Nullable
     static BlockEntity getTargetAnvil() {
         Minecraft mc = Minecraft.getInstance();
         if (mc.level == null) return null;
         if (mc.hitResult instanceof BlockHitResult hit
                 && hit.getType() == BlockHitResult.Type.BLOCK) {
             BlockEntity be = mc.level.getBlockEntity(hit.getBlockPos());
-            if (isAnvil(be)) return be;
+            if (isAnvil(be) || isToolStation(be)) return be;
         }
         return null;
     }

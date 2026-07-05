@@ -20,6 +20,8 @@ public final class ModIds {
     public static final String AVARITIA = "avaritia";
     public static final String CONFLUENCE = "confluence";
     public static final String IMMORTERS_DELIGHT = "immortalers_delight";
+    public static final String FARMERSDELIGHT = "farmersdelight";
+    public static final String FARMERSRESPITE = "farmersrespite";
 
     // Dependencies
     public static final String REFINED_STORAGE = "refinedstorage";
@@ -32,7 +34,20 @@ public final class ModIds {
     // Composite ModType IDs (one mod → multiple machine types)
     public static final String ID_EMBERS_ALCHEMY = "embers_alchemy";
     public static final String ID_AETHERWORKS_ANVIL = "aetherworks_anvil";
+    public static final String ID_AETHERWORKS_TOOL_STATION = "aetherworks_tool_station";
     public static final String ID_AVARITIA_CRAFTING = "avaritia_crafting";
     public static final String ID_AVARITIA_COMPRESSOR = "avaritia_compressor";
     public static final String ID_AVARITIA_SMITHING = "avaritia_smithing";
+    public static final String ID_MALUM_RUNIC = "malum_runic_workbench";
+    public static final String ID_FD_SKILLET = "farmersdelight_skillet";
+    public static final String ID_FD_COOKING_POT = "farmersdelight_cooking_pot";
+    public static final String ID_FR_KETTLE = "farmersrespite_kettle";
+
+    // Youkai's Homecoming
+    public static final String YOUKAISHOMECOMING = "youkaishomecoming";
+    public static final String ID_YHK_MOKA = "youkaishomecoming_moka";
+    public static final String ID_YHK_STEAMER = "youkaishomecoming_steamer";
+    public static final String ID_YHK_FERMENT = "youkaishomecoming_ferment";
+    public static final String ID_YHK_KETTLE = "youkaishomecoming_kettle";
+    public static final String ID_YHK_COOKING_POT = "youkaishomecoming_cooking_pot";
 }

@@ -653,8 +653,9 @@ public final class AsyncCraftChain {
                 ledger.releaseReservations(materials);
                 virtualInventory.clear();
                 virtualInventory.addAll(virtualSnapshot);
-                RSIntegrationMod.LOGGER.warn("[RSI-AsyncChain] preReserveStepMaterials failed: need {} more of ingredient for step {}",
-                        needed, steps.get(currentStepIdx).recipeId());
+                RSIntegrationMod.LOGGER.warn("[RSI-AsyncChain] preReserveStepMaterials failed: need {} more of '{}' (spec {}/{}) for step {}",
+                        needed, CraftPacketUtils.describeIngredient(spec.ingredient()).getString(),
+                        materials.size() + 1, specs.size(), steps.get(currentStepIdx).recipeId());
                 return null;
             }
             materials.add(material);

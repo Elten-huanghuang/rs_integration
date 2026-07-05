@@ -8,6 +8,7 @@ import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.mods.IModIntegration;
 import com.huanghuang.rsintegration.network.BindingEventHandler;
 import com.huanghuang.rsintegration.recipe.AetherworksRecipeHandler;
+import com.huanghuang.rsintegration.recipe.AetherworksToolStationRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import net.minecraftforge.common.ForgeConfigSpec;
 import net.minecraftforge.fml.DistExecutor;
@@ -34,12 +35,23 @@ public final class AetherworksRSModule implements IModIntegration {
     @Override
     public void registerModType() {
         ModType.register(ModIds.ID_AETHERWORKS_ANVIL,
-                new String[]{"net.sirplop.aetherworks."},
+                new String[]{"net.sirplop.aetherworks.recipe.AetheriumAnvilRecipe"},
                 new String[]{"aetherworks", "aetherium", "anvil"},
                 new String[0],
                 ModType.delegateSupplier("com.huanghuang.rsintegration.mods.aetherworks.AetherworksBatchDelegate"));
         ModType.configureJei(ModIds.ID_AETHERWORKS_ANVIL,
                 new String[][]{{"aetherworks:anvil", "aetherworks"}},
+                new String[][]{{"net.sirplop.aetherworks.", "aetherworks"}},
+                null);
+
+        // Forge Tool Station
+        ModType.register(ModIds.ID_AETHERWORKS_TOOL_STATION,
+                new String[]{"net.sirplop.aetherworks.recipe.ToolStationRecipe"},
+                new String[]{"tool_station"},
+                new String[0],
+                ModType.delegateSupplier("com.huanghuang.rsintegration.mods.aetherworks.AetherworksToolStationBatchDelegate"));
+        ModType.configureJei(ModIds.ID_AETHERWORKS_TOOL_STATION,
+                new String[][]{{"aetherworks:tool_station", "aetherworks"}},
                 new String[][]{{"net.sirplop.aetherworks.", "aetherworks"}},
                 null);
     }
@@ -53,11 +65,19 @@ public final class AetherworksRSModule implements IModIntegration {
                 List.of("net.sirplop.aetherworks.block.forge.AetheriumAnvilBlock"),
                 "aetherworks", false
         ));
+        // Forge Tool Station
+        BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
+                "aetherworks", ModType.byId(ModIds.ID_AETHERWORKS_TOOL_STATION),
+                RSIntegrationConfig.ENABLE_AETHERWORKS,
+                List.of("net.sirplop.aetherworks.block.forge.ForgeToolStation"),
+                "aetherworks", false
+        ));
     }
 
     @Override
     public void registerRecipeHandler() {
         ModRecipeHandlers.register(new AetherworksRecipeHandler());
+        ModRecipeHandlers.register(new AetherworksToolStationRecipeHandler());
     }
 
     @Override

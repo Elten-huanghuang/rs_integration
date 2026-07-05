@@ -3,8 +3,11 @@ package com.huanghuang.rsintegration.crafting.plan;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.mods.aether.AetherFurnaceBatchDelegate;
 import com.huanghuang.rsintegration.mods.aetherworks.AetherworksBatchDelegate;
+import com.huanghuang.rsintegration.mods.aetherworks.AetherworksToolStationBatchDelegate;
 import com.huanghuang.rsintegration.mods.crockpot.CrockPotBatchDelegate;
 import com.huanghuang.rsintegration.mods.eidolon.EidolonBatchDelegate;
+import com.huanghuang.rsintegration.mods.farmersdelight.CookingPotBatchDelegate;
+import com.huanghuang.rsintegration.mods.farmersdelight.SkilletBatchDelegate;
 import com.huanghuang.rsintegration.mods.immortalers_delight.EnchantalCoolerBatchDelegate;
 import com.huanghuang.rsintegration.mods.embers.EreAlchemyBatchDelegate;
 import com.huanghuang.rsintegration.mods.farmingforblockheads.MarketBatchDelegate;
@@ -13,6 +16,9 @@ import com.huanghuang.rsintegration.mods.goety.GoetyBatchDelegate;
 import com.huanghuang.rsintegration.mods.malum.MalumBatchDelegate;
 import com.huanghuang.rsintegration.mods.touhoulittlemaid.TlmAltarBatchDelegate;
 import com.huanghuang.rsintegration.mods.wizards_reborn.WRBatchDelegate;
+import com.huanghuang.rsintegration.mods.youkaishomecoming.ferment.FermentationTankBatchDelegate;
+import com.huanghuang.rsintegration.mods.youkaishomecoming.moka.MokaPotBatchDelegate;
+import com.huanghuang.rsintegration.mods.youkaishomecoming.steamer.SteamerBatchDelegate;
 import com.huanghuang.rsintegration.util.ModIds;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
@@ -54,6 +60,9 @@ public final class PlanWarnings {
             case ModIds.ID_AETHERWORKS_ANVIL:
                 warnings.addAll(AetherworksBatchDelegate.getPlanWarnings(player, recipe, dim, pos));
                 break;
+            case ModIds.ID_AETHERWORKS_TOOL_STATION:
+                warnings.addAll(AetherworksToolStationBatchDelegate.getPlanWarnings(player, recipe, dim, pos));
+                break;
             case ModIds.CROCKPOT:
                 warnings.addAll(CrockPotBatchDelegate.getPlanWarnings(player, recipe, dim, pos));
                 break;
@@ -65,6 +74,21 @@ public final class PlanWarnings {
                 break;
             case ModIds.IMMORTERS_DELIGHT:
                 warnings.addAll(EnchantalCoolerBatchDelegate.getPlanWarnings(player, recipe, dim, pos));
+                break;
+            case ModIds.ID_FD_COOKING_POT:
+                warnings.addAll(CookingPotBatchDelegate.getPlanWarnings(player, recipe, dim, pos));
+                break;
+            case ModIds.ID_FD_SKILLET:
+                warnings.addAll(SkilletBatchDelegate.getPlanWarnings(player, recipe, dim, pos));
+                break;
+            case ModIds.ID_YHK_MOKA:
+                warnings.addAll(MokaPotBatchDelegate.getPlanWarnings(player, recipe, dim, pos));
+                break;
+            case ModIds.ID_YHK_STEAMER:
+                warnings.addAll(SteamerBatchDelegate.getPlanWarnings(player, recipe, dim, pos));
+                break;
+            case ModIds.ID_YHK_FERMENT:
+                warnings.addAll(FermentationTankBatchDelegate.getPlanWarnings(player, recipe, dim, pos));
                 break;
             case ModIds.ID_AVARITIA_CRAFTING:
             case ModIds.ID_AVARITIA_COMPRESSOR:

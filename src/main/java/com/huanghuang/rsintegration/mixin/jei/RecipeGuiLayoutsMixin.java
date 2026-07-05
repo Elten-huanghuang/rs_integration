@@ -61,7 +61,7 @@ public class RecipeGuiLayoutsMixin {
     private static final ResourceLocation SMOKING_UID =
             new ResourceLocation("minecraft", "smoking");
     private static final ResourceLocation CAMPFIRE_UID =
-            new ResourceLocation("minecraft", "campfire_cooking");
+            new ResourceLocation("minecraft", "campfire");
     private static final ResourceLocation STONECUTTING_UID =
             new ResourceLocation("minecraft", "stonecutting");
     private static final ResourceLocation SMITHING_UID =
@@ -469,11 +469,21 @@ public class RecipeGuiLayoutsMixin {
     private static String getBindingFilter(Object recipe, IRecipeLayoutDrawable<?> recipeLayout) {
         if (rsi$isGoetyRitual(recipe)) return ModIds.GOETY;
 
+        // YHK cooking pot recipes: 3 ModTypes share 1 JEI UID, so we use
+        // result.getCraftingRemainingItem() to pick the right pot type.
+        String yhkCooking = rsi$classifyYhkCooking(recipe);
+        if (yhkCooking != null) return yhkCooking;
+
         try {
             ResourceLocation uid = recipeLayout.getRecipeCategory().getRecipeType().getUid();
 
             // 1. ModType UID → filter lookup (replaces per-mod if/else chain)
-            String filter = ModType.filterForJeiUid(uid.toString());
+            String uidStr = uid.toString();
+            String filter = ModType.filterForJeiUid(uidStr);
+            if (uidStr.startsWith("youkaishomecoming")) {
+                RSIntegrationMod.LOGGER.warn("[RSI-JEI-Mixin] getBindingFilter YHK: uid={} filter={} class={}",
+                        uidStr, filter, recipe.getClass().getName());
+            }
             if (filter != null) return filter;
 
             // 2. Vanilla / unregistered UIDs not covered by ModType registry
@@ -1034,7 +1044,8 @@ public class RecipeGuiLayoutsMixin {
 
 		boolean debugFaTlm = filter.equals("hephaestus_forge") || filter.equals("touhou_little_maid");
 		boolean debugVanilla = filter != null && filter.startsWith("block.minecraft.");
-		boolean debug = debugFaTlm || debugVanilla;
+		boolean debugYhk = filter != null && filter.startsWith("youkaishomecoming");
+		boolean debug = debugFaTlm || debugVanilla || debugYhk;
         List<String> allBlockKeys = debug ? new ArrayList<>() : null;
 
         if (container != null) {
@@ -1132,6 +1143,37 @@ public class RecipeGuiLayoutsMixin {
         } catch (Exception e) {
             return false;
         }
+    }
+
+    /** Content-based JEI filter for YHK cooking pot recipes.
+     *  All three pot sizes share the {@code pot_cooking} JEI UID, so we read
+     *  {@code getResult().getCraftingRemainingItem()} to tell which pot the
+     *  recipe needs.  Returns the ModType filter string, or null if this
+     *  isn't a YHK cooking pot recipe. */
+    @Unique
+    private static String rsi$classifyYhkCooking(Object recipe) {
+        String cn = recipe.getClass().getName();
+        if (!cn.startsWith("dev.xkmc.youkaishomecoming.content.pot.cooking."))
+            return null;
+        try {
+            java.lang.reflect.Method getResult = recipe.getClass().getMethod("getResult");
+            net.minecraft.world.item.ItemStack result =
+                    (net.minecraft.world.item.ItemStack) getResult.invoke(recipe);
+            if (!result.isEmpty() && result.hasCraftingRemainingItem()) {
+                net.minecraft.world.item.ItemStack container = result.getCraftingRemainingItem();
+                net.minecraft.resources.ResourceLocation key =
+                        net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(
+                                container.getItem());
+                String k = key.toString();
+                if ("youkaishomecoming:short_iron_pot".equals(k))
+                    return "youkaishomecoming_cooking_short";
+                if ("youkaishomecoming:stockpot".equals(k))
+                    return "youkaishomecoming_cooking_large";
+                if ("youkaishomecoming:small_iron_pot".equals(k))
+                    return "youkaishomecoming_cooking_small";
+            }
+        } catch (Exception ignored) {}
+        return "youkaishomecoming_cooking_small";
     }
 
     /** Returns true for Goety rituals that don't produce items and can't be automated (Convert/Teleport). */

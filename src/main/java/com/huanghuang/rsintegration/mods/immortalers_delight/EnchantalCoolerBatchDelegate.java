@@ -130,6 +130,8 @@ public final class EnchantalCoolerBatchDelegate implements com.huanghuang.rsinte
         this.usingSharedLedger = true;
         this.craftDone = false;
 
+        myLevel.getChunk(myPos);
+
         BlockEntity be = myLevel.getBlockEntity(myPos);
         if (be == null) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-Cooler] BlockEntity missing at {}", myPos);
@@ -244,6 +246,7 @@ public final class EnchantalCoolerBatchDelegate implements com.huanghuang.rsinte
     }
 
     private void clearMachineSlotsAndRefund() {
+        myLevel.getChunk(myPos);
         BlockEntity be = myLevel.getBlockEntity(myPos);
         if (be == null) return;
         if (!be.getClass().getName().equals(BE_CLASS)) return;
@@ -375,12 +378,13 @@ public final class EnchantalCoolerBatchDelegate implements com.huanghuang.rsinte
     @Nullable
     private static IItemHandler getInventory(BlockEntity be) {
         probeReflection();
-        if (inventoryField == null) return null;
-        try {
-            return (IItemHandler) inventoryField.get(be);
-        } catch (Exception e) {
-            return null;
+        if (inventoryField != null) {
+            try {
+                return (IItemHandler) inventoryField.get(be);
+            } catch (Exception ignored) {}
         }
+        return be.getCapability(net.minecraftforge.common.capabilities.ForgeCapabilities.ITEM_HANDLER)
+                .resolve().orElse(null);
     }
 
     private static boolean hasResidualDye(BlockEntity be) {

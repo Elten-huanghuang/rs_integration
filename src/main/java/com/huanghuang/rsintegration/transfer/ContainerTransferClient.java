@@ -47,7 +47,11 @@ public final class ContainerTransferClient {
      * Must be called during mod construction so the key-mapping listener is
      * added before {@code RegisterKeyMappingsEvent} fires.
      */
+    private static volatile boolean keyMappingsRegistered;
+
     public static void registerKeyMappings() {
+        if (keyMappingsRegistered) return;
+        keyMappingsRegistered = true;
         KEY_STORE_ALL = new KeyMapping(
                 "key.rsi.store_all",
                 KeyConflictContext.GUI,
