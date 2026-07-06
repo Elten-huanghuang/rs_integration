@@ -2,7 +2,7 @@ package com.huanghuang.rsintegration.mods.goety;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
-import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
+
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
@@ -186,8 +186,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
                     }
                 }
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.warn("[RSI-Batch-Goety] validateAndInit [9/9] pedestal scan failed — proceeding without pedestal check: {}",
-                        e.toString());
+                RSIntegrationMod.LOGGER.warn("[RSI-Batch-Goety] validateAndInit [9/9] pedestal scan failed — proceeding without pedestal check", e);
             }
         } else {
             RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] validateAndInit [9/9] pedestal scan skipped (ritual is null)");
@@ -735,7 +734,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean isCraftComplete(ServerLevel level) {
+    protected boolean isMachineCraftFinished(ServerLevel level, BlockEntity be) {
         if (isBrazier) return isBrazierCraftComplete(level);
 
         // Use the public field directly — getCurrentRitualRecipe() has a side
@@ -748,10 +747,11 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         if (!ritualEverSeenActive && player != null) {
             ItemStack expected = RecipeIndex.tryGetResultItem((Recipe<?>) ritualRecipe, level.registryAccess());
             if (!expected.isEmpty()) {
-                if (myPos != null && level.isLoaded(myPos)) {
+                BlockPos pos = be.getBlockPos();
+                if (pos != null && level.isLoaded(pos)) {
                     var entities = level.getEntitiesOfClass(
                             net.minecraft.world.entity.item.ItemEntity.class,
-                            new net.minecraft.world.phys.AABB(myPos).inflate(3),
+                            new net.minecraft.world.phys.AABB(pos).inflate(3),
                             e -> ItemStack.isSameItemSameTags(e.getItem(), expected));
                     if (!entities.isEmpty()) return true;
                 }
@@ -811,7 +811,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
                 }
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] Altar inventory read failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] Altar inventory read failed", e);
         }
 
         // 2. Scan for ItemEntity near the altar
@@ -906,25 +906,12 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public void onBatchFailed(ServerPlayer player, String reason) {
+    protected void clearMachineState(BlockEntity be, ServerPlayer player) {
         if (isBrazier) {
-            if (usingSharedLedger) {
-                // Chain will refund via ledger.refundCommitted() — clearing
-                // here would double-return. Reset state without touching slots.
-                resetState();
-                return;
-            }
             recoverBrazierItems();
         } else {
             ritualEverSeenActive = false;
             refundActivationToPlayer();
-            if (usingSharedLedger) {
-                // Chain will refund via ledger.refundCommitted() — clearing
-                // pedestals would double-return. Reset state without touching them.
-                resetState();
-                activationExtractedFromPlayer = null;
-                return;
-            }
             recoverFromPedestals();
         }
         resetState();
@@ -1071,7 +1058,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             return ((LazyOptional<IItemHandler>) opt.get())
                     .map(h -> h.getStackInSlot(0)).orElse(ItemStack.EMPTY);
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.error("[RSI-Goety] Failed to read pedestal stack: {}", e.toString());
+            RSIntegrationMod.LOGGER.error("[RSI-Goety] Failed to read pedestal stack", e);
             return ItemStack.EMPTY;
         }
     }
@@ -1117,7 +1104,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
                     raw.size(), result.size());
             if (!result.isEmpty()) return result;
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Batch-Goety] ritual.getPedestals failed, using fallback scan: {}", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-Batch-Goety] ritual.getPedestals failed, using fallback scan", e);
         }
         int range = 16;
         for (BlockPos cp : BlockPos.betweenClosed(
@@ -1296,7 +1283,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             }
             return true;
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Batch-Goety] ritual.isValid check failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-Batch-Goety] ritual.isValid check failed", e);
             return false;
         }
     }
@@ -1456,7 +1443,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
                     }
                 }
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] Plan structure check failed: {}", e.toString());
+                RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] Plan structure check failed", e);
             }
         } else if (dim == null || pos == null) {
             try {

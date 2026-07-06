@@ -256,20 +256,16 @@ extends AbstractBatchDelegate {
         }
     }
 
-    public boolean isCraftComplete(ServerLevel level) {
+    @Override
+    protected boolean isMachineCraftFinished(ServerLevel level, BlockEntity be) {
         if (this.tablet == null) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Embers] isCraftComplete: tablet is null");
+            RSIntegrationMod.debug("[RSI-Embers] isCraftComplete: tablet is null");
             return true;
         }
-        BlockEntity current = this.level.getBlockEntity(this.machinePos);
-        if (current == null || current.isRemoved()) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Embers] isCraftComplete: tablet removed (direct check) current={}", (Object)current);
-            return true;
-        }
-        int progress = Reflect.getIntField((Object)this.tablet, "progress").orElse(-1);
+        int progress = Reflect.getIntField(be, "progress").orElse(-1);
         boolean complete = this.craftStarted && progress == 0;
         if (complete) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Embers] isCraftComplete=TRUE: craftStarted={} progress={}",
+            RSIntegrationMod.debug("[RSI-Embers] isCraftComplete=TRUE: craftStarted={} progress={}",
                     (Object)this.craftStarted, (Object)progress);
         }
         return complete;
@@ -335,13 +331,11 @@ extends AbstractBatchDelegate {
         return ItemStack.EMPTY;
     }
 
-    public void onBatchFailed(ServerPlayer player, String reason) {
-        EreAlchemyLock.unlock(this.level.dimension(), (BlockPos)this.machinePos);
+    @Override
+    protected void clearMachineState(BlockEntity be, ServerPlayer player) {
+        EreAlchemyLock.unlock(be.getLevel().dimension(), be.getBlockPos());
         this.craftStarted = false;
         this.clearAllSlots();
-        if (reason != null && !reason.isEmpty()) {
-            player.sendSystemMessage(Component.translatable("rsi.generic.error.craft_failed", reason));
-        }
     }
 
     public void onBatchFinished(ServerPlayer player) {

@@ -94,7 +94,7 @@ public final class RSJeiPlugin implements IModPlugin {
             );
             RSIntegrationMod.LOGGER.debug("[RSI-JEI] Registered Eidolon worktable transfer handler");
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-JEI] Failed to register Eidolon worktable transfer: {}", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-JEI] Failed to register Eidolon worktable transfer", e);
         }
     }
 }

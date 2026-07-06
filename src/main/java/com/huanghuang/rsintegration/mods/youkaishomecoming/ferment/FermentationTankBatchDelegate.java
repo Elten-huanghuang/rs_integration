@@ -4,7 +4,7 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
-import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.reflection.probes.YHKReflection;
 import com.huanghuang.rsintegration.util.Reflect;
 import com.refinedmods.refinedstorage.api.network.INetwork;
@@ -34,16 +34,14 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-public final class FermentationTankBatchDelegate implements IBatchDelegate {
+public final class FermentationTankBatchDelegate extends AbstractBatchDelegate {
 
     private ServerPlayer player;
     private ServerLevel myLevel;
     private ResourceKey<Level> myDim;
     private BlockPos myPos;
     private Recipe<?> recipe;
-    private INetwork network;
     private boolean craftDone;
-    private boolean usingSharedLedger;
 
     private int insertedCount;
     private ItemStack insertedSample = ItemStack.EMPTY;
@@ -189,9 +187,8 @@ public final class FermentationTankBatchDelegate implements IBatchDelegate {
     }
 
     @Override
-    public boolean isCraftComplete(ServerLevel level) {
-        BlockEntity be = level.getBlockEntity(myPos);
-        if (be == null || !isFermentationBE(be)) return false;
+    protected boolean isMachineCraftFinished(ServerLevel level, BlockEntity be) {
+        if (!isFermentationBE(be)) return false;
 
         int progress = Reflect.<Integer>getField(be, "recipeProgress").orElse(-1);
         int total = Reflect.<Integer>getField(be, "totalTime").orElse(-1);
@@ -245,7 +242,7 @@ public final class FermentationTankBatchDelegate implements IBatchDelegate {
     }
 
     @Override
-    public void onBatchFailed(ServerPlayer player, String reason) {
+    protected void clearMachineState(BlockEntity be, ServerPlayer player) {
         clearAndRefund();
         forceChunkLoad(false);
         craftDone = false;
@@ -292,7 +289,7 @@ public final class FermentationTankBatchDelegate implements IBatchDelegate {
             Object val = f.get(recipe);
             if (val instanceof List) return (List<Ingredient>) val;
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Fermentation] Recipe ingredients reflection failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-Fermentation] Recipe ingredients reflection failed", e);
         }
         return List.of();
     }
@@ -307,7 +304,7 @@ public final class FermentationTankBatchDelegate implements IBatchDelegate {
                     return s.copy();
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Fermentation] Expected result reflection failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-Fermentation] Expected result reflection failed", e);
         }
         return ItemStack.EMPTY;
     }
@@ -337,7 +334,7 @@ public final class FermentationTankBatchDelegate implements IBatchDelegate {
                 openPropertyField.setAccessible(true);
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Ferment] Reflection probe failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-Ferment] Reflection probe failed", e);
         }
     }
 
@@ -360,7 +357,7 @@ public final class FermentationTankBatchDelegate implements IBatchDelegate {
                 Object val = itemsField.get(be);
                 if (val instanceof SimpleContainer sc) return sc;
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.warn("[RSI-Fermentation] getItemHandler reflection failed: {}", e.toString());
+                RSIntegrationMod.LOGGER.warn("[RSI-Fermentation] getItemHandler reflection failed", e);
             }
         }
         // Fallback: getCapability
@@ -377,7 +374,7 @@ public final class FermentationTankBatchDelegate implements IBatchDelegate {
                 notifyTileMethod.invoke(be);
                 return;
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.warn("[RSI-Fermentation] notifyTile reflection failed: {}", e.toString());
+                RSIntegrationMod.LOGGER.warn("[RSI-Fermentation] notifyTile reflection failed", e);
             }
         }
         be.setChanged();
@@ -391,7 +388,7 @@ public final class FermentationTankBatchDelegate implements IBatchDelegate {
                 if (prop instanceof BooleanProperty bp && state.hasProperty(bp))
                     return state.getValue(bp);
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.warn("[RSI-Fermentation] isLidOpen reflection failed: {}", e.toString());
+                RSIntegrationMod.LOGGER.warn("[RSI-Fermentation] isLidOpen reflection failed", e);
             }
         }
         for (var prop : state.getProperties()) {
@@ -411,7 +408,7 @@ public final class FermentationTankBatchDelegate implements IBatchDelegate {
                     return;
                 }
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.warn("[RSI-Fermentation] setLidOpen reflection failed: {}", e.toString());
+                RSIntegrationMod.LOGGER.warn("[RSI-Fermentation] setLidOpen reflection failed", e);
             }
         }
         for (var prop : state.getProperties()) {
@@ -455,7 +452,7 @@ public final class FermentationTankBatchDelegate implements IBatchDelegate {
             int cz = myPos.getZ() >> 4;
             ForgeChunkManager.forceChunk(myLevel, RSIntegrationMod.MOD_ID, myPos, cx, cz, load, true);
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Ferment] Chunk load failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI-Ferment] Chunk load failed", e);
         }
     }
 }

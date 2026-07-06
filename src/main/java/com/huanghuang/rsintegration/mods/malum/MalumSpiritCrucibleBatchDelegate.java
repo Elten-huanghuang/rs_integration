@@ -4,7 +4,7 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.reflection.probes.MalumReflection;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
-import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
+
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.util.Reflect;
@@ -37,7 +37,7 @@ import java.util.List;
  *
  * Output spawns as ItemEntity in the world — collected via AABB scan.
  */
-public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegate implements IBatchDelegate {
+public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegate {
 
     private static java.lang.reflect.Field iwcIngField;
     private static java.lang.reflect.Field iwcCountField;
@@ -141,7 +141,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
                     if (v instanceof ItemStack s && !s.isEmpty())
                         this.expectedOutput = s.copy();
                 } catch (Exception e) {
-                    RSIntegrationMod.LOGGER.warn("[RSI-Malum] IngredientWithCount parse failed: {}", e.toString());
+                    RSIntegrationMod.LOGGER.warn("[RSI-Malum] IngredientWithCount parse failed", e);
                 }
             });
         }
@@ -191,7 +191,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
                         }
                     }
                 } catch (Exception e) {
-                    RSIntegrationMod.LOGGER.warn("[RSI-Malum] IngredientWithCount parse failed: {}", e.toString());
+                    RSIntegrationMod.LOGGER.warn("[RSI-Malum] IngredientWithCount parse failed", e);
                 }
             }
             if (!matches) {
@@ -458,14 +458,13 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
         return true;
     }
 
-    // ── isCraftComplete ──────────────────────────────────────────
+    // ── isMachineCraftFinished ───────────────────────────────────
 
     @Override
-    public boolean isCraftComplete(ServerLevel level) {
-        if (!craftStarted || myLevel == null || myPos == null) return false;
+    protected boolean isMachineCraftFinished(ServerLevel level, BlockEntity be) {
+        if (!craftStarted) return false;
 
-        BlockEntity be = myLevel.getBlockEntity(myPos);
-        if (be == null || !MalumReflection.crucibleBEClass.isInstance(be)) return true; // BE gone → consider done
+        if (!MalumReflection.crucibleBEClass.isInstance(be)) return true; // BE gone → consider done
 
         Object currentRecipe = Reflect.getField(be, "recipe").orElse(null);
         if (currentRecipe != null) {
@@ -478,8 +477,9 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
 
         // Fallback: scan for ItemEntity result
         if (!expectedOutput.isEmpty()) {
-            List<ItemEntity> entities = myLevel.getEntitiesOfClass(ItemEntity.class,
-                    new AABB(myPos).inflate(3),
+            BlockPos pos = be.getBlockPos();
+            List<ItemEntity> entities = level.getEntitiesOfClass(ItemEntity.class,
+                    new AABB(pos).inflate(3),
                     e -> net.minecraft.world.item.ItemStack.isSameItemSameTags(
                             e.getItem(), expectedOutput)
                             || net.minecraft.world.item.ItemStack.isSameItem(
@@ -545,14 +545,8 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
     // ── cleanup ───────────────────────────────────────────────────
 
     @Override
-    public void onBatchFailed(ServerPlayer player, String reason) {
-        RSIntegrationMod.LOGGER.warn("[RSI-Crucible] Batch failed: {}", reason);
-        if (usingSharedLedger) {
-            // Chain will refund via ledger.refundCommitted() — clearing
-            // here would double-return. Reset state without touching slots.
-            resetState();
-            return;
-        }
+    protected void clearMachineState(BlockEntity be, ServerPlayer player) {
+        RSIntegrationMod.LOGGER.warn("[RSI-Crucible] Batch failed");
         clearAllSlots();
         resetState();
     }
@@ -583,7 +577,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
             handler.getClass().getMethod("setStackInSlot", int.class, ItemStack.class)
                     .invoke(handler, slot, stack.copy());
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Crucible] setSlot failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI-Crucible] setSlot failed", e);
         }
     }
 

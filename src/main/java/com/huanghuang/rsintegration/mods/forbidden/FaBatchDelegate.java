@@ -2,7 +2,7 @@ package com.huanghuang.rsintegration.mods.forbidden;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
-import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
+
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
@@ -131,7 +131,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
                     return false;
                 }
             }
-        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Reflection probe failed", e); }
+        } catch (Exception e) { RSIntegrationMod.debug("[RSI-Batch-FA] Reflection probe failed", e); }
 
         // Resolve ritual manager — must come BEFORE enhancer check
         try {
@@ -263,7 +263,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
                 RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] tryStartSingleCraft: altar busy, aborting");
                 return false;
             }
-        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Reflection probe failed", e); }
+        } catch (Exception e) { RSIntegrationMod.debug("[RSI-Batch-FA] Reflection probe failed", e); }
 
         this.filledPedestals = new ArrayList<>();
 
@@ -286,7 +286,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
                 if (stack.isEmpty()) {
                     availablePedestals.add(ped);
                 }
-            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Reflection probe failed", e); }
+            } catch (Exception e) { RSIntegrationMod.debug("[RSI-Batch-FA] Reflection probe failed", e); }
         }
 
         // Collect recipe requirements
@@ -420,7 +420,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
             }
         } catch (java.lang.reflect.InvocationTargetException e) {
             Throwable root = e.getCause() != null ? e.getCause() : e;
-            RSIntegrationMod.LOGGER.error("[RSI-Batch-FA] tryStartRitual failed — forge rejected: {}", root.toString());
+            RSIntegrationMod.LOGGER.error("[RSI-Batch-FA] tryStartRitual failed — forge rejected", root);
             rollbackAll();
             ledger.rollback(player);
             returnStarterToSource(starterStack);
@@ -498,7 +498,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
                 player.sendSystemMessage(Component.translatable("rsi.fa.warn.ritual_active"));
                 return false;
             }
-        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Reflection probe failed", e); }
+        } catch (Exception e) { RSIntegrationMod.debug("[RSI-Batch-FA] Reflection probe failed", e); }
 
         this.filledPedestals = new ArrayList<>();
 
@@ -521,7 +521,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
             try {
                 ItemStack stack = (ItemStack) Reflect.getMethodOrThrow(FAReflection.pedestalBEClass, "getStack", "getStack").invoke(ped);
                 if (stack.isEmpty()) availablePedestals.add(ped);
-            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Reflection probe failed", e); }
+            } catch (Exception e) { RSIntegrationMod.debug("[RSI-Batch-FA] Reflection probe failed", e); }
         }
 
         boolean hasMain = ((Ingredient) FaRitualHelper.invoke(ritual, "mainIngredient")) != null;
@@ -604,7 +604,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
                     RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] updateValidRitual: matched expected ritual");
                 }
             } catch (Exception vEx) {
-                RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] validRitual check failed (harmless): {}", vEx.toString());
+                RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] validRitual check failed (harmless)", vEx);
             }
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-FA] cachedIngredients/updateValidRitual failed: {}");
@@ -668,20 +668,20 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
                                 i, materials.get(i), materials.get(i).getCount());
                     }
                 } catch (Exception diagEx) {
-                    RSIntegrationMod.LOGGER.warn("[RSI-Batch-FA]   diagnostic dump failed: {}", diagEx.toString());
+                    RSIntegrationMod.LOGGER.warn("[RSI-Batch-FA]   diagnostic dump failed", diagEx);
                 }
                 player.sendSystemMessage(Component.translatable("rsi.fa.warn.ritual_rejected"));
                 clearFilledPedestals();
                 try {
                     int mainSlot = FaRitualHelper.getMainSlot();
                     FaRitualHelper.setForgeSlot(forge, mainSlot, ItemStack.EMPTY);
-                } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Reflection probe failed", e); }
+                } catch (Exception e) { RSIntegrationMod.debug("[RSI-Batch-FA] Reflection probe failed", e); }
                 returnStarterToSource(starterStack);
                 return false;
             }
         } catch (java.lang.reflect.InvocationTargetException e) {
             Throwable root = e.getCause() != null ? e.getCause() : e;
-            RSIntegrationMod.LOGGER.error("[RSI-Batch-FA] tryStartRitual failed (withMaterials) — forge rejected: {}", root.toString());
+            RSIntegrationMod.LOGGER.error("[RSI-Batch-FA] tryStartRitual failed (withMaterials) — forge rejected", root);
             rollbackAll();
             player.sendSystemMessage(Component.translatable("rsi.fa.error.craft_failed"));
             returnStarterToSource(starterStack);
@@ -699,7 +699,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean isCraftComplete(ServerLevel level) {
+    protected boolean isMachineCraftFinished(ServerLevel level, BlockEntity be) {
         try {
             if (ritualManager != null) {
                 Boolean active = (Boolean) Reflect.getMethodOrThrow(FAReflection.ritualManagerClass, "isRitualActive", "isRitualActive").invoke(ritualManager);
@@ -708,7 +708,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
                     return false;
                 }
             }
-        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Reflection probe failed", e); }
+        } catch (Exception e) { RSIntegrationMod.debug("[RSI-Batch-FA] Reflection probe failed", e); }
         return ritualEverSeenActive;
     }
 
@@ -755,8 +755,8 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public void onBatchFailed(ServerPlayer player, String reason) {
-        if (!usingSharedLedger && starterFromRS != null && network != null) {
+    protected void clearMachineState(BlockEntity be, ServerPlayer player) {
+        if (starterFromRS != null && network != null) {
             ItemStack leftover = network.insertItem(starterFromRS, starterFromRS.getCount(),
                     com.refinedmods.refinedstorage.api.util.Action.PERFORM);
             if (!leftover.isEmpty()) {
@@ -776,7 +776,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
         try {
             int mainSlot = FaRitualHelper.getMainSlot();
             FaRitualHelper.setForgeSlot(forge, mainSlot, ItemStack.EMPTY);
-        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Reflection probe failed", e); }
+        } catch (Exception e) { RSIntegrationMod.debug("[RSI-Batch-FA] Reflection probe failed", e); }
         resetState();
         starterFromRS = null;
         ritualEverSeenActive = false;
@@ -811,7 +811,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
                 }
             }
             FaRitualHelper.setForgeSlot(forge, mainSlot, ItemStack.EMPTY);
-        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Reflection probe failed", e); }
+        } catch (Exception e) { RSIntegrationMod.debug("[RSI-Batch-FA] Reflection probe failed", e); }
     }
 
     private void clearFilledPedestals() {
@@ -832,7 +832,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
                 }
                 Reflect.getMethodOrThrow(FAReflection.pedestalBEClass, "clearStack", "clearStack", Level.class, boolean.class)
                         .invoke(ped, null, false);
-            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Reflection probe failed", e); }
+            } catch (Exception e) { RSIntegrationMod.debug("[RSI-Batch-FA] Reflection probe failed", e); }
         }
     }
 
@@ -842,7 +842,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
             try {
                 Reflect.getMethodOrThrow(FAReflection.pedestalBEClass, "clearStack", "clearStack", Level.class, boolean.class)
                         .invoke(ped, null, false);
-            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Reflection probe failed", e); }
+            } catch (Exception e) { RSIntegrationMod.debug("[RSI-Batch-FA] Reflection probe failed", e); }
         }
     }
 
@@ -945,7 +945,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
                                     }
                                 }
                             }
-                        } catch (Exception ignored) {}
+                        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] curios inventory probe failed", e); }
                         ResourceLocation foundDim = null;
                         BlockPos foundPos = null;
                         outer:
@@ -968,7 +968,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
                     }
                 }
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Forge pos resolution failed: {}", e.toString());
+                RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Forge pos resolution failed", e);
             }
         }
 

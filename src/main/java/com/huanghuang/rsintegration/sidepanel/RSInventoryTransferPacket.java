@@ -214,7 +214,9 @@ public final class RSInventoryTransferPacket {
                                 if (getCrystalType.invoke(ritual, is) != null) {
                                     crystalItems.add(is.getItem());
                                 }
-                            } catch (Exception ignored) {}
+                            } catch (Exception e) {
+                                RSIntegrationMod.LOGGER.debug("[RSI-SidePanel] reflection probe failed", e);
+                            }
                         }
                     }
                 }
@@ -241,7 +243,7 @@ public final class RSInventoryTransferPacket {
                     }
                 }
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.debug("[RSI-InvTransfer] WR crystal class detection failed: {}", e.toString());
+                RSIntegrationMod.LOGGER.debug("[RSI-InvTransfer] WR crystal class detection failed", e);
             }
         }
 

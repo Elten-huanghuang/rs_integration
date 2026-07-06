@@ -528,7 +528,7 @@ public final class JeiMarqueeSelector {
             try {
                 IBookmark bookmark = (IBookmark) bookmarkCreateMethod.invoke(null, ing, im);
                 if (bookmark != null && list.add(bookmark)) added++;
-            } catch (Exception ignored) {}
+            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-JEI-Marquee] bookmark create failed", e); }
         }
         RSIntegrationMod.LOGGER.debug("[RSI-JEI-Marquee] Bookmarked {} items", added);
     }
@@ -618,7 +618,7 @@ public final class JeiMarqueeSelector {
                     ITypedIngredient.class, IIngredientManager.class);
             bookmarkCreateMethod.setAccessible(true);
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-JEI-Marquee] Reflection probe failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-JEI-Marquee] Reflection probe failed", e);
         }
     }
 }

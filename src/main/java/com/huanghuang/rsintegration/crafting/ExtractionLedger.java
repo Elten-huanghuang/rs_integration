@@ -653,7 +653,7 @@ public final class ExtractionLedger {
                 return opt.get().getInventoryForUpgradeProcessing();
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Ledger] Backpack inventory lookup failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI-Ledger] Backpack inventory lookup failed", e);
         }
         return null;
     }
@@ -714,7 +714,7 @@ public final class ExtractionLedger {
                 }
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Ledger] Curios backpack scan failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-Ledger] Curios backpack scan failed", e);
         }
     }
 

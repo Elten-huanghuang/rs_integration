@@ -17,7 +17,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
-public final class FaRecipeHandler implements ModRecipeHandler {
+public final class FaRecipeHandler extends AbstractRecipeHandler {
 
     @Override
     public ModType modType() { return ModType.byId("forbidden_arcanus"); }
@@ -88,7 +88,7 @@ public final class FaRecipeHandler implements ModRecipeHandler {
                 if (assembled instanceof ItemStack st && !st.isEmpty()) return st;
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-FaHandler] assemble failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI-FaHandler] assemble failed", e);
         }
         return ItemStack.EMPTY;
     }
@@ -226,7 +226,7 @@ public final class FaRecipeHandler implements ModRecipeHandler {
 
             return preview;
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-FaHandler] buildModifierPreview failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI-FaHandler] buildModifierPreview failed", e);
             return ItemStack.EMPTY;
         }
     }

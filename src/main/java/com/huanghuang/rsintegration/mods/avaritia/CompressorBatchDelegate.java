@@ -4,7 +4,7 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
-import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
@@ -29,7 +29,7 @@ import java.util.List;
  * Inserts materials into slot 1 (input), lets the machine's tick()
  * process them, then collects from slot 0 (output).
  */
-public final class CompressorBatchDelegate implements IBatchDelegate {
+public final class CompressorBatchDelegate extends AbstractBatchDelegate {
 
     private static final String BE_CLASS = "committee.nova.mods.avaritia.common.tile.NeutronCompressorTile";
 
@@ -143,9 +143,7 @@ public final class CompressorBatchDelegate implements IBatchDelegate {
     }
 
     @Override
-    public boolean isCraftComplete(ServerLevel level) {
-        BlockEntity be = level.getBlockEntity(myPos);
-        if (be == null) return false;
+    protected boolean isMachineCraftFinished(ServerLevel level, BlockEntity be) {
         IItemHandler handler = getHandler(be);
         if (handler == null) return false;
         return !handler.getStackInSlot(0).isEmpty();
@@ -164,7 +162,7 @@ public final class CompressorBatchDelegate implements IBatchDelegate {
     }
 
     @Override
-    public void onBatchFailed(ServerPlayer player, String reason) {
+    protected void clearMachineState(BlockEntity be, ServerPlayer player) {
         forceChunkLoad(false);
     }
 
@@ -191,7 +189,7 @@ public final class CompressorBatchDelegate implements IBatchDelegate {
             int cz = myPos.getZ() >> 4;
             ForgeChunkManager.forceChunk(myLevel, RSIntegrationMod.MOD_ID, myPos, cx, cz, load, true);
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Batch-Comp] Chunk load failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI-Batch-Comp] Chunk load failed", e);
         }
     }
 }

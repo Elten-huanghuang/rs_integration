@@ -2,7 +2,7 @@ package com.huanghuang.rsintegration.mods.touhoulittlemaid;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
-import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
+
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
@@ -433,7 +433,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean isCraftComplete(ServerLevel level) {
+    protected boolean isMachineCraftFinished(ServerLevel level, BlockEntity be) {
         if (!craftEverConfirmed) return false;
         // altarCraft is fully synchronous: addFreshEntity() has already run.
         // Return true immediately -- no need to poll for ItemEntity existence.
@@ -478,7 +478,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public void onBatchFailed(ServerPlayer player, String reason) {
+    protected void clearMachineState(BlockEntity be, ServerPlayer player) {
         rollbackAll();
         resetState();
         craftEverConfirmed = false;
@@ -608,7 +608,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
             return true;
         } catch (java.lang.reflect.InvocationTargetException e) {
             Throwable root = e.getCause() != null ? e.getCause() : e;
-            RSIntegrationMod.LOGGER.error("[RSI-Batch-TLM] altarCraft failed: {}", root.toString());
+            RSIntegrationMod.LOGGER.error("[RSI-Batch-TLM] altarCraft failed", root);
             return false;
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.error("[RSI-Batch-TLM] altarCraft invocation failed:", e);

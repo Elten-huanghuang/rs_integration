@@ -14,15 +14,14 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 
-public final class EreAlchemyRecipeHandler implements ModRecipeHandler {
+public final class EreAlchemyRecipeHandler extends AbstractRecipeHandler {
+
+    static {
+        registerRecipePrefixes(EreAlchemyRecipeHandler.class, "com.rekindled.embers.");
+    }
 
     @Override
     public ModType modType() { return ModType.byId(ModIds.ID_EMBERS_ALCHEMY); }
-
-    @Override
-    public boolean canHandle(Recipe<?> recipe) {
-        return recipe.getClass().getName().startsWith("com.rekindled.embers.");
-    }
 
     @Override
     public ItemStack getResultItem(Recipe<?> recipe, RegistryAccess access) {

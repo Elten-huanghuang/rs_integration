@@ -60,7 +60,9 @@ public final class Reflect {
                     return s.get();
                 }
                 return raw;
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                LOG.debug("{} reflection probe failed", TAG, e);
+            }
         }
         // Brute-force: return first non-synthetic Object field
         for (var f : holder.getClass().getDeclaredFields()) {
@@ -74,7 +76,9 @@ public final class Reflect {
                         return s.get();
                     }
                     return raw;
-                } catch (Exception ignored) {}
+                } catch (Exception e) {
+                    LOG.debug("{} reflection probe failed", TAG, e);
+                }
             }
         }
         return null;
@@ -122,7 +126,7 @@ public final class Reflect {
             }
             return Optional.ofNullable((T) m.invoke(obj, args));
         } catch (Exception e) {
-            LOG.debug("{} invoke failed: {}.{} — {}", TAG, obj.getClass().getName(), methodName, e.toString());
+            LOG.debug("{} invoke failed: {}.{}", TAG, obj.getClass().getName(), methodName, e);
             return Optional.empty();
         }
     }
@@ -140,7 +144,7 @@ public final class Reflect {
             f.setAccessible(true);
             return Optional.ofNullable((T) f.get(obj));
         } catch (Exception e) {
-            LOG.debug("{} getField failed: {}.{} — {}", TAG, obj.getClass().getName(), fieldName, e.toString());
+            LOG.debug("{} getField failed: {}.{}", TAG, obj.getClass().getName(), fieldName, e);
             return Optional.empty();
         }
     }
@@ -152,7 +156,7 @@ public final class Reflect {
             f.setAccessible(true);
             return OptionalInt.of(f.getInt(obj));
         } catch (Exception e) {
-            LOG.debug("{} getIntField failed: {}.{} — {}", TAG, obj.getClass().getName(), fieldName, e.toString());
+            LOG.debug("{} getIntField failed: {}.{}", TAG, obj.getClass().getName(), fieldName, e);
             return OptionalInt.empty();
         }
     }
@@ -167,7 +171,7 @@ public final class Reflect {
             f.setAccessible(true);
             f.set(obj, value);
         } catch (Exception e) {
-            LOG.debug("{} setField failed: {}.{} — {}", TAG, obj.getClass().getName(), fieldName, e.toString());
+            LOG.debug("{} setField failed: {}.{}", TAG, obj.getClass().getName(), fieldName, e);
         }
     }
 
@@ -220,7 +224,9 @@ public final class Reflect {
                             methodCache.put(key, Optional.of(m));
                             return m;
                         }
-                    } catch (NoSuchMethodException ignored) {}
+                    } catch (NoSuchMethodException ex) {
+                        LOG.debug("{} reflection probe failed", TAG, ex);
+                    }
                 }
                 scan = scan.getSuperclass();
             }

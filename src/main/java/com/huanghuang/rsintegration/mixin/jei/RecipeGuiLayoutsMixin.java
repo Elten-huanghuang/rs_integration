@@ -97,8 +97,8 @@ public class RecipeGuiLayoutsMixin {
                 RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] setRecipeLayoutsWithButtons HEAD: {} recipes, uid={}",
                         layouts.size(), catUid);
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] setRecipeLayoutsWithButtons HEAD: {} recipes, uid=? err={}",
-                        layouts.size(), e.toString());
+                RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] setRecipeLayoutsWithButtons HEAD: {} recipes, uid=?",
+                        layouts.size(), e);
             }
         }
     }
@@ -142,7 +142,7 @@ public class RecipeGuiLayoutsMixin {
                         faNoRecipe++;
                         RSIntegrationMod.LOGGER.warn("[RSI-JEI-Mixin] FA category {} returned null recipe from getRecipe()", catUid);
                     }
-                } catch (Exception ignored) {}
+                } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] category uid check failed", e); }
                 skippedNoRecipe++; continue;
             }
 
@@ -660,12 +660,12 @@ public class RecipeGuiLayoutsMixin {
                 RSIntegrationMod.LOGGER.warn("[RSI-JEI-Mixin] FA ritual not found ({} entries, fp={})",
                         registry.keySet().size(), fp);
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.warn("[RSI-JEI-Mixin] FA registry access failed: {}", e.toString());
+                RSIntegrationMod.LOGGER.warn("[RSI-JEI-Mixin] FA registry access failed", e);
                 // Fallback: try per-call fingerprint match with whatever registry we have
                 return rsi$faFingerprintMatch(null, ritual);
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-JEI-Mixin] FA ritual ID lookup failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-JEI-Mixin] FA ritual ID lookup failed", e);
         }
         return null;
     }
@@ -695,14 +695,14 @@ public class RecipeGuiLayoutsMixin {
                     }
                 } catch (Exception e) {
                     failed++;
-                    RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] FA cache entry failed: {}", e.toString());
+                    RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] FA cache entry failed", e);
                 }
             }
             rsi$faCacheBuilt = true;
             RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] FA fingerprint cache built: {} entries (skipped={} failed={})",
                     rsi$faFingerprintCache.size(), skipped, failed);
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-JEI-Mixin] FA fingerprint cache build failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-JEI-Mixin] FA fingerprint cache build failed", e);
         }
     }
 
@@ -755,7 +755,7 @@ public class RecipeGuiLayoutsMixin {
 
             return sb.toString();
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] FA fingerprint build failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] FA fingerprint build failed", e);
             return "";
         }
     }
@@ -770,7 +770,7 @@ public class RecipeGuiLayoutsMixin {
             var key = (net.minecraft.resources.ResourceKey<? extends net.minecraft.core.Registry<?>>) regKey;
             return level.registryAccess().registryOrThrow(key);
         } catch (Exception e1) {
-            RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] FA registryOrThrow failed, trying RegistryManager: {}", e1.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] FA registryOrThrow failed, trying RegistryManager", e1);
             try {
                 Class<?> rmClass = Class.forName("net.minecraftforge.registries.RegistryManager");
                 java.lang.reflect.Field activeField = rmClass.getField("ACTIVE");
@@ -785,7 +785,7 @@ public class RecipeGuiLayoutsMixin {
                     }
                 }
             } catch (Exception e2) {
-                RSIntegrationMod.LOGGER.warn("[RSI-JEI-Mixin] FA RegistryManager fallback also failed: {}", e2.toString());
+                RSIntegrationMod.LOGGER.warn("[RSI-JEI-Mixin] FA RegistryManager fallback also failed", e2);
             }
         }
         return null;
@@ -862,7 +862,7 @@ public class RecipeGuiLayoutsMixin {
                 }
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-JEI-Mixin] FA fingerprint match failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-JEI-Mixin] FA fingerprint match failed", e);
         }
         return null;
     }
@@ -881,7 +881,7 @@ public class RecipeGuiLayoutsMixin {
                         && inner.getClass().getName().startsWith("com.stal111.forbidden_arcanus")) {
                     return inner;
                 }
-            } catch (Exception ignored) {}
+            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] ritual method probe failed", e); }
         }
         return obj;
     }
@@ -910,7 +910,7 @@ public class RecipeGuiLayoutsMixin {
                 }
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-JEI-Mixin] TLM altar recipe ID lookup failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-JEI-Mixin] TLM altar recipe ID lookup failed", e);
         }
         return null;
     }
@@ -1019,7 +1019,7 @@ public class RecipeGuiLayoutsMixin {
                 return inputSlots.get(1).getDisplayedItemStack().orElse(null);
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-JEI-Mixin] Failed to extract FA smithing base item: {}", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-JEI-Mixin] Failed to extract FA smithing base item", e);
         }
         return null;
     }
@@ -1160,7 +1160,7 @@ public class RecipeGuiLayoutsMixin {
                 if ("youkaishomecoming:small_iron_pot".equals(k))
                     return "youkaishomecoming_cooking_small";
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] YHK pot type probe failed", e); }
         return "youkaishomecoming_cooking_small";
     }
 

@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.recipe;
 
 import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.util.Reflect;
@@ -13,15 +14,14 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 
-public final class WRRecipeHandler implements ModRecipeHandler {
+public final class WRRecipeHandler extends AbstractRecipeHandler {
+
+    static {
+        registerRecipePrefixes(WRRecipeHandler.class, "mod.maxbogomol.wizards_reborn.");
+    }
 
     @Override
     public ModType modType() { return ModType.byId("wizards_reborn"); }
-
-    @Override
-    public boolean canHandle(Recipe<?> recipe) {
-        return recipe.getClass().getName().startsWith("mod.maxbogomol.wizards_reborn.");
-    }
 
     @Override
     public ItemStack getResultItem(Recipe<?> recipe, RegistryAccess access) {
@@ -48,12 +48,16 @@ public final class WRRecipeHandler implements ModRecipeHandler {
                     try {
                         Object r = m.invoke(recipe, access);
                         if (r instanceof ItemStack s && !s.isEmpty()) return s;
-                    } catch (Exception ignored) {}
+                    } catch (Exception e) {
+                        RSIntegrationMod.LOGGER.debug("[RSI-Recipe] reflection probe failed", e);
+                    }
                 } else if (m.getParameterCount() == 0) {
                     try {
                         Object r = m.invoke(recipe);
                         if (r instanceof ItemStack s && !s.isEmpty()) return s;
-                    } catch (Exception ignored) {}
+                    } catch (Exception e) {
+                        RSIntegrationMod.LOGGER.debug("[RSI-Recipe] reflection probe failed", e);
+                    }
                 }
             }
         }
@@ -76,7 +80,9 @@ public final class WRRecipeHandler implements ModRecipeHandler {
                     try {
                         ItemStack s = (ItemStack) f.get(recipe);
                         if (s != null && !s.isEmpty()) return s.copy();
-                    } catch (Exception ignored) {}
+                    } catch (Exception e) {
+                        RSIntegrationMod.LOGGER.debug("[RSI-Recipe] reflection probe failed", e);
+                    }
                 }
             }
             scan = scan.getSuperclass();

@@ -6,14 +6,12 @@ import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.reflection.probes.CrabbersDelightReflection;
-import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
@@ -39,9 +37,7 @@ public final class CrabTrapBatchDelegate extends AbstractBatchDelegate {
     private ResourceKey<Level> myDim;
     private BlockPos myPos;
     private CrabTrapLootWrapper wrapper;
-    private INetwork network;
     private boolean craftDone;
-    private boolean usingSharedLedger;
 
     private static volatile Field inventoryField;
     private static volatile boolean reflectionProbed;
@@ -172,11 +168,8 @@ public final class CrabTrapBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean isCraftComplete(ServerLevel level) {
+    protected boolean isMachineCraftFinished(ServerLevel level, BlockEntity be) {
         if (craftDone) return true;
-
-        BlockEntity be = level.getBlockEntity(myPos);
-        if (be == null) return false;
         if (!CrabbersDelightReflection.crabTrapBEClass.isInstance(be)) return false;
 
         IItemHandler itemHandler = getInventory(be);
@@ -232,11 +225,23 @@ public final class CrabTrapBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public void onBatchFailed(ServerPlayer player, String reason) {
-        clearMachineSlotsAndRefund();
+    protected void clearMachineState(BlockEntity be, ServerPlayer player) {
+        if (!CrabbersDelightReflection.crabTrapBEClass.isInstance(be)) return;
+
+        IItemHandler handler = getInventory(be);
+        if (handler == null || handler.getSlots() < TOTAL_SLOTS) return;
+
+        // Refund unconsumed bait
+        ItemStack bait = handler.extractItem(BAIT_SLOT, 64, false);
+        if (!bait.isEmpty() && !usingSharedLedger) refundToRSNetwork(bait);
+
+        // Refund uncollected output
+        for (int slot = OUTPUT_START; slot < OUTPUT_END; slot++) {
+            ItemStack s = handler.extractItem(slot, 64, false);
+            if (!s.isEmpty() && !usingSharedLedger) refundToRSNetwork(s);
+        }
+        be.setChanged();
         forceChunkLoad(false);
-        craftDone = false;
-        network = null;
     }
 
     @Override
@@ -290,7 +295,7 @@ public final class CrabTrapBatchDelegate extends AbstractBatchDelegate {
             inventoryField = CrabbersDelightReflection.crabTrapBEClass.getDeclaredField("inventory");
             inventoryField.setAccessible(true);
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-CrabTrap] Reflection probe failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-CrabTrap] Reflection probe failed", e);
         }
     }
 
@@ -300,7 +305,7 @@ public final class CrabTrapBatchDelegate extends AbstractBatchDelegate {
         if (inventoryField != null) {
             try {
                 return (IItemHandler) inventoryField.get(be);
-            } catch (Exception ignored) {}
+            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-CrabTrap] field access failed", e); }
         }
         return be.getCapability(net.minecraftforge.common.capabilities.ForgeCapabilities.ITEM_HANDLER)
                 .resolve().orElse(null);
@@ -312,7 +317,7 @@ public final class CrabTrapBatchDelegate extends AbstractBatchDelegate {
             int cz = myPos.getZ() >> 4;
             ForgeChunkManager.forceChunk(myLevel, RSIntegrationMod.MOD_ID, myPos, cx, cz, load, true);
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-CrabTrap] Chunk load failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI-CrabTrap] Chunk load failed", e);
         }
     }
 }

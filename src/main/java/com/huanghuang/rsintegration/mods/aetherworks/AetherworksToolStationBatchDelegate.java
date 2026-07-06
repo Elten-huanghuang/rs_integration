@@ -208,15 +208,14 @@ public final class AetherworksToolStationBatchDelegate extends AbstractBatchDele
     }
 
     @Override
-    public boolean isCraftComplete(ServerLevel level) {
+    protected boolean isMachineCraftFinished(ServerLevel level, BlockEntity be) {
         if (!materialsPlaced || AetherworksReflection.toolStationBEClass == null) return false;
 
-        BlockEntity current = level.getBlockEntity(machinePos);
-        if (current == null || current.isRemoved() || !AetherworksReflection.toolStationBEClass.isInstance(current)) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] ToolStation BE removed during craft");
+        if (!AetherworksReflection.toolStationBEClass.isInstance(be)) {
+            warnOnce("toolstation_be_removed", "[RSI-Aetherworks] ToolStation BE removed during craft");
             return true;
         }
-        this.toolStationBE = current;
+        this.toolStationBE = be;
 
         // Refresh forge reference
         if (forgePos != null) {
@@ -259,7 +258,7 @@ public final class AetherworksToolStationBatchDelegate extends AbstractBatchDele
                 abortTimer++;
                 if (abortTimer > 300) {
                     craftTimedOut = true;
-                    RSIntegrationMod.LOGGER.error("[RSI-Aetherworks] ToolStation temperature regulation failed >300 ticks, aborting craft", e);
+                    warnOnce("toolstation_temp_regulation_failed", "[RSI-Aetherworks] ToolStation temperature regulation failed >300 ticks, aborting craft", e);
                 }
             }
         }
@@ -267,33 +266,33 @@ public final class AetherworksToolStationBatchDelegate extends AbstractBatchDele
         // Sync hasEmber/hasHeat from forge, then auto-hammer
         if (forgeBE != null) {
             try {
-                Reflect.invoke(toolStationBE, "onForgeTick", forgeBE);
+                Reflect.invoke(be, "onForgeTick", forgeBE);
             } catch (Exception e) {
                 abortTimer++;
                 if (abortTimer > 300) {
                     craftTimedOut = true;
-                    RSIntegrationMod.LOGGER.error("[RSI-Aetherworks] ToolStation onForgeTick failed >300 ticks, aborting craft", e);
+                    warnOnce("toolstation_on_forge_tick_failed", "[RSI-Aetherworks] ToolStation onForgeTick failed >300 ticks, aborting craft", e);
                 }
             }
         }
         try {
-            boolean hasEmber = Reflect.<Boolean>getField(toolStationBE, "hasEmber").orElse(false);
-            boolean hasHeat = Reflect.<Boolean>getField(toolStationBE, "hasHeat").orElse(false);
+            boolean hasEmber = Reflect.<Boolean>getField(be, "hasEmber").orElse(false);
+            boolean hasHeat = Reflect.<Boolean>getField(be, "hasHeat").orElse(false);
             if (hasEmber && hasHeat) {
-                Reflect.invoke(toolStationBE, "onHit");
+                Reflect.invoke(be, "onHit");
             }
         } catch (Exception e) {
             abortTimer++;
             if (abortTimer > 300) {
                 craftTimedOut = true;
-                RSIntegrationMod.LOGGER.error("[RSI-Aetherworks] ToolStation auto-hammer reflection failed >300 ticks, aborting craft", e);
+                warnOnce("toolstation_auto_hammer_failed", "[RSI-Aetherworks] ToolStation auto-hammer reflection failed >300 ticks, aborting craft", e);
             }
         }
 
         if (craftTimedOut) return true;
 
         // Completion detection: slot 0 item type changed
-        Object inv = Reflect.getField(toolStationBE, "inventory").orElse(null);
+        Object inv = Reflect.getField(be, "inventory").orElse(null);
         if (inv == null) return false;
         ItemStack slotItem = Reflect.invoke(inv, "getStackInSlot", 0)
                 .map(o -> (ItemStack) o).orElse(ItemStack.EMPTY);
@@ -343,23 +342,16 @@ public final class AetherworksToolStationBatchDelegate extends AbstractBatchDele
     }
 
     @Override
-    public void onBatchFailed(ServerPlayer player, String reason) {
-        materialsPlaced = false;
-        if (toolStationBE != null) {
-            Object inv = Reflect.getField(toolStationBE, "inventory").orElse(null);
-            if (inv != null) {
-                for (int i = 0; i < 6; i++) {
-                    ItemStack leftover = Reflect.invoke(inv, "extractItem", i, 64, false)
-                            .map(o -> (ItemStack) o).orElse(ItemStack.EMPTY);
-                    if (!leftover.isEmpty() && network != null) {
-                        network.insertItem(leftover, leftover.getCount(), Action.PERFORM);
-                    }
+    protected void clearMachineState(BlockEntity be, ServerPlayer player) {
+        Object inv = Reflect.getField(be, "inventory").orElse(null);
+        if (inv != null) {
+            for (int i = 0; i < 6; i++) {
+                ItemStack leftover = Reflect.invoke(inv, "extractItem", i, 64, false)
+                        .map(o -> (ItemStack) o).orElse(ItemStack.EMPTY);
+                if (!leftover.isEmpty() && network != null) {
+                    network.insertItem(leftover, leftover.getCount(), Action.PERFORM);
                 }
             }
-        }
-        recordedInputItem = null;
-        if (reason != null && !reason.isEmpty()) {
-            player.sendSystemMessage(Component.translatable("rsi.generic.error.craft_failed", reason));
         }
     }
 

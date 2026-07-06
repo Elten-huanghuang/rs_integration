@@ -14,17 +14,16 @@ import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.List;
 
-public final class AvaritiaRecipeHandler implements ModRecipeHandler {
+public final class AvaritiaRecipeHandler extends AbstractRecipeHandler {
 
     private static final String RECIPE_PKG = "committee.nova.mods.avaritia.common.crafting.recipe.";
 
-    @Override
-    public ModType modType() { return ModType.byId(ModIds.ID_AVARITIA_CRAFTING); }
+    static {
+        registerRecipePrefixes(AvaritiaRecipeHandler.class, RECIPE_PKG);
+    }
 
     @Override
-    public boolean canHandle(Recipe<?> recipe) {
-        return recipe.getClass().getName().startsWith(RECIPE_PKG);
-    }
+    public ModType modType() { return ModType.byId(ModIds.ID_AVARITIA_CRAFTING); }
 
     @Override
     public ItemStack getResultItem(Recipe<?> recipe, RegistryAccess access) {
@@ -62,7 +61,7 @@ public final class AvaritiaRecipeHandler implements ModRecipeHandler {
                 specs.add(new IngredientSpec(additions, 1));
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Avaritia] Failed to reflect smithing ingredients: {}", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-Avaritia] Failed to reflect smithing ingredients", e);
         }
         return specs.isEmpty() ? null : specs;
     }

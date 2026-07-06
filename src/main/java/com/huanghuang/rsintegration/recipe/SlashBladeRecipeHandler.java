@@ -19,16 +19,15 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 
-public final class SlashBladeRecipeHandler implements ModRecipeHandler {
+public final class SlashBladeRecipeHandler extends AbstractRecipeHandler {
+
+    static {
+        registerRecipePrefixes(SlashBladeRecipeHandler.class,
+                "mods.flammpfeil.slashblade.recipe.SlashBladeShapedRecipe");
+    }
 
     @Override
     public ModType modType() { return ModType.byId("slashblade"); }
-
-    @Override
-    public boolean canHandle(Recipe<?> recipe) {
-        return recipe.getClass().getName()
-                .equals("mods.flammpfeil.slashblade.recipe.SlashBladeShapedRecipe");
-    }
 
     @Override
     public ItemStack getResultItem(Recipe<?> recipe, RegistryAccess access) {
@@ -180,7 +179,7 @@ public final class SlashBladeRecipeHandler implements ModRecipeHandler {
 
             return true;
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-SlashBlade] NBT fallback match failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI-SlashBlade] NBT fallback match failed", e);
             return false;
         }
     }

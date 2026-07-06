@@ -2,7 +2,7 @@ package com.huanghuang.rsintegration.mods.wizardsreborn;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
-import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
+
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.reflection.probes.WRReflection;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
@@ -1054,7 +1054,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean isCraftComplete(ServerLevel level) {
+    protected boolean isMachineCraftFinished(ServerLevel level, BlockEntity be) {
         if (!craftStarted) return false;
         waitTicks++;
         if (waitTicks > MAX_WAIT_TICKS) return true; // timeout
@@ -1105,7 +1105,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
                     if (progress == lastCraftProgress) {
                         stallTicks++;
                         if (stallTicks > STALL_THRESHOLD) {
-                            RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] Arcane Iterator craft stalled (progress={}), aborting", progress);
+                            warnOnce("iterator_stalled", "[RSI-Batch-WR] Arcane Iterator craft stalled (progress={}), aborting", progress);
                             return true;
                         }
                     } else {
@@ -1451,18 +1451,11 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public void onBatchFailed(ServerPlayer player, String reason) {
+    protected void clearMachineState(BlockEntity be, ServerPlayer player) {
         // WR commits ledger before placement, so items are already
         // extracted from RS. Always recover actual items from machine
         // slots/pedestals before clearing.
         this.player = player;
-        if (usingSharedLedger) {
-            // Chain will refund via ledger.refundCommitted() — clearing
-            // here would double-return.  Reset state without touching slots.
-            resetState();
-            craftStarted = false;
-            return;
-        }
         clearFilledSlots();
         clearFilledPedestals();
         resetState();
@@ -1594,8 +1587,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
             f.setAccessible(true);
             return (ItemStackHandler) f.get(be);
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] Failed to get itemHandler from {}: {}",
-                    be.getClass().getName(), e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] Failed to get itemHandler from {}", be.getClass().getName(), e);
             return null;
         }
     }
@@ -1607,8 +1599,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
             f.setAccessible(true);
             return (ItemStackHandler) f.get(be);
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] Failed to get itemOutputHandler from {}: {}",
-                    be.getClass().getName(), e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] Failed to get itemOutputHandler from {}", be.getClass().getName(), e);
             return null;
         }
     }
@@ -1799,11 +1790,11 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         try {
             java.lang.reflect.Method m = Reflect.findMethod(be.getClass(), "getWissen", new Class<?>[0]);
             if (m != null) return (int) m.invoke(be);
-        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-WR] readCurrentWissen method failed: {}", e.toString()); }
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-WR] readCurrentWissen method failed", e); }
         try {
             java.lang.reflect.Field f = Reflect.findField(be.getClass(), "wissen").orElse(null);
             if (f != null) { f.setAccessible(true); return f.getInt(be); }
-        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-WR] readCurrentWissen field failed: {}", e.toString()); }
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-WR] readCurrentWissen field failed", e); }
         return -1;
     }
 }

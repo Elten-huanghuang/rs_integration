@@ -58,6 +58,7 @@ import net.minecraftforge.fml.IExtensionPoint;
 import net.minecraftforge.fml.ModList;
 import net.minecraftforge.fml.ModLoadingContext;
 import net.minecraftforge.fml.common.Mod;
+import net.minecraftforge.fml.event.config.ModConfigEvent;
 import net.minecraftforge.fml.event.lifecycle.FMLCommonSetupEvent;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 import net.minecraftforge.network.NetworkConstants;
@@ -71,6 +72,20 @@ public final class RSIntegrationMod {
     public static final String MOD_NAME = "RS Integration";
     public static final Logger LOGGER = LogManager.getLogger(MOD_NAME);
     public static final int[] RS_FLOW_COLORS = {0x3355FF, 0x7733FF, 0xCC33FF, 0x3355FF};
+
+    // Cached boolean — avoids per-tick ConfigValue.get() Map lookup + sync overhead
+    private static boolean verboseLogging;
+
+    public static void refreshConfigCache() {
+        verboseLogging = RSIntegrationConfig.DIAGNOSTIC_VERBOSE_LOGGING.get();
+    }
+
+    /** Guarded debug — only emits when diagnostic verbose logging is enabled in config. */
+    public static void debug(String format, Object... args) {
+        if (verboseLogging) {
+            LOGGER.debug(format, args);
+        }
+    }
 
     public static final IEventBus MOD_BUS =
             FMLJavaModLoadingContext.get().getModEventBus();
@@ -125,6 +140,8 @@ public final class RSIntegrationMod {
     public RSIntegrationMod() {
         registerDisplayTest();
         RSIntegrationConfig.register();
+        refreshConfigCache();
+        MOD_BUS.addListener((ModConfigEvent.Reloading e) -> refreshConfigCache());
         AltarBindingRegistry.registerHook(AltarBinding.RS_NETWORK, RSBindingHook.INSTANCE);
         ForgeChunkManager.setForcedChunkLoadingCallback(
                 MOD_ID, (level, ticketHelper) -> {});

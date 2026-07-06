@@ -31,7 +31,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-public final class CookingPotBatchDelegate implements com.huanghuang.rsintegration.crafting.batch.IBatchDelegate {
+public final class CookingPotBatchDelegate extends com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate {
 
     // Slot layout matching CookingPotBlockEntity
     private static final int INPUT_SLOTS = 6;   // 0..5
@@ -43,9 +43,7 @@ public final class CookingPotBatchDelegate implements com.huanghuang.rsintegrati
     private ResourceKey<Level> myDim;
     private BlockPos myPos;
     private Recipe<?> recipe;
-    private INetwork network;
     private boolean craftDone;
-    private boolean usingSharedLedger;
 
     private static volatile Field inventoryField;
     private static volatile boolean reflectionProbed;
@@ -201,9 +199,7 @@ public final class CookingPotBatchDelegate implements com.huanghuang.rsintegrati
     }
 
     @Override
-    public boolean isCraftComplete(ServerLevel level) {
-        BlockEntity be = level.getBlockEntity(myPos);
-        if (be == null) return false;
+    protected boolean isMachineCraftFinished(ServerLevel level, BlockEntity be) {
         if (!FarmersDelightReflection.cookingPotBEClass.isInstance(be)) return false;
 
         IItemHandler itemHandler = getInventory(be);
@@ -228,11 +224,10 @@ public final class CookingPotBatchDelegate implements com.huanghuang.rsintegrati
     }
 
     @Override
-    public void onBatchFailed(ServerPlayer player, String reason) {
+    protected void clearMachineState(BlockEntity be, ServerPlayer player) {
         clearMachineSlotsAndRefund();
         forceChunkLoad(false);
         craftDone = false;
-        network = null;
     }
 
     @Override
@@ -280,7 +275,7 @@ public final class CookingPotBatchDelegate implements com.huanghuang.rsintegrati
             inventoryField = FarmersDelightReflection.cookingPotBEClass.getDeclaredField("inventory");
             inventoryField.setAccessible(true);
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Batch-CookingPot] Reflection probe failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-Batch-CookingPot] Reflection probe failed", e);
         }
     }
 
@@ -290,7 +285,7 @@ public final class CookingPotBatchDelegate implements com.huanghuang.rsintegrati
         if (inventoryField != null) {
             try {
                 return (IItemHandler) inventoryField.get(be);
-            } catch (Exception ignored) {}
+            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-CookingPot] reflection probe failed", e); }
         }
         return be.getCapability(net.minecraftforge.common.capabilities.ForgeCapabilities.ITEM_HANDLER)
                 .resolve().orElse(null);
@@ -311,13 +306,13 @@ public final class CookingPotBatchDelegate implements com.huanghuang.rsintegrati
             Method m = recipe.getClass().getMethod("getOutputContainer");
             Object result = m.invoke(recipe);
             if (result instanceof ItemStack s && !s.isEmpty()) return s;
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-CookingPot] getOutputContainer failed", e); }
         try {
             Field f = recipe.getClass().getDeclaredField("container");
             f.setAccessible(true);
             Object v = f.get(recipe);
             if (v instanceof ItemStack s && !s.isEmpty()) return s;
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-CookingPot] container field access failed", e); }
         return ItemStack.EMPTY;
     }
 
@@ -360,7 +355,7 @@ public final class CookingPotBatchDelegate implements com.huanghuang.rsintegrati
             int cz = myPos.getZ() >> 4;
             ForgeChunkManager.forceChunk(myLevel, RSIntegrationMod.MOD_ID, myPos, cx, cz, load, true);
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Batch-CookingPot] Chunk load failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI-Batch-CookingPot] Chunk load failed", e);
         }
     }
 }

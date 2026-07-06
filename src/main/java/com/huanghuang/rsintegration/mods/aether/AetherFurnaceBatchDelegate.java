@@ -4,7 +4,7 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
-import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.mixin.minecraft.AbstractFurnaceAccessor;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
@@ -44,7 +44,7 @@ import java.util.Map;
  * valid Aether fuel items, so we must use the machine's own
  * {@code getBurnDuration()} (furnace) or {@code getIncubatingMap()} (incubator).
  */
-public final class AetherFurnaceBatchDelegate implements IBatchDelegate {
+public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
 
     // Cached incubator fuel map — resolved once via reflection (no SRG names needed
     // because this is a public static method, not a vanilla method).
@@ -57,9 +57,7 @@ public final class AetherFurnaceBatchDelegate implements IBatchDelegate {
     private ResourceKey<Level> myDim;
     private BlockPos myPos;
     private Recipe<?> recipe;
-    private INetwork network;
     private boolean isIncubator;
-    private boolean usingSharedLedger;
 
     @Override
     public boolean validateAndInit(ServerPlayer player, ResourceLocation recipeId,
@@ -210,10 +208,7 @@ public final class AetherFurnaceBatchDelegate implements IBatchDelegate {
     }
 
     @Override
-    public boolean isCraftComplete(ServerLevel level) {
-        BlockEntity be = level.getBlockEntity(myPos);
-        if (be == null) return false;
-
+    protected boolean isMachineCraftFinished(ServerLevel level, BlockEntity be) {
         if (be instanceof AbstractFurnaceBlockEntity furnace) {
             // Freezer/Altar: check output slot
             return !furnace.getItem(2).isEmpty();
@@ -250,36 +245,33 @@ public final class AetherFurnaceBatchDelegate implements IBatchDelegate {
     }
 
     @Override
-    public void onBatchFailed(ServerPlayer player, String reason) {
+    protected void clearMachineState(BlockEntity be, ServerPlayer player) {
         // Clear machine slots to prevent item duplication.
         // In the shared-ledger (chain) path the chain already refunded materials
         // via refundCommitted(), so we just void the machine slots.
         // In the private-ledger (direct) path we need to refund back to RS.
-        myLevel.getChunk(myPos);
-        BlockEntity be = myLevel.getBlockEntity(myPos);
         if (be instanceof AbstractFurnaceBlockEntity furnace) {
             ItemStack slot0 = furnace.getItem(0);
             if (!slot0.isEmpty()) {
                 furnace.setItem(0, ItemStack.EMPTY);
-                if (!usingSharedLedger) refundToRSNetwork(slot0);
+                refundToRSNetwork(slot0);
             }
             ItemStack slot2 = furnace.getItem(2);
             if (!slot2.isEmpty()) {
                 furnace.setItem(2, ItemStack.EMPTY);
-                if (!usingSharedLedger) refundToRSNetwork(slot2);
+                refundToRSNetwork(slot2);
             }
             furnace.setChanged();
-        } else if (be != null) {
+        } else {
             IItemHandler handler = be.getCapability(
                     net.minecraftforge.common.capabilities.ForgeCapabilities.ITEM_HANDLER, null)
                     .orElse(null);
             if (handler != null) {
                 ItemStack slot0 = handler.extractItem(0, 64, false);
-                if (!slot0.isEmpty() && !usingSharedLedger) refundToRSNetwork(slot0);
+                if (!slot0.isEmpty()) refundToRSNetwork(slot0);
             }
         }
         forceChunkLoad(false);
-        network = null;
     }
 
     private void refundToRSNetwork(ItemStack stack) {
@@ -329,7 +321,8 @@ public final class AetherFurnaceBatchDelegate implements IBatchDelegate {
         if (be instanceof AbstractFurnaceBlockEntity furnace) {
             try {
                 return ((AbstractFurnaceAccessor) furnace).rsi$callGetBurnDuration(stack) > 0;
-            } catch (Exception ignored) {
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.debug("[RSI-Batch-Aether] getBurnDuration probe failed, falling back to ForgeHooks", e);
                 return ForgeHooks.getBurnTime(stack, null) > 0;
             }
         }
@@ -351,7 +344,7 @@ public final class AetherFurnaceBatchDelegate implements IBatchDelegate {
             cachedIncubatorMap = map;
             return map;
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Batch-Aether] Incubator fuel probe failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI-Batch-Aether] Incubator fuel probe failed", e);
             return null;
         }
     }
@@ -376,7 +369,7 @@ public final class AetherFurnaceBatchDelegate implements IBatchDelegate {
             int cz = myPos.getZ() >> 4;
             ForgeChunkManager.forceChunk(myLevel, RSIntegrationMod.MOD_ID, myPos, cx, cz, load, true);
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Batch-Aether] Chunk load failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI-Batch-Aether] Chunk load failed", e);
         }
     }
 }

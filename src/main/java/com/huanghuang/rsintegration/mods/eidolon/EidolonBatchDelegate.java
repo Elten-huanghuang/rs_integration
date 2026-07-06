@@ -3,7 +3,7 @@ package com.huanghuang.rsintegration.mods.eidolon;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.util.ChunkUtils;
-import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
+
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
@@ -120,7 +120,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
                 java.lang.reflect.Field f = EidolonReflection.brazierTileEntityClass.getDeclaredField("ritual");
                 f.setAccessible(true);
                 currentRitual = f.get(be);
-            } catch (Exception ignored) {}
+            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Eidolon] reflection probe failed", e); }
             if (currentRitual != null) {
                 player.sendSystemMessage(Component.translatable("rsi.eidolon.error.ritual_busy"));
                 return false;
@@ -130,7 +130,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
                 java.lang.reflect.Field f = EidolonReflection.brazierTileEntityClass.getDeclaredField("burning");
                 f.setAccessible(true);
                 burning = f.getBoolean(be);
-            } catch (Exception ignored) {}
+            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Eidolon] reflection probe failed", e); }
             if (burning) {
                 player.sendSystemMessage(Component.translatable("rsi.eidolon.error.ritual_busy"));
                 return false;
@@ -347,21 +347,21 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
                     .invoke(tank, readWaterAmount(), IFluidHandler.FluidAction.EXECUTE);
             crucible.getClass().getDeclaredField("hasWater").set(crucible, false);
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.error("[RSI-Eidolon] Crucible drain/clear failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.error("[RSI-Eidolon] Crucible drain/clear failed", e);
             return false;
         }
 
         try {
             if (stepsField != null) stepsField.set(crucible, new ArrayList<>());
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.error("[RSI-Eidolon] Crucible drain/clear failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.error("[RSI-Eidolon] Crucible drain/clear failed", e);
             return false;
         }
 
         try {
             crucible.getClass().getMethod("setChanged").invoke(crucible);
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.error("[RSI-Eidolon] Crucible drain/clear failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.error("[RSI-Eidolon] Crucible drain/clear failed", e);
             return false;
         }
 
@@ -534,7 +534,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
             List<Ingredient> items = (List<Ingredient>) f.get(recipe);
             return items;
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Eidolon] Failed to read pedestal items: {}", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-Eidolon] Failed to read pedestal items", e);
             return null;
         }
     }
@@ -547,7 +547,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
             List<Ingredient> items = (List<Ingredient>) f.get(recipe);
             return items;
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Eidolon] Failed to read focus items: {}", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-Eidolon] Failed to read focus items", e);
             return null;
         }
     }
@@ -822,21 +822,21 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
                     .invoke(tank, readWaterAmount(), IFluidHandler.FluidAction.EXECUTE);
             crucible.getClass().getDeclaredField("hasWater").set(crucible, false);
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.error("[RSI-Eidolon] Crucible drain/clear failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.error("[RSI-Eidolon] Crucible drain/clear failed", e);
             return false;
         }
 
         try {
             if (stepsField != null) stepsField.set(crucible, new ArrayList<>());
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.error("[RSI-Eidolon] Crucible drain/clear failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.error("[RSI-Eidolon] Crucible drain/clear failed", e);
             return false;
         }
 
         try {
             crucible.getClass().getMethod("setChanged").invoke(crucible);
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.error("[RSI-Eidolon] Crucible drain/clear failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.error("[RSI-Eidolon] Crucible drain/clear failed", e);
             return false;
         }
 
@@ -845,32 +845,28 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean isCraftComplete(ServerLevel level) {
-        if (isRitual) return isRitualComplete(level);
-        // Crucible & worktable crafts are instant
-        return craftCompleted;
-    }
-
-    private boolean isRitualComplete(ServerLevel level) {
-        if (brazier == null) return true;
-        if (craftCompleted) return true;
-        // Check ritualDone flag on brazier
-        try {
-            java.lang.reflect.Field f = EidolonReflection.brazierTileEntityClass.getDeclaredField("ritualDone");
-            f.setAccessible(true);
-            if (f.getBoolean(brazier)) return true;
-        } catch (Exception ignored) {}
-        // Check item entity above brazier
-        if (myPos != null) {
+    protected boolean isMachineCraftFinished(ServerLevel level, BlockEntity be) {
+        if (isRitual) {
+            if (craftCompleted) return true;
+            // Check ritualDone flag on brazier
+            try {
+                java.lang.reflect.Field f = EidolonReflection.brazierTileEntityClass.getDeclaredField("ritualDone");
+                f.setAccessible(true);
+                if (f.getBoolean(be)) return true;
+            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Eidolon] reflection probe failed", e); }
+            // Check item entity above brazier
+            BlockPos pos = be.getBlockPos();
             for (net.minecraft.world.entity.item.ItemEntity entity :
                     level.getEntitiesOfClass(net.minecraft.world.entity.item.ItemEntity.class,
                             new net.minecraft.world.phys.AABB(
-                                    myPos.getX() - 0.5, myPos.getY() + 2.0, myPos.getZ() - 0.5,
-                                    myPos.getX() + 1.5, myPos.getY() + 3.5, myPos.getZ() + 1.5))) {
+                                    pos.getX() - 0.5, pos.getY() + 2.0, pos.getZ() - 0.5,
+                                    pos.getX() + 1.5, pos.getY() + 3.5, pos.getZ() + 1.5))) {
                 if (!entity.getItem().isEmpty()) return true;
             }
+            return false;
         }
-        return false;
+        // Crucible & worktable crafts are instant
+        return craftCompleted;
     }
 
     @Override
@@ -913,10 +909,8 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public void onBatchFailed(ServerPlayer player, String reason) {
-        if (!usingSharedLedger) {
-            refundAll();
-        }
+    protected void clearMachineState(BlockEntity be, ServerPlayer player) {
+        refundAll();
         if (isRitual) cleanupBrazier();
         pendingResult = ItemStack.EMPTY;
         craftCompleted = false;
@@ -1098,14 +1092,14 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
                                 java.lang.reflect.Field f = be.getClass().getDeclaredField("hasWater");
                                 f.setAccessible(true);
                                 hasWater = f.getBoolean(be);
-                            } catch (Exception ignored) {}
+                            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Eidolon] reflection probe failed", e); }
                             if (!hasWater) {
                                 warnings.add(Component.translatable("rsi.eidolon.warn.needs_water_fill").getString());
                             }
                             boolean boiling = false;
                             try {
                                 if (boilingField != null) boiling = boilingField.getBoolean(be);
-                            } catch (Exception ignored) {}
+                            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Eidolon] reflection probe failed", e); }
                             if (!boiling) {
                                 warnings.add(Component.translatable("rsi.eidolon.warn.needs_heat").getString());
                             }
@@ -1127,7 +1121,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
                     warnings.add(Component.translatable(
                             "rsi.eidolon.warn.pedestal_items", pi.size()).getString());
                 }
-            } catch (Exception ignored) {}
+            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Eidolon] reflection probe failed", e); }
 
             warnings.add(Component.translatable("rsi.eidolon.warn.needs_focus").getString());
 
@@ -1143,7 +1137,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
                                 java.lang.reflect.Field bf = EidolonReflection.brazierTileEntityClass.getDeclaredField("burning");
                                 bf.setAccessible(true);
                                 burning = bf.getBoolean(be);
-                            } catch (Exception ignored) {}
+                            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Eidolon] reflection probe failed", e); }
                             if (burning) {
                                 warnings.add(Component.translatable("rsi.eidolon.error.ritual_busy").getString());
                             }
@@ -1162,16 +1156,16 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
         try {
             java.lang.reflect.Method m = recipe.getClass().getMethod("getWaterAmount");
             return (int) m.invoke(recipe);
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Eidolon] reflection probe failed", e); }
         try {
             java.lang.reflect.Field f = recipe.getClass().getDeclaredField("waterAmount");
             f.setAccessible(true);
             return f.getInt(recipe);
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Eidolon] reflection probe failed", e); }
         try {
             java.lang.reflect.Method m = recipe.getClass().getMethod("getWater");
             return (int) m.invoke(recipe);
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Eidolon] reflection probe failed", e); }
         return 1000;
     }
 

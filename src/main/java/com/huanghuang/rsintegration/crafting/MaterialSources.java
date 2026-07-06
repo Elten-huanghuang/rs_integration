@@ -48,7 +48,7 @@ public final class MaterialSources {
                         }
                     }
                 }
-            } catch (Exception ignored) {}
+            } catch (Exception e) { com.huanghuang.rsintegration.RSIntegrationMod.LOGGER.debug("[RSI] backpack inventory scan failed", e); }
         }
         return map;
     }

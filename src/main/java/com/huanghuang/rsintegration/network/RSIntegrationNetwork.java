@@ -62,7 +62,7 @@ public final class RSIntegrationNetwork {
                     ? cache.getList().getStacks().size() : -1;
             RSIntegrationMod.LOGGER.debug("[RSI] Resolved network via {} ({} items in cache)", source, count);
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI] Resolved network via {} (cache probe failed: {})", source, e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI] Resolved network via {} (cache probe failed)", source, e);
         }
     }
 
@@ -92,7 +92,7 @@ public final class RSIntegrationNetwork {
                 clazz = clazz.getSuperclass();
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI] getNetworkFromContainer error: {}", e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI] getNetworkFromContainer error", e);
         }
         return null;
     }
@@ -127,7 +127,7 @@ public final class RSIntegrationNetwork {
                 }
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI] Curios scan error: {}", e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI] Curios scan error", e);
         }
         return null;
     }
@@ -171,7 +171,7 @@ public final class RSIntegrationNetwork {
             RSIntegrationMod.LOGGER.debug("[RSI] resolveNetwork: BE at {} is {} (no network accessible)",
                     controllerPos, be.getClass().getName());
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI] resolveNetwork error: {}", e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI] resolveNetwork error", e);
         }
         return null;
     }
@@ -372,7 +372,7 @@ public final class RSIntegrationNetwork {
             ItemStack stack = (ItemStack) getStack.invoke(grid);
             return resolveFromNetworkItem(player, stack);
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI] Container terminal resolve failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI] Container terminal resolve failed", e);
             return null;
         }
     }
@@ -450,7 +450,7 @@ public final class RSIntegrationNetwork {
                 }
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI] hasItemInNetwork error: {}", e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI] hasItemInNetwork error", e);
         }
         return false;
     }

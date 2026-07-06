@@ -13,7 +13,7 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 
-public final class AetherworksRecipeHandler implements ModRecipeHandler {
+public final class AetherworksRecipeHandler extends AbstractRecipeHandler {
 
     @Override
     public ModType modType() { return ModType.byId(ModIds.ID_AETHERWORKS_ANVIL); }
@@ -44,14 +44,14 @@ public final class AetherworksRecipeHandler implements ModRecipeHandler {
                         Object r = m.invoke(recipe, access);
                         if (r instanceof ItemStack s && !s.isEmpty()) return s;
                     } catch (Exception e) {
-                        RSIntegrationMod.LOGGER.debug("[RSI-Aetherworks] Recipe reflection failed: {}", e.toString());
+                        RSIntegrationMod.LOGGER.debug("[RSI-Aetherworks] Recipe reflection failed", e);
                     }
                 } else if (m.getParameterCount() == 0) {
                     try {
                         Object r = m.invoke(recipe);
                         if (r instanceof ItemStack s && !s.isEmpty()) return s;
                     } catch (Exception e) {
-                        RSIntegrationMod.LOGGER.debug("[RSI-Aetherworks] Recipe reflection failed: {}", e.toString());
+                        RSIntegrationMod.LOGGER.debug("[RSI-Aetherworks] Recipe reflection failed", e);
                     }
                 }
             }
@@ -64,7 +64,7 @@ public final class AetherworksRecipeHandler implements ModRecipeHandler {
                 Object v = f.get(recipe);
                 if (v instanceof ItemStack s && !s.isEmpty()) return s;
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.debug("[RSI-Aetherworks] Recipe reflection failed: {}", e.toString());
+                RSIntegrationMod.LOGGER.debug("[RSI-Aetherworks] Recipe reflection failed", e);
             }
         }
         return ItemStack.EMPTY;
@@ -82,7 +82,7 @@ public final class AetherworksRecipeHandler implements ModRecipeHandler {
                 specs.add(new IngredientSpec(ing, 1));
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Aetherworks] Recipe reflection failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI-Aetherworks] Recipe reflection failed", e);
         }
 
         try {
@@ -92,7 +92,7 @@ public final class AetherworksRecipeHandler implements ModRecipeHandler {
                 specs.add(new IngredientSpec(ing, 1));
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Aetherworks] Recipe reflection failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI-Aetherworks] Recipe reflection failed", e);
         }
 
         return specs.isEmpty() ? null : specs;

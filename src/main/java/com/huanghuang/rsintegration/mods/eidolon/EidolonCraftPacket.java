@@ -197,7 +197,7 @@ public final class EidolonCraftPacket {
                     available.entrySet().stream().map(e -> {
                         ItemStack s = new ItemStack(e.getKey().item(), e.getValue());
                         if (e.getKey().tag() != null) {
-                            try { s.setTag(net.minecraft.nbt.TagParser.parseTag(e.getKey().tag())); } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] NBT parse failed for key {}: {}", e.getKey(), ex.toString()); }
+                            try { s.setTag(net.minecraft.nbt.TagParser.parseTag(e.getKey().tag())); } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] NBT parse failed for key {}", e.getKey(), ex); }
                         }
                         return s;
                     }).toList(),

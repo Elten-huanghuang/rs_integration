@@ -218,7 +218,7 @@ public final class FaCraftPacket {
                     .map(e -> {
                         ItemStack s = new ItemStack(e.getKey().item(), e.getValue());
                         if (e.getKey().tag() != null) {
-                            try { s.setTag(net.minecraft.nbt.TagParser.parseTag(e.getKey().tag())); } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] NBT parse failed for key {}: {}", e.getKey(), ex.toString()); }
+                            try { s.setTag(net.minecraft.nbt.TagParser.parseTag(e.getKey().tag())); } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] NBT parse failed for key {}", e.getKey(), ex); }
                         }
                         return s;
                     })
@@ -351,7 +351,7 @@ public final class FaCraftPacket {
             Reflect.getMethodOrThrow(FAReflection.ritualManagerClass, "updateValidRitual", "updateValidRitual", FAReflection.essencesDefinitionClass)
                     .invoke(ritualManager, curEssences);
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-FA] cachedIngredients/updateValidRitual failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI-FA] cachedIngredients/updateValidRitual failed", e);
         }
 
         // Phase 3: require a RitualStarterItem
@@ -399,7 +399,7 @@ public final class FaCraftPacket {
             }
         } catch (java.lang.reflect.InvocationTargetException e) {
             Throwable root = e.getCause() != null ? e.getCause() : e;
-            RSIntegrationMod.LOGGER.error("[RSI-FA] tryStartRitual failed — forge rejected: {}", root.toString());
+            RSIntegrationMod.LOGGER.error("[RSI-FA] tryStartRitual failed — forge rejected", root);
             rollbackAll(player, be, filledPedestals, network);
             ledger.rollback(player);
             FaRitualHelper.returnStarterToSource(starterStack, player, starterNetwork);

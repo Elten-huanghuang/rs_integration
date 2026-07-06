@@ -16,17 +16,16 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
-public final class MalumRecipeHandler implements ModRecipeHandler {
+public final class MalumRecipeHandler extends AbstractRecipeHandler {
 
     private static final String IWC_CLASS = "team.lodestar.lodestone.systems.recipe.IngredientWithCount";
 
-    @Override
-    public ModType modType() { return ModType.byId("malum"); }
+    static {
+        registerRecipePrefixes(MalumRecipeHandler.class, "com.sammy.malum.");
+    }
 
     @Override
-    public boolean canHandle(Recipe<?> recipe) {
-        return recipe.getClass().getName().startsWith("com.sammy.malum.");
-    }
+    public ModType modType() { return ModType.byId("malum"); }
 
     @Override
     public ItemStack getResultItem(Recipe<?> recipe, RegistryAccess access) {
@@ -36,7 +35,9 @@ public final class MalumRecipeHandler implements ModRecipeHandler {
                 if (!ItemStack.class.isAssignableFrom(m.getReturnType())) continue;
                 Object r = m.getParameterCount() == 1 ? m.invoke(recipe, access) : m.invoke(recipe);
                 if (r instanceof ItemStack s && !s.isEmpty()) return s;
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.debug("[RSI-Recipe] reflection probe failed", e);
+            }
         }
         // Fallback: direct field access (SpiritFocusingRecipe.output, etc.)
         try {
@@ -44,7 +45,9 @@ public final class MalumRecipeHandler implements ModRecipeHandler {
             f.setAccessible(true);
             Object v = f.get(recipe);
             if (v instanceof ItemStack s && !s.isEmpty()) return s;
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-Recipe] reflection probe failed", e);
+        }
         return ItemStack.EMPTY;
     }
 

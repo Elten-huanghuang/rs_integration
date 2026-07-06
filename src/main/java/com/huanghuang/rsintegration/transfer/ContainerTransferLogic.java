@@ -261,7 +261,7 @@ final class ContainerTransferLogic {
                 }
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI] Curios backpack scan failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI] Curios backpack scan failed", e);
         }
         return null;
     }
@@ -327,7 +327,7 @@ final class ContainerTransferLogic {
                 }
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI] Curios backpack wrapper scan failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI] Curios backpack wrapper scan failed", e);
         }
         return null;
     }

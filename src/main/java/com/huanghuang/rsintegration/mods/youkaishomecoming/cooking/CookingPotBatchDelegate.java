@@ -4,7 +4,7 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
-import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.reflection.probes.YHKReflection;
 import com.huanghuang.rsintegration.util.Reflect;
 import com.refinedmods.refinedstorage.api.network.INetwork;
@@ -33,7 +33,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-public class CookingPotBatchDelegate implements IBatchDelegate {
+public class CookingPotBatchDelegate extends AbstractBatchDelegate {
 
     // indices into BOWL_KEYS / POT_KEYS / BE_CLASS_NAMES
     protected static final int SMALL = 0;
@@ -50,9 +50,7 @@ public class CookingPotBatchDelegate implements IBatchDelegate {
     private ResourceKey<Level> myDim;
     private BlockPos myPos;
     private Recipe<?> recipe;
-    private INetwork network;
     private boolean craftDone;
-    private boolean usingSharedLedger;
 
     // -- reflection cache --
     private static volatile Field itemsField;          // CookingBlockEntity.items (public final)
@@ -176,7 +174,7 @@ public class CookingPotBatchDelegate implements IBatchDelegate {
                     net.minecraft.world.entity.player.Player.class);
             setPlayer.invoke(be, player);
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-CookingPot] setLastPlayer reflection failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-CookingPot] setLastPlayer reflection failed", e);
         }
 
         for (ItemStack mat : materials) {
@@ -195,14 +193,14 @@ public class CookingPotBatchDelegate implements IBatchDelegate {
     }
 
     @Override
-    public boolean isCraftComplete(ServerLevel level) {
-        BlockEntity be = level.getBlockEntity(myPos);
+    protected boolean isMachineCraftFinished(ServerLevel level, BlockEntity be) {
+        BlockPos pos = be.getBlockPos();
 
         // Case 1: BE is gone -- finishRecipe() replaced the pot with a BlockItem
         // result (e.g. soup block placed at the pot's own position).
-        if (be == null || !isCookingBE(be)) {
+        if (!isCookingBE(be)) {
             // If the block here is not air and not a cooking pot, it's the result.
-            var state = level.getBlockState(myPos);
+            var state = level.getBlockState(pos);
             if (!state.isAir()) {
                 String key = net.minecraft.core.registries.BuiltInRegistries.BLOCK
                         .getKey(state.getBlock()).toString();
@@ -285,7 +283,7 @@ public class CookingPotBatchDelegate implements IBatchDelegate {
     }
 
     @Override
-    public void onBatchFailed(ServerPlayer player, String reason) {
+    protected void clearMachineState(BlockEntity be, ServerPlayer player) {
         clearAndRefund();
         forceChunkLoad(false);
         craftDone = false;
@@ -415,7 +413,7 @@ public class CookingPotBatchDelegate implements IBatchDelegate {
             getInputMethod = YHKReflection.potCookingRecipeClass.getMethod("getInput");
             getResultMethod = YHKReflection.potCookingRecipeClass.getMethod("getResult");
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-CookPot] Reflection probe failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-CookPot] Reflection probe failed", e);
         }
     }
 
@@ -464,7 +462,7 @@ public class CookingPotBatchDelegate implements IBatchDelegate {
                 Object val = itemsField.get(be);
                 if (val instanceof Container c) return c;
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.warn("[RSI-CookingPot] Items container reflection failed: {}", e.toString());
+                RSIntegrationMod.LOGGER.warn("[RSI-CookingPot] Items container reflection failed", e);
             }
         }
         return null;
@@ -475,7 +473,7 @@ public class CookingPotBatchDelegate implements IBatchDelegate {
             try {
                 return (boolean) tryAddItemMethod.invoke(be, stack, false);
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.warn("[RSI-CookingPot] tryAddItem reflection failed: {}", e.toString());
+                RSIntegrationMod.LOGGER.warn("[RSI-CookingPot] tryAddItem reflection failed", e);
             }
         }
         return false;
@@ -486,7 +484,7 @@ public class CookingPotBatchDelegate implements IBatchDelegate {
         try {
             return (boolean) isHeatedMethod.invoke(be, be.getLevel(), be.getBlockPos());
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-CookPot] isHeated invoke failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI-CookPot] isHeated invoke failed", e);
         }
         return true;
     }
@@ -503,7 +501,7 @@ public class CookingPotBatchDelegate implements IBatchDelegate {
                 return result.getCraftingRemainingItem().is(container);
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-CookPot] matchContainer failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI-CookPot] matchContainer failed", e);
         }
         return true; // can't determine -- allow
     }
@@ -514,7 +512,7 @@ public class CookingPotBatchDelegate implements IBatchDelegate {
             try {
                 return (List<Ingredient>) getInputMethod.invoke(recipe);
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.warn("[RSI-CookingPot] getRecipeInput reflection failed: {}", e.toString());
+                RSIntegrationMod.LOGGER.warn("[RSI-CookingPot] getRecipeInput reflection failed", e);
             }
         }
         return List.of();
@@ -525,7 +523,7 @@ public class CookingPotBatchDelegate implements IBatchDelegate {
             try {
                 return (ItemStack) getResultMethod.invoke(recipe);
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.warn("[RSI-CookingPot] getRecipeResult reflection failed: {}", e.toString());
+                RSIntegrationMod.LOGGER.warn("[RSI-CookingPot] getRecipeResult reflection failed", e);
             }
         }
         return ItemStack.EMPTY;
@@ -580,7 +578,7 @@ public class CookingPotBatchDelegate implements IBatchDelegate {
             int cz = myPos.getZ() >> 4;
             ForgeChunkManager.forceChunk(myLevel, RSIntegrationMod.MOD_ID, myPos, cx, cz, load, true);
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-CookPot] Chunk load failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI-CookPot] Chunk load failed", e);
         }
     }
 }

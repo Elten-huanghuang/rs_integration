@@ -201,8 +201,7 @@ public abstract class RefillUpgradeWrapperMixin
             rsi$fillerMethod = rsi$tsFillerField.getType().getMethod(
                     "fill", Player.class, IItemHandler.class, ItemStack.class);
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-SB] TargetSlot reflection unavailable — RS refill disabled: {}",
-                    e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-SB] TargetSlot reflection unavailable — RS refill disabled", e);
             rsi$tsReflectionFailed = true;
         }
     }

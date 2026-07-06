@@ -17,7 +17,7 @@ import java.util.List;
  * This handler extracts the cost item as a single {@link IngredientSpec}
  * so the resolver can compute recursive material requirements.</p>
  */
-public final class MarketRecipeHandler implements ModRecipeHandler {
+public final class MarketRecipeHandler extends AbstractRecipeHandler {
 
     @Override
     public ModType modType() { return ModType.byId("farmingforblockheads"); }

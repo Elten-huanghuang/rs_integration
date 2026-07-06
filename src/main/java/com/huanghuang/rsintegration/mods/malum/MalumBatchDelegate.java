@@ -2,7 +2,7 @@ package com.huanghuang.rsintegration.mods.malum;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
-import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
+
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.reflection.probes.MalumReflection;
@@ -424,13 +424,13 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean isCraftComplete(ServerLevel level) {
+    protected boolean isMachineCraftFinished(ServerLevel level, BlockEntity be) {
         if (!craftStarted) return false;
 
         // The altar's tick() sets isCrafting=true when recipe is active,
         // and sets isCrafting=false when recipe becomes null (items consumed).
         // We detect the true→false transition to know the craft finished.
-        Boolean crafting = (Boolean) getField(altar, "isCrafting");
+        Boolean crafting = (Boolean) getField(be, "isCrafting");
         if (Boolean.TRUE.equals(crafting)) {
             craftWasSeenActive = true;
             return false;
@@ -438,7 +438,7 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
 
         if (craftWasSeenActive) {
             craftWasSeenActive = false;
-            RSIntegrationMod.LOGGER.debug("[RSI-Batch-Malum] Native craft finished (isCrafting false transition)");
+            RSIntegrationMod.debug("[RSI-Batch-Malum] Native craft finished (isCrafting false transition)");
             return true;
         }
 
@@ -446,10 +446,11 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
         // between our poll ticks and we missed the transition)
         ItemStack expected = com.huanghuang.rsintegration.crafting.RecipeIndex
                 .tryGetResultItem(recipe, level.registryAccess());
-        if (!expected.isEmpty() && myPos != null && level.isLoaded(myPos)) {
+        if (!expected.isEmpty()) {
+            BlockPos pos = be.getBlockPos();
             var entities = level.getEntitiesOfClass(
                     net.minecraft.world.entity.item.ItemEntity.class,
-                    new net.minecraft.world.phys.AABB(myPos).inflate(3),
+                    new net.minecraft.world.phys.AABB(pos).inflate(3),
                     e -> ItemStack.isSameItemSameTags(e.getItem(), expected)
                             || ItemStack.isSameItem(e.getItem(), expected));
             if (!entities.isEmpty()) return true;
@@ -504,16 +505,9 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public void onBatchFailed(ServerPlayer player, String reason) {
+    protected void clearMachineState(BlockEntity be, ServerPlayer player) {
         craftStarted = false;
         craftWasSeenActive = false;
-        if (usingSharedLedger) {
-            // Chain will refund via ledger.refundCommitted() — clearing
-            // pedestals here would double-return. Reset state without
-            // touching them.
-            resetState();
-            return;
-        }
         // Retrieve items from altar slots before clearing, so we can return
         // them to their source instead of creating duplicate items.
         if (ledger != null && ledger.isCommitted()) {

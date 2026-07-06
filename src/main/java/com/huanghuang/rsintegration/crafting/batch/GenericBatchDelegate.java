@@ -9,6 +9,7 @@ import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
+import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
@@ -23,15 +24,13 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 
-public final class GenericBatchDelegate implements IBatchDelegate {
+public final class GenericBatchDelegate extends AbstractBatchDelegate {
 
     private ServerPlayer player;
     private ServerLevel myLevel;
     private ResourceKey<Level> myDim;
     private BlockPos myPos;
     private Recipe<?> recipe;
-    private ExtractionLedger ledger;
-    private INetwork network;
     private ItemStack pendingResult;
     private boolean craftDone;
 
@@ -148,7 +147,7 @@ public final class GenericBatchDelegate implements IBatchDelegate {
     }
 
     @Override
-    public boolean isCraftComplete(ServerLevel level) {
+    protected boolean isMachineCraftFinished(ServerLevel level, BlockEntity be) {
         return craftDone;
     }
 
@@ -161,12 +160,10 @@ public final class GenericBatchDelegate implements IBatchDelegate {
     }
 
     @Override
-    public void onBatchFailed(ServerPlayer player, String reason) {
+    protected void clearMachineState(BlockEntity be, ServerPlayer player) {
         refundAll();
         pendingResult = ItemStack.EMPTY;
         craftDone = false;
-        ledger = null;
-        network = null;
     }
 
     @Override

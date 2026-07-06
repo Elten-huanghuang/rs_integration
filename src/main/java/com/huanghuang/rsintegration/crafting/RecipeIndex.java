@@ -165,7 +165,7 @@ public final class RecipeIndex {
                     "com.stal111.forbidden_arcanus.common.block.entity.forge.ritual.result.UpgradeTierResult");
             faAvailable = true;
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RecipeIndex] FA classes not available: {}", e.toString());
+            RSIntegrationMod.LOGGER.debug("[RecipeIndex] FA classes not available", e);
             faAvailable = false;
         }
     }
@@ -212,8 +212,7 @@ public final class RecipeIndex {
                 }
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RecipeIndex] FA fallback output failed for {}: {}",
-                    id, e.toString());
+            RSIntegrationMod.LOGGER.warn("[RecipeIndex] FA fallback output failed for {}", id, e);
         }
         return ItemStack.EMPTY;
     }
@@ -261,7 +260,7 @@ public final class RecipeIndex {
                             Method getTo = Reflect.findMethod(result.getClass(), "getUpgradedTier", new Class<?>[0]);
                             if (getFrom != null) from = (int) getFrom.invoke(result);
                             if (getTo != null) to = (int) getTo.invoke(result);
-                        } catch (Exception ignored) {}
+                        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RecipeIndex] tier read failed", e); }
                         output = rsi$makeFaUpgradeOutput(to);
                         if (output.isEmpty()) continue;
                         FaRitualWrapper wrapper = new FaRitualWrapper(id, ritual, output, from, to);
@@ -288,12 +287,11 @@ public final class RecipeIndex {
                             k -> new ArrayList<>()).add(entryObj);
                     count++;
                 } catch (Exception e) {
-                    RSIntegrationMod.LOGGER.debug("[RecipeIndex] Failed to index FA ritual {}: {}",
-                            id, e.toString());
+                    RSIntegrationMod.LOGGER.debug("[RecipeIndex] Failed to index FA ritual {}", id, e);
                 }
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RecipeIndex] FA ritual scan failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RecipeIndex] FA ritual scan failed", e);
         }
         return count;
     }
@@ -314,7 +312,7 @@ public final class RecipeIndex {
             marketRegistryInst = instField.get(null);
             marketAvailable = marketRegistryInst != null;
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RecipeIndex] MarketRegistry not available: {}", e.toString());
+            RSIntegrationMod.LOGGER.debug("[RecipeIndex] MarketRegistry not available", e);
             marketAvailable = false;
         }
     }
@@ -372,11 +370,11 @@ public final class RecipeIndex {
                     idx.computeIfAbsent(output.getItem(), k -> new ArrayList<>()).add(indexEntry);
                     count++;
                 } catch (Exception e) {
-                    RSIntegrationMod.LOGGER.debug("[RecipeIndex] Failed to index market entry: {}", e.toString());
+                    RSIntegrationMod.LOGGER.debug("[RecipeIndex] Failed to index market entry", e);
                 }
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RecipeIndex] Market entry scan failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RecipeIndex] Market entry scan failed", e);
         }
         return count;
     }

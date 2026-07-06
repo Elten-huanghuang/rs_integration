@@ -4,7 +4,7 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
-import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.reflection.probes.YHKReflection;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;
@@ -32,7 +32,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-public final class MokaPotBatchDelegate implements IBatchDelegate {
+public final class MokaPotBatchDelegate extends AbstractBatchDelegate {
 
     // BasePotBlockEntity layout (INVENTORY_SIZE = 7):
     //   0-3: input ingredients  4: meal display
@@ -48,9 +48,7 @@ public final class MokaPotBatchDelegate implements IBatchDelegate {
     private ResourceKey<Level> myDim;
     private BlockPos myPos;
     private Recipe<?> recipe;
-    private INetwork network;
     private boolean craftDone;
-    private boolean usingSharedLedger;
 
     private static volatile Method inventoryMethod;
     private static volatile Method isHeatedMethod;
@@ -211,9 +209,8 @@ public final class MokaPotBatchDelegate implements IBatchDelegate {
     }
 
     @Override
-    public boolean isCraftComplete(ServerLevel level) {
-        BlockEntity be = level.getBlockEntity(myPos);
-        if (be == null || !isMokaBE(be)) return false;
+    protected boolean isMachineCraftFinished(ServerLevel level, BlockEntity be) {
+        if (!isMokaBE(be)) return false;
 
         IItemHandler handler = getInventory(be);
         if (handler == null) return false;
@@ -236,7 +233,7 @@ public final class MokaPotBatchDelegate implements IBatchDelegate {
     }
 
     @Override
-    public void onBatchFailed(ServerPlayer player, String reason) {
+    protected void clearMachineState(BlockEntity be, ServerPlayer player) {
         clearAndRefund();
         forceChunkLoad(false);
         craftDone = false;
@@ -326,11 +323,11 @@ public final class MokaPotBatchDelegate implements IBatchDelegate {
                     waterPropertyField = findFieldInHierarchy(YHKReflection.mokaMakerBlockClass, "WATER");
                     if (waterPropertyField != null) waterPropertyField.setAccessible(true);
                 } catch (Exception e) {
-                    RSIntegrationMod.LOGGER.warn("[RSI-MokaPot] WATER property reflection failed: {}", e.toString());
+                    RSIntegrationMod.LOGGER.warn("[RSI-MokaPot] WATER property reflection failed", e);
                 }
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Moka] Reflection probe failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-Moka] Reflection probe failed", e);
         }
     }
 
@@ -385,7 +382,7 @@ public final class MokaPotBatchDelegate implements IBatchDelegate {
                 inventoryField = YHKReflection.mokaMakerBEClass.getSuperclass().getDeclaredField("inventory");
                 inventoryField.setAccessible(true);
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.warn("[RSI-MokaPot] inventoryField access failed: {}", e.toString());
+                RSIntegrationMod.LOGGER.warn("[RSI-MokaPot] inventoryField access failed", e);
             }
         }
         if (inventoryField != null) {
@@ -393,7 +390,7 @@ public final class MokaPotBatchDelegate implements IBatchDelegate {
                 Object val = inventoryField.get(be);
                 if (val instanceof IItemHandler h) return h;
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.warn("[RSI-MokaPot] inventoryField get failed: {}", e.toString());
+                RSIntegrationMod.LOGGER.warn("[RSI-MokaPot] inventoryField get failed", e);
             }
         }
         // Fallback: getInventory() public method (capability wrapper, ~7 slots)
@@ -401,7 +398,7 @@ public final class MokaPotBatchDelegate implements IBatchDelegate {
             try {
                 return (IItemHandler) inventoryMethod.invoke(be);
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.warn("[RSI-MokaPot] inventoryMethod invoke failed: {}", e.toString());
+                RSIntegrationMod.LOGGER.warn("[RSI-MokaPot] inventoryMethod invoke failed", e);
             }
         }
         // Last resort: capability
@@ -421,7 +418,7 @@ public final class MokaPotBatchDelegate implements IBatchDelegate {
                         myLevel, myPos);
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Moka] isHeated invoke failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI-Moka] isHeated invoke failed", e);
         }
         return true; // can't check, assume heated so we don't block
     }
@@ -433,7 +430,7 @@ public final class MokaPotBatchDelegate implements IBatchDelegate {
             try {
                 return (ItemStack) addItemMethod.invoke(be, stack);
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.warn("[RSI-MokaPot] addItemMethod invoke failed: {}", e.toString());
+                RSIntegrationMod.LOGGER.warn("[RSI-MokaPot] addItemMethod invoke failed", e);
             }
         }
         // Fallback: insert into inventory directly
@@ -452,7 +449,7 @@ public final class MokaPotBatchDelegate implements IBatchDelegate {
                 if (prop instanceof BooleanProperty bp && state.hasProperty(bp))
                     return state.getValue(bp);
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.warn("[RSI-MokaPot] hasWater reflection failed: {}", e.toString());
+                RSIntegrationMod.LOGGER.warn("[RSI-MokaPot] hasWater reflection failed", e);
             }
         }
         for (var prop : state.getProperties()) {
@@ -471,7 +468,7 @@ public final class MokaPotBatchDelegate implements IBatchDelegate {
                     return;
                 }
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.warn("[RSI-MokaPot] setWaterProperty reflection failed: {}", e.toString());
+                RSIntegrationMod.LOGGER.warn("[RSI-MokaPot] setWaterProperty reflection failed", e);
             }
         }
         for (var prop : state.getProperties()) {
@@ -489,7 +486,7 @@ public final class MokaPotBatchDelegate implements IBatchDelegate {
             Object result = m.invoke(recipe);
             if (result instanceof ItemStack s && !s.isEmpty()) return s;
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-MokaPot] getOutputContainer method failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-MokaPot] getOutputContainer method failed", e);
         }
         try {
             Field f = recipe.getClass().getDeclaredField("container");
@@ -497,7 +494,7 @@ public final class MokaPotBatchDelegate implements IBatchDelegate {
             Object v = f.get(recipe);
             if (v instanceof ItemStack s && !s.isEmpty()) return s;
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-MokaPot] getOutputContainer field failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-MokaPot] getOutputContainer field failed", e);
         }
         return ItemStack.EMPTY;
     }
@@ -539,7 +536,7 @@ public final class MokaPotBatchDelegate implements IBatchDelegate {
             int cz = myPos.getZ() >> 4;
             ForgeChunkManager.forceChunk(myLevel, RSIntegrationMod.MOD_ID, myPos, cx, cz, load, true);
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Moka] Chunk load failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI-Moka] Chunk load failed", e);
         }
     }
 }

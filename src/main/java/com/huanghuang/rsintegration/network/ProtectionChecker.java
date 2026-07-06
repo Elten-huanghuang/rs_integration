@@ -69,7 +69,7 @@ public final class ProtectionChecker {
         try {
             Method m = Reflect.findMethod(clazz, methodName, new Class<?>[0]);
             if (m != null) return m.invoke(null);
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("{} reflection probe failed", TAG, e); }
         return null;
     }
 
@@ -82,7 +82,7 @@ public final class ProtectionChecker {
         try {
             Method m = Reflect.findMethod(clazz, methodName, paramTypes);
             if (m != null) return m.invoke(null, args);
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("{} reflection probe failed", TAG, e); }
         return null;
     }
 
@@ -155,7 +155,7 @@ public final class ProtectionChecker {
             return false;
 
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("{} FTB Chunks check error (fail-open): {}", TAG, e.toString());
+            RSIntegrationMod.LOGGER.warn("{} FTB Chunks check error (fail-open)", TAG, e);
             return true; // fail-open
         }
     }
@@ -176,7 +176,7 @@ public final class ProtectionChecker {
         try {
             Optional<java.lang.reflect.Field> f = Reflect.findField(ccClass, "INSTANCE");
             if (f.isPresent()) return f.get().get(null);
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("{} reflection probe failed", TAG, e); }
 
         return null;
     }
@@ -194,7 +194,7 @@ public final class ProtectionChecker {
                 Object claim = getChunk.invoke(manager, chunkPos);
                 return claim != null;
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("{} reflection probe failed", TAG, e); }
 
         // Approach 2: getChunk(ServerLevel, BlockPos)
         try {
@@ -205,7 +205,7 @@ public final class ProtectionChecker {
                 Object claim = getChunk.invoke(manager, level, pos);
                 return claim != null;
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("{} reflection probe failed", TAG, e); }
 
         // Approach 3: isWithinClaimedChunk(ServerLevel, BlockPos)
         try {
@@ -215,7 +215,7 @@ public final class ProtectionChecker {
                 Object result = m.invoke(manager, level, pos);
                 if (result instanceof Boolean b) return b;
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("{} reflection probe failed", TAG, e); }
 
         // Approach 4: isClaimed(ChunkPos)
         try {
@@ -225,7 +225,7 @@ public final class ProtectionChecker {
                 Object result = m.invoke(manager, chunkPos);
                 if (result instanceof Boolean b) return b;
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("{} reflection probe failed", TAG, e); }
 
         // Can't determine — default to not claimed (allow)
         return false;
@@ -243,7 +243,7 @@ public final class ProtectionChecker {
             Method getChunk = Reflect.findMethod(
                     manager.getClass(), "getChunk", new Class<?>[]{ChunkPos.class});
             if (getChunk != null) claim = getChunk.invoke(manager, chunkPos);
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("{} reflection probe failed", TAG, e); }
 
         if (claim == null) {
             try {
@@ -251,7 +251,7 @@ public final class ProtectionChecker {
                         manager.getClass(), "getChunk",
                         new Class<?>[]{ServerLevel.class, BlockPos.class});
                 if (getChunk != null) claim = getChunk.invoke(manager, level, pos);
-            } catch (Exception ignored) {}
+            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("{} reflection probe failed", TAG, e); }
         }
 
         if (claim == null) return null;
@@ -278,7 +278,7 @@ public final class ProtectionChecker {
                 Optional<Object> owner = invokeInstance(teamData.get(), "getOwner");
                 if (owner.isPresent()) return owner.get();
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("{} reflection probe failed", TAG, e); }
 
         // Try getTeamId() directly on the claim
         Optional<Object> teamId = invokeInstance(claim, "getTeamId");
@@ -313,7 +313,7 @@ public final class ProtectionChecker {
                 }
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("{} FTBTeamsAPI lookup failed: {}", TAG, e.toString());
+            RSIntegrationMod.LOGGER.debug("{} FTBTeamsAPI lookup failed", TAG, e);
         }
 
         // Approach 2: TeamManager.getPlayerTeam(uuid) static
@@ -326,7 +326,7 @@ public final class ProtectionChecker {
                 if (result != null) return result;
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("{} TeamManager static lookup failed: {}", TAG, e.toString());
+            RSIntegrationMod.LOGGER.debug("{} TeamManager static lookup failed", TAG, e);
         }
 
         // Approach 3: getTeamForPlayer(ServerPlayer) through the manager
@@ -344,19 +344,19 @@ public final class ProtectionChecker {
                                 Method m = Reflect.findMethod(manager.getClass(), name,
                                         new Class<?>[]{UUID.class});
                                 if (m != null) return m.invoke(manager, player.getUUID());
-                            } catch (Exception ignored) {}
+                            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("{} reflection probe failed", TAG, e); }
                             try {
                                 // Also try with ServerPlayer parameter
                                 Method m = Reflect.findMethod(manager.getClass(), name,
                                         new Class<?>[]{ServerPlayer.class});
                                 if (m != null) return m.invoke(manager, player);
-                            } catch (Exception ignored) {}
+                            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("{} reflection probe failed", TAG, e); }
                         }
                     }
                 }
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("{} FTB Teams alt lookup failed: {}", TAG, e.toString());
+            RSIntegrationMod.LOGGER.debug("{} FTB Teams alt lookup failed", TAG, e);
         }
 
         return null;
@@ -380,13 +380,13 @@ public final class ProtectionChecker {
         try {
             Optional<Object> result = invokeInstance(playerTeam, "isAlly", claimOwnerId);
             if (result.isPresent() && result.get() instanceof Boolean b) return b;
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("{} reflection probe failed", TAG, e); }
 
         // Try isAllied(teamId)
         try {
             Optional<Object> result = invokeInstance(playerTeam, "isAllied", claimOwnerId);
             if (result.isPresent() && result.get() instanceof Boolean b) return b;
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("{} reflection probe failed", TAG, e); }
 
         // Try isAllied(UUID)
         if (claimOwnerId instanceof UUID) {
@@ -397,7 +397,7 @@ public final class ProtectionChecker {
                     Object r = m.invoke(playerTeam, (UUID) claimOwnerId);
                     if (r instanceof Boolean b) return b;
                 }
-            } catch (Exception ignored) {}
+            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("{} reflection probe failed", TAG, e); }
         }
 
         return false;
@@ -420,7 +420,7 @@ public final class ProtectionChecker {
                 if (getClaim != null) {
                     claimInfo = getClaim.invoke(null, level, pos);
                 }
-            } catch (Exception ignored) {}
+            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("{} reflection probe failed", TAG, e); }
 
             if (claimInfo == null) {
                 try {
@@ -431,7 +431,7 @@ public final class ProtectionChecker {
                     if (getClaim != null) {
                         claimInfo = getClaim.invoke(null, level, chunkPos);
                     }
-                } catch (Exception ignored) {}
+                } catch (Exception e) { RSIntegrationMod.LOGGER.debug("{} reflection probe failed", TAG, e); }
             }
 
             if (claimInfo == null) {
@@ -446,7 +446,7 @@ public final class ProtectionChecker {
                         // don't have a claimInfo object, so skip to deny
                         if (result instanceof Boolean) return false;
                     }
-                } catch (Exception ignored) {}
+                } catch (Exception e) { RSIntegrationMod.LOGGER.debug("{} reflection probe failed", TAG, e); }
                 return true; // Can't determine claim — allow
             }
 
@@ -474,7 +474,7 @@ public final class ProtectionChecker {
             return false;
 
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("{} Cadmus check error (fail-open): {}", TAG, e.toString());
+            RSIntegrationMod.LOGGER.warn("{} Cadmus check error (fail-open)", TAG, e);
             return true; // fail-open
         }
     }

@@ -71,8 +71,7 @@ public enum ModSpecificPacketOpener implements IMachineGuiOpener {
                 return;
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-MachineGUI] No custom openScreen on {}: {}",
-                    className, e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI-MachineGUI] No custom openScreen on {}", className, e);
         }
 
         if (machine instanceof net.minecraft.world.MenuProvider provider) {

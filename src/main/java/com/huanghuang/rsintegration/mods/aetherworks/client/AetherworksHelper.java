@@ -74,26 +74,26 @@ final class AetherworksHelper {
                 // Tool station (non-essential for HUD)
                 try {
                     f_ts_inventory = AetherworksReflection.toolStationBEClass.getField("inventory");
-                } catch (Exception ignored) {}
+                } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Aetherworks] reflection probe failed", e); }
             } catch (Exception e) {
                 // Aetherworks not properly installed — core classes missing
             }
 
             if (ok) {
                 // Non-essential: forge capability fields
-                try { f_forge_heatCap = AetherworksReflection.forgeBEClass.getField("heatCapability"); } catch (Exception ignored) {}
-                try { f_forge_emberCap = AetherworksReflection.forgeBEClass.getField("emberCapability"); } catch (Exception ignored) {}
+                try { f_forge_heatCap = AetherworksReflection.forgeBEClass.getField("heatCapability"); } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Aetherworks] reflection probe failed", e); }
+                try { f_forge_emberCap = AetherworksReflection.forgeBEClass.getField("emberCapability"); } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Aetherworks] reflection probe failed", e); }
 
                 // Non-essential: heat capability (Aetherworks own API)
                 try {
                     m_heat_getHeat = AetherworksReflection.iheatCapabilityClass.getMethod("getHeat");
-                } catch (Exception ignored) {}
+                } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Aetherworks] reflection probe failed", e); }
 
                 // Non-essential: ember capability (Embers API)
                 try {
                     m_ember_getEmber = EmbersReflection.iemberCapabilityClass.getMethod("getEmber");
                     m_ember_getCapacity = EmbersReflection.iemberCapabilityClass.getMethod("getEmberCapacity");
-                } catch (Exception ignored) {}
+                } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Aetherworks] reflection probe failed", e); }
 
                 // Non-essential: recipe access
                 try {
@@ -107,7 +107,7 @@ final class AetherworksHelper {
                     Field f = awReg.getField("AETHERIUM_ANVIL");
                     Object ro = f.get(null);
                     recipeType = ro.getClass().getMethod("get").invoke(ro);
-                } catch (Exception ignored) {}
+                } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Aetherworks] reflection probe failed", e); }
 
                 // Non-essential: tool station recipe access
                 try {
@@ -118,7 +118,7 @@ final class AetherworksHelper {
                     Field f2 = awReg.getField("TOOL_STATION");
                     Object ro2 = f2.get(null);
                     tsRecipeType = ro2.getClass().getMethod("get").invoke(ro2);
-                } catch (Exception ignored) {}
+                } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Aetherworks] reflection probe failed", e); }
 
                 // Non-essential: hammer
                 try {
@@ -126,7 +126,7 @@ final class AetherworksHelper {
                     Field f = regMan.getField("TINKER_HAMMER");
                     Object ro = f.get(null);
                     hammerItem = (Item) ro.getClass().getMethod("get").invoke(ro);
-                } catch (Exception ignored) {}
+                } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Aetherworks] reflection probe failed", e); }
             }
         }
         LOADED = ok;
@@ -155,7 +155,7 @@ final class AetherworksHelper {
     static int getAnvilProgress(BlockEntity anvil) {
         if (f_anvil_progress == null) return 0;
         try { return f_anvil_progress.getInt(anvil); } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] Reflection read failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] Reflection read failed", e);
             return 0;
         }
     }
@@ -163,7 +163,7 @@ final class AetherworksHelper {
     static int getAnvilHitTimeout(BlockEntity anvil) {
         if (f_anvil_hitTimeout == null) return 0;
         try { return f_anvil_hitTimeout.getInt(anvil); } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] Reflection read failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] Reflection read failed", e);
             return 0;
         }
     }
@@ -171,7 +171,7 @@ final class AetherworksHelper {
     static int getAnvilMistakes(BlockEntity anvil) {
         if (f_anvil_mistakes == null) return 0;
         try { return f_anvil_mistakes.getInt(anvil); } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] Reflection read failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] Reflection read failed", e);
             return 0;
         }
     }
@@ -182,7 +182,7 @@ final class AetherworksHelper {
             IItemHandler handler = (IItemHandler) f_anvil_inventory.get(anvil);
             return handler.getStackInSlot(slot);
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] Reflection read failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] Reflection read failed", e);
             return ItemStack.EMPTY;
         }
     }
@@ -193,7 +193,7 @@ final class AetherworksHelper {
             IItemHandler handler = (IItemHandler) f_ts_inventory.get(ts);
             return handler.getStackInSlot(slot);
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] Reflection read failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] Reflection read failed", e);
             return ItemStack.EMPTY;
         }
     }
@@ -205,7 +205,7 @@ final class AetherworksHelper {
             if (cap == null) return 0;
             return (double) m_heat_getHeat.invoke(cap);
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] Reflection read failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] Reflection read failed", e);
             return 0;
         }
     }
@@ -217,7 +217,7 @@ final class AetherworksHelper {
             if (cap == null) return 0;
             return (double) m_ember_getEmber.invoke(cap);
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] Reflection read failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] Reflection read failed", e);
             return 0;
         }
     }
@@ -229,7 +229,7 @@ final class AetherworksHelper {
             if (cap == null) return 0;
             return (double) m_ember_getCapacity.invoke(cap);
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] Reflection read failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] Reflection read failed", e);
             return 0;
         }
     }
@@ -246,7 +246,7 @@ final class AetherworksHelper {
                 if (ing.test(item)) return r;
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] Reflection read failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] Reflection read failed", e);
         }
         return null;
     }
@@ -254,7 +254,7 @@ final class AetherworksHelper {
     static int getRecipeHits(Object recipe) {
         if (m_recipe_getNumberOfHits == null) return 0;
         try { return (int) m_recipe_getNumberOfHits.invoke(recipe); } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] Reflection read failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] Reflection read failed", e);
             return 0;
         }
     }
@@ -262,7 +262,7 @@ final class AetherworksHelper {
     static int getRecipeTempMin(Object recipe) {
         if (m_recipe_getTemperatureMin == null) return 0;
         try { return (int) m_recipe_getTemperatureMin.invoke(recipe); } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] Reflection read failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] Reflection read failed", e);
             return 0;
         }
     }
@@ -270,7 +270,7 @@ final class AetherworksHelper {
     static int getRecipeTempMax(Object recipe) {
         if (m_recipe_getTemperatureMax == null) return 0;
         try { return (int) m_recipe_getTemperatureMax.invoke(recipe); } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] Reflection read failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] Reflection read failed", e);
             return 0;
         }
     }
@@ -278,7 +278,7 @@ final class AetherworksHelper {
     static int getRecipeEmberPerHit(Object recipe) {
         if (m_recipe_getEmberPerHit == null) return 0;
         try { return (int) m_recipe_getEmberPerHit.invoke(recipe); } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] Reflection read failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] Reflection read failed", e);
             return 0;
         }
     }
@@ -313,7 +313,7 @@ final class AetherworksHelper {
                 }
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] Reflection read failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] Reflection read failed", e);
         }
         return null;
     }
@@ -321,7 +321,7 @@ final class AetherworksHelper {
     static int getTsRecipeTemp(Object recipe) {
         if (m_ts_recipe_getTemperature == null) return 0;
         try { return (int) m_ts_recipe_getTemperature.invoke(recipe); } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] Reflection read failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] Reflection read failed", e);
             return 0;
         }
     }

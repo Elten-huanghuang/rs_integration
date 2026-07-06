@@ -244,7 +244,9 @@ public final class OpenBoundMachineGuiPacket {
                 var f = AbstractFurnaceBlockEntity.class.getDeclaredField("litTime");
                 f.setAccessible(true);
                 if (f.getInt(furnace) > 0) hasFuel = true;
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.debug("[RSI-SidePanel] reflection probe failed", e);
+            }
         }
         if (!hasFuel) {
             int cookingTime = recipe instanceof AbstractCookingRecipe acr
@@ -486,7 +488,7 @@ public final class OpenBoundMachineGuiPacket {
                         Component.translatable("rsi.vanilla.info.smithing_filled", filled), true);
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Prefill] FA smithing prefill failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-Prefill] FA smithing prefill failed", e);
         }
     }
 

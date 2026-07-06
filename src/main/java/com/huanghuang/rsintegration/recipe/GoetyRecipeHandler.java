@@ -13,7 +13,7 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 
-public final class GoetyRecipeHandler implements ModRecipeHandler {
+public final class GoetyRecipeHandler extends AbstractRecipeHandler {
 
     @Override
     public ModType modType() { return ModType.byId("goety"); }

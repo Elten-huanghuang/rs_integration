@@ -12,7 +12,7 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 
-final class GenericRecipeHandler implements ModRecipeHandler {
+final class GenericRecipeHandler extends AbstractRecipeHandler {
 
     @Override
     public ModType modType() { return ModType.byId("generic"); }

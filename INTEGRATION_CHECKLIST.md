@@ -69,20 +69,25 @@ ModType.register("malum",
 
 `ModRecipeHandler` 负责从各模组的配方对象中提取输入材料和产出物。每个模组一个 Handler，通过反射读取配方字段/方法。
 
+**`AbstractRecipeHandler` 基类**（`recipe/AbstractRecipeHandler.java`）消除了 ~18 个 Handler 中的重复 `canHandle` 代码。子类只需在 `static` 块中注册 recipe 类名前缀，`canHandle` 由基类统一实现：
+
 ```java
-public interface ModRecipeHandler {
-    ModType modType();
-    boolean canHandle(Recipe<?> recipe);
-    ItemStack getResultItem(Recipe<?> recipe, RegistryAccess access);
-    List<IngredientSpec> getIngredients(Recipe<?> recipe);
+public final class MalumRecipeHandler extends AbstractRecipeHandler {
+    static { registerRecipePrefixes(MalumRecipeHandler.class, "com.sammy.malum."); }
+
+    @Override public ModType modType() { return ModType.byId("malum"); }
+    @Override public ItemStack getResultItem(Recipe<?> recipe, RegistryAccess access) { ... }
+    @Override public List<IngredientSpec> getIngredients(Recipe<?> recipe) { ... }
 }
 ```
 
 注册：`ModRecipeHandlers.register(new MalumRecipeHandler())`
 
+自有 `canHandle` 逻辑的 Handler（如 Goety、Fa 等）仍可覆写。
+
 ### 3.3 BatchDelegate（合成委托）
 
-`IBatchDelegate` 是机器交互的核心，每个机器类型一个实现。负责：
+`IBatchDelegate` 是机器交互的核心，每个机器类型一个实现。继承自 `AbstractBatchDelegate`（`crafting/batch/AbstractBatchDelegate.java`），负责：
 
 | 方法 | 职责 |
 |------|------|
@@ -95,6 +100,11 @@ public interface ModRecipeHandler {
 | `onBatchFailed()` / `onBatchFinished()` | 清理、退款 |
 
 **Delegate 不应缓存 BlockEntity / IItemHandler**——每次 tick 重新 `level.getBlockEntity(pos)` 获取。
+
+**基类模板方法：** `AbstractBatchDelegate` 提供带保护的默认实现：
+- `isCraftComplete(level)` — 内含 `level.isLoaded(pos)` 区块卸载保护，子类覆写 `isMachineCraftFinished(be)` 即可
+- `onBatchFailed(player, reason)` — 内含 `usingSharedLedger` 防双倍退款保护，子类覆写 `clearMachineState(be, player)` 即可
+- `warnOnce(state, format, args...)` — tick 路径限流日志，只在错误状态变更时输出，避免每秒 20 条刷屏
 
 ### 3.4 绑定系统（Binding）
 
@@ -256,12 +266,23 @@ new ModuleEntry("modId", RSIntegrationConfig.ENABLE_XXX,
 
 ### 6.2 错误处理
 
-- 跨模组反射失败：`RSIntegrationMod.LOGGER.debug(...)`（非致命）
-- 本模组逻辑错误：`LOGGER.warn / error`
-- 用户可见错误：`player.sendSystemMessage(Component.translatable(...))`
-- 网络包处理：始终在 `context.enqueueWork(() -> {...})` 内操作世界
+- **禁止静默 catch**：所有 `catch` 块必须保留异常对象引用，至少 `LOGGER.debug("msg", e)`。`catch (Exception ignored) {}` / `catch (Exception e) { LOGGER.warn("{}", e.toString()) }` 均为违规。
+- **跨 mod 反射探测**（预期可能失败）：`RSIntegrationMod.LOGGER.debug("msg", e)` 或 `RSIntegrationMod.debug("msg", e)`（受 diagnostic 开关控制）
+- **合成/提取失败**（用户操作相关）：`LOGGER.warn("msg", e)`
+- **网络/绑定/账本错误**：`LOGGER.error("msg", e)`
+- **Tick 路径**：使用 `warnOnce()` 限流，防刷屏
+- **用户可见错误**：`player.sendSystemMessage(Component.translatable(...))`
+- **网络包处理**：始终在 `context.enqueueWork(() -> {...})` 内操作世界
 
-### 6.3 不可变原则
+### 6.3 诊断日志开关
+
+`RSIntegrationMod.debug(format, args...)` 是一个受 config 开关 `DIAGNOSTIC_VERBOSE_LOGGING` 控制的守卫日志方法。**高频 tick 路径中的 debug 必须用此方法**，避免默认关闭时产生无意义的字符串拼接开销。
+
+一次性路径（启动初始化、注册）可直接使用 `RSIntegrationMod.LOGGER.debug(...)`。
+
+开关状态缓存在 `RSIntegrationMod.verboseLogging` boolean 原语中，通过 `ModConfigEvent.Reloading` 监听配置重载，避免每 tick 调用 `ConfigValue.get()` 的同步开销。
+
+### 6.4 不可变原则
 
 | 原则 | 原因 |
 |------|------|
@@ -270,7 +291,7 @@ new ModuleEntry("modId", RSIntegrationConfig.ENABLE_XXX,
 | 不缓存 Level / ServerLevel | 维度切换 |
 | 修改 BE 后调 `setChanged()` | 否则重启/崩服回档 |
 
-### 6.4 ItemStack 操作
+### 6.5 ItemStack 操作
 
 - 用 `copy()` 创建副本，不直接修改网络中的物品
 - `shrink` 掉落物后调 `entity.setItem(entity.getItem().copy())`
@@ -298,7 +319,10 @@ Phase 1: reserve → Phase 2: commit → Phase 3: craft
 | 陷阱 | 后果 | 修复 |
 |------|------|------|
 | 跨 tick 缓存 BlockEntity | 刷物/吞物 | 每次 tick 重新 `level.getBlockEntity()` |
+| `getBlockEntity()` 不先检查 `isLoaded()` | 触发区块加载 → TPS 掉帧 | 先 `level.isLoaded(pos)` |
 | 共享账本下单方面退款 | 双倍刷物 | `onBatchFailed` 检查 `usingSharedLedger` |
+| Tick 路径中 `warn`/`error` 无限流 | 故障机器每秒 20 条堆栈撑爆磁盘 | 使用基类 `warnOnce(state, fmt, args...)` |
+| catch 块丢异常对象（`e.toString()` / 空体） | 故障完全不可追踪 | 始终 `LOGGER.xxx("msg", e)` |
 | 修改 BE 不调 `setChanged()` | 重启/崩服回档 | 改完必须调 |
 | `entity.getItem().shrink()` 不跟 `setItem` | 客户端不同步 | shrink 后调 `entity.setItem(entity.getItem().copy())` |
 | 退物品不检查在线状态 | 物品掉虚空 | 检查 `!player.hasDisconnected()` |
@@ -307,6 +331,7 @@ Phase 1: reserve → Phase 2: commit → Phase 3: craft
 | 机器坐标不校验绑定 | 全服隔空偷窃 | 服务端检查 `AltarBindingRegistry.isBound()` |
 | 类名写死字符串而非探针 | 上游改名后运行时 NPE | 类名统一放探针，启动期校验 |
 | `Field`/`Method` 存探针 | 违反探针设计原则 | 探针只存 `Class<?>`，字段/方法在调用点用 `Reflect` |
+| Tick 路径中每帧读 `ConfigValue.get()` | Map 查找+同步开销累积 | 缓存 boolean 原语，监听 `ModConfigEvent.Reloading` |
 
 ---
 

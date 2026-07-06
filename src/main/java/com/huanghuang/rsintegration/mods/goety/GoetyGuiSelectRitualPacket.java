@@ -400,7 +400,7 @@ public final class GoetyGuiSelectRitualPacket {
                 return item.getDefaultInstance().getDisplayName().getString();
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Goety] resolveResearchName failed for {}: {}", researchId, e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI-Goety] resolveResearchName failed for {}", researchId, e);
             /* fall through */
         }
         return researchId;

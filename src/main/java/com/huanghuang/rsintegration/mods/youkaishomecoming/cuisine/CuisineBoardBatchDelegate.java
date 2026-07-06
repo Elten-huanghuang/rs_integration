@@ -4,7 +4,7 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
-import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.reflection.probes.YHKReflection;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;
@@ -29,14 +29,13 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-public final class CuisineBoardBatchDelegate implements IBatchDelegate {
+public final class CuisineBoardBatchDelegate extends AbstractBatchDelegate {
 
     private ServerPlayer player;
     private ServerLevel myLevel;
     private ResourceKey<Level> myDim;
     private BlockPos myPos;
     private Recipe<?> recipe;
-    private INetwork network;
     private boolean craftDone;
     private ItemStack resultItem = ItemStack.EMPTY;
 
@@ -232,11 +231,10 @@ public final class CuisineBoardBatchDelegate implements IBatchDelegate {
     }
 
     @Override
-    public boolean isCraftComplete(ServerLevel level) {
+    protected boolean isMachineCraftFinished(ServerLevel level, BlockEntity be) {
         if (craftDone) return true;
 
-        BlockEntity be = level.getBlockEntity(myPos);
-        if (be == null || !isCuisineBE(be)) return false;
+        if (!isCuisineBE(be)) return false;
 
         // Keep advancing the model with empty clicks.  The model tree has
         // transition states (EMPTY ingredient) that require empty-hand
@@ -315,7 +313,7 @@ public final class CuisineBoardBatchDelegate implements IBatchDelegate {
     }
 
     @Override
-    public void onBatchFailed(ServerPlayer player, String reason) {
+    protected void clearMachineState(BlockEntity be, ServerPlayer player) {
         clearAndRefund();
         forceChunkLoad(false);
         craftDone = false;
@@ -361,7 +359,7 @@ public final class CuisineBoardBatchDelegate implements IBatchDelegate {
             try {
                 return (List<Ingredient>) getCustomIngredientsMethod.invoke(recipe);
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.warn("[RSI-CuisineBoard] getCustomIngredients reflection failed: {}", e.toString());
+                RSIntegrationMod.LOGGER.warn("[RSI-CuisineBoard] getCustomIngredients reflection failed", e);
             }
         }
         return List.of();
@@ -372,7 +370,7 @@ public final class CuisineBoardBatchDelegate implements IBatchDelegate {
             try {
                 return (ItemStack) getResultMethod.invoke(recipe);
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.warn("[RSI-CuisineBoard] getRecipeResult reflection failed: {}", e.toString());
+                RSIntegrationMod.LOGGER.warn("[RSI-CuisineBoard] getRecipeResult reflection failed", e);
             }
         }
         return ItemStack.EMPTY;
@@ -413,8 +411,7 @@ public final class CuisineBoardBatchDelegate implements IBatchDelegate {
                         }
                     }
                 } catch (Exception e) {
-                    RSIntegrationMod.LOGGER.debug("[RSI-Cuisine] VTB collect failed: {}",
-                            e.toString());
+                    RSIntegrationMod.LOGGER.debug("[RSI-Cuisine] VTB collect failed", e);
                 }
             }
 
@@ -430,12 +427,11 @@ public final class CuisineBoardBatchDelegate implements IBatchDelegate {
                         cm.invoke(fixed, all);
                     }
                 } catch (Exception e) {
-                    RSIntegrationMod.LOGGER.debug("[RSI-Cuisine] FIXED collect failed: {}",
-                            e.toString());
+                    RSIntegrationMod.LOGGER.debug("[RSI-Cuisine] FIXED collect failed", e);
                 }
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Cuisine] base lookup failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI-Cuisine] base lookup failed", e);
         }
 
         // 2. Recipe-specific ingredients (custom per-recipe)
@@ -448,7 +444,7 @@ public final class CuisineBoardBatchDelegate implements IBatchDelegate {
                 }
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-CuisineBoard] collectAllIngredients reflection failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-CuisineBoard] collectAllIngredients reflection failed", e);
         }
 
         if (!all.isEmpty()) {
@@ -497,7 +493,7 @@ public final class CuisineBoardBatchDelegate implements IBatchDelegate {
                 recreateMethod.setAccessible(true);
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Cuisine] Reflection probe failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-Cuisine] Reflection probe failed", e);
         }
     }
 
@@ -530,7 +526,7 @@ public final class CuisineBoardBatchDelegate implements IBatchDelegate {
             try {
                 return (int) addItemMethod.invoke(be, stack);
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.warn("[RSI-CuisineBoard] addItem reflection failed: {}", e.toString());
+                RSIntegrationMod.LOGGER.warn("[RSI-CuisineBoard] addItem reflection failed", e);
             }
         }
         return -1;
@@ -541,7 +537,7 @@ public final class CuisineBoardBatchDelegate implements IBatchDelegate {
             try {
                 return (boolean) addToPlayerMethod.invoke(be, player);
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.warn("[RSI-CuisineBoard] addToPlayer reflection failed: {}", e.toString());
+                RSIntegrationMod.LOGGER.warn("[RSI-CuisineBoard] addToPlayer reflection failed", e);
             }
         }
         return false;
@@ -552,7 +548,7 @@ public final class CuisineBoardBatchDelegate implements IBatchDelegate {
             try {
                 return (boolean) performToolActionMethod.invoke(be, tool);
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.warn("[RSI-CuisineBoard] performToolAction reflection failed: {}", e.toString());
+                RSIntegrationMod.LOGGER.warn("[RSI-CuisineBoard] performToolAction reflection failed", e);
             }
         }
         return false;
@@ -564,7 +560,7 @@ public final class CuisineBoardBatchDelegate implements IBatchDelegate {
             try {
                 return getModelMethod.invoke(be);
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.warn("[RSI-CuisineBoard] getModel reflection failed: {}", e.toString());
+                RSIntegrationMod.LOGGER.warn("[RSI-CuisineBoard] getModel reflection failed", e);
             }
         }
         return null;
@@ -581,7 +577,7 @@ public final class CuisineBoardBatchDelegate implements IBatchDelegate {
                     }
                 }
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.warn("[RSI-CuisineBoard] completeModelGetResult reflection failed: {}", e.toString());
+                RSIntegrationMod.LOGGER.warn("[RSI-CuisineBoard] completeModelGetResult reflection failed", e);
             }
         }
         return ItemStack.EMPTY;
@@ -592,7 +588,7 @@ public final class CuisineBoardBatchDelegate implements IBatchDelegate {
             try {
                 clearMethod.invoke(be);
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.warn("[RSI-CuisineBoard] clearModel reflection failed: {}", e.toString());
+                RSIntegrationMod.LOGGER.warn("[RSI-CuisineBoard] clearModel reflection failed", e);
             }
         }
     }
@@ -635,7 +631,7 @@ public final class CuisineBoardBatchDelegate implements IBatchDelegate {
             int cz = myPos.getZ() >> 4;
             ForgeChunkManager.forceChunk(myLevel, RSIntegrationMod.MOD_ID, myPos, cx, cz, load, true);
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Cuisine] Chunk load failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI-Cuisine] Chunk load failed", e);
         }
     }
 }

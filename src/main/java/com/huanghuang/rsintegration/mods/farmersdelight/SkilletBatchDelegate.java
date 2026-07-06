@@ -32,7 +32,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-public final class SkilletBatchDelegate implements com.huanghuang.rsintegration.crafting.batch.IBatchDelegate {
+public final class SkilletBatchDelegate extends com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate {
 
     private static final String CAMPFIRE_BE =
             "net.minecraft.world.level.block.entity.CampfireBlockEntity";
@@ -42,9 +42,7 @@ public final class SkilletBatchDelegate implements com.huanghuang.rsintegration.
     private ResourceKey<Level> myDim;
     private BlockPos myPos;
     private Recipe<?> recipe;
-    private INetwork network;
     private boolean craftDone;
-    private boolean usingSharedLedger;
 
     // Skillet-specific
     private boolean isSkillet;
@@ -68,7 +66,7 @@ public final class SkilletBatchDelegate implements com.huanghuang.rsintegration.
             cookingProgress = resolveField(cfb, "cookingProgress", "f_59043_");
             cookingTime = resolveField(cfb, "cookingTime", "f_59044_");
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Skillet] Reflection read failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-Skillet] Reflection read failed", e);
         }
         CAMPFIRE_ITEMS = items;
         CAMPFIRE_COOKING_PROGRESS = cookingProgress;
@@ -82,7 +80,7 @@ public final class SkilletBatchDelegate implements com.huanghuang.rsintegration.
                 Field f = clazz.getDeclaredField(name);
                 f.setAccessible(true);
                 return f;
-            } catch (NoSuchFieldException ignored) {}
+            } catch (NoSuchFieldException e) { RSIntegrationMod.LOGGER.debug("[RSI-Skillet] field not found", e); }
         }
         return null;
     }
@@ -215,7 +213,7 @@ public final class SkilletBatchDelegate implements com.huanghuang.rsintegration.
             RSIntegrationMod.LOGGER.debug("[RSI-Batch-Skillet] Item added to skillet");
             return true;
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.error("[RSI-Batch-Skillet] Failed to add item: {}", e.toString());
+            RSIntegrationMod.LOGGER.error("[RSI-Batch-Skillet] Failed to add item", e);
             return false;
         }
     }
@@ -269,10 +267,7 @@ public final class SkilletBatchDelegate implements com.huanghuang.rsintegration.
     }
 
     @Override
-    public boolean isCraftComplete(ServerLevel level) {
-        BlockEntity be = level.getBlockEntity(myPos);
-        if (be == null) return false;
-
+    protected boolean isMachineCraftFinished(ServerLevel level, BlockEntity be) {
         if (isSkilletBE(be)) {
             // Use CAMPFIRE_ITEMS (already resolved in static init) to peek at
             // the stored item. hasStoredStack() returns true even for raw
@@ -301,7 +296,7 @@ public final class SkilletBatchDelegate implements com.huanghuang.rsintegration.
                     return campfireSlot >= 0 && campfireSlot < items.size()
                             && items.get(campfireSlot).isEmpty();
                 } catch (Exception e) {
-                    RSIntegrationMod.LOGGER.debug("[RSI-Batch-Skillet] Item peek failed: {}", e.toString());
+                    RSIntegrationMod.LOGGER.debug("[RSI-Batch-Skillet] Item peek failed", e);
                 }
             }
             return false;
@@ -314,7 +309,7 @@ public final class SkilletBatchDelegate implements com.huanghuang.rsintegration.
                 return campfireSlot >= 0 && campfireSlot < items.size()
                         && items.get(campfireSlot).isEmpty();
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.warn("[RSI-Skillet] Reflection read failed: {}", e.toString());
+                RSIntegrationMod.LOGGER.warn("[RSI-Skillet] Reflection read failed", e);
                 return false;
             }
         }
@@ -335,7 +330,7 @@ public final class SkilletBatchDelegate implements com.huanghuang.rsintegration.
                 craftDone = true;
                 if (result instanceof ItemStack s) return s;
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.error("[RSI-Batch-Skillet] Failed to remove item: {}", e.toString());
+                RSIntegrationMod.LOGGER.error("[RSI-Batch-Skillet] Failed to remove item", e);
             }
             return ItemStack.EMPTY;
         }
@@ -356,7 +351,7 @@ public final class SkilletBatchDelegate implements com.huanghuang.rsintegration.
                 times[campfireSlot] = 0;
                 be.setChanged();
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.warn("[RSI-Skillet] Reflection read failed: {}", e.toString());
+                RSIntegrationMod.LOGGER.warn("[RSI-Skillet] Reflection read failed", e);
             }
             return result;
         }
@@ -365,24 +360,22 @@ public final class SkilletBatchDelegate implements com.huanghuang.rsintegration.
     }
 
     @Override
-    public void onBatchFailed(ServerPlayer player, String reason) {
-        BlockEntity be = myLevel.getBlockEntity(myPos);
-        if (be != null && isSkilletBE(be)) {
+    protected void clearMachineState(BlockEntity be, ServerPlayer player) {
+        if (isSkilletBE(be)) {
             try {
                 Method isCooking = be.getClass().getMethod("isCooking");
                 if ((Boolean) isCooking.invoke(be)) {
                     ItemStack recovered = collectResult(player);
-                    if (!recovered.isEmpty() && !usingSharedLedger) refundToRSNetwork(recovered);
+                    if (!recovered.isEmpty()) refundToRSNetwork(recovered);
                 }
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.warn("[RSI-Skillet] Reflection read failed: {}", e.toString());
+                RSIntegrationMod.LOGGER.warn("[RSI-Skillet] Reflection read failed", e);
             }
         }
         clearCampfireSlot();
         campfireForceLoad(false);
         craftDone = false;
         skilletPrevTime = -1;
-        network = null;
     }
 
     @Override
@@ -420,7 +413,7 @@ public final class SkilletBatchDelegate implements com.huanghuang.rsintegration.
         try {
             campfireClass = Class.forName(CAMPFIRE_BE);
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Batch-Skillet] Reflection probe failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-Batch-Skillet] Reflection probe failed", e);
         }
     }
 
@@ -445,7 +438,7 @@ public final class SkilletBatchDelegate implements com.huanghuang.rsintegration.
             Method m = be.getClass().getMethod("isHeated");
             return (boolean) m.invoke(be);
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Skillet] Reflection read failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-Skillet] Reflection read failed", e);
             return false;
         }
     }
@@ -464,7 +457,7 @@ public final class SkilletBatchDelegate implements com.huanghuang.rsintegration.
             times[campfireSlot] = 0;
             if (campfireBE instanceof BlockEntity be) be.setChanged();
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Skillet] Reflection read failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-Skillet] Reflection read failed", e);
         }
         campfireSlot = -1;
     }
@@ -488,7 +481,7 @@ public final class SkilletBatchDelegate implements com.huanghuang.rsintegration.
             ForgeChunkManager.forceChunk(myLevel, RSIntegrationMod.MOD_ID, myPos, cx, cz, load, true);
             campfireChunkForced = load;
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Batch-Skillet] Chunk load failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI-Batch-Skillet] Chunk load failed", e);
         }
     }
 }

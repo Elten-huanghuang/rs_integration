@@ -279,8 +279,8 @@ public final class GenericCraftPacket {
                 String reason = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
                 try {
                     player.sendSystemMessage(Component.translatable("rsi.generic.error.craft_failed", reason));
-                } catch (Exception ignored) {
-                    RSIntegrationMod.LOGGER.error("[RSI-Generic] Failed to send error message to player:", ignored);
+                } catch (Exception ex) {
+                    RSIntegrationMod.LOGGER.error("[RSI-Generic] Failed to send error message to player", ex);
                 }
             }
         });
@@ -853,11 +853,11 @@ public final class GenericCraftPacket {
                         }
                     }
                 } catch (Exception ex) {
-                    RSIntegrationMod.LOGGER.warn("[RSI-tryBuildPlan] Failed to apply FA modifier: {}", ex.toString());
+                    RSIntegrationMod.LOGGER.warn("[RSI-tryBuildPlan] Failed to apply FA modifier", ex);
                 }
                 recipeModType = ModType.byId("smithing");
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.error("[RSI-tryBuildPlan] FA reflection failed: {}", e.toString());
+                RSIntegrationMod.LOGGER.error("[RSI-tryBuildPlan] FA reflection failed", e);
                 sendPlanError(player, Component.translatable("rsi.generic.error.fa_open_smithing").getString());
                 return;
             }
@@ -971,7 +971,7 @@ public final class GenericCraftPacket {
             for (var e : available.entrySet()) {
                 ItemStack s = new ItemStack(e.getKey().item(), e.getValue());
                 if (e.getKey().tag() != null) {
-                    try { s.setTag(net.minecraft.nbt.TagParser.parseTag(e.getKey().tag())); } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] NBT parse failed for key {}: {}", e.getKey(), ex.toString()); }
+                    try { s.setTag(net.minecraft.nbt.TagParser.parseTag(e.getKey().tag())); } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] NBT parse failed for key {}", e.getKey(), ex); }
                 }
                 availableStacks.add(s);
             }

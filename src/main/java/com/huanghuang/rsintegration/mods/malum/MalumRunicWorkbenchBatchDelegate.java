@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.mods.malum;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.reflection.probes.MalumReflection;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
@@ -28,19 +29,16 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 
-public final class MalumRunicWorkbenchBatchDelegate implements com.huanghuang.rsintegration.crafting.batch.IBatchDelegate {
+public final class MalumRunicWorkbenchBatchDelegate extends AbstractBatchDelegate {
 
     private ServerPlayer player;
     private ServerLevel myLevel;
     private ResourceKey<Level> myDim;
     private BlockPos myPos;
     private Recipe<?> recipe;
-    private INetwork network;
     private IItemHandler itemHandler;
     private ItemStack expectedOutput = ItemStack.EMPTY;
     private boolean craftDone;
-    private boolean usingSharedLedger;
-    private ExtractionLedger ledger;
 
     // ── IBatchDelegate ──────────────────────────────────────────────
 
@@ -220,7 +218,7 @@ public final class MalumRunicWorkbenchBatchDelegate implements com.huanghuang.rs
     }
 
     @Override
-    public boolean isCraftComplete(ServerLevel level) {
+    protected boolean isMachineCraftFinished(ServerLevel level, BlockEntity be) {
         return craftDone;
     }
 
@@ -260,15 +258,9 @@ public final class MalumRunicWorkbenchBatchDelegate implements com.huanghuang.rs
     }
 
     @Override
-    public void onBatchFailed(ServerPlayer player, String reason) {
+    protected void clearMachineState(BlockEntity be, ServerPlayer player) {
         craftDone = false;
-        if (usingSharedLedger) {
-            reset();
-            return;
-        }
-        // Clear slot 0 and refund if from own ledger
-        BlockEntity be = myLevel.getBlockEntity(myPos);
-        if (be != null && MalumReflection.runicWorkbenchBEClass.isInstance(be) && itemHandler != null) {
+        if (MalumReflection.runicWorkbenchBEClass.isInstance(be) && itemHandler != null) {
             ItemStack slot = itemHandler.getStackInSlot(0);
             if (!slot.isEmpty()) {
                 refundItem(slot);
@@ -311,7 +303,7 @@ public final class MalumRunicWorkbenchBatchDelegate implements com.huanghuang.rs
             Object inv = f.get(be);
             if (inv instanceof IItemHandler handler) return handler;
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Runic] Inventory fallback reflection failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-Runic] Inventory fallback reflection failed", e);
         }
         return null;
     }
@@ -322,7 +314,7 @@ public final class MalumRunicWorkbenchBatchDelegate implements com.huanghuang.rs
             itemHandler.getClass().getMethod("setStackInSlot", int.class, ItemStack.class)
                     .invoke(itemHandler, slot, stack);
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Batch-Runic] setSlot failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI-Batch-Runic] setSlot failed", e);
         }
     }
 

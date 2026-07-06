@@ -176,8 +176,7 @@ public final class SidePanelRenderer {
                     }
                 } catch (Exception t) {
                     if (RENDER_ERRORED_ITEMS.add(stack.getItem())) {
-                        RSIntegrationMod.LOGGER.warn("[RSI-SidePanel] Failed render stack {} (silenced for this item): {}",
-                                ForgeRegistries.ITEMS.getKey(stack.getItem()), t.toString());
+                        RSIntegrationMod.LOGGER.warn("[RSI-SidePanel] Failed render stack {} (silenced for this item)", ForgeRegistries.ITEMS.getKey(stack.getItem()), t);
                     }
                 }
 

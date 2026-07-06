@@ -518,7 +518,7 @@ public final class CraftPacketUtils {
                 }
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI] WR ritual access failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI] WR ritual access failed", e);
         }
 
         if (getCrystalType != null && ritual != null) {
@@ -531,7 +531,7 @@ public final class CraftPacketUtils {
                             crystalItems.add(is.getItem());
                         }
                     } catch (Exception e) {
-                        RSIntegrationMod.LOGGER.warn("[RSI] Crystal type detection failed: {}", e.toString());
+                        RSIntegrationMod.LOGGER.warn("[RSI] Crystal type detection failed", e);
                     }
                 }
             }
@@ -549,7 +549,7 @@ public final class CraftPacketUtils {
                     crystalItems.addAll(registered);
                 }
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.warn("[RSI] CrystalHandler.getItems failed: {}", e.toString());
+                RSIntegrationMod.LOGGER.warn("[RSI] CrystalHandler.getItems failed", e);
             }
         }
 
@@ -574,7 +574,7 @@ public final class CraftPacketUtils {
                     }
                 }
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.warn("[RSI] WR crystal class detection failed: {}", e.toString());
+                RSIntegrationMod.LOGGER.warn("[RSI] WR crystal class detection failed", e);
             }
         }
 
@@ -796,10 +796,10 @@ public final class CraftPacketUtils {
 
             return result.isEmpty() ? null : result;
         } catch (ClassNotFoundException e) {
-            RSIntegrationMod.LOGGER.warn("[RSI] Lodestone IngredientWithCount parse failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI] Lodestone IngredientWithCount parse failed", e);
             return null;
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI] Lodestone IngredientWithCount parse failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI] Lodestone IngredientWithCount parse failed", e);
             return null;
         }
     }
@@ -1043,7 +1043,7 @@ public final class CraftPacketUtils {
             if (key.tag() != null) {
                 try {
                     stack.setTag(net.minecraft.nbt.TagParser.parseTag(key.tag()));
-                } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] NBT parse failed for key {}: {}", key, ex.toString()); }
+                } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] NBT parse failed for key {}", key, ex); }
             }
             list.add(stack);
         }
@@ -1174,7 +1174,7 @@ public final class CraftPacketUtils {
                     }
                 }
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.warn("[RSI] Fuel detection failed: {}", e.toString());
+                RSIntegrationMod.LOGGER.warn("[RSI] Fuel detection failed", e);
             }
         }
         if (bestFuel == null) {

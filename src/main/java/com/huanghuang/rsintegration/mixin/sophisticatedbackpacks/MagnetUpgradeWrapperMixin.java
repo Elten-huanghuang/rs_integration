@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.mixin.sophisticatedbackpacks;
 
 import com.huanghuang.rsintegration.util.BackpackRSUtils;
+import com.huanghuang.rsintegration.RSIntegrationMod;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
@@ -63,7 +64,8 @@ public abstract class MagnetUpgradeWrapperMixin
             try {
                 rsi$debrisClass = Class.forName(
                         "fuzs.mutantmonsters.world.entity.MutantSkeletonBodyPart");
-            } catch (ClassNotFoundException ignored) {
+            } catch (ClassNotFoundException ex) {
+                RSIntegrationMod.LOGGER.debug("[RSI] reflection probe failed", ex);
             }
         }
         return rsi$debrisClass != null && rsi$debrisClass.isInstance(e);

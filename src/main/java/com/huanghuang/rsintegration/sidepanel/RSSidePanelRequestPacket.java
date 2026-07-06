@@ -149,7 +149,7 @@ public final class RSSidePanelRequestPacket {
 
                 RSSidePanelNetworkHandler.sendSync(player, ids, items, timestamps, craftableFlags, totalCount, true, netName);
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.warn("[RSI] SidePanel request error: {}", e.toString());
+                RSIntegrationMod.LOGGER.warn("[RSI] SidePanel request error", e);
                 RSSidePanelNetworkHandler.sendSync(player,
                         Collections.emptyList(), Collections.emptyList(),
                         Collections.emptyList(), Collections.emptyList(),

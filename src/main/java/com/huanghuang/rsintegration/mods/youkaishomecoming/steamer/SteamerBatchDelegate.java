@@ -4,7 +4,7 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
-import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.reflection.probes.YHKReflection;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;
@@ -37,7 +37,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-public final class SteamerBatchDelegate implements IBatchDelegate {
+public final class SteamerBatchDelegate extends AbstractBatchDelegate {
 
     private ServerPlayer player;
     private ServerLevel myLevel;
@@ -45,9 +45,7 @@ public final class SteamerBatchDelegate implements IBatchDelegate {
     private BlockPos myPos;
     private BlockPos potBasePos;
     private AbstractCookingRecipe recipe;
-    private INetwork network;
     private boolean craftDone;
-    private boolean usingSharedLedger;
 
     private static final ResourceLocation KEY_POT =
             new ResourceLocation("youkaishomecoming", "steamer_pot");
@@ -207,9 +205,8 @@ public final class SteamerBatchDelegate implements IBatchDelegate {
     }
 
     @Override
-    public boolean isCraftComplete(ServerLevel level) {
-        BlockEntity be = level.getBlockEntity(potBasePos != null ? potBasePos : myPos);
-        if (be == null || !isSteamerBE(be)) return false;
+    protected boolean isMachineCraftFinished(ServerLevel level, BlockEntity be) {
+        if (!isSteamerBE(be)) return false;
 
         List<?> racks = getRacks(be);
         if (racks == null) return false;
@@ -258,7 +255,7 @@ public final class SteamerBatchDelegate implements IBatchDelegate {
     }
 
     @Override
-    public void onBatchFailed(ServerPlayer player, String reason) {
+    protected void clearMachineState(BlockEntity be, ServerPlayer player) {
         clearAndRefund();
         forceChunkLoad(false);
         craftDone = false;
@@ -276,7 +273,7 @@ public final class SteamerBatchDelegate implements IBatchDelegate {
     }
 
     @Override
-    public BlockPos getMachinePos() { return myPos; }
+    public BlockPos getMachinePos() { return potBasePos != null ? potBasePos : myPos; }
 
     // -- plan helpers --
 
@@ -371,11 +368,11 @@ public final class SteamerBatchDelegate implements IBatchDelegate {
                     waterPropertyField = YHKReflection.steamerPotBlockClass.getDeclaredField("WATER");
                     waterPropertyField.setAccessible(true);
                 } catch (Exception e) {
-                    RSIntegrationMod.LOGGER.warn("[RSI-Steamer] Water property probe failed: {}", e.toString());
+                    RSIntegrationMod.LOGGER.warn("[RSI-Steamer] Water property probe failed", e);
                 }
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Steamer] Reflection probe failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-Steamer] Reflection probe failed", e);
         }
     }
 
@@ -410,7 +407,7 @@ public final class SteamerBatchDelegate implements IBatchDelegate {
             try {
                 return (List<?>) racksField.get(be);
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.warn("[RSI-Steamer] Failed to read racks field: {}", e.toString());
+                RSIntegrationMod.LOGGER.warn("[RSI-Steamer] Failed to read racks field", e);
             }
         }
         return null;
@@ -421,7 +418,7 @@ public final class SteamerBatchDelegate implements IBatchDelegate {
             try {
                 return (boolean) tryAddItemMethod.invoke(rack, be, myLevel, stack);
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.error("[RSI-Steamer] Failed to add item to rack: {}", e.toString());
+                RSIntegrationMod.LOGGER.error("[RSI-Steamer] Failed to add item to rack", e);
             }
         }
         return false;
@@ -434,7 +431,7 @@ public final class SteamerBatchDelegate implements IBatchDelegate {
             Field listField = rack.getClass().getField("list");
             return (Object[]) listField.get(rack);
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Steamer] Failed to read rack items list: {}", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-Steamer] Failed to read rack items list", e);
         }
         return null;
     }
@@ -444,7 +441,7 @@ public final class SteamerBatchDelegate implements IBatchDelegate {
             try {
                 return (boolean) mayExtractMethod.invoke(itemData);
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.warn("[RSI-Steamer] Failed to check mayExtract: {}", e.toString());
+                RSIntegrationMod.LOGGER.warn("[RSI-Steamer] Failed to check mayExtract", e);
             }
         }
         return false;
@@ -455,7 +452,7 @@ public final class SteamerBatchDelegate implements IBatchDelegate {
             try {
                 return (ItemStack) stackField.get(itemData);
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.error("[RSI-Steamer] Failed to read rack stack -- item may be lost: {}", e.toString());
+                RSIntegrationMod.LOGGER.error("[RSI-Steamer] Failed to read rack stack -- item may be lost", e);
             }
         }
         return ItemStack.EMPTY;
@@ -467,7 +464,7 @@ public final class SteamerBatchDelegate implements IBatchDelegate {
                 rackSetStackMethod.invoke(itemData, be, stack);
                 return;
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.error("[RSI-Steamer] Failed to set rack stack (method): {}", e.toString());
+                RSIntegrationMod.LOGGER.error("[RSI-Steamer] Failed to set rack stack (method)", e);
             }
         }
         // Fallback: direct field set
@@ -475,7 +472,7 @@ public final class SteamerBatchDelegate implements IBatchDelegate {
             try {
                 stackField.set(itemData, stack);
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.error("[RSI-Steamer] Failed to set rack stack (field): {}", e.toString());
+                RSIntegrationMod.LOGGER.error("[RSI-Steamer] Failed to set rack stack (field)", e);
             }
         }
     }
@@ -485,7 +482,7 @@ public final class SteamerBatchDelegate implements IBatchDelegate {
             try {
                 setChangedMethod.invoke(itemData);
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.warn("[RSI-Steamer] Failed to mark item dirty: {}", e.toString());
+                RSIntegrationMod.LOGGER.warn("[RSI-Steamer] Failed to mark item dirty", e);
             }
         }
     }
@@ -501,7 +498,7 @@ public final class SteamerBatchDelegate implements IBatchDelegate {
         try {
             return (boolean) isHeatedMethod.invoke(be, myLevel, potPos());
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Steamer] isHeated invoke failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI-Steamer] isHeated invoke failed", e);
         }
         return true; // can't check, assume heated so we don't block
     }
@@ -514,7 +511,7 @@ public final class SteamerBatchDelegate implements IBatchDelegate {
                 if (prop instanceof BooleanProperty bp && state.hasProperty(bp))
                     return state.getValue(bp);
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.warn("[RSI-Steamer] Failed to read water property: {}", e.toString());
+                RSIntegrationMod.LOGGER.warn("[RSI-Steamer] Failed to read water property", e);
             }
         }
         for (var prop : state.getProperties()) {
@@ -534,7 +531,7 @@ public final class SteamerBatchDelegate implements IBatchDelegate {
                     return;
                 }
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.warn("[RSI-Steamer] Failed to set water property: {}", e.toString());
+                RSIntegrationMod.LOGGER.warn("[RSI-Steamer] Failed to set water property", e);
             }
         }
         for (var prop : state.getProperties()) {
@@ -600,7 +597,7 @@ public final class SteamerBatchDelegate implements IBatchDelegate {
             int cz = myPos.getZ() >> 4;
             ForgeChunkManager.forceChunk(myLevel, RSIntegrationMod.MOD_ID, myPos, cx, cz, load, true);
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Steamer] Chunk load failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI-Steamer] Chunk load failed", e);
         }
     }
 }

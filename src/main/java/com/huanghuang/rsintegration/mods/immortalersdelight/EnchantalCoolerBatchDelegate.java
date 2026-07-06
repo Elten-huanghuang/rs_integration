@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.mods.immortalersdelight;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
@@ -30,7 +31,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-public final class EnchantalCoolerBatchDelegate implements com.huanghuang.rsintegration.crafting.batch.IBatchDelegate {
+public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
 
     // Slot layout (matching EnchantalCoolerBlockEntity)
     private static final int INPUT_SLOTS = 4;  // 0..3
@@ -43,9 +44,7 @@ public final class EnchantalCoolerBatchDelegate implements com.huanghuang.rsinte
     private ResourceKey<Level> myDim;
     private BlockPos myPos;
     private Recipe<?> recipe;
-    private INetwork network;
     private boolean craftDone;
-    private boolean usingSharedLedger;
 
     // Cached reflection
     private static volatile Field inventoryField;
@@ -201,9 +200,7 @@ public final class EnchantalCoolerBatchDelegate implements com.huanghuang.rsinte
     }
 
     @Override
-    public boolean isCraftComplete(ServerLevel level) {
-        BlockEntity be = level.getBlockEntity(myPos);
-        if (be == null) return false;
+    protected boolean isMachineCraftFinished(ServerLevel level, BlockEntity be) {
         if (!ImmersalsDelightReflection.enchantalCoolerBEClass.isInstance(be)) return false;
 
         IItemHandler itemHandler = getInventory(be);
@@ -228,7 +225,7 @@ public final class EnchantalCoolerBatchDelegate implements com.huanghuang.rsinte
     }
 
     @Override
-    public void onBatchFailed(ServerPlayer player, String reason) {
+    protected void clearMachineState(BlockEntity be, ServerPlayer player) {
         clearMachineSlotsAndRefund();
         forceChunkLoad(false);
         craftDone = false;
@@ -368,7 +365,7 @@ public final class EnchantalCoolerBatchDelegate implements com.huanghuang.rsinte
             residualDyeField = ImmersalsDelightReflection.enchantalCoolerBEClass.getDeclaredField("residualDye");
             residualDyeField.setAccessible(true);
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Batch-Cooler] Reflection probe failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-Batch-Cooler] Reflection probe failed", e);
         }
     }
 
@@ -378,7 +375,7 @@ public final class EnchantalCoolerBatchDelegate implements com.huanghuang.rsinte
         if (inventoryField != null) {
             try {
                 return (IItemHandler) inventoryField.get(be);
-            } catch (Exception ignored) {}
+            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-Cooler] field access failed", e); }
         }
         return be.getCapability(net.minecraftforge.common.capabilities.ForgeCapabilities.ITEM_HANDLER)
                 .resolve().orElse(null);
@@ -400,7 +397,7 @@ public final class EnchantalCoolerBatchDelegate implements com.huanghuang.rsinte
             int cz = myPos.getZ() >> 4;
             ForgeChunkManager.forceChunk(myLevel, RSIntegrationMod.MOD_ID, myPos, cx, cz, load, true);
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Batch-Cooler] Chunk load failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI-Batch-Cooler] Chunk load failed", e);
         }
     }
 }

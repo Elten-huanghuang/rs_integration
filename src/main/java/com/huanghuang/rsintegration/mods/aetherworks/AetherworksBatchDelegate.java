@@ -215,15 +215,14 @@ public final class AetherworksBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean isCraftComplete(ServerLevel level) {
+    protected boolean isMachineCraftFinished(ServerLevel level, BlockEntity be) {
         if (!materialsPlaced || AetherworksReflection.anvilBEClass == null) return false;
 
-        BlockEntity current = level.getBlockEntity(machinePos);
-        if (current == null || current.isRemoved() || !AetherworksReflection.anvilBEClass.isInstance(current)) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] Anvil BE removed during craft");
+        if (!AetherworksReflection.anvilBEClass.isInstance(be)) {
+            warnOnce("anvil_be_removed", "[RSI-Aetherworks] Anvil BE removed during craft");
             return true; // trigger cleanup
         }
-        this.anvilBE = current;
+        this.anvilBE = be;
 
         // Refresh forge reference
         if (forgePos != null) {
@@ -269,37 +268,37 @@ public final class AetherworksBatchDelegate extends AbstractBatchDelegate {
                 abortTimer++;
                 if (abortTimer > 300) {
                     craftTimedOut = true;
-                    RSIntegrationMod.LOGGER.error("[RSI-Aetherworks] Temperature regulation failed >300 ticks, aborting craft", e);
+                    warnOnce("anvil_temp_regulation_failed", "[RSI-Aetherworks] Temperature regulation failed >300 ticks, aborting craft", e);
                 }
             }
         }
 
         // 2. Auto-hammer — call onHit() when hitTimeout > 0 and hasEmber
         try {
-            int ht = Reflect.getIntField(anvilBE, "hitTimeout").orElse(0);
-            boolean ember = Reflect.<Boolean>getField(anvilBE, "hasEmber").orElse(false);
+            int ht = Reflect.getIntField(be, "hitTimeout").orElse(0);
+            boolean ember = Reflect.<Boolean>getField(be, "hasEmber").orElse(false);
             if (ht > 0 && ember) {
-                Reflect.invoke(anvilBE, "onHit");
+                Reflect.invoke(be, "onHit");
             }
         } catch (Exception e) {
             abortTimer++;
             if (abortTimer > 300) {
                 craftTimedOut = true;
-                RSIntegrationMod.LOGGER.error("[RSI-Aetherworks] Auto-hammer reflection failed >300 ticks, aborting craft", e);
+                warnOnce("anvil_auto_hammer_failed", "[RSI-Aetherworks] Auto-hammer reflection failed >300 ticks, aborting craft", e);
             }
         }
 
         if (craftTimedOut) return true;
 
         // 3. Craft completion — check if slot 0 item type changed
-        Object inv = Reflect.getField(anvilBE, "inventory").orElse(null);
+        Object inv = Reflect.getField(be, "inventory").orElse(null);
         if (inv == null) return false;
         ItemStack slotItem = Reflect.invoke(inv, "getStackInSlot", 0)
                 .map(o -> (ItemStack) o).orElse(ItemStack.EMPTY);
 
         if (!slotItem.isEmpty() && recordedInputItem != null
                 && slotItem.getItem() != recordedInputItem) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Aetherworks] isCraftComplete=TRUE: item transformed {} -> {}",
+            RSIntegrationMod.debug("[RSI-Aetherworks] isCraftComplete=TRUE: item transformed {} -> {}",
                     recordedInputItem, slotItem.getItem());
             return true;
         }
@@ -337,21 +336,14 @@ public final class AetherworksBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public void onBatchFailed(ServerPlayer player, String reason) {
-        materialsPlaced = false;
-        if (anvilBE != null) {
-            Object inv = Reflect.getField(anvilBE, "inventory").orElse(null);
-            if (inv != null) {
-                ItemStack leftover = Reflect.invoke(inv, "extractItem", 0, 64, false)
-                        .map(o -> (ItemStack) o).orElse(ItemStack.EMPTY);
-                if (!leftover.isEmpty() && network != null) {
-                    network.insertItem(leftover, leftover.getCount(), Action.PERFORM);
-                }
+    protected void clearMachineState(BlockEntity be, ServerPlayer player) {
+        Object inv = Reflect.getField(be, "inventory").orElse(null);
+        if (inv != null) {
+            ItemStack leftover = Reflect.invoke(inv, "extractItem", 0, 64, false)
+                    .map(o -> (ItemStack) o).orElse(ItemStack.EMPTY);
+            if (!leftover.isEmpty() && network != null) {
+                network.insertItem(leftover, leftover.getCount(), Action.PERFORM);
             }
-        }
-        recordedInputItem = null;
-        if (reason != null && !reason.isEmpty()) {
-            player.sendSystemMessage(Component.translatable("rsi.generic.error.craft_failed", reason));
         }
     }
 

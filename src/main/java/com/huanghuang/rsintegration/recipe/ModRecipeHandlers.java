@@ -128,8 +128,7 @@ public final class ModRecipeHandlers {
                         : cached.invoke(recipe);
                 if (r instanceof ItemStack s && !s.isEmpty()) return s;
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.debug("[RSI-Handler] cached getResultItem failed for {}: {}",
-                        clazz.getName(), e.toString());
+                RSIntegrationMod.LOGGER.debug("[RSI-Handler] cached getResultItem failed for {}", clazz.getName(), e);
             }
         }
 
@@ -154,8 +153,7 @@ public final class ModRecipeHandlers {
                         return s;
                     }
                 } catch (Exception e) {
-                    RSIntegrationMod.LOGGER.debug("[RSI-Handler] probe {} on {} failed: {}",
-                            name, clazz.getName(), e.toString());
+                    RSIntegrationMod.LOGGER.debug("[RSI-Handler] probe {} on {} failed", name, clazz.getName(), e);
                 }
             }
             // Skip no-arg getResultItem() — the deprecated overload that mods
@@ -173,8 +171,7 @@ public final class ModRecipeHandlers {
                         return s;
                     }
                 } catch (Exception e) {
-                    RSIntegrationMod.LOGGER.debug("[RSI-Handler] probe {} on {} failed: {}",
-                            name, clazz.getName(), e.toString());
+                    RSIntegrationMod.LOGGER.debug("[RSI-Handler] probe {} on {} failed", name, clazz.getName(), e);
                 }
             }
         }

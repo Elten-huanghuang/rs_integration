@@ -176,7 +176,9 @@ public final class RSSidePanelNetworkHandler {
                     }
                 }
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-SidePanel] reflection probe failed", e);
+        }
 
         UUID pid = player.getUUID();
         Map<String, MachineStatus> playerLast = lastPushedStatuses.computeIfAbsent(pid,
@@ -244,9 +246,11 @@ public final class RSSidePanelNetworkHandler {
                         }
                     }
                 }
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-SidePanel] reflection probe failed", e);
+        }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI] Failed to collect bindings for sync: {}", e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI] Failed to collect bindings for sync", e);
         }
         CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
                 new RSBindingSyncPacket(bindings));
@@ -273,9 +277,11 @@ public final class RSSidePanelNetworkHandler {
                         }
                     }
                 }
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-SidePanel] reflection probe failed", e);
+        }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI] Failed to build binding info: {}", e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI] Failed to build binding info", e);
         }
 
         // Piggyback lock sync
@@ -449,7 +455,7 @@ public final class RSSidePanelNetworkHandler {
                                 return;
                             }
                         } catch (Exception ex) {
-                            RSIntegrationMod.LOGGER.warn("[RSI] Re-registration attempt failed for {}: {}", pid, ex.toString());
+                            RSIntegrationMod.LOGGER.warn("[RSI] Re-registration attempt failed for {}", pid, ex);
                         }
                         // Network is truly gone — notify client
                         RSIntegrationMod.LOGGER.debug("[RSI] Network unavailable for {} — clearing panel", pid);

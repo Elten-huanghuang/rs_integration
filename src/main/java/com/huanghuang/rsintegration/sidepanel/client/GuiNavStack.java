@@ -76,7 +76,9 @@ public final class GuiNavStack {
                     cachePos(be, "getGrid()");
                     return;
                 }
-            } catch (NoSuchMethodException ignored) {}
+            } catch (NoSuchMethodException e) {
+                RSIntegrationMod.LOGGER.debug("[RSI-SidePanel] reflection probe failed", e);
+            }
 
             // 2. Scan all declared fields across the class hierarchy for any object
             //    that can yield a BlockEntity (direct BlockEntity, IGrid, INetworkNode, etc.).
@@ -96,7 +98,7 @@ public final class GuiNavStack {
                 clazz = clazz.getSuperclass();
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-GuiNav] Failed to extract grid position: {}", e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI-GuiNav] Failed to extract grid position", e);
         }
     }
 
@@ -116,7 +118,9 @@ public final class GuiNavStack {
                 var m = obj.getClass().getMethod(methodName);
                 Object result = m.invoke(obj);
                 if (result instanceof BlockEntity be) return be;
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.debug("[RSI-SidePanel] reflection probe failed", e);
+            }
         }
         return null;
     }

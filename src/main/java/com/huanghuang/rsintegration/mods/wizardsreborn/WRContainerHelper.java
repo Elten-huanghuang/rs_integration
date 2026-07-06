@@ -39,8 +39,8 @@ public final class WRContainerHelper {
                     field.setAccessible(true);
                     try {
                         return (net.minecraft.world.SimpleContainer) field.get(be);
-                    } catch (Exception ignored) {
-                        RSIntegrationMod.LOGGER.debug("[RSI-WR] getLiveSimpleContainer field access failed: {}", ignored.toString());
+                    } catch (Exception e) {
+                        RSIntegrationMod.LOGGER.debug("[RSI-WR] reflection probe failed", e);
                     }
                 }
             }
@@ -60,7 +60,7 @@ public final class WRContainerHelper {
             } catch (NoSuchMethodException e) {
                 clazz = clazz.getSuperclass();
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.warn("[RSI-WR] Container reflection failed: {}", e.toString());
+                RSIntegrationMod.LOGGER.warn("[RSI-WR] Container reflection failed", e);
                 return null;
             }
         }
@@ -78,17 +78,17 @@ public final class WRContainerHelper {
         // 1. WR BlockSimpleInventory.inventorySize() (no "get" prefix)
         m = Reflect.findMethod(bc, "inventorySize", new Class<?>[0]);
         if (m != null) { try { return (int) m.invoke(be); } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-WR] inventorySize() invoke failed for {}: {}", beName, e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI-WR] inventorySize() invoke failed for {}", beName, e);
         }}
         // 2. Alternative: getInventorySize()
         m = Reflect.findMethod(bc, "getInventorySize", new Class<?>[0]);
         if (m != null) { try { return (int) m.invoke(be); } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-WR] getInventorySize() invoke failed for {}: {}", beName, e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI-WR] getInventorySize() invoke failed for {}", beName, e);
         }}
         // 3. Vanilla: getContainerSize() (BaseContainerBlockEntity)
         m = Reflect.findMethod(bc, "getContainerSize", new Class<?>[0]);
         if (m != null) { try { return (int) m.invoke(be); } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-WR] getContainerSize() invoke failed for {}: {}", beName, e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI-WR] getContainerSize() invoke failed for {}", beName, e);
         }}
         // 4. getItemHandler() → IItemHandler.getSlots() or Container.getContainerSize()
         m = Reflect.findMethod(bc, "getItemHandler", new Class<?>[0]);
@@ -104,7 +104,7 @@ public final class WRContainerHelper {
                     if (gm != null) return (int) gm.invoke(h);
                 }
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.debug("[RSI-WR] getItemHandler() invoke failed for {}: {}", beName, e.toString());
+                RSIntegrationMod.LOGGER.debug("[RSI-WR] getItemHandler() invoke failed for {}", beName, e);
             }
         }
         // 5. Forge capabilities
@@ -116,7 +116,7 @@ public final class WRContainerHelper {
         // 7. SRG name
         m = Reflect.findMethod(bc, "m_6643_", new Class<?>[0]);
         if (m != null) { try { return (int) m.invoke(be); } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-WR] m_6643_() invoke failed for {}: {}", beName, e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI-WR] m_6643_() invoke failed for {}", beName, e);
         }}
         // 8. createItemHandler() factory (last resort)
         net.minecraft.world.SimpleContainer sc = getSimpleContainer(be);
@@ -133,8 +133,8 @@ public final class WRContainerHelper {
     public static ItemStack getContainerItem(Object be, int slot) {
         Class<?> bc = be.getClass();
         java.lang.reflect.Method m = Reflect.findMethod(bc, "getItem", new Class<?>[]{int.class});
-        if (m != null) { try { return (ItemStack) m.invoke(be, slot); } catch (Exception ignored) {
-            RSIntegrationMod.LOGGER.debug("[RSI-WR] getItem S1 failed: {}", ignored.toString());
+        if (m != null) { try { return (ItemStack) m.invoke(be, slot); } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-WR] reflection probe failed", e);
         }}
         m = Reflect.findMethod(bc, "getItemHandler", new Class<?>[0]);
         if (m != null) {
@@ -148,8 +148,8 @@ public final class WRContainerHelper {
                     gm = Reflect.findMethod(h.getClass(), "m_8020_", new Class<?>[]{int.class});
                     if (gm != null) return (ItemStack) gm.invoke(h, slot);
                 }
-            } catch (Exception ignored) {
-                RSIntegrationMod.LOGGER.debug("[RSI-WR] getItem handler probe failed: {}", ignored.toString());
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.debug("[RSI-WR] reflection probe failed", e);
             }
         }
         IItemHandler cap = getForgeItemHandler(be);
@@ -157,8 +157,8 @@ public final class WRContainerHelper {
         net.minecraft.world.SimpleContainer live = getLiveSimpleContainer(be);
         if (live != null) return live.getItem(slot);
         m = Reflect.findMethod(bc, "m_8020_", new Class<?>[]{int.class});
-        if (m != null) { try { return (ItemStack) m.invoke(be, slot); } catch (Exception ignored) {
-            RSIntegrationMod.LOGGER.debug("[RSI-WR] getItem SRG failed: {}", ignored.toString());
+        if (m != null) { try { return (ItemStack) m.invoke(be, slot); } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-WR] reflection probe failed", e);
         }}
         net.minecraft.world.SimpleContainer sc = getSimpleContainer(be);
         if (sc != null) return sc.getItem(slot);
@@ -168,8 +168,8 @@ public final class WRContainerHelper {
     public static void setContainerItem(Object be, int slot, ItemStack stack) {
         Class<?> bc = be.getClass();
         java.lang.reflect.Method m = Reflect.findMethod(bc, "setItem", new Class<?>[]{int.class, ItemStack.class});
-        if (m != null) { try { m.invoke(be, slot, stack); return; } catch (Exception ignored) {
-            RSIntegrationMod.LOGGER.debug("[RSI-WR] setItem S1 failed: {}", ignored.toString());
+        if (m != null) { try { m.invoke(be, slot, stack); return; } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-WR] reflection probe failed", e);
         }}
         m = Reflect.findMethod(bc, "getItemHandler", new Class<?>[0]);
         if (m != null) {
@@ -183,8 +183,8 @@ public final class WRContainerHelper {
                     sm = Reflect.findMethod(h.getClass(), "m_6836_", new Class<?>[]{int.class, ItemStack.class});
                     if (sm != null) { sm.invoke(h, slot, stack); return; }
                 }
-            } catch (Exception ignored) {
-                RSIntegrationMod.LOGGER.debug("[RSI-WR] getItemHandler probe failed: {}", ignored.toString());
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.debug("[RSI-WR] reflection probe failed", e);
             }
         }
         IItemHandler cap = getForgeItemHandler(be);
@@ -204,8 +204,8 @@ public final class WRContainerHelper {
         net.minecraft.world.SimpleContainer live = getLiveSimpleContainer(be);
         if (live != null) { live.setItem(slot, stack); return; }
         m = Reflect.findMethod(bc, "m_6836_", new Class<?>[]{int.class, ItemStack.class});
-        if (m != null) { try { m.invoke(be, slot, stack); return; } catch (Exception ignored) {
-            RSIntegrationMod.LOGGER.debug("[RSI-WR] setItem SRG failed: {}", ignored.toString());
+        if (m != null) { try { m.invoke(be, slot, stack); return; } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-WR] reflection probe failed", e);
         }}
         net.minecraft.world.SimpleContainer sc = getSimpleContainer(be);
         if (sc != null) { sc.setItem(slot, stack); return; }

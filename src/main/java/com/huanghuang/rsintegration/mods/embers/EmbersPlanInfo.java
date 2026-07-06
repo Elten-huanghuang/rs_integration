@@ -71,7 +71,7 @@ public record EmbersPlanInfo(
                     }
                 }
             } catch (Exception ex) {
-                RSIntegrationMod.LOGGER.debug("[RSI-Embers] Cannot compute code for preview: {}", ex.toString());
+                RSIntegrationMod.LOGGER.debug("[RSI-Embers] Cannot compute code for preview", ex);
             }
         }
 
@@ -111,7 +111,7 @@ public record EmbersPlanInfo(
                     }
                 }
             } catch (Exception ex) {
-                RSIntegrationMod.LOGGER.debug("[RSI-Embers] Cannot resolve display names: {}", ex.toString());
+                RSIntegrationMod.LOGGER.debug("[RSI-Embers] Cannot resolve display names", ex);
             }
         }
 

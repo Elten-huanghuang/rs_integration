@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.recipe;
 
 import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.core.NonNullList;
@@ -13,21 +14,20 @@ import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.List;
 
-public final class EnchantalCoolerRecipeHandler implements ModRecipeHandler {
+public final class EnchantalCoolerRecipeHandler extends AbstractRecipeHandler {
 
     private static final String RECIPE_CLASS =
             "com.renyigesai.immortalers_delight.recipe.EnchantalCoolerRecipe";
+
+    static {
+        registerRecipePrefixes(EnchantalCoolerRecipeHandler.class, RECIPE_CLASS);
+    }
 
     private static volatile Field inputItemsField;
     private static volatile boolean fieldProbed;
 
     @Override
     public ModType modType() { return ModType.byId("immortalers_delight"); }
-
-    @Override
-    public boolean canHandle(Recipe<?> recipe) {
-        return recipe.getClass().getName().equals(RECIPE_CLASS);
-    }
 
     @Override
     public ItemStack getResultItem(Recipe<?> recipe, RegistryAccess access) {
@@ -65,6 +65,8 @@ public final class EnchantalCoolerRecipeHandler implements ModRecipeHandler {
             Class<?> c = Class.forName(RECIPE_CLASS);
             inputItemsField = c.getDeclaredField("inputItems");
             inputItemsField.setAccessible(true);
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-Recipe] reflection probe failed", e);
+        }
     }
 }

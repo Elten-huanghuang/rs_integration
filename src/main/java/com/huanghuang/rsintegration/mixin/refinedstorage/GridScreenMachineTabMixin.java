@@ -57,7 +57,7 @@ public abstract class GridScreenMachineTabMixin {
                         var last = sbs.get(sbs.size() - 1);
                         sideButtonBottom = (last.getY() - topPos) + last.getHeight();
                     }
-                } catch (Exception ignored) {}
+                } catch (Exception e) { com.huanghuang.rsintegration.RSIntegrationMod.LOGGER.debug("[RSI-RS-Mixin] side button layout probe failed", e); }
                 int hubRelY = sideButtonBottom + 4;
 
                 boolean hubHovered = mouseX >= hubRelX && mouseX < hubRelX + HUB_BUTTON_W

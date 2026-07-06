@@ -15,15 +15,14 @@ import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.List;
 
-public final class EidolonRecipeHandler implements ModRecipeHandler {
+public final class EidolonRecipeHandler extends AbstractRecipeHandler {
+
+    static {
+        registerRecipePrefixes(EidolonRecipeHandler.class, "elucent.eidolon.");
+    }
 
     @Override
     public ModType modType() { return ModType.byId("eidolon"); }
-
-    @Override
-    public boolean canHandle(Recipe<?> recipe) {
-        return recipe.getClass().getName().startsWith("elucent.eidolon.");
-    }
 
     @Override
     public ItemStack getResultItem(Recipe<?> recipe, RegistryAccess access) {
@@ -65,7 +64,9 @@ public final class EidolonRecipeHandler implements ModRecipeHandler {
                     java.lang.reflect.Field f = ritualClass.getField("reagent");
                     Ingredient ing = (Ingredient) f.get(recipe);
                     if (ing != null && !ing.isEmpty()) result.add(new IngredientSpec(ing, 1));
-                } catch (Exception ignored) {}
+                } catch (Exception e) {
+                    RSIntegrationMod.LOGGER.debug("[RSI-Recipe] reflection probe failed", e);
+                }
                 try {
                     java.lang.reflect.Field f = ritualClass.getField("pedestalItems");
                     @SuppressWarnings("unchecked")
@@ -73,7 +74,9 @@ public final class EidolonRecipeHandler implements ModRecipeHandler {
                     if (items != null)
                         for (Ingredient ing : items)
                             if (!ing.isEmpty()) result.add(new IngredientSpec(ing, 1));
-                } catch (Exception ignored) {}
+                } catch (Exception e) {
+                    RSIntegrationMod.LOGGER.debug("[RSI-Recipe] reflection probe failed", e);
+                }
                 try {
                     java.lang.reflect.Field f = ritualClass.getField("focusItems");
                     @SuppressWarnings("unchecked")
@@ -81,10 +84,14 @@ public final class EidolonRecipeHandler implements ModRecipeHandler {
                     if (items != null)
                         for (Ingredient ing : items)
                             if (!ing.isEmpty()) result.add(new IngredientSpec(ing, 1));
-                } catch (Exception ignored) {}
+                } catch (Exception e) {
+                    RSIntegrationMod.LOGGER.debug("[RSI-Recipe] reflection probe failed", e);
+                }
                 if (!result.isEmpty()) return result;
             }
-        } catch (ClassNotFoundException ignored) {}
+        } catch (ClassNotFoundException e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-Recipe] reflection probe failed", e);
+        }
 
         // WorktableRecipe: Ingredient[] core + Ingredient[] extras
         // (getIngredients/m_7527_ is not reliably accessible in SRG)

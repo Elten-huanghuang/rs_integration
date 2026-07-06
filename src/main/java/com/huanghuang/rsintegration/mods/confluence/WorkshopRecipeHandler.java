@@ -57,7 +57,7 @@ public final class WorkshopRecipeHandler implements ModRecipeHandler {
                 if (val instanceof Integer count && count > 0) return count;
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Confluence] AmountIngredient.getCount() failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI-Confluence] AmountIngredient.getCount() failed", e);
         }
         return 1;
     }

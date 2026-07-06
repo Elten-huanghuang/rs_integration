@@ -185,7 +185,7 @@ public final class WRWandCraftPacket {
             // Clear slots that may have been filled before the exception
             for (int j = 0; j < templates.size(); j++) {
                 if (!templates.get(j).isEmpty()) {
-                    try { rsi$setContainerItem(be, j, ItemStack.EMPTY); } catch (Exception ignored) {}
+                    try { rsi$setContainerItem(be, j, ItemStack.EMPTY); } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI-WR] rollback setContainerItem failed", ex); }
                 }
             }
             refundTemplates(network, player, templates);
@@ -279,7 +279,7 @@ public final class WRWandCraftPacket {
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.warn("[RSI-WR] Failed to place item on ArcaneIterator pedestal {}: {}", i, e.getMessage());
                 for (int j = 0; j < i; j++) {
-                    try { rsi$setContainerItem(pedestals.get(j), 0, ItemStack.EMPTY); rsi$syncBlockEntity(pedestals.get(j)); } catch (Exception ign) {}
+                    try { rsi$setContainerItem(pedestals.get(j), 0, ItemStack.EMPTY); rsi$syncBlockEntity(pedestals.get(j)); } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI-WR] rollback pedestal clear failed", ex); }
                 }
                 refundTemplates(network, player, templates);
                 return false;
@@ -291,7 +291,7 @@ public final class WRWandCraftPacket {
             rsi$syncBlockEntity(be);
         } catch (Exception ex) {
             for (int i = 0; i < templates.size(); i++) {
-                try { rsi$setContainerItem(pedestals.get(i), 0, ItemStack.EMPTY); rsi$syncBlockEntity(pedestals.get(i)); } catch (Exception ign) {}
+                try { rsi$setContainerItem(pedestals.get(i), 0, ItemStack.EMPTY); rsi$syncBlockEntity(pedestals.get(i)); } catch (Exception exc) { RSIntegrationMod.LOGGER.debug("[RSI-WR] rollback pedestal clear failed", exc); }
             }
             refundTemplates(network, player, templates);
             return false;
@@ -618,7 +618,7 @@ public final class WRWandCraftPacket {
                 available.entrySet().stream().map(e -> {
                     ItemStack s = new ItemStack(e.getKey().item(), e.getValue());
                     if (e.getKey().tag() != null) {
-                        try { s.setTag(net.minecraft.nbt.TagParser.parseTag(e.getKey().tag())); } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] NBT parse failed for key {}: {}", e.getKey(), ex.toString()); }
+                        try { s.setTag(net.minecraft.nbt.TagParser.parseTag(e.getKey().tag())); } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] NBT parse failed for key {}", e.getKey(), ex); }
                     }
                     return s;
                 }).toList(),

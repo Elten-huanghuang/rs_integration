@@ -529,7 +529,7 @@ public final class BindingEventHandler {
         try {
             com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler.sendBindingSync(player);
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Bind] Failed to send binding sync: {}", e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI-Bind] Failed to send binding sync", e);
         }
     }
 
@@ -544,7 +544,7 @@ public final class BindingEventHandler {
                     return root;
                 }
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.debug("[RSI-Bind] TACZ root-pos resolution failed: {}", e.toString());
+                RSIntegrationMod.LOGGER.debug("[RSI-Bind] TACZ root-pos resolution failed", e);
             }
             return pos;
         }
@@ -621,7 +621,7 @@ public final class BindingEventHandler {
             BlockPos canonical = (BlockPos) list.get(0);
             if (!canonical.equals(pos)) return canonical;
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Bind] TLM altar centre resolution failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI-Bind] TLM altar centre resolution failed", e);
         }
         return null;
     }

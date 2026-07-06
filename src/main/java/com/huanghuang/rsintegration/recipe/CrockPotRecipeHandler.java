@@ -19,18 +19,17 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
-public final class CrockPotRecipeHandler implements ModRecipeHandler {
+public final class CrockPotRecipeHandler extends AbstractRecipeHandler {
 
     private static final String RECIPE_CLASS = "com.sihenzhang.crockpot.recipe.cooking.CrockPotCookingRecipe";
     public static final int CAT_COUNT = 10;
 
-    @Override
-    public ModType modType() { return ModType.byId("crockpot"); }
+    static {
+        registerRecipePrefixes(CrockPotRecipeHandler.class, RECIPE_CLASS);
+    }
 
     @Override
-    public boolean canHandle(Recipe<?> recipe) {
-        return recipe.getClass().getName().equals(RECIPE_CLASS);
-    }
+    public ModType modType() { return ModType.byId("crockpot"); }
 
     @Override
     public ItemStack getResultItem(Recipe<?> recipe, RegistryAccess access) {
@@ -79,7 +78,7 @@ public final class CrockPotRecipeHandler implements ModRecipeHandler {
 
             return specs.isEmpty() ? null : specs;
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-CrockPot] Recipe reflection failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI-CrockPot] Recipe reflection failed", e);
             return null;
         }
     }
@@ -110,7 +109,7 @@ public final class CrockPotRecipeHandler implements ModRecipeHandler {
             }
             return 0;
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-CrockPot] Recipe reflection failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI-CrockPot] Recipe reflection failed", e);
             return 0;
         }
     }
@@ -121,7 +120,7 @@ public final class CrockPotRecipeHandler implements ModRecipeHandler {
             int level = (int) m.invoke(recipe);
             return level > 0 ? level : 4;
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-CrockPot] Recipe reflection failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI-CrockPot] Recipe reflection failed", e);
             return 4;
         }
     }
@@ -146,7 +145,7 @@ public final class CrockPotRecipeHandler implements ModRecipeHandler {
             }
             return count;
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-CrockPot] Recipe reflection failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI-CrockPot] Recipe reflection failed", e);
             return 0;
         }
     }
@@ -170,7 +169,7 @@ public final class CrockPotRecipeHandler implements ModRecipeHandler {
             }
             return 0;
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-CrockPot] Recipe reflection failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI-CrockPot] Recipe reflection failed", e);
             return 0;
         }
     }
@@ -183,7 +182,7 @@ public final class CrockPotRecipeHandler implements ModRecipeHandler {
                 if (hasCategoryConstraint(req)) return true;
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-CrockPot] Recipe reflection failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI-CrockPot] Recipe reflection failed", e);
         }
         return false;
     }
@@ -199,7 +198,7 @@ public final class CrockPotRecipeHandler implements ModRecipeHandler {
                 if (hasCategoryConstraint(getFirst.invoke(req))) return true;
                 if (hasCategoryConstraint(getSecond.invoke(req))) return true;
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.debug("[RSI-CrockPot] Recipe reflection failed: {}", e.toString());
+                RSIntegrationMod.LOGGER.debug("[RSI-CrockPot] Recipe reflection failed", e);
             }
         }
         return false;
@@ -223,7 +222,7 @@ public final class CrockPotRecipeHandler implements ModRecipeHandler {
                 collectCategoryConstraints(req, mins, maxs);
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-CrockPot] Recipe reflection failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI-CrockPot] Recipe reflection failed", e);
         }
 
         return new float[][]{mins, maxs};
@@ -256,7 +255,7 @@ public final class CrockPotRecipeHandler implements ModRecipeHandler {
                 collectCategoryConstraints(getSecond.invoke(req), mins, maxs);
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-CrockPot] Recipe reflection failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI-CrockPot] Recipe reflection failed", e);
         }
     }
 }

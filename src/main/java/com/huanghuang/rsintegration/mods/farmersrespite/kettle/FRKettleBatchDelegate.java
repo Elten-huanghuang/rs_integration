@@ -4,7 +4,7 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
-import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.reflection.probes.FRReflection;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;
@@ -43,7 +43,7 @@ import java.util.Map;
  *   0-1: input ingredients  2: drink display
  *   3: container slot        4: output slot
  */
-public final class FRKettleBatchDelegate implements IBatchDelegate {
+public final class FRKettleBatchDelegate extends AbstractBatchDelegate {
 
     private ServerPlayer player;
     private ServerLevel myLevel;
@@ -52,9 +52,7 @@ public final class FRKettleBatchDelegate implements IBatchDelegate {
     private Recipe<?> recipe;
     private FluidStack recipeFluidIn;
     private FluidStack recipeFluidOut;
-    private INetwork network;
     private boolean craftDone;
-    private boolean usingSharedLedger;
 
     // ── reflection cache ──
     private static volatile Method getInventoryMethod;
@@ -273,9 +271,8 @@ public final class FRKettleBatchDelegate implements IBatchDelegate {
     }
 
     @Override
-    public boolean isCraftComplete(ServerLevel level) {
-        BlockEntity be = level.getBlockEntity(myPos);
-        if (be == null || !isFRKettleBE(be)) return false;
+    protected boolean isMachineCraftFinished(ServerLevel level, BlockEntity be) {
+        if (!isFRKettleBE(be)) return false;
 
         // Check if output fluid has appeared in the tank
         IFluidHandler fluidHandler = getFluidHandler(be);
@@ -316,9 +313,8 @@ public final class FRKettleBatchDelegate implements IBatchDelegate {
     }
 
     @Override
-    public void onBatchFailed(ServerPlayer player, String reason) {
-        BlockEntity be = myLevel.getBlockEntity(myPos);
-        if (be != null && isFRKettleBE(be)) {
+    protected void clearMachineState(BlockEntity be, ServerPlayer player) {
+        if (isFRKettleBE(be)) {
             IFluidHandler fluidHandler = getFluidHandler(be);
             if (fluidHandler != null) {
                 FluidStack tankFluid = fluidHandler.getFluidInTank(0);
@@ -327,7 +323,7 @@ public final class FRKettleBatchDelegate implements IBatchDelegate {
                     ItemStack result = collectResult(player);
                     if (!result.isEmpty()) {
                         if (network == null)
-                            this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+                            this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, be.getBlockPos());
                         if (network != null)
                             network.insertItem(result, result.getCount(), Action.PERFORM);
                     }
@@ -338,7 +334,6 @@ public final class FRKettleBatchDelegate implements IBatchDelegate {
         if (inventory != null) clearAndRefund(inventory, be);
         forceChunkLoad(false);
         craftDone = false;
-        network = null;
     }
 
     @Override
@@ -386,7 +381,7 @@ public final class FRKettleBatchDelegate implements IBatchDelegate {
             getFluidOutMethod = FRReflection.kettleRecipeClass.getMethod("getFluidOut");
             getBrewTimeMethod = FRReflection.kettleRecipeClass.getMethod("getBrewTime");
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-FRKettle] Reflection probe failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-FRKettle] Reflection probe failed", e);
         }
     }
 
@@ -409,7 +404,7 @@ public final class FRKettleBatchDelegate implements IBatchDelegate {
             try {
                 Object result = getInventoryMethod.invoke(be);
                 if (result instanceof ItemStackHandler h) return h;
-            } catch (Exception ignored) {}
+            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-FRKettle] reflection invoke failed", e); }
         }
         return null;
     }
@@ -419,7 +414,7 @@ public final class FRKettleBatchDelegate implements IBatchDelegate {
         try {
             return (boolean) isHeatedMethod.invoke(be);
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-FRKettle] isHeated invoke failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI-FRKettle] isHeated invoke failed", e);
         }
         return true;
     }
@@ -429,7 +424,7 @@ public final class FRKettleBatchDelegate implements IBatchDelegate {
         if (getFluidInMethod != null) {
             try {
                 return (FluidStack) getFluidInMethod.invoke(recipe);
-            } catch (Exception ignored) {}
+            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-FRKettle] reflection invoke failed", e); }
         }
         return FluidStack.EMPTY;
     }
@@ -439,7 +434,7 @@ public final class FRKettleBatchDelegate implements IBatchDelegate {
         if (getFluidOutMethod != null) {
             try {
                 return (FluidStack) getFluidOutMethod.invoke(recipe);
-            } catch (Exception ignored) {}
+            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-FRKettle] reflection invoke failed", e); }
         }
         return FluidStack.EMPTY;
     }
@@ -473,7 +468,7 @@ public final class FRKettleBatchDelegate implements IBatchDelegate {
             int cz = myPos.getZ() >> 4;
             ForgeChunkManager.forceChunk(myLevel, RSIntegrationMod.MOD_ID, myPos, cx, cz, load, true);
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-FRKettle] Chunk load failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI-FRKettle] Chunk load failed", e);
         }
     }
 }

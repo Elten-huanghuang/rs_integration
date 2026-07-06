@@ -11,6 +11,7 @@ import com.huanghuang.rsintegration.util.Reflect;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -54,7 +55,7 @@ public final class MarketBatchDelegate extends AbstractBatchDelegate {
             marketRegistryInstance = instField.get(null);
             available = marketRegistryInstance != null;
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Market] MarketRegistry not available: {}", e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI-Market] MarketRegistry not available", e);
             available = false;
         }
     }
@@ -190,7 +191,7 @@ public final class MarketBatchDelegate extends AbstractBatchDelegate {
             if (entry == null) return null;
             return wrapEntry(entry);
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Market] Failed to resolve entry {}: {}", entryId, e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-Market] Failed to resolve entry {}", entryId, e);
             return null;
         }
     }
@@ -236,7 +237,7 @@ public final class MarketBatchDelegate extends AbstractBatchDelegate {
             if (output.isEmpty() || cost.isEmpty()) return null;
             return new MarketRecipeWrapper(entryId, output, cost);
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Market] Failed to wrap entry: {}", e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI-Market] Failed to wrap entry", e);
             return null;
         }
     }
@@ -283,7 +284,7 @@ public final class MarketBatchDelegate extends AbstractBatchDelegate {
     // ── Polling ────────────────────────────────────────────────────
 
     @Override
-    public boolean isCraftComplete(ServerLevel level) {
+    protected boolean isMachineCraftFinished(ServerLevel level, BlockEntity be) {
         return done;
     }
 
@@ -299,7 +300,7 @@ public final class MarketBatchDelegate extends AbstractBatchDelegate {
     // ── Cleanup ────────────────────────────────────────────────────
 
     @Override
-    public void onBatchFailed(ServerPlayer player, String reason) {
+    protected void clearMachineState(BlockEntity be, ServerPlayer player) {
         done = false;
         resetState();
     }

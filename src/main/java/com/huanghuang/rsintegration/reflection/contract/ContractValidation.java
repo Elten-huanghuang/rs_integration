@@ -103,13 +103,13 @@ public final class ContractValidation {
                 ok++;
             } catch (Exception e) {
                 failed++;
-                String msg = "[RSI-Contract] {} 反射契约失败: {} — {}: {}";
+                String msg = "[RSI-Contract] {} 反射契约失败: {} — {}";
                 if (c.required()) {
                     RSIntegrationMod.LOGGER.error(msg, c.modId(), c.description(),
-                            c.className(), e.toString());
+                            c.className(), e);
                 } else {
                     RSIntegrationMod.LOGGER.warn(msg, c.modId(), c.description(),
-                            c.className(), e.toString());
+                            c.className(), e);
                 }
             }
         }

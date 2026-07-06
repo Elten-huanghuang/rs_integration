@@ -97,8 +97,7 @@ public final class SidePanelJeiBridge {
                     VanillaTypes.ITEM_STACK, stack);
             runtime.getRecipesGui().show(focus);
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-SidePanel] JEI {} failed: {}",
-                    usage ? "showUses" : "showRecipes", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-SidePanel] JEI {} failed", usage ? "showUses" : "showRecipes", e);
         }
     }
 

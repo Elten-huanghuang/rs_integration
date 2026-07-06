@@ -94,7 +94,7 @@ public final class ContainerTransferClient {
                 }
             }
         } catch (IOException e) {
-            RSIntegrationMod.LOGGER.warn("[RSI] Failed to read transfer mode file: {}", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI] Failed to read transfer mode file", e);
         }
     }
 
@@ -103,7 +103,7 @@ public final class ContainerTransferClient {
             Files.createDirectories(MODE_FILE.getParent());
             Files.writeString(MODE_FILE, currentMode == MODE_RS ? "RS_NETWORK" : "BACKPACK");
         } catch (IOException e) {
-            RSIntegrationMod.LOGGER.warn("[RSI] Failed to write transfer mode file: {}", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI] Failed to write transfer mode file", e);
         }
     }
 
@@ -176,7 +176,9 @@ public final class ContainerTransferClient {
                 try {
                     var m = clazz.getMethod("isFocused");
                     if (Boolean.TRUE.equals(m.invoke(widget))) return true;
-                } catch (Exception ignored) {}
+                } catch (Exception e) {
+                    RSIntegrationMod.LOGGER.debug("[RSI-Transfer] reflection probe failed", e);
+                }
             }
             clazz = clazz.getSuperclass();
         } while (clazz != null && clazz != Object.class);
@@ -205,11 +207,15 @@ public final class ContainerTransferClient {
                         try {
                             java.lang.reflect.Method m = overlay.getClass().getMethod(methodName);
                             if (Boolean.TRUE.equals(m.invoke(overlay))) return true;
-                        } catch (Exception ignored) {}
+                        } catch (Exception e) {
+                            RSIntegrationMod.LOGGER.debug("[RSI-Transfer] reflection probe failed", e);
+                        }
                     }
                 }
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-Transfer] reflection probe failed", e);
+        }
 
         // --- EMI ---
         try {
@@ -217,7 +223,9 @@ public final class ContainerTransferClient {
             java.lang.reflect.Method isSearchFocused =
                     emiApi.getMethod("isSearchFocused");
             if (Boolean.TRUE.equals(isSearchFocused.invoke(null))) return true;
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-Transfer] reflection probe failed", e);
+        }
 
         // --- REI ---
         try {
@@ -225,7 +233,9 @@ public final class ContainerTransferClient {
                     "me.shedaniel.rei.impl.client.gui.widgets.basewidgets.TextFieldWidget");
             // REI's search field is rendered on top; check via ScreenEvent
             // interceptors — if any REI widget anywhere in the JVM is focused
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-Transfer] reflection probe failed", e);
+        }
 
         return false;
     }

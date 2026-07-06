@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.recipe;
 
 import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.world.item.ItemStack;
@@ -13,17 +14,16 @@ import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
 
-public final class TaczRecipeHandler implements ModRecipeHandler {
+public final class TaczRecipeHandler extends AbstractRecipeHandler {
 
     private static final String RECIPE_CLASS = "com.tacz.guns.crafting.GunSmithTableRecipe";
 
-    @Override
-    public ModType modType() { return ModType.byId("tacz"); }
+    static {
+        registerRecipePrefixes(TaczRecipeHandler.class, RECIPE_CLASS);
+    }
 
     @Override
-    public boolean canHandle(Recipe<?> recipe) {
-        return recipe.getClass().getName().equals(RECIPE_CLASS);
-    }
+    public ModType modType() { return ModType.byId("tacz"); }
 
     @Override
     public ItemStack getResultItem(Recipe<?> recipe, RegistryAccess registryAccess) {
@@ -33,7 +33,9 @@ public final class TaczRecipeHandler implements ModRecipeHandler {
         try {
             ItemStack result = recipe.getResultItem(registryAccess);
             if (result != null && !result.isEmpty()) return result.copy();
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-Recipe] reflection probe failed", e);
+        }
 
         // 2. No-arg getResultItem() — deprecated but many mod authors override
         //    only this one.  The global ModRecipeHandlers probe skips it to
@@ -43,7 +45,9 @@ public final class TaczRecipeHandler implements ModRecipeHandler {
             Method m = clazz.getMethod("getResultItem");
             ItemStack result = (ItemStack) m.invoke(recipe);
             if (result != null && !result.isEmpty()) return result.copy();
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-Recipe] reflection probe failed", e);
+        }
 
         // 3. Other common result method names
         for (String methodName : new String[]{"getResult", "getOutput", "getRecipeOutput"}) {
@@ -51,7 +55,9 @@ public final class TaczRecipeHandler implements ModRecipeHandler {
                 Method m = clazz.getMethod(methodName);
                 ItemStack result = (ItemStack) m.invoke(recipe);
                 if (result != null && !result.isEmpty()) return result.copy();
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-Recipe] reflection probe failed", e);
+        }
         }
 
         // 4. Smart field scan: walk the class hierarchy, skip input fields,
@@ -78,7 +84,9 @@ public final class TaczRecipeHandler implements ModRecipeHandler {
                             return stack.copy();
                         }
                     }
-                } catch (Exception ignored) {}
+                } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-Recipe] reflection probe failed", e);
+        }
             }
             scan = scan.getSuperclass();
         }

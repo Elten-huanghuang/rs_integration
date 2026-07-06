@@ -121,7 +121,7 @@ public final class FaRitualHelper {
                         blockId, props.toString());
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-FA] getForgeTier blockstate probe failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI-FA] getForgeTier blockstate probe failed", e);
         }
 
         // 2. Try BlockEntity.getTier() / getForgeTier() (older FA versions)
@@ -141,7 +141,7 @@ public final class FaRitualHelper {
                     }
                 }
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.debug("[RSI-FA] getForgeTier method probe failed: {}", e.toString());
+                RSIntegrationMod.LOGGER.debug("[RSI-FA] getForgeTier method probe failed", e);
             }
 
             // 3. Try tier / forgeTier field directly (older FA versions)
@@ -157,7 +157,7 @@ public final class FaRitualHelper {
                     return v;
                 }
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.debug("[RSI-FA] getForgeTier field probe failed: {}", e.toString());
+                RSIntegrationMod.LOGGER.debug("[RSI-FA] getForgeTier field probe failed", e);
             }
 
             // 4. FA 2.2.x: ValueNotifier<HephaestusForgeLevel> forgeLevel
@@ -181,7 +181,7 @@ public final class FaRitualHelper {
                     RSIntegrationMod.LOGGER.debug("[RSI-FA] getForgeTier forgeLevel field NOT FOUND on {}", FAReflection.hephaestusForgeBEClass.getName());
                 }
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.debug("[RSI-FA] getForgeTier forgeLevel probe failed: {}", e.toString());
+                RSIntegrationMod.LOGGER.debug("[RSI-FA] getForgeTier forgeLevel probe failed", e);
             }
         } else {
             RSIntegrationMod.LOGGER.debug("[RSI-FA] getForgeTier BE check skipped: be={} beClass={} isInstance={}",
@@ -208,13 +208,13 @@ public final class FaRitualHelper {
         try {
             return (int) Reflect.getMethodOrThrow(FAReflection.upgradeTierResultClass, "requiredTier", "requiredTier").invoke(upgradeResult);
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-FA] readUpgradeRequiredTier method failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI-FA] readUpgradeRequiredTier method failed", e);
         }
         try {
             java.lang.reflect.Field f = Reflect.findField(FAReflection.upgradeTierResultClass, "requiredTier").orElse(null);
             if (f != null) { f.setAccessible(true); return f.getInt(upgradeResult); }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-FA] readUpgradeRequiredTier field failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI-FA] readUpgradeRequiredTier field failed", e);
         }
         return -1;
     }
@@ -262,7 +262,7 @@ public final class FaRitualHelper {
                 }
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-FA] Failed to collect enhancer modifiers: {}", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-FA] Failed to collect enhancer modifiers", e);
         }
         return modifiers;
     }
@@ -323,7 +323,7 @@ public final class FaRitualHelper {
             }
             return ok;
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.error("[RSI-FA] Essence check failed: {}", e.toString(), e);
+            RSIntegrationMod.LOGGER.error("[RSI-FA] Essence check failed", e);
             player.sendSystemMessage(Component.translatable("rsi.fa.error.essence_check_failed"));
             return false;
         }
@@ -377,7 +377,7 @@ public final class FaRitualHelper {
                     new Class<?>[]{int.class, ItemStack.class});
             if (m != null) { m.invoke(be, slot, stack); return; }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-FA] S1 setStack({}) failed: {}", slot, e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-FA] S1 setStack({}) failed", slot, e);
         }
         // Strategy 2: setStackInSlot (MCP mapped name)
         try {
@@ -385,7 +385,7 @@ public final class FaRitualHelper {
                     new Class<?>[]{int.class, ItemStack.class});
             if (m != null) { m.invoke(be, slot, stack); return; }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-FA] S2 setStackInSlot({}) failed: {}", slot, e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-FA] S2 setStackInSlot({}) failed", slot, e);
         }
         // Strategy 3: setItem (Mojang mapped name)
         try {
@@ -393,7 +393,7 @@ public final class FaRitualHelper {
                     new Class<?>[]{int.class, ItemStack.class});
             if (m != null) { m.invoke(be, slot, stack); return; }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-FA] S3 setItem({}) failed: {}", slot, e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-FA] S3 setItem({}) failed", slot, e);
         }
         // Strategy 4: Forge IItemHandler capability
         try {
@@ -411,7 +411,7 @@ public final class FaRitualHelper {
                 return;
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-FA] S4 IItemHandler set({}) failed: {}", slot, e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-FA] S4 IItemHandler set({}) failed", slot, e);
         }
         // Strategy 5: itemStackHandler field
         try {
@@ -428,7 +428,7 @@ public final class FaRitualHelper {
                 }
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-FA] S5 itemStackHandler field({}) failed: {}", slot, e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-FA] S5 itemStackHandler field({}) failed", slot, e);
         }
         // Strategy 6: inventory / items NonNullList field
         try {
@@ -441,7 +441,7 @@ public final class FaRitualHelper {
                 return;
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-FA] S6 inventory field({}) failed: {}", slot, e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-FA] S6 inventory field({}) failed", slot, e);
         }
         RSIntegrationMod.LOGGER.warn("[RSI-FA] All slot strategies failed for set slot {}", slot);
     }
@@ -453,7 +453,7 @@ public final class FaRitualHelper {
                     new Class<?>[]{int.class});
             if (m != null) return (ItemStack) m.invoke(be, slot);
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-FA] S1 getStack({}) failed: {}", slot, e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-FA] S1 getStack({}) failed", slot, e);
         }
         // Strategy 2: getStackInSlot (MCP mapped name)
         try {
@@ -461,7 +461,7 @@ public final class FaRitualHelper {
                     new Class<?>[]{int.class});
             if (m != null) return (ItemStack) m.invoke(be, slot);
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-FA] S2 getStackInSlot({}) failed: {}", slot, e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-FA] S2 getStackInSlot({}) failed", slot, e);
         }
         // Strategy 3: getItem (Mojang mapped name)
         try {
@@ -469,7 +469,7 @@ public final class FaRitualHelper {
                     new Class<?>[]{int.class});
             if (m != null) return (ItemStack) m.invoke(be, slot);
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-FA] S3 getItem({}) failed: {}", slot, e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-FA] S3 getItem({}) failed", slot, e);
         }
         // Strategy 4: Forge IItemHandler capability
         try {
@@ -483,7 +483,7 @@ public final class FaRitualHelper {
                 if (slot < ih.getSlots()) return ih.getStackInSlot(slot);
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-FA] S4 IItemHandler get({}) failed: {}", slot, e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-FA] S4 IItemHandler get({}) failed", slot, e);
         }
         // Strategy 5: itemStackHandler field
         try {
@@ -496,7 +496,7 @@ public final class FaRitualHelper {
                 }
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-FA] S5 itemStackHandler field({}) failed: {}", slot, e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-FA] S5 itemStackHandler field({}) failed", slot, e);
         }
         // Strategy 6: inventory / items NonNullList field
         try {
@@ -508,7 +508,7 @@ public final class FaRitualHelper {
                 if (slot < list.size()) return list.get(slot);
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-FA] S6 inv field({}) failed: {}", slot, e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-FA] S6 inv field({}) failed", slot, e);
         }
         return ItemStack.EMPTY;
     }
@@ -526,8 +526,7 @@ public final class FaRitualHelper {
             }
             return m.invoke(obj);
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-FA] invoke failed: {}.{} — {}",
-                    obj.getClass().getName(), methodName, e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI-FA] invoke failed: {}.{} —", obj.getClass().getName(), methodName, e);
             return null;
         }
     }
@@ -544,8 +543,7 @@ public final class FaRitualHelper {
             }
             return (List<?>) m.invoke(obj);
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-FA] invokeList failed: {}.{} — {}",
-                    obj.getClass().getName(), methodName, e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI-FA] invokeList failed: {}.{} —", obj.getClass().getName(), methodName, e);
             return null;
         }
     }
@@ -568,19 +566,19 @@ public final class FaRitualHelper {
         try {
             Method m = Reflect.findMethod(FAReflection.ritualManagerClass, "getValidRitual", new Class<?>[0]);
             if (m != null) return m.invoke(ritualManager);
-        } catch (Exception ignored) { /* fallthrough */ }
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Fa] reflection probe failed", e); }
         try {
             Method m = Reflect.findMethod(FAReflection.ritualManagerClass, "getRitual", new Class<?>[0]);
             if (m != null) return m.invoke(ritualManager);
-        } catch (Exception ignored) { /* fallthrough */ }
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Fa] reflection probe failed", e); }
         try {
             java.lang.reflect.Field f = Reflect.findField(FAReflection.ritualManagerClass, "validRitual").orElse(null);
             if (f != null) { f.setAccessible(true); return f.get(ritualManager); }
-        } catch (Exception ignored) { /* fallthrough */ }
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Fa] reflection probe failed", e); }
         try {
             java.lang.reflect.Field f = Reflect.findField(FAReflection.ritualManagerClass, "ritual").orElse(null);
             if (f != null) { f.setAccessible(true); return f.get(ritualManager); }
-        } catch (Exception ignored) { /* fallthrough */ }
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Fa] reflection probe failed", e); }
         return null;
     }
 
@@ -650,7 +648,7 @@ public final class FaRitualHelper {
                     }
                 }
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.warn("[RSI-FA] RS starter search failed: {}", e.toString());
+                RSIntegrationMod.LOGGER.warn("[RSI-FA] RS starter search failed", e);
             }
         }
 
@@ -694,8 +692,7 @@ public final class FaRitualHelper {
                             starterStack.getHoverName().getString(), remaining);
                 }
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.warn("[RSI-FA] consumeRitualStarterUse failed for '{}': {}",
-                        starterStack.getHoverName().getString(), e.toString());
+                RSIntegrationMod.LOGGER.warn("[RSI-FA] consumeRitualStarterUse failed for '{}'", starterStack.getHoverName().getString(), e);
             }
         } else {
             RSIntegrationMod.LOGGER.debug("[RSI-FA] consumeRitualStarterUse: player is creative, not consuming durability");
@@ -789,7 +786,7 @@ public final class FaRitualHelper {
                 }
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-FA] Fallback output failed for {}: {}", recipeId, e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI-FA] Fallback output failed for {}", recipeId, e);
         }
         return ItemStack.EMPTY;
     }
@@ -810,7 +807,7 @@ public final class FaRitualHelper {
                 }
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-FA] Scan failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI-FA] Scan failed", e);
         }
         return null;
     }
@@ -836,8 +833,8 @@ public final class FaRitualHelper {
                 java.lang.reflect.Method getFrom = Reflect.findMethod(result.getClass(), "getRequiredTier", new Class<?>[0]);
                 java.lang.reflect.Method getTo = Reflect.findMethod(result.getClass(), "getUpgradedTier", new Class<?>[0]);
                 int from = 0, to = 0;
-                try { if (getFrom != null) from = (int) getFrom.invoke(result); } catch (Exception ignored) {}
-                try { if (getTo != null) to = (int) getTo.invoke(result); } catch (Exception ignored) {}
+                try { if (getFrom != null) from = (int) getFrom.invoke(result); } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Fa] reflection probe failed", e); }
+                try { if (getTo != null) to = (int) getTo.invoke(result); } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Fa] reflection probe failed", e); }
                 output = makeFaUpgradeOutput(to);
                 if (!output.isEmpty()) return new FaRitualWrapper(recipeId, ritual, output, from, to);
             }
@@ -849,7 +846,7 @@ public final class FaRitualHelper {
 
             return new FaRitualWrapper(recipeId, ritual, output);
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-FA] wrapFaRitual failed for {}: {}", recipeId, e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI-FA] wrapFaRitual failed for {}", recipeId, e);
             return null;
         }
     }

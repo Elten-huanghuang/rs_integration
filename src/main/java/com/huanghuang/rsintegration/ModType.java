@@ -266,8 +266,7 @@ public final class ModType {
                     return byId("youkaishomecoming_cooking_small");
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI] Cooking pot recipe classification failed: {}",
-                    e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI] Cooking pot recipe classification failed", e);
         }
         return byId("youkaishomecoming_cooking_small");
     }
@@ -367,7 +366,7 @@ public final class ModType {
                 return clazz.getDeclaredConstructor().newInstance();
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.error(
-                        "[RSI] Failed to load delegate class '{}': {}", className, e.toString());
+                        "[RSI] Failed to load delegate class '{}'", className, e);
                 return null;
             }
         };

@@ -11,15 +11,14 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 
-public final class AetherRecipeHandler implements ModRecipeHandler {
+public final class AetherRecipeHandler extends AbstractRecipeHandler {
+
+    static {
+        registerRecipePrefixes(AetherRecipeHandler.class, "com.aetherteam.aether.recipe.recipes.item.");
+    }
 
     @Override
     public ModType modType() { return ModType.byId("aether"); }
-
-    @Override
-    public boolean canHandle(Recipe<?> recipe) {
-        return recipe.getClass().getName().startsWith("com.aetherteam.aether.recipe.recipes.item.");
-    }
 
     @Override
     public ItemStack getResultItem(Recipe<?> recipe, RegistryAccess access) {

@@ -137,8 +137,7 @@ public final class RSSidePanelClickPacket {
         try {
             handleSingleClickImpl(player, targetItem, action, isShift, panelId);
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI] handleSingleClick failed for {}: {}",
-                    player.getGameProfile().getName(), e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI] handleSingleClick failed for {}", player.getGameProfile().getName(), e);
         } finally {
             syncCursorSlot(player);
         }
@@ -345,8 +344,7 @@ public final class RSSidePanelClickPacket {
             // Delta is handled by the storage-cache listener registered in
             // RSSidePanelNetworkHandler — matches RS native pattern.
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI] handleInsert failed for {}: {}",
-                    player.getGameProfile().getName(), e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI] handleInsert failed for {}", player.getGameProfile().getName(), e);
         } finally {
             // Always sync cursor — the client clears it optimistically before
             // sending the packet. Every server path (success, early return,

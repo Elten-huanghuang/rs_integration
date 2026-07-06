@@ -4,7 +4,7 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
-import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
@@ -32,7 +32,7 @@ import java.util.List;
  * inventory grid via IItemHandler, calls recipe.matches() and
  * recipe.assemble() to produce the result (instant craft).
  */
-public final class CraftingTableBatchDelegate implements IBatchDelegate {
+public final class CraftingTableBatchDelegate extends AbstractBatchDelegate {
 
     private ServerLevel myLevel;
     private ResourceKey<Level> myDim;
@@ -170,7 +170,7 @@ public final class CraftingTableBatchDelegate implements IBatchDelegate {
             Method remainMethod = null;
             try {
                 remainMethod = recipe.getClass().getMethod("getRemainingItems", IItemHandler.class);
-            } catch (NoSuchMethodException ignored) {}
+            } catch (NoSuchMethodException e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-CT] getRemainingItems not found", e); }
             if (remainMethod != null) {
                 @SuppressWarnings("unchecked")
                 List<ItemStack> remains = (List<ItemStack>) remainMethod.invoke(recipe, handler);
@@ -187,7 +187,7 @@ public final class CraftingTableBatchDelegate implements IBatchDelegate {
                 }
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.error("[RSI-Batch-CT] Assemble failed at {}: {}", myPos, e.toString());
+            RSIntegrationMod.LOGGER.error("[RSI-Batch-CT] Assemble failed at {}", myPos, e);
             clearGrid(handler);
             return false;
         }
@@ -200,7 +200,7 @@ public final class CraftingTableBatchDelegate implements IBatchDelegate {
     }
 
     @Override
-    public boolean isCraftComplete(ServerLevel level) {
+    protected boolean isMachineCraftFinished(ServerLevel level, BlockEntity be) {
         return craftDone;
     }
 
@@ -213,7 +213,7 @@ public final class CraftingTableBatchDelegate implements IBatchDelegate {
     }
 
     @Override
-    public void onBatchFailed(ServerPlayer player, String reason) {
+    protected void clearMachineState(BlockEntity be, ServerPlayer player) {
         forceChunkLoad(false);
         cachedResult = ItemStack.EMPTY;
         craftDone = false;
@@ -250,7 +250,7 @@ public final class CraftingTableBatchDelegate implements IBatchDelegate {
             int cz = myPos.getZ() >> 4;
             ForgeChunkManager.forceChunk(myLevel, RSIntegrationMod.MOD_ID, myPos, cx, cz, load, true);
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Batch-CT] Chunk load failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI-Batch-CT] Chunk load failed", e);
         }
     }
 }

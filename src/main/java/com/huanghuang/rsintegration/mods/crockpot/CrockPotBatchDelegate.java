@@ -35,16 +35,14 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-public final class CrockPotBatchDelegate implements com.huanghuang.rsintegration.crafting.batch.IBatchDelegate {
+public final class CrockPotBatchDelegate extends com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate {
 
     private ServerPlayer player;
     private ServerLevel myLevel;
     private ResourceKey<Level> myDim;
     private BlockPos myPos;
     private Recipe<?> recipe;
-    private INetwork network;
     private boolean craftDone;
-    private boolean usingSharedLedger;
     private int potLevel;
 
     // Food-value category constraint state
@@ -277,9 +275,7 @@ public final class CrockPotBatchDelegate implements com.huanghuang.rsintegration
     }
 
     @Override
-    public boolean isCraftComplete(ServerLevel level) {
-        BlockEntity be = level.getBlockEntity(myPos);
-        if (be == null) return false;
+    protected boolean isMachineCraftFinished(ServerLevel level, BlockEntity be) {
         if (!CrockPotReflection.crockPotBEClass.isInstance(be))
             return false;
 
@@ -305,12 +301,11 @@ public final class CrockPotBatchDelegate implements com.huanghuang.rsintegration
     }
 
     @Override
-    public void onBatchFailed(ServerPlayer player, String reason) {
+    protected void clearMachineState(BlockEntity be, ServerPlayer player) {
         clearMachineSlotsAndRefund();
         refundExtraExtracted();
         forceChunkLoad(false);
         craftDone = false;
-        network = null;
     }
 
     @Override
@@ -531,7 +526,7 @@ public final class CrockPotBatchDelegate implements com.huanghuang.rsintegration
             getFoodValuesMethod = CrockPotReflection.foodValuesDefinitionClass.getMethod("getFoodValues", ItemStack.class, Level.class);
             fvGetMethod = CrockPotReflection.foodValuesClass.getMethod("get", CrockPotReflection.foodCategoryClass);
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Batch-CrockPot] FoodValue reflection probe failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-Batch-CrockPot] FoodValue reflection probe failed", e);
         }
     }
 
@@ -564,8 +559,7 @@ public final class CrockPotBatchDelegate implements com.huanghuang.rsintegration
             }
             return result;
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Batch-CrockPot] computeItemFoodValues failed for {}: {}",
-                    stack.getHoverName().getString(), e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-Batch-CrockPot] computeItemFoodValues failed for {}", stack.getHoverName().getString(), e);
             return null;
         }
     }
@@ -675,7 +669,7 @@ public final class CrockPotBatchDelegate implements com.huanghuang.rsintegration
             itemHandlerField = CrockPotReflection.crockPotBEClass.getDeclaredField("itemHandler");
             itemHandlerField.setAccessible(true);
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Batch-CrockPot] Reflection probe failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-Batch-CrockPot] Reflection probe failed", e);
         }
     }
 
@@ -685,7 +679,7 @@ public final class CrockPotBatchDelegate implements com.huanghuang.rsintegration
         if (itemHandlerField != null) {
             try {
                 return (IItemHandler) itemHandlerField.get(be);
-            } catch (Exception ignored) {}
+            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-CrockPot] field access failed", e); }
         }
         return be.getCapability(net.minecraftforge.common.capabilities.ForgeCapabilities.ITEM_HANDLER)
                 .resolve().orElse(null);
@@ -771,7 +765,7 @@ public final class CrockPotBatchDelegate implements com.huanghuang.rsintegration
             int cz = myPos.getZ() >> 4;
             ForgeChunkManager.forceChunk(myLevel, RSIntegrationMod.MOD_ID, myPos, cx, cz, load, true);
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Batch-CrockPot] Chunk load failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI-Batch-CrockPot] Chunk load failed", e);
         }
     }
 }

@@ -67,7 +67,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
             items = resolveCampfireField(cfb, "items", "f_59042_");
             cookingProgress = resolveCampfireField(cfb, "cookingProgress", "f_59043_");
             cookingTime = resolveCampfireField(cfb, "cookingTime", "f_59044_");
-        } catch (Exception ignored) {}
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Vanilla] Campfire class probe failed", e); }
         CAMPFIRE_ITEMS = items;
         CAMPFIRE_COOKING_PROGRESS = cookingProgress;
         CAMPFIRE_COOKING_TIME = cookingTime;
@@ -80,7 +80,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
                 java.lang.reflect.Field f = clazz.getDeclaredField(name);
                 f.setAccessible(true);
                 return f;
-            } catch (NoSuchFieldException ignored) {}
+            } catch (NoSuchFieldException e) { RSIntegrationMod.LOGGER.debug("[RSI-Vanilla] campfire field not found", e); }
         }
         return null;
     }
@@ -644,7 +644,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
     // ── polling / collection ──────────────────────────────────────
 
     @Override
-    public boolean isCraftComplete(ServerLevel level) {
+    protected boolean isMachineCraftFinished(ServerLevel level, BlockEntity be) {
         if (kind == MachineKind.VIRTUAL) return craftDone;
         if (kind == MachineKind.CAMPFIRE) return isCampfireComplete();
 
@@ -682,25 +682,19 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
     // ── lifecycle ─────────────────────────────────────────────────
 
     @Override
-    public void onBatchFailed(ServerPlayer player, String reason) {
+    protected void clearMachineState(BlockEntity be, ServerPlayer player) {
         if (kind == MachineKind.FURNACE && furnaceBE != null) {
             // Refund unprocessed input from slot 0
             ItemStack slot0 = furnaceBE.getItem(0);
             if (!slot0.isEmpty()) {
                 furnaceBE.setItem(0, ItemStack.EMPTY);
-                if (usingSharedLedger) {
-                    // Chain refunds via refundCommitted; just clear machine
-                } else {
-                    refundToRSNetwork(slot0);
-                }
+                refundToRSNetwork(slot0);
             }
             // Refund any result from slot 2
             ItemStack slot2 = furnaceBE.getItem(2);
             if (!slot2.isEmpty()) {
                 furnaceBE.setItem(2, ItemStack.EMPTY);
-                if (!usingSharedLedger) {
-                    refundToRSNetwork(slot2);
-                }
+                refundToRSNetwork(slot2);
             }
             // Do NOT refund fuel from slot 1 (already partially consumed)
             furnaceBE.setChanged();
@@ -711,7 +705,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         }
 
         // Rollback uncommitted private ledger
-        if (!usingSharedLedger && ledger != null && !ledger.isCommitted()) {
+        if (ledger != null && !ledger.isCommitted()) {
             ledger.rollback(player);
         }
 
@@ -748,7 +742,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
                     myPos, cx, cz, load, true);
             campfireChunkForced = load;
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Vanilla] Campfire chunk force-load failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI-Vanilla] Campfire chunk force-load failed", e);
         }
     }
 

@@ -503,7 +503,7 @@ public final class CraftingResolver {
                 if (key.tag() != null) {
                     try {
                         stack.setTag(TagParser.parseTag(key.tag()));
-                    } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] NBT parse failed: {}", e.toString()); }
+                    } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] NBT parse failed", e); }
                 }
                 list.add(stack);
             }
@@ -620,7 +620,7 @@ public final class CraftingResolver {
                     if (stack != null && !stack.isEmpty() && stack.hasTag()) {
                         return stack.copy();
                     }
-                } catch (Exception ignored) {}
+                } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Resolver] reflection read failed", e); }
             }
             clazz = clazz.getSuperclass();
         }
@@ -693,7 +693,7 @@ public final class CraftingResolver {
                             }
                         }
                     }
-                } catch (Exception ignored) {}
+                } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Resolver] reflection read failed", e); }
             }
             clazz = clazz.getSuperclass();
         }
@@ -752,7 +752,7 @@ public final class CraftingResolver {
             if (tag != null) {
                 try {
                     stack.setTag(TagParser.parseTag(tag));
-                } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] NBT parse failed: {}", e.toString()); }
+                } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] NBT parse failed", e); }
             }
             return stack;
         }

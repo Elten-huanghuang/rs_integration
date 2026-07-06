@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.recipe;
 
 import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.world.item.ItemStack;
@@ -11,16 +12,15 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 
-public final class TlmAltarRecipeHandler implements ModRecipeHandler {
+public final class TlmAltarRecipeHandler extends AbstractRecipeHandler {
+
+    static {
+        registerRecipePrefixes(TlmAltarRecipeHandler.class,
+                "com.github.tartaricacid.touhoulittlemaid.");
+    }
 
     @Override
     public ModType modType() { return ModType.byId("touhou_little_maid"); }
-
-    @Override
-    public boolean canHandle(Recipe<?> recipe) {
-        return recipe.getClass().getName()
-                .startsWith("com.github.tartaricacid.touhoulittlemaid.");
-    }
 
     @Override
     public ItemStack getResultItem(Recipe<?> recipe, RegistryAccess access) {
@@ -35,12 +35,16 @@ public final class TlmAltarRecipeHandler implements ModRecipeHandler {
                     try {
                         Object r = m.invoke(recipe, access);
                         if (r instanceof ItemStack s && !s.isEmpty()) return s;
-                    } catch (Exception ignored) {}
+                    } catch (Exception e) {
+                        RSIntegrationMod.LOGGER.debug("[RSI-Recipe] reflection probe failed", e);
+                    }
                 } else if (m.getParameterCount() == 0) {
                     try {
                         Object r = m.invoke(recipe);
                         if (r instanceof ItemStack s && !s.isEmpty()) return s;
-                    } catch (Exception ignored) {}
+                    } catch (Exception e) {
+                        RSIntegrationMod.LOGGER.debug("[RSI-Recipe] reflection probe failed", e);
+                    }
                 }
             }
         }
@@ -63,7 +67,9 @@ public final class TlmAltarRecipeHandler implements ModRecipeHandler {
                 try {
                     ItemStack s = (ItemStack) f.get(recipe);
                     if (s != null && !s.isEmpty()) return s.copy();
-                } catch (Exception ignored) {}
+                } catch (Exception e) {
+                    RSIntegrationMod.LOGGER.debug("[RSI-Recipe] reflection probe failed", e);
+                }
             }
             scan = scan.getSuperclass();
         }

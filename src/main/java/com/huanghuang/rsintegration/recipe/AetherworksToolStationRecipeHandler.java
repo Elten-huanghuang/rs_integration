@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.recipe;
 
 import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.util.ModIds;
 import net.minecraft.core.RegistryAccess;
@@ -12,7 +13,7 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 
-public final class AetherworksToolStationRecipeHandler implements ModRecipeHandler {
+public final class AetherworksToolStationRecipeHandler extends AbstractRecipeHandler {
 
     @Override
     public ModType modType() { return ModType.byId(ModIds.ID_AETHERWORKS_TOOL_STATION); }
@@ -33,14 +34,18 @@ public final class AetherworksToolStationRecipeHandler implements ModRecipeHandl
             java.lang.reflect.Method m = recipe.getClass().getMethod("getResultItem");
             Object r = m.invoke(recipe);
             if (r instanceof ItemStack s && !s.isEmpty()) return s;
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-Recipe] reflection probe failed", e);
+        }
         // Field fallback
         try {
             java.lang.reflect.Field f = recipe.getClass().getDeclaredField("output");
             f.setAccessible(true);
             Object v = f.get(recipe);
             if (v instanceof ItemStack s && !s.isEmpty()) return s;
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-Recipe] reflection probe failed", e);
+        }
         return ItemStack.EMPTY;
     }
 
@@ -58,7 +63,9 @@ public final class AetherworksToolStationRecipeHandler implements ModRecipeHandl
                 }
                 if (!specs.isEmpty()) return specs;
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-Recipe] reflection probe failed", e);
+        }
         return null;
     }
 }

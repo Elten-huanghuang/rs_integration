@@ -42,7 +42,7 @@ public final class SmithingRecipeHandler implements ModRecipeHandler {
                     try {
                         Ingredient ing = (Ingredient) f.get(recipe);
                         if (ing != null && !ing.isEmpty()) ingredients.add(ing);
-                    } catch (Exception ignored) {}
+                    } catch (Exception e) { com.huanghuang.rsintegration.RSIntegrationMod.LOGGER.debug("[RSI-Smithing] field access failed", e); }
                 }
             }
             clazz = clazz.getSuperclass();

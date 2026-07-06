@@ -278,33 +278,23 @@ extends AbstractBatchDelegate {
         return true;
     }
 
-    public boolean isCraftComplete(ServerLevel level) {
-        if (this.tablet == null) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Embers-Infer] isCraftComplete: tablet is null");
-            this.phase = Phase.DONE_FAILED;
-            return true;
-        }
-        BlockEntity current = this.level.getBlockEntity(this.machinePos);
-        if (current == null || current.isRemoved()) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Embers-Infer] isCraftComplete: tablet removed (direct check) current={}", (Object)current);
-            this.phase = Phase.DONE_FAILED;
-            return true;
-        }
+    @Override
+    protected boolean isMachineCraftFinished(ServerLevel level, BlockEntity be) {
         if (this.phase == Phase.DONE_SUCCESS || this.phase == Phase.DONE_FAILED) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Embers-Infer] isCraftComplete: already done, phase={}", (Object)this.phase);
+            warnOnce("already_done", "[RSI-Embers-Infer] isMachineCraftFinished: already done, phase={}", this.phase);
             return true;
         }
         if (this.phase == Phase.INIT) {
             return false;
         }
         if (this.phase == Phase.PLACED || this.phase == Phase.WAITING) {
-            var progressOpt = Reflect.getIntField((Object)this.tablet, "progress");
+            var progressOpt = Reflect.getIntField(this.tablet, "progress");
             int progress = progressOpt.orElse(-999);
             int elapsed = level.getServer().getTickCount() - this.waitStartTick;
-            RSIntegrationMod.LOGGER.warn("[RSI-Embers-Infer] isCraftComplete: progressOpt={} progress={} elapsed={} waitStart={} tickNow={} phase={}",
-                    (Object)progressOpt, (Object)progress, (Object)elapsed,
-                    (Object)this.waitStartTick, (Object)level.getServer().getTickCount(),
-                    (Object)this.phase);
+            warnOnce("progress_poll", "[RSI-Embers-Infer] isMachineCraftFinished: progressOpt={} progress={} elapsed={} waitStart={} tickNow={} phase={}",
+                    progressOpt, progress, elapsed,
+                    this.waitStartTick, level.getServer().getTickCount(),
+                    this.phase);
             if (progress > 0) {
                 this.phase = Phase.WAITING;
                 return false;
@@ -315,17 +305,17 @@ extends AbstractBatchDelegate {
             ItemStack result = this.findResultAnywhere();
             if (result.isEmpty()) {
                 if (elapsed > (Integer)RSIntegrationConfig.EMBERS_PROGRESS_TIMEOUT_TICKS.get()) {
-                    RSIntegrationMod.LOGGER.warn("[RSI-Embers-Infer] Timeout waiting for alchemy result");
+                    warnOnce("progress_timeout", "[RSI-Embers-Infer] Timeout waiting for alchemy result");
                     this.phase = Phase.DONE_FAILED;
                     return true;
                 }
                 return false;
             }
-            RSIntegrationMod.LOGGER.warn("[RSI-Embers-Infer] isCraftComplete: found result={} calling processResult",
-                    (Object)result.getHoverName().getString());
+            warnOnce("result_found", "[RSI-Embers-Infer] isMachineCraftFinished: found result={} calling processResult",
+                    result.getHoverName().getString());
             return this.processResult(result);
         }
-        RSIntegrationMod.LOGGER.warn("[RSI-Embers-Infer] isCraftComplete: unexpected phase={}", (Object)this.phase);
+        warnOnce("unexpected_phase", "[RSI-Embers-Infer] isMachineCraftFinished: unexpected phase={}", this.phase);
         return false;
     }
 
@@ -390,7 +380,7 @@ extends AbstractBatchDelegate {
             ++this.consecutiveZeroBlackPins;
             int zeroLimit = (Integer)RSIntegrationConfig.EMBERS_INFER_ZERO_BLACK_LIMIT.get();
             if (this.consecutiveZeroBlackPins >= zeroLimit) {
-                RSIntegrationMod.LOGGER.warn("[RSI-Embers-Infer] {} consecutive 0-blackPin, aborting", (Object)this.consecutiveZeroBlackPins);
+                warnOnce("zero_black_pin_limit", "[RSI-Embers-Infer] {} consecutive 0-blackPin, aborting", (Object)this.consecutiveZeroBlackPins);
                 if (this.player != null) {
                     this.player.displayClientMessage(Component.translatable("rsi.embers.infer.failed_zero_black", zeroLimit), true);
                 }
@@ -402,7 +392,7 @@ extends AbstractBatchDelegate {
             this.consecutiveZeroBlackPins = 0;
         }
         if (this.attemptCount >= (maxAttempts = ((Integer)RSIntegrationConfig.EMBERS_INFER_MAX_ATTEMPTS.get()).intValue())) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Embers-Infer] Max attempts {} reached", (Object)maxAttempts);
+            warnOnce("max_attempts_reached", "[RSI-Embers-Infer] Max attempts {} reached", (Object)maxAttempts);
             if (this.player != null) {
                 this.player.displayClientMessage(Component.translatable("rsi.embers.infer.failed_max", maxAttempts), true);
             }
@@ -413,7 +403,7 @@ extends AbstractBatchDelegate {
         this.clearAndRefundSurvivors();
         this.filterCandidates(blackPins, whitePins);
         if (this.candidates.isEmpty()) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Embers-Infer] No candidates remain after filtering (black={} white={} guess={})",
+            warnOnce("no_candidates_remain", "[RSI-Embers-Infer] No candidates remain after filtering (black={} white={} guess={})",
                     blackPins, whitePins, Arrays.toString(this.currentGuess));
             if (this.player != null) {
                 this.player.displayClientMessage(Component.translatable("rsi.embers.infer.failed_no_candidates"), true);
@@ -475,12 +465,10 @@ extends AbstractBatchDelegate {
         return ItemStack.EMPTY;
     }
 
-    public void onBatchFailed(ServerPlayer player, String reason) {
-        EreAlchemyLock.unlock(this.level.dimension(), (BlockPos)this.machinePos);
+    @Override
+    protected void clearMachineState(BlockEntity be, ServerPlayer player) {
+        EreAlchemyLock.unlock(this.level.dimension(), be.getBlockPos());
         this.clearAndRefundSurvivors();
-        if (reason != null && !reason.isEmpty()) {
-            player.sendSystemMessage(Component.translatable("rsi.generic.error.craft_failed", reason));
-        }
     }
 
     public void onBatchFinished(ServerPlayer player) {
@@ -855,7 +843,7 @@ extends AbstractBatchDelegate {
             return Reflect.getField((Object)recipe, (String)fieldName).map(o -> (List)o).orElse(null);
         }
         catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Embers-Infer] Cannot read {}: {}", (Object)fieldName, (Object)e.toString());
+            RSIntegrationMod.LOGGER.debug("[RSI-Embers-Infer] Cannot read {}", (Object)fieldName, e);
             return null;
         }
     }

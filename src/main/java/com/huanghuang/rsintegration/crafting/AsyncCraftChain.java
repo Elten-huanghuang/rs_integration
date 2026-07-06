@@ -440,8 +440,7 @@ public final class AsyncCraftChain {
                     break;
                 }
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.debug("[RSI-AsyncChain] validateAndInit failed for machine at {}: {}",
-                        m.pos(), e.toString());
+                RSIntegrationMod.LOGGER.debug("[RSI-AsyncChain] validateAndInit failed for machine at {}", m.pos(), e);
             }
         }
         if (matchedMachine == null) {
@@ -465,7 +464,7 @@ public final class AsyncCraftChain {
                 return null;
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-AsyncChain] Protection check failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-AsyncChain] Protection check failed", e);
         }
 
         try {
@@ -852,8 +851,8 @@ public final class AsyncCraftChain {
                 return versioned.getDeclaredConstructor().newInstance();
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.error(
-                        "[RSI] Failed to instantiate versioned delegate {}: {}",
-                        versioned.getName(), e.toString());
+                        "[RSI] Failed to instantiate versioned delegate {}",
+                        versioned.getName(), e);
             }
         }
         // 2. Fall back to default delegate

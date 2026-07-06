@@ -23,8 +23,7 @@ public final class VersionRange {
         try {
             return new ComparableVersion(actual).compareTo(new ComparableVersion(threshold)) >= 0;
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Version] Cannot parse version {} for mod {}: {}",
-                    actual, modId, e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-Version] Cannot parse version {} for mod {}", actual, modId, e);
             return false;
         }
     }

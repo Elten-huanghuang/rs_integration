@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.recipe;
 
 import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.world.item.ItemStack;
@@ -12,7 +13,7 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 
-public final class FarmersDelightRecipeHandler implements ModRecipeHandler {
+public final class FarmersDelightRecipeHandler extends AbstractRecipeHandler {
 
     private static final String COOKING_POT_CLASS =
             "vectorwing.farmersdelight.common.crafting.CookingPotRecipe";
@@ -59,7 +60,9 @@ public final class FarmersDelightRecipeHandler implements ModRecipeHandler {
         if (recipe.getClass().getName().equals(COOKING_POT_CLASS)) {
             try {
                 return (int) recipe.getClass().getMethod("getCookTime").invoke(recipe);
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.debug("[RSI-Recipe] reflection probe failed", e);
+            }
         }
         return 200; // fallback
     }
@@ -70,7 +73,9 @@ public final class FarmersDelightRecipeHandler implements ModRecipeHandler {
         if (recipe.getClass().getName().equals(COOKING_POT_CLASS)) {
             try {
                 return (ItemStack) recipe.getClass().getMethod("getOutputContainer").invoke(recipe);
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.debug("[RSI-Recipe] reflection probe failed", e);
+            }
         }
         return null;
     }
