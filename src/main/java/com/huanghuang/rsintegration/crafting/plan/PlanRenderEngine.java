@@ -300,20 +300,32 @@ public final class PlanRenderEngine {
      * either from {@code rsi.batch.mod.<id>} translation keys
      * or the mod's own display name from {@code mods.toml}.
      */
+    private static final java.util.Map<String, String> MOD_LABEL_CACHE = new java.util.concurrent.ConcurrentHashMap<>();
+
     public static String formatModTypeLabel(String modTypeId) {
+        String cached = MOD_LABEL_CACHE.get(modTypeId);
+        if (cached != null) return cached;
+
         // 1. Explicit translation key (optional override)
         String key = "rsi.batch.mod." + modTypeId;
         if (net.minecraft.client.resources.language.I18n.exists(key)) {
-            return net.minecraft.client.resources.language.I18n.get(key);
+            String label = net.minecraft.client.resources.language.I18n.get(key);
+            MOD_LABEL_CACHE.put(modTypeId, label);
+            return label;
         }
         // 2. Forge mod display name
         String forgeName = net.minecraftforge.fml.ModList.get()
                 .getModContainerById(modTypeId)
                 .map(c -> c.getModInfo().getDisplayName())
                 .orElse("");
-        if (!forgeName.isEmpty()) return forgeName;
+        if (!forgeName.isEmpty()) {
+            MOD_LABEL_CACHE.put(modTypeId, forgeName);
+            return forgeName;
+        }
         // 3. Fallback
-        return capitalizeWords(modTypeId.replace('_', ' '));
+        String fallback = capitalizeWords(modTypeId.replace('_', ' '));
+        MOD_LABEL_CACHE.put(modTypeId, fallback);
+        return fallback;
     }
 
     private static String capitalizeWords(String input) {

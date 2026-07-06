@@ -266,7 +266,7 @@ public final class ModType {
                     return byId("youkaishomecoming_cooking_small");
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI] Cooking pot recipe classification failed: {}",
+            RSIntegrationMod.LOGGER.warn("[RSI] Cooking pot recipe classification failed: {}",
                     e.toString());
         }
         return byId("youkaishomecoming_cooking_small");

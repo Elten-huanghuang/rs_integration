@@ -1,4 +1,4 @@
-package com.huanghuang.rsintegration.backpack;
+package com.huanghuang.rsintegration.mods.sophisticatedbackpacks;
 
 import net.p3pp3rf1y.sophisticatedcore.client.gui.StorageScreenBase;
 import net.p3pp3rf1y.sophisticatedcore.client.gui.utils.Position;

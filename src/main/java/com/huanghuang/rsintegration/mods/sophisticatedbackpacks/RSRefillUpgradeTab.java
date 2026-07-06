@@ -1,4 +1,4 @@
-package com.huanghuang.rsintegration.backpack;
+package com.huanghuang.rsintegration.mods.sophisticatedbackpacks;
 
 import net.p3pp3rf1y.sophisticatedbackpacks.upgrades.refill.RefillUpgradeContainer;
 import net.p3pp3rf1y.sophisticatedbackpacks.upgrades.refill.RefillUpgradeTab;

@@ -1,4 +1,4 @@
-package com.huanghuang.rsintegration.jei;
+package com.huanghuang.rsintegration.mods.jei;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.client.RSIKeyBindings;
@@ -18,16 +18,20 @@ import mezz.jei.gui.bookmarks.IBookmark;
 import mezz.jei.gui.bookmarks.IngredientBookmark;
 import mezz.jei.gui.overlay.IngredientGridWithNavigation;
 import mezz.jei.gui.overlay.IngredientListOverlay;
+import mezz.jei.gui.recipes.RecipeTransferButton;
+import mezz.jei.gui.recipes.RecipesGui;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.client.event.ScreenEvent;
 import net.minecraftforge.common.MinecraftForge;
+import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.eventbus.api.EventPriority;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fluids.FluidStack;
@@ -64,6 +68,10 @@ public final class JeiMarqueeSelector {
     private static volatile Method bookmarkCreateMethod;
     private static volatile boolean reflectionProbed;
 
+    // ── Bounding-box cache (only recompute on screen resize) ──
+    private static int cachedJeiMinX, cachedJeiMinY, cachedJeiMaxX, cachedJeiMaxY;
+    private static int cachedScreenW, cachedScreenH;
+
     // ── Registration ──
 
     public static void register() {
@@ -77,12 +85,34 @@ public final class JeiMarqueeSelector {
     }
 
     // ═══════════════════════════════════════════════════════════
+    //  State Reset Hooks
+    // ═══════════════════════════════════════════════════════════
+
+    // Clear stale selection when switching screens (e.g. clicking recipe → new GUI)
+    @SubscribeEvent
+    public static void onScreenInit(ScreenEvent.Init.Pre event) {
+        clearSelection();
+    }
+
+    // Force-reset state machine when all GUIs are closed (back to game view)
+    @SubscribeEvent
+    public static void onClientTick(TickEvent.ClientTickEvent event) {
+        if (event.phase == TickEvent.Phase.END) {
+            if (Minecraft.getInstance().screen == null && (selecting || dragging || potentialDrag)) {
+                clearSelection();
+            }
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════
     //  Shortcut dispatch
     // ═══════════════════════════════════════════════════════════
 
     private static boolean dispatchShortcut(Screen screen, InputConstants.Key input, int mx, int my) {
         IJeiRuntime runtime = RSJeiPlugin.getRuntime();
         if (runtime == null) return false;
+
+        boolean typingSafe = !isAnyEditBoxFocused(screen);
 
         KeyMapping km;
 
@@ -110,22 +140,14 @@ public final class JeiMarqueeSelector {
             }
         }
 
-        km = RSIKeyBindings.KEY_HISTORY_BACK;
-        if (km != null && km.isActiveAndMatches(input)) {
-            if (!isOverVanillaGui(screen, mx, my)) {
-                screen.keyPressed(259, 0, 0);
-                return true;
-            }
-        }
-
         km = RSIKeyBindings.KEY_TRANSFER_RECIPE;
         if (km != null && km.isActiveAndMatches(input)) {
-            if (screen.getClass().getName().contains("RecipesGui")) {
+            if (typingSafe && screen instanceof RecipesGui) {
                 Button target = null;
                 double best = Double.MAX_VALUE;
                 for (var child : screen.children()) {
                     if (child instanceof Button btn
-                            && btn.getClass().getName().contains("RecipeTransferButton")) {
+                            && child instanceof RecipeTransferButton) {
                         if (btn.active && btn.visible) {
                             double dist = (btn.getX() - mx) * (btn.getX() - mx)
                                         + (btn.getY() - my) * (btn.getY() - my);
@@ -154,9 +176,67 @@ public final class JeiMarqueeSelector {
         IIngredientListOverlay overlay = runtime.getIngredientListOverlay();
         if (overlay == null || !overlay.isListDisplayed()) return false;
 
+        // 1. Avoid overlapping vanilla GUI elements
         if (isOverVanillaGui(screen, mx, my)) return false;
 
+        // 2. Restrict drag initiation to within the JEI item list bounding box
+        if (!isOverJeiList(mx, my)) return false;
+
         return true;
+    }
+
+    /**
+     * Computes the bounding rectangle of all JEI item-list slots.
+     * Drag initiation is only allowed within this area, preventing false
+     * triggers from mods that don't properly declare exclusion zones.
+     */
+    private static boolean isOverJeiList(int mx, int my) {
+        Minecraft mc = Minecraft.getInstance();
+        int sw = mc.getWindow().getGuiScaledWidth();
+        int sh = mc.getWindow().getGuiScaledHeight();
+
+        // Return cached result if screen hasn't resized
+        if (sw == cachedScreenW && sh == cachedScreenH && cachedJeiMaxX > cachedJeiMinX) {
+            int padding = 30;
+            return mx >= cachedJeiMinX - padding && mx <= cachedJeiMaxX + padding
+                && my >= cachedJeiMinY - padding && my <= cachedJeiMaxY + padding;
+        }
+
+        probeReflection();
+        if (overlayContentsField == null) return false;
+        IJeiRuntime runtime = RSJeiPlugin.getRuntime();
+        if (runtime == null) return false;
+        IIngredientListOverlay overlay = runtime.getIngredientListOverlay();
+        if (overlay == null) return false;
+
+        try {
+            IngredientGridWithNavigation grid = (IngredientGridWithNavigation) overlayContentsField.get(overlay);
+            if (grid == null) return false;
+
+            int[] minX = {Integer.MAX_VALUE}, minY = {Integer.MAX_VALUE};
+            int[] maxX = {Integer.MIN_VALUE}, maxY = {Integer.MIN_VALUE};
+
+            grid.getSlots().forEach(slot -> {
+                ImmutableRect2i area = slot.getArea();
+                if (area != null) {
+                    if (area.x() < minX[0]) minX[0] = area.x();
+                    if (area.y() < minY[0]) minY[0] = area.y();
+                    if (area.x() + area.width() > maxX[0]) maxX[0] = area.x() + area.width();
+                    if (area.y() + area.height() > maxY[0]) maxY[0] = area.y() + area.height();
+                }
+            });
+            if (minX[0] > maxX[0]) return false;
+
+            cachedJeiMinX = minX[0]; cachedJeiMinY = minY[0];
+            cachedJeiMaxX = maxX[0]; cachedJeiMaxY = maxY[0];
+            cachedScreenW = sw; cachedScreenH = sh;
+
+            int padding = 30;
+            return mx >= minX[0] - padding && mx <= maxX[0] + padding
+                && my >= minY[0] - padding && my <= maxY[0] + padding;
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -256,10 +336,6 @@ public final class JeiMarqueeSelector {
         }
     }
 
-    // ═══════════════════════════════════════════════════════════
-    //  Scroll handler — dismiss selection on page change
-    // ═══════════════════════════════════════════════════════════
-
     @SubscribeEvent
     public static void onScroll(ScreenEvent.MouseScrolled.Pre event) {
         if (selecting && !dragging) {
@@ -267,18 +343,13 @@ public final class JeiMarqueeSelector {
         }
     }
 
-    // ═══════════════════════════════════════════════════════════
-    //  Screen close — dismiss selection when GUI closes
-    // ═══════════════════════════════════════════════════════════
+
 
     @SubscribeEvent
     public static void onScreenClose(ScreenEvent.Closing event) {
         clearSelection();
     }
 
-    // ═══════════════════════════════════════════════════════════
-    //  Keyboard handler
-    // ═══════════════════════════════════════════════════════════
 
     private static final int KEY_PAGE_UP = 266;
     private static final int KEY_PAGE_DOWN = 267;
@@ -314,24 +385,19 @@ public final class JeiMarqueeSelector {
         }
 
         if (selecting && !dragging) {
-            KeyMapping km;
-
-            km = RSIKeyBindings.KEY_MARQUEE_BOOKMARK;
-            if (km != null && km.matches(key, scan)) {
+            if (key == InputConstants.KEY_A) {
                 batchBookmark(cachedIngredients);
                 clearSelection();
                 event.setCanceled(true);
                 return;
             }
-            km = RSIKeyBindings.KEY_MARQUEE_HIDE;
-            if (km != null && km.matches(key, scan)) {
+            if (key == InputConstants.KEY_H) {
                 batchHide(cachedIngredients);
                 clearSelection();
                 event.setCanceled(true);
                 return;
             }
-            km = RSIKeyBindings.KEY_MARQUEE_DISMISS;
-            if (km != null && km.matches(key, scan)) {
+            if (key == InputConstants.KEY_ESCAPE) {
                 clearSelection();
                 event.setCanceled(true);
                 return;
@@ -490,6 +556,24 @@ public final class JeiMarqueeSelector {
         return helper.getGuiExclusionAreas(screen)
                 .anyMatch(area -> mx >= area.getX() && mx < area.getX() + area.getWidth()
                         && my >= area.getY() && my < area.getY() + area.getHeight());
+    }
+
+    /** Checks whether any text input widget on the screen currently has focus.
+     *  When the JEI search box is focused, keys like Backspace and T should
+     *  go to the text field, not trigger shortcuts. */
+    private static boolean isAnyEditBoxFocused(Screen screen) {
+        if (screen == null) return false;
+        var focused = screen.getFocused();
+        if (focused instanceof EditBox) return true;
+        // Some modded screens wrap EditBox differently — check class name
+        if (focused != null) {
+            Class<?> c = focused.getClass();
+            while (c != null) {
+                if (c.getName().endsWith("EditBox") || c.getName().endsWith("TextField")) return true;
+                c = c.getSuperclass();
+            }
+        }
+        return false;
     }
 
     private static String getModId(ITypedIngredient<?> ingredient) {

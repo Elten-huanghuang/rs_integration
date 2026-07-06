@@ -1190,7 +1190,7 @@ public class RecipeGuiLayoutsMixin {
             // ConvertRitual, TeleportRitual — no item output, potentially destructive
             return true;
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] Goety ritual type check failed", e);
+            RSIntegrationMod.LOGGER.warn("[RSI-JEI-Mixin] Goety ritual type check failed", e);
             return false;
         }
     }

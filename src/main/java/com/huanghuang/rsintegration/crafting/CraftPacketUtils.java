@@ -74,7 +74,8 @@ public final class CraftPacketUtils {
         return Component.literal("Unknown Item");
     }
 
-    /** Merge duplicate item names with counts: "大地精魂, 大地精魂, 大地精魂" → "大地精魂 x3". */
+    /** Merge duplicate item names with counts: "大地精魂, 大地精魂, 大地精魂" → "大地精魂 x3".
+     *  Caps output at ~120 chars to avoid flooding chat with an unreadable wall. */
     public static String formatMissingSummary(List<String> missing) {
         java.util.LinkedHashMap<String, Integer> counts = new java.util.LinkedHashMap<>();
         for (String name : missing) {
@@ -82,12 +83,19 @@ public final class CraftPacketUtils {
         }
         StringBuilder sb = new StringBuilder();
         boolean first = true;
+        int shown = 0;
+        int total = counts.size();
         for (java.util.Map.Entry<String, Integer> entry : counts.entrySet()) {
             if (!first) sb.append(", ");
             first = false;
             sb.append(entry.getKey());
             if (entry.getValue() > 1) {
                 sb.append(" x").append(entry.getValue());
+            }
+            shown++;
+            if (sb.length() > 120 && shown < total) {
+                sb.append(" ").append(Component.translatable("rsi.plan.missing_more", total - shown).getString());
+                break;
             }
         }
         return sb.toString();
@@ -510,7 +518,7 @@ public final class CraftPacketUtils {
                 }
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI] WR ritual access failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI] WR ritual access failed: {}", e.toString());
         }
 
         if (getCrystalType != null && ritual != null) {
@@ -539,7 +547,7 @@ public final class CraftPacketUtils {
                     crystalItems.addAll(registered);
                 }
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.debug("[RSI] CrystalHandler.getItems failed: {}", e.toString());
+                RSIntegrationMod.LOGGER.warn("[RSI] CrystalHandler.getItems failed: {}", e.toString());
             }
         }
 
@@ -564,7 +572,7 @@ public final class CraftPacketUtils {
                     }
                 }
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.debug("[RSI] WR crystal class detection failed: {}", e.toString());
+                RSIntegrationMod.LOGGER.warn("[RSI] WR crystal class detection failed: {}", e.toString());
             }
         }
 

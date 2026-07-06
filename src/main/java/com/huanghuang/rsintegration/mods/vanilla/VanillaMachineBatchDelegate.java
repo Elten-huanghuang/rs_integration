@@ -193,8 +193,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
             this.furnaceBE = fbe;
             this.kind = MachineKind.FURNACE;
         } else if (CAMPFIRE_ITEMS != null
-                && be.getClass().getName().equals(
-                        "net.minecraft.world.level.block.entity.CampfireBlockEntity")) {
+                && be instanceof net.minecraft.world.level.block.entity.CampfireBlockEntity) {
             if (!(recipe instanceof CampfireCookingRecipe)) {
                 this.kind = MachineKind.VIRTUAL;
                 return true;

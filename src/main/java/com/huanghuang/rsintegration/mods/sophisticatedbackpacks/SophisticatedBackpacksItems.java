@@ -1,4 +1,4 @@
-package com.huanghuang.rsintegration.backpack;
+package com.huanghuang.rsintegration.mods.sophisticatedbackpacks;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import net.minecraft.client.renderer.block.model.BakedQuad;

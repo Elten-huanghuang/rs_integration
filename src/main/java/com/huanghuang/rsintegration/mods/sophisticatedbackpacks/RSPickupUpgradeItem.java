@@ -1,4 +1,4 @@
-package com.huanghuang.rsintegration.backpack;
+package com.huanghuang.rsintegration.mods.sophisticatedbackpacks;
 
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.InteractionResult;

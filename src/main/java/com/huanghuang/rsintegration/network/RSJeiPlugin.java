@@ -2,7 +2,7 @@ package com.huanghuang.rsintegration.network;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
-import com.huanghuang.rsintegration.jei.JeiMarqueeSelector;
+import com.huanghuang.rsintegration.mods.jei.JeiMarqueeSelector;
 import com.huanghuang.rsintegration.mods.goety.GoetyRSModule;
 import com.huanghuang.rsintegration.sidepanel.RSInventoryTransferHandler;
 import com.huanghuang.rsintegration.util.ModIds;

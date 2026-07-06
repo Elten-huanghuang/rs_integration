@@ -56,6 +56,7 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.BooleanValue ENABLE_SOPHISTICATED_BACKPACKS;
     public static ForgeConfigSpec.BooleanValue ENABLE_JEI;
     public static ForgeConfigSpec.BooleanValue DEPOSIT_UPGRADE_RS;
+    public static ForgeConfigSpec.BooleanValue ENABLE_MAJ_ACCESSORY_COMPRESSION;
     public static ForgeConfigSpec.BooleanValue ENABLE_MACHINE_GUI_TABS;
     public static ForgeConfigSpec.BooleanValue ENABLE_CONTAINER_TRANSFER;
     public static ForgeConfigSpec.BooleanValue ENABLE_RS_SIDE_PANEL;
@@ -204,6 +205,12 @@ public final class RSIntegrationConfig {
                         "Enabled (true): deposit upgrade interacts with RS grids.",
                         "Disabled (false): deposit upgrade works as vanilla Sophisticated Backpacks.")
                 .define("depositUpgradeRS", false);
+        ENABLE_MAJ_ACCESSORY_COMPRESSION = c
+                .comment("Enable Majrusz's Accessories compression via the Compacting Upgrade.",
+                        "When enabled, the Compacting Upgrade also auto-combines MAJ accessories",
+                        "that match the upgrade's whitelist filter. Accessories are combined",
+                        "two at a time (max efficiency + another) until they reach 100%.")
+                .define("enableMajAccessoryCompression", true);
         c.pop();
 
         c.push("containerTransfer");

@@ -41,7 +41,7 @@ public final class StoreAllPacket {
 
             AbstractContainerMenu menu = player.containerMenu;
             if (menu == null) return;
-            if (menu.getClass().getName().contains("InventoryMenu")) return;
+            if (menu instanceof net.minecraft.world.inventory.InventoryMenu) return;
 
             ContainerTransferLogic.transferAll(player, menu, pkt.mode);
         });

@@ -183,6 +183,25 @@ public final class UIRenderer {
         rounded(gfx, x - 4, y - 1, tw + 8, th + 2, 4f, bgColor);
     }
 
+    // ── Text wrapping ──────────────────────────────────────────────
+
+    /** Split {@code text} into lines that each fit within {@code maxWidth},
+     *  breaking at spaces when possible. */
+    public static java.util.List<String> wrapLines(Font font, String text, int maxWidth) {
+        java.util.List<String> lines = new java.util.ArrayList<>();
+        String remaining = text;
+        while (!remaining.isEmpty()) {
+            String line = font.plainSubstrByWidth(remaining, maxWidth);
+            if (line.length() < remaining.length()) {
+                int breakAt = line.lastIndexOf(' ');
+                if (breakAt > 0) line = line.substring(0, breakAt);
+            }
+            lines.add(line);
+            remaining = remaining.substring(line.length()).trim();
+        }
+        return lines;
+    }
+
     /** Gradient vertical line — alpha fades linearly from topColor to bottomColor.
      *  Uses multiple fill strips for simplicity; fine for the ~18px connector gaps. */
     public static void vLineGradient(GuiGraphics gfx, float x, float y1, float y2,

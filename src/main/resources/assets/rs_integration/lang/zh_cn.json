@@ -245,6 +245,8 @@
   "rsi.plan.status_ok": "所有材料充足",
   "rsi.plan.status_fail": "部分材料不足",
   "rsi.plan.missing_header": "无法获取:",
+  "rsi.plan.missing_more": "... (+%s 更多)",
+  
   "rsi.plan.materials": "材料",
   "rsi.plan.tooltip.available": "库存",
   "rsi.plan.repeat_count": "次数:",
@@ -289,12 +291,12 @@
 
   "key.rsi.side_panel": "切换 RS 侧边面板",
   "key.rsi.machine_hub": "切换机器面板",
-  "key.rsi.marquee_bookmark": "JEI 框选收藏",
-  "key.rsi.marquee_hide": "JEI 框选隐藏",
-  "key.rsi.marquee_dismiss": "JEI 框选取消",
+  
+  
+  
   "key.rsi.clear_search": "JEI 清空搜索",
   "key.rsi.mod_filter": "JEI 按模组过滤",
-  "key.rsi.history_back": "JEI 配方历史后退",
+  
   "key.rsi.transfer_recipe": "JEI 传输配方",
   "rsi.side_panel.no_network": "无 RS 网络",
   "rsi.side_panel.search_hint": "搜索...",

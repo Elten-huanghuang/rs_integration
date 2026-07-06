@@ -1,6 +1,6 @@
 package com.huanghuang.rsintegration;
 
-import com.huanghuang.rsintegration.backpack.SophisticatedBackpacksItems;
+import com.huanghuang.rsintegration.mods.sophisticatedbackpacks.SophisticatedBackpacksItems;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.client.RSIKeyBindings;
 import com.huanghuang.rsintegration.crafting.AsyncCraftManager;

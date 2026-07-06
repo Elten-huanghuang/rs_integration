@@ -244,6 +244,8 @@
   "rsi.plan.status_ok": "All materials available",
   "rsi.plan.status_fail": "Some materials are missing",
   "rsi.plan.missing_header": "Unavailable:",
+  "rsi.plan.missing_more": "... (+%s more)",
+  
   "rsi.plan.materials": "Materials",
   "rsi.plan.tooltip.available": "Available",
   "rsi.plan.repeat_count": "Repeat:",
@@ -288,12 +290,12 @@
 
   "key.rsi.side_panel": "Toggle RS Side Panel",
   "key.rsi.machine_hub": "Toggle Machine Hub",
-  "key.rsi.marquee_bookmark": "JEI Marquee Bookmark",
-  "key.rsi.marquee_hide": "JEI Marquee Hide",
-  "key.rsi.marquee_dismiss": "JEI Marquee Dismiss",
+  
+  
+  
   "key.rsi.clear_search": "JEI Clear Search",
   "key.rsi.mod_filter": "JEI Filter by Mod",
-  "key.rsi.history_back": "JEI Recipe History Back",
+  
   "key.rsi.transfer_recipe": "JEI Transfer Recipe",
   "rsi.side_panel.no_network": "No RS Network",
   "rsi.side_panel.search_hint": "Search...",

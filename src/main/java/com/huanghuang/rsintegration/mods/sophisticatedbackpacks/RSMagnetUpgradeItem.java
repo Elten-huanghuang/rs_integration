@@ -1,4 +1,4 @@
-package com.huanghuang.rsintegration.backpack;
+package com.huanghuang.rsintegration.mods.sophisticatedbackpacks;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.util.TextBuilder;

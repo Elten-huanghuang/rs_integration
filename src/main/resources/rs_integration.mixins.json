@@ -26,6 +26,8 @@
     "sophisticatedbackpacks.FeedingUpgradeWrapperMixin",
     "sophisticatedbackpacks.UpgradeHandlerMixin",
     "sophisticatedbackpacks.StorageUpgradeSlotMixin",
+    "sophisticatedbackpacks.StorageContainerMenuBaseMixin",
+    "sophisticatedbackpacks.CompactingUpgradeWrapperMixin",
     "crockpot.CrockPotMenuMixin"
   ],
   "client": [

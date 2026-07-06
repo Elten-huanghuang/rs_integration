@@ -33,7 +33,8 @@ public final class CraftingPlanScreen extends Screen {
     private static final int SLOT_SIZE = 18;
     private static final int CARD_PAD = 8;
     private static final int ARROW_W = 18;
-    private static final int STEPS_TOP = 40;
+    private static final int STEPS_TOP_MIN = 40;
+    private int stepsTop = STEPS_TOP_MIN; // dynamic — grows when title wraps
     private static final int INDENT = 28;
     private static final int CONNECTOR_GAP = 18;
 
@@ -179,12 +180,21 @@ public final class CraftingPlanScreen extends Screen {
         // Default mode: Calculate if code is known (from cache or computed), Infer otherwise
         embersInferMode = !hasEmbers;
 
-        // Compute missing items area (material shortages + mod validation warnings)
+        // Compute missing items area — items flow inline with wrapping
         int missingCount = plan.missing() != null ? plan.missing().size() : 0;
         int modWarnCount = plan.modWarnings() != null ? plan.modWarnings().size() : 0;
-        int totalMissingLines = missingCount + modWarnCount;
-        if (totalMissingLines > 0) {
-            missingAreaHeight = font.lineHeight + 6 + totalMissingLines * (font.lineHeight + 4) + 4;
+        if (missingCount + modWarnCount > 0) {
+            int lines = 0;
+            int maxLineW = contentW - 24;
+            if (missingCount > 0) {
+                lines++; // header
+                String joined = String.join(", ", plan.missing());
+                lines += UIRenderer.wrapLines(font, "  " + joined, maxLineW).size();
+            }
+            if (modWarnCount > 0) {
+                lines += modWarnCount;
+            }
+            missingAreaHeight = font.lineHeight + 6 + lines * (font.lineHeight + 4) + 4;
         } else {
             missingAreaHeight = 0;
         }
@@ -315,24 +325,34 @@ public final class CraftingPlanScreen extends Screen {
         int contentW = width - 40;
         int left = 20;
 
-        // Title — slide in from top, with frosted backdrop
+        // Title — slide in from top, with frosted backdrop; wraps to multiple lines
         int titleY = (int) (12 - (1f - ease) * 20);
-        String titleStr = title.getString();
-        UIRenderer.textBackdrop(gfx, font, width / 2 - font.width(titleStr) / 2, titleY,
-                titleStr, fadeColor(C_TEXT_BACKDROP, ease));
-        gfx.drawCenteredString(font, title, width / 2, titleY, fadeColor(0xFFFFFF, ease));
-
-        // Subtitle — with backdrop
-        String statusKey = plan.success() ? "rsi.plan.status_ok" : "rsi.plan.status_fail";
-        int statusColor = plan.success() ? 0x55FF55 : 0xFF5555;
-        String statusStr = Component.translatable(statusKey).getString();
-        UIRenderer.textBackdrop(gfx, font, width / 2 - font.width(statusStr) / 2, titleY + 12,
-                statusStr, fadeColor(C_TEXT_BACKDROP, ease));
-        gfx.drawCenteredString(font, Component.translatable(statusKey),
-                width / 2, titleY + 12, fadeColor(statusColor, ease));
+        int titleMaxW = width - 40;
+        {
+            var titleLines = UIRenderer.wrapLines(font, title.getString(), titleMaxW);
+            int ty = titleY;
+            for (String lineStr : titleLines) {
+                UIRenderer.textBackdrop(gfx, font, width / 2 - font.width(lineStr) / 2, ty,
+                        lineStr, fadeColor(C_TEXT_BACKDROP, ease));
+                gfx.drawString(font, lineStr,
+                        width / 2 - font.width(lineStr) / 2, ty, fadeColor(0xFFFFFF, ease));
+                ty += font.lineHeight + 2;
+            }
+            // Subtitle — with backdrop
+            String statusKey = plan.success() ? "rsi.plan.status_ok" : "rsi.plan.status_fail";
+            int statusColor = plan.success() ? 0x55FF55 : 0xFF5555;
+            String statusStr = font.plainSubstrByWidth(
+                    Component.translatable(statusKey).getString(), titleMaxW);
+            UIRenderer.textBackdrop(gfx, font, width / 2 - font.width(statusStr) / 2, ty,
+                    statusStr, fadeColor(C_TEXT_BACKDROP, ease));
+            gfx.drawString(font, statusStr,
+                    width / 2 - font.width(statusStr) / 2, ty, fadeColor(statusColor, ease));
+            ty += font.lineHeight + 4;
+            stepsTop = Math.max(STEPS_TOP_MIN, ty);
+        }
 
         // Steps area (scrollable)
-        int areaTop = STEPS_TOP;
+        int areaTop = stepsTop;
         int bottomReserved = embersPedestalH > 0 ? embersPedestalY
                 : (missingAreaHeight > 0 ? missingAreaTop : materialAreaTop);
         int areaBottom = bottomReserved - 4;
@@ -729,13 +749,7 @@ public final class CraftingPlanScreen extends Screen {
         UIRenderer.slotBg(gfx, x, y, GRID_SLOT, border);
         gfx.renderItem(stack, x + 1, y + 1);
 
-        // Hover brighten — overlay a subtle white sheen over the whole slot
-        if (hovered) {
-            gfx.fill(x - 1, y - 1, x + GRID_SLOT + 1, y, C_SLOT_HOVER);
-            gfx.fill(x - 1, y + GRID_SLOT + 1, x + GRID_SLOT + 1, y + GRID_SLOT + 2, C_SLOT_HOVER);
-            gfx.fill(x - 1, y - 1, x, y + GRID_SLOT + 1, C_SLOT_HOVER);
-            gfx.fill(x + GRID_SLOT + 1, y - 1, x + GRID_SLOT + 2, y + GRID_SLOT + 1, C_SLOT_HOVER);
-        }
+        if (hovered) drawHoverBorder(gfx, x, y, GRID_SLOT);
 
         if (displayCount > 1) {
             gfx.pose().pushPose();
@@ -752,6 +766,13 @@ public final class CraftingPlanScreen extends Screen {
     private void drawGridPlaceholder(GuiGraphics gfx, int x, int y) {
         gfx.fill(x - 1, y - 1, x + GRID_SLOT + 1, y + GRID_SLOT + 1, 0xFF3A3A3A);
         gfx.fill(x, y, x + GRID_SLOT, y + GRID_SLOT, 0xFF252525);
+    }
+
+    private static void drawHoverBorder(GuiGraphics gfx, int x, int y, int size) {
+        gfx.fill(x - 1, y - 1, x + size + 1, y, C_SLOT_HOVER);
+        gfx.fill(x - 1, y + size + 1, x + size + 1, y + size + 2, C_SLOT_HOVER);
+        gfx.fill(x - 1, y - 1, x, y + size + 1, C_SLOT_HOVER);
+        gfx.fill(x + size + 1, y - 1, x + size + 2, y + size + 1, C_SLOT_HOVER);
     }
 
     // ── Alternative selection ─────────────────────────────────────
@@ -851,14 +872,10 @@ public final class CraftingPlanScreen extends Screen {
         UIRenderer.slotBg(gfx, x, y, SLOT_SIZE, border);
         gfx.renderItem(stack, x + 1, y + 1);
 
-        // Hover brighten — overlay subtle white sheen on borders
         boolean hovered = mouseX >= x - 1 && mouseX <= x + SLOT_SIZE + 1
                 && mouseY >= y - 1 && mouseY <= y + SLOT_SIZE + 1;
         if (hovered) {
-            gfx.fill(x - 1, y - 1, x + SLOT_SIZE + 1, y, C_SLOT_HOVER);
-            gfx.fill(x - 1, y + SLOT_SIZE + 1, x + SLOT_SIZE + 1, y + SLOT_SIZE + 2, C_SLOT_HOVER);
-            gfx.fill(x - 1, y - 1, x, y + SLOT_SIZE + 1, C_SLOT_HOVER);
-            gfx.fill(x + SLOT_SIZE + 1, y - 1, x + SLOT_SIZE + 2, y + SLOT_SIZE + 1, C_SLOT_HOVER);
+            drawHoverBorder(gfx, x, y, SLOT_SIZE);
             // Defer tooltip — render after all scissors are disabled
             hoveredItemForTooltip = stack;
             hoveredTooltipX = mouseX;
@@ -1025,23 +1042,24 @@ public final class CraftingPlanScreen extends Screen {
         gfx.fill(left + 1, top + 2, left + 4, top + missingAreaHeight - 2, accentColor);
 
         int my = top + 4;
+        int maxLineW = contentW - 24;
+        // Render missing items — inline, wrapped
         if (hasMissing) {
             String hdr = Component.translatable("rsi.plan.missing_header").getString();
             UIRenderer.textBackdrop(gfx, font, left + 10, my, hdr, C_TEXT_BACKDROP);
             gfx.drawString(font, hdr, left + 10, my, 0xFFFF6666);
             my += font.lineHeight + 4;
-            for (String msg : plan.missing()) {
-                String line = "  " + I18n.get(msg);
-                UIRenderer.textBackdrop(gfx, font, left + 10, my, line, C_TEXT_BACKDROP);
+            String joined = String.join(", ", plan.missing());
+            for (String line : UIRenderer.wrapLines(font, "  " + joined, maxLineW)) {
                 gfx.drawString(font, line, left + 10, my, 0xFFCC8888);
                 my += font.lineHeight + 4;
             }
         }
-        // Render mod warnings (Goety research/structure, FA essences) in orange
+        // Render mod warnings (one per line — they're longer sentences)
         if (hasModWarnings) {
-            if (!hasMissing) my += 4; // no header, add padding
+            if (!hasMissing) my += 4;
             for (String warn : plan.modWarnings()) {
-                String display = font.plainSubstrByWidth(warn, contentW - 24);
+                String display = font.plainSubstrByWidth(warn, maxLineW);
                 UIRenderer.textBackdrop(gfx, font, left + 10, my, display, C_TEXT_BACKDROP);
                 gfx.drawString(font, display, left + 10, my, 0xFFDDAA00);
                 my += font.lineHeight + 4;
@@ -1100,7 +1118,7 @@ public final class CraftingPlanScreen extends Screen {
                 embersInferMode = true;
                 return true;
             }
-            if (my >= STEPS_TOP) {
+            if (my >= stepsTop) {
                 for (ORHitbox hb : orHitboxes) {
                     if (mx >= hb.x && mx <= hb.x + hb.w
                             && my >= hb.y && my <= hb.y + hb.h) {

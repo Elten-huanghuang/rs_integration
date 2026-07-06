@@ -151,7 +151,7 @@ public final class GuiNavStack {
     }
 
     public static void onScreenChanged(Screen newScreen) {
-        if (newScreen != null && newScreen.getClass().getName().contains("PauseScreen")) {
+        if (newScreen instanceof net.minecraft.client.gui.screens.PauseScreen) {
             clearPending();
         }
     }
@@ -181,7 +181,7 @@ public final class GuiNavStack {
         if (!MachineHub.isVisible()) return;
         Screen screen = event.getScreen();
         if (!(screen instanceof AbstractContainerScreen<?> acs)) return;
-        if (!screen.getClass().getName().contains("GridScreen")) return;
+        if (!(screen instanceof com.refinedmods.refinedstorage.screen.grid.GridScreen)) return;
 
         AbstractContainerScreenAccessor acc = (AbstractContainerScreenAccessor) acs;
         MachineHubRenderer.render(event.getGuiGraphics(), acc.getLeftPos(), acc.getTopPos(),

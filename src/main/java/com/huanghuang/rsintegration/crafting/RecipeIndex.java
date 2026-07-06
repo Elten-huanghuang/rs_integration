@@ -190,7 +190,7 @@ public final class RecipeIndex {
             ItemStack stack = new ItemStack(faForgeBlockItem);
             return (ItemStack) faSetTierOnStack.invoke(null, stack, upgradedTier);
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RecipeIndex] FA upgrade output failed", e);
+            RSIntegrationMod.LOGGER.warn("[RecipeIndex] FA upgrade output failed", e);
             return ItemStack.EMPTY;
         }
     }
@@ -212,7 +212,7 @@ public final class RecipeIndex {
                 }
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RecipeIndex] FA fallback output failed for {}: {}",
+            RSIntegrationMod.LOGGER.warn("[RecipeIndex] FA fallback output failed for {}: {}",
                     id, e.toString());
         }
         return ItemStack.EMPTY;
