@@ -71,7 +71,9 @@ public final class SkilletBatchDelegate implements com.huanghuang.rsintegration.
             items = resolveField(cfb, "items", "f_59042_");
             cookingProgress = resolveField(cfb, "cookingProgress", "f_59043_");
             cookingTime = resolveField(cfb, "cookingTime", "f_59044_");
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Skillet] Reflection read failed: {}", e.toString());
+        }
         CAMPFIRE_ITEMS = items;
         CAMPFIRE_COOKING_PROGRESS = cookingProgress;
         CAMPFIRE_COOKING_TIME = cookingTime;
@@ -315,7 +317,10 @@ public final class SkilletBatchDelegate implements com.huanghuang.rsintegration.
                 var items = (net.minecraft.core.NonNullList<ItemStack>) CAMPFIRE_ITEMS.get(be);
                 return campfireSlot >= 0 && campfireSlot < items.size()
                         && items.get(campfireSlot).isEmpty();
-            } catch (Exception e) { return false; }
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.warn("[RSI-Skillet] Reflection read failed: {}", e.toString());
+                return false;
+            }
         }
 
         return false;
@@ -354,7 +359,9 @@ public final class SkilletBatchDelegate implements com.huanghuang.rsintegration.
                 int[] times = (int[]) CAMPFIRE_COOKING_TIME.get(be);
                 times[campfireSlot] = 0;
                 be.setChanged();
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.warn("[RSI-Skillet] Reflection read failed: {}", e.toString());
+            }
             return result;
         }
 
@@ -371,7 +378,9 @@ public final class SkilletBatchDelegate implements com.huanghuang.rsintegration.
                     ItemStack recovered = collectResult(player);
                     if (!recovered.isEmpty() && !usingSharedLedger) refundToRSNetwork(recovered);
                 }
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.warn("[RSI-Skillet] Reflection read failed: {}", e.toString());
+            }
         }
         clearCampfireSlot();
         campfireForceLoad(false);
@@ -446,7 +455,9 @@ public final class SkilletBatchDelegate implements com.huanghuang.rsintegration.
 
     private static boolean isSkilletBE(BlockEntity be) {
         if (skilletClass == null) {
-            try { skilletClass = Class.forName(SKILLET_BE); } catch (Exception ignored) {}
+            try { skilletClass = Class.forName(SKILLET_BE); } catch (Exception e) {
+                RSIntegrationMod.LOGGER.warn("[RSI-Skillet] Reflection read failed: {}", e.toString());
+            }
         }
         if (skilletClass != null && skilletClass.isAssignableFrom(be.getClass())) return true;
         Class<?> clazz = be.getClass();
@@ -459,7 +470,9 @@ public final class SkilletBatchDelegate implements com.huanghuang.rsintegration.
 
     private static boolean isCampfireBE(BlockEntity be) {
         if (campfireClass == null) {
-            try { campfireClass = Class.forName(CAMPFIRE_BE); } catch (Exception ignored) {}
+            try { campfireClass = Class.forName(CAMPFIRE_BE); } catch (Exception e) {
+                RSIntegrationMod.LOGGER.warn("[RSI-Skillet] Reflection read failed: {}", e.toString());
+            }
         }
         if (campfireClass != null && campfireClass.isAssignableFrom(be.getClass())) return true;
         Class<?> clazz = be.getClass();
@@ -475,6 +488,7 @@ public final class SkilletBatchDelegate implements com.huanghuang.rsintegration.
             Method m = be.getClass().getMethod("isHeated");
             return (boolean) m.invoke(be);
         } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Skillet] Reflection read failed: {}", e.toString());
             return false;
         }
     }
@@ -492,7 +506,9 @@ public final class SkilletBatchDelegate implements com.huanghuang.rsintegration.
             int[] times = (int[]) CAMPFIRE_COOKING_TIME.get(campfireBE);
             times[campfireSlot] = 0;
             if (campfireBE instanceof BlockEntity be) be.setChanged();
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Skillet] Reflection read failed: {}", e.toString());
+        }
         campfireSlot = -1;
     }
 

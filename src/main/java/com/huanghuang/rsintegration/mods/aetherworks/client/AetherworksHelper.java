@@ -15,6 +15,8 @@ import net.minecraftforge.api.distmarker.OnlyIn;
 import net.minecraftforge.fml.ModList;
 import net.minecraftforge.items.IItemHandler;
 
+import com.huanghuang.rsintegration.RSIntegrationMod;
+
 import javax.annotation.Nullable;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -166,17 +168,26 @@ final class AetherworksHelper {
 
     static int getAnvilProgress(BlockEntity anvil) {
         if (f_anvil_progress == null) return 0;
-        try { return f_anvil_progress.getInt(anvil); } catch (Exception e) { return 0; }
+        try { return f_anvil_progress.getInt(anvil); } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] Reflection read failed: {}", e.toString());
+            return 0;
+        }
     }
 
     static int getAnvilHitTimeout(BlockEntity anvil) {
         if (f_anvil_hitTimeout == null) return 0;
-        try { return f_anvil_hitTimeout.getInt(anvil); } catch (Exception e) { return 0; }
+        try { return f_anvil_hitTimeout.getInt(anvil); } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] Reflection read failed: {}", e.toString());
+            return 0;
+        }
     }
 
     static int getAnvilMistakes(BlockEntity anvil) {
         if (f_anvil_mistakes == null) return 0;
-        try { return f_anvil_mistakes.getInt(anvil); } catch (Exception e) { return 0; }
+        try { return f_anvil_mistakes.getInt(anvil); } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] Reflection read failed: {}", e.toString());
+            return 0;
+        }
     }
 
     static ItemStack getAnvilSlot(BlockEntity anvil, int slot) {
@@ -184,7 +195,10 @@ final class AetherworksHelper {
         try {
             IItemHandler handler = (IItemHandler) f_anvil_inventory.get(anvil);
             return handler.getStackInSlot(slot);
-        } catch (Exception e) { return ItemStack.EMPTY; }
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] Reflection read failed: {}", e.toString());
+            return ItemStack.EMPTY;
+        }
     }
 
     static ItemStack getTsSlot(BlockEntity ts, int slot) {
@@ -192,7 +206,10 @@ final class AetherworksHelper {
         try {
             IItemHandler handler = (IItemHandler) f_ts_inventory.get(ts);
             return handler.getStackInSlot(slot);
-        } catch (Exception e) { return ItemStack.EMPTY; }
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] Reflection read failed: {}", e.toString());
+            return ItemStack.EMPTY;
+        }
     }
 
     static double getForgeHeat(BlockEntity forge) {
@@ -201,7 +218,10 @@ final class AetherworksHelper {
             Object cap = f_forge_heatCap.get(forge);
             if (cap == null) return 0;
             return (double) m_heat_getHeat.invoke(cap);
-        } catch (Exception e) { return 0; }
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] Reflection read failed: {}", e.toString());
+            return 0;
+        }
     }
 
     static double getForgeEmber(BlockEntity forge) {
@@ -210,7 +230,10 @@ final class AetherworksHelper {
             Object cap = f_forge_emberCap.get(forge);
             if (cap == null) return 0;
             return (double) m_ember_getEmber.invoke(cap);
-        } catch (Exception e) { return 0; }
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] Reflection read failed: {}", e.toString());
+            return 0;
+        }
     }
 
     static double getForgeEmberCapacity(BlockEntity forge) {
@@ -219,7 +242,10 @@ final class AetherworksHelper {
             Object cap = f_forge_emberCap.get(forge);
             if (cap == null) return 0;
             return (double) m_ember_getCapacity.invoke(cap);
-        } catch (Exception e) { return 0; }
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] Reflection read failed: {}", e.toString());
+            return 0;
+        }
     }
 
     @Nullable
@@ -233,28 +259,42 @@ final class AetherworksHelper {
                 Ingredient ing = (Ingredient) m_recipe_getDisplayInput.invoke(r);
                 if (ing.test(item)) return r;
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] Reflection read failed: {}", e.toString());
+        }
         return null;
     }
 
     static int getRecipeHits(Object recipe) {
         if (m_recipe_getNumberOfHits == null) return 0;
-        try { return (int) m_recipe_getNumberOfHits.invoke(recipe); } catch (Exception e) { return 0; }
+        try { return (int) m_recipe_getNumberOfHits.invoke(recipe); } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] Reflection read failed: {}", e.toString());
+            return 0;
+        }
     }
 
     static int getRecipeTempMin(Object recipe) {
         if (m_recipe_getTemperatureMin == null) return 0;
-        try { return (int) m_recipe_getTemperatureMin.invoke(recipe); } catch (Exception e) { return 0; }
+        try { return (int) m_recipe_getTemperatureMin.invoke(recipe); } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] Reflection read failed: {}", e.toString());
+            return 0;
+        }
     }
 
     static int getRecipeTempMax(Object recipe) {
         if (m_recipe_getTemperatureMax == null) return 0;
-        try { return (int) m_recipe_getTemperatureMax.invoke(recipe); } catch (Exception e) { return 0; }
+        try { return (int) m_recipe_getTemperatureMax.invoke(recipe); } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] Reflection read failed: {}", e.toString());
+            return 0;
+        }
     }
 
     static int getRecipeEmberPerHit(Object recipe) {
         if (m_recipe_getEmberPerHit == null) return 0;
-        try { return (int) m_recipe_getEmberPerHit.invoke(recipe); } catch (Exception e) { return 0; }
+        try { return (int) m_recipe_getEmberPerHit.invoke(recipe); } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] Reflection read failed: {}", e.toString());
+            return 0;
+        }
     }
 
     @Nullable
@@ -286,13 +326,18 @@ final class AetherworksHelper {
                     }
                 }
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] Reflection read failed: {}", e.toString());
+        }
         return null;
     }
 
     static int getTsRecipeTemp(Object recipe) {
         if (m_ts_recipe_getTemperature == null) return 0;
-        try { return (int) m_ts_recipe_getTemperature.invoke(recipe); } catch (Exception e) { return 0; }
+        try { return (int) m_ts_recipe_getTemperature.invoke(recipe); } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] Reflection read failed: {}", e.toString());
+            return 0;
+        }
     }
 
     @Nullable

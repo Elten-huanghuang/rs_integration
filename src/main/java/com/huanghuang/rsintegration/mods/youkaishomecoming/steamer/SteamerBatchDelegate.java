@@ -24,7 +24,9 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BooleanProperty;
+import net.minecraftforge.common.capabilities.ForgeCapabilities;
 import net.minecraftforge.common.world.ForgeChunkManager;
+import net.minecraftforge.items.IItemHandler;
 import net.minecraftforge.items.ItemHandlerHelper;
 
 import javax.annotation.Nullable;
@@ -554,20 +556,32 @@ public final class SteamerBatchDelegate implements IBatchDelegate {
         if (be == null || !isSteamerBE(be)) return;
 
         List<?> racks = getRacks(be);
-        if (racks == null) return;
-
-        for (Object rack : racks) {
-            Object[] items = getRackItems(rack);
-            if (items == null) continue;
-            for (Object itemData : items) {
-                if (itemData == null) continue;
-                ItemStack s = getStack(itemData);
-                if (!s.isEmpty()) {
-                    setStack(itemData, be, ItemStack.EMPTY);
-                    markItemDirty(itemData);
-                    if (!usingSharedLedger) refund(s);
+        if (racks != null) {
+            for (Object rack : racks) {
+                Object[] items = getRackItems(rack);
+                if (items == null) continue;
+                for (Object itemData : items) {
+                    if (itemData == null) continue;
+                    ItemStack s = getStack(itemData);
+                    if (!s.isEmpty()) {
+                        setStack(itemData, be, ItemStack.EMPTY);
+                        markItemDirty(itemData);
+                        if (!usingSharedLedger) refund(s);
+                    }
                 }
             }
+        } else {
+            // IItemHandler capability fallback — recovers items when reflection
+            // path fails (e.g. after a mod update changes internal field names)
+            be.getCapability(ForgeCapabilities.ITEM_HANDLER).ifPresent(handler -> {
+                for (int slot = 0; slot < handler.getSlots(); slot++) {
+                    ItemStack s = handler.extractItem(slot, handler.getSlotLimit(slot), true);
+                    if (!s.isEmpty()) {
+                        handler.extractItem(slot, handler.getSlotLimit(slot), false);
+                        if (!usingSharedLedger) refund(s);
+                    }
+                }
+            });
         }
         be.setChanged();
     }

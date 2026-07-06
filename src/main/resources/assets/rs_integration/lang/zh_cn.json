@@ -64,6 +64,7 @@
   "rsi.generic.info.resolved": "§a已从 RS 网络解析 %s 个材料",
   "rsi.generic.error.auto_craft_failed": "§c自动合成中间步骤失败",
   "rsi.generic.craft_complete": "§a已合成 %s× %s (%s)",
+  "rsi.recovery.incomplete": "§eRS Integration: %s 个物品未能自动回收，位置 %s。请手动检查机器。",
 
   "rsi.error.circuit_breaker_tripped": "§c合成已中止：连续 %s 次失败，跳过 %s 次剩余合成",
 

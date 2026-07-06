@@ -60,6 +60,7 @@ public final class WRContainerHelper {
             } catch (NoSuchMethodException e) {
                 clazz = clazz.getSuperclass();
             } catch (Exception e) {
+                RSIntegrationMod.LOGGER.warn("[RSI-WR] Container reflection failed: {}", e.toString());
                 return null;
             }
         }
