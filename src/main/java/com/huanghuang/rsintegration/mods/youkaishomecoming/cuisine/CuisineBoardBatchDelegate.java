@@ -363,7 +363,9 @@ public final class CuisineBoardBatchDelegate implements IBatchDelegate {
         if (getCustomIngredientsMethod != null) {
             try {
                 return (List<Ingredient>) getCustomIngredientsMethod.invoke(recipe);
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.warn("[RSI-CuisineBoard] getCustomIngredients reflection failed: {}", e.toString());
+            }
         }
         return List.of();
     }
@@ -372,7 +374,9 @@ public final class CuisineBoardBatchDelegate implements IBatchDelegate {
         if (getResultMethod != null) {
             try {
                 return (ItemStack) getResultMethod.invoke(recipe);
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.warn("[RSI-CuisineBoard] getRecipeResult reflection failed: {}", e.toString());
+            }
         }
         return ItemStack.EMPTY;
     }
@@ -448,7 +452,9 @@ public final class CuisineBoardBatchDelegate implements IBatchDelegate {
                     if (!ing.isEmpty()) all.add(ing);
                 }
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-CuisineBoard] collectAllIngredients reflection failed: {}", e.toString());
+        }
 
         if (!all.isEmpty()) {
             RSIntegrationMod.LOGGER.debug("[RSI-Cuisine] collectAllIngredients: {} items", all.size());
@@ -526,7 +532,9 @@ public final class CuisineBoardBatchDelegate implements IBatchDelegate {
         if (addItemMethod != null) {
             try {
                 return (int) addItemMethod.invoke(be, stack);
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.warn("[RSI-CuisineBoard] addItem reflection failed: {}", e.toString());
+            }
         }
         return -1;
     }
@@ -535,7 +543,9 @@ public final class CuisineBoardBatchDelegate implements IBatchDelegate {
         if (addToPlayerMethod != null) {
             try {
                 return (boolean) addToPlayerMethod.invoke(be, player);
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.warn("[RSI-CuisineBoard] addToPlayer reflection failed: {}", e.toString());
+            }
         }
         return false;
     }
@@ -544,7 +554,9 @@ public final class CuisineBoardBatchDelegate implements IBatchDelegate {
         if (performToolActionMethod != null) {
             try {
                 return (boolean) performToolActionMethod.invoke(be, tool);
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.warn("[RSI-CuisineBoard] performToolAction reflection failed: {}", e.toString());
+            }
         }
         return false;
     }
@@ -554,7 +566,9 @@ public final class CuisineBoardBatchDelegate implements IBatchDelegate {
         if (getModelMethod != null) {
             try {
                 return getModelMethod.invoke(be);
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.warn("[RSI-CuisineBoard] getModel reflection failed: {}", e.toString());
+            }
         }
         return null;
     }
@@ -569,7 +583,9 @@ public final class CuisineBoardBatchDelegate implements IBatchDelegate {
                         return s;
                     }
                 }
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.warn("[RSI-CuisineBoard] completeModelGetResult reflection failed: {}", e.toString());
+            }
         }
         return ItemStack.EMPTY;
     }
@@ -578,7 +594,9 @@ public final class CuisineBoardBatchDelegate implements IBatchDelegate {
         if (clearMethod != null) {
             try {
                 clearMethod.invoke(be);
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.warn("[RSI-CuisineBoard] clearModel reflection failed: {}", e.toString());
+            }
         }
     }
 

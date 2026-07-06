@@ -123,7 +123,7 @@ public final class MachineTabRenderer {
      * look up the block, falling back to the crafting table icon.
      */
     private static ItemStack resolveIcon(BindingInfo info) {
-        return com.huanghuang.rsintegration.network.BindingEventHandler.resolveBlockIcon(
+        return com.huanghuang.rsintegration.network.binding.BindingEventHandler.resolveBlockIcon(
                 info.blockRegKey(), info.blockKey(), info.displayStack());
     }
 }

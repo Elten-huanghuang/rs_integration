@@ -1,6 +1,6 @@
 package com.huanghuang.rsintegration.mods.goety;
 
-import com.huanghuang.rsintegration.network.NetworkHandler;
+import com.huanghuang.rsintegration.network.packet.NetworkHandler;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;

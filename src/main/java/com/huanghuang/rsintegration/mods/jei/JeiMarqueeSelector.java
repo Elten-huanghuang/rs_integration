@@ -1,7 +1,7 @@
 package com.huanghuang.rsintegration.mods.jei;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
-import com.huanghuang.rsintegration.client.RSIKeyBindings;
+import com.huanghuang.rsintegration.sidepanel.client.RSIKeyBindings;
 import com.huanghuang.rsintegration.network.RSJeiPlugin;
 import com.mojang.blaze3d.platform.InputConstants;
 import com.mojang.blaze3d.systems.RenderSystem;

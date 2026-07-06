@@ -3,7 +3,7 @@ package com.huanghuang.rsintegration.mods.farmersrespite;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.mods.IModIntegration;
-import com.huanghuang.rsintegration.network.BindingEventHandler;
+import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
 import net.minecraftforge.common.ForgeConfigSpec;
 import net.minecraftforge.fml.DistExecutor;
 

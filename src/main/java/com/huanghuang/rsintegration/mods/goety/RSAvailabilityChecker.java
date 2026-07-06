@@ -1,10 +1,10 @@
 package com.huanghuang.rsintegration.mods.goety;
 
-import com.huanghuang.rsintegration.network.AltarBinding;
-import com.huanghuang.rsintegration.network.AltarBindingRegistry;
+import com.huanghuang.rsintegration.network.binding.AltarBinding;
+import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
-import com.huanghuang.rsintegration.network.RSIntegration;
+import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.util.Reflect;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
@@ -81,7 +81,7 @@ public final class RSAvailabilityChecker {
 
         boolean[] results = new boolean[ingredients.size()];
         for (int i = 0; i < ingredients.size(); i++) {
-            results[i] = RSIntegration.hasItemInNetwork(network, ingredients.get(i));
+            results[i] = RSIntegrationNetwork.hasItemInNetwork(network, ingredients.get(i));
             if (!results[i]) {
                 results[i] = rsi$matchesPedestalItem(pedestalItems, ingredients.get(i));
             }
@@ -195,11 +195,11 @@ public final class RSAvailabilityChecker {
                         net.minecraft.core.registries.Registries.DIMENSION, dimId);
                 BlockPos controllerPos = new BlockPos(
                         data.getInt("x"), data.getInt("y"), data.getInt("z"));
-                INetwork net = RSIntegration.resolveNetwork(player.server, dim, controllerPos);
+                INetwork net = RSIntegrationNetwork.resolveNetwork(player.server, dim, controllerPos);
                 if (net != null) return net;
             }
         }
 
-        return RSIntegration.resolveNetworkFromPlayer(player);
+        return RSIntegrationNetwork.resolveNetworkFromPlayer(player);
     }
 }

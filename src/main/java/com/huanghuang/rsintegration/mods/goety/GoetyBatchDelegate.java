@@ -31,6 +31,7 @@ import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraftforge.common.capabilities.ForgeCapabilities;
 import net.minecraftforge.common.util.LazyOptional;
 import net.minecraftforge.items.IItemHandler;
 import net.minecraftforge.items.ItemHandlerHelper;
@@ -1144,7 +1145,10 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             if (opt.isEmpty()) return ItemStack.EMPTY;
             return ((LazyOptional<IItemHandler>) opt.get())
                     .map(h -> h.getStackInSlot(0)).orElse(ItemStack.EMPTY);
-        } catch (Exception e) { return ItemStack.EMPTY; }
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.error("[RSI-Goety] Failed to read pedestal stack: {}", e.toString());
+            return ItemStack.EMPTY;
+        }
     }
 
     @SuppressWarnings("unchecked")
@@ -1245,6 +1249,30 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
                 }
             }
             writePedestalItem(ped, ItemStack.EMPTY);
+
+            // IItemHandler capability fallback — extracts items that the reflection-based
+            // itemStackHandler field access may have missed (prevents permanent item loss).
+            if (ped instanceof BlockEntity be) {
+                LazyOptional<IItemHandler> handler = be.getCapability(ForgeCapabilities.ITEM_HANDLER);
+                handler.ifPresent(h -> {
+                    for (int i = 0; i < h.getSlots(); i++) {
+                        ItemStack s = h.extractItem(i, 64, false);
+                        if (!s.isEmpty()) {
+                            if (usingSharedLedger) {
+                                // Shared ledger will refund — do not double-insert
+                            } else if (network != null) {
+                                ItemStack leftover = network.insertItem(s, s.getCount(),
+                                        com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                                if (!leftover.isEmpty()) {
+                                    ItemHandlerHelper.giveItemToPlayer(player, leftover);
+                                }
+                            } else if (player != null) {
+                                ItemHandlerHelper.giveItemToPlayer(player, s);
+                            }
+                        }
+                    }
+                });
+            }
         }
     }
 

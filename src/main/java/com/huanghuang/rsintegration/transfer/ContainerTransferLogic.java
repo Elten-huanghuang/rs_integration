@@ -1,7 +1,7 @@
 package com.huanghuang.rsintegration.transfer;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
-import com.huanghuang.rsintegration.network.RSIntegration;
+import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.util.ModIds;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;
@@ -37,7 +37,7 @@ final class ContainerTransferLogic {
     }
 
     private static void transferToRS(ServerPlayer player, AbstractContainerMenu menu) {
-        INetwork network = RSIntegration.resolveNetworkFromPlayer(player);
+        INetwork network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
         if (network == null) {
             player.sendSystemMessage(
                     Component.translatable("rsi.transfer.no_network"), false);

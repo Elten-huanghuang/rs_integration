@@ -3,8 +3,8 @@ package com.huanghuang.rsintegration.mods;
 import com.huanghuang.rsintegration.mods.eidolon.EidolonCraftPacket;
 import com.huanghuang.rsintegration.mods.forbidden.FaCraftPacket;
 import com.huanghuang.rsintegration.mods.malum.MalumCraftPacket;
-import com.huanghuang.rsintegration.mods.wizards_reborn.WRWandCraftPacket;
-import com.huanghuang.rsintegration.network.NetworkHandler;
+import com.huanghuang.rsintegration.mods.wizardsreborn.WRWandCraftPacket;
+import com.huanghuang.rsintegration.network.packet.NetworkHandler;
 
 public final class ModCraftNetworkHandlers {
 

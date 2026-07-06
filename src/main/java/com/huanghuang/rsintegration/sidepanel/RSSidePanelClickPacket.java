@@ -1,7 +1,7 @@
 package com.huanghuang.rsintegration.sidepanel;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
-import com.huanghuang.rsintegration.network.RSIntegration;
+import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.network.security.Permission;
 import com.refinedmods.refinedstorage.api.util.Action;
@@ -146,7 +146,7 @@ public final class RSSidePanelClickPacket {
 
     private static void handleSingleClickImpl(ServerPlayer player, ItemStack targetItem,
                                                byte action, boolean isShift, UUID panelId) {
-        INetwork network = RSIntegration.resolveNetworkFromPlayer(player);
+        INetwork network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
         if (network == null || targetItem.isEmpty()) return;
 
         if (network.getSecurityManager() != null
@@ -279,7 +279,7 @@ public final class RSSidePanelClickPacket {
 
     private static void handleInsert(ServerPlayer player, boolean isRightClick, ItemStack clientCarried) {
         try {
-            INetwork network = RSIntegration.resolveNetworkFromPlayer(player);
+            INetwork network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
             if (network == null) return;
 
             // Security check — matches RS ItemGridHandler.onInsert
@@ -356,7 +356,7 @@ public final class RSSidePanelClickPacket {
     }
 
     private static void handleDragDistribute(ServerPlayer player, List<ItemStack> dragItems) {
-        INetwork network = RSIntegration.resolveNetworkFromPlayer(player);
+        INetwork network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
         if (network == null || dragItems.isEmpty()) return;
 
         if (network.getSecurityManager() != null

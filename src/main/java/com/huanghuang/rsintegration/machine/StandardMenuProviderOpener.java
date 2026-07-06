@@ -1,6 +1,6 @@
 package com.huanghuang.rsintegration.machine;
 
-import com.huanghuang.rsintegration.network.IMachineGuiOpener;
+import com.huanghuang.rsintegration.network.gui.IMachineGuiOpener;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerPlayer;

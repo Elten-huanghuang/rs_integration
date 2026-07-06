@@ -5,7 +5,7 @@ import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
-import com.huanghuang.rsintegration.network.RSIntegration;
+import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
@@ -236,7 +236,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         this.usingSharedLedger = false;
         this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
         if (this.network == null) {
-            this.network = RSIntegration.resolveNetworkFromPlayer(player);
+            this.network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
         }
         this.craftDone = false;
         this.fuelStacks = null;
@@ -259,7 +259,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         this.usingSharedLedger = true;
         this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
         if (this.network == null) {
-            this.network = RSIntegration.resolveNetworkFromPlayer(player);
+            this.network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
         }
         this.craftDone = false;
         this.fuelStacks = null;
@@ -290,7 +290,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         this.usingSharedLedger = true;
         this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
         if (this.network == null) {
-            this.network = RSIntegration.resolveNetworkFromPlayer(player);
+            this.network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
         }
         this.craftDone = false;
         this.fuelStacks = null;

@@ -1,8 +1,9 @@
 package com.huanghuang.rsintegration;
 
 import com.huanghuang.rsintegration.mods.sophisticatedbackpacks.SophisticatedBackpacksItems;
+import com.huanghuang.rsintegration.reflection.contract.ContractValidation;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
-import com.huanghuang.rsintegration.client.RSIKeyBindings;
+import com.huanghuang.rsintegration.sidepanel.client.RSIKeyBindings;
 import com.huanghuang.rsintegration.crafting.AsyncCraftManager;
 import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
 import com.huanghuang.rsintegration.mods.IModIntegration;
@@ -19,20 +20,20 @@ import com.huanghuang.rsintegration.mods.embers.EreAlchemyRSModule;
 import com.huanghuang.rsintegration.mods.farmingforblockheads.FarmingForBlockheadsRSModule;
 import com.huanghuang.rsintegration.mods.forbidden.FaRSModule;
 import com.huanghuang.rsintegration.mods.goety.GoetyRSModule;
-import com.huanghuang.rsintegration.mods.immortalers_delight.ImmortalersDelightRSModule;
+import com.huanghuang.rsintegration.mods.immortalersdelight.ImmortalersDelightRSModule;
 import com.huanghuang.rsintegration.mods.malum.MalumRSModule;
 import com.huanghuang.rsintegration.mods.slashblade.SlashBladeRSModule;
 import com.huanghuang.rsintegration.mods.tacz.TaczRSModule;
 import com.huanghuang.rsintegration.mods.touhoulittlemaid.TlmRSModule;
-import com.huanghuang.rsintegration.mods.wizards_reborn.WizardsRebornRSModule;
+import com.huanghuang.rsintegration.mods.wizardsreborn.WizardsRebornRSModule;
 import com.huanghuang.rsintegration.mods.youkaishomecoming.YoukaisHomecomingRSModule;
-import com.huanghuang.rsintegration.network.AltarBinding;
-import com.huanghuang.rsintegration.network.AltarBindingRegistry;
-import com.huanghuang.rsintegration.network.BindingEventHandler;
-import com.huanghuang.rsintegration.network.BindingTooltipHandler;
-import com.huanghuang.rsintegration.network.RSBindingHook;
-import com.huanghuang.rsintegration.network.RemoteGuiAuth;
-import com.huanghuang.rsintegration.network.RSIntegration;
+import com.huanghuang.rsintegration.network.binding.AltarBinding;
+import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
+import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
+import com.huanghuang.rsintegration.network.binding.BindingTooltipHandler;
+import com.huanghuang.rsintegration.network.binding.RSBindingHook;
+import com.huanghuang.rsintegration.network.gui.RemoteGuiAuth;
+import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.sidepanel.RSSidePanelClient;
 import com.huanghuang.rsintegration.sidepanel.RSSidePanelModule;
 import com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler;
@@ -365,7 +366,7 @@ public final class RSIntegrationMod {
             if (e.getEntity() instanceof ServerPlayer sp) {
                 if (RSSidePanelNetworkHandler.hasListener(sp.getUUID())) {
                     RSSidePanelNetworkHandler.unregisterListener(sp.getUUID());
-                    INetwork network = RSIntegration.resolveNetworkFromPlayer(sp);
+                    INetwork network = RSIntegrationNetwork.resolveNetworkFromPlayer(sp);
                     if (network != null) {
                         RSSidePanelNetworkHandler.registerListener(sp, network);
                     }
@@ -384,6 +385,8 @@ public final class RSIntegrationMod {
         // force-loading in RemoteGuiAuth.authorize(); this catches edge cases
         // (e.g. another mod force-unloading the chunk).
         MinecraftForge.EVENT_BUS.addListener(RemoteGuiAuth::onChunkUnload);
+
+        ContractValidation.validateAll();
 
         LOGGER.info("{} initialized.", MOD_NAME);
     }

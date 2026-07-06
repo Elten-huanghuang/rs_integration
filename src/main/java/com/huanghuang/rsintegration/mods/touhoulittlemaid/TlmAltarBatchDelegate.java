@@ -803,7 +803,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
             network = CraftPacketUtils.resolveNetworkForCraft(player, key, pos);
         }
         if (network == null) {
-            network = com.huanghuang.rsintegration.network.RSIntegration
+            network = com.huanghuang.rsintegration.network.RSIntegrationNetwork
                     .resolveNetworkFromPlayer(player);
         }
         if (network != null) {

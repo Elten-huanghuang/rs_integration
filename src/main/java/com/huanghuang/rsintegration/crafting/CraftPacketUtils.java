@@ -3,11 +3,11 @@ package com.huanghuang.rsintegration.crafting;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
-import com.huanghuang.rsintegration.network.AltarBindingRegistry;
-import com.huanghuang.rsintegration.network.BindingStorage;
+import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
+import com.huanghuang.rsintegration.network.binding.BindingStorage;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.ResolutionStep;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
-import com.huanghuang.rsintegration.network.RSIntegration;
+import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.util.PlayerUtils;
 import com.huanghuang.rsintegration.util.Reflect;
@@ -530,7 +530,9 @@ public final class CraftPacketUtils {
                         if (ct != null) {
                             crystalItems.add(is.getItem());
                         }
-                    } catch (Exception ignored) {}
+                    } catch (Exception e) {
+                        RSIntegrationMod.LOGGER.warn("[RSI] Crystal type detection failed: {}", e.toString());
+                    }
                 }
             }
         }
@@ -794,8 +796,10 @@ public final class CraftPacketUtils {
 
             return result.isEmpty() ? null : result;
         } catch (ClassNotFoundException e) {
+            RSIntegrationMod.LOGGER.warn("[RSI] Lodestone IngredientWithCount parse failed: {}", e.toString());
             return null;
         } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI] Lodestone IngredientWithCount parse failed: {}", e.toString());
             return null;
         }
     }
@@ -945,7 +949,7 @@ public final class CraftPacketUtils {
                                                      BlockPos altarPos, Ingredient ingredient, int count,
                                                      @Nullable ExtractionLedger ledger) {
         if (ledger != null) {
-            INetwork network = RSIntegration.resolveNetworkFromPlayer(player);
+            INetwork network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
             if (network == null && altarDim != null && altarPos != null) {
                 network = AltarBindingRegistry.resolveNetworkForAltar(player, altarDim, altarPos);
             }
@@ -972,7 +976,7 @@ public final class CraftPacketUtils {
         // Phase 1: direct extraction
         ItemStack result = AltarBindingRegistry.tryExtractFromBindings(player, altarDim, altarPos, ingredient, count);
         if (!result.isEmpty()) return result;
-        result = RSIntegration.tryExtractFromPlayerRS(player, ingredient, count);
+        result = RSIntegrationNetwork.tryExtractFromPlayerRS(player, ingredient, count);
         if (!result.isEmpty()) return result;
         result = extractFromPlayerInventoryAggregated(player, ingredient, count);
         if (!result.isEmpty()) return result;
@@ -985,7 +989,7 @@ public final class CraftPacketUtils {
         if (options.length == 0 || options[0].isEmpty()) return ItemStack.EMPTY;
         ItemStack needed = options[0].copyWithCount(count);
 
-        INetwork network = RSIntegration.resolveNetworkFromPlayer(player);
+        INetwork network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
         if (network == null) {
             network = AltarBindingRegistry.resolveNetworkForAltar(player, altarDim, altarPos);
         }
@@ -999,7 +1003,7 @@ public final class CraftPacketUtils {
         // Retry ALL extraction paths after auto-crafting
         result = AltarBindingRegistry.tryExtractFromBindings(player, altarDim, altarPos, ingredient, count);
         if (!result.isEmpty()) return result;
-        result = RSIntegration.tryExtractFromPlayerRS(player, ingredient, count);
+        result = RSIntegrationNetwork.tryExtractFromPlayerRS(player, ingredient, count);
         if (!result.isEmpty()) return result;
         result = extractFromPlayerInventoryAggregated(player, ingredient, count);
         if (!result.isEmpty()) return result;
@@ -1024,7 +1028,7 @@ public final class CraftPacketUtils {
             if (net != null) return net;
         }
         // Fall back to generic player inventory / nearby node scan
-        return RSIntegration.resolveNetworkFromPlayer(player);
+        return RSIntegrationNetwork.resolveNetworkFromPlayer(player);
     }
 
     // ── keyed-counts helpers ──────────────────────────────────────
@@ -1169,7 +1173,9 @@ public final class CraftPacketUtils {
                         bestFuel = entry.getKey();
                     }
                 }
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.warn("[RSI] Fuel detection failed: {}", e.toString());
+            }
         }
         if (bestFuel == null) {
             bestFuel = net.minecraft.world.item.Items.COAL;

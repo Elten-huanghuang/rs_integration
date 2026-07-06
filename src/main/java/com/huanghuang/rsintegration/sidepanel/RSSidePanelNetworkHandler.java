@@ -4,12 +4,12 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.machine.MachineInteractType;
 import com.huanghuang.rsintegration.machine.MachineStatus;
 import com.huanghuang.rsintegration.machine.MachineStatusReader;
-import com.huanghuang.rsintegration.network.BindingStorage;
-import com.huanghuang.rsintegration.network.BindingEventHandler;
-import com.huanghuang.rsintegration.network.ConfigSyncPacket;
-import com.huanghuang.rsintegration.network.NetworkHandler;
-import com.huanghuang.rsintegration.network.GuiOpenRateLimiter;
-import com.huanghuang.rsintegration.network.RemoteGuiAuth;
+import com.huanghuang.rsintegration.network.binding.BindingStorage;
+import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
+import com.huanghuang.rsintegration.network.packet.ConfigSyncPacket;
+import com.huanghuang.rsintegration.network.packet.NetworkHandler;
+import com.huanghuang.rsintegration.network.gui.GuiOpenRateLimiter;
+import com.huanghuang.rsintegration.network.gui.RemoteGuiAuth;
 import com.huanghuang.rsintegration.sidepanel.data.BindingInfo;
 import com.huanghuang.rsintegration.sidepanel.network.MachineCollectPacket;
 import com.huanghuang.rsintegration.sidepanel.network.MachineInsertPacket;
@@ -336,7 +336,7 @@ public final class RSSidePanelNetworkHandler {
                 // Only accept it if it differs from the generic fallback below,
                 // otherwise let the normal MULTI_PART_ROOT_MAP path handle it.
                 String mapped = blockRegKey != null
-                        ? com.huanghuang.rsintegration.network.BindingEventHandler.MULTI_PART_ROOT_MAP
+                        ? com.huanghuang.rsintegration.network.binding.BindingEventHandler.MULTI_PART_ROOT_MAP
                             .get(blockRegKey)
                         : null;
                 if (!key.equals(mapped)) {
@@ -346,7 +346,7 @@ public final class RSSidePanelNetworkHandler {
         }
 
         if (blockRegKey != null) {
-            String effectiveKey = com.huanghuang.rsintegration.network.BindingEventHandler.MULTI_PART_ROOT_MAP
+            String effectiveKey = com.huanghuang.rsintegration.network.binding.BindingEventHandler.MULTI_PART_ROOT_MAP
                     .getOrDefault(blockRegKey, blockRegKey);
             var rl = net.minecraft.resources.ResourceLocation.tryParse(effectiveKey);
             if (rl != null) {

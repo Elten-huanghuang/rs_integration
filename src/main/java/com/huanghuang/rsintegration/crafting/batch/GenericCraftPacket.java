@@ -17,14 +17,14 @@ import com.huanghuang.rsintegration.crafting.plan.PlanWarnings;
 import com.huanghuang.rsintegration.mods.crabbersdelight.CrabTrapRecipeResolver;
 import com.huanghuang.rsintegration.mods.crockpot.CrockPotBatchDelegate;
 import com.huanghuang.rsintegration.mods.farmersdelight.CookingPotBatchDelegate;
-import com.huanghuang.rsintegration.mods.immortalers_delight.EnchantalCoolerBatchDelegate;
+import com.huanghuang.rsintegration.mods.immortalersdelight.EnchantalCoolerBatchDelegate;
 import com.huanghuang.rsintegration.mods.youkaishomecoming.moka.MokaPotBatchDelegate;
 import com.huanghuang.rsintegration.mods.embers.EmbersPlanInfo;
 import com.huanghuang.rsintegration.mods.farmingforblockheads.MarketBatchDelegate;
 import com.huanghuang.rsintegration.mods.forbidden.FaRitualHelper;
 import com.huanghuang.rsintegration.mods.forbidden.FaRitualWrapper;
-import com.huanghuang.rsintegration.network.AltarBindingRegistry;
-import com.huanghuang.rsintegration.network.RSIntegration;
+import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
+import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.crafting.AsyncCraftChain;
 import com.huanghuang.rsintegration.crafting.AsyncCraftManager;
 import com.huanghuang.rsintegration.crafting.ChainRepeatController;
@@ -32,7 +32,7 @@ import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.MaterialSources;
 import com.huanghuang.rsintegration.crafting.PreviewRateLimiter;
-import com.huanghuang.rsintegration.network.BindingEventHandler;
+import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.util.TextBuilder;
 import com.huanghuang.rsintegration.util.ModIds;
@@ -745,7 +745,7 @@ public final class GenericCraftPacket {
             }
         }
         // 2. Fallback to player inventory / nearby RS node
-        INetwork network = RSIntegration.resolveNetworkFromPlayer(player);
+        INetwork network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
         if (network != null) return network;
         // 3. For mod recipes: try all bound machines of matching type
         if (modType != null && modType != ModType.GENERIC) {

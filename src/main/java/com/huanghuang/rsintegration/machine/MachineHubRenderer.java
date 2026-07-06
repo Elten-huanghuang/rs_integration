@@ -1,6 +1,6 @@
 package com.huanghuang.rsintegration.machine;
 
-import com.huanghuang.rsintegration.network.BindingEventHandler;
+import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
 import com.huanghuang.rsintegration.sidepanel.data.BindingInfo;
 import com.huanghuang.rsintegration.sidepanel.data.MachineStatusCache;
 import net.minecraft.client.Minecraft;

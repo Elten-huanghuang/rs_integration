@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.network;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.util.ChunkUtils;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.network.grid.INetworkAwareGrid;
@@ -24,9 +25,9 @@ import javax.annotation.Nullable;
 import java.lang.reflect.Method;
 import java.util.UUID;
 
-public final class RSIntegration {
+public final class RSIntegrationNetwork {
 
-    private RSIntegration() {}
+    private RSIntegrationNetwork() {}
 
     @Nullable
     public static INetwork resolveNetworkFromPlayer(ServerPlayer player) {

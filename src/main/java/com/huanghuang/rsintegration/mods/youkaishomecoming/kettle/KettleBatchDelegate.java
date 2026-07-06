@@ -323,7 +323,9 @@ public final class KettleBatchDelegate implements IBatchDelegate {
             if (holder != null) {
                 return (int) holderAmountMethod.invoke(holder);
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Kettle] YHK fluid amount reflection failed: {}", e.toString());
+        }
         return 0;
     }
 
@@ -486,7 +488,9 @@ public final class KettleBatchDelegate implements IBatchDelegate {
         if (getFluidHandlerMethod != null) {
             try {
                 return (IFluidHandler) getFluidHandlerMethod.invoke(be);
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.warn("[RSI-Kettle] getFluidHandler reflection failed: {}", e.toString());
+            }
         }
         return be.getCapability(net.minecraftforge.common.capabilities.ForgeCapabilities.FLUID_HANDLER)
                 .resolve().orElse(null);
@@ -499,7 +503,9 @@ public final class KettleBatchDelegate implements IBatchDelegate {
             try {
                 Object result = getItemHandlerMethod.invoke(be);
                 if (result instanceof SimpleContainer c) return c;
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.warn("[RSI-Kettle] getItemHandler reflection failed: {}", e.toString());
+            }
         }
         var cap = be.getCapability(net.minecraftforge.common.capabilities.ForgeCapabilities.ITEM_HANDLER)
                 .resolve().orElse(null);
@@ -552,7 +558,9 @@ public final class KettleBatchDelegate implements IBatchDelegate {
                     be.setChanged();
                     return true;
                 }
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.warn("[RSI-Kettle] Water fill via fluidsField failed: {}", e.toString());
+            }
         }
 
         // Last resort: extract water bucket from RS, use it to fill
@@ -594,7 +602,9 @@ public final class KettleBatchDelegate implements IBatchDelegate {
         if (inputField != null) {
             try {
                 return (List<Ingredient>) inputField.get(recipe);
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.warn("[RSI-Kettle] getRecipeInput reflection failed: {}", e.toString());
+            }
         }
         return List.of();
     }
@@ -605,7 +615,9 @@ public final class KettleBatchDelegate implements IBatchDelegate {
             try {
                 Object val = resultField.get(recipe);
                 if (val instanceof FluidStack fs) return fs;
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.warn("[RSI-Kettle] getRecipeResult reflection failed: {}", e.toString());
+            }
         }
         return FluidStack.EMPTY;
     }

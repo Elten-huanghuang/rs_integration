@@ -6,7 +6,7 @@ import com.huanghuang.rsintegration.util.ModIds;
 import com.huanghuang.rsintegration.mods.aetherworks.client.AetherworksClientSetup;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.mods.IModIntegration;
-import com.huanghuang.rsintegration.network.BindingEventHandler;
+import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
 import com.huanghuang.rsintegration.recipe.AetherworksRecipeHandler;
 import com.huanghuang.rsintegration.recipe.AetherworksToolStationRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;

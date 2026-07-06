@@ -3,7 +3,7 @@ package com.huanghuang.rsintegration.machine;
 import com.github.stuxuhai.jpinyin.PinyinFormat;
 import com.github.stuxuhai.jpinyin.PinyinHelper;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
-import com.huanghuang.rsintegration.network.BindingEventHandler;
+import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
 import com.huanghuang.rsintegration.sidepanel.client.MachineTabHandler;
 import com.huanghuang.rsintegration.sidepanel.data.BindingInfo;
 import net.minecraft.client.Minecraft;

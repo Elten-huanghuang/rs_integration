@@ -1,9 +1,10 @@
-package com.huanghuang.rsintegration.network;
+package com.huanghuang.rsintegration.network.binding;
 
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.item.NetworkItem;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
+import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.util.TextBuilder;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
@@ -64,9 +65,9 @@ public final class RSBindingHook implements IBindingHook {
         ResourceKey<Level> dim = ResourceKey.create(
                 net.minecraft.core.registries.Registries.DIMENSION, dimId);
         BlockPos pos = new BlockPos(data.getInt(KEY_X), data.getInt(KEY_Y), data.getInt(KEY_Z));
-        INetwork network = RSIntegration.resolveNetwork(player.server, dim, pos);
+        INetwork network = RSIntegrationNetwork.resolveNetwork(player.server, dim, pos);
         if (network == null) return ItemStack.EMPTY;
-        return RSIntegration.extractFromNetwork(network, ingredient, count);
+        return RSIntegrationNetwork.extractFromNetwork(network, ingredient, count);
     }
 
 }

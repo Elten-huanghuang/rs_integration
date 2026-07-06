@@ -180,7 +180,9 @@ public class CookingPotBatchDelegate implements IBatchDelegate {
             Method setPlayer = be.getClass().getMethod("setLastPlayer",
                     net.minecraft.world.entity.player.Player.class);
             setPlayer.invoke(be, player);
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-CookingPot] setLastPlayer reflection failed: {}", e.toString());
+        }
 
         for (ItemStack mat : materials) {
             if (mat.isEmpty()) continue;
@@ -465,7 +467,9 @@ public class CookingPotBatchDelegate implements IBatchDelegate {
             try {
                 Object val = itemsField.get(be);
                 if (val instanceof Container c) return c;
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.warn("[RSI-CookingPot] Items container reflection failed: {}", e.toString());
+            }
         }
         return null;
     }
@@ -474,7 +478,9 @@ public class CookingPotBatchDelegate implements IBatchDelegate {
         if (tryAddItemMethod != null) {
             try {
                 return (boolean) tryAddItemMethod.invoke(be, stack, false);
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.warn("[RSI-CookingPot] tryAddItem reflection failed: {}", e.toString());
+            }
         }
         return false;
     }
@@ -511,7 +517,9 @@ public class CookingPotBatchDelegate implements IBatchDelegate {
         if (getInputMethod != null) {
             try {
                 return (List<Ingredient>) getInputMethod.invoke(recipe);
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.warn("[RSI-CookingPot] getRecipeInput reflection failed: {}", e.toString());
+            }
         }
         return List.of();
     }
@@ -520,7 +528,9 @@ public class CookingPotBatchDelegate implements IBatchDelegate {
         if (getResultMethod != null) {
             try {
                 return (ItemStack) getResultMethod.invoke(recipe);
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.warn("[RSI-CookingPot] getRecipeResult reflection failed: {}", e.toString());
+            }
         }
         return ItemStack.EMPTY;
     }

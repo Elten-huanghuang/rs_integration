@@ -1,4 +1,4 @@
-package com.huanghuang.rsintegration.network;
+package com.huanghuang.rsintegration.network.gui;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceKey;

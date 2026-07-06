@@ -1,8 +1,8 @@
 package com.huanghuang.rsintegration.sidepanel.network;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
-import com.huanghuang.rsintegration.network.AltarBindingRegistry;
-import com.huanghuang.rsintegration.network.RSIntegration;
+import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
+import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.core.BlockPos;
@@ -100,7 +100,7 @@ public final class MachineCollectPacket {
             furnace.setChanged();
 
             if (packet.toRS) {
-                INetwork network = RSIntegration.resolveNetworkFromPlayer(player);
+                INetwork network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
                 if (network != null) {
                     ItemStack leftover = network.insertItem(output, output.getCount(), Action.PERFORM);
                     if (!leftover.isEmpty()) {

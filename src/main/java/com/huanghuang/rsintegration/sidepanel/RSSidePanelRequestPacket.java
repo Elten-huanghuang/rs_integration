@@ -1,7 +1,7 @@
 package com.huanghuang.rsintegration.sidepanel;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
-import com.huanghuang.rsintegration.network.RSIntegration;
+import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.storage.cache.IStorageCache;
 import net.minecraft.network.FriendlyByteBuf;
@@ -54,7 +54,7 @@ public final class RSSidePanelRequestPacket {
                 return;
             }
 
-            INetwork network = RSIntegration.resolveNetworkFromPlayer(player);
+            INetwork network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
             if (network == null) {
                 RSSidePanelNetworkHandler.unregisterListener(player.getUUID());
                 RSSidePanelNetworkHandler.sendSync(player,

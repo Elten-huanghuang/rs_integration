@@ -1,4 +1,4 @@
-package com.huanghuang.rsintegration.network;
+package com.huanghuang.rsintegration.network.binding;
 
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;

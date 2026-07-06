@@ -1,7 +1,7 @@
 package com.huanghuang.rsintegration.sidepanel.network;
 
 import com.huanghuang.rsintegration.machine.MachineSlotType;
-import com.huanghuang.rsintegration.network.AltarBindingRegistry;
+import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;

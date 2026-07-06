@@ -5,7 +5,7 @@ import com.huanghuang.rsintegration.machine.MachineHub;
 import com.huanghuang.rsintegration.machine.MachineInteractType;
 import com.huanghuang.rsintegration.machine.MachineState;
 import com.huanghuang.rsintegration.machine.MachineStatus;
-import com.huanghuang.rsintegration.network.BindingEventHandler;
+import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
 import com.huanghuang.rsintegration.sidepanel.client.MachineTabHandler;
 import com.huanghuang.rsintegration.sidepanel.data.BindingInfo;
 import com.huanghuang.rsintegration.sidepanel.data.MachineStatusCache;

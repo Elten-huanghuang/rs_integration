@@ -55,7 +55,9 @@ public final class YoukaisHomecomingRecipeHandler implements com.huanghuang.rsin
                     Object first = list.get(0);
                     if (first instanceof ItemStack s && !s.isEmpty()) return s.copy();
                 }
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.warn("[RSI-YHK] Recipe result reflection failed: {}", e.toString());
+            }
             return ItemStack.EMPTY;
         }
         return com.huanghuang.rsintegration.recipe.ModRecipeHandlers.tryGetResultItem(recipe, access);
@@ -78,7 +80,9 @@ public final class YoukaisHomecomingRecipeHandler implements com.huanghuang.rsin
                     }
                     return specs.isEmpty() ? null : specs;
                 }
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.warn("[RSI-YHK] Ferment recipe ingredients reflection failed: {}", e.toString());
+            }
             return null;
         }
         if (isPotCookingRecipe(recipe)) {
@@ -93,7 +97,9 @@ public final class YoukaisHomecomingRecipeHandler implements com.huanghuang.rsin
                     }
                     return specs.isEmpty() ? null : specs;
                 }
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.warn("[RSI-YHK] Cooking recipe input reflection failed: {}", e.toString());
+            }
             return null;
         }
         if (isCuisineRecipe(recipe)) {
@@ -202,7 +208,9 @@ public final class YoukaisHomecomingRecipeHandler implements com.huanghuang.rsin
                     if (!ing.isEmpty()) all.add(ing);
                 }
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-YHK] Cuisine custom ingredients reflection failed: {}", e.toString());
+        }
 
         return all;
     }

@@ -8,7 +8,7 @@ import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.mods.embers.EreAlchemyLock;
 import com.huanghuang.rsintegration.mods.embers.KnownCodeSavedData;
-import com.huanghuang.rsintegration.network.RSIntegration;
+import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.util.ChunkUtils;
 import com.huanghuang.rsintegration.util.ModClassLoader;
 import com.huanghuang.rsintegration.util.Reflect;
@@ -119,7 +119,7 @@ extends AbstractBatchDelegate {
             player.sendSystemMessage(Component.translatable("rsi.embers.error.pedestals_insufficient", this.code.size(), this.pedestals.size()));
             return false;
         }
-        this.network = RSIntegration.resolveNetworkFromPlayer((ServerPlayer)player);
+        this.network = RSIntegrationNetwork.resolveNetworkFromPlayer((ServerPlayer)player);
         EreAlchemyBatchDelegate.recycleBlockingItems(lvl, pos, this.pedestals, player);
         for (PedestalInfo p : this.pedestals) {
             ItemStack bottomStack;
@@ -441,7 +441,7 @@ extends AbstractBatchDelegate {
     }
 
     static void recycleBlockingItems(ServerLevel level, BlockPos tabletPos, List<PedestalInfo> pedestals, ServerPlayer player) {
-        INetwork network = RSIntegration.resolveNetworkFromPlayer((ServerPlayer)player);
+        INetwork network = RSIntegrationNetwork.resolveNetworkFromPlayer((ServerPlayer)player);
         if (network == null) {
             RSIntegrationMod.LOGGER.warn("[RSI-Embers] No RS network for recycling, clearing pedestals anyway");
         }

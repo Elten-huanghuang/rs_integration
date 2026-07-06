@@ -5,7 +5,7 @@ import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.mods.farmingforblockheads.MarketRecipeWrapper;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
-import com.huanghuang.rsintegration.network.RSIntegration;
+import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.util.Reflect;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;
@@ -69,7 +69,7 @@ public final class MarketBatchDelegate extends AbstractBatchDelegate {
         // No shared ledger — extract payment from RS ourselves
         ItemStack cost = wrapper.costItem();
         if (!cost.isEmpty()) {
-            ItemStack extracted = RSIntegration.extractFromNetwork(
+            ItemStack extracted = RSIntegrationNetwork.extractFromNetwork(
                     network, Ingredient.of(cost), cost.getCount());
             if (extracted.isEmpty() || extracted.getCount() < cost.getCount()) {
                 RSIntegrationMod.LOGGER.warn("[RSI-Market] Failed to extract payment: {}x {}",
@@ -153,7 +153,7 @@ public final class MarketBatchDelegate extends AbstractBatchDelegate {
         this.wrapper = mrw;
 
         // Get RS network
-        network = RSIntegration.resolveNetworkFromPlayer(player);
+        network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
         if (network == null) {
             RSIntegrationMod.LOGGER.warn("[RSI-Market] validateAndInit: no RS network for player {}", player.getGameProfile().getName());
             return false;

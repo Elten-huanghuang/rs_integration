@@ -4,7 +4,7 @@ import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.mods.IModIntegration;
-import com.huanghuang.rsintegration.network.BindingEventHandler;
+import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
 import com.huanghuang.rsintegration.recipe.GoetyRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import mezz.jei.api.registration.IRecipeTransferRegistration;

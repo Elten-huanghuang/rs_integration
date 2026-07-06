@@ -1,4 +1,4 @@
-package com.huanghuang.rsintegration.mods.immortalers_delight;
+package com.huanghuang.rsintegration.mods.immortalersdelight;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;

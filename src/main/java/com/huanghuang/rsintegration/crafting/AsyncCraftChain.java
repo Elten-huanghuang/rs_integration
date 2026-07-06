@@ -2,11 +2,12 @@ package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.batch.GenericBatchDelegate;
+import com.huanghuang.rsintegration.ModVersionDelegateRegistry;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
-import com.huanghuang.rsintegration.network.AltarBindingRegistry;
-import com.huanghuang.rsintegration.network.AltarBindingRegistry.BoundMachine;
+import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
+import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry.BoundMachine;
 import com.huanghuang.rsintegration.network.ProtectionChecker;
 import com.huanghuang.rsintegration.util.Diagnostics;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
@@ -464,7 +465,7 @@ public final class AsyncCraftChain {
                 return null;
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-AsyncChain] Protection check failed: {}", e.toString());
+            RSIntegrationMod.LOGGER.warn("[RSI-AsyncChain] Protection check failed: {}", e.toString());
         }
 
         try {
@@ -844,6 +845,18 @@ public final class AsyncCraftChain {
     @Nullable
     private static IBatchDelegate createDelegate(ModType type) {
         if (type == ModType.GENERIC) return null;
+        // 1. Check version-specific delegate registry first
+        Class<? extends IBatchDelegate> versioned = ModVersionDelegateRegistry.resolve(type);
+        if (versioned != null) {
+            try {
+                return versioned.getDeclaredConstructor().newInstance();
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.error(
+                        "[RSI] Failed to instantiate versioned delegate {}: {}",
+                        versioned.getName(), e.toString());
+            }
+        }
+        // 2. Fall back to default delegate
         return type.createDelegate();
     }
 

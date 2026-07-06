@@ -1,6 +1,6 @@
 package com.huanghuang.rsintegration.mixin.minecraft;
 
-import com.huanghuang.rsintegration.network.RemoteGuiAuth;
+import com.huanghuang.rsintegration.network.gui.RemoteGuiAuth;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.ContainerLevelAccess;
 import net.minecraft.world.entity.player.Player;

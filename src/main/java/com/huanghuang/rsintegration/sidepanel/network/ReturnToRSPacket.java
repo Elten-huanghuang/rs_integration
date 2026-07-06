@@ -1,7 +1,7 @@
 package com.huanghuang.rsintegration.sidepanel.network;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
-import com.huanghuang.rsintegration.network.RemoteGuiAuth;
+import com.huanghuang.rsintegration.network.gui.RemoteGuiAuth;
 import com.huanghuang.rsintegration.util.ChunkUtils;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;

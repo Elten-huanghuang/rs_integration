@@ -296,7 +296,9 @@ public final class FermentationTankBatchDelegate implements IBatchDelegate {
             Field f = recipe.getClass().getField("ingredients");
             Object val = f.get(recipe);
             if (val instanceof List) return (List<Ingredient>) val;
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Fermentation] Recipe ingredients reflection failed: {}", e.toString());
+        }
         return List.of();
     }
 
@@ -309,7 +311,9 @@ public final class FermentationTankBatchDelegate implements IBatchDelegate {
                 if (list.get(0) instanceof ItemStack s && !s.isEmpty())
                     return s.copy();
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Fermentation] Expected result reflection failed: {}", e.toString());
+        }
         return ItemStack.EMPTY;
     }
 
@@ -358,7 +362,9 @@ public final class FermentationTankBatchDelegate implements IBatchDelegate {
             try {
                 Object val = itemsField.get(be);
                 if (val instanceof SimpleContainer sc) return sc;
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.warn("[RSI-Fermentation] getItemHandler reflection failed: {}", e.toString());
+            }
         }
         // Fallback: getCapability
         IItemHandler cap = be.getCapability(
@@ -373,7 +379,9 @@ public final class FermentationTankBatchDelegate implements IBatchDelegate {
             try {
                 notifyTileMethod.invoke(be);
                 return;
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.warn("[RSI-Fermentation] notifyTile reflection failed: {}", e.toString());
+            }
         }
         be.setChanged();
     }
@@ -385,7 +393,9 @@ public final class FermentationTankBatchDelegate implements IBatchDelegate {
                 Object prop = openPropertyField.get(null);
                 if (prop instanceof BooleanProperty bp && state.hasProperty(bp))
                     return state.getValue(bp);
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.warn("[RSI-Fermentation] isLidOpen reflection failed: {}", e.toString());
+            }
         }
         for (var prop : state.getProperties()) {
             if (prop.getName().equalsIgnoreCase("open") && prop instanceof BooleanProperty bp)
@@ -403,7 +413,9 @@ public final class FermentationTankBatchDelegate implements IBatchDelegate {
                     myLevel.setBlock(myPos, state.setValue(bp, open), 3);
                     return;
                 }
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.warn("[RSI-Fermentation] setLidOpen reflection failed: {}", e.toString());
+            }
         }
         for (var prop : state.getProperties()) {
             if (prop.getName().equalsIgnoreCase("open") && prop instanceof BooleanProperty bp) {

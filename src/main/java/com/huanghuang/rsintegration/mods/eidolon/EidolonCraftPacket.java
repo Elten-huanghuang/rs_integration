@@ -1,14 +1,14 @@
 package com.huanghuang.rsintegration.mods.eidolon;
 
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
-import com.huanghuang.rsintegration.network.AltarBindingRegistry;
+import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftingResolver;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.MaterialSources;
-import com.huanghuang.rsintegration.network.RSIntegration;
+import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.util.ChunkUtils;
 import com.huanghuang.rsintegration.util.ModClassLoader;
 import com.huanghuang.rsintegration.util.Reflect;
@@ -240,7 +240,7 @@ public final class EidolonCraftPacket {
         // Preserve the binding-resolved network from earlier; only fall back
         // to player-inventory scan if no binding was found.
         if (network == null) {
-            network = RSIntegration.resolveNetworkFromPlayer(player);
+            network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
         }
         ExtractionLedger ledger = new ExtractionLedger();
         List<Object> crucibleSteps = new ArrayList<>();

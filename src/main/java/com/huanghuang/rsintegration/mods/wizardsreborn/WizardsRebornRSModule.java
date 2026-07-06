@@ -1,11 +1,11 @@
-package com.huanghuang.rsintegration.mods.wizards_reborn;
+package com.huanghuang.rsintegration.mods.wizardsreborn;
 
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.mods.IModIntegration;
 import com.huanghuang.rsintegration.mods.ModCraftNetworkHandlers;
-import com.huanghuang.rsintegration.network.BindingEventHandler;
+import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.recipe.WRRecipeHandler;
 import net.minecraftforge.common.ForgeConfigSpec;
@@ -37,7 +37,7 @@ public final class WizardsRebornRSModule implements IModIntegration {
                 new String[]{"mod.maxbogomol.wizards_reborn."},
                 new String[]{"wizards_reborn"},
                 new String[]{"crystal_ritual"},
-                ModType.delegateSupplier("com.huanghuang.rsintegration.mods.wizards_reborn.WRBatchDelegate"));
+                ModType.delegateSupplier("com.huanghuang.rsintegration.mods.wizardsreborn.WRBatchDelegate"));
         ModType.configureJei("wizards_reborn",
                 new String[][]{{"wizards_reborn:wissen_crystallizer", "wissen_crystallizer"}, {"wizards_reborn:arcane_iterator", "arcane_iterator"}, {"wizards_reborn:arcane_workbench", "arcane_workbench"}, {"wizards_reborn:crystal_ritual", "crystal_ritual"}, {"wizards_reborn:crystal_infusion", "crystal_ritual"}},
                 new String[][]{{"mod.maxbogomol.wizards_reborn.common.recipe.CrystalInfusion", "crystal_ritual"}, {"mod.maxbogomol.wizards_reborn.common.recipe.CrystalRitual", "crystal_ritual"}, {"mod.maxbogomol.wizards_reborn.common.recipe.ArcaneWorkbench", "arcane_workbench"}, {"mod.maxbogomol.wizards_reborn.common.recipe.ArcaneIterator", "arcane_iterator"}, {"mod.maxbogomol.wizards_reborn.common.recipe.WissenCrystallizer", "wissen_crystallizer"}, {"mod.maxbogomol.wizards_reborn.", "wizards_reborn"}},

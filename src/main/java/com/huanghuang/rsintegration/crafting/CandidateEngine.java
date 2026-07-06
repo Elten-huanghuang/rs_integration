@@ -2,7 +2,7 @@ package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
-import com.huanghuang.rsintegration.network.AltarBindingRegistry;
+import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.recipe.SlashBladeRecipeHandler;
 import net.minecraft.resources.ResourceLocation;

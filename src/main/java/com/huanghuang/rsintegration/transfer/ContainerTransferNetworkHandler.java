@@ -1,6 +1,6 @@
 package com.huanghuang.rsintegration.transfer;
 
-import com.huanghuang.rsintegration.network.NetworkHandler;
+import com.huanghuang.rsintegration.network.packet.NetworkHandler;
 import net.minecraftforge.network.simple.SimpleChannel;
 
 public final class ContainerTransferNetworkHandler {

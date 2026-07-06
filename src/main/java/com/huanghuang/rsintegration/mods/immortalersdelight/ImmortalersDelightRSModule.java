@@ -1,9 +1,9 @@
-package com.huanghuang.rsintegration.mods.immortalers_delight;
+package com.huanghuang.rsintegration.mods.immortalersdelight;
 
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.mods.IModIntegration;
-import com.huanghuang.rsintegration.network.BindingEventHandler;
+import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
 import com.huanghuang.rsintegration.recipe.EnchantalCoolerRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import net.minecraftforge.common.ForgeConfigSpec;

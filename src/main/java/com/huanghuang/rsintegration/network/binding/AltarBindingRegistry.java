@@ -1,8 +1,9 @@
-package com.huanghuang.rsintegration.network;
+package com.huanghuang.rsintegration.network.binding;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.util.ModIds;
+import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.GlobalPos;
@@ -240,7 +241,7 @@ public final class AltarBindingRegistry {
                             net.minecraft.core.registries.Registries.DIMENSION, dimId);
                     BlockPos netPos = new BlockPos(
                             data.getInt("x"), data.getInt("y"), data.getInt("z"));
-                    INetwork net = RSIntegration.resolveNetwork(player.server, netDim, netPos);
+                    INetwork net = RSIntegrationNetwork.resolveNetwork(player.server, netDim, netPos);
                     if (net != null) return net;
                 } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
             }
@@ -282,7 +283,7 @@ public final class AltarBindingRegistry {
             if (stack.isEmpty()) continue;
             if (!BindingStorage.hasBinding(stack, dim.location(), altarPos)) continue;
             if (com.refinedmods.refinedstorage.item.NetworkItem.isValid(stack)) {
-                return RSIntegration.resolveNetwork(player.server,
+                return RSIntegrationNetwork.resolveNetwork(player.server,
                         com.refinedmods.refinedstorage.item.NetworkItem.getDimension(stack),
                         new BlockPos(com.refinedmods.refinedstorage.item.NetworkItem.getX(stack),
                                 com.refinedmods.refinedstorage.item.NetworkItem.getY(stack),
@@ -344,13 +345,13 @@ public final class AltarBindingRegistry {
             if (stack.isEmpty()) continue;
             if (!BindingStorage.hasBinding(stack, dim.location(), altarPos)) continue;
             if (com.refinedmods.refinedstorage.item.NetworkItem.isValid(stack)) {
-                INetwork net = RSIntegration.resolveNetwork(player.server,
+                INetwork net = RSIntegrationNetwork.resolveNetwork(player.server,
                         com.refinedmods.refinedstorage.item.NetworkItem.getDimension(stack),
                         new BlockPos(com.refinedmods.refinedstorage.item.NetworkItem.getX(stack),
                                 com.refinedmods.refinedstorage.item.NetworkItem.getY(stack),
                                 com.refinedmods.refinedstorage.item.NetworkItem.getZ(stack)));
                 if (net != null) {
-                    ItemStack extracted = RSIntegration.extractFromNetwork(net, ingredient, count);
+                    ItemStack extracted = RSIntegrationNetwork.extractFromNetwork(net, ingredient, count);
                     if (!extracted.isEmpty()) return extracted;
                 }
             }
@@ -410,7 +411,7 @@ public final class AltarBindingRegistry {
                                 net.minecraft.core.registries.Registries.DIMENSION, dimId);
                         BlockPos netPos = new BlockPos(
                                 data.getInt("x"), data.getInt("y"), data.getInt("z"));
-                        INetwork net = RSIntegration.resolveNetwork(player.server, netDim, netPos);
+                        INetwork net = RSIntegrationNetwork.resolveNetwork(player.server, netDim, netPos);
                         if (net != null) return net;
                     } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
                 }

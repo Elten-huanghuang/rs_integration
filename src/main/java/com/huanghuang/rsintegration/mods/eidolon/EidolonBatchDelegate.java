@@ -8,8 +8,8 @@ import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
-import com.huanghuang.rsintegration.network.AltarBindingRegistry;
-import com.huanghuang.rsintegration.network.RSIntegration;
+import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
+import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
@@ -383,15 +383,24 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
                     .getMethod("drain", int.class, IFluidHandler.FluidAction.class)
                     .invoke(tank, readWaterAmount(), IFluidHandler.FluidAction.EXECUTE);
             crucible.getClass().getDeclaredField("hasWater").set(crucible, false);
-        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-Eidolon] Reflection probe failed", e); }
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.error("[RSI-Eidolon] Crucible drain/clear failed: {}", e.toString());
+            return false;
+        }
 
         try {
             if (stepsField != null) stepsField.set(crucible, new ArrayList<>());
-        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-Eidolon] Reflection probe failed", e); }
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.error("[RSI-Eidolon] Crucible drain/clear failed: {}", e.toString());
+            return false;
+        }
 
         try {
             crucible.getClass().getMethod("setChanged").invoke(crucible);
-        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-Eidolon] Reflection probe failed", e); }
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.error("[RSI-Eidolon] Crucible drain/clear failed: {}", e.toString());
+            return false;
+        }
 
         this.craftCompleted = true;
         return true;
@@ -561,7 +570,10 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
             @SuppressWarnings("unchecked")
             List<Ingredient> items = (List<Ingredient>) f.get(recipe);
             return items;
-        } catch (Exception e) { return null; }
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Eidolon] Failed to read pedestal items: {}", e.toString());
+            return null;
+        }
     }
 
     @Nullable
@@ -571,7 +583,10 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
             @SuppressWarnings("unchecked")
             List<Ingredient> items = (List<Ingredient>) f.get(recipe);
             return items;
-        } catch (Exception e) { return null; }
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Eidolon] Failed to read focus items: {}", e.toString());
+            return null;
+        }
     }
 
     private boolean tryStartRitualWithMaterials(ServerPlayer player, List<ItemStack> materials) {
@@ -725,7 +740,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
         // Apply crafting remainders: items with hasCraftingRemainingItem() leave
         // getCraftingRemainingItem() behind; everything else is consumed.
         if (isWorktable) {
-            INetwork net = RSIntegration.resolveNetworkFromPlayer(player);
+            INetwork net = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
             for (ItemStack mat : materials) {
                 if (mat.hasCraftingRemainingItem()) {
                     ItemStack remainder = mat.getCraftingRemainingItem();
@@ -843,15 +858,24 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
                     .getMethod("drain", int.class, IFluidHandler.FluidAction.class)
                     .invoke(tank, readWaterAmount(), IFluidHandler.FluidAction.EXECUTE);
             crucible.getClass().getDeclaredField("hasWater").set(crucible, false);
-        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-Eidolon] Reflection probe failed", e); }
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.error("[RSI-Eidolon] Crucible drain/clear failed: {}", e.toString());
+            return false;
+        }
 
         try {
             if (stepsField != null) stepsField.set(crucible, new ArrayList<>());
-        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-Eidolon] Reflection probe failed", e); }
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.error("[RSI-Eidolon] Crucible drain/clear failed: {}", e.toString());
+            return false;
+        }
 
         try {
             crucible.getClass().getMethod("setChanged").invoke(crucible);
-        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-Eidolon] Reflection probe failed", e); }
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.error("[RSI-Eidolon] Crucible drain/clear failed: {}", e.toString());
+            return false;
+        }
 
         this.craftCompleted = true;
         return true;

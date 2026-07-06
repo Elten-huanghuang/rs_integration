@@ -1,7 +1,7 @@
 package com.huanghuang.rsintegration.crafting.batch;
 
 import com.huanghuang.rsintegration.crafting.plan.PlanResponsePacket;
-import com.huanghuang.rsintegration.network.NetworkHandler;
+import com.huanghuang.rsintegration.network.packet.NetworkHandler;
 import net.minecraftforge.network.simple.SimpleChannel;
 
 public final class BatchCraftNetworkHandler {

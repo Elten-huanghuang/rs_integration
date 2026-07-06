@@ -1,4 +1,4 @@
-package com.huanghuang.rsintegration.network;
+package com.huanghuang.rsintegration.network.binding;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import net.minecraft.core.BlockPos;

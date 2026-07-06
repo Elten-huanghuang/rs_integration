@@ -329,7 +329,9 @@ public final class MokaPotBatchDelegate implements IBatchDelegate {
                         "dev.xkmc.youkaishomecoming.content.pot.moka.MokaMakerBlock");
                 waterPropertyField = findFieldInHierarchy(blockClass, "WATER");
                 if (waterPropertyField != null) waterPropertyField.setAccessible(true);
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.warn("[RSI-MokaPot] WATER property reflection failed: {}", e.toString());
+            }
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-Moka] Reflection probe failed: {}", e.toString());
         }
@@ -385,19 +387,25 @@ public final class MokaPotBatchDelegate implements IBatchDelegate {
             try {
                 inventoryField = beBaseClass.getSuperclass().getDeclaredField("inventory");
                 inventoryField.setAccessible(true);
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.warn("[RSI-MokaPot] inventoryField access failed: {}", e.toString());
+            }
         }
         if (inventoryField != null) {
             try {
                 Object val = inventoryField.get(be);
                 if (val instanceof IItemHandler h) return h;
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.warn("[RSI-MokaPot] inventoryField get failed: {}", e.toString());
+            }
         }
         // Fallback: getInventory() public method (capability wrapper, ~7 slots)
         if (inventoryMethod != null) {
             try {
                 return (IItemHandler) inventoryMethod.invoke(be);
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.warn("[RSI-MokaPot] inventoryMethod invoke failed: {}", e.toString());
+            }
         }
         // Last resort: capability
         return be.getCapability(net.minecraftforge.common.capabilities.ForgeCapabilities.ITEM_HANDLER)
@@ -427,7 +435,9 @@ public final class MokaPotBatchDelegate implements IBatchDelegate {
         if (addItemMethod != null) {
             try {
                 return (ItemStack) addItemMethod.invoke(be, stack);
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.warn("[RSI-MokaPot] addItemMethod invoke failed: {}", e.toString());
+            }
         }
         // Fallback: insert into inventory directly
         IItemHandler handler = getInventory(be);
@@ -444,7 +454,9 @@ public final class MokaPotBatchDelegate implements IBatchDelegate {
                 Object prop = waterPropertyField.get(null);
                 if (prop instanceof BooleanProperty bp && state.hasProperty(bp))
                     return state.getValue(bp);
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.warn("[RSI-MokaPot] hasWater reflection failed: {}", e.toString());
+            }
         }
         for (var prop : state.getProperties()) {
             if (prop.getName().equalsIgnoreCase("water") && prop instanceof BooleanProperty bp)
@@ -461,7 +473,9 @@ public final class MokaPotBatchDelegate implements IBatchDelegate {
                     myLevel.setBlock(myPos, state.setValue(bp, value), 3);
                     return;
                 }
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.warn("[RSI-MokaPot] setWaterProperty reflection failed: {}", e.toString());
+            }
         }
         for (var prop : state.getProperties()) {
             if (prop.getName().equalsIgnoreCase("water") && prop instanceof BooleanProperty bp) {
@@ -477,13 +491,17 @@ public final class MokaPotBatchDelegate implements IBatchDelegate {
             Method m = recipe.getClass().getMethod("getOutputContainer");
             Object result = m.invoke(recipe);
             if (result instanceof ItemStack s && !s.isEmpty()) return s;
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-MokaPot] getOutputContainer method failed: {}", e.toString());
+        }
         try {
             Field f = recipe.getClass().getDeclaredField("container");
             f.setAccessible(true);
             Object v = f.get(recipe);
             if (v instanceof ItemStack s && !s.isEmpty()) return s;
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-MokaPot] getOutputContainer field failed: {}", e.toString());
+        }
         return ItemStack.EMPTY;
     }
 

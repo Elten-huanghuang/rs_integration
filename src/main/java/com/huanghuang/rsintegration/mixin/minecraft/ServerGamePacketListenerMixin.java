@@ -1,6 +1,6 @@
 package com.huanghuang.rsintegration.mixin.minecraft;
 
-import com.huanghuang.rsintegration.network.RemoteGuiAuth;
+import com.huanghuang.rsintegration.network.gui.RemoteGuiAuth;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import net.minecraft.server.network.ServerGamePacketListenerImpl;

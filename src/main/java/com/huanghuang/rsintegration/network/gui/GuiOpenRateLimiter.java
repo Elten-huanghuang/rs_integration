@@ -1,4 +1,4 @@
-package com.huanghuang.rsintegration.network;
+package com.huanghuang.rsintegration.network.gui;
 
 import java.util.Map;
 import java.util.UUID;

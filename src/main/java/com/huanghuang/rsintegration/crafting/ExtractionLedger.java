@@ -2,8 +2,8 @@ package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.crafting.RSICraftException;
 import com.huanghuang.rsintegration.RSIntegrationMod;
-import com.huanghuang.rsintegration.network.AltarBindingRegistry;
-import com.huanghuang.rsintegration.network.RSIntegration;
+import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
+import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.util.Diagnostics;
 import com.huanghuang.rsintegration.util.ModIds;
 import com.huanghuang.rsintegration.util.PlayerUtils;
@@ -352,7 +352,7 @@ public final class ExtractionLedger {
             }
             case NETWORK -> {
                 if (network == null) yield ItemStack.EMPTY;
-                yield RSIntegration.extractFromNetwork(network, entry.originalIngredient, entry.count);
+                yield RSIntegrationNetwork.extractFromNetwork(network, entry.originalIngredient, entry.count);
             }
             case PLAYER_INVENTORY -> {
                 ItemStack extracted = extractFromSlots(entry, player.getInventory().items);

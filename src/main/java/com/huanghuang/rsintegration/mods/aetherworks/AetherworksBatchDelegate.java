@@ -6,7 +6,7 @@ import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
-import com.huanghuang.rsintegration.network.RSIntegration;
+import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.util.ChunkUtils;
 import com.huanghuang.rsintegration.util.Reflect;
 import com.refinedmods.refinedstorage.api.network.INetwork;
@@ -73,6 +73,8 @@ public final class AetherworksBatchDelegate extends AbstractBatchDelegate {
     private int tempMax;
     private final List<BlockPos> coolerPositions = new ArrayList<>();
     private boolean tempControlAvailable;
+    private int abortTimer;
+    private boolean craftTimedOut;
 
     @Override
     public boolean validateAndInit(ServerPlayer player, ResourceLocation recipeId,
@@ -129,7 +131,7 @@ public final class AetherworksBatchDelegate extends AbstractBatchDelegate {
             this.tempMax = 3000;
         }
 
-        this.network = RSIntegration.resolveNetworkFromPlayer(player);
+        this.network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
         this.materialsPlaced = false;
         this.recordedInputItem = null;
         return true;
@@ -190,7 +192,9 @@ public final class AetherworksBatchDelegate extends AbstractBatchDelegate {
             if (result instanceof Ingredient ing && !ing.isEmpty()) {
                 specs.add(new IngredientSpec(ing, 1));
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] getAddition reflection failed", e);
+        }
         return specs.isEmpty() ? null : specs;
     }
 
@@ -233,6 +237,8 @@ public final class AetherworksBatchDelegate extends AbstractBatchDelegate {
 
         this.recordedInputItem = input.getItem();
         this.materialsPlaced = true;
+        this.abortTimer = 0;
+        this.craftTimedOut = false;
 
         RSIntegrationMod.LOGGER.debug("[RSI-Aetherworks] Placed {} in anvil slot 0",
                 input.getHoverName().getString());
@@ -290,7 +296,13 @@ public final class AetherworksBatchDelegate extends AbstractBatchDelegate {
                         }
                     }
                 }
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                abortTimer++;
+                if (abortTimer > 300) {
+                    craftTimedOut = true;
+                    RSIntegrationMod.LOGGER.error("[RSI-Aetherworks] Temperature regulation failed >300 ticks, aborting craft", e);
+                }
+            }
         }
 
         // 2. Auto-hammer — call onHit() when hitTimeout > 0 and hasEmber
@@ -300,7 +312,15 @@ public final class AetherworksBatchDelegate extends AbstractBatchDelegate {
             if (ht > 0 && ember) {
                 Reflect.invoke(anvilBE, "onHit");
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            abortTimer++;
+            if (abortTimer > 300) {
+                craftTimedOut = true;
+                RSIntegrationMod.LOGGER.error("[RSI-Aetherworks] Auto-hammer reflection failed >300 ticks, aborting craft", e);
+            }
+        }
+
+        if (craftTimedOut) return true;
 
         // 3. Craft completion — check if slot 0 item type changed
         Object inv = Reflect.getField(anvilBE, "inventory").orElse(null);
@@ -392,17 +412,23 @@ public final class AetherworksBatchDelegate extends AbstractBatchDelegate {
             int min = (int) recipe.getClass().getMethod("getTemperatureMin").invoke(recipe);
             int max = (int) recipe.getClass().getMethod("getTemperatureMax").invoke(recipe);
             warnings.add(Component.translatable("rsi.aetherworks.warn.temp_range", min, max).getString());
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] getTemperatureMin/Max reflection failed in plan warnings", e);
+        }
 
         try {
             int hits = (int) recipe.getClass().getMethod("getNumberOfHits").invoke(recipe);
             warnings.add(Component.translatable("rsi.aetherworks.info.hits_required", hits).getString());
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] getNumberOfHits reflection failed in plan warnings", e);
+        }
 
         try {
             int ember = (int) recipe.getClass().getMethod("getEmberPerHit").invoke(recipe);
             warnings.add(Component.translatable("rsi.aetherworks.info.ember_per_hit", ember).getString());
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] getEmberPerHit reflection failed in plan warnings", e);
+        }
 
         if (dim != null && pos != null) {
             try {
@@ -415,7 +441,9 @@ public final class AetherworksBatchDelegate extends AbstractBatchDelegate {
                         }
                     }
                 }
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] Forge proximity check failed in plan warnings", e);
+            }
         }
 
         return warnings;

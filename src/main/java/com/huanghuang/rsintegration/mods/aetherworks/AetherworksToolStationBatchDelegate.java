@@ -6,7 +6,7 @@ import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
-import com.huanghuang.rsintegration.network.RSIntegration;
+import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.util.ChunkUtils;
 import com.huanghuang.rsintegration.util.Reflect;
 import com.refinedmods.refinedstorage.api.util.Action;
@@ -71,6 +71,8 @@ public final class AetherworksToolStationBatchDelegate extends AbstractBatchDele
     private int recipeTemperature;
     private final List<BlockPos> coolerPositions = new ArrayList<>();
     private boolean tempControlAvailable;
+    private int abortTimer;
+    private boolean craftTimedOut;
 
     @Override
     public boolean validateAndInit(ServerPlayer player, ResourceLocation recipeId,
@@ -124,7 +126,7 @@ public final class AetherworksToolStationBatchDelegate extends AbstractBatchDele
             this.recipeTemperature = 2800;
         }
 
-        this.network = RSIntegration.resolveNetworkFromPlayer(player);
+        this.network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
         this.materialsPlaced = false;
         this.recordedInputItem = null;
         return true;
@@ -228,6 +230,8 @@ public final class AetherworksToolStationBatchDelegate extends AbstractBatchDele
         // Record first input for change detection
         this.recordedInputItem = materials.get(0).getItem();
         this.materialsPlaced = true;
+        this.abortTimer = 0;
+        this.craftTimedOut = false;
 
         RSIntegrationMod.LOGGER.debug("[RSI-Aetherworks] Placed {} materials in tool station",
                 materials.size());
@@ -282,14 +286,26 @@ public final class AetherworksToolStationBatchDelegate extends AbstractBatchDele
                         }
                     }
                 }
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                abortTimer++;
+                if (abortTimer > 300) {
+                    craftTimedOut = true;
+                    RSIntegrationMod.LOGGER.error("[RSI-Aetherworks] ToolStation temperature regulation failed >300 ticks, aborting craft", e);
+                }
+            }
         }
 
         // Sync hasEmber/hasHeat from forge, then auto-hammer
         if (forgeBE != null) {
             try {
                 Reflect.invoke(toolStationBE, "onForgeTick", forgeBE);
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                abortTimer++;
+                if (abortTimer > 300) {
+                    craftTimedOut = true;
+                    RSIntegrationMod.LOGGER.error("[RSI-Aetherworks] ToolStation onForgeTick failed >300 ticks, aborting craft", e);
+                }
+            }
         }
         try {
             boolean hasEmber = Reflect.<Boolean>getField(toolStationBE, "hasEmber").orElse(false);
@@ -297,7 +313,15 @@ public final class AetherworksToolStationBatchDelegate extends AbstractBatchDele
             if (hasEmber && hasHeat) {
                 Reflect.invoke(toolStationBE, "onHit");
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            abortTimer++;
+            if (abortTimer > 300) {
+                craftTimedOut = true;
+                RSIntegrationMod.LOGGER.error("[RSI-Aetherworks] ToolStation auto-hammer reflection failed >300 ticks, aborting craft", e);
+            }
+        }
+
+        if (craftTimedOut) return true;
 
         // Completion detection: slot 0 item type changed
         Object inv = Reflect.getField(toolStationBE, "inventory").orElse(null);
@@ -394,7 +418,9 @@ public final class AetherworksToolStationBatchDelegate extends AbstractBatchDele
             int temp = (int) recipe.getClass().getMethod("getTemperature").invoke(recipe);
             warnings.add(Component.translatable("rsi.aetherworks.warn.temp_range",
                     Math.max(0, temp - 100), temp + 100).getString());
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] ToolStation getTemperature reflection failed in plan warnings", e);
+        }
 
         if (dim != null && pos != null) {
             try {
@@ -407,7 +433,9 @@ public final class AetherworksToolStationBatchDelegate extends AbstractBatchDele
                         }
                     }
                 }
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] ToolStation forge proximity check failed in plan warnings", e);
+            }
         }
 
         return warnings;

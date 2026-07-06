@@ -321,7 +321,9 @@ public final class MalumRunicWorkbenchBatchDelegate implements com.huanghuang.rs
             f.setAccessible(true);
             Object inv = f.get(be);
             if (inv instanceof IItemHandler handler) return handler;
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Runic] Inventory fallback reflection failed: {}", e.toString());
+        }
         return null;
     }
 

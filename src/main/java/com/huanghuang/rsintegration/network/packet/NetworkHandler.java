@@ -1,4 +1,4 @@
-package com.huanghuang.rsintegration.network;
+package com.huanghuang.rsintegration.network.packet;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import net.minecraft.resources.ResourceLocation;

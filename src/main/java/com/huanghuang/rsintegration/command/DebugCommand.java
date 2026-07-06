@@ -3,9 +3,9 @@ package com.huanghuang.rsintegration.command;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.*;
-import com.huanghuang.rsintegration.network.AltarBindingRegistry;
-import com.huanghuang.rsintegration.network.BindingStorage;
-import com.huanghuang.rsintegration.network.RSIntegration;
+import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
+import com.huanghuang.rsintegration.network.binding.BindingStorage;
+import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.recipe.SlashBladeRecipeHandler;
 import com.huanghuang.rsintegration.crafting.MaterialSources;
@@ -212,7 +212,7 @@ public final class DebugCommand {
         String modeLabel = noInventory ? " (no-inventory)" : "";
 
         // Candidate decision tree — use actual inventory when available
-        var network = noInventory ? null : RSIntegration.resolveNetworkFromPlayer(player);
+        var network = noInventory ? null : RSIntegrationNetwork.resolveNetworkFromPlayer(player);
         Map<CraftingResolver.StackKey, Integer> available = noInventory
                 ? Map.of()
                 : MaterialSources.listAllAvailable(player, network);

@@ -155,7 +155,9 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
                     Object v = f.get(recipe);
                     if (v instanceof ItemStack s && !s.isEmpty())
                         this.expectedOutput = s.copy();
-                } catch (Exception ignored) {}
+                } catch (Exception e) {
+                    RSIntegrationMod.LOGGER.warn("[RSI-Malum] IngredientWithCount parse failed: {}", e.toString());
+                }
             });
         }
 
@@ -203,7 +205,9 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
                             matches = true; // reuse matching catalyst
                         }
                     }
-                } catch (Exception ignored) {}
+                } catch (Exception e) {
+                    RSIntegrationMod.LOGGER.warn("[RSI-Malum] IngredientWithCount parse failed: {}", e.toString());
+                }
             }
             if (!matches) {
                 returnCrucibleItem(existing);

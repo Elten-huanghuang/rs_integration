@@ -1,14 +1,14 @@
 package com.huanghuang.rsintegration.mods.forbidden;
 
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
-import com.huanghuang.rsintegration.network.AltarBindingRegistry;
+import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftingResolver;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.MaterialSources;
-import com.huanghuang.rsintegration.network.RSIntegration;
+import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.util.ChunkUtils;
 import com.huanghuang.rsintegration.util.Reflect;
 import com.refinedmods.refinedstorage.api.network.INetwork;
@@ -281,7 +281,7 @@ public final class FaCraftPacket {
         // Phase 1: reserve all items via ledger
         ExtractionLedger ledger = new ExtractionLedger();
         if (network == null) {
-            network = RSIntegration.resolveNetworkFromPlayer(player);
+            network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
         }
 
         ItemStack mainTemplate = ItemStack.EMPTY;

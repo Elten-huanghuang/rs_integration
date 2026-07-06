@@ -3,10 +3,10 @@ package com.huanghuang.rsintegration.sidepanel.network;
 import com.huanghuang.rsintegration.api.ISmithingRecipeAccessor;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
-import com.huanghuang.rsintegration.network.AltarBindingRegistry;
-import com.huanghuang.rsintegration.network.BlockGuiRegistry;
-import com.huanghuang.rsintegration.network.GuiOpenRateLimiter;
-import com.huanghuang.rsintegration.network.RSIntegration;
+import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
+import com.huanghuang.rsintegration.network.gui.BlockGuiRegistry;
+import com.huanghuang.rsintegration.network.gui.GuiOpenRateLimiter;
+import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.util.ChunkUtils;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;
@@ -192,7 +192,7 @@ public final class OpenBoundMachineGuiPacket {
         BlockEntity be = levelOpt.getBlockEntity(pos);
         if (!(be instanceof AbstractFurnaceBlockEntity furnace)) return;
 
-        INetwork network = RSIntegration.resolveNetworkFromPlayer(player);
+        INetwork network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
         if (network == null) return;
 
         var ingredients = recipe.getIngredients();
@@ -307,7 +307,7 @@ public final class OpenBoundMachineGuiPacket {
         Recipe<?> recipe = level.getRecipeManager().byKey(recipeId).orElse(null);
         if (recipe == null) return;
 
-        INetwork network = RSIntegration.resolveNetworkFromPlayer(player);
+        INetwork network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
         if (network == null) return;
 
         var ingredients = recipe.getIngredients();
@@ -375,7 +375,7 @@ public final class OpenBoundMachineGuiPacket {
             return;
         }
 
-        INetwork network = RSIntegration.resolveNetworkFromPlayer(player);
+        INetwork network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
         if (network == null) return;
 
         // FA ApplyModifierRecipe: template (slot 0), base (slot 1 from baseItem or RS), addition (slot 2).

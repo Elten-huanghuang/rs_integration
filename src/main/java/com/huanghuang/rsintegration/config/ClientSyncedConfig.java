@@ -1,6 +1,6 @@
 package com.huanghuang.rsintegration.config;
 
-import com.huanghuang.rsintegration.network.ConfigSyncPacket;
+import com.huanghuang.rsintegration.network.packet.ConfigSyncPacket;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 

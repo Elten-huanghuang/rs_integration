@@ -1,6 +1,6 @@
 package com.huanghuang.rsintegration.mixin.minecraft;
 
-import com.huanghuang.rsintegration.network.RemoteGuiAuth;
+import com.huanghuang.rsintegration.network.gui.RemoteGuiAuth;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.Vec3;

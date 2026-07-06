@@ -1,4 +1,4 @@
-package com.huanghuang.rsintegration.client;
+package com.huanghuang.rsintegration.sidepanel.client;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.mojang.blaze3d.platform.InputConstants;

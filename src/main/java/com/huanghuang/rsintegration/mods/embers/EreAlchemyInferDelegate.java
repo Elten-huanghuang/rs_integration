@@ -9,7 +9,7 @@ import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.mods.embers.EreAlchemyBatchDelegate;
 import com.huanghuang.rsintegration.mods.embers.EreAlchemyLock;
 import com.huanghuang.rsintegration.mods.embers.KnownCodeSavedData;
-import com.huanghuang.rsintegration.network.RSIntegration;
+import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.util.ChunkUtils;
 import com.huanghuang.rsintegration.util.ModClassLoader;
@@ -192,7 +192,7 @@ extends AbstractBatchDelegate {
             player.sendSystemMessage(Component.translatable("rsi.embers.error.pedestals_insufficient", this.inputsSize, this.pedestals.size()));
             return false;
         }
-        this.network = RSIntegration.resolveNetworkFromPlayer((ServerPlayer)player);
+        this.network = RSIntegrationNetwork.resolveNetworkFromPlayer((ServerPlayer)player);
         EreAlchemyBatchDelegate.recycleBlockingItems(lvl, pos, this.pedestals, player);
         for (EreAlchemyBatchDelegate.PedestalInfo p : this.pedestals) {
             ItemStack bottomStack;
@@ -763,7 +763,7 @@ extends AbstractBatchDelegate {
         if (this.network == null) {
             return ItemStack.EMPTY;
         }
-        return RSIntegration.extractFromNetwork((INetwork)this.network, (Ingredient)ing, (int)1);
+        return RSIntegrationNetwork.extractFromNetwork((INetwork)this.network, (Ingredient)ing, (int)1);
     }
 
     private void refundPartial(List<ItemStack> stacks) {

@@ -1,8 +1,8 @@
-package com.huanghuang.rsintegration.network;
+package com.huanghuang.rsintegration.network.gui;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.machine.StandardMenuProviderOpener;
-import com.huanghuang.rsintegration.network.RemoteGuiAuth;
+import com.huanghuang.rsintegration.network.gui.RemoteGuiAuth;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.resources.ResourceKey;
