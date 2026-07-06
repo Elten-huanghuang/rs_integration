@@ -59,6 +59,7 @@ public final class RSSidePanelClient {
     // ── UI state ─────────────────────────────────────────────────
     static boolean panelVisible;
     static boolean panelHidden = true;
+    static boolean panelScreenBound; // auto-close when screen closes
     static int panelX = 100, panelY = 100;
     static boolean networkAvailable;
     static String networkName = "";

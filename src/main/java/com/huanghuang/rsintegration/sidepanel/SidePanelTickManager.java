@@ -25,6 +25,14 @@ final class SidePanelTickManager {
         if (mc.player == null) return;
         if (event.phase == TickEvent.Phase.START) return;
 
+        // Auto-close panel when the screen it was opened from is closed
+        if (RSSidePanelClient.panelScreenBound && mc.screen == null && RSSidePanelClient.panelVisible) {
+            RSSidePanelClient.panelVisible = false;
+            RSSidePanelClient.panelScreenBound = false;
+            RSSidePanelNetworkHandler.sendCloseRequest();
+            return;
+        }
+
         // MachineHub animation (always tick, even when panel is hidden)
         MachineHub.tick();
 

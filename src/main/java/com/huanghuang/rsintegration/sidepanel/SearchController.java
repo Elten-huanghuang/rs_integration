@@ -59,10 +59,14 @@ final class SearchController {
         if (RSSidePanelClient.KEY_TOGGLE_PANEL.isActiveAndMatches(
                 com.mojang.blaze3d.platform.InputConstants.getKey(event.getKey(), event.getScanCode()))
                 && event.getAction() == GLFW.GLFW_PRESS) {
+            if (mc.screen == null) return; // only toggle when a screen is open
             RSSidePanelClient.panelVisible = !RSSidePanelClient.panelVisible;
-            if (RSSidePanelClient.panelVisible && !RSSidePanelClient.panelHidden) {
-                RSSidePanelNetworkHandler.sendRequestSync();
-                RSSidePanelClient.scrollRow = 0;
+            if (RSSidePanelClient.panelVisible) {
+                RSSidePanelClient.panelScreenBound = true;
+                if (!RSSidePanelClient.panelHidden) {
+                    RSSidePanelNetworkHandler.sendRequestSync();
+                    RSSidePanelClient.scrollRow = 0;
+                }
             } else {
                 RSSidePanelNetworkHandler.sendCloseRequest();
             }

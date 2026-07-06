@@ -6,6 +6,8 @@ import com.huanghuang.rsintegration.ModVersionDelegateRegistry;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.crafting.loadbalancer.LoadBalancer;
+import com.huanghuang.rsintegration.crafting.loadbalancer.ParallelCraftGroup;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry.BoundMachine;
 import com.huanghuang.rsintegration.network.ProtectionChecker;
@@ -13,6 +15,7 @@ import com.huanghuang.rsintegration.util.Diagnostics;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.util.PlayerUtils;
 import com.refinedmods.refinedstorage.api.network.INetwork;
+import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
@@ -415,6 +418,15 @@ public final class AsyncCraftChain {
             return null;
         }
 
+        // ── Load-balanced multi-machine dispatch ──
+        // When multiple machines are bound for this mod type, try to distribute
+        // work across them instead of sending everything to one machine.
+        if (!step.inferMode() && machines.size() >= 2) {
+            IBatchDelegate parallel = tryStartParallel(machines, step, online);
+            if (parallel != null) return parallel;
+            // Fall through: single-machine path below
+        }
+
         IBatchDelegate delegate = step.inferMode()
                 ? step.modType().createInferDelegate()
                 : createDelegate(step.modType());
@@ -590,6 +602,71 @@ public final class AsyncCraftChain {
         RSIntegrationMod.LOGGER.debug("[RSI-AsyncChain] Generic step started OK: recipe={}",
                 step.recipeId());
         return delegate;
+    }
+
+    // ── parallel (load-balanced) step ──────────────────────────────
+
+    /**
+     * Try to dispatch work across multiple bound machines of the same type.
+     * Returns a {@link ParallelCraftGroup} if at least 2 machines are available;
+     * returns null to fall through to the single-machine path.
+     */
+    @Nullable
+    private IBatchDelegate tryStartParallel(List<BoundMachine> machines,
+                                            CraftingResolver.ResolutionStep step,
+                                            ServerPlayer online) {
+        // Resolve the dimension from the first machine for BE lookups
+        var dimKey = net.minecraft.resources.ResourceKey.create(
+                net.minecraft.core.registries.Registries.DIMENSION, machines.get(0).dim());
+        ServerLevel machineLevel = server.getLevel(dimKey);
+        if (machineLevel == null) return null;
+
+        // Filter: chunk loaded, BE present, not busy
+        List<BoundMachine> available = LoadBalancer.filterAvailable(machines, machineLevel);
+        if (available.size() < 2) return null;
+
+        // Build a parallel group — constructor internally creates and validates
+        // one delegate per machine
+        ParallelCraftGroup group = new ParallelCraftGroup(available, step.modType(),
+                step.recipeId(), online);
+        if (!group.validateAndInit(online, step.recipeId(), null, BlockPos.ZERO)) {
+            RSIntegrationMod.LOGGER.debug("[RSI-AsyncChain] Parallel group empty — all children failed validateAndInit");
+            return null;
+        }
+
+        RSIntegrationMod.LOGGER.info("[RSI-AsyncChain] Load-balanced: {} machines for recipe {}",
+                available.size(), step.recipeId());
+
+        // Parallel groups use the tryStartSingleCraft path (each child extracts
+        // its own materials independently)
+        return startParallelStep(group, step, online);
+    }
+
+    @Nullable
+    private IBatchDelegate startParallelStep(IBatchDelegate group,
+                                             CraftingResolver.ResolutionStep step,
+                                             ServerPlayer online) {
+        try {
+            if (!group.tryStartSingleCraft(online, ledger)) {
+                RSIntegrationMod.LOGGER.warn("[RSI-AsyncChain] Parallel group tryStartSingleCraft failed for {}",
+                        step.recipeId());
+                online.sendSystemMessage(Component.translatable(
+                        "rsi.generic.error.craft_failed", step.recipeId()));
+                try { group.onBatchFailed(online, "tryStartSingleCraft failed"); } catch (Exception fe) {
+                    RSIntegrationMod.LOGGER.error("[RSI-AsyncChain] onBatchFailed threw during parallel cleanup", fe);
+                }
+                return null;
+            }
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.error("[RSI-AsyncChain] Error starting parallel step", e);
+            try { group.onBatchFailed(online, "exception in startParallelStep"); } catch (Exception fe) {
+                RSIntegrationMod.LOGGER.error("[RSI-AsyncChain] onBatchFailed threw during exception cleanup", fe);
+            }
+            return null;
+        }
+
+        RSIntegrationMod.LOGGER.debug("[RSI-AsyncChain] Parallel step started OK: recipe={}", step.recipeId());
+        return group;
     }
 
     @Nullable
