@@ -5,7 +5,8 @@ import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
-import com.huanghuang.rsintegration.mods.youkaishomecoming.YhkReflect;
+import com.huanghuang.rsintegration.reflection.probes.YHKReflection;
+import com.huanghuang.rsintegration.util.Reflect;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.core.BlockPos;
@@ -35,11 +36,6 @@ import java.util.Map;
 
 public final class FermentationTankBatchDelegate implements IBatchDelegate {
 
-    private static final String BE_CLASS =
-            "dev.xkmc.youkaishomecoming.content.pot.ferment.FermentationTankBlockEntity";
-    private static final String RECIPE_CLASS =
-            "dev.xkmc.youkaishomecoming.content.pot.ferment.SimpleFermentationRecipe";
-
     private ServerPlayer player;
     private ServerLevel myLevel;
     private ResourceKey<Level> myDim;
@@ -55,7 +51,6 @@ public final class FermentationTankBatchDelegate implements IBatchDelegate {
     private static volatile Field itemsField;
     private static volatile Method notifyTileMethod;
     private static volatile Field openPropertyField;
-    private static volatile Class<?> beBaseClass;
     private static volatile boolean reflectionProbed;
 
     @Override
@@ -72,7 +67,7 @@ public final class FermentationTankBatchDelegate implements IBatchDelegate {
         this.player = player;
 
         Recipe<?> found = level.getRecipeManager().byKey(recipeId).orElse(null);
-        if (found == null || !found.getClass().getName().equals(RECIPE_CLASS)) {
+        if (found == null || YHKReflection.simpleFermentationRecipeClass == null || !YHKReflection.simpleFermentationRecipeClass.isInstance(found)) {
             player.sendSystemMessage(Component.translatable("rsi.generic.error.recipe_not_found", recipeId.toString()));
             return false;
         }
@@ -198,8 +193,8 @@ public final class FermentationTankBatchDelegate implements IBatchDelegate {
         BlockEntity be = level.getBlockEntity(myPos);
         if (be == null || !isFermentationBE(be)) return false;
 
-        int progress = YhkReflect.getRecipeProgress(be);
-        int total = YhkReflect.getTotalTime(be);
+        int progress = Reflect.<Integer>getField(be, "recipeProgress").orElse(-1);
+        int total = Reflect.<Integer>getField(be, "totalTime").orElse(-1);
         if (total > 0 && progress >= total) return true;
 
         // Fallback: check if result item is present
@@ -272,7 +267,7 @@ public final class FermentationTankBatchDelegate implements IBatchDelegate {
     @Override
     public BlockPos getMachinePos() { return myPos; }
 
-    // ── plan helpers ──
+    // -- plan helpers --
 
     public static void addFuelIfNeeded(@Nullable String recipeModTypeId,
                                        Map<Item, Integer> itemAvailable,
@@ -288,7 +283,7 @@ public final class FermentationTankBatchDelegate implements IBatchDelegate {
         return warnings;
     }
 
-    // ── recipe accessors via public fields ──
+    // -- recipe accessors via public fields --
 
     @SuppressWarnings("unchecked")
     private List<Ingredient> getRecipeIngredients() {
@@ -317,28 +312,30 @@ public final class FermentationTankBatchDelegate implements IBatchDelegate {
         return ItemStack.EMPTY;
     }
 
-    // ── reflection ──
+    // -- reflection --
 
     private static void probeReflection() {
         if (reflectionProbed) return;
         reflectionProbed = true;
+        if (YHKReflection.fermentationTankBEClass == null) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Ferment] YHKReflection ferment probe not ready");
+            return;
+        }
         try {
-            beBaseClass = Class.forName(BE_CLASS);
-
             // FermentationTankBlockEntity.items is public final
-            itemsField = beBaseClass.getField("items");
+            itemsField = YHKReflection.fermentationTankBEClass.getField("items");
 
             // FluidItemTile.notifyTile()
-            Class<?> fluidItemTile = Class.forName(
-                    "dev.xkmc.youkaishomecoming.content.pot.base.FluidItemTile");
-            notifyTileMethod = fluidItemTile.getMethod("notifyTile");
-            notifyTileMethod.setAccessible(true);
+            if (YHKReflection.fluidItemTileClass != null) {
+                notifyTileMethod = YHKReflection.fluidItemTileClass.getMethod("notifyTile");
+                notifyTileMethod.setAccessible(true);
+            }
 
-            // FermentationTankBlock.OPEN — public static BooleanProperty
-            Class<?> blockClass = Class.forName(
-                    "dev.xkmc.youkaishomecoming.content.pot.ferment.FermentationTankBlock");
-            openPropertyField = blockClass.getDeclaredField("OPEN");
-            openPropertyField.setAccessible(true);
+            // FermentationTankBlock.OPEN -- public static BooleanProperty
+            if (YHKReflection.fermentationTankBlockClass != null) {
+                openPropertyField = YHKReflection.fermentationTankBlockClass.getDeclaredField("OPEN");
+                openPropertyField.setAccessible(true);
+            }
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-Ferment] Reflection probe failed: {}", e.toString());
         }
@@ -346,10 +343,10 @@ public final class FermentationTankBatchDelegate implements IBatchDelegate {
 
     private static boolean isFermentationBE(BlockEntity be) {
         probeReflection();
-        if (beBaseClass != null && beBaseClass.isAssignableFrom(be.getClass())) return true;
+        if (YHKReflection.fermentationTankBEClass != null && YHKReflection.fermentationTankBEClass.isAssignableFrom(be.getClass())) return true;
         Class<?> clazz = be.getClass();
         while (clazz != null) {
-            if (clazz.getName().equals(BE_CLASS)) return true;
+            if (YHKReflection.fermentationTankBEClass != null && YHKReflection.fermentationTankBEClass.getName().equals(clazz.getName())) return true;
             clazz = clazz.getSuperclass();
         }
         return false;
@@ -425,7 +422,7 @@ public final class FermentationTankBatchDelegate implements IBatchDelegate {
         }
     }
 
-    // ── cleanup ──
+    // -- cleanup --
 
     private void clearAndRefund() {
         myLevel.getChunk(myPos);

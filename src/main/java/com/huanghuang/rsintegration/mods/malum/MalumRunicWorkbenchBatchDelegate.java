@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.mods.malum;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.reflection.probes.MalumReflection;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
@@ -29,11 +30,6 @@ import java.util.List;
 
 public final class MalumRunicWorkbenchBatchDelegate implements com.huanghuang.rsintegration.crafting.batch.IBatchDelegate {
 
-    private static final String BE_CLASS =
-            "com.sammy.malum.common.block.curiosities.runic_workbench.RunicWorkbenchBlockEntity";
-    private static Class<?> beClass;
-    private static boolean classesEnsured;
-
     private ServerPlayer player;
     private ServerLevel myLevel;
     private ResourceKey<Level> myDim;
@@ -46,19 +42,12 @@ public final class MalumRunicWorkbenchBatchDelegate implements com.huanghuang.rs
     private boolean usingSharedLedger;
     private ExtractionLedger ledger;
 
-    private static void ensureClasses() {
-        if (classesEnsured) return;
-        beClass = com.huanghuang.rsintegration.util.Reflect.forName(BE_CLASS).orElse(null);
-        classesEnsured = true;
-    }
-
     // ── IBatchDelegate ──────────────────────────────────────────────
 
     @Override
     public boolean validateAndInit(ServerPlayer player, ResourceLocation recipeId,
                                    @Nullable ResourceLocation dim, BlockPos pos) {
-        ensureClasses();
-        if (beClass == null) {
+        if (!MalumReflection.isAvailable()) {
             player.sendSystemMessage(Component.translatable("rsi.batch.error.mod_missing", "Malum"));
             return false;
         }
@@ -83,7 +72,7 @@ public final class MalumRunicWorkbenchBatchDelegate implements com.huanghuang.rs
         this.expectedOutput = ItemStack.EMPTY;
 
         BlockEntity be = level.getBlockEntity(pos);
-        if (be == null || !beClass.isInstance(be)) {
+        if (be == null || !MalumReflection.runicWorkbenchBEClass.isInstance(be)) {
             player.sendSystemMessage(Component.translatable("rsi.malum.error.not_runic_workbench"));
             return false;
         }
@@ -131,7 +120,7 @@ public final class MalumRunicWorkbenchBatchDelegate implements com.huanghuang.rs
         if (specs.size() < 2) return false;
 
         BlockEntity be = myLevel.getBlockEntity(myPos);
-        if (be == null || !beClass.isInstance(be)) return false;
+        if (be == null || !MalumReflection.runicWorkbenchBEClass.isInstance(be)) return false;
         this.itemHandler = resolveHandler(be);
         if (itemHandler == null) return false;
 
@@ -194,7 +183,7 @@ public final class MalumRunicWorkbenchBatchDelegate implements com.huanghuang.rs
         this.craftDone = false;
 
         BlockEntity be = myLevel.getBlockEntity(myPos);
-        if (be == null || !beClass.isInstance(be)) return false;
+        if (be == null || !MalumReflection.runicWorkbenchBEClass.isInstance(be)) return false;
         this.itemHandler = resolveHandler(be);
         if (itemHandler == null) return false;
 
@@ -239,7 +228,7 @@ public final class MalumRunicWorkbenchBatchDelegate implements com.huanghuang.rs
     public ItemStack collectResult(ServerPlayer player) {
         ItemStack result = ItemStack.EMPTY;
         BlockEntity be = myLevel.getBlockEntity(myPos);
-        if (be != null && beClass.isInstance(be)) {
+        if (be != null && MalumReflection.runicWorkbenchBEClass.isInstance(be)) {
             IItemHandler handler = resolveHandler(be);
             if (handler != null) {
                 result = handler.getStackInSlot(0).copy();
@@ -279,7 +268,7 @@ public final class MalumRunicWorkbenchBatchDelegate implements com.huanghuang.rs
         }
         // Clear slot 0 and refund if from own ledger
         BlockEntity be = myLevel.getBlockEntity(myPos);
-        if (be != null && beClass.isInstance(be) && itemHandler != null) {
+        if (be != null && MalumReflection.runicWorkbenchBEClass.isInstance(be) && itemHandler != null) {
             ItemStack slot = itemHandler.getStackInSlot(0);
             if (!slot.isEmpty()) {
                 refundItem(slot);

@@ -9,6 +9,7 @@ import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.util.ChunkUtils;
 import com.huanghuang.rsintegration.util.Reflect;
+import com.huanghuang.rsintegration.reflection.probes.AetherworksReflection;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.core.BlockPos;
@@ -22,43 +23,12 @@ import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
-import net.minecraftforge.fml.ModList;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 
 public final class AetherworksBatchDelegate extends AbstractBatchDelegate {
-
-    private static volatile boolean classesLoaded;
-    private static volatile boolean classesAvailable;
-    private static volatile Class<?> anvilBEClass;
-    private static volatile Class<?> forgeBEClass;
-    private static volatile Class<?> anvilRecipeClass;
-    private static volatile Class<?> coolerBEClass;
-    private static volatile Class<?> heaterBEClass;
-
-    private static void ensureClasses() {
-        if (classesLoaded) return;
-        classesLoaded = true;
-        if (!ModList.get().isLoaded("aetherworks")) {
-            classesAvailable = false;
-            return;
-        }
-        try {
-            anvilBEClass = Class.forName("net.sirplop.aetherworks.blockentity.AetheriumAnvilBlockEntity");
-            forgeBEClass = Class.forName("net.sirplop.aetherworks.blockentity.AetherForgeBlockEntity");
-            anvilRecipeClass = Class.forName("net.sirplop.aetherworks.recipe.IAetheriumAnvilRecipe");
-            try { coolerBEClass = Class.forName("net.sirplop.aetherworks.blockentity.ForgeCoolerBlockEntity"); }
-            catch (ClassNotFoundException e) { coolerBEClass = null; }
-            try { heaterBEClass = Class.forName("net.sirplop.aetherworks.blockentity.ForgeHeaterBlockEntity"); }
-            catch (ClassNotFoundException e) { heaterBEClass = null; }
-            classesAvailable = true;
-        } catch (ClassNotFoundException e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] Classes not found: {}", e.toString());
-            classesAvailable = false;
-        }
-    }
 
     // Instance state
     private ServerLevel level;
@@ -79,8 +49,7 @@ public final class AetherworksBatchDelegate extends AbstractBatchDelegate {
     @Override
     public boolean validateAndInit(ServerPlayer player, ResourceLocation recipeId,
                                    @Nullable ResourceLocation dim, BlockPos pos) {
-        ensureClasses();
-        if (!classesAvailable) {
+        if (!AetherworksReflection.ready) {
             player.sendSystemMessage(Component.translatable("rsi.batch.error.mod_missing", "Aetherworks"));
             return false;
         }
@@ -95,7 +64,7 @@ public final class AetherworksBatchDelegate extends AbstractBatchDelegate {
         ChunkUtils.loadChunk(lvl, pos);
 
         BlockEntity be = lvl.getBlockEntity(pos);
-        if (be == null || !anvilBEClass.isInstance(be)) {
+        if (be == null || !AetherworksReflection.anvilBEClass.isInstance(be)) {
             player.sendSystemMessage(Component.translatable("rsi.aetherworks.error.not_anvil"));
             return false;
         }
@@ -105,7 +74,7 @@ public final class AetherworksBatchDelegate extends AbstractBatchDelegate {
         this.forgePos = findNearbyForge(lvl, pos);
         if (forgePos != null) {
             BlockEntity fbe = lvl.getBlockEntity(forgePos);
-            if (fbe != null && forgeBEClass.isInstance(fbe)) {
+            if (fbe != null && AetherworksReflection.forgeBEClass.isInstance(fbe)) {
                 this.forgeBE = fbe;
             }
             findNearbyCoolers(lvl, forgePos, this.coolerPositions);
@@ -117,7 +86,7 @@ public final class AetherworksBatchDelegate extends AbstractBatchDelegate {
             player.sendSystemMessage(Component.translatable("rsi.generic.error.recipe_not_found", recipeId.toString()));
             return false;
         }
-        if (anvilRecipeClass != null && !anvilRecipeClass.isInstance(r)) {
+        if (AetherworksReflection.anvilRecipeClass != null && !AetherworksReflection.anvilRecipeClass.isInstance(r)) {
             player.sendSystemMessage(Component.translatable("rsi.generic.error.wrong_recipe_type"));
             return false;
         }
@@ -139,14 +108,14 @@ public final class AetherworksBatchDelegate extends AbstractBatchDelegate {
 
     @Nullable
     private static BlockPos findNearbyForge(Level level, BlockPos center) {
-        if (forgeBEClass == null) return null;
+        if (AetherworksReflection.forgeBEClass == null) return null;
         BlockPos.MutableBlockPos mpos = center.mutable();
         for (int dx = -5; dx <= 5; dx++) {
             for (int dz = -5; dz <= 5; dz++) {
                 for (int dy = -2; dy <= 2; dy++) {
                     mpos.set(center.getX() + dx, center.getY() + dy, center.getZ() + dz);
                     BlockEntity be = level.getBlockEntity(mpos);
-                    if (be != null && forgeBEClass.isInstance(be)) {
+                    if (be != null && AetherworksReflection.forgeBEClass.isInstance(be)) {
                         return mpos.immutable();
                     }
                 }
@@ -157,14 +126,14 @@ public final class AetherworksBatchDelegate extends AbstractBatchDelegate {
 
     private static void findNearbyCoolers(Level level, BlockPos center, List<BlockPos> out) {
         out.clear();
-        if (coolerBEClass == null) return;
+        if (AetherworksReflection.coolerBEClass == null) return;
         BlockPos.MutableBlockPos mpos = center.mutable();
         for (int dx = -5; dx <= 5; dx++) {
             for (int dz = -5; dz <= 5; dz++) {
                 for (int dy = -2; dy <= 2; dy++) {
                     mpos.set(center.getX() + dx, center.getY() + dy, center.getZ() + dz);
                     BlockEntity be = level.getBlockEntity(mpos);
-                    if (be != null && coolerBEClass.isInstance(be)) {
+                    if (be != null && AetherworksReflection.coolerBEClass.isInstance(be)) {
                         out.add(mpos.immutable());
                     }
                 }
@@ -212,7 +181,7 @@ public final class AetherworksBatchDelegate extends AbstractBatchDelegate {
         if (anvilBE == null || recipe == null || materials.isEmpty()) return false;
 
         BlockEntity current = level.getBlockEntity(machinePos);
-        if (current == null || current.isRemoved() || !anvilBEClass.isInstance(current)) {
+        if (current == null || current.isRemoved() || !AetherworksReflection.anvilBEClass.isInstance(current)) {
             player.sendSystemMessage(Component.translatable("rsi.error.machine_missing"));
             return false;
         }
@@ -247,10 +216,10 @@ public final class AetherworksBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public boolean isCraftComplete(ServerLevel level) {
-        if (!materialsPlaced || anvilBEClass == null) return false;
+        if (!materialsPlaced || AetherworksReflection.anvilBEClass == null) return false;
 
         BlockEntity current = level.getBlockEntity(machinePos);
-        if (current == null || current.isRemoved() || !anvilBEClass.isInstance(current)) {
+        if (current == null || current.isRemoved() || !AetherworksReflection.anvilBEClass.isInstance(current)) {
             RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] Anvil BE removed during craft");
             return true; // trigger cleanup
         }
@@ -259,7 +228,7 @@ public final class AetherworksBatchDelegate extends AbstractBatchDelegate {
         // Refresh forge reference
         if (forgePos != null) {
             BlockEntity fbe = level.getBlockEntity(forgePos);
-            if (fbe != null && forgeBEClass != null && forgeBEClass.isInstance(fbe)) {
+            if (fbe != null && AetherworksReflection.forgeBEClass != null && AetherworksReflection.forgeBEClass.isInstance(fbe)) {
                 this.forgeBE = fbe;
             }
         }
@@ -277,7 +246,7 @@ public final class AetherworksBatchDelegate extends AbstractBatchDelegate {
                         if (currentHeat > target + 50) {
                             for (BlockPos cp : coolerPositions) {
                                 BlockEntity cbe = level.getBlockEntity(cp);
-                                if (cbe != null && coolerBEClass.isInstance(cbe)) {
+                                if (cbe != null && AetherworksReflection.coolerBEClass.isInstance(cbe)) {
                                     double excess = currentHeat - target;
                                     double cd = Math.max(1.0, 100.0 - excess / 5.0);
                                     Reflect.setField(cbe, "cooldown", cd);
@@ -404,9 +373,8 @@ public final class AetherworksBatchDelegate extends AbstractBatchDelegate {
     public static List<String> getPlanWarnings(ServerPlayer player, Recipe<?> recipe,
                                                @Nullable ResourceLocation dim,
                                                @Nullable BlockPos pos) {
-        ensureClasses();
         List<String> warnings = new ArrayList<>();
-        if (anvilRecipeClass == null || !anvilRecipeClass.isInstance(recipe)) return warnings;
+        if (AetherworksReflection.anvilRecipeClass == null || !AetherworksReflection.anvilRecipeClass.isInstance(recipe)) return warnings;
 
         try {
             int min = (int) recipe.getClass().getMethod("getTemperatureMin").invoke(recipe);
@@ -435,7 +403,7 @@ public final class AetherworksBatchDelegate extends AbstractBatchDelegate {
                 ServerLevel lvl = CraftPacketUtils.resolveLevel(player.server, dim, player);
                 if (lvl != null && lvl.isLoaded(pos)) {
                     BlockEntity be = lvl.getBlockEntity(pos);
-                    if (be != null && anvilBEClass != null && anvilBEClass.isInstance(be)) {
+                    if (be != null && AetherworksReflection.anvilBEClass != null && AetherworksReflection.anvilBEClass.isInstance(be)) {
                         if (findNearbyForge(lvl, pos) == null) {
                             warnings.add(Component.translatable("rsi.aetherworks.warn.no_forge").getString());
                         }

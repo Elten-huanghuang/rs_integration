@@ -30,6 +30,8 @@ public final class ModIds {
     public static final String FTB_CHUNKS = "ftbchunks";
     public static final String CADMUS = "cadmus";
     public static final String SOPHISTICATED_BACKPACKS = "sophisticatedbackpacks";
+    public static final String BETTER_COMBAT = "bettercombat";
+    public static final String CRABBERS_DELIGHT = "crabbersdelight";
 
     // Composite ModType IDs (one mod → multiple machine types)
     public static final String ID_EMBERS_ALCHEMY = "embers_alchemy";

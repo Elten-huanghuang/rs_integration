@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
+import com.huanghuang.rsintegration.reflection.probes.WRReflection;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
@@ -41,67 +42,6 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         UNKNOWN
     }
 
-    private static volatile Class<?> wissenCrystallizerBEClass;
-    private static volatile Class<?> arcaneIteratorBEClass;
-    private static volatile Class<?> arcaneWorkbenchBEClass;
-    private static volatile Class<?> crystalRitualBEClass;
-    private static volatile Class<?> crystalRitualClass;
-    private static volatile Class<?> ritualAreaClass;
-    private static volatile Class<?> crystalInfusionRecipeClass;
-    private static volatile Class<?> runicPedestalBEClass;
-
-    private static void ensureClasses() {
-        // CrystalRitualBlockEntity is intentionally omitted — newer WR
-        // versions renamed it to CrystalBlockEntity, and the local try-catch
-        // below handles the fallback.  Putting both in ensureClasses would
-        // cause the entire gate to fail if one is missing, which prevents the
-        // local fallback from ever running.
-        if (!com.huanghuang.rsintegration.util.ModClassLoader.ensureClasses("wizards_reborn",
-                "mod.maxbogomol.wizards_reborn.common.block.wissen_crystallizer.WissenCrystallizerBlockEntity",
-                "mod.maxbogomol.wizards_reborn.common.block.arcane_iterator.ArcaneIteratorBlockEntity",
-                "mod.maxbogomol.wizards_reborn.common.block.arcane_workbench.ArcaneWorkbenchBlockEntity",
-                "mod.maxbogomol.wizards_reborn.common.block.crystal.CrystalBlockEntity",
-                "mod.maxbogomol.wizards_reborn.api.crystalritual.CrystalRitual",
-                "mod.maxbogomol.wizards_reborn.api.crystalritual.CrystalRitualArea",
-                "mod.maxbogomol.wizards_reborn.common.recipe.CrystalInfusionRecipe",
-                "mod.maxbogomol.wizards_reborn.common.block.runic_pedestal.RunicPedestalBlockEntity")) return;
-        try {
-            wissenCrystallizerBEClass = Class.forName(
-                    "mod.maxbogomol.wizards_reborn.common.block.wissen_crystallizer.WissenCrystallizerBlockEntity");
-        } catch (ClassNotFoundException ignored) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-WR] WissenCrystallizer class not found — mod variant may differ"); }
-        try {
-            arcaneIteratorBEClass = Class.forName(
-                    "mod.maxbogomol.wizards_reborn.common.block.arcane_iterator.ArcaneIteratorBlockEntity");
-        } catch (ClassNotFoundException ignored) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-WR] ArcaneIterator class not found — mod variant may differ"); }
-        try {
-            arcaneWorkbenchBEClass = Class.forName(
-                    "mod.maxbogomol.wizards_reborn.common.block.arcane_workbench.ArcaneWorkbenchBlockEntity");
-        } catch (ClassNotFoundException ignored) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-WR] ArcaneWorkbench class not found — mod variant may differ"); }
-        try {
-            // Try crystal_ritual first, then crystal as fallback
-            try {
-                crystalRitualBEClass = Class.forName(
-                        "mod.maxbogomol.wizards_reborn.common.block.crystal_ritual.CrystalRitualBlockEntity");
-            } catch (ClassNotFoundException e) {
-                crystalRitualBEClass = Class.forName(
-                        "mod.maxbogomol.wizards_reborn.common.block.crystal.CrystalBlockEntity");
-            }
-        } catch (ClassNotFoundException ignored) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-WR] CrystalRitual/Crystal BE class not found — mod variant may differ"); }
-        try {
-            crystalRitualClass = Class.forName(
-                    "mod.maxbogomol.wizards_reborn.api.crystalritual.CrystalRitual");
-            ritualAreaClass = Class.forName(
-                    "mod.maxbogomol.wizards_reborn.api.crystalritual.CrystalRitualArea");
-        } catch (ClassNotFoundException ignored) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-WR] CrystalRitual/RitualArea class not found — mod variant may differ"); }
-        try {
-            crystalInfusionRecipeClass = Class.forName(
-                    "mod.maxbogomol.wizards_reborn.common.recipe.CrystalInfusionRecipe");
-        } catch (ClassNotFoundException ignored) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-WR] CrystalInfusionRecipe class not found — mod variant may differ"); }
-        try {
-            runicPedestalBEClass = Class.forName(
-                    "mod.maxbogomol.wizards_reborn.common.block.runic_pedestal.RunicPedestalBlockEntity");
-        } catch (ClassNotFoundException ignored) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-WR] RunicPedestal class not found — mod variant may differ"); }
-    }
 
     private ServerPlayer player;
     private ResourceKey<Level> myDim;
@@ -136,7 +76,6 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
     @Override
     public boolean validateAndInit(ServerPlayer player, ResourceLocation recipeId,
                                    @Nullable ResourceLocation dim, BlockPos pos) {
-        ensureClasses();
 
         // Reset all instance state to prevent pollution from a previous
         // validateAndInit() call that failed partway through.
@@ -176,13 +115,13 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         this.be = blockEntity;
 
         // Determine machine type
-        if (wissenCrystallizerBEClass != null && wissenCrystallizerBEClass.isInstance(be)) {
+        if (WRReflection.wissenCrystallizerBEClass != null && WRReflection.wissenCrystallizerBEClass.isInstance(be)) {
             machineType = MachineType.WISSEN_CRYSTALLIZER;
-        } else if (arcaneIteratorBEClass != null && arcaneIteratorBEClass.isInstance(be)) {
+        } else if (WRReflection.arcaneIteratorBEClass != null && WRReflection.arcaneIteratorBEClass.isInstance(be)) {
             machineType = MachineType.ARCANE_ITERATOR;
-        } else if (arcaneWorkbenchBEClass != null && arcaneWorkbenchBEClass.isInstance(be)) {
+        } else if (WRReflection.arcaneWorkbenchBEClass != null && WRReflection.arcaneWorkbenchBEClass.isInstance(be)) {
             machineType = MachineType.ARCANE_WORKBENCH;
-        } else if (crystalRitualBEClass != null && crystalRitualBEClass.isInstance(be)) {
+        } else if (WRReflection.crystalRitualBEClass != null && WRReflection.crystalRitualBEClass.isInstance(be)) {
             machineType = MachineType.CRYSTAL_RITUAL;
         } else {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] Unsupported BE type: {}", be.getClass().getName());
@@ -443,12 +382,12 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
             player.sendSystemMessage(Component.translatable("rsi.wr.error.runic_pedestal_missing"));
             return false;
         }
-        if (runicPedestalBEClass == null) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] [step 4/6] runicPedestalBEClass is null (not loaded)");
+        if (WRReflection.runicPedestalBEClass == null) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] [step 4/6] WRReflection.runicPedestalBEClass is null (not loaded)");
             player.sendSystemMessage(Component.translatable("rsi.wr.error.runic_pedestal_missing"));
             return false;
         }
-        if (!runicPedestalBEClass.isInstance(belowBE)) {
+        if (!WRReflection.runicPedestalBEClass.isInstance(belowBE)) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] [step 4/6] Block below at {} is {} (expected RunicPedestalBlockEntity)",
                     below, belowBE.getClass().getName());
             player.sendSystemMessage(Component.translatable("rsi.wr.error.runic_pedestal_missing"));
@@ -459,7 +398,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         // [Step 5] Runic pedestal must have a runic plate
         try {
             java.lang.reflect.Method hasPlate = Reflect.findMethod(
-                    runicPedestalBEClass, "hasRunicPlate", new Class<?>[0]);
+                    WRReflection.runicPedestalBEClass, "hasRunicPlate", new Class<?>[0]);
             if (hasPlate != null) {
                 if (!(boolean) hasPlate.invoke(belowBE)) {
                     RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] [step 5/6] hasRunicPlate() returned false");
@@ -475,7 +414,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         // [Step 6] Ritual must be crystal_infusion type
         try {
             java.lang.reflect.Method getRitual = Reflect.findMethod(
-                    runicPedestalBEClass, "getCrystalRitual", new Class<?>[0]);
+                    WRReflection.runicPedestalBEClass, "getCrystalRitual", new Class<?>[0]);
             if (getRitual != null) {
                 Object ritual = getRitual.invoke(belowBE);
                 if (ritual == null) {
@@ -499,7 +438,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
                     RSIntegrationMod.LOGGER.debug("[RSI-Batch-WR] [step 6/6] getId method not found on {}", ritual.getClass().getName());
                 }
             } else {
-                RSIntegrationMod.LOGGER.debug("[RSI-Batch-WR] [step 6/6] getCrystalRitual method not found on {}", runicPedestalBEClass.getName());
+                RSIntegrationMod.LOGGER.debug("[RSI-Batch-WR] [step 6/6] getCrystalRitual method not found on {}", WRReflection.runicPedestalBEClass.getName());
             }
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.debug("[RSI-Batch-WR] [step 6/6] ritual ID check exception", e);
@@ -776,7 +715,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         List<?> pedestals;
         try {
             ServerLevel level = player.serverLevel();
-            pedestals = (List<?>) Reflect.getMethodOrThrow(crystalRitualClass, "getPedestalsWithArea", "getPedestalsWithArea", Level.class, BlockPos.class, ritualAreaClass)
+            pedestals = (List<?>) Reflect.getMethodOrThrow(WRReflection.crystalRitualClass, "getPedestalsWithArea", "getPedestalsWithArea", Level.class, BlockPos.class, WRReflection.ritualAreaClass)
                     .invoke(null, level, myPos, area);
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] Failed to find arcane pedestals for crystal ritual", e);
@@ -1062,7 +1001,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         List<?> pedestals;
         try {
             ServerLevel level = player.serverLevel();
-            pedestals = (List<?>) Reflect.getMethodOrThrow(crystalRitualClass, "getPedestalsWithArea", "getPedestalsWithArea", Level.class, BlockPos.class, ritualAreaClass)
+            pedestals = (List<?>) Reflect.getMethodOrThrow(WRReflection.crystalRitualClass, "getPedestalsWithArea", "getPedestalsWithArea", Level.class, BlockPos.class, WRReflection.ritualAreaClass)
                     .invoke(null, level, myPos, area);
         } catch (Exception e) {
             return false;
@@ -1811,7 +1750,6 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
                                                @Nullable BlockPos pos) {
         List<String> warnings = new ArrayList<>();
         if (recipe == null) return warnings;
-        ensureClasses();
 
         // Determine machine type from recipe ID path
         MachineType mt = expectedMachineType(recipe.getId());

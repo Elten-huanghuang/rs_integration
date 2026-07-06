@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
+import com.huanghuang.rsintegration.reflection.probes.YHKReflection;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.core.BlockPos;
@@ -36,11 +37,6 @@ import java.util.Map;
 
 public final class KettleBatchDelegate implements IBatchDelegate {
 
-    private static final String BE_CLASS =
-            "dev.xkmc.youkaishomecoming.content.pot.kettle.KettleBlockEntity";
-    private static final String RECIPE_CLASS =
-            "dev.xkmc.youkaishomecoming.content.pot.kettle.KettleRecipe";
-
     private ServerPlayer player;
     private ServerLevel myLevel;
     private ResourceKey<Level> myDim;
@@ -50,27 +46,24 @@ public final class KettleBatchDelegate implements IBatchDelegate {
     private boolean craftDone;
     private boolean usingSharedLedger;
 
-    // ── reflection cache ──
-    private static volatile Class<?> beClass;
-    private static volatile Class<?> recipeClass;
-    /** KettleBlockEntity.fluids — public final BaseTank */
+    // -- reflection cache --
+    /** KettleBlockEntity.fluids -- public final BaseTank */
     private static volatile Field fluidsField;
-    /** KettleRecipe.input — public final List<Ingredient> */
+    /** KettleRecipe.input -- public final List<Ingredient> */
     private static volatile Field inputField;
-    /** KettleRecipe.result — public FluidStack */
+    /** KettleRecipe.result -- public FluidStack */
     private static volatile Field resultField;
     /** HeatableBlockEntity.isHeated(Level, BlockPos) */
     private static volatile Method isHeatedMethod;
-    /** FluidItemTile.getItemHandler() → SimpleContainer */
+    /** FluidItemTile.getItemHandler() -> SimpleContainer */
     private static volatile Method getItemHandlerMethod;
-    /** FluidItemTile.getFluidHandler() → BaseTank */
+    /** FluidItemTile.getFluidHandler() -> BaseTank */
     private static volatile Method getFluidHandlerMethod;
-    /** YHFluid.type → IYHFluidHolder (public final) */
-    private static volatile Class<?> yhFluidClass;
+    /** YHFluid.type -> IYHFluidHolder (public final) */
     private static volatile Field yhFluidTypeField;
-    /** IYHFluidHolder.amount() → int */
+    /** IYHFluidHolder.amount() -> int */
     private static volatile Method holderAmountMethod;
-    /** IYHFluidHolder.asStack(int) → ItemStack */
+    /** IYHFluidHolder.asStack(int) -> ItemStack */
     private static volatile Method holderAsStackMethod;
     private static volatile boolean reflectionProbed;
 
@@ -88,7 +81,7 @@ public final class KettleBatchDelegate implements IBatchDelegate {
         this.player = player;
 
         Recipe<?> found = level.getRecipeManager().byKey(recipeId).orElse(null);
-        if (found == null || !found.getClass().getName().equals(RECIPE_CLASS)) {
+        if (found == null || YHKReflection.kettleRecipeClass == null || !YHKReflection.kettleRecipeClass.isInstance(found)) {
             player.sendSystemMessage(Component.translatable("rsi.generic.error.recipe_not_found", recipeId.toString()));
             return false;
         }
@@ -221,7 +214,7 @@ public final class KettleBatchDelegate implements IBatchDelegate {
 
         // Check if result fluid is present in the tank.
         // Input items may still be visible in the UI while the kettle
-        // processes them — the fluid appearing is the true signal.
+        // processes them -- the fluid appearing is the true signal.
         IFluidHandler fluidHandler = getFluidHandler(be);
         if (fluidHandler == null) return false;
         FluidStack tankFluid = fluidHandler.getFluidInTank(0);
@@ -230,7 +223,7 @@ public final class KettleBatchDelegate implements IBatchDelegate {
         if (tankFluid.getFluid() != recipeResult.getFluid()) return false;
 
         // For YHFluid, also verify there's enough for at least one container
-        if (yhFluidClass != null && yhFluidClass.isInstance(tankFluid.getFluid())) {
+        if (YHKReflection.yhFluidClass != null && YHKReflection.yhFluidClass.isInstance(tankFluid.getFluid())) {
             int minAmount = getYHFluidAmountPerContainer(tankFluid.getFluid());
             if (minAmount > 0 && tankFluid.getAmount() < minAmount) return false;
         }
@@ -251,11 +244,11 @@ public final class KettleBatchDelegate implements IBatchDelegate {
         // YHK custom fluid system (tea, sake, etc.):
         // YHFluid.getBucket() always returns AIR.  Must use
         // IYHFluidHolder.asStack(count) to obtain the filled container.
-        if (yhFluidClass != null && yhFluidClass.isInstance(tankFluid.getFluid())) {
+        if (YHKReflection.yhFluidClass != null && YHKReflection.yhFluidClass.isInstance(tankFluid.getFluid())) {
             return collectYHFluidResult(be, fluidHandler, tankFluid);
         }
 
-        // Standard Forge fluid — use bucket
+        // Standard Forge fluid -- use bucket
         FluidStack recipeResult = getRecipeResult();
         FluidStack drained = fluidHandler.drain(recipeResult, IFluidHandler.FluidAction.EXECUTE);
         be.setChanged();
@@ -284,12 +277,12 @@ public final class KettleBatchDelegate implements IBatchDelegate {
         int count = total / perContainer;
         if (count == 0) return ItemStack.EMPTY;
 
-        // Validate the fluid → item conversion BEFORE draining.
+        // Validate the fluid -> item conversion BEFORE draining.
         // If asStack fails, the fluid stays in the tank so the player
         // can still extract it manually.
         ItemStack template = getYHFluidAsStack(tankFluid.getFluid(), 1);
         if (template.isEmpty()) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Kettle] asStack(1) returned empty for {} (holder={}) — fluid left in tank",
+            RSIntegrationMod.LOGGER.warn("[RSI-Kettle] asStack(1) returned empty for {} (holder={}) -- fluid left in tank",
                     tankFluid.getFluid().getFluidType().getDescriptionId(),
                     getYHFluidHolderDesc(tankFluid.getFluid()));
             return ItemStack.EMPTY;
@@ -391,7 +384,7 @@ public final class KettleBatchDelegate implements IBatchDelegate {
     @Override
     public BlockPos getMachinePos() { return myPos; }
 
-    // ── plan helpers ──
+    // -- plan helpers --
 
     public static void addFuelIfNeeded(@Nullable String recipeModTypeId,
                                        Map<Item, Integer> itemAvailable,
@@ -409,7 +402,7 @@ public final class KettleBatchDelegate implements IBatchDelegate {
         return warnings;
     }
 
-    // ── BE discovery ──
+    // -- BE discovery --
 
     @Nullable
     private BlockEntity findKettleBE() {
@@ -435,37 +428,36 @@ public final class KettleBatchDelegate implements IBatchDelegate {
         return null;
     }
 
-    // ── reflection (one-time probe) ──
+    // -- reflection (one-time probe) --
 
     private static void probeReflection() {
         if (reflectionProbed) return;
         reflectionProbed = true;
+        if (YHKReflection.kettleBEClass == null || YHKReflection.kettleRecipeClass == null) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Kettle] YHKReflection kettle probe not ready");
+            return;
+        }
         try {
-            beClass = Class.forName(BE_CLASS);
-            recipeClass = Class.forName(RECIPE_CLASS);
+            // fluids -- public final field on KettleBlockEntity
+            fluidsField = YHKReflection.kettleBEClass.getField("fluids");
 
-            // fluids — public final field on KettleBlockEntity
-            fluidsField = beClass.getField("fluids");
+            // getItemHandler(), getFluidHandler() -- public on FluidItemTile
+            getItemHandlerMethod = YHKReflection.kettleBEClass.getMethod("getItemHandler");
+            getFluidHandlerMethod = YHKReflection.kettleBEClass.getMethod("getFluidHandler");
 
-            // getItemHandler(), getFluidHandler() — public on FluidItemTile
-            getItemHandlerMethod = beClass.getMethod("getItemHandler");
-            getFluidHandlerMethod = beClass.getMethod("getFluidHandler");
-
-            // isHeated — default method from HeatableBlockEntity
-            isHeatedMethod = beClass.getMethod("isHeated", Level.class, BlockPos.class);
+            // isHeated -- default method from HeatableBlockEntity
+            isHeatedMethod = YHKReflection.kettleBEClass.getMethod("isHeated", Level.class, BlockPos.class);
 
             // KettleRecipe public fields
-            inputField = recipeClass.getField("input");
-            resultField = recipeClass.getField("result");
+            inputField = YHKReflection.kettleRecipeClass.getField("input");
+            resultField = YHKReflection.kettleRecipeClass.getField("result");
 
             // YHFluid custom container system (used for kettle fluid output)
-            yhFluidClass = Class.forName(
-                    "dev.xkmc.youkaishomecoming.content.item.fluid.YHFluid");
-            yhFluidTypeField = yhFluidClass.getField("type");
-            Class<?> holderClass = Class.forName(
-                    "dev.xkmc.youkaishomecoming.content.item.fluid.IYHFluidHolder");
-            holderAmountMethod = holderClass.getMethod("amount");
-            holderAsStackMethod = holderClass.getMethod("asStack", int.class);
+            if (YHKReflection.yhFluidClass != null && YHKReflection.yhFluidHolderClass != null) {
+                yhFluidTypeField = YHKReflection.yhFluidClass.getField("type");
+                holderAmountMethod = YHKReflection.yhFluidHolderClass.getMethod("amount");
+                holderAsStackMethod = YHKReflection.yhFluidHolderClass.getMethod("asStack", int.class);
+            }
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-Kettle] Reflection probe failed: {}", e.toString());
         }
@@ -473,10 +465,10 @@ public final class KettleBatchDelegate implements IBatchDelegate {
 
     private static boolean isKettleBE(BlockEntity be) {
         probeReflection();
-        if (beClass != null && beClass.isAssignableFrom(be.getClass())) return true;
+        if (YHKReflection.kettleBEClass != null && YHKReflection.kettleBEClass.isAssignableFrom(be.getClass())) return true;
         Class<?> clazz = be.getClass();
         while (clazz != null) {
-            if (clazz.getName().equals(BE_CLASS)) return true;
+            if (YHKReflection.kettleBEClass != null && YHKReflection.kettleBEClass.getName().equals(clazz.getName())) return true;
             clazz = clazz.getSuperclass();
         }
         return false;
@@ -530,7 +522,7 @@ public final class KettleBatchDelegate implements IBatchDelegate {
     private boolean ensureWater(IFluidHandler fluidHandler, BlockEntity be) {
         FluidStack tankFluid = fluidHandler.getFluidInTank(0);
 
-        // Already has water — nothing to do
+        // Already has water -- nothing to do
         if (!tankFluid.isEmpty() && tankFluid.getFluid() == Fluids.WATER) {
             return true;
         }
@@ -548,7 +540,7 @@ public final class KettleBatchDelegate implements IBatchDelegate {
             return true;
         }
 
-        // Direct fill failed — try setting the public fluids field directly
+        // Direct fill failed -- try setting the public fluids field directly
         if (fluidsField != null) {
             try {
                 Object tank = fluidsField.get(be);
@@ -590,7 +582,7 @@ public final class KettleBatchDelegate implements IBatchDelegate {
             return true;
         }
 
-        // Refund the water bucket — we couldn't use it
+        // Refund the water bucket -- we couldn't use it
         network.insertItem(waterBucket, 1, Action.PERFORM);
         RSIntegrationMod.LOGGER.warn("[RSI-Kettle] Fluid handler rejected water fill");
         return false;
@@ -622,7 +614,7 @@ public final class KettleBatchDelegate implements IBatchDelegate {
         return FluidStack.EMPTY;
     }
 
-    // ── cleanup ──
+    // -- cleanup --
 
     private void clearSlots(SimpleContainer items, BlockEntity be) {
         for (int i = 0; i < items.getContainerSize(); i++) {

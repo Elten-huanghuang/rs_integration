@@ -11,8 +11,8 @@ import com.huanghuang.rsintegration.mods.embers.EreAlchemyLock;
 import com.huanghuang.rsintegration.mods.embers.KnownCodeSavedData;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
+import com.huanghuang.rsintegration.reflection.probes.EmbersReflection;
 import com.huanghuang.rsintegration.util.ChunkUtils;
-import com.huanghuang.rsintegration.util.ModClassLoader;
 import com.huanghuang.rsintegration.util.Reflect;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.storage.tracker.IStorageTracker;
@@ -46,11 +46,6 @@ import net.minecraftforge.items.ItemHandlerHelper;
 
 public final class EreAlchemyInferDelegate
 extends AbstractBatchDelegate {
-    private static volatile Class<?> alchemyTabletBEClass;
-    private static volatile Class<?> alchemyPedestalTopBEClass;
-    private static volatile Class<?> alchemyPedestalBEClass;
-    private static volatile Class<?> alchemyRecipeClass;
-    private static volatile Class<?> ibinClass;
     private static final int MINIMAX_THRESHOLD = 1024;
     private static final int MAX_COMBINATIONS = 50000;
     private static final long PROGRESS_TTL_MS = 1800000L;
@@ -77,22 +72,6 @@ extends AbstractBatchDelegate {
     private boolean succeeded;
     private List<IngredientSpec> firstAttemptSpecs;
     private int[] aspectEquivClasses;
-
-    private static void ensureClasses() {
-        if (!ModClassLoader.ensureClasses("embers", (String[])new String[]{"com.rekindled.embers.blockentity.AlchemyTabletBlockEntity", "com.rekindled.embers.blockentity.AlchemyPedestalTopBlockEntity", "com.rekindled.embers.blockentity.AlchemyPedestalBlockEntity", "com.rekindled.embers.recipe.AlchemyRecipe", "com.rekindled.embers.api.tile.IBin"})) {
-            return;
-        }
-        try {
-            alchemyTabletBEClass = Class.forName("com.rekindled.embers.blockentity.AlchemyTabletBlockEntity");
-            alchemyPedestalTopBEClass = Class.forName("com.rekindled.embers.blockentity.AlchemyPedestalTopBlockEntity");
-            alchemyPedestalBEClass = Class.forName("com.rekindled.embers.blockentity.AlchemyPedestalBlockEntity");
-            alchemyRecipeClass = Class.forName("com.rekindled.embers.recipe.AlchemyRecipe");
-            ibinClass = Class.forName("com.rekindled.embers.api.tile.IBin");
-        }
-        catch (ClassNotFoundException e) {
-            RSIntegrationMod.LOGGER.error("[RSI-Embers-Infer] Failed to load Embers classes", (Throwable)e);
-        }
-    }
 
     private static String progressKey(UUID playerId, String recipeId) {
         return playerId + "|" + recipeId;
@@ -137,8 +116,7 @@ extends AbstractBatchDelegate {
     }
 
     public boolean validateAndInit(ServerPlayer player, ResourceLocation recipeId, @Nullable ResourceLocation dim, BlockPos pos) {
-        EreAlchemyInferDelegate.ensureClasses();
-        if (alchemyTabletBEClass == null || alchemyRecipeClass == null || alchemyPedestalTopBEClass == null || alchemyPedestalBEClass == null) {
+        if (!EmbersReflection.isAvailable()) {
             player.sendSystemMessage(Component.translatable("rsi.batch.error.mod_missing", "Embers"));
             return false;
         }
@@ -163,14 +141,14 @@ extends AbstractBatchDelegate {
             }
         }
         BlockEntity be = lvl.getBlockEntity(pos);
-        if (be == null || !alchemyTabletBEClass.isInstance(be)) {
+        if (be == null || !EmbersReflection.alchemyTabletBEClass.isInstance(be)) {
             RSIntegrationMod.LOGGER.warn("[RSI-Embers-Infer] No AlchemyTabletBlockEntity at {}", (Object)pos);
             player.sendSystemMessage(Component.translatable("rsi.embers.error.not_tablet"));
             return false;
         }
         this.tablet = be;
         Recipe r = lvl.getRecipeManager().byKey(recipeId).orElse(null);
-        if (r == null || !alchemyRecipeClass.isInstance(r)) {
+        if (r == null || !EmbersReflection.alchemyRecipeClass.isInstance(r)) {
             RSIntegrationMod.LOGGER.warn("[RSI-Embers-Infer] Recipe {} is not an AlchemyRecipe", (Object)recipeId);
             player.sendSystemMessage(Component.translatable("rsi.embers.error.not_alchemy_recipe", recipeId.toString()));
             return false;
@@ -205,7 +183,7 @@ extends AbstractBatchDelegate {
                 return false;
             }
             BlockEntity bottomBE = lvl.getBlockEntity(p.pos().below());
-            if (bottomBE == null || !alchemyPedestalBEClass.isInstance(bottomBE)) {
+            if (bottomBE == null || !EmbersReflection.alchemyPedestalBEClass.isInstance(bottomBE)) {
                 String reason = bottomBE == null ? "\u65e0BE" : "\u7c7b\u578b=" + bottomBE.getClass().getSimpleName();
                 RSIntegrationMod.LOGGER.warn("[RSI-Embers-Infer] Pedestal bottom at {} missing or invalid ({})", (Object)p.pos().below(), (Object)reason);
                 player.sendSystemMessage(Component.literal("\u00a7c\u57fa\u5ea7\u5e95\u90e8\u5f02\u5e38: " + p.pos().below().toShortString() + " (" + reason + ")"));
@@ -362,7 +340,7 @@ extends AbstractBatchDelegate {
         BlockPos below = this.machinePos.below();
         ChunkUtils.loadChunk((ServerLevel)this.level, (BlockPos)below);
         BlockEntity be = this.level.getBlockEntity(below);
-        if (ibinClass != null && be != null && ibinClass.isInstance(be) && (binInv = Reflect.invoke((Object)be, "getInventory").orElse(null)) != null && !(r = Reflect.invoke(binInv, "getStackInSlot", 0).map(o -> (ItemStack)o).orElse(ItemStack.EMPTY)).isEmpty()) {
+        if (EmbersReflection.ibinClass != null && be != null && EmbersReflection.ibinClass.isInstance(be) && (binInv = Reflect.invoke((Object)be, "getInventory").orElse(null)) != null && !(r = Reflect.invoke(binInv, "getStackInSlot", 0).map(o -> (ItemStack)o).orElse(ItemStack.EMPTY)).isEmpty()) {
             return r;
         }
         return ItemStack.EMPTY;
@@ -483,7 +461,7 @@ extends AbstractBatchDelegate {
                 BlockPos below = this.machinePos.below();
                 ChunkUtils.loadChunk((ServerLevel)this.level, (BlockPos)below);
                 BlockEntity be = this.level.getBlockEntity(below);
-                if (ibinClass != null && be != null && ibinClass.isInstance(be)) {
+                if (EmbersReflection.ibinClass != null && be != null && EmbersReflection.ibinClass.isInstance(be)) {
                     Object binInv = Reflect.invoke((Object)be, "getInventory").orElse(null);
                     if (binInv != null) {
                         Reflect.invoke(binInv, "extractItem", 0, 64, false);
@@ -677,7 +655,7 @@ extends AbstractBatchDelegate {
                     return false;
                 }
                 BlockEntity be = this.level.getBlockEntity(bottomPos);
-                if (be != null && alchemyPedestalBEClass != null && alchemyPedestalBEClass.isInstance(be)) {
+                if (be != null && EmbersReflection.alchemyPedestalBEClass != null && EmbersReflection.alchemyPedestalBEClass.isInstance(be)) {
                     Object bottomInv = Reflect.getField((Object)be, "inventory").orElse(null);
                     if (bottomInv != null) {
                         Reflect.invoke(bottomInv, "setStackInSlot", 0, materials.get(idx++));
@@ -830,7 +808,7 @@ extends AbstractBatchDelegate {
                 BlockPos bp = top.pos().below();
                 if (this.level.isLoaded(bp)) {
                     BlockEntity be = this.level.getBlockEntity(bp);
-                    if (be != null && !be.isRemoved() && alchemyPedestalBEClass != null && alchemyPedestalBEClass.isInstance(be)) {
+                    if (be != null && !be.isRemoved() && EmbersReflection.alchemyPedestalBEClass != null && EmbersReflection.alchemyPedestalBEClass.isInstance(be)) {
                         Object botInv = Reflect.getField((Object)be, "inventory").orElse(null);
                         if (botInv != null) {
                             ItemStack is = Reflect.invoke(botInv, "getStackInSlot", 0).map(o -> (ItemStack)o).orElse(ItemStack.EMPTY);

@@ -9,6 +9,7 @@ import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.network.binding.BindingStorage;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
+import com.huanghuang.rsintegration.reflection.probes.FAReflection;
 import com.huanghuang.rsintegration.util.ChunkUtils;
 import com.huanghuang.rsintegration.util.Reflect;
 import com.refinedmods.refinedstorage.api.network.INetwork;
@@ -41,9 +42,6 @@ import java.util.Set;
 public final class FaBatchDelegate extends AbstractBatchDelegate {
 
     // ── Shared class refs (delegated to FaRitualHelper) ──────────
-    private static void ensureClasses() {
-        FaRitualHelper.ensureClasses();
-    }
 
     @Nullable
     private static ResourceKey<?> getFARegistryKey() {
@@ -72,7 +70,6 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
     @Override
     public boolean validateAndInit(ServerPlayer player, ResourceLocation recipeId,
                                    @Nullable ResourceLocation dim, BlockPos pos) {
-        ensureClasses();
 
         // Reset all instance state to prevent pollution from a previous
         // validateAndInit() call that failed partway through.
@@ -84,7 +81,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
         this.emptyPedestals = null;
         this.ritualEverSeenActive = false;
 
-        if (FaRitualHelper.hephaestusForgeBEClass == null || FaRitualHelper.ritualManagerClass == null) {
+        if (FAReflection.hephaestusForgeBEClass == null || FAReflection.ritualManagerClass == null) {
             player.sendSystemMessage(Component.translatable("rsi.batch.error.mod_missing", "Forbidden Arcanus"));
             return false;
         }
@@ -107,7 +104,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
 
         ChunkUtils.loadChunk(level, pos);
         BlockEntity be = level.getBlockEntity(pos);
-        if (be == null || !FaRitualHelper.hephaestusForgeBEClass.isInstance(be)) {
+        if (be == null || !FAReflection.hephaestusForgeBEClass.isInstance(be)) {
             player.sendSystemMessage(Component.translatable("rsi.fa.error.forge_not_found"));
             return false;
         }
@@ -125,7 +122,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
         // UpgradeTierResult: FA's checkConditions requires EXACT tier match
         try {
             Object result = FaRitualHelper.invoke(ritual, "result");
-            if (result != null && FaRitualHelper.upgradeTierResultClass.isInstance(result)) {
+            if (result != null && FAReflection.upgradeTierResultClass.isInstance(result)) {
                 RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] UpgradeTierResult ritual — output depends on main ingredient");
                 int upgradeReqTier = FaRitualHelper.readUpgradeRequiredTier(result);
                 if (upgradeReqTier >= 0 && forgeTier != upgradeReqTier) {
@@ -138,7 +135,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
 
         // Resolve ritual manager — must come BEFORE enhancer check
         try {
-            ritualManager = Reflect.getMethodOrThrow(FaRitualHelper.hephaestusForgeBEClass, "getRitualManager", "getRitualManager").invoke(forge);
+            ritualManager = Reflect.getMethodOrThrow(FAReflection.hephaestusForgeBEClass, "getRitualManager", "getRitualManager").invoke(forge);
         } catch (Exception e) {
             player.sendSystemMessage(Component.translatable("rsi.fa.error.ritual_manager"));
             return false;
@@ -155,13 +152,13 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
                 List<?> requiredEnhancers = FaRitualHelper.invokeList(requirements, "enhancers");
                 if (requiredEnhancers != null && !requiredEnhancers.isEmpty()) {
                     java.lang.reflect.Field accessorField = Reflect.findField(
-                            FaRitualHelper.ritualManagerClass, "enhancerAccessor").orElse(null);
+                            FAReflection.ritualManagerClass, "enhancerAccessor").orElse(null);
                     List<?> installedEnhancers = null;
                     if (accessorField != null) {
                         accessorField.setAccessible(true);
                         Object ea = accessorField.get(ritualManager);
                         if (ea != null) {
-                            installedEnhancers = (List<?>) Reflect.getMethodOrThrow(FaRitualHelper.enhancerAccessorClass, "getEnhancers", "getEnhancers").invoke(ea);
+                            installedEnhancers = (List<?>) Reflect.getMethodOrThrow(FAReflection.enhancerAccessorClass, "getEnhancers", "getEnhancers").invoke(ea);
                         }
                     }
                     for (Object holder : requiredEnhancers) {
@@ -190,7 +187,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
 
         // Validate idle
         try {
-            Boolean active = (Boolean) Reflect.getMethodOrThrow(FaRitualHelper.ritualManagerClass, "isRitualActive", "isRitualActive").invoke(ritualManager);
+            Boolean active = (Boolean) Reflect.getMethodOrThrow(FAReflection.ritualManagerClass, "isRitualActive", "isRitualActive").invoke(ritualManager);
             if (Boolean.TRUE.equals(active)) {
                 player.sendSystemMessage(Component.translatable("rsi.fa.warn.ritual_active"));
                 return false;
@@ -220,7 +217,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
             List<Object> foundPedestals = findPedestals(level);
             if (foundPedestals != null) {
                 for (Object ped : foundPedestals) {
-                    ItemStack ps = (ItemStack) Reflect.getMethodOrThrow(FaRitualHelper.pedestalBEClass, "getStack", "getStack").invoke(ped);
+                    ItemStack ps = (ItemStack) Reflect.getMethodOrThrow(FAReflection.pedestalBEClass, "getStack", "getStack").invoke(ped);
                     if (!ps.isEmpty()) {
                         player.sendSystemMessage(Component.translatable("rsi.fa.warn.ritual_active"));
                         return false;
@@ -261,7 +258,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
 
         // Re-validate idle
         try {
-            Boolean active = (Boolean) Reflect.getMethodOrThrow(FaRitualHelper.ritualManagerClass, "isRitualActive", "isRitualActive").invoke(ritualManager);
+            Boolean active = (Boolean) Reflect.getMethodOrThrow(FAReflection.ritualManagerClass, "isRitualActive", "isRitualActive").invoke(ritualManager);
             if (Boolean.TRUE.equals(active)) {
                 RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] tryStartSingleCraft: altar busy, aborting");
                 return false;
@@ -285,7 +282,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
         List<Object> availablePedestals = new ArrayList<>();
         for (Object ped : foundPedestals) {
             try {
-                ItemStack stack = (ItemStack) Reflect.getMethodOrThrow(FaRitualHelper.pedestalBEClass, "getStack", "getStack").invoke(ped);
+                ItemStack stack = (ItemStack) Reflect.getMethodOrThrow(FAReflection.pedestalBEClass, "getStack", "getStack").invoke(ped);
                 if (stack.isEmpty()) {
                     availablePedestals.add(ped);
                 }
@@ -350,7 +347,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
                     ItemStack single = template.copy();
                     single.setCount(1);
                     Object ped = availablePedestals.get(pedIdx++);
-                    Reflect.getMethodOrThrow(FaRitualHelper.pedestalBEClass, "setStackAndSync", "setStackAndSync", ItemStack.class)
+                    Reflect.getMethodOrThrow(FAReflection.pedestalBEClass, "setStackAndSync", "setStackAndSync", ItemStack.class)
                             .invoke(ped, single);
                     filledPedestals.add(ped);
                 }
@@ -366,19 +363,19 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
 
         // Populate cachedIngredients
         try {
-            Object curEssences = Reflect.getMethodOrThrow(FaRitualHelper.hephaestusForgeBEClass, "getEssences", "getEssences").invoke(forge);
-            Method updateIngredient = Reflect.getMethodOrThrow(FaRitualHelper.ritualManagerClass, "updateIngredient", "updateIngredient",
-                    FaRitualHelper.pedestalBEClass, ItemStack.class, FaRitualHelper.essencesDefinitionClass);
+            Object curEssences = Reflect.getMethodOrThrow(FAReflection.hephaestusForgeBEClass, "getEssences", "getEssences").invoke(forge);
+            Method updateIngredient = Reflect.getMethodOrThrow(FAReflection.ritualManagerClass, "updateIngredient", "updateIngredient",
+                    FAReflection.pedestalBEClass, ItemStack.class, FAReflection.essencesDefinitionClass);
             for (Object ped : foundPedestals) {
                 if (!filledPedestals.contains(ped)) {
                     updateIngredient.invoke(ritualManager, ped, ItemStack.EMPTY, curEssences);
                 }
             }
             for (Object ped : filledPedestals) {
-                ItemStack stack = (ItemStack) Reflect.getMethodOrThrow(FaRitualHelper.pedestalBEClass, "getStack", "getStack").invoke(ped);
+                ItemStack stack = (ItemStack) Reflect.getMethodOrThrow(FAReflection.pedestalBEClass, "getStack", "getStack").invoke(ped);
                 updateIngredient.invoke(ritualManager, ped, stack, curEssences);
             }
-            Reflect.getMethodOrThrow(FaRitualHelper.ritualManagerClass, "updateValidRitual", "updateValidRitual", FaRitualHelper.essencesDefinitionClass)
+            Reflect.getMethodOrThrow(FAReflection.ritualManagerClass, "updateValidRitual", "updateValidRitual", FAReflection.essencesDefinitionClass)
                     .invoke(ritualManager, curEssences);
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] cachedIngredients/updateValidRitual failed: {}");
@@ -399,17 +396,17 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
 
         // Phase 4: start the ritual BEFORE committing ledger
         try {
-            Object essenceMgr = Reflect.getMethodOrThrow(FaRitualHelper.hephaestusForgeBEClass, "getEssenceManager", "getEssenceManager").invoke(forge);
-            this.essencesStorage = Reflect.getMethodOrThrow(FaRitualHelper.essenceManagerClass, "getStorage", "getStorage").invoke(essenceMgr);
+            Object essenceMgr = Reflect.getMethodOrThrow(FAReflection.hephaestusForgeBEClass, "getEssenceManager", "getEssenceManager").invoke(forge);
+            this.essencesStorage = Reflect.getMethodOrThrow(FAReflection.essenceManagerClass, "getStorage", "getStorage").invoke(essenceMgr);
             DelegateBooleanConsumer callback = new DelegateBooleanConsumer(this, starterStack, player);
             Object proxy = Proxy.newProxyInstance(
-                    FaRitualHelper.booleanConsumerClass.getClassLoader(),
-                    new Class<?>[]{FaRitualHelper.booleanConsumerClass},
+                    FAReflection.booleanConsumerClass.getClassLoader(),
+                    new Class<?>[]{FAReflection.booleanConsumerClass},
                     callback);
 
             RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] (single) Invoking tryStartRitual with starter='{}'",
                     starterStack.getHoverName().getString());
-            Reflect.getMethodOrThrow(FaRitualHelper.ritualManagerClass, "tryStartRitual", "tryStartRitual", FaRitualHelper.essencesStorageClass, FaRitualHelper.booleanConsumerClass)
+            Reflect.getMethodOrThrow(FAReflection.ritualManagerClass, "tryStartRitual", "tryStartRitual", FAReflection.essencesStorageClass, FAReflection.booleanConsumerClass)
                     .invoke(ritualManager, essencesStorage, proxy);
             RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] (single) tryStartRitual returned: wasCalled={} accepted={}",
                     callback.wasCalled, callback.accepted);
@@ -496,7 +493,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
 
         // Re-validate idle
         try {
-            Boolean active = (Boolean) Reflect.getMethodOrThrow(FaRitualHelper.ritualManagerClass, "isRitualActive", "isRitualActive").invoke(ritualManager);
+            Boolean active = (Boolean) Reflect.getMethodOrThrow(FAReflection.ritualManagerClass, "isRitualActive", "isRitualActive").invoke(ritualManager);
             if (Boolean.TRUE.equals(active)) {
                 player.sendSystemMessage(Component.translatable("rsi.fa.warn.ritual_active"));
                 return false;
@@ -522,7 +519,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
         List<Object> availablePedestals = new ArrayList<>();
         for (Object ped : foundPedestals) {
             try {
-                ItemStack stack = (ItemStack) Reflect.getMethodOrThrow(FaRitualHelper.pedestalBEClass, "getStack", "getStack").invoke(ped);
+                ItemStack stack = (ItemStack) Reflect.getMethodOrThrow(FAReflection.pedestalBEClass, "getStack", "getStack").invoke(ped);
                 if (stack.isEmpty()) availablePedestals.add(ped);
             } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Reflection probe failed", e); }
         }
@@ -563,7 +560,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
                     ItemStack single = compacted.copy();
                     single.setCount(1);
                     Object ped = availablePedestals.get(pedIdx++);
-                    Reflect.getMethodOrThrow(FaRitualHelper.pedestalBEClass, "setStackAndSync", "setStackAndSync", ItemStack.class)
+                    Reflect.getMethodOrThrow(FAReflection.pedestalBEClass, "setStackAndSync", "setStackAndSync", ItemStack.class)
                             .invoke(ped, single);
                     filledPedestals.add(ped);
                 }
@@ -579,19 +576,19 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
 
         // Populate cachedIngredients
         try {
-            Object curEssences = Reflect.getMethodOrThrow(FaRitualHelper.hephaestusForgeBEClass, "getEssences", "getEssences").invoke(forge);
-            Method updateIngredient = Reflect.getMethodOrThrow(FaRitualHelper.ritualManagerClass, "updateIngredient", "updateIngredient",
-                    FaRitualHelper.pedestalBEClass, ItemStack.class, FaRitualHelper.essencesDefinitionClass);
+            Object curEssences = Reflect.getMethodOrThrow(FAReflection.hephaestusForgeBEClass, "getEssences", "getEssences").invoke(forge);
+            Method updateIngredient = Reflect.getMethodOrThrow(FAReflection.ritualManagerClass, "updateIngredient", "updateIngredient",
+                    FAReflection.pedestalBEClass, ItemStack.class, FAReflection.essencesDefinitionClass);
             for (Object ped : foundPedestals) {
                 if (!filledPedestals.contains(ped)) {
                     updateIngredient.invoke(ritualManager, ped, ItemStack.EMPTY, curEssences);
                 }
             }
             for (Object ped : filledPedestals) {
-                ItemStack stack = (ItemStack) Reflect.getMethodOrThrow(FaRitualHelper.pedestalBEClass, "getStack", "getStack").invoke(ped);
+                ItemStack stack = (ItemStack) Reflect.getMethodOrThrow(FAReflection.pedestalBEClass, "getStack", "getStack").invoke(ped);
                 updateIngredient.invoke(ritualManager, ped, stack, curEssences);
             }
-            Reflect.getMethodOrThrow(FaRitualHelper.ritualManagerClass, "updateValidRitual", "updateValidRitual", FaRitualHelper.essencesDefinitionClass)
+            Reflect.getMethodOrThrow(FAReflection.ritualManagerClass, "updateValidRitual", "updateValidRitual", FAReflection.essencesDefinitionClass)
                     .invoke(ritualManager, curEssences);
 
             // Diagnostic: verify updateValidRitual found our ritual
@@ -627,17 +624,17 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
 
         // Start the ritual
         try {
-            Object essenceMgr = Reflect.getMethodOrThrow(FaRitualHelper.hephaestusForgeBEClass, "getEssenceManager", "getEssenceManager").invoke(forge);
-            this.essencesStorage = Reflect.getMethodOrThrow(FaRitualHelper.essenceManagerClass, "getStorage", "getStorage").invoke(essenceMgr);
+            Object essenceMgr = Reflect.getMethodOrThrow(FAReflection.hephaestusForgeBEClass, "getEssenceManager", "getEssenceManager").invoke(forge);
+            this.essencesStorage = Reflect.getMethodOrThrow(FAReflection.essenceManagerClass, "getStorage", "getStorage").invoke(essenceMgr);
             DelegateBooleanConsumer callback = new DelegateBooleanConsumer(this, starterStack, player);
             Object proxy = Proxy.newProxyInstance(
-                    FaRitualHelper.booleanConsumerClass.getClassLoader(),
-                    new Class<?>[]{FaRitualHelper.booleanConsumerClass},
+                    FAReflection.booleanConsumerClass.getClassLoader(),
+                    new Class<?>[]{FAReflection.booleanConsumerClass},
                     callback);
 
             RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Invoking tryStartRitual (withMaterials) with starter='{}'",
                     starterStack.getHoverName().getString());
-            Reflect.getMethodOrThrow(FaRitualHelper.ritualManagerClass, "tryStartRitual", "tryStartRitual", FaRitualHelper.essencesStorageClass, FaRitualHelper.booleanConsumerClass)
+            Reflect.getMethodOrThrow(FAReflection.ritualManagerClass, "tryStartRitual", "tryStartRitual", FAReflection.essencesStorageClass, FAReflection.booleanConsumerClass)
                     .invoke(ritualManager, essencesStorage, proxy);
             RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] tryStartRitual (withMaterials) returned: wasCalled={} accepted={}",
                     callback.wasCalled, callback.accepted);
@@ -656,12 +653,12 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
                     int mainSlot = FaRitualHelper.getMainSlot();
                     ItemStack forgeStack = FaRitualHelper.getForgeSlot(forge, mainSlot);
                     RSIntegrationMod.LOGGER.warn("[RSI-Batch-FA]   forge main slot={}: {}", mainSlot, forgeStack);
-                    Object curEss = Reflect.getMethodOrThrow(FaRitualHelper.hephaestusForgeBEClass, "getEssences", "getEssences").invoke(forge);
+                    Object curEss = Reflect.getMethodOrThrow(FAReflection.hephaestusForgeBEClass, "getEssences", "getEssences").invoke(forge);
                     RSIntegrationMod.LOGGER.warn("[RSI-Batch-FA]   essences: a={} s={} b={} e={}",
-                            Reflect.getMethodOrThrow(FaRitualHelper.essencesDefinitionClass, "aureal", "aureal").invoke(curEss),
-                            Reflect.getMethodOrThrow(FaRitualHelper.essencesDefinitionClass, "souls", "souls").invoke(curEss),
-                            Reflect.getMethodOrThrow(FaRitualHelper.essencesDefinitionClass, "blood", "blood").invoke(curEss),
-                            Reflect.getMethodOrThrow(FaRitualHelper.essencesDefinitionClass, "experience", "experience").invoke(curEss));
+                            Reflect.getMethodOrThrow(FAReflection.essencesDefinitionClass, "aureal", "aureal").invoke(curEss),
+                            Reflect.getMethodOrThrow(FAReflection.essencesDefinitionClass, "souls", "souls").invoke(curEss),
+                            Reflect.getMethodOrThrow(FAReflection.essencesDefinitionClass, "blood", "blood").invoke(curEss),
+                            Reflect.getMethodOrThrow(FAReflection.essencesDefinitionClass, "experience", "experience").invoke(curEss));
                     Object req = FaRitualHelper.invoke(ritual, "essences");
                     RSIntegrationMod.LOGGER.warn("[RSI-Batch-FA]   required: a={} s={} b={} e={}",
                             FaRitualHelper.invoke(req, "aureal"), FaRitualHelper.invoke(req, "souls"),
@@ -705,7 +702,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
     public boolean isCraftComplete(ServerLevel level) {
         try {
             if (ritualManager != null) {
-                Boolean active = (Boolean) Reflect.getMethodOrThrow(FaRitualHelper.ritualManagerClass, "isRitualActive", "isRitualActive").invoke(ritualManager);
+                Boolean active = (Boolean) Reflect.getMethodOrThrow(FAReflection.ritualManagerClass, "isRitualActive", "isRitualActive").invoke(ritualManager);
                 if (Boolean.TRUE.equals(active)) {
                     ritualEverSeenActive = true;
                     return false;
@@ -719,8 +716,8 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
     public ItemStack collectResult(ServerPlayer player) {
         try {
             Object result = FaRitualHelper.invoke(ritual, "result");
-            if (result != null && FaRitualHelper.createItemResultClass.isInstance(result)) {
-                ItemStack itemResult = (ItemStack) Reflect.getMethodOrThrow(FaRitualHelper.createItemResultClass, "getResult", "getResult").invoke(result);
+            if (result != null && FAReflection.createItemResultClass.isInstance(result)) {
+                ItemStack itemResult = (ItemStack) Reflect.getMethodOrThrow(FAReflection.createItemResultClass, "getResult", "getResult").invoke(result);
                 if (itemResult != null && !itemResult.isEmpty()) {
                     try {
                         int mainSlot = FaRitualHelper.getMainSlot();
@@ -729,7 +726,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
                     return itemResult.copy();
                 }
             }
-            if (result != null && FaRitualHelper.upgradeTierResultClass.isInstance(result)) {
+            if (result != null && FAReflection.upgradeTierResultClass.isInstance(result)) {
                 try {
                     int mainSlot = FaRitualHelper.getMainSlot();
                     ItemStack upgraded = FaRitualHelper.getForgeSlot(forge, mainSlot);
@@ -821,7 +818,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
         if (filledPedestals == null) return;
         for (Object ped : filledPedestals) {
             try {
-                ItemStack stack = (ItemStack) Reflect.getMethodOrThrow(FaRitualHelper.pedestalBEClass, "getStack", "getStack").invoke(ped);
+                ItemStack stack = (ItemStack) Reflect.getMethodOrThrow(FAReflection.pedestalBEClass, "getStack", "getStack").invoke(ped);
                 if (stack != null && !stack.isEmpty()) {
                     if (network != null) {
                         ItemStack leftover = network.insertItem(stack, stack.getCount(),
@@ -833,7 +830,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
                         ItemHandlerHelper.giveItemToPlayer(player, stack);
                     }
                 }
-                Reflect.getMethodOrThrow(FaRitualHelper.pedestalBEClass, "clearStack", "clearStack", Level.class, boolean.class)
+                Reflect.getMethodOrThrow(FAReflection.pedestalBEClass, "clearStack", "clearStack", Level.class, boolean.class)
                         .invoke(ped, null, false);
             } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Reflection probe failed", e); }
         }
@@ -843,7 +840,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
         if (filledPedestals == null) return;
         for (Object ped : filledPedestals) {
             try {
-                Reflect.getMethodOrThrow(FaRitualHelper.pedestalBEClass, "clearStack", "clearStack", Level.class, boolean.class)
+                Reflect.getMethodOrThrow(FAReflection.pedestalBEClass, "clearStack", "clearStack", Level.class, boolean.class)
                         .invoke(ped, null, false);
             } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Reflection probe failed", e); }
         }
@@ -912,8 +909,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
                                                @Nullable net.minecraft.core.BlockPos pos) {
         List<String> warnings = new ArrayList<>();
         if (!(recipe instanceof FaRitualWrapper wrapper)) return warnings;
-        FaRitualHelper.ensureClasses();
-        if (FaRitualHelper.hephaestusForgeBEClass == null || FaRitualHelper.ritualClass == null || FaRitualHelper.essencesDefinitionClass == null)
+        if (FAReflection.hephaestusForgeBEClass == null || FAReflection.ritualClass == null || FAReflection.essencesDefinitionClass == null)
             return warnings;
 
         Object ritual = wrapper.ritual();
@@ -932,7 +928,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
                 if (probeLevel != null && probeLevel.isLoaded(pos)) {
                     ChunkUtils.loadChunk(probeLevel, pos);
                     BlockEntity probeBe = probeLevel.getBlockEntity(pos);
-                    if (probeBe == null || !FaRitualHelper.hephaestusForgeBEClass.isInstance(probeBe)) {
+                    if (probeBe == null || !FAReflection.hephaestusForgeBEClass.isInstance(probeBe)) {
                         RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] pos is not a forge, searching player bindings...");
                         // Scan player inventory + offhand + curios for a forge binding
                         List<ItemStack> allStacks = new ArrayList<>();
@@ -998,25 +994,25 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
                         // yet instantiated).
                         ChunkUtils.loadChunk(level, pos);
                         BlockEntity be = level.getBlockEntity(pos);
-                        if (be != null && FaRitualHelper.hephaestusForgeBEClass.isInstance(be)) {
-                            Object ritualManager = Reflect.getMethodOrThrow(FaRitualHelper.hephaestusForgeBEClass, "getRitualManager", "getRitualManager").invoke(be);
+                        if (be != null && FAReflection.hephaestusForgeBEClass.isInstance(be)) {
+                            Object ritualManager = Reflect.getMethodOrThrow(FAReflection.hephaestusForgeBEClass, "getRitualManager", "getRitualManager").invoke(be);
                             if (ritualManager != null) {
                                 List<Object> enhancerModifiers = FaRitualHelper.collectEnhancerModifiers(ritualManager, ritual);
                                 if (!enhancerModifiers.isEmpty()) {
-                                    Object modified = Reflect.getMethodOrThrow(FaRitualHelper.essencesDefinitionClass, "applyModifiers", "applyModifiers",
+                                    Object modified = Reflect.getMethodOrThrow(FAReflection.essencesDefinitionClass, "applyModifiers", "applyModifiers",
                                             List.class).invoke(ritualEssences, enhancerModifiers);
-                                    reqAureal = (int) Reflect.getMethodOrThrow(FaRitualHelper.essencesDefinitionClass, "aureal", "aureal").invoke(modified);
-                                    reqSouls  = (int) Reflect.getMethodOrThrow(FaRitualHelper.essencesDefinitionClass, "souls", "souls").invoke(modified);
-                                    reqBlood  = (int) Reflect.getMethodOrThrow(FaRitualHelper.essencesDefinitionClass, "blood", "blood").invoke(modified);
-                                    reqExp    = (int) Reflect.getMethodOrThrow(FaRitualHelper.essencesDefinitionClass, "experience", "experience").invoke(modified);
+                                    reqAureal = (int) Reflect.getMethodOrThrow(FAReflection.essencesDefinitionClass, "aureal", "aureal").invoke(modified);
+                                    reqSouls  = (int) Reflect.getMethodOrThrow(FAReflection.essencesDefinitionClass, "souls", "souls").invoke(modified);
+                                    reqBlood  = (int) Reflect.getMethodOrThrow(FAReflection.essencesDefinitionClass, "blood", "blood").invoke(modified);
+                                    reqExp    = (int) Reflect.getMethodOrThrow(FAReflection.essencesDefinitionClass, "experience", "experience").invoke(modified);
                                 }
                             }
 
-                            Object curEssences = Reflect.getMethodOrThrow(FaRitualHelper.hephaestusForgeBEClass, "getEssences", "getEssences").invoke(be);
-                            curAureal = (int) Reflect.getMethodOrThrow(FaRitualHelper.essencesDefinitionClass, "aureal", "aureal").invoke(curEssences);
-                            curSouls  = (int) Reflect.getMethodOrThrow(FaRitualHelper.essencesDefinitionClass, "souls", "souls").invoke(curEssences);
-                            curBlood  = (int) Reflect.getMethodOrThrow(FaRitualHelper.essencesDefinitionClass, "blood", "blood").invoke(curEssences);
-                            curExp    = (int) Reflect.getMethodOrThrow(FaRitualHelper.essencesDefinitionClass, "experience", "experience").invoke(curEssences);
+                            Object curEssences = Reflect.getMethodOrThrow(FAReflection.hephaestusForgeBEClass, "getEssences", "getEssences").invoke(be);
+                            curAureal = (int) Reflect.getMethodOrThrow(FAReflection.essencesDefinitionClass, "aureal", "aureal").invoke(curEssences);
+                            curSouls  = (int) Reflect.getMethodOrThrow(FAReflection.essencesDefinitionClass, "souls", "souls").invoke(curEssences);
+                            curBlood  = (int) Reflect.getMethodOrThrow(FAReflection.essencesDefinitionClass, "blood", "blood").invoke(curEssences);
+                            curExp    = (int) Reflect.getMethodOrThrow(FAReflection.essencesDefinitionClass, "experience", "experience").invoke(curEssences);
                         }
                     }
                 } catch (Exception e) {
@@ -1045,17 +1041,17 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
                     if (level != null && level.isLoaded(pos)) {
                         ChunkUtils.loadChunk(level, pos);
                         BlockEntity be = level.getBlockEntity(pos);
-                        if (be != null && FaRitualHelper.hephaestusForgeBEClass.isInstance(be)) {
+                        if (be != null && FAReflection.hephaestusForgeBEClass.isInstance(be)) {
                             java.lang.reflect.Field slotMapField = Reflect.findField(
-                                    FaRitualHelper.hephaestusForgeBEClass, "SLOT_FROM_ESSENCE_TYPE_MAP").orElse(null);
+                                    FAReflection.hephaestusForgeBEClass, "SLOT_FROM_ESSENCE_TYPE_MAP").orElse(null);
                             if (slotMapField != null) {
                                 Object slotMap = slotMapField.get(null);
                                 if (slotMap instanceof java.util.Map<?, ?> map) {
-                                    Object curEssences = Reflect.getMethodOrThrow(FaRitualHelper.hephaestusForgeBEClass, "getEssences", "getEssences").invoke(be);
-                                    int curA = (int) Reflect.getMethodOrThrow(FaRitualHelper.essencesDefinitionClass, "aureal", "aureal").invoke(curEssences);
-                                    int curS = (int) Reflect.getMethodOrThrow(FaRitualHelper.essencesDefinitionClass, "souls", "souls").invoke(curEssences);
-                                    int curB = (int) Reflect.getMethodOrThrow(FaRitualHelper.essencesDefinitionClass, "blood", "blood").invoke(curEssences);
-                                    int curE = (int) Reflect.getMethodOrThrow(FaRitualHelper.essencesDefinitionClass, "experience", "experience").invoke(curEssences);
+                                    Object curEssences = Reflect.getMethodOrThrow(FAReflection.hephaestusForgeBEClass, "getEssences", "getEssences").invoke(be);
+                                    int curA = (int) Reflect.getMethodOrThrow(FAReflection.essencesDefinitionClass, "aureal", "aureal").invoke(curEssences);
+                                    int curS = (int) Reflect.getMethodOrThrow(FAReflection.essencesDefinitionClass, "souls", "souls").invoke(curEssences);
+                                    int curB = (int) Reflect.getMethodOrThrow(FAReflection.essencesDefinitionClass, "blood", "blood").invoke(curEssences);
+                                    int curE = (int) Reflect.getMethodOrThrow(FAReflection.essencesDefinitionClass, "experience", "experience").invoke(curEssences);
 
                                     for (var entry : map.entrySet()) {
                                         String typeName = entry.getKey().toString();
@@ -1143,17 +1139,17 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
                         if (level != null && level.isLoaded(pos)) {
                             ChunkUtils.loadChunk(level, pos);
                             BlockEntity be = level.getBlockEntity(pos);
-                            if (be != null && FaRitualHelper.hephaestusForgeBEClass.isInstance(be)) {
-                                Object rm = Reflect.getMethodOrThrow(FaRitualHelper.hephaestusForgeBEClass, "getRitualManager", "getRitualManager").invoke(be);
+                            if (be != null && FAReflection.hephaestusForgeBEClass.isInstance(be)) {
+                                Object rm = Reflect.getMethodOrThrow(FAReflection.hephaestusForgeBEClass, "getRitualManager", "getRitualManager").invoke(be);
                                 if (rm != null) {
                                     java.lang.reflect.Field af = Reflect.findField(
-                                            FaRitualHelper.ritualManagerClass, "enhancerAccessor").orElse(null);
+                                            FAReflection.ritualManagerClass, "enhancerAccessor").orElse(null);
                                     List<?> installedEnhancers = null;
                                     if (af != null) {
                                         af.setAccessible(true);
                                         Object ea = af.get(rm);
                                         if (ea != null) {
-                                            installedEnhancers = (List<?>) Reflect.getMethodOrThrow(FaRitualHelper.enhancerAccessorClass, "getEnhancers", "getEnhancers").invoke(ea);
+                                            installedEnhancers = (List<?>) Reflect.getMethodOrThrow(FAReflection.enhancerAccessorClass, "getEnhancers", "getEnhancers").invoke(ea);
                                         }
                                     }
                                     for (int i = 0; i < requiredEnhancers.size(); i++) {

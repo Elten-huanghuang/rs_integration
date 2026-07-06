@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
+import com.huanghuang.rsintegration.reflection.probes.FRReflection;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.core.BlockPos;
@@ -44,11 +45,6 @@ import java.util.Map;
  */
 public final class FRKettleBatchDelegate implements IBatchDelegate {
 
-    private static final String BE_CLASS =
-            "umpaz.farmersrespite.common.block.entity.KettleBlockEntity";
-    private static final String RECIPE_CLASS =
-            "umpaz.farmersrespite.common.crafting.KettleRecipe";
-
     private ServerPlayer player;
     private ServerLevel myLevel;
     private ResourceKey<Level> myDim;
@@ -61,8 +57,6 @@ public final class FRKettleBatchDelegate implements IBatchDelegate {
     private boolean usingSharedLedger;
 
     // ── reflection cache ──
-    private static volatile Class<?> beClass;
-    private static volatile Class<?> recipeClass;
     private static volatile Method getInventoryMethod;
     private static volatile Method isHeatedMethod;
     private static volatile Method getFluidInMethod;
@@ -84,7 +78,7 @@ public final class FRKettleBatchDelegate implements IBatchDelegate {
         this.player = player;
 
         Recipe<?> found = level.getRecipeManager().byKey(recipeId).orElse(null);
-        if (found == null || !found.getClass().getName().equals(RECIPE_CLASS)) {
+        if (found == null || !FRReflection.kettleRecipeClass.isInstance(found)) {
             player.sendSystemMessage(Component.translatable("rsi.generic.error.recipe_not_found", recipeId.toString()));
             return false;
         }
@@ -385,29 +379,20 @@ public final class FRKettleBatchDelegate implements IBatchDelegate {
         if (reflectionProbed) return;
         reflectionProbed = true;
         try {
-            beClass = Class.forName(BE_CLASS);
-            recipeClass = Class.forName(RECIPE_CLASS);
+            getInventoryMethod = FRReflection.kettleBEClass.getMethod("getInventory");
+            isHeatedMethod = FRReflection.kettleBEClass.getMethod("isHeated");
 
-            getInventoryMethod = beClass.getMethod("getInventory");
-            isHeatedMethod = beClass.getMethod("isHeated");
-
-            getFluidInMethod = recipeClass.getMethod("getFluidIn");
-            getFluidOutMethod = recipeClass.getMethod("getFluidOut");
-            getBrewTimeMethod = recipeClass.getMethod("getBrewTime");
+            getFluidInMethod = FRReflection.kettleRecipeClass.getMethod("getFluidIn");
+            getFluidOutMethod = FRReflection.kettleRecipeClass.getMethod("getFluidOut");
+            getBrewTimeMethod = FRReflection.kettleRecipeClass.getMethod("getBrewTime");
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-FRKettle] Reflection probe failed: {}", e.toString());
         }
     }
 
     private static boolean isFRKettleBE(BlockEntity be) {
-        probeReflection();
-        if (beClass != null && beClass.isAssignableFrom(be.getClass())) return true;
-        Class<?> clazz = be.getClass();
-        while (clazz != null) {
-            if (clazz.getName().equals(BE_CLASS)) return true;
-            clazz = clazz.getSuperclass();
-        }
-        return false;
+        return FRReflection.kettleBEClass != null
+                && FRReflection.kettleBEClass.isInstance(be);
     }
 
     @Nullable

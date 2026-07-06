@@ -7,7 +7,7 @@ import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.RecipeIndex;
-import com.huanghuang.rsintegration.util.ModClassLoader;
+import com.huanghuang.rsintegration.reflection.probes.GoetyReflection;
 import com.huanghuang.rsintegration.util.ModIds;
 import com.huanghuang.rsintegration.util.Reflect;
 import com.refinedmods.refinedstorage.api.network.INetwork;
@@ -44,81 +44,6 @@ import java.util.Optional;
 
 public final class GoetyBatchDelegate extends AbstractBatchDelegate {
 
-    // ── Shared class refs ────────────────────────────────────────
-    private static volatile Class<?> darkAltarBEClass;
-    private static volatile Class<?> seHelperClass;
-    private static volatile Class<?> cursedCageBEClass;
-    private static volatile Class<?> researchListClass;
-    private static volatile Class<?> necroBrazierBEClass;
-    private static volatile Class<?> pedestalBEClass;
-    private static volatile Class<?> soulCandlestickBEClass;
-    private static volatile Class<?> brazierRecipeClass;
-    private static volatile Class<?> ritualRecipeClass;
-    private static volatile Class<?> ritualClass;
-    private static volatile Class<?> enchantItemRitualClass;
-    private static volatile Class<?> convertRitualClass;
-    private static volatile Class<?> teleportRitualClass;
-    private static volatile Class<?> ritualRequirementsClass;
-    private static volatile Class<?> ritualBlockEntityClass;
-
-    private static void ensureClasses() {
-        if (!ModClassLoader.ensureClasses(ModIds.GOETY,
-                "com.Polarice3.Goety.common.blocks.entities.DarkAltarBlockEntity",
-                "com.Polarice3.Goety.utils.SEHelper",
-                "com.Polarice3.Goety.common.blocks.entities.CursedCageBlockEntity",
-                "com.Polarice3.Goety.common.blocks.entities.NecroBrazierBlockEntity",
-                "com.Polarice3.Goety.common.blocks.entities.PedestalBlockEntity",
-                "com.Polarice3.Goety.common.blocks.entities.SoulCandlestickBlockEntity",
-                "com.Polarice3.Goety.common.blocks.entities.RitualBlockEntity",
-                "com.Polarice3.Goety.common.crafting.BrazierRecipe",
-                "com.Polarice3.Goety.common.crafting.RitualRecipe",
-                "com.Polarice3.Goety.common.ritual.Ritual",
-                "com.Polarice3.Goety.common.ritual.EnchantItemRitual",
-                "com.Polarice3.Goety.common.ritual.ConvertRitual",
-                "com.Polarice3.Goety.common.ritual.TeleportRitual",
-                "com.Polarice3.Goety.common.ritual.RitualRequirements",
-                "com.Polarice3.Goety.common.research.ResearchList")) return;
-        try {
-            darkAltarBEClass = Class.forName(
-                    "com.Polarice3.Goety.common.blocks.entities.DarkAltarBlockEntity");
-            seHelperClass = Class.forName(
-                    "com.Polarice3.Goety.utils.SEHelper");
-            cursedCageBEClass = Class.forName(
-                    "com.Polarice3.Goety.common.blocks.entities.CursedCageBlockEntity");
-            necroBrazierBEClass = Class.forName(
-                    "com.Polarice3.Goety.common.blocks.entities.NecroBrazierBlockEntity");
-            pedestalBEClass = Class.forName(
-                    "com.Polarice3.Goety.common.blocks.entities.PedestalBlockEntity");
-            soulCandlestickBEClass = Class.forName(
-                    "com.Polarice3.Goety.common.blocks.entities.SoulCandlestickBlockEntity");
-            brazierRecipeClass = Class.forName(
-                    "com.Polarice3.Goety.common.crafting.BrazierRecipe");
-            ritualRecipeClass = Class.forName(
-                    "com.Polarice3.Goety.common.crafting.RitualRecipe");
-            ritualClass = Class.forName(
-                    "com.Polarice3.Goety.common.ritual.Ritual");
-            enchantItemRitualClass = Class.forName(
-                    "com.Polarice3.Goety.common.ritual.EnchantItemRitual");
-            convertRitualClass = Class.forName(
-                    "com.Polarice3.Goety.common.ritual.ConvertRitual");
-            teleportRitualClass = Class.forName(
-                    "com.Polarice3.Goety.common.ritual.TeleportRitual");
-            ritualRequirementsClass = Class.forName(
-                    "com.Polarice3.Goety.common.ritual.RitualRequirements");
-            ritualBlockEntityClass = Class.forName(
-                    "com.Polarice3.Goety.common.blocks.entities.RitualBlockEntity");
-            try {
-                researchListClass = Class.forName(
-                        "com.Polarice3.Goety.common.research.ResearchList");
-            } catch (ClassNotFoundException e) {
-                RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] ResearchList not found — research checks disabled");
-                researchListClass = null;
-            }
-        } catch (ClassNotFoundException e) {
-            RSIntegrationMod.LOGGER.error("[RSI-Batch-Goety] Failed to load Goety classes", e);
-        }
-    }
-
     // ── Instance state ───────────────────────────────────────────
     private ServerPlayer player;
     private ResourceKey<Level> myDim;
@@ -142,7 +67,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
     @Override
     public boolean validateAndInit(ServerPlayer player, ResourceLocation recipeId,
                                    @Nullable ResourceLocation dim, BlockPos pos) {
-        ensureClasses();
+
         RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] validateAndInit [1/9] entry: recipe={} dim={} pos={}",
                 recipeId, dim, pos);
 
@@ -172,7 +97,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
                 be.getClass().getSimpleName(), pos);
 
         // ── Brazier path ───────────────────────────────────
-        if (necroBrazierBEClass != null && necroBrazierBEClass.isInstance(be)) {
+        if (GoetyReflection.necroBrazierBEClass != null && GoetyReflection.necroBrazierBEClass.isInstance(be)) {
             RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] validateAndInit [BRANCH] Brazier path: recipe={}", recipeId);
             boolean ok = validateAndInitBrazier(be, recipeId, level);
             if (!ok) {
@@ -184,7 +109,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         }
 
         // ── Dark Altar path (original) ─────────────────────
-        if (darkAltarBEClass == null || !darkAltarBEClass.isInstance(be)) {
+        if (GoetyReflection.darkAltarBEClass == null || !GoetyReflection.darkAltarBEClass.isInstance(be)) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-Goety] validateAndInit [FAIL-4] BE is not DarkAltar (got {} class={}) at {}",
                     be.getClass().getSimpleName(), be.getClass().getName(), pos);
             player.sendSystemMessage(Component.translatable("rsi.goety.error.altar_not_found"));
@@ -194,7 +119,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] validateAndInit [4/9] Dark Altar confirmed");
 
         Recipe<?> foundRecipe = level.getRecipeManager().byKey(recipeId).orElse(null);
-        if (ritualRecipeClass == null || !ritualRecipeClass.isInstance(foundRecipe)) {
+        if (GoetyReflection.ritualRecipeClass == null || !GoetyReflection.ritualRecipeClass.isInstance(foundRecipe)) {
             if (foundRecipe == null) {
                 RSIntegrationMod.LOGGER.warn("[RSI-Batch-Goety] validateAndInit [FAIL-5] recipe not found: {}", recipeId);
                 player.sendSystemMessage(Component.translatable("rsi.generic.error.recipe_not_found", recipeId.toString()));
@@ -218,12 +143,12 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             // Skip ritual-type checks and pedestal scan — nothing to derive from.
             // Still do the altar-idle check (independent of ritualObj).
         } else {
-            if (convertRitualClass != null && convertRitualClass.isInstance(ritualObj)) {
+            if (GoetyReflection.convertRitualClass != null && GoetyReflection.convertRitualClass.isInstance(ritualObj)) {
                 RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] validateAndInit [FAIL-7] convert ritual blocked: recipe={}", recipeId);
                 player.sendSystemMessage(Component.translatable("rsi.goety.error.unsupported_ritual_type", "convert"));
                 return false;
             }
-            if (teleportRitualClass != null && teleportRitualClass.isInstance(ritualObj)) {
+            if (GoetyReflection.teleportRitualClass != null && GoetyReflection.teleportRitualClass.isInstance(ritualObj)) {
                 RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] validateAndInit [FAIL-7] teleport ritual blocked: recipe={}", recipeId);
                 player.sendSystemMessage(Component.translatable("rsi.goety.error.unsupported_ritual_type", "teleport"));
                 return false;
@@ -279,7 +204,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         this.ritualRecipe = null;
 
         Recipe<?> foundRecipe = level.getRecipeManager().byKey(recipeId).orElse(null);
-        if (brazierRecipeClass == null || !brazierRecipeClass.isInstance(foundRecipe)) {
+        if (GoetyReflection.brazierRecipeClass == null || !GoetyReflection.brazierRecipeClass.isInstance(foundRecipe)) {
             if (foundRecipe == null)
                 player.sendSystemMessage(Component.translatable("rsi.generic.error.recipe_not_found", recipeId.toString()));
             else {
@@ -1072,14 +997,14 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
 
     private static List<Object> findNearbyCandlesticks(ServerLevel level, BlockPos pos) {
         List<Object> result = new ArrayList<>();
-        ensureClasses();
-        if (soulCandlestickBEClass == null) return result;
+
+        if (GoetyReflection.soulCandlestickBEClass == null) return result;
         int r = CANDLESTICK_SEARCH_RANGE;
         for (BlockPos cp : BlockPos.betweenClosed(
                 pos.offset(-r, -r, -r), pos.offset(r, r, r))) {
             if (!level.isLoaded(cp)) continue;
             BlockEntity be = level.getBlockEntity(cp);
-            if (soulCandlestickBEClass.isInstance(be)) {
+            if (GoetyReflection.soulCandlestickBEClass.isInstance(be)) {
                 int souls = Reflect.<Integer>invoke(be, "getSouls").orElse(0);
                 if (souls > 0) {
                     result.add(be);
@@ -1100,9 +1025,9 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
                 return true;
             }
             Object cage = cageOpt.get();
-            if (cursedCageBEClass == null || !cursedCageBEClass.isInstance(cage)) return true;
+            if (GoetyReflection.cursedCageBEClass == null || !GoetyReflection.cursedCageBEClass.isInstance(cage)) return true;
 
-            int available = (int) cursedCageBEClass.getMethod("getSouls").invoke(cage);
+            int available = (int) GoetyReflection.cursedCageBEClass.getMethod("getSouls").invoke(cage);
             if (available < cost) {
                 player.sendSystemMessage(Component.translatable(
                         "rsi.goety.error.insufficient_souls", cost, available));
@@ -1200,7 +1125,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
                 myPos.offset(range, range, range))) {
             if (!level.isLoaded(cp)) continue;
             BlockEntity be = level.getBlockEntity(cp);
-            if (pedestalBEClass != null && pedestalBEClass.isInstance(be)) {
+            if (GoetyReflection.pedestalBEClass != null && GoetyReflection.pedestalBEClass.isInstance(be)) {
                 ItemStack stack = readPedestalItem(be);
                 if (stack.isEmpty()) result.add(be);
             }
@@ -1297,16 +1222,16 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
     }
 
     private boolean checkResearchRequirement(Object recipe) {
-        if (researchListClass == null) return true;
+        if (GoetyReflection.researchListClass == null) return true;
         try {
             String researchId = Reflect.<String>invoke(recipe, "getResearch").orElse(null);
             if (researchId == null || researchId.isEmpty()) return true;
 
-            Object research = researchListClass.getMethod("getResearch", String.class)
+            Object research = GoetyReflection.researchListClass.getMethod("getResearch", String.class)
                     .invoke(null, researchId);
             if (research == null) return true;
 
-            boolean hasIt = (boolean) seHelperClass.getMethod("hasResearch",
+            boolean hasIt = (boolean) GoetyReflection.seHelperClass.getMethod("hasResearch",
                     Player.class, research.getClass())
                     .invoke(null, player, research);
             if (!hasIt) {
@@ -1335,8 +1260,8 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             String craftType = Reflect.<String>invoke(recipe, "getCraftType").orElse(null);
             if (craftType == null || craftType.isEmpty()) return true;
             ServerLevel level = player.serverLevel();
-            Method m = ritualRequirementsClass.getMethod("getProperStructure",
-                    String.class, ritualBlockEntityClass, BlockPos.class, Level.class);
+            Method m = GoetyReflection.ritualRequirementsClass.getMethod("getProperStructure",
+                    String.class, GoetyReflection.ritualBlockEntityClass, BlockPos.class, Level.class);
             boolean valid = (boolean) m.invoke(null, craftType, altar, myPos, level);
             if (!valid) {
                 player.sendSystemMessage(Component.translatable(
@@ -1361,7 +1286,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             }
             ServerLevel level = player.serverLevel();
             boolean valid = (boolean) ritual.getClass()
-                    .getMethod("isValid", Level.class, BlockPos.class, darkAltarBEClass,
+                    .getMethod("isValid", Level.class, BlockPos.class, GoetyReflection.darkAltarBEClass,
                             Player.class, ItemStack.class, List.class)
                     .invoke(ritual, level, myPos, altar, player, activationItem, filtered);
             if (!valid) {
@@ -1377,7 +1302,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
     }
 
     private boolean checkEnchantmentRequirements(Object recipe, Object ritual) {
-        if (enchantItemRitualClass == null || !enchantItemRitualClass.isInstance(ritual)) return true;
+        if (GoetyReflection.enchantItemRitualClass == null || !GoetyReflection.enchantItemRitualClass.isInstance(ritual)) return true;
         int xpCost = Reflect.<Integer>invoke(recipe, "getXPLevelCost").orElse(0);
         if (xpCost > 0 && player.experienceLevel < xpCost) {
             player.sendSystemMessage(Component.translatable(
@@ -1388,7 +1313,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
     }
 
     private boolean checkEnchantCompatibility(Object recipe, Object ritual) {
-        if (enchantItemRitualClass == null || !enchantItemRitualClass.isInstance(ritual)) return true;
+        if (GoetyReflection.enchantItemRitualClass == null || !GoetyReflection.enchantItemRitualClass.isInstance(ritual)) return true;
         try {
             Object enchantment = Reflect.invoke(recipe, "getEnchantment").orElse(null);
             if (enchantment == null) {
@@ -1470,8 +1395,8 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
      * @return true if the ritual started successfully */
     private static boolean startAltarRitual(Object altar, ServerPlayer player, ItemStack activation, Object recipe) {
         try {
-            ensureClasses();
-            Method m = darkAltarBEClass.getMethod("startRitual", Player.class, ItemStack.class, ritualRecipeClass);
+
+            Method m = GoetyReflection.darkAltarBEClass.getMethod("startRitual", Player.class, ItemStack.class, GoetyReflection.ritualRecipeClass);
             m.invoke(altar, player, activation, recipe);
             return true;
         } catch (Exception e) {
@@ -1486,19 +1411,19 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
                                                @Nullable ResourceLocation dim,
                                                @Nullable net.minecraft.core.BlockPos pos) {
         List<String> warnings = new ArrayList<>();
-        ensureClasses();
-        if (ritualRecipeClass == null || !ritualRecipeClass.isInstance(recipe)) return warnings;
+
+        if (GoetyReflection.ritualRecipeClass == null || !GoetyReflection.ritualRecipeClass.isInstance(recipe)) return warnings;
 
         // Research check
         String researchId = Reflect.<String>invoke(recipe, "getResearch").orElse(null);
         if (researchId != null && !researchId.isEmpty()) {
             boolean hasResearch = false;
             try {
-                if (researchListClass != null && seHelperClass != null) {
-                    Object research = researchListClass.getMethod("getResearch", String.class)
+                if (GoetyReflection.researchListClass != null && GoetyReflection.seHelperClass != null) {
+                    Object research = GoetyReflection.researchListClass.getMethod("getResearch", String.class)
                             .invoke(null, researchId);
                     if (research != null) {
-                        hasResearch = (boolean) seHelperClass.getMethod("hasResearch",
+                        hasResearch = (boolean) GoetyReflection.seHelperClass.getMethod("hasResearch",
                                 Player.class, research.getClass())
                                 .invoke(null, player, research);
                     }
@@ -1519,9 +1444,9 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
                     ServerLevel level = CraftPacketUtils.resolveLevel(player.server, dim, player);
                     if (level != null && level.isLoaded(pos)) {
                         BlockEntity be = level.getBlockEntity(pos);
-                        if (darkAltarBEClass != null && darkAltarBEClass.isInstance(be)) {
-                            Method m = ritualRequirementsClass.getMethod("getProperStructure",
-                                    String.class, darkAltarBEClass, BlockPos.class, Level.class);
+                        if (GoetyReflection.darkAltarBEClass != null && GoetyReflection.darkAltarBEClass.isInstance(be)) {
+                            Method m = GoetyReflection.ritualRequirementsClass.getMethod("getProperStructure",
+                                    String.class, GoetyReflection.darkAltarBEClass, BlockPos.class, Level.class);
                             boolean valid = (boolean) m.invoke(null, craftType, be, pos, level);
                             if (!valid) {
                                 warnings.add(Component.translatable(

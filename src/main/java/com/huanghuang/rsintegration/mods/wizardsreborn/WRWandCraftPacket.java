@@ -9,6 +9,7 @@ import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.MaterialSources;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
+import com.huanghuang.rsintegration.reflection.probes.WRReflection;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;
@@ -93,13 +94,13 @@ public final class WRWandCraftPacket {
                 return;
             }
 
-            if (rsi$isInstance(be, "mod.maxbogomol.wizards_reborn.common.block.wissen_crystallizer.WissenCrystallizerBlockEntity")) {
+            if (WRReflection.wissenCrystallizerBEClass != null && WRReflection.wissenCrystallizerBEClass.isInstance(be)) {
                 handleWissenCrystallizer(player, be, recipe);
-            } else if (rsi$isInstance(be, "mod.maxbogomol.wizards_reborn.common.block.arcane_iterator.ArcaneIteratorBlockEntity")) {
+            } else if (WRReflection.arcaneIteratorBEClass != null && WRReflection.arcaneIteratorBEClass.isInstance(be)) {
                 handleArcaneIterator(player, be, recipe);
-            } else if (rsi$isInstance(be, "mod.maxbogomol.wizards_reborn.common.block.arcane_workbench.ArcaneWorkbenchBlockEntity")) {
+            } else if (WRReflection.arcaneWorkbenchBEClass != null && WRReflection.arcaneWorkbenchBEClass.isInstance(be)) {
                 handleArcaneWorkbench(player, be, recipe);
-            } else if (rsi$isInstance(be, "mod.maxbogomol.wizards_reborn.common.block.crystal.CrystalBlockEntity")) {
+            } else if (WRReflection.crystalRitualBEClass != null && WRReflection.crystalRitualBEClass.isInstance(be)) {
                 handleCrystalRitual(player, be, recipe);
             } else {
                 RSIntegrationMod.LOGGER.warn("[RSI-WR] Unsupported BE type for recipe {}: {}",
@@ -450,11 +451,7 @@ public final class WRWandCraftPacket {
 
         List<?> pedestals;
         try {
-            Class<?> crystalRitualClass = Class.forName(
-                    "mod.maxbogomol.wizards_reborn.api.crystalritual.CrystalRitual");
-            Class<?> ritualAreaClass = Class.forName(
-                    "mod.maxbogomol.wizards_reborn.api.crystalritual.CrystalRitualArea");
-            pedestals = (List<?>) rsi$getMethod(crystalRitualClass, "getPedestalsWithArea", Level.class, BlockPos.class, ritualAreaClass)
+            pedestals = (List<?>) rsi$getMethod(WRReflection.crystalRitualClass, "getPedestalsWithArea", Level.class, BlockPos.class, WRReflection.ritualAreaClass)
                     .invoke(null, beLevel, pos, area);
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("Failed to find Arcane Pedestals for crystal ritual", e);
@@ -645,14 +642,6 @@ public final class WRWandCraftPacket {
         }
 
         return true;
-    }
-
-    private static boolean rsi$isInstance(Object obj, String className) {
-        try {
-            return Class.forName(className).isInstance(obj);
-        } catch (ClassNotFoundException e) {
-            return false;
-        }
     }
 
     @Nullable

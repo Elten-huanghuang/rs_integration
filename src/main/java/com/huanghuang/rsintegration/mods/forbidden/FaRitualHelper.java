@@ -1,7 +1,7 @@
 package com.huanghuang.rsintegration.mods.forbidden;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
-import com.huanghuang.rsintegration.util.ModClassLoader;
+import com.huanghuang.rsintegration.reflection.probes.FAReflection;
 import com.huanghuang.rsintegration.util.ModIds;
 import com.huanghuang.rsintegration.util.Reflect;
 import com.refinedmods.refinedstorage.api.network.INetwork;
@@ -37,79 +37,10 @@ public final class FaRitualHelper {
 
     private FaRitualHelper() {}
 
-    // ── Shared class refs ────────────────────────────────────────
-    static Class<?> hephaestusForgeBEClass;
-    static Class<?> pedestalBEClass;
-    static Class<?> ritualClass;
-    static Class<?> essencesDefinitionClass;
-    static Class<?> essencesStorageClass;
-    static Class<?> ritualManagerClass;
-    static Class<?> booleanConsumerClass;
-    static Class<?> essenceManagerClass;
-    static Class<?> createItemResultClass;
-    static Class<?> upgradeTierResultClass;
-    static Class<?> ritualStarterItemClass;
-    static Class<?> enhancerAccessorClass;
-    static Class<?> enhancerDefinitionClass;
-    static Class<?> enhancerEffectClass;
-    static Class<?> essenceModifierClass;
-
     private static volatile ResourceKey<?> cachedFaRitualKey;
     /** Built once from the FA ritual registry — O(1) lookups thereafter. */
     private static volatile Map<ResourceLocation, Object> cachedRitualMap;
 
-    static void ensureClasses() {
-        if (!ModClassLoader.ensureClasses(ModIds.FORBIDDEN_ARCANUS,
-                "com.stal111.forbidden_arcanus.common.block.entity.forge.HephaestusForgeBlockEntity",
-                "com.stal111.forbidden_arcanus.common.block.entity.PedestalBlockEntity",
-                "com.stal111.forbidden_arcanus.common.block.entity.forge.ritual.Ritual",
-                "com.stal111.forbidden_arcanus.common.block.entity.forge.essence.EssencesDefinition",
-                "com.stal111.forbidden_arcanus.common.block.entity.forge.essence.EssencesStorage",
-                "com.stal111.forbidden_arcanus.common.block.entity.forge.ritual.RitualManager",
-                "it.unimi.dsi.fastutil.booleans.BooleanConsumer",
-                "com.stal111.forbidden_arcanus.common.block.entity.forge.essence.EssenceManager",
-                "com.stal111.forbidden_arcanus.common.block.entity.forge.ritual.result.CreateItemResult",
-                "com.stal111.forbidden_arcanus.common.block.entity.forge.ritual.result.UpgradeTierResult",
-                "com.stal111.forbidden_arcanus.common.item.RitualStarterItem",
-                "com.stal111.forbidden_arcanus.common.item.enhancer.EnhancerAccessor",
-                "com.stal111.forbidden_arcanus.common.item.enhancer.EnhancerDefinition",
-                "com.stal111.forbidden_arcanus.common.item.enhancer.EnhancerEffect",
-                "com.stal111.forbidden_arcanus.common.block.entity.forge.essence.EssenceModifier")) return;
-        try {
-            hephaestusForgeBEClass = Class.forName(
-                    "com.stal111.forbidden_arcanus.common.block.entity.forge.HephaestusForgeBlockEntity");
-            pedestalBEClass = Class.forName(
-                    "com.stal111.forbidden_arcanus.common.block.entity.PedestalBlockEntity");
-            ritualClass = Class.forName(
-                    "com.stal111.forbidden_arcanus.common.block.entity.forge.ritual.Ritual");
-            essencesDefinitionClass = Class.forName(
-                    "com.stal111.forbidden_arcanus.common.block.entity.forge.essence.EssencesDefinition");
-            essencesStorageClass = Class.forName(
-                    "com.stal111.forbidden_arcanus.common.block.entity.forge.essence.EssencesStorage");
-            ritualManagerClass = Class.forName(
-                    "com.stal111.forbidden_arcanus.common.block.entity.forge.ritual.RitualManager");
-            booleanConsumerClass = Class.forName(
-                    "it.unimi.dsi.fastutil.booleans.BooleanConsumer");
-            essenceManagerClass = Class.forName(
-                    "com.stal111.forbidden_arcanus.common.block.entity.forge.essence.EssenceManager");
-            createItemResultClass = Class.forName(
-                    "com.stal111.forbidden_arcanus.common.block.entity.forge.ritual.result.CreateItemResult");
-            upgradeTierResultClass = Class.forName(
-                    "com.stal111.forbidden_arcanus.common.block.entity.forge.ritual.result.UpgradeTierResult");
-            ritualStarterItemClass = Class.forName(
-                    "com.stal111.forbidden_arcanus.common.item.RitualStarterItem");
-            enhancerAccessorClass = Class.forName(
-                    "com.stal111.forbidden_arcanus.common.item.enhancer.EnhancerAccessor");
-            enhancerDefinitionClass = Class.forName(
-                    "com.stal111.forbidden_arcanus.common.item.enhancer.EnhancerDefinition");
-            enhancerEffectClass = Class.forName(
-                    "com.stal111.forbidden_arcanus.common.item.enhancer.EnhancerEffect");
-            essenceModifierClass = Class.forName(
-                    "com.stal111.forbidden_arcanus.common.block.entity.forge.essence.EssenceModifier");
-        } catch (ClassNotFoundException e) {
-            RSIntegrationMod.LOGGER.error("[RSI-FA] Failed to load FA classes", e);
-        }
-    }
 
     // ── Registry ─────────────────────────────────────────────────
 
@@ -130,7 +61,6 @@ public final class FaRitualHelper {
 
     @Nullable
     public static Object getRitualById(ResourceLocation id, ServerLevel level) {
-        ensureClasses();
         ResourceKey<?> key = getFARegistryKey();
         if (key == null) return null;
         try {
@@ -195,13 +125,13 @@ public final class FaRitualHelper {
         }
 
         // 2. Try BlockEntity.getTier() / getForgeTier() (older FA versions)
-        if (be != null && hephaestusForgeBEClass != null && hephaestusForgeBEClass.isInstance(be)) {
+        if (be != null && FAReflection.hephaestusForgeBEClass != null && FAReflection.hephaestusForgeBEClass.isInstance(be)) {
             try {
                 java.lang.reflect.Method getTier = Reflect.findMethod(
-                        hephaestusForgeBEClass, "getTier", new Class<?>[0]);
+                        FAReflection.hephaestusForgeBEClass, "getTier", new Class<?>[0]);
                 if (getTier == null) {
                     getTier = Reflect.findMethod(
-                            hephaestusForgeBEClass, "getForgeTier", new Class<?>[0]);
+                            FAReflection.hephaestusForgeBEClass, "getForgeTier", new Class<?>[0]);
                 }
                 if (getTier != null) {
                     Object val = getTier.invoke(be);
@@ -216,9 +146,9 @@ public final class FaRitualHelper {
 
             // 3. Try tier / forgeTier field directly (older FA versions)
             try {
-                java.lang.reflect.Field f = Reflect.findField(hephaestusForgeBEClass, "tier").orElse(null);
+                java.lang.reflect.Field f = Reflect.findField(FAReflection.hephaestusForgeBEClass, "tier").orElse(null);
                 if (f == null) {
-                    f = Reflect.findField(hephaestusForgeBEClass, "forgeTier").orElse(null);
+                    f = Reflect.findField(FAReflection.hephaestusForgeBEClass, "forgeTier").orElse(null);
                 }
                 if (f != null) {
                     f.setAccessible(true);
@@ -232,7 +162,7 @@ public final class FaRitualHelper {
 
             // 4. FA 2.2.x: ValueNotifier<HephaestusForgeLevel> forgeLevel
             try {
-                java.lang.reflect.Field flField = Reflect.findField(hephaestusForgeBEClass, "forgeLevel").orElse(null);
+                java.lang.reflect.Field flField = Reflect.findField(FAReflection.hephaestusForgeBEClass, "forgeLevel").orElse(null);
                 if (flField != null) {
                     flField.setAccessible(true);
                     Object notifier = flField.get(be);
@@ -248,7 +178,7 @@ public final class FaRitualHelper {
                         }
                     }
                 } else {
-                    RSIntegrationMod.LOGGER.debug("[RSI-FA] getForgeTier forgeLevel field NOT FOUND on {}", hephaestusForgeBEClass.getName());
+                    RSIntegrationMod.LOGGER.debug("[RSI-FA] getForgeTier forgeLevel field NOT FOUND on {}", FAReflection.hephaestusForgeBEClass.getName());
                 }
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.debug("[RSI-FA] getForgeTier forgeLevel probe failed: {}", e.toString());
@@ -256,8 +186,8 @@ public final class FaRitualHelper {
         } else {
             RSIntegrationMod.LOGGER.debug("[RSI-FA] getForgeTier BE check skipped: be={} beClass={} isInstance={}",
                     be != null ? be.getClass().getName() : "null",
-                    hephaestusForgeBEClass != null ? hephaestusForgeBEClass.getName() : "null",
-                    be != null && hephaestusForgeBEClass != null ? hephaestusForgeBEClass.isInstance(be) : false);
+                    FAReflection.hephaestusForgeBEClass != null ? FAReflection.hephaestusForgeBEClass.getName() : "null",
+                    be != null && FAReflection.hephaestusForgeBEClass != null ? FAReflection.hephaestusForgeBEClass.isInstance(be) : false);
         }
         RSIntegrationMod.LOGGER.debug("[RSI-FA] getForgeTier FALLBACK → 1");
         return 1;
@@ -276,12 +206,12 @@ public final class FaRitualHelper {
     /** Reads the exact required tier from an UpgradeTierResult. Returns -1 on failure. */
     static int readUpgradeRequiredTier(Object upgradeResult) {
         try {
-            return (int) Reflect.getMethodOrThrow(upgradeTierResultClass, "requiredTier", "requiredTier").invoke(upgradeResult);
+            return (int) Reflect.getMethodOrThrow(FAReflection.upgradeTierResultClass, "requiredTier", "requiredTier").invoke(upgradeResult);
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.debug("[RSI-FA] readUpgradeRequiredTier method failed: {}", e.toString());
         }
         try {
-            java.lang.reflect.Field f = Reflect.findField(upgradeTierResultClass, "requiredTier").orElse(null);
+            java.lang.reflect.Field f = Reflect.findField(FAReflection.upgradeTierResultClass, "requiredTier").orElse(null);
             if (f != null) { f.setAccessible(true); return f.getInt(upgradeResult); }
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.debug("[RSI-FA] readUpgradeRequiredTier field failed: {}", e.toString());
@@ -299,8 +229,7 @@ public final class FaRitualHelper {
     static List<Object> collectEnhancerModifiers(Object ritualManager, Object ritual) {
         List<Object> modifiers = new ArrayList<>();
         try {
-            ensureClasses();
-            Set<Object> requiredDefs = new HashSet<>();
+                Set<Object> requiredDefs = new HashSet<>();
             Object requirements = invoke(ritual, "requirements");
             if (requirements != null) {
                 List<?> requiredEnhancers = invokeList(requirements, "enhancers");
@@ -313,21 +242,21 @@ public final class FaRitualHelper {
             }
             if (requiredDefs.isEmpty()) return modifiers;
 
-            java.lang.reflect.Field accessorField = Reflect.findField(ritualManagerClass, "enhancerAccessor").orElse(null);
+            java.lang.reflect.Field accessorField = Reflect.findField(FAReflection.ritualManagerClass, "enhancerAccessor").orElse(null);
             if (accessorField == null) return modifiers;
             accessorField.setAccessible(true);
             Object enhancerAccessor = accessorField.get(ritualManager);
             if (enhancerAccessor == null) return modifiers;
 
-            List<?> enhancers = (List<?>) Reflect.getMethodOrThrow(enhancerAccessorClass, "getEnhancers", "getEnhancers").invoke(enhancerAccessor);
+            List<?> enhancers = (List<?>) Reflect.getMethodOrThrow(FAReflection.enhancerAccessorClass, "getEnhancers", "getEnhancers").invoke(enhancerAccessor);
             if (enhancers == null) return modifiers;
 
             for (Object enhancerDef : enhancers) {
                 if (!requiredDefs.contains(enhancerDef)) continue;
-                List<?> effects = (List<?>) Reflect.getMethodOrThrow(enhancerDefinitionClass, "effects", "effects").invoke(enhancerDef);
+                List<?> effects = (List<?>) Reflect.getMethodOrThrow(FAReflection.enhancerDefinitionClass, "effects", "effects").invoke(enhancerDef);
                 if (effects == null) continue;
                 for (Object effect : effects) {
-                    if (essenceModifierClass.isInstance(effect)) {
+                    if (FAReflection.essenceModifierClass.isInstance(effect)) {
                         modifiers.add(effect);
                     }
                 }
@@ -348,26 +277,25 @@ public final class FaRitualHelper {
      */
     static boolean checkEssences(ServerPlayer player, Object ritual, Object forge, Object ritualManager) {
         try {
-            ensureClasses();
-            Object ritualEssences = Reflect.getMethodOrThrow(ritualClass, "essences", "essences").invoke(ritual);
+                Object ritualEssences = Reflect.getMethodOrThrow(FAReflection.ritualClass, "essences", "essences").invoke(ritual);
 
             List<Object> enhancerModifiers = collectEnhancerModifiers(ritualManager, ritual);
             Object requiredEssences = ritualEssences;
             if (!enhancerModifiers.isEmpty()) {
-                requiredEssences = Reflect.getMethodOrThrow(essencesDefinitionClass, "applyModifiers", "applyModifiers",
+                requiredEssences = Reflect.getMethodOrThrow(FAReflection.essencesDefinitionClass, "applyModifiers", "applyModifiers",
                         List.class).invoke(ritualEssences, enhancerModifiers);
             }
 
-            int reqAureal = (int) Reflect.getMethodOrThrow(essencesDefinitionClass, "aureal", "aureal").invoke(requiredEssences);
-            int reqSouls  = (int) Reflect.getMethodOrThrow(essencesDefinitionClass, "souls", "souls").invoke(requiredEssences);
-            int reqBlood  = (int) Reflect.getMethodOrThrow(essencesDefinitionClass, "blood", "blood").invoke(requiredEssences);
-            int reqExp    = (int) Reflect.getMethodOrThrow(essencesDefinitionClass, "experience", "experience").invoke(requiredEssences);
+            int reqAureal = (int) Reflect.getMethodOrThrow(FAReflection.essencesDefinitionClass, "aureal", "aureal").invoke(requiredEssences);
+            int reqSouls  = (int) Reflect.getMethodOrThrow(FAReflection.essencesDefinitionClass, "souls", "souls").invoke(requiredEssences);
+            int reqBlood  = (int) Reflect.getMethodOrThrow(FAReflection.essencesDefinitionClass, "blood", "blood").invoke(requiredEssences);
+            int reqExp    = (int) Reflect.getMethodOrThrow(FAReflection.essencesDefinitionClass, "experience", "experience").invoke(requiredEssences);
 
-            Object curEssences = Reflect.getMethodOrThrow(hephaestusForgeBEClass, "getEssences", "getEssences").invoke(forge);
-            int curAureal = (int) Reflect.getMethodOrThrow(essencesDefinitionClass, "aureal", "aureal").invoke(curEssences);
-            int curSouls  = (int) Reflect.getMethodOrThrow(essencesDefinitionClass, "souls", "souls").invoke(curEssences);
-            int curBlood  = (int) Reflect.getMethodOrThrow(essencesDefinitionClass, "blood", "blood").invoke(curEssences);
-            int curExp    = (int) Reflect.getMethodOrThrow(essencesDefinitionClass, "experience", "experience").invoke(curEssences);
+            Object curEssences = Reflect.getMethodOrThrow(FAReflection.hephaestusForgeBEClass, "getEssences", "getEssences").invoke(forge);
+            int curAureal = (int) Reflect.getMethodOrThrow(FAReflection.essencesDefinitionClass, "aureal", "aureal").invoke(curEssences);
+            int curSouls  = (int) Reflect.getMethodOrThrow(FAReflection.essencesDefinitionClass, "souls", "souls").invoke(curEssences);
+            int curBlood  = (int) Reflect.getMethodOrThrow(FAReflection.essencesDefinitionClass, "blood", "blood").invoke(curEssences);
+            int curExp    = (int) Reflect.getMethodOrThrow(FAReflection.essencesDefinitionClass, "experience", "experience").invoke(curEssences);
 
             RSIntegrationMod.LOGGER.debug("[RSI-FA] Essence check: a={}/{}, s={}/{}, b={}/{}, e={}/{}",
                     curAureal, reqAureal, curSouls, reqSouls, curBlood, reqBlood, curExp, reqExp);
@@ -411,7 +339,7 @@ public final class FaRitualHelper {
                     forgePos.offset(8, 3, 8)
             ).forEach(cp -> {
                 BlockEntity be = level.getBlockEntity(cp);
-                if (be != null && pedestalBEClass.isInstance(be)) {
+                if (be != null && FAReflection.pedestalBEClass.isInstance(be)) {
                     result.add(be);
                 }
             });
@@ -430,7 +358,7 @@ public final class FaRitualHelper {
         Integer v = cachedMainSlot;
         if (v != null) return v;
         try {
-            java.lang.reflect.Field f = Reflect.findField(hephaestusForgeBEClass, "MAIN_SLOT").orElse(null);
+            java.lang.reflect.Field f = Reflect.findField(FAReflection.hephaestusForgeBEClass, "MAIN_SLOT").orElse(null);
             if (f != null) {
                 f.setAccessible(true);
                 cachedMainSlot = f.getInt(null);
@@ -638,19 +566,19 @@ public final class FaRitualHelper {
     @Nullable
     static Object getValidRitualSafe(Object ritualManager) {
         try {
-            Method m = Reflect.findMethod(ritualManagerClass, "getValidRitual", new Class<?>[0]);
+            Method m = Reflect.findMethod(FAReflection.ritualManagerClass, "getValidRitual", new Class<?>[0]);
             if (m != null) return m.invoke(ritualManager);
         } catch (Exception ignored) { /* fallthrough */ }
         try {
-            Method m = Reflect.findMethod(ritualManagerClass, "getRitual", new Class<?>[0]);
+            Method m = Reflect.findMethod(FAReflection.ritualManagerClass, "getRitual", new Class<?>[0]);
             if (m != null) return m.invoke(ritualManager);
         } catch (Exception ignored) { /* fallthrough */ }
         try {
-            java.lang.reflect.Field f = Reflect.findField(ritualManagerClass, "validRitual").orElse(null);
+            java.lang.reflect.Field f = Reflect.findField(FAReflection.ritualManagerClass, "validRitual").orElse(null);
             if (f != null) { f.setAccessible(true); return f.get(ritualManager); }
         } catch (Exception ignored) { /* fallthrough */ }
         try {
-            java.lang.reflect.Field f = Reflect.findField(ritualManagerClass, "ritual").orElse(null);
+            java.lang.reflect.Field f = Reflect.findField(FAReflection.ritualManagerClass, "ritual").orElse(null);
             if (f != null) { f.setAccessible(true); return f.get(ritualManager); }
         } catch (Exception ignored) { /* fallthrough */ }
         return null;
@@ -676,12 +604,11 @@ public final class FaRitualHelper {
     }
 
     static StarterResult findRitualStarterItem(ServerPlayer player, @Nullable INetwork network) {
-        ensureClasses();
-        if (ritualStarterItemClass == null) return StarterResult.EMPTY;
+        if (FAReflection.ritualStarterItemClass == null) return StarterResult.EMPTY;
 
         // 1. Check player inventory + offhand
         for (ItemStack stack : player.getInventory().items) {
-            if (!stack.isEmpty() && ritualStarterItemClass.isInstance(stack.getItem())
+            if (!stack.isEmpty() && FAReflection.ritualStarterItemClass.isInstance(stack.getItem())
                     && canStartRitual(stack)) {
                 RSIntegrationMod.LOGGER.debug("[RSI-FA] Found RitualStarterItem '{}' in player inventory",
                         stack.getHoverName().getString());
@@ -689,7 +616,7 @@ public final class FaRitualHelper {
             }
         }
         ItemStack offhand = player.getOffhandItem();
-        if (!offhand.isEmpty() && ritualStarterItemClass.isInstance(offhand.getItem())
+        if (!offhand.isEmpty() && FAReflection.ritualStarterItemClass.isInstance(offhand.getItem())
                 && canStartRitual(offhand)) {
             RSIntegrationMod.LOGGER.debug("[RSI-FA] Found RitualStarterItem '{}' in player offhand",
                     offhand.getHoverName().getString());
@@ -704,7 +631,7 @@ public final class FaRitualHelper {
                     for (var entry : cacheList.getStacks()) {
                         ItemStack rsStack = entry.getStack();
                         if (rsStack.isEmpty()) continue;
-                        if (!ritualStarterItemClass.isInstance(rsStack.getItem())) continue;
+                        if (!FAReflection.ritualStarterItemClass.isInstance(rsStack.getItem())) continue;
                         if (!canStartRitual(rsStack)) {
                             RSIntegrationMod.LOGGER.debug("[RSI-FA] RS has RitualStarterItem '{}' but canStartRitual=false",
                                     rsStack.getHoverName().getString());
@@ -732,7 +659,7 @@ public final class FaRitualHelper {
 
     static boolean canStartRitual(ItemStack stack) {
         try {
-            return (boolean) Reflect.getMethodOrThrow(ritualStarterItemClass, "canStartRitual", "canStartRitual", ItemStack.class).invoke(stack.getItem(), stack);
+            return (boolean) Reflect.getMethodOrThrow(FAReflection.ritualStarterItemClass, "canStartRitual", "canStartRitual", ItemStack.class).invoke(stack.getItem(), stack);
         } catch (Exception e) {
             return false;
         }
@@ -753,12 +680,12 @@ public final class FaRitualHelper {
         if (!isCreative) {
             try {
                 Object item = starterStack.getItem();
-                int remaining = (int) Reflect.getMethodOrThrow(ritualStarterItemClass, "getRemainingUses", "getRemainingUses", ItemStack.class).invoke(item, starterStack);
+                int remaining = (int) Reflect.getMethodOrThrow(FAReflection.ritualStarterItemClass, "getRemainingUses", "getRemainingUses", ItemStack.class).invoke(item, starterStack);
                 RSIntegrationMod.LOGGER.debug("[RSI-FA] Starter '{}' uses before: {} (source: {})",
                         starterStack.getHoverName().getString(), remaining, source);
                 if (remaining > 0) {
                     int newRemaining = remaining - 1;
-                    Reflect.getMethodOrThrow(ritualStarterItemClass, "setRemainingUses", "setRemainingUses", ItemStack.class, int.class)
+                    Reflect.getMethodOrThrow(FAReflection.ritualStarterItemClass, "setRemainingUses", "setRemainingUses", ItemStack.class, int.class)
                             .invoke(item, starterStack, newRemaining);
                     RSIntegrationMod.LOGGER.debug("[RSI-FA] Starter '{}' uses after: {}",
                             starterStack.getHoverName().getString(), newRemaining);
@@ -892,12 +819,11 @@ public final class FaRitualHelper {
     @Nullable
     public static Recipe<?> wrapFaRitual(ResourceLocation recipeId, Object ritual) {
         try {
-            ensureClasses();
-            java.lang.reflect.Method getResult = Reflect.findMethod(ritual.getClass(), "result", new Class<?>[0]);
+                java.lang.reflect.Method getResult = Reflect.findMethod(ritual.getClass(), "result", new Class<?>[0]);
             Object result = getResult != null ? getResult.invoke(ritual) : null;
 
             ItemStack output = ItemStack.EMPTY;
-            if (result != null && createItemResultClass.isInstance(result)) {
+            if (result != null && FAReflection.createItemResultClass.isInstance(result)) {
                 java.lang.reflect.Method getStack = Reflect.findMethod(result.getClass(),
                         "getResult", new Class<?>[0]);
                 if (getStack != null) {
@@ -905,8 +831,8 @@ public final class FaRitualHelper {
                     if (s instanceof ItemStack st && !st.isEmpty())
                         output = st;
                 }
-            } else if (result != null && upgradeTierResultClass != null
-                    && upgradeTierResultClass.isInstance(result)) {
+            } else if (result != null && FAReflection.upgradeTierResultClass != null
+                    && FAReflection.upgradeTierResultClass.isInstance(result)) {
                 java.lang.reflect.Method getFrom = Reflect.findMethod(result.getClass(), "getRequiredTier", new Class<?>[0]);
                 java.lang.reflect.Method getTo = Reflect.findMethod(result.getClass(), "getUpgradedTier", new Class<?>[0]);
                 int from = 0, to = 0;

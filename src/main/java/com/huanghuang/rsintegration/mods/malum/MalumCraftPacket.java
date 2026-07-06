@@ -8,6 +8,7 @@ import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.MaterialSources;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
+import com.huanghuang.rsintegration.reflection.probes.MalumReflection;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;
@@ -373,9 +374,8 @@ public final class MalumCraftPacket {
     }
 
     private static List<?> capturePedestals(ServerLevel level, BlockPos altarPos) throws Exception {
-        Class<?> helperClass = Class.forName(
-                "com.sammy.malum.common.block.curiosities.spirit_altar.AltarCraftingHelper");
-        return (List<?>) helperClass.getMethod("capturePedestals", Level.class, BlockPos.class)
+        return (List<?>) MalumReflection.altarCraftingHelperClass
+                .getMethod("capturePedestals", Level.class, BlockPos.class)
                 .invoke(null, level, altarPos);
     }
 
@@ -414,11 +414,7 @@ public final class MalumCraftPacket {
     @Nullable
     private static Object castSpiritAltar(BlockEntity be) {
         if (be == null) return null;
-        try {
-            Class<?> clazz = Class.forName(
-                    "com.sammy.malum.common.block.curiosities.spirit_altar.SpiritAltarBlockEntity");
-            if (clazz.isInstance(be)) return be;
-        } catch (ClassNotFoundException ignored) {}
+        if (MalumReflection.spiritAltarBEClass != null && MalumReflection.spiritAltarBEClass.isInstance(be)) return be;
         return null;
     }
 

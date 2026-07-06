@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
+import com.huanghuang.rsintegration.reflection.probes.CrabbersDelightReflection;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
@@ -27,9 +28,6 @@ import java.util.ArrayList;
 import java.util.List;
 
 public final class CrabTrapBatchDelegate extends AbstractBatchDelegate {
-
-    private static final String BE_CLASS =
-            "alabaster.crabbersdelight.common.block.entity.CrabTrapBlockEntity";
 
     private static final int BAIT_SLOT = 0;
     private static final int OUTPUT_START = 1;
@@ -62,7 +60,7 @@ public final class CrabTrapBatchDelegate extends AbstractBatchDelegate {
         this.player = player;
 
         BlockEntity be = level.getBlockEntity(pos);
-        if (be == null || !be.getClass().getName().equals(BE_CLASS)) {
+        if (be == null || !CrabbersDelightReflection.crabTrapBEClass.isInstance(be)) {
             RSIntegrationMod.LOGGER.warn("[RSI-CrabTrap] Not a CrabTrapBlockEntity at {}", pos);
             player.sendSystemMessage(Component.translatable("rsi.crabtrap.error.not_crab_trap"));
             return false;
@@ -143,7 +141,7 @@ public final class CrabTrapBatchDelegate extends AbstractBatchDelegate {
         myLevel.getChunk(myPos);
 
         BlockEntity be = myLevel.getBlockEntity(myPos);
-        if (be == null || !be.getClass().getName().equals(BE_CLASS)) {
+        if (be == null || !CrabbersDelightReflection.crabTrapBEClass.isInstance(be)) {
             RSIntegrationMod.LOGGER.warn("[RSI-CrabTrap] BlockEntity missing at {}", myPos);
             return false;
         }
@@ -179,7 +177,7 @@ public final class CrabTrapBatchDelegate extends AbstractBatchDelegate {
 
         BlockEntity be = level.getBlockEntity(myPos);
         if (be == null) return false;
-        if (!be.getClass().getName().equals(BE_CLASS)) return false;
+        if (!CrabbersDelightReflection.crabTrapBEClass.isInstance(be)) return false;
 
         IItemHandler itemHandler = getInventory(be);
         if (itemHandler == null) return false;
@@ -253,7 +251,7 @@ public final class CrabTrapBatchDelegate extends AbstractBatchDelegate {
         myLevel.getChunk(myPos);
         BlockEntity be = myLevel.getBlockEntity(myPos);
         if (be == null) return;
-        if (!be.getClass().getName().equals(BE_CLASS)) return;
+        if (!CrabbersDelightReflection.crabTrapBEClass.isInstance(be)) return;
 
         IItemHandler handler = getInventory(be);
         if (handler == null || handler.getSlots() < TOTAL_SLOTS) return;
@@ -289,8 +287,7 @@ public final class CrabTrapBatchDelegate extends AbstractBatchDelegate {
         if (reflectionProbed) return;
         reflectionProbed = true;
         try {
-            Class<?> beClass = Class.forName(BE_CLASS);
-            inventoryField = beClass.getDeclaredField("inventory");
+            inventoryField = CrabbersDelightReflection.crabTrapBEClass.getDeclaredField("inventory");
             inventoryField.setAccessible(true);
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-CrabTrap] Reflection probe failed: {}", e.toString());

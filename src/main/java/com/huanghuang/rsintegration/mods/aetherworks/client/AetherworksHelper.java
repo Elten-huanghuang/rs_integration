@@ -12,10 +12,11 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
-import net.minecraftforge.fml.ModList;
 import net.minecraftforge.items.IItemHandler;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.reflection.probes.AetherworksReflection;
+import com.huanghuang.rsintegration.reflection.probes.EmbersReflection;
 
 import javax.annotation.Nullable;
 import java.lang.reflect.Field;
@@ -28,10 +29,6 @@ final class AetherworksHelper {
     private static final int FORGE_SEARCH_RADIUS = 5;
 
     private static final boolean LOADED;
-
-    @Nullable private static Class<?> anvilClass;
-    @Nullable private static Class<?> forgeClass;
-    @Nullable private static Class<?> toolStationClass;
 
     @Nullable private static Field f_anvil_progress;
     @Nullable private static Field f_anvil_hitTimeout;
@@ -64,25 +61,19 @@ final class AetherworksHelper {
 
     static {
         boolean ok = false;
-        if (ModList.get().isLoaded("aetherworks")) {
+        if (AetherworksReflection.ready) {
             try {
-                // Essential: anvil and forge class objects
-                anvilClass = Class.forName("net.sirplop.aetherworks.blockentity.AetheriumAnvilBlockEntity");
-                forgeClass = Class.forName("net.sirplop.aetherworks.blockentity.AetherForgeBlockEntity");
-
                 // Essential: anvil fields for HUD + auto-hammer
-                f_anvil_progress = anvilClass.getField("progress");
-                f_anvil_hitTimeout = anvilClass.getField("hitTimeout");
-                f_anvil_mistakes = anvilClass.getField("mistakes");
-                f_anvil_inventory = anvilClass.getField("inventory");
+                f_anvil_progress = AetherworksReflection.anvilBEClass.getField("progress");
+                f_anvil_hitTimeout = AetherworksReflection.anvilBEClass.getField("hitTimeout");
+                f_anvil_mistakes = AetherworksReflection.anvilBEClass.getField("mistakes");
+                f_anvil_inventory = AetherworksReflection.anvilBEClass.getField("inventory");
 
                 ok = true; // Core HUD and auto-hammer can work
 
                 // Tool station (non-essential for HUD)
                 try {
-                    toolStationClass = Class.forName(
-                            "net.sirplop.aetherworks.blockentity.ToolStationBlockEntity");
-                    f_ts_inventory = toolStationClass.getField("inventory");
+                    f_ts_inventory = AetherworksReflection.toolStationBEClass.getField("inventory");
                 } catch (Exception ignored) {}
             } catch (Exception e) {
                 // Aetherworks not properly installed — core classes missing
@@ -90,32 +81,29 @@ final class AetherworksHelper {
 
             if (ok) {
                 // Non-essential: forge capability fields
-                try { f_forge_heatCap = forgeClass.getField("heatCapability"); } catch (Exception ignored) {}
-                try { f_forge_emberCap = forgeClass.getField("emberCapability"); } catch (Exception ignored) {}
+                try { f_forge_heatCap = AetherworksReflection.forgeBEClass.getField("heatCapability"); } catch (Exception ignored) {}
+                try { f_forge_emberCap = AetherworksReflection.forgeBEClass.getField("emberCapability"); } catch (Exception ignored) {}
 
                 // Non-essential: heat capability (Aetherworks own API)
                 try {
-                    Class<?> hc = Class.forName("net.sirplop.aetherworks.api.capabilities.IHeatCapability");
-                    m_heat_getHeat = hc.getMethod("getHeat");
+                    m_heat_getHeat = AetherworksReflection.iheatCapabilityClass.getMethod("getHeat");
                 } catch (Exception ignored) {}
 
                 // Non-essential: ember capability (Embers API)
                 try {
-                    Class<?> ec = Class.forName("com.rekindled.embers.api.power.IEmberCapability");
-                    m_ember_getEmber = ec.getMethod("getEmber");
-                    m_ember_getCapacity = ec.getMethod("getEmberCapacity");
+                    m_ember_getEmber = EmbersReflection.iemberCapabilityClass.getMethod("getEmber");
+                    m_ember_getCapacity = EmbersReflection.iemberCapabilityClass.getMethod("getEmberCapacity");
                 } catch (Exception ignored) {}
 
                 // Non-essential: recipe access
                 try {
-                    Class<?> recipeClass = Class.forName("net.sirplop.aetherworks.recipe.IAetheriumAnvilRecipe");
-                    m_recipe_getDisplayInput = recipeClass.getMethod("getDisplayInput");
-                    m_recipe_getNumberOfHits = recipeClass.getMethod("getNumberOfHits");
-                    m_recipe_getTemperatureMin = recipeClass.getMethod("getTemperatureMin");
-                    m_recipe_getTemperatureMax = recipeClass.getMethod("getTemperatureMax");
-                    m_recipe_getEmberPerHit = recipeClass.getMethod("getEmberPerHit");
+                    m_recipe_getDisplayInput = AetherworksReflection.anvilRecipeClass.getMethod("getDisplayInput");
+                    m_recipe_getNumberOfHits = AetherworksReflection.anvilRecipeClass.getMethod("getNumberOfHits");
+                    m_recipe_getTemperatureMin = AetherworksReflection.anvilRecipeClass.getMethod("getTemperatureMin");
+                    m_recipe_getTemperatureMax = AetherworksReflection.anvilRecipeClass.getMethod("getTemperatureMax");
+                    m_recipe_getEmberPerHit = AetherworksReflection.anvilRecipeClass.getMethod("getEmberPerHit");
 
-                    Class<?> awReg = Class.forName("net.sirplop.aetherworks.AWRegistry");
+                    Class<?> awReg = AetherworksReflection.awRegistryClass;
                     Field f = awReg.getField("AETHERIUM_ANVIL");
                     Object ro = f.get(null);
                     recipeType = ro.getClass().getMethod("get").invoke(ro);
@@ -123,12 +111,10 @@ final class AetherworksHelper {
 
                 // Non-essential: tool station recipe access
                 try {
-                    Class<?> tsRClass = Class.forName(
-                            "net.sirplop.aetherworks.recipe.IToolStationRecipe");
-                    m_ts_recipe_getDisplayInputs = tsRClass.getMethod("getDisplayInputs");
-                    m_ts_recipe_getTemperature = tsRClass.getMethod("getTemperature");
+                    m_ts_recipe_getDisplayInputs = AetherworksReflection.toolStationRecipeClass.getMethod("getDisplayInputs");
+                    m_ts_recipe_getTemperature = AetherworksReflection.toolStationRecipeClass.getMethod("getTemperature");
 
-                    Class<?> awReg = Class.forName("net.sirplop.aetherworks.AWRegistry");
+                    Class<?> awReg = AetherworksReflection.awRegistryClass;
                     Field f2 = awReg.getField("TOOL_STATION");
                     Object ro2 = f2.get(null);
                     tsRecipeType = ro2.getClass().getMethod("get").invoke(ro2);
@@ -136,7 +122,7 @@ final class AetherworksHelper {
 
                 // Non-essential: hammer
                 try {
-                    Class<?> regMan = Class.forName("com.rekindled.embers.RegistryManager");
+                    Class<?> regMan = EmbersReflection.registryManagerClass;
                     Field f = regMan.getField("TINKER_HAMMER");
                     Object ro = f.get(null);
                     hammerItem = (Item) ro.getClass().getMethod("get").invoke(ro);
@@ -151,15 +137,15 @@ final class AetherworksHelper {
     static boolean isLoaded() { return LOADED; }
 
     static boolean isAnvil(@Nullable BlockEntity be) {
-        return LOADED && anvilClass != null && anvilClass.isInstance(be);
+        return LOADED && AetherworksReflection.anvilBEClass.isInstance(be);
     }
 
     static boolean isToolStation(@Nullable BlockEntity be) {
-        return LOADED && toolStationClass != null && toolStationClass.isInstance(be);
+        return LOADED && AetherworksReflection.toolStationBEClass.isInstance(be);
     }
 
     static boolean isForge(@Nullable BlockEntity be) {
-        return LOADED && forgeClass != null && forgeClass.isInstance(be);
+        return LOADED && AetherworksReflection.forgeBEClass.isInstance(be);
     }
 
     static boolean isHoldingHammer(Player player) {

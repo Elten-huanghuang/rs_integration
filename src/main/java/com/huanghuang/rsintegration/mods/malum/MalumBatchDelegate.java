@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
+import com.huanghuang.rsintegration.reflection.probes.MalumReflection;
 import com.huanghuang.rsintegration.util.Reflect;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
@@ -28,24 +29,6 @@ import java.util.Optional;
 
 public final class MalumBatchDelegate extends AbstractBatchDelegate {
 
-    // ── Shared class refs ────────────────────────────────────────
-    private static volatile Class<?> spiritAltarBEClass;
-    private static volatile Class<?> altarCraftingHelperClass;
-
-    private static void ensureClasses() {
-        if (!com.huanghuang.rsintegration.util.ModClassLoader.ensureClasses("malum",
-                "com.sammy.malum.common.block.curiosities.spirit_altar.SpiritAltarBlockEntity",
-                "com.sammy.malum.common.block.curiosities.spirit_altar.AltarCraftingHelper")) return;
-        try {
-            spiritAltarBEClass = Class.forName(
-                    "com.sammy.malum.common.block.curiosities.spirit_altar.SpiritAltarBlockEntity");
-            altarCraftingHelperClass = Class.forName(
-                    "com.sammy.malum.common.block.curiosities.spirit_altar.AltarCraftingHelper");
-        } catch (ClassNotFoundException e) {
-            RSIntegrationMod.LOGGER.error("[RSI-Batch-Malum] Failed to load Malum classes", e);
-        }
-    }
-
     // ── Instance state ───────────────────────────────────────────
     private ServerPlayer player;
     private ServerLevel myLevel;
@@ -65,7 +48,10 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
     @Override
     public boolean validateAndInit(ServerPlayer player, ResourceLocation recipeId,
                                    @Nullable ResourceLocation dim, BlockPos pos) {
-        ensureClasses();
+        if (!MalumReflection.isAvailable()) {
+            player.sendSystemMessage(Component.translatable("rsi.batch.error.mod_missing", "Malum"));
+            return false;
+        }
 
         // Reset all instance state to prevent pollution from a previous
         // validateAndInit() call that failed partway through.
@@ -77,11 +63,6 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
         this.pedestals = null;
         this.craftStarted = false;
         this.craftWasSeenActive = false;
-
-        if (spiritAltarBEClass == null || altarCraftingHelperClass == null) {
-            player.sendSystemMessage(Component.translatable("rsi.batch.error.mod_missing", "Malum"));
-            return false;
-        }
 
         ServerLevel level = CraftPacketUtils.resolveLevel(player.server, dim, player);
         if (level == null) {
@@ -98,7 +79,7 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
             level.getChunk(pos);
         }
         BlockEntity be = level.getBlockEntity(pos);
-        if (be == null || !spiritAltarBEClass.isInstance(be)) {
+        if (be == null || !MalumReflection.spiritAltarBEClass.isInstance(be)) {
             player.sendSystemMessage(Component.translatable("rsi.malum.error.altar_not_found"));
             return false;
         }
@@ -648,11 +629,11 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
      *  for certain altar configurations — skip it so items aren't
      *  misplaced onto the crucible instead of proper pedestals. */
     private static boolean isSpiritCrucible(Object ap) {
-        return ap.getClass().getName().contains("spirit_crucible");
+        return MalumReflection.crucibleBEClass != null && MalumReflection.crucibleBEClass.isInstance(ap);
     }
 
     private List<?> capturePedestals() throws Exception {
-        return (List<?>) altarCraftingHelperClass.getMethod("capturePedestals", Level.class, BlockPos.class)
+        return (List<?>) MalumReflection.altarCraftingHelperClass.getMethod("capturePedestals", Level.class, BlockPos.class)
                 .invoke(null, myLevel, myPos);
     }
 
@@ -750,7 +731,7 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
                                                @Nullable ResourceLocation dim,
                                                @Nullable BlockPos pos) {
         List<String> warnings = new ArrayList<>();
-        ensureClasses();
+        if (!MalumReflection.isAvailable()) return warnings;
 
         // Check for spirit requirements on the recipe
         List<?> spirits = null;
@@ -778,12 +759,12 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
         }
 
         // If altar is bound, check actual spirit inventory
-        if (dim != null && pos != null && spiritAltarBEClass != null) {
+        if (dim != null && pos != null && MalumReflection.spiritAltarBEClass != null) {
             try {
                 ServerLevel level = CraftPacketUtils.resolveLevel(player.server, dim, player);
                 if (level != null && level.isLoaded(pos)) {
                     BlockEntity be = level.getBlockEntity(pos);
-                    if (be != null && spiritAltarBEClass.isInstance(be)) {
+                    if (be != null && MalumReflection.spiritAltarBEClass.isInstance(be)) {
                         Object spiritInv = getFieldStatic(be, "spiritInventory");
                         if (spiritInv != null) {
                             int slots = (int) spiritInv.getClass().getMethod("getSlots").invoke(spiritInv);

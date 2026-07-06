@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
+import com.huanghuang.rsintegration.reflection.probes.FarmersDelightReflection;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.core.BlockPos;
@@ -31,11 +32,6 @@ import java.util.List;
 import java.util.Map;
 
 public final class CookingPotBatchDelegate implements com.huanghuang.rsintegration.crafting.batch.IBatchDelegate {
-
-    private static final String BE_CLASS =
-            "vectorwing.farmersdelight.common.block.entity.CookingPotBlockEntity";
-    private static final String RECIPE_CLASS =
-            "vectorwing.farmersdelight.common.crafting.CookingPotRecipe";
 
     // Slot layout matching CookingPotBlockEntity
     private static final int INPUT_SLOTS = 6;   // 0..5
@@ -72,7 +68,7 @@ public final class CookingPotBatchDelegate implements com.huanghuang.rsintegrati
             player.sendSystemMessage(Component.translatable("rsi.generic.error.recipe_not_found", recipeId.toString()));
             return false;
         }
-        if (!found.getClass().getName().equals(RECIPE_CLASS)) {
+        if (FarmersDelightReflection.cookingPotRecipeClass == null || !FarmersDelightReflection.cookingPotRecipeClass.isInstance(found)) {
             player.sendSystemMessage(Component.translatable("rsi.generic.error.recipe_not_found", recipeId.toString()));
             return false;
         }
@@ -139,7 +135,7 @@ public final class CookingPotBatchDelegate implements com.huanghuang.rsintegrati
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-CookingPot] BlockEntity missing at {}", myPos);
             return false;
         }
-        if (!be.getClass().getName().equals(BE_CLASS)) {
+        if (!FarmersDelightReflection.cookingPotBEClass.isInstance(be)) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-CookingPot] Wrong BE type: {}", be.getClass().getName());
             return false;
         }
@@ -208,7 +204,7 @@ public final class CookingPotBatchDelegate implements com.huanghuang.rsintegrati
     public boolean isCraftComplete(ServerLevel level) {
         BlockEntity be = level.getBlockEntity(myPos);
         if (be == null) return false;
-        if (!be.getClass().getName().equals(BE_CLASS)) return false;
+        if (!FarmersDelightReflection.cookingPotBEClass.isInstance(be)) return false;
 
         IItemHandler itemHandler = getInventory(be);
         if (itemHandler == null) return false;
@@ -281,8 +277,7 @@ public final class CookingPotBatchDelegate implements com.huanghuang.rsintegrati
         if (reflectionProbed) return;
         reflectionProbed = true;
         try {
-            Class<?> beClass = Class.forName(BE_CLASS);
-            inventoryField = beClass.getDeclaredField("inventory");
+            inventoryField = FarmersDelightReflection.cookingPotBEClass.getDeclaredField("inventory");
             inventoryField.setAccessible(true);
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-CookingPot] Reflection probe failed: {}", e.toString());
@@ -332,7 +327,7 @@ public final class CookingPotBatchDelegate implements com.huanghuang.rsintegrati
         myLevel.getChunk(myPos);
         BlockEntity be = myLevel.getBlockEntity(myPos);
         if (be == null) return;
-        if (!be.getClass().getName().equals(BE_CLASS)) return;
+        if (!FarmersDelightReflection.cookingPotBEClass.isInstance(be)) return;
 
         IItemHandler handler = getInventory(be);
         if (handler == null || handler.getSlots() < 9) return;

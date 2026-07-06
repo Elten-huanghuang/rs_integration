@@ -6,6 +6,7 @@ import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.mods.farmingforblockheads.MarketRecipeWrapper;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
+import com.huanghuang.rsintegration.reflection.probes.FarmingForBlockheadsReflection;
 import com.huanghuang.rsintegration.util.Reflect;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;
@@ -49,9 +50,7 @@ public final class MarketBatchDelegate extends AbstractBatchDelegate {
         if (probed) return;
         probed = true;
         try {
-            Class<?> registryClass = Class.forName(
-                    "net.blay09.mods.farmingforblockheads.registry.MarketRegistry");
-            java.lang.reflect.Field instField = registryClass.getField("INSTANCE");
+            java.lang.reflect.Field instField = FarmingForBlockheadsReflection.marketRegistryClass.getField("INSTANCE");
             marketRegistryInstance = instField.get(null);
             available = marketRegistryInstance != null;
         } catch (Exception e) {
@@ -137,9 +136,8 @@ public final class MarketBatchDelegate extends AbstractBatchDelegate {
             RSIntegrationMod.LOGGER.warn("[RSI-Market] validateAndInit: no block entity at {}", pos);
             return false;
         }
-        String beClass = be.getClass().getName();
-        if (!beClass.equals("net.blay09.mods.farmingforblockheads.block.entity.MarketBlockEntity")) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Market] validateAndInit: not a MarketBlockEntity, got {}", beClass);
+        if (!FarmingForBlockheadsReflection.marketBEClass.isInstance(be)) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Market] validateAndInit: not a MarketBlockEntity, got {}", be.getClass().getName());
             return false;
         }
 

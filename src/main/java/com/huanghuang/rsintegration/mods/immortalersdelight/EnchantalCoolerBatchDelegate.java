@@ -6,6 +6,7 @@ import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.recipe.EnchantalCoolerRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
+import com.huanghuang.rsintegration.reflection.probes.ImmersalsDelightReflection;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
@@ -30,9 +31,6 @@ import java.util.List;
 import java.util.Map;
 
 public final class EnchantalCoolerBatchDelegate implements com.huanghuang.rsintegration.crafting.batch.IBatchDelegate {
-
-    private static final String BE_CLASS =
-            "com.renyigesai.immortalers_delight.block.enchantal_cooler.EnchantalCoolerBlockEntity";
 
     // Slot layout (matching EnchantalCoolerBlockEntity)
     private static final int INPUT_SLOTS = 4;  // 0..3
@@ -137,7 +135,7 @@ public final class EnchantalCoolerBatchDelegate implements com.huanghuang.rsinte
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-Cooler] BlockEntity missing at {}", myPos);
             return false;
         }
-        if (!be.getClass().getName().equals(BE_CLASS)) {
+        if (!ImmersalsDelightReflection.enchantalCoolerBEClass.isInstance(be)) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-Cooler] Wrong BE type: {}", be.getClass().getName());
             return false;
         }
@@ -206,7 +204,7 @@ public final class EnchantalCoolerBatchDelegate implements com.huanghuang.rsinte
     public boolean isCraftComplete(ServerLevel level) {
         BlockEntity be = level.getBlockEntity(myPos);
         if (be == null) return false;
-        if (!be.getClass().getName().equals(BE_CLASS)) return false;
+        if (!ImmersalsDelightReflection.enchantalCoolerBEClass.isInstance(be)) return false;
 
         IItemHandler itemHandler = getInventory(be);
         if (itemHandler == null) return false;
@@ -249,7 +247,7 @@ public final class EnchantalCoolerBatchDelegate implements com.huanghuang.rsinte
         myLevel.getChunk(myPos);
         BlockEntity be = myLevel.getBlockEntity(myPos);
         if (be == null) return;
-        if (!be.getClass().getName().equals(BE_CLASS)) return;
+        if (!ImmersalsDelightReflection.enchantalCoolerBEClass.isInstance(be)) return;
 
         IItemHandler handler = getInventory(be);
         if (handler == null || handler.getSlots() < 7) return;
@@ -365,10 +363,9 @@ public final class EnchantalCoolerBatchDelegate implements com.huanghuang.rsinte
         if (reflectionProbed) return;
         reflectionProbed = true;
         try {
-            Class<?> beClass = Class.forName(BE_CLASS);
-            inventoryField = beClass.getDeclaredField("inventory");
+            inventoryField = ImmersalsDelightReflection.enchantalCoolerBEClass.getDeclaredField("inventory");
             inventoryField.setAccessible(true);
-            residualDyeField = beClass.getDeclaredField("residualDye");
+            residualDyeField = ImmersalsDelightReflection.enchantalCoolerBEClass.getDeclaredField("residualDye");
             residualDyeField.setAccessible(true);
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-Cooler] Reflection probe failed: {}", e.toString());

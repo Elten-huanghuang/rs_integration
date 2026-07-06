@@ -3,13 +3,13 @@ package com.huanghuang.rsintegration.mods.eidolon;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.util.ChunkUtils;
-import com.huanghuang.rsintegration.util.ModClassLoader;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
+import com.huanghuang.rsintegration.reflection.probes.EidolonReflection;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
@@ -32,61 +32,25 @@ import java.util.List;
 
 public final class EidolonBatchDelegate extends AbstractBatchDelegate {
 
-    // ── Shared class refs ────────────────────────────────────────
-    private static volatile Class<?> crucibleRecipeClass;
-    private static volatile Class<?> crucibleRecipeStepClass;
-    private static volatile Class<?> crucibleTileEntityClass;
-    private static volatile Class<?> crucibleStepInnerClass;
-    private static volatile Class<?> worktableBlockClass;
-    private static volatile Class<?> worktableRecipeClass;
+    // ── Shared class refs (resolved from probe) ─────────────────
     private static volatile java.lang.reflect.Field boilingField;
     private static volatile java.lang.reflect.Field stepsField;
-    private static volatile Class<?> ritualRecipeClass;
-    private static volatile Class<?> brazierTileEntityClass;
 
-    private static void ensureClasses() {
-        if (!ModClassLoader.ensureClasses("eidolon",
-                "elucent.eidolon.recipe.CrucibleRecipe",
-                "elucent.eidolon.recipe.CrucibleRecipe$Step",
-                "elucent.eidolon.common.tile.CrucibleTileEntity",
-                "elucent.eidolon.common.tile.CrucibleTileEntity$CrucibleStep",
-                "elucent.eidolon.common.block.WorktableBlock",
-                "elucent.eidolon.recipe.WorktableRecipe")) return;
-        try {
-            crucibleRecipeClass = Class.forName("elucent.eidolon.recipe.CrucibleRecipe");
-            crucibleRecipeStepClass = Class.forName("elucent.eidolon.recipe.CrucibleRecipe$Step");
-            crucibleTileEntityClass = Class.forName("elucent.eidolon.common.tile.CrucibleTileEntity");
-            crucibleStepInnerClass = Class.forName(
-                    "elucent.eidolon.common.tile.CrucibleTileEntity$CrucibleStep");
-
+    static {
+        if (EidolonReflection.crucibleTileEntityClass != null) {
             try {
-                boilingField = crucibleTileEntityClass.getDeclaredField("boiling");
+                boilingField = EidolonReflection.crucibleTileEntityClass.getDeclaredField("boiling");
                 boilingField.setAccessible(true);
             } catch (NoSuchFieldException e) {
                 RSIntegrationMod.LOGGER.warn("[RSI-Batch-Eidolon] boiling field not found");
             }
-
             try {
-                stepsField = crucibleTileEntityClass.getDeclaredField("steps");
+                stepsField = EidolonReflection.crucibleTileEntityClass.getDeclaredField("steps");
                 stepsField.setAccessible(true);
             } catch (NoSuchFieldException e) {
                 RSIntegrationMod.LOGGER.warn("[RSI-Batch-Eidolon] steps field not found");
             }
-        } catch (ClassNotFoundException e) {
-            RSIntegrationMod.LOGGER.error("[RSI-Batch-Eidolon] Failed to load Eidolon classes", e);
         }
-        try {
-            worktableBlockClass = Class.forName("elucent.eidolon.common.block.WorktableBlock");
-        } catch (ClassNotFoundException ignored) {}
-        try {
-            worktableRecipeClass = Class.forName("elucent.eidolon.recipe.WorktableRecipe");
-        } catch (ClassNotFoundException ignored) {}
-        try {
-            ritualRecipeClass = Class.forName("elucent.eidolon.recipe.RitualRecipe");
-        } catch (ClassNotFoundException ignored) {}
-        try {
-            brazierTileEntityClass = Class.forName("elucent.eidolon.common.tile.BrazierTileEntity");
-        } catch (ClassNotFoundException ignored) {}
     }
 
     // ── Instance state ───────────────────────────────────────────
@@ -106,7 +70,6 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
     @Override
     public boolean validateAndInit(ServerPlayer player, ResourceLocation recipeId,
                                    @Nullable ResourceLocation dim, BlockPos pos) {
-        ensureClasses();
 
         ServerLevel level = CraftPacketUtils.resolveLevel(player.server, dim, player);
         if (level == null) {
@@ -129,8 +92,8 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
         this.recipe = foundRecipe;
 
         // Detect worktable mode
-        boolean isWtRecipe = worktableRecipeClass != null && worktableRecipeClass.isInstance(foundRecipe);
-        boolean isWtBlock = worktableBlockClass != null && worktableBlockClass.isInstance(blockState.getBlock());
+        boolean isWtRecipe = EidolonReflection.worktableRecipeClass != null && EidolonReflection.worktableRecipeClass.isInstance(foundRecipe);
+        boolean isWtBlock = EidolonReflection.worktableBlockClass != null && EidolonReflection.worktableBlockClass.isInstance(blockState.getBlock());
         this.isWorktable = isWtRecipe || isWtBlock;
 
         if (isWorktable) {
@@ -149,12 +112,12 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
         }
 
         // Ritual mode (Brazier)
-        boolean isRitualRecipe = ritualRecipeClass != null && ritualRecipeClass.isInstance(foundRecipe);
-        boolean isBrazier = brazierTileEntityClass != null && be != null && brazierTileEntityClass.isInstance(be);
+        boolean isRitualRecipe = EidolonReflection.ritualRecipeClass != null && EidolonReflection.ritualRecipeClass.isInstance(foundRecipe);
+        boolean isBrazier = EidolonReflection.brazierTileEntityClass != null && be != null && EidolonReflection.brazierTileEntityClass.isInstance(be);
         if (isRitualRecipe && isBrazier) {
             Object currentRitual = null;
             try {
-                java.lang.reflect.Field f = brazierTileEntityClass.getDeclaredField("ritual");
+                java.lang.reflect.Field f = EidolonReflection.brazierTileEntityClass.getDeclaredField("ritual");
                 f.setAccessible(true);
                 currentRitual = f.get(be);
             } catch (Exception ignored) {}
@@ -164,7 +127,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
             }
             boolean burning = false;
             try {
-                java.lang.reflect.Field f = brazierTileEntityClass.getDeclaredField("burning");
+                java.lang.reflect.Field f = EidolonReflection.brazierTileEntityClass.getDeclaredField("burning");
                 f.setAccessible(true);
                 burning = f.getBoolean(be);
             } catch (Exception ignored) {}
@@ -183,16 +146,16 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
         }
 
         // Crucible mode
-        if (crucibleTileEntityClass == null || crucibleRecipeClass == null) {
+        if (EidolonReflection.crucibleTileEntityClass == null || EidolonReflection.crucibleRecipeClass == null) {
             player.sendSystemMessage(Component.translatable("rsi.batch.error.mod_missing", "Eidolon"));
             return false;
         }
-        if (!crucibleRecipeClass.isInstance(foundRecipe)) {
+        if (!EidolonReflection.crucibleRecipeClass.isInstance(foundRecipe)) {
             RSIntegrationMod.LOGGER.debug("[RSI-Batch-Eidolon] Machine-type mismatch: recipe={} is {} but bound machine is Crucible — trying next binding",
                     recipeId, foundRecipe.getClass().getSimpleName());
             return false;
         }
-        if (be == null || !crucibleTileEntityClass.isInstance(be)) {
+        if (be == null || !EidolonReflection.crucibleTileEntityClass.isInstance(be)) {
             player.sendSystemMessage(Component.translatable("rsi.eidolon.error.crucible_not_found"));
             return false;
         }
@@ -339,7 +302,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
                     stepItems.add(stack);
                 }
 
-                Constructor<?> ctor = crucibleStepInnerClass.getConstructor(int.class, List.class);
+                Constructor<?> ctor = EidolonReflection.crucibleStepInnerClass.getConstructor(int.class, List.class);
                 Object step = ctor.newInstance(si.stirs, stepItems);
                 crucibleSteps.add(step);
             }
@@ -482,7 +445,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
         if (myPos != null && level.isLoaded(myPos)) {
             BlockEntity current = level.getBlockEntity(myPos);
             if (current == null || current.isRemoved()
-                    || !brazierTileEntityClass.isInstance(current)) {
+                    || !EidolonReflection.brazierTileEntityClass.isInstance(current)) {
                 player.sendSystemMessage(Component.translatable("rsi.error.machine_missing"));
                 return false;
             }
@@ -491,10 +454,10 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
 
         // Check brazier is not busy
         try {
-            java.lang.reflect.Field f = brazierTileEntityClass.getDeclaredField("ritual");
+            java.lang.reflect.Field f = EidolonReflection.brazierTileEntityClass.getDeclaredField("ritual");
             f.setAccessible(true);
             if (f.get(brazier) != null) return false;
-            java.lang.reflect.Field bf = brazierTileEntityClass.getDeclaredField("burning");
+            java.lang.reflect.Field bf = EidolonReflection.brazierTileEntityClass.getDeclaredField("burning");
             bf.setAccessible(true);
             if (bf.getBoolean(brazier)) return false;
         } catch (Exception e) { return false; }
@@ -528,7 +491,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
 
         // Start burning
         try {
-            java.lang.reflect.Method startBurning = brazierTileEntityClass.getMethod(
+            java.lang.reflect.Method startBurning = EidolonReflection.brazierTileEntityClass.getMethod(
                     "startBurning", net.minecraft.world.entity.player.Player.class,
                     Level.class, BlockPos.class);
             startBurning.invoke(brazier, player, level, myPos);
@@ -555,7 +518,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
     @Nullable
     private Ingredient getRitualReagent() {
         try {
-            java.lang.reflect.Field f = ritualRecipeClass.getField("reagent");
+            java.lang.reflect.Field f = EidolonReflection.ritualRecipeClass.getField("reagent");
             return (Ingredient) f.get(recipe);
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.debug("[RSI-Batch-Eidolon] getRitualReagent failed", e);
@@ -566,7 +529,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
     @Nullable
     private List<Ingredient> getRitualPedestalItems() {
         try {
-            java.lang.reflect.Field f = ritualRecipeClass.getField("pedestalItems");
+            java.lang.reflect.Field f = EidolonReflection.ritualRecipeClass.getField("pedestalItems");
             @SuppressWarnings("unchecked")
             List<Ingredient> items = (List<Ingredient>) f.get(recipe);
             return items;
@@ -579,7 +542,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
     @Nullable
     private List<Ingredient> getRitualFocusItems() {
         try {
-            java.lang.reflect.Field f = ritualRecipeClass.getField("focusItems");
+            java.lang.reflect.Field f = EidolonReflection.ritualRecipeClass.getField("focusItems");
             @SuppressWarnings("unchecked")
             List<Ingredient> items = (List<Ingredient>) f.get(recipe);
             return items;
@@ -596,7 +559,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
         if (myPos != null && level.isLoaded(myPos)) {
             BlockEntity current = level.getBlockEntity(myPos);
             if (current == null || current.isRemoved()
-                    || !brazierTileEntityClass.isInstance(current)) {
+                    || !EidolonReflection.brazierTileEntityClass.isInstance(current)) {
                 player.sendSystemMessage(Component.translatable("rsi.error.machine_missing"));
                 return false;
             }
@@ -605,10 +568,10 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
 
         // Check brazier not busy
         try {
-            java.lang.reflect.Field f = brazierTileEntityClass.getDeclaredField("ritual");
+            java.lang.reflect.Field f = EidolonReflection.brazierTileEntityClass.getDeclaredField("ritual");
             f.setAccessible(true);
             if (f.get(brazier) != null) return false;
-            java.lang.reflect.Field bf = brazierTileEntityClass.getDeclaredField("burning");
+            java.lang.reflect.Field bf = EidolonReflection.brazierTileEntityClass.getDeclaredField("burning");
             bf.setAccessible(true);
             if (bf.getBoolean(brazier)) return false;
         } catch (Exception e) { return false; }
@@ -627,7 +590,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
 
         // Start burning
         try {
-            java.lang.reflect.Method startBurning = brazierTileEntityClass.getMethod(
+            java.lang.reflect.Method startBurning = EidolonReflection.brazierTileEntityClass.getMethod(
                     "startBurning", net.minecraft.world.entity.player.Player.class,
                     Level.class, BlockPos.class);
             startBurning.invoke(brazier, player, level, myPos);
@@ -826,7 +789,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
                     ItemStack mat = materials.get(matIdx++);
                     if (!mat.isEmpty()) stepItems.add(mat);
                 }
-                Constructor<?> ctor = crucibleStepInnerClass.getConstructor(int.class, List.class);
+                Constructor<?> ctor = EidolonReflection.crucibleStepInnerClass.getConstructor(int.class, List.class);
                 Object step = ctor.newInstance(si.stirs, stepItems);
                 crucibleSteps.add(step);
             }
@@ -893,7 +856,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
         if (craftCompleted) return true;
         // Check ritualDone flag on brazier
         try {
-            java.lang.reflect.Field f = brazierTileEntityClass.getDeclaredField("ritualDone");
+            java.lang.reflect.Field f = EidolonReflection.brazierTileEntityClass.getDeclaredField("ritualDone");
             f.setAccessible(true);
             if (f.getBoolean(brazier)) return true;
         } catch (Exception ignored) {}
@@ -976,15 +939,15 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
             setStack.invoke(brazier, ItemStack.EMPTY);
             brazier.getClass().getMethod("setChanged").invoke(brazier);
 
-            java.lang.reflect.Field f = brazierTileEntityClass.getDeclaredField("ritualDone");
+            java.lang.reflect.Field f = EidolonReflection.brazierTileEntityClass.getDeclaredField("ritualDone");
             f.setAccessible(true);
             f.setBoolean(brazier, false);
 
-            java.lang.reflect.Field rf = brazierTileEntityClass.getDeclaredField("ritual");
+            java.lang.reflect.Field rf = EidolonReflection.brazierTileEntityClass.getDeclaredField("ritual");
             rf.setAccessible(true);
             rf.set(brazier, null);
 
-            java.lang.reflect.Field bf = brazierTileEntityClass.getDeclaredField("burning");
+            java.lang.reflect.Field bf = EidolonReflection.brazierTileEntityClass.getDeclaredField("burning");
             bf.setAccessible(true);
             bf.setBoolean(brazier, false);
         } catch (Exception e) {
@@ -1107,10 +1070,9 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
                                                @Nullable ResourceLocation dim,
                                                @Nullable BlockPos pos) {
         List<String> warnings = new ArrayList<>();
-        ensureClasses();
 
-        boolean isCrucible = crucibleRecipeClass != null && crucibleRecipeClass.isInstance(recipe);
-        boolean isRitual = ritualRecipeClass != null && ritualRecipeClass.isInstance(recipe);
+        boolean isCrucible = EidolonReflection.crucibleRecipeClass != null && EidolonReflection.crucibleRecipeClass.isInstance(recipe);
+        boolean isRitual = EidolonReflection.ritualRecipeClass != null && EidolonReflection.ritualRecipeClass.isInstance(recipe);
         if (!isCrucible && !isRitual) return warnings;
 
         if (isCrucible) {
@@ -1130,7 +1092,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
                     ServerLevel level = CraftPacketUtils.resolveLevel(player.server, dim, player);
                     if (level != null && level.isLoaded(pos)) {
                         BlockEntity be = level.getBlockEntity(pos);
-                        if (be != null && crucibleTileEntityClass.isInstance(be)) {
+                        if (be != null && EidolonReflection.crucibleTileEntityClass.isInstance(be)) {
                             boolean hasWater = false;
                             try {
                                 java.lang.reflect.Field f = be.getClass().getDeclaredField("hasWater");
@@ -1158,7 +1120,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
         if (isRitual) {
             // Number of pedestal / focus items required
             try {
-                java.lang.reflect.Field pf = ritualRecipeClass.getField("pedestalItems");
+                java.lang.reflect.Field pf = EidolonReflection.ritualRecipeClass.getField("pedestalItems");
                 @SuppressWarnings("unchecked")
                 List<Ingredient> pi = (List<Ingredient>) pf.get(recipe);
                 if (pi != null && !pi.isEmpty()) {
@@ -1174,11 +1136,11 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
                     ServerLevel level = CraftPacketUtils.resolveLevel(player.server, dim, player);
                     if (level != null && level.isLoaded(pos)) {
                         BlockEntity be = level.getBlockEntity(pos);
-                        if (be != null && brazierTileEntityClass != null
-                                && brazierTileEntityClass.isInstance(be)) {
+                        if (be != null && EidolonReflection.brazierTileEntityClass != null
+                                && EidolonReflection.brazierTileEntityClass.isInstance(be)) {
                             boolean burning = false;
                             try {
-                                java.lang.reflect.Field bf = brazierTileEntityClass.getDeclaredField("burning");
+                                java.lang.reflect.Field bf = EidolonReflection.brazierTileEntityClass.getDeclaredField("burning");
                                 bf.setAccessible(true);
                                 burning = bf.getBoolean(be);
                             } catch (Exception ignored) {}

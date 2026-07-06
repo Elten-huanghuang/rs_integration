@@ -7,6 +7,7 @@ import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.RecipeIndex;
+import com.huanghuang.rsintegration.reflection.probes.TLMReflection;
 import com.huanghuang.rsintegration.util.ModIds;
 import com.huanghuang.rsintegration.util.Reflect;
 import com.refinedmods.refinedstorage.api.network.INetwork;
@@ -42,36 +43,25 @@ import java.util.List;
  */
 public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
 
-    // ── Shared class refs ────────────────────────────────────────
-    private static volatile Class<?> altarBEClass;
-    private static volatile Class<?> blockAltarClass;
-    private static volatile Class<?> altarRecipeClass;
+    // -- Shared class refs (now from TLMReflection probe) --
     private static volatile Object powerCapToken;
+    private static volatile boolean powerCapProbed;
 
-    private static void ensureClasses() {
-        if (!com.huanghuang.rsintegration.util.ModClassLoader.ensureClasses(ModIds.TOUHOU_LITTLE_MAID,
-                "com.github.tartaricacid.touhoulittlemaid.tileentity.TileEntityAltar",
-                "com.github.tartaricacid.touhoulittlemaid.block.BlockAltar",
-                "com.github.tartaricacid.touhoulittlemaid.crafting.AltarRecipe",
-                "com.github.tartaricacid.touhoulittlemaid.capability.PowerCapabilityProvider")) return;
-        try {
-            altarBEClass = Class.forName(
-                    "com.github.tartaricacid.touhoulittlemaid.tileentity.TileEntityAltar");
-            blockAltarClass = Class.forName(
-                    "com.github.tartaricacid.touhoulittlemaid.block.BlockAltar");
-            altarRecipeClass = Class.forName(
-                    "com.github.tartaricacid.touhoulittlemaid.crafting.AltarRecipe");
-            Class<?> providerClass = Class.forName(
-                    "com.github.tartaricacid.touhoulittlemaid.capability.PowerCapabilityProvider");
-            java.lang.reflect.Field capField = providerClass.getField("POWER_CAP");
-            capField.setAccessible(true);
-            powerCapToken = capField.get(null);
-        } catch (ClassNotFoundException | NoSuchFieldException | IllegalAccessException e) {
-            RSIntegrationMod.LOGGER.error("[RSI-Batch-TLM] Failed to load TLM classes", e);
+    private static void probePowerCap() {
+        if (powerCapProbed) return;
+        powerCapProbed = true;
+        if (TLMReflection.powerCapProviderClass != null) {
+            try {
+                java.lang.reflect.Field capField = TLMReflection.powerCapProviderClass.getField("POWER_CAP");
+                capField.setAccessible(true);
+                powerCapToken = capField.get(null);
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.error("[RSI-Batch-TLM] Failed to resolve power cap token", e);
+            }
         }
     }
 
-    // ── Instance state ───────────────────────────────────────────
+    // -- Instance state --
     private ServerPlayer player;
     private ResourceKey<Level> myDim;
     private BlockPos myPos;
@@ -88,13 +78,12 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
     private List<Object> storageBlockEntities; // TileEntityAltar for each position
     private boolean[] slotsFilled;            // tracks which slots we put items into
 
-    // ── IBatchDelegate impl ───────────────────────────────────────
+    // -- IBatchDelegate impl --
 
     @Override
     public boolean validateAndInit(ServerPlayer player, ResourceLocation recipeId,
                                    @Nullable ResourceLocation dim, BlockPos pos) {
-        ensureClasses();
-        if (altarBEClass == null || blockAltarClass == null) {
+        if (TLMReflection.altarBEClass == null || TLMReflection.blockAltarClass == null) {
             player.sendSystemMessage(Component.translatable("rsi.batch.error.mod_missing", "Touhou Little Maid"));
             return false;
         }
@@ -109,11 +98,11 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
         this.player = player;
 
         if (!level.isLoaded(pos)) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Batch-TLM] Chunk unloaded at {} — force-loading", pos);
+            RSIntegrationMod.LOGGER.debug("[RSI-Batch-TLM] Chunk unloaded at {} -- force-loading", pos);
             level.getChunk(pos);
         }
         BlockEntity be = level.getBlockEntity(pos);
-        if (be == null || !altarBEClass.isInstance(be)) {
+        if (be == null || !TLMReflection.altarBEClass.isInstance(be)) {
             player.sendSystemMessage(Component.translatable("rsi.tlm.error.altar_not_found"));
             return false;
         }
@@ -121,7 +110,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
 
         // Check multiblock formed
         try {
-            Object storageState = Reflect.getMethodOrThrow(altarBEClass, "getStorageState", "getStorageState").invoke(altar);
+            Object storageState = Reflect.getMethodOrThrow(TLMReflection.altarBEClass, "getStorageState", "getStorageState").invoke(altar);
             if (storageState == null) {
                 player.sendSystemMessage(Component.translatable("rsi.tlm.error.multiblock_incomplete"));
                 return false;
@@ -141,8 +130,8 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
             RSIntegrationMod.LOGGER.debug("[RSI-Batch-TLM] validateAndInit: recipe not found {}", recipeId);
         }
 
-        // Verify recipe type — reject non-altar TLM recipes (e.g. maid crafting)
-        if (this.recipe != null && altarRecipeClass != null && !altarRecipeClass.isInstance(this.recipe)) {
+        // Verify recipe type -- reject non-altar TLM recipes (e.g. maid crafting)
+        if (this.recipe != null && TLMReflection.altarRecipeClass != null && !TLMReflection.altarRecipeClass.isInstance(this.recipe)) {
             RSIntegrationMod.LOGGER.debug("[RSI-Batch-TLM] validateAndInit: recipe {} is not an AltarRecipe", recipeId);
             player.sendSystemMessage(Component.literal("§c" + Component.translatable("rsi.generic.error.wrong_recipe_type").getString()
                     + " [" + recipeId + " expected=AltarRecipe got=" + this.recipe.getClass().getSimpleName() + "]"));
@@ -151,7 +140,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
 
         // Resolve storage block positions and their TileEntityAltars
         try {
-            Object posList = Reflect.getMethodOrThrow(altarBEClass, "getCanPlaceItemPosList", "getCanPlaceItemPosList").invoke(altar);
+            Object posList = Reflect.getMethodOrThrow(TLMReflection.altarBEClass, "getCanPlaceItemPosList", "getCanPlaceItemPosList").invoke(altar);
             this.storagePositions = Reflect.invokeExact(posList, "getData",
                     new Class<?>[0]).map(l -> (List<BlockPos>) l).orElse(null);
         } catch (Exception e) {
@@ -167,7 +156,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
         //   averages X/Z of all blocks in blockPosList whose Y == altarY-2,
         //   then output spawns at centrePos.above(2)
         try {
-            Object blockPosData = Reflect.getMethodOrThrow(altarBEClass, "getBlockPosList", "getBlockPosList").invoke(altar);
+            Object blockPosData = Reflect.getMethodOrThrow(TLMReflection.altarBEClass, "getBlockPosList", "getBlockPosList").invoke(altar);
             List<BlockPos> allBlockPositions = Reflect.invokeExact(blockPosData, "getData",
                     new Class<?>[0]).map(l -> (List<BlockPos>) l).orElse(null);
             if (allBlockPositions != null && !allBlockPositions.isEmpty()) {
@@ -203,7 +192,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
         for (BlockPos p : storagePositions) {
             com.huanghuang.rsintegration.util.ChunkUtils.loadChunk(level, p);
             BlockEntity storageBe = level.getBlockEntity(p);
-            if (storageBe != null && altarBEClass.isInstance(storageBe)) {
+            if (storageBe != null && TLMReflection.altarBEClass.isInstance(storageBe)) {
                 storageBlockEntities.add(storageBe);
             } else {
                 RSIntegrationMod.LOGGER.debug("[RSI-Batch-TLM] Storage block at {} is not a TileEntityAltar", p);
@@ -213,7 +202,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
 
         this.slotsFilled = new boolean[storagePositions.size()];
 
-        // Reject if any storage handler has items — another task may be running.
+        // Reject if any storage handler has items -- another task may be running.
         if (!checkAllHandlersEmpty(player)) {
             player.sendSystemMessage(Component.translatable("rsi.tlm.error.handler_not_empty"));
             return false;
@@ -229,7 +218,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
                 player.sendSystemMessage(Component.translatable(
                         "rsi.tlm.warn.insufficient_power_bind",
                         String.format("%.1f", current), String.format("%.1f", powerCost)));
-                // Don't block binding — just warn so the player knows why it
+                // Don't block binding -- just warn so the player knows why it
                 // will fail later.
             }
         }
@@ -322,7 +311,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
                 ItemStack placed = templates.get(templateIdx).copy();
                 ItemStackHandler handler = rsi$tlmsGetHandler(storageBe);
                 if (!level.isLoaded(storagePositions.get(i))) {
-                    RSIntegrationMod.LOGGER.warn("[RSI-Batch-TLM] Storage chunk unloaded at {} — aborting placement", storagePositions.get(i));
+                    RSIntegrationMod.LOGGER.warn("[RSI-Batch-TLM] Storage chunk unloaded at {} -- aborting placement", storagePositions.get(i));
                     rollbackAll();
                     ledger.rollback(player);
                     return false;
@@ -340,7 +329,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
             return false;
         }
 
-        // Phase 3: Commit ledger first — extract items from RS BEFORE starting craft
+        // Phase 3: Commit ledger first -- extract items from RS BEFORE starting craft
         if (!ledger.commit(network, player)) {
             RSIntegrationMod.LOGGER.error("[RSI-Batch-TLM] Ledger commit failed");
             rollbackAll();
@@ -358,7 +347,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
         // and the output ItemEntity is already spawned. If handlers still have
         // items, altarCraft silently failed (recipe mismatch / insufficient power).
         if (!areAllHandlersEmpty()) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Batch-TLM] altarCraft did not consume items — recipe mismatch?");
+            RSIntegrationMod.LOGGER.debug("[RSI-Batch-TLM] altarCraft did not consume items -- recipe mismatch?");
             rollbackAll();
             ledger.refundCommitted(network, player);
             return false;
@@ -412,7 +401,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
                 }
                 ItemStackHandler handler = rsi$tlmsGetHandler(storageBe);
                 if (!level.isLoaded(storagePositions.get(i))) {
-                    RSIntegrationMod.LOGGER.warn("[RSI-Batch-TLM] Storage chunk unloaded at {} — aborting material placement", storagePositions.get(i));
+                    RSIntegrationMod.LOGGER.warn("[RSI-Batch-TLM] Storage chunk unloaded at {} -- aborting material placement", storagePositions.get(i));
                     rollbackAll();
                     return false;
                 }
@@ -432,7 +421,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
             return false;
         }
 
-        // altarCraft is synchronous — verify it consumed items
+        // altarCraft is synchronous -- verify it consumed items
         if (!areAllHandlersEmpty()) {
             RSIntegrationMod.LOGGER.debug("[RSI-Batch-TLM] altarCraft did not consume items (shared path)");
             rollbackAll();
@@ -447,7 +436,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
     public boolean isCraftComplete(ServerLevel level) {
         if (!craftEverConfirmed) return false;
         // altarCraft is fully synchronous: addFreshEntity() has already run.
-        // Return true immediately — no need to poll for ItemEntity existence.
+        // Return true immediately -- no need to poll for ItemEntity existence.
         return true;
     }
 
@@ -509,9 +498,10 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
         return myPos;
     }
 
-    // ── Helpers ──────────────────────────────────────────────────
+    // -- Helpers --
 
     private boolean checkPower(ServerPlayer player) {
+        probePowerCap();
         if (powerCapToken == null || recipe == null) return true;
         float cost = readPowerCost();
         if (cost <= 0) return true;
@@ -550,6 +540,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
     /** Read current P-points from the player. Returns null if capability not available. */
     @Nullable
     private Float readCurrentPower(ServerPlayer player) {
+        probePowerCap();
         if (powerCapToken == null) return null;
         try {
             var capInstance = player.getCapability(
@@ -607,8 +598,8 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
     /** Invoke altarCraft via reflection. Returns true if no exception thrown. */
     private boolean invokeAltarCraft(ServerLevel level) {
         try {
-            Method altarCraftMethod = Reflect.findMethod(blockAltarClass, "altarCraft",
-                    new Class<?>[]{Level.class, altarBEClass, net.minecraft.world.entity.player.Player.class});
+            Method altarCraftMethod = Reflect.findMethod(TLMReflection.blockAltarClass, "altarCraft",
+                    new Class<?>[]{Level.class, TLMReflection.altarBEClass, net.minecraft.world.entity.player.Player.class});
             if (altarCraftMethod == null) {
                 RSIntegrationMod.LOGGER.error("[RSI-Batch-TLM] altarCraft method not found");
                 return false;
@@ -629,7 +620,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
     private void rollbackAll() {
         clearHandlers();
         // Entity output cleanup: skip item recovery when using shared committed
-        // ledger — refund is centralized via ledger.refundCommitted().
+        // ledger -- refund is centralized via ledger.refundCommitted().
         if (usingSharedLedger) return;
         // Also clear any output entity near the altar (match expected output)
         try {
@@ -666,7 +657,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
     }
 
     /** Clear items from storage block handlers. When using shared committed
-     *  ledger, items are template copies — clear slots without returning. */
+     *  ledger, items are template copies -- clear slots without returning. */
     private void clearHandlers() {
         if (storageBlockEntities == null || slotsFilled == null) return;
         try {
@@ -693,7 +684,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
                         Reflect.invoke(storageBe, "setChanged");
                         Reflect.invoke(storageBe, "refresh");
                     } else {
-                        RSIntegrationMod.LOGGER.debug("[RSI-Batch-TLM] Skipping clear — chunk unloaded at {}", storagePositions.get(i));
+                        RSIntegrationMod.LOGGER.debug("[RSI-Batch-TLM] Skipping clear -- chunk unloaded at {}", storagePositions.get(i));
                     }
                 }
             }
@@ -708,16 +699,16 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
         }
     }
 
-    // ── Reflection helpers ───────────────────────────────────────
+    // -- Reflection helpers --
 
     private static ItemStackHandler rsi$tlmsGetHandler(Object storageBe)
             throws NoSuchFieldException, IllegalAccessException {
-        java.lang.reflect.Field f = altarBEClass.getDeclaredField("handler");
+        java.lang.reflect.Field f = TLMReflection.altarBEClass.getDeclaredField("handler");
         f.setAccessible(true);
         return (ItemStackHandler) f.get(storageBe);
     }
 
-    // ── Plan warnings (static) ─────────────────────────────────────
+    // -- Plan warnings (static) --
 
     /** Item that can be right-clicked to absorb into the player's P-Power capability. */
     private static final ResourceLocation PP_ID =
@@ -737,8 +728,8 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
 
         // 1. P-Power already absorbed into the player's capability
         float capPower = 0f;
-        ensureClasses();
-        if (powerCapToken != null) {
+        probePowerCapStatic();
+        if (TLMReflection.powerCapProviderClass != null) {
             Float f = rsi$staticCurrentPower(player);
             if (f != null) capPower = f;
         }
@@ -752,6 +743,20 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
                     String.format("%.1f", totalPower), String.format("%.1f", cost)).getString());
         }
         return warnings;
+    }
+
+    private static void probePowerCapStatic() {
+        if (powerCapProbed) return;
+        powerCapProbed = true;
+        if (TLMReflection.powerCapProviderClass != null) {
+            try {
+                java.lang.reflect.Field capField = TLMReflection.powerCapProviderClass.getField("POWER_CAP");
+                capField.setAccessible(true);
+                powerCapToken = capField.get(null);
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.error("[RSI-Batch-TLM] Failed to resolve power cap token (static)", e);
+            }
+        }
     }
 
     private static float rsi$staticPowerCost(Recipe<?> recipe) {
@@ -769,6 +774,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
 
     @Nullable
     private static Float rsi$staticCurrentPower(ServerPlayer player) {
+        probePowerCapStatic();
         if (powerCapToken == null) return null;
         try {
             var capInstance = player.getCapability(

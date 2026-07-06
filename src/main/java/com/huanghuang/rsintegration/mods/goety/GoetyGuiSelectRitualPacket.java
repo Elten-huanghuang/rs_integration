@@ -2,8 +2,8 @@ package com.huanghuang.rsintegration.mods.goety;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
+import com.huanghuang.rsintegration.reflection.probes.GoetyReflection;
 import com.huanghuang.rsintegration.util.ChunkUtils;
-import com.huanghuang.rsintegration.util.ModClassLoader;
 import com.huanghuang.rsintegration.util.Reflect;
 
 import net.minecraft.core.BlockPos;
@@ -33,57 +33,6 @@ import java.util.List;
 import java.util.function.Supplier;
 
 public final class GoetyGuiSelectRitualPacket {
-
-    // ── Shared class refs ────────────────────────────────────────
-    private static volatile Class<?> darkAltarBEClass;
-    private static volatile Class<?> pedestalBEClass;
-    private static volatile Class<?> ritualRecipeClass;
-    private static volatile Class<?> ritualClass;
-    private static volatile Class<?> researchListClass;
-    private static volatile Class<?> seHelperClass;
-    private static volatile Class<?> convertRitualClass;
-    private static volatile Class<?> teleportRitualClass;
-    private static volatile Class<?> enchantItemRitualClass;
-
-    private static void ensureClasses() {
-        if (!ModClassLoader.ensureClasses("goety",
-                "com.Polarice3.Goety.common.blocks.entities.DarkAltarBlockEntity",
-                "com.Polarice3.Goety.common.blocks.entities.PedestalBlockEntity",
-                "com.Polarice3.Goety.common.crafting.RitualRecipe",
-                "com.Polarice3.Goety.common.ritual.Ritual",
-                "com.Polarice3.Goety.utils.SEHelper",
-                "com.Polarice3.Goety.common.ritual.ConvertRitual",
-                "com.Polarice3.Goety.common.ritual.TeleportRitual",
-                "com.Polarice3.Goety.common.ritual.EnchantItemRitual",
-                "com.Polarice3.Goety.common.research.ResearchList")) return;
-        try {
-            darkAltarBEClass = Class.forName(
-                    "com.Polarice3.Goety.common.blocks.entities.DarkAltarBlockEntity");
-            pedestalBEClass = Class.forName(
-                    "com.Polarice3.Goety.common.blocks.entities.PedestalBlockEntity");
-            ritualRecipeClass = Class.forName(
-                    "com.Polarice3.Goety.common.crafting.RitualRecipe");
-            ritualClass = Class.forName(
-                    "com.Polarice3.Goety.common.ritual.Ritual");
-            seHelperClass = Class.forName(
-                    "com.Polarice3.Goety.utils.SEHelper");
-            convertRitualClass = Class.forName(
-                    "com.Polarice3.Goety.common.ritual.ConvertRitual");
-            teleportRitualClass = Class.forName(
-                    "com.Polarice3.Goety.common.ritual.TeleportRitual");
-            enchantItemRitualClass = Class.forName(
-                    "com.Polarice3.Goety.common.ritual.EnchantItemRitual");
-            try {
-                researchListClass = Class.forName(
-                        "com.Polarice3.Goety.common.research.ResearchList");
-            } catch (ClassNotFoundException e) {
-                RSIntegrationMod.LOGGER.debug("[RSI-Goety] ResearchList not found — research checks disabled");
-                researchListClass = null;
-            }
-        } catch (ClassNotFoundException e) {
-            RSIntegrationMod.LOGGER.error("[RSI-Goety] Failed to load Goety classes", e);
-        }
-    }
 
     private final ResourceLocation recipeId;
     @Nullable private final ResourceLocation dim;
@@ -116,7 +65,6 @@ public final class GoetyGuiSelectRitualPacket {
             return;
         }
         context.enqueueWork(() -> {
-            ensureClasses();
             ServerLevel level = resolveLevel(player.server, packet.dim, player);
             if (level == null) {
                 player.sendSystemMessage(Component.translatable("rsi.generic.error.dim_not_found"));
@@ -124,7 +72,7 @@ public final class GoetyGuiSelectRitualPacket {
             }
 
             Recipe<?> recipe = level.getRecipeManager().byKey(packet.recipeId).orElse(null);
-            if (ritualRecipeClass == null || !ritualRecipeClass.isInstance(recipe)) {
+            if (GoetyReflection.ritualRecipeClass == null || !GoetyReflection.ritualRecipeClass.isInstance(recipe)) {
                 player.sendSystemMessage(Component.translatable("rsi.generic.error.recipe_not_found", packet.recipeId.toString()));
                 RSIntegrationMod.LOGGER.warn("Player {} selected unknown Goety ritual: {}", player.getName().getString(), packet.recipeId);
                 return;
@@ -133,7 +81,7 @@ public final class GoetyGuiSelectRitualPacket {
 
             ChunkUtils.loadChunk(level, packet.pos);
             BlockEntity be = level.getBlockEntity(packet.pos);
-            if (darkAltarBEClass == null || !darkAltarBEClass.isInstance(be)) {
+            if (GoetyReflection.darkAltarBEClass == null || !GoetyReflection.darkAltarBEClass.isInstance(be)) {
                 player.sendSystemMessage(Component.translatable("rsi.goety.error.altar_not_found"));
                 return;
             }
@@ -205,8 +153,8 @@ public final class GoetyGuiSelectRitualPacket {
 
         // 2. Validate ritual prerequisites BEFORE touching any inventory/pedestals
         // 2a. Filter unsupported ritual subtypes
-        if ((convertRitualClass != null && convertRitualClass.isInstance(ritual))
-                || (teleportRitualClass != null && teleportRitualClass.isInstance(ritual))) {
+        if ((GoetyReflection.convertRitualClass != null && GoetyReflection.convertRitualClass.isInstance(ritual))
+                || (GoetyReflection.teleportRitualClass != null && GoetyReflection.teleportRitualClass.isInstance(ritual))) {
             player.displayClientMessage(Component.translatable(
                     "rsi.goety.error.unsupported_ritual_type", ritual.getClass().getSimpleName()), true);
             return false;
@@ -223,11 +171,11 @@ public final class GoetyGuiSelectRitualPacket {
         String researchId = Reflect.<String>invoke(recipe, "getResearch").orElse(null);
         if (researchId != null && !researchId.isEmpty()) {
             try {
-                if (researchListClass != null && seHelperClass != null) {
-                    Object research = researchListClass
+                if (GoetyReflection.researchListClass != null && GoetyReflection.seHelperClass != null) {
+                    Object research = GoetyReflection.researchListClass
                             .getMethod("getResearch", String.class).invoke(null, researchId);
                     if (research != null) {
-                        boolean hasResearch = (boolean) seHelperClass.getMethod("hasResearch",
+                        boolean hasResearch = (boolean) GoetyReflection.seHelperClass.getMethod("hasResearch",
                                 Player.class, research.getClass())
                                 .invoke(null, player, research);
                         if (!hasResearch) {
@@ -243,7 +191,7 @@ public final class GoetyGuiSelectRitualPacket {
             }
         }
         // 2d. Enchant XP check
-        if (enchantItemRitualClass != null && enchantItemRitualClass.isInstance(ritual)) {
+        if (GoetyReflection.enchantItemRitualClass != null && GoetyReflection.enchantItemRitualClass.isInstance(ritual)) {
             int xpCost = Reflect.<Integer>invoke(recipe, "getXPLevelCost").orElse(0);
             if (xpCost > 0 && player.experienceLevel < xpCost) {
                 player.displayClientMessage(Component.translatable(
@@ -254,7 +202,7 @@ public final class GoetyGuiSelectRitualPacket {
         // 2e. Ritual.isValid() pre-flight — validate BEFORE any extraction
         try {
             boolean valid = (boolean) ritual.getClass()
-                    .getMethod("isValid", Level.class, BlockPos.class, darkAltarBEClass,
+                    .getMethod("isValid", Level.class, BlockPos.class, GoetyReflection.darkAltarBEClass,
                             ServerPlayer.class, ItemStack.class, List.class)
                     .invoke(ritual, level, pos, altar, player, ItemStack.EMPTY, requiredIngredients);
             if (!valid) {
@@ -328,7 +276,7 @@ public final class GoetyGuiSelectRitualPacket {
 
         // 8. Start ritual
         try {
-            darkAltarBEClass.getMethod("startRitual", Player.class, ItemStack.class, ritualRecipeClass)
+            GoetyReflection.darkAltarBEClass.getMethod("startRitual", Player.class, ItemStack.class, GoetyReflection.ritualRecipeClass)
                     .invoke(altar, player, activationItem, recipe);
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.error("[RSI-Goety] startRitual threw after extraction — refunding activation item", e);

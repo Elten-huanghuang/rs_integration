@@ -5,6 +5,8 @@ import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
+import com.huanghuang.rsintegration.reflection.probes.YHKReflection;
+import com.huanghuang.rsintegration.util.Reflect;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.core.BlockPos;
@@ -38,11 +40,6 @@ public class CookingPotBatchDelegate implements IBatchDelegate {
     protected static final int SHORT = 1;
     protected static final int LARGE = 2;
 
-    private static final String BE_BASE =
-            "dev.xkmc.youkaishomecoming.content.pot.cooking.core.CookingBlockEntity";
-    private static final String RECIPE_BASE =
-            "dev.xkmc.youkaishomecoming.content.pot.cooking.core.PotCookingRecipe";
-
     protected final int potIndex;
 
     public CookingPotBatchDelegate() { this(SMALL); }
@@ -57,9 +54,7 @@ public class CookingPotBatchDelegate implements IBatchDelegate {
     private boolean craftDone;
     private boolean usingSharedLedger;
 
-    // ── reflection cache ──
-    private static volatile Class<?> beBaseClass;
-    private static volatile Class<?> recipeBaseClass;
+    // -- reflection cache --
     private static volatile Field itemsField;          // CookingBlockEntity.items (public final)
     private static volatile Method tryAddItemMethod;   // CookingBlockEntity.tryAddItem(ItemStack, boolean)
     private static volatile Method isHeatedMethod;     // HeatableBlockEntity.isHeated(Level, BlockPos)
@@ -165,7 +160,7 @@ public class CookingPotBatchDelegate implements IBatchDelegate {
             return false;
         }
 
-        // Ensure this pot can cook this recipe — matchContainer() checks
+        // Ensure this pot can cook this recipe -- matchContainer() checks
         // that result.getCraftingRemainingItem() matches be.container()
         if (!matchesContainer(be, recipe)) {
             RSIntegrationMod.LOGGER.debug("[RSI-CookPot] Recipe {} does not match this pot type (index {})",
@@ -203,7 +198,7 @@ public class CookingPotBatchDelegate implements IBatchDelegate {
     public boolean isCraftComplete(ServerLevel level) {
         BlockEntity be = level.getBlockEntity(myPos);
 
-        // Case 1: BE is gone — finishRecipe() replaced the pot with a BlockItem
+        // Case 1: BE is gone -- finishRecipe() replaced the pot with a BlockItem
         // result (e.g. soup block placed at the pot's own position).
         if (be == null || !isCookingBE(be)) {
             // If the block here is not air and not a cooking pot, it's the result.
@@ -220,7 +215,7 @@ public class CookingPotBatchDelegate implements IBatchDelegate {
             return false;
         }
 
-        // Case 2: Container is empty → finishRecipe() cleared items and
+        // Case 2: Container is empty -- finishRecipe() cleared items and
         // dropped/spawned the result.
         Container container = getItemsContainer(be);
         if (container != null) {
@@ -231,8 +226,8 @@ public class CookingPotBatchDelegate implements IBatchDelegate {
         }
 
         // Fallback: use TimedRecipeBlockEntity progress fields
-        int progress = com.huanghuang.rsintegration.mods.youkaishomecoming.YhkReflect.getRecipeProgress(be);
-        int total = com.huanghuang.rsintegration.mods.youkaishomecoming.YhkReflect.getTotalTime(be);
+        int progress = Reflect.<Integer>getField(be, "recipeProgress").orElse(-1);
+        int total = Reflect.<Integer>getField(be, "totalTime").orElse(-1);
         return total > 0 && progress >= total;
     }
 
@@ -299,7 +294,7 @@ public class CookingPotBatchDelegate implements IBatchDelegate {
 
     @Override
     public void onBatchFinished(ServerPlayer player) {
-        // Don't clearAndRefund — the pot's finishRecipe() already consumed
+        // Don't clearAndRefund -- the pot's finishRecipe() already consumed
         // ingredients, and collectResult() already took the result.  The
         // bowl/pot in the container slot must stay in-world for reuse.
         forceChunkLoad(false);
@@ -310,7 +305,7 @@ public class CookingPotBatchDelegate implements IBatchDelegate {
     @Override
     public BlockPos getMachinePos() { return myPos; }
 
-    // ── plan helpers ──
+    // -- plan helpers --
 
     public static void addFuelIfNeeded(@Nullable String recipeModTypeId,
                                        Map<Item, Integer> itemAvailable,
@@ -326,14 +321,14 @@ public class CookingPotBatchDelegate implements IBatchDelegate {
         return warnings;
     }
 
-    // ── BE discovery ──
+    // -- BE discovery --
 
     // YHK bowl blocks are IronBowlBlock (no BE).  They must be converted to the
     // corresponding cooking block before a CookingBlockEntity exists.
-    // Bowl → Pot mappings (from IronBowlBlock.use):
-    //   small_iron_pot     → cooking_small_iron_pot  (SmallCookingPotBlockEntity)
-    //   short_iron_pot     → cooking_short_iron_pot  (MidCookingPotBlockEntity)
-    //   stockpot           → cooking_stockpot        (LargeCookingPotBlockEntity)
+    // Bowl -> Pot mappings (from IronBowlBlock.use):
+    //   small_iron_pot     -> cooking_small_iron_pot  (SmallCookingPotBlockEntity)
+    //   short_iron_pot     -> cooking_short_iron_pot  (MidCookingPotBlockEntity)
+    //   stockpot           -> cooking_stockpot        (LargeCookingPotBlockEntity)
     private static final String[] BOWL_KEYS = {
         "youkaishomecoming:small_iron_pot",
         "youkaishomecoming:short_iron_pot",
@@ -345,7 +340,7 @@ public class CookingPotBatchDelegate implements IBatchDelegate {
 
     @Nullable
     private BlockEntity findCookingBE() {
-        // Try direct chunk BE lookup first — more reliable when chunk was just loaded.
+        // Try direct chunk BE lookup first -- more reliable when chunk was just loaded.
         var chunk = myLevel.getChunk(myPos);
         BlockEntity be = chunk.getBlockEntity(myPos);
         if (be != null && isCookingBE(be)) return be;
@@ -373,7 +368,7 @@ public class CookingPotBatchDelegate implements IBatchDelegate {
                                 state.getValue(net.minecraft.world.level.block.state.properties.BlockStateProperties.FACING));
                     }
                     myLevel.setBlock(myPos, cookingState, 3);
-                    RSIntegrationMod.LOGGER.info("[RSI-CookPot] Activated bowl → {} at {}",
+                    RSIntegrationMod.LOGGER.info("[RSI-CookPot] Activated bowl -> {} at {}",
                             POT_KEYS[potIndex], myPos);
                     be = myLevel.getBlockEntity(myPos);
                     if (be != null && isCookingBE(be)) return be;
@@ -391,33 +386,34 @@ public class CookingPotBatchDelegate implements IBatchDelegate {
         return null;
     }
 
-    // ── reflection (one-time probe) ──
+    // -- reflection (one-time probe) --
 
     private static void probeReflection() {
         if (reflectionProbed) return;
         reflectionProbed = true;
+        if (YHKReflection.cookingBEClass == null || YHKReflection.potCookingRecipeClass == null) {
+            RSIntegrationMod.LOGGER.warn("[RSI-CookPot] YHKReflection probe not ready");
+            return;
+        }
         try {
-            beBaseClass = Class.forName(BE_BASE);
-            recipeBaseClass = Class.forName(RECIPE_BASE);
+            // items field -- public final on CookingBlockEntity
+            itemsField = YHKReflection.cookingBEClass.getField("items");
 
-            // items field — public final on CookingBlockEntity
-            itemsField = beBaseClass.getField("items");
+            // tryAddItem(ItemStack, boolean) -- public on CookingBlockEntity
+            tryAddItemMethod = YHKReflection.cookingBEClass.getMethod("tryAddItem", ItemStack.class, boolean.class);
 
-            // tryAddItem(ItemStack, boolean) — public on CookingBlockEntity
-            tryAddItemMethod = beBaseClass.getMethod("tryAddItem", ItemStack.class, boolean.class);
+            // isHeated(Level, BlockPos) -- from FD's HeatableBlockEntity interface
+            isHeatedMethod = YHKReflection.cookingBEClass.getMethod("isHeated", Level.class, BlockPos.class);
 
-            // isHeated(Level, BlockPos) — from FD's HeatableBlockEntity interface
-            isHeatedMethod = beBaseClass.getMethod("isHeated", Level.class, BlockPos.class);
+            // container() -- public abstract on CookingBlockEntity
+            containerMethod = YHKReflection.cookingBEClass.getMethod("container");
 
-            // container() — public abstract on CookingBlockEntity
-            containerMethod = beBaseClass.getMethod("container");
+            // inProgress() -- public on TimedRecipeBlockEntity
+            inProgressMethod = findMethodInHierarchy(YHKReflection.cookingBEClass.getSuperclass(), "inProgress");
 
-            // inProgress() — public on TimedRecipeBlockEntity
-            inProgressMethod = findMethodInHierarchy(beBaseClass.getSuperclass(), "inProgress");
-
-            // PotCookingRecipe.getInput() / getResult() — public
-            getInputMethod = recipeBaseClass.getMethod("getInput");
-            getResultMethod = recipeBaseClass.getMethod("getResult");
+            // PotCookingRecipe.getInput() / getResult() -- public
+            getInputMethod = YHKReflection.potCookingRecipeClass.getMethod("getInput");
+            getResultMethod = YHKReflection.potCookingRecipeClass.getMethod("getResult");
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-CookPot] Reflection probe failed: {}", e.toString());
         }
@@ -438,10 +434,10 @@ public class CookingPotBatchDelegate implements IBatchDelegate {
 
     private static boolean isCookingBE(BlockEntity be) {
         probeReflection();
-        if (beBaseClass != null && beBaseClass.isAssignableFrom(be.getClass())) return true;
+        if (YHKReflection.cookingBEClass != null && YHKReflection.cookingBEClass.isAssignableFrom(be.getClass())) return true;
         Class<?> clazz = be.getClass();
         while (clazz != null) {
-            if (clazz.getName().equals(BE_BASE)) return true;
+            if (YHKReflection.cookingBEClass != null && YHKReflection.cookingBEClass.getName().equals(clazz.getName())) return true;
             clazz = clazz.getSuperclass();
         }
         return false;
@@ -449,16 +445,16 @@ public class CookingPotBatchDelegate implements IBatchDelegate {
 
     private static boolean isPotCookingRecipe(Recipe<?> recipe) {
         probeReflection();
-        if (recipeBaseClass != null && recipeBaseClass.isAssignableFrom(recipe.getClass())) return true;
+        if (YHKReflection.potCookingRecipeClass != null && YHKReflection.potCookingRecipeClass.isAssignableFrom(recipe.getClass())) return true;
         Class<?> clazz = recipe.getClass();
         while (clazz != null) {
-            if (clazz.getName().equals(RECIPE_BASE)) return true;
+            if (YHKReflection.potCookingRecipeClass != null && YHKReflection.potCookingRecipeClass.getName().equals(clazz.getName())) return true;
             clazz = clazz.getSuperclass();
         }
         return false;
     }
 
-    // ── operation helpers ──
+    // -- operation helpers --
 
     @Nullable
     private static Container getItemsContainer(BlockEntity be) {
@@ -509,7 +505,7 @@ public class CookingPotBatchDelegate implements IBatchDelegate {
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.debug("[RSI-CookPot] matchContainer failed: {}", e.toString());
         }
-        return true; // can't determine — allow
+        return true; // can't determine -- allow
     }
 
     @SuppressWarnings("unchecked")
@@ -535,7 +531,7 @@ public class CookingPotBatchDelegate implements IBatchDelegate {
         return ItemStack.EMPTY;
     }
 
-    // ── cleanup ──
+    // -- cleanup --
 
     private void clearAndRefund() {
         BlockEntity be = myLevel.getBlockEntity(myPos);

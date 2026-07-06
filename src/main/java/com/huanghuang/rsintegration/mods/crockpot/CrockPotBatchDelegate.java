@@ -8,6 +8,7 @@ import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.recipe.CrockPotRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
+import com.huanghuang.rsintegration.reflection.probes.CrockPotReflection;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.core.BlockPos;
@@ -54,9 +55,6 @@ public final class CrockPotBatchDelegate implements com.huanghuang.rsintegration
     // Reflection handles — loaded once
     private static volatile boolean reflectionProbed;
     private static volatile java.lang.reflect.Field itemHandlerField;
-    private static volatile Class<?> foodValuesClass;
-    private static volatile Class<?> foodValuesDefClass;
-    private static volatile Class<?> foodCategoryClass;
     private static volatile Object[] foodCategoryValues;
     private static volatile Method getFoodValuesMethod;
     private static volatile Method fvGetMethod;
@@ -195,7 +193,7 @@ public final class CrockPotBatchDelegate implements com.huanghuang.rsintegration
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-CrockPot] BlockEntity missing at {}", myPos);
             return false;
         }
-        if (!be.getClass().getName().equals("com.sihenzhang.crockpot.block.entity.CrockPotBlockEntity")) {
+        if (!CrockPotReflection.crockPotBEClass.isInstance(be)) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-CrockPot] Wrong BE type: {}", be.getClass().getName());
             return false;
         }
@@ -282,7 +280,7 @@ public final class CrockPotBatchDelegate implements com.huanghuang.rsintegration
     public boolean isCraftComplete(ServerLevel level) {
         BlockEntity be = level.getBlockEntity(myPos);
         if (be == null) return false;
-        if (!be.getClass().getName().equals("com.sihenzhang.crockpot.block.entity.CrockPotBlockEntity"))
+        if (!CrockPotReflection.crockPotBEClass.isInstance(be))
             return false;
 
         IItemHandler itemHandler = getItemHandler(be);
@@ -341,7 +339,7 @@ public final class CrockPotBatchDelegate implements com.huanghuang.rsintegration
         float[] current = Arrays.copyOf(currentFV, CrockPotRecipeHandler.CAT_COUNT);
 
         ensureFoodValueReflection();
-        if (foodValuesDefClass == null || foodValuesClass == null || foodCategoryValues == null) {
+        if (CrockPotReflection.foodValuesDefinitionClass == null || CrockPotReflection.foodValuesClass == null || foodCategoryValues == null) {
             return null;
         }
 
@@ -529,12 +527,9 @@ public final class CrockPotBatchDelegate implements com.huanghuang.rsintegration
         if (reflectionProbed) return;
         reflectionProbed = true;
         try {
-            foodCategoryClass = Class.forName("com.sihenzhang.crockpot.base.FoodCategory");
-            foodCategoryValues = (Object[]) foodCategoryClass.getMethod("values").invoke(null);
-            foodValuesClass = Class.forName("com.sihenzhang.crockpot.base.FoodValues");
-            foodValuesDefClass = Class.forName("com.sihenzhang.crockpot.recipe.FoodValuesDefinition");
-            getFoodValuesMethod = foodValuesDefClass.getMethod("getFoodValues", ItemStack.class, Level.class);
-            fvGetMethod = foodValuesClass.getMethod("get", foodCategoryClass);
+            foodCategoryValues = (Object[]) CrockPotReflection.foodCategoryClass.getMethod("values").invoke(null);
+            getFoodValuesMethod = CrockPotReflection.foodValuesDefinitionClass.getMethod("getFoodValues", ItemStack.class, Level.class);
+            fvGetMethod = CrockPotReflection.foodValuesClass.getMethod("get", CrockPotReflection.foodCategoryClass);
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-CrockPot] FoodValue reflection probe failed: {}", e.toString());
         }
@@ -677,8 +672,7 @@ public final class CrockPotBatchDelegate implements com.huanghuang.rsintegration
         ensureFoodValueReflection();
         if (itemHandlerField != null) return;
         try {
-            Class<?> beClass = Class.forName("com.sihenzhang.crockpot.block.entity.CrockPotBlockEntity");
-            itemHandlerField = beClass.getDeclaredField("itemHandler");
+            itemHandlerField = CrockPotReflection.crockPotBEClass.getDeclaredField("itemHandler");
             itemHandlerField.setAccessible(true);
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-CrockPot] Reflection probe failed: {}", e.toString());
@@ -745,7 +739,7 @@ public final class CrockPotBatchDelegate implements com.huanghuang.rsintegration
         myLevel.getChunk(myPos);
         BlockEntity be = myLevel.getBlockEntity(myPos);
         if (be == null) return;
-        if (!be.getClass().getName().equals("com.sihenzhang.crockpot.block.entity.CrockPotBlockEntity"))
+        if (!CrockPotReflection.crockPotBEClass.isInstance(be))
             return;
 
         IItemHandler handler = getItemHandler(be);

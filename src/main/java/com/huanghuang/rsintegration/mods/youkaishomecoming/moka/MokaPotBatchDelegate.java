@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
+import com.huanghuang.rsintegration.reflection.probes.YHKReflection;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.core.BlockPos;
@@ -33,11 +34,6 @@ import java.util.Map;
 
 public final class MokaPotBatchDelegate implements IBatchDelegate {
 
-    private static final String BE_CLASS =
-            "dev.xkmc.youkaishomecoming.content.pot.moka.MokaMakerBlockEntity";
-    private static final String RECIPE_CLASS =
-            "dev.xkmc.youkaishomecoming.content.pot.moka.MokaRecipe";
-
     // BasePotBlockEntity layout (INVENTORY_SIZE = 7):
     //   0-3: input ingredients  4: meal display
     //   5: CONTAINER_SLOT       6: OUTPUT_SLOT
@@ -60,8 +56,6 @@ public final class MokaPotBatchDelegate implements IBatchDelegate {
     private static volatile Method isHeatedMethod;
     private static volatile Method addItemMethod;
     private static volatile Field waterPropertyField;
-    private static volatile Class<?> beBaseClass;
-    private static volatile Class<?> heatedInterface;
     private static volatile boolean reflectionProbed;
 
     @Override
@@ -78,7 +72,7 @@ public final class MokaPotBatchDelegate implements IBatchDelegate {
         this.player = player;
 
         Recipe<?> found = level.getRecipeManager().byKey(recipeId).orElse(null);
-        if (found == null || !found.getClass().getName().equals(RECIPE_CLASS)) {
+        if (found == null || YHKReflection.mokaRecipeClass == null || !YHKReflection.mokaRecipeClass.isInstance(found)) {
             player.sendSystemMessage(Component.translatable("rsi.generic.error.recipe_not_found", recipeId.toString()));
             return false;
         }
@@ -176,7 +170,7 @@ public final class MokaPotBatchDelegate implements IBatchDelegate {
         }
 
         // Step 1: Place container (cup, bottle, etc.) into CONTAINER_SLOT.
-        // Do NOT use addItem() — it just calls ItemHandlerHelper.insertItem
+        // Do NOT use addItem() -- it just calls ItemHandlerHelper.insertItem
         // which routes to the first empty slot (slot 0, an ingredient slot).
         ItemStack container = getOutputContainer(recipe);
         if (!container.isEmpty() && handler.getStackInSlot(CONTAINER_SLOT).isEmpty()) {
@@ -189,14 +183,14 @@ public final class MokaPotBatchDelegate implements IBatchDelegate {
             }
         }
 
-        // Step 2: Add ingredients via addItem() → ItemHandlerHelper.insertItem
+        // Step 2: Add ingredients via addItem() -> ItemHandlerHelper.insertItem
         // into the first available input slot (0-3).
         for (ItemStack mat : materials) {
             if (mat.isEmpty()) continue;
             ItemStack single = mat.copyWithCount(1);
             ItemStack remainder = addItem(be, single);
             if (!remainder.isEmpty()) {
-                RSIntegrationMod.LOGGER.warn("[RSI-Moka] addItem rejected {} — remainder={}",
+                RSIntegrationMod.LOGGER.warn("[RSI-Moka] addItem rejected {} -- remainder={}",
                         single.getHoverName().getString(), remainder.getHoverName().getString());
                 // Rollback input slots and container slot
                 for (int i = 0; i < INPUT_SLOTS; i++) {
@@ -260,7 +254,7 @@ public final class MokaPotBatchDelegate implements IBatchDelegate {
     @Override
     public BlockPos getMachinePos() { return myPos; }
 
-    // ── plan helpers ──
+    // -- plan helpers --
 
     public static void addFuelIfNeeded(@Nullable String recipeModTypeId,
                                        Map<Item, Integer> itemAvailable,
@@ -281,31 +275,34 @@ public final class MokaPotBatchDelegate implements IBatchDelegate {
         return warnings;
     }
 
-    // ── reflection (one-time probe) ──
+    // -- reflection (one-time probe) --
 
     private static void probeReflection() {
         if (reflectionProbed) return;
         reflectionProbed = true;
+        if (YHKReflection.mokaMakerBEClass == null) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Moka] YHKReflection moka probe not ready");
+            return;
+        }
         try {
-            beBaseClass = Class.forName(BE_CLASS);
             // try getMethod first (finds public inherited), then declared walk
             try {
-                inventoryMethod = beBaseClass.getMethod("getInventory");
+                inventoryMethod = YHKReflection.mokaMakerBEClass.getMethod("getInventory");
             } catch (NoSuchMethodException e) {
-                inventoryMethod = findMethodInHierarchy(beBaseClass, "getInventory");
+                inventoryMethod = findMethodInHierarchy(YHKReflection.mokaMakerBEClass, "getInventory");
             }
             if (inventoryMethod != null) inventoryMethod.setAccessible(true);
 
             // isHeated may be on the BE class itself or a parent class/interface.
             // Try multiple signatures: no-arg first, then (Level, BlockPos).
-            isHeatedMethod = findMethodInHierarchy(beBaseClass, "isHeated");
+            isHeatedMethod = findMethodInHierarchy(YHKReflection.mokaMakerBEClass, "isHeated");
             if (isHeatedMethod == null) {
-                isHeatedMethod = findMethodInHierarchy(beBaseClass,
+                isHeatedMethod = findMethodInHierarchy(YHKReflection.mokaMakerBEClass,
                         "isHeated", Level.class, BlockPos.class);
             }
             if (isHeatedMethod == null) {
                 // Last resort: scan for any method named isHeated
-                for (Method m : beBaseClass.getMethods()) {
+                for (Method m : YHKReflection.mokaMakerBEClass.getMethods()) {
                     if (m.getName().equals("isHeated")) {
                         isHeatedMethod = m;
                         break;
@@ -316,21 +313,21 @@ public final class MokaPotBatchDelegate implements IBatchDelegate {
                 isHeatedMethod.setAccessible(true);
             } else {
                 RSIntegrationMod.LOGGER.warn("[RSI-Moka] isHeated method not found on {} hierarchy",
-                        BE_CLASS);
+                        YHKReflection.mokaMakerBEClass.getName());
             }
 
             // addItem() is on BasePotBlockEntity
-            addItemMethod = findMethodInHierarchy(beBaseClass, "addItem", ItemStack.class);
+            addItemMethod = findMethodInHierarchy(YHKReflection.mokaMakerBEClass, "addItem", ItemStack.class);
             if (addItemMethod != null) addItemMethod.setAccessible(true);
 
             // WATER property on MokaMakerBlock
-            try {
-                Class<?> blockClass = Class.forName(
-                        "dev.xkmc.youkaishomecoming.content.pot.moka.MokaMakerBlock");
-                waterPropertyField = findFieldInHierarchy(blockClass, "WATER");
-                if (waterPropertyField != null) waterPropertyField.setAccessible(true);
-            } catch (Exception e) {
-                RSIntegrationMod.LOGGER.warn("[RSI-MokaPot] WATER property reflection failed: {}", e.toString());
+            if (YHKReflection.mokaMakerBlockClass != null) {
+                try {
+                    waterPropertyField = findFieldInHierarchy(YHKReflection.mokaMakerBlockClass, "WATER");
+                    if (waterPropertyField != null) waterPropertyField.setAccessible(true);
+                } catch (Exception e) {
+                    RSIntegrationMod.LOGGER.warn("[RSI-MokaPot] WATER property reflection failed: {}", e.toString());
+                }
             }
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-Moka] Reflection probe failed: {}", e.toString());
@@ -339,11 +336,11 @@ public final class MokaPotBatchDelegate implements IBatchDelegate {
 
     private static boolean isMokaBE(BlockEntity be) {
         probeReflection();
-        if (beBaseClass != null && beBaseClass.isAssignableFrom(be.getClass())) return true;
+        if (YHKReflection.mokaMakerBEClass != null && YHKReflection.mokaMakerBEClass.isAssignableFrom(be.getClass())) return true;
         // Fallback: class name walk
         Class<?> clazz = be.getClass();
         while (clazz != null) {
-            if (clazz.getName().equals(BE_CLASS)) return true;
+            if (YHKReflection.mokaMakerBEClass != null && YHKReflection.mokaMakerBEClass.getName().equals(clazz.getName())) return true;
             clazz = clazz.getSuperclass();
         }
         return false;
@@ -373,7 +370,7 @@ public final class MokaPotBatchDelegate implements IBatchDelegate {
         return null;
     }
 
-    /** Cache for BasePotBlockEntity.inventory field — the full ItemStackHandler. */
+    /** Cache for BasePotBlockEntity.inventory field -- the full ItemStackHandler. */
     @Nullable
     private static volatile Field inventoryField;
 
@@ -383,9 +380,9 @@ public final class MokaPotBatchDelegate implements IBatchDelegate {
         // Primary: direct field access to BasePotBlockEntity.inventory (private).
         // The public getInventory() method returns a capability-wrapped handler
         // with only 7 slots; the private ItemStackHandler field has all 9.
-        if (inventoryField == null && beBaseClass != null) {
+        if (inventoryField == null && YHKReflection.mokaMakerBEClass != null) {
             try {
-                inventoryField = beBaseClass.getSuperclass().getDeclaredField("inventory");
+                inventoryField = YHKReflection.mokaMakerBEClass.getSuperclass().getDeclaredField("inventory");
                 inventoryField.setAccessible(true);
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.warn("[RSI-MokaPot] inventoryField access failed: {}", e.toString());
@@ -505,7 +502,7 @@ public final class MokaPotBatchDelegate implements IBatchDelegate {
         return ItemStack.EMPTY;
     }
 
-    // ── cleanup ──
+    // -- cleanup --
 
     private void clearAndRefund() {
         myLevel.getChunk(myPos);

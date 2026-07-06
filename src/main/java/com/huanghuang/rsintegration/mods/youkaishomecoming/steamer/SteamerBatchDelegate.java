@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
+import com.huanghuang.rsintegration.reflection.probes.YHKReflection;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.core.BlockPos;
@@ -38,13 +39,6 @@ import java.util.Map;
 
 public final class SteamerBatchDelegate implements IBatchDelegate {
 
-    private static final String BE_CLASS =
-            "dev.xkmc.youkaishomecoming.content.pot.steamer.SteamerBlockEntity";
-    private static final String RACK_DATA_CLASS =
-            "dev.xkmc.youkaishomecoming.content.pot.steamer.RackData";
-    private static final String RACK_ITEM_DATA_CLASS =
-            "dev.xkmc.youkaishomecoming.content.pot.steamer.RackItemData";
-
     private ServerPlayer player;
     private ServerLevel myLevel;
     private ResourceKey<Level> myDim;
@@ -72,7 +66,6 @@ public final class SteamerBatchDelegate implements IBatchDelegate {
     private static volatile Method setChangedMethod;
     private static volatile Method isHeatedMethod;
     private static volatile Field waterPropertyField;
-    private static volatile Class<?> beBaseClass;
     private static volatile boolean reflectionProbed;
 
     @Override
@@ -153,7 +146,7 @@ public final class SteamerBatchDelegate implements IBatchDelegate {
         forceChunkLoad(true);
         myLevel.getChunk(myPos);
 
-        // Find pot base — the BE lives in the bottom pot block.
+        // Find pot base -- the BE lives in the bottom pot block.
         // myPos might be the rack or lid position if the user bound those.
         BlockEntity be = findPotBase();
         if (be == null) {
@@ -240,7 +233,7 @@ public final class SteamerBatchDelegate implements IBatchDelegate {
         List<?> racks = getRacks(be);
         if (racks == null) return ItemStack.EMPTY;
 
-        // Only collect items that are ready — mayExtract() ensures the
+        // Only collect items that are ready -- mayExtract() ensures the
         // item has finished cooking and is not a raw ingredient.
         for (Object rack : racks) {
             Object[] items = getRackItems(rack);
@@ -285,7 +278,7 @@ public final class SteamerBatchDelegate implements IBatchDelegate {
     @Override
     public BlockPos getMachinePos() { return myPos; }
 
-    // ── plan helpers ──
+    // -- plan helpers --
 
     public static void addFuelIfNeeded(@Nullable String recipeModTypeId,
                                        Map<Item, Integer> itemAvailable,
@@ -303,7 +296,7 @@ public final class SteamerBatchDelegate implements IBatchDelegate {
         return warnings;
     }
 
-    // ── multi-block structure ──
+    // -- multi-block structure --
 
     @Nullable
     private BlockEntity findPotBase() {
@@ -328,7 +321,7 @@ public final class SteamerBatchDelegate implements IBatchDelegate {
     private boolean hasLid(BlockEntity be) {
         List<?> racks = getRacks(be);
         if (racks == null) return false;
-        // Scan upward from the pot base to find the lid — don't assume an exact
+        // Scan upward from the pot base to find the lid -- don't assume an exact
         // offset because the number of racks may not match racks.size().
         BlockPos checkPos = potBasePos.above();
         for (int i = 0; i < 5; i++) {
@@ -340,41 +333,46 @@ public final class SteamerBatchDelegate implements IBatchDelegate {
         return false;
     }
 
-    // ── reflection ──
+    // -- reflection --
 
     private static void probeReflection() {
         if (reflectionProbed) return;
         reflectionProbed = true;
+        if (YHKReflection.steamerBEClass == null) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Steamer] YHKReflection steamer probe not ready");
+            return;
+        }
         try {
-            beBaseClass = Class.forName(BE_CLASS);
-            racksField = beBaseClass.getField("racks");
+            racksField = YHKReflection.steamerBEClass.getField("racks");
 
             // isHeated(Level, BlockPos) is from HeatableBlockEntity interface (default method)
-            isHeatedMethod = beBaseClass.getMethod("isHeated", Level.class, BlockPos.class);
+            isHeatedMethod = YHKReflection.steamerBEClass.getMethod("isHeated", Level.class, BlockPos.class);
             if (isHeatedMethod != null) isHeatedMethod.setAccessible(true);
 
-            Class<?> rackDataClass = Class.forName(RACK_DATA_CLASS);
-            tryAddItemMethod = rackDataClass.getMethod("tryAddItem", beBaseClass, Level.class, ItemStack.class);
-            tryAddItemMethod.setAccessible(true);
-            tryTakeItemMethod = findMethodInHierarchy(rackDataClass, "tryTakeItem",
-                    beBaseClass, Level.class, net.minecraft.world.entity.player.Player.class,
-                    InteractionHand.class);
-            if (tryTakeItemMethod != null) tryTakeItemMethod.setAccessible(true);
+            if (YHKReflection.rackDataClass != null) {
+                tryAddItemMethod = YHKReflection.rackDataClass.getMethod("tryAddItem", YHKReflection.steamerBEClass, Level.class, ItemStack.class);
+                tryAddItemMethod.setAccessible(true);
+                tryTakeItemMethod = findMethodInHierarchy(YHKReflection.rackDataClass, "tryTakeItem",
+                        YHKReflection.steamerBEClass, Level.class, net.minecraft.world.entity.player.Player.class,
+                        InteractionHand.class);
+                if (tryTakeItemMethod != null) tryTakeItemMethod.setAccessible(true);
+            }
 
-            Class<?> rackItemDataClass = Class.forName(RACK_ITEM_DATA_CLASS);
-            mayExtractMethod = rackItemDataClass.getMethod("mayExtract");
-            stackField = rackItemDataClass.getField("stack");
-            rackSetStackMethod = rackItemDataClass.getMethod("setStack", beBaseClass, ItemStack.class);
-            rackSetStackMethod.setAccessible(true);
-            setChangedMethod = rackItemDataClass.getMethod("setChanged");
+            if (YHKReflection.rackItemDataClass != null) {
+                mayExtractMethod = YHKReflection.rackItemDataClass.getMethod("mayExtract");
+                stackField = YHKReflection.rackItemDataClass.getField("stack");
+                rackSetStackMethod = YHKReflection.rackItemDataClass.getMethod("setStack", YHKReflection.steamerBEClass, ItemStack.class);
+                rackSetStackMethod.setAccessible(true);
+                setChangedMethod = YHKReflection.rackItemDataClass.getMethod("setChanged");
+            }
 
-            try {
-                Class<?> blockClass = Class.forName(
-                        "dev.xkmc.youkaishomecoming.content.pot.steamer.SteamerPotBlock");
-                waterPropertyField = blockClass.getDeclaredField("WATER");
-                waterPropertyField.setAccessible(true);
-            } catch (Exception e) {
-                RSIntegrationMod.LOGGER.warn("[RSI-Steamer] Water property probe failed: {}", e.toString());
+            if (YHKReflection.steamerPotBlockClass != null) {
+                try {
+                    waterPropertyField = YHKReflection.steamerPotBlockClass.getDeclaredField("WATER");
+                    waterPropertyField.setAccessible(true);
+                } catch (Exception e) {
+                    RSIntegrationMod.LOGGER.warn("[RSI-Steamer] Water property probe failed: {}", e.toString());
+                }
             }
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-Steamer] Reflection probe failed: {}", e.toString());
@@ -383,10 +381,10 @@ public final class SteamerBatchDelegate implements IBatchDelegate {
 
     private static boolean isSteamerBE(BlockEntity be) {
         probeReflection();
-        if (beBaseClass != null && beBaseClass.isAssignableFrom(be.getClass())) return true;
+        if (YHKReflection.steamerBEClass != null && YHKReflection.steamerBEClass.isAssignableFrom(be.getClass())) return true;
         Class<?> clazz = be.getClass();
         while (clazz != null) {
-            if (clazz.getName().equals(BE_CLASS)) return true;
+            if (YHKReflection.steamerBEClass != null && YHKReflection.steamerBEClass.getName().equals(clazz.getName())) return true;
             clazz = clazz.getSuperclass();
         }
         return false;
@@ -404,7 +402,7 @@ public final class SteamerBatchDelegate implements IBatchDelegate {
         return null;
     }
 
-    // ── rack operations ──
+    // -- rack operations --
 
     @Nullable
     private static List<?> getRacks(BlockEntity be) {
@@ -457,7 +455,7 @@ public final class SteamerBatchDelegate implements IBatchDelegate {
             try {
                 return (ItemStack) stackField.get(itemData);
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.error("[RSI-Steamer] Failed to read rack stack — item may be lost: {}", e.toString());
+                RSIntegrationMod.LOGGER.error("[RSI-Steamer] Failed to read rack stack -- item may be lost: {}", e.toString());
             }
         }
         return ItemStack.EMPTY;
@@ -492,7 +490,7 @@ public final class SteamerBatchDelegate implements IBatchDelegate {
         }
     }
 
-    // ── heat / water ──
+    // -- heat / water --
 
     private BlockPos potPos() {
         return potBasePos != null ? potBasePos : myPos;
@@ -547,7 +545,7 @@ public final class SteamerBatchDelegate implements IBatchDelegate {
         }
     }
 
-    // ── cleanup ──
+    // -- cleanup --
 
     private void clearAndRefund() {
         BlockPos pos = potBasePos != null ? potBasePos : myPos;
@@ -571,7 +569,7 @@ public final class SteamerBatchDelegate implements IBatchDelegate {
                 }
             }
         } else {
-            // IItemHandler capability fallback — recovers items when reflection
+            // IItemHandler capability fallback -- recovers items when reflection
             // path fails (e.g. after a mod update changes internal field names)
             be.getCapability(ForgeCapabilities.ITEM_HANDLER).ifPresent(handler -> {
                 for (int slot = 0; slot < handler.getSlots(); slot++) {

@@ -5,6 +5,8 @@ import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
+import com.huanghuang.rsintegration.reflection.probes.GoetyReflection;
+import com.huanghuang.rsintegration.reflection.probes.MalumReflection;
 import com.huanghuang.rsintegration.util.Reflect;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
@@ -25,29 +27,11 @@ import java.util.List;
 
 public final class RSAvailabilityChecker {
 
-    // ── Shared class refs ────────────────────────────────────────
-    private static volatile Class<?> ritualRecipeClass;
-    private static volatile Class<?> pedestalBEClass;
-
-    private static void ensureClasses() {
-        if (!com.huanghuang.rsintegration.util.ModClassLoader.ensureClasses("goety",
-                "com.Polarice3.Goety.common.crafting.RitualRecipe",
-                "com.Polarice3.Goety.common.blocks.entities.PedestalBlockEntity")) return;
-        try {
-            ritualRecipeClass = Class.forName(
-                    "com.Polarice3.Goety.common.crafting.RitualRecipe");
-            pedestalBEClass = Class.forName(
-                    "com.Polarice3.Goety.common.blocks.entities.PedestalBlockEntity");
-        } catch (ClassNotFoundException e) {
-            RSIntegrationMod.LOGGER.error("[RSI-Avail] Failed to load Goety classes", e);
-        }
-    }
-
     private RSAvailabilityChecker() {}
 
     public static boolean[] check(ServerPlayer player, ResourceLocation recipeId,
                                   @Nullable ResourceLocation altarDim, BlockPos pos) {
-        ensureClasses();
+        
         Recipe<?> recipe = player.level().getRecipeManager().byKey(recipeId).orElse(null);
         if (recipe == null) return null;
 
@@ -55,7 +39,7 @@ public final class RSAvailabilityChecker {
         if (network == null) return null;
 
         List<Ingredient> ingredients = new ArrayList<>();
-        if (ritualRecipeClass != null && ritualRecipeClass.isInstance(recipe)) {
+        if (GoetyReflection.ritualRecipeClass != null && GoetyReflection.ritualRecipeClass.isInstance(recipe)) {
             Object ritualRecipe = recipe;
             Ingredient activationItem = Reflect.<Ingredient>invoke(ritualRecipe, "getActivationItem")
                     .orElse(Ingredient.EMPTY);
@@ -73,9 +57,9 @@ public final class RSAvailabilityChecker {
         }
 
         List<ItemStack> pedestalItems = new ArrayList<>();
-        if (ritualRecipeClass != null && ritualRecipeClass.isInstance(recipe)) {
+        if (GoetyReflection.ritualRecipeClass != null && GoetyReflection.ritualRecipeClass.isInstance(recipe)) {
             pedestalItems.addAll(rsi$collectGoetyPedestalItems(player, pos, recipe));
-        } else if (recipe.getClass().getName().equals("com.sammy.malum.common.recipe.SpiritInfusionRecipe")) {
+        } else if (MalumReflection.spiritInfusionRecipeClass != null && MalumReflection.spiritInfusionRecipeClass.isInstance(recipe)) {
             pedestalItems.addAll(rsi$collectMalumPedestalItems(player, pos));
         }
 
@@ -126,7 +110,7 @@ public final class RSAvailabilityChecker {
                 altarPos.offset(-range, -range, -range),
                 altarPos.offset(range, range, range))) {
             BlockEntity be = level.getBlockEntity(p);
-            if (pedestalBEClass != null && pedestalBEClass.isInstance(be)) {
+            if (GoetyReflection.pedestalBEClass != null && GoetyReflection.pedestalBEClass.isInstance(be)) {
                 var opt = Reflect.<Object>getField(be, "itemStackHandler");
                 opt.ifPresent(obj -> {
                     LazyOptional<IItemHandler> lazy = (LazyOptional<IItemHandler>) obj;
@@ -145,9 +129,7 @@ public final class RSAvailabilityChecker {
     private static List<ItemStack> rsi$collectMalumPedestalItems(ServerPlayer player, BlockPos altarPos) {
         List<ItemStack> items = new ArrayList<>();
         try {
-            Class<?> helperClass = Class.forName(
-                    "com.sammy.malum.common.block.curiosities.spirit_altar.AltarCraftingHelper");
-            List<?> pedestals = (List<?>) helperClass
+            List<?> pedestals = (List<?>) MalumReflection.altarCraftingHelperClass
                     .getMethod("capturePedestals", Level.class, BlockPos.class)
                     .invoke(null, player.level(), altarPos);
             for (Object ap : pedestals) {

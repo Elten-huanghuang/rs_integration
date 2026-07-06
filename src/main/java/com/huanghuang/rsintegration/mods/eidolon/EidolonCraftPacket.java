@@ -10,8 +10,8 @@ import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.MaterialSources;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.util.ChunkUtils;
-import com.huanghuang.rsintegration.util.ModClassLoader;
 import com.huanghuang.rsintegration.util.Reflect;
+import com.huanghuang.rsintegration.reflection.probes.EidolonReflection;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;
@@ -44,41 +44,24 @@ public final class EidolonCraftPacket {
     @Nullable private final ResourceLocation dim;
     private final BlockPos pos;
 
-    private static volatile Class<?> crucibleRecipeClass;
-    private static volatile Class<?> crucibleRecipeStepClass;
-    private static volatile Class<?> crucibleTileEntityClass;
-    private static volatile Class<?> crucibleStepInnerClass;
+    // ── Shared class refs (resolved from probe) ─────────────────
     private static volatile java.lang.reflect.Field boilingField;
     private static volatile java.lang.reflect.Field stepsField;
 
-    private static void ensureClasses() {
-        if (!ModClassLoader.ensureClasses("eidolon",
-                "elucent.eidolon.recipe.CrucibleRecipe",
-                "elucent.eidolon.recipe.CrucibleRecipe$Step",
-                "elucent.eidolon.common.tile.CrucibleTileEntity",
-                "elucent.eidolon.common.tile.CrucibleTileEntity$CrucibleStep")) return;
-        try {
-            crucibleRecipeClass = Class.forName("elucent.eidolon.recipe.CrucibleRecipe");
-            crucibleRecipeStepClass = Class.forName("elucent.eidolon.recipe.CrucibleRecipe$Step");
-            crucibleTileEntityClass = Class.forName("elucent.eidolon.common.tile.CrucibleTileEntity");
-            crucibleStepInnerClass = Class.forName(
-                    "elucent.eidolon.common.tile.CrucibleTileEntity$CrucibleStep");
-
+    static {
+        if (EidolonReflection.crucibleTileEntityClass != null) {
             try {
-                boilingField = crucibleTileEntityClass.getDeclaredField("boiling");
+                boilingField = EidolonReflection.crucibleTileEntityClass.getDeclaredField("boiling");
                 boilingField.setAccessible(true);
             } catch (NoSuchFieldException e) {
                 RSIntegrationMod.LOGGER.warn("[RSI-Eidolon] boiling field not found");
             }
-
             try {
-                stepsField = crucibleTileEntityClass.getDeclaredField("steps");
+                stepsField = EidolonReflection.crucibleTileEntityClass.getDeclaredField("steps");
                 stepsField.setAccessible(true);
             } catch (NoSuchFieldException e) {
                 RSIntegrationMod.LOGGER.warn("[RSI-Eidolon] steps field not found");
             }
-        } catch (ClassNotFoundException e) {
-            RSIntegrationMod.LOGGER.error("[RSI-Eidolon] Failed to load Eidolon classes", e);
         }
     }
 
@@ -124,7 +107,6 @@ public final class EidolonCraftPacket {
 
     private static void tryCraft(ServerPlayer player, ResourceLocation recipeId,
                                   @Nullable ResourceLocation dim, BlockPos pos) {
-        ensureClasses();
         ServerLevel level = resolveLevel(player.server, dim, player);
         if (level == null) {
             player.sendSystemMessage(Component.translatable("rsi.generic.error.dim_not_found"));
@@ -136,7 +118,7 @@ public final class EidolonCraftPacket {
             player.sendSystemMessage(Component.translatable("rsi.generic.error.recipe_not_found", recipeId.toString()));
             return;
         }
-        if (!crucibleRecipeClass.isInstance(recipe)) {
+        if (!EidolonReflection.crucibleRecipeClass.isInstance(recipe)) {
             player.sendSystemMessage(Component.literal("§c" + Component.translatable("rsi.generic.error.wrong_recipe_type").getString()
                     + " [" + recipeId + " expected=CrucibleRecipe got=" + recipe.getClass().getSimpleName() + "]"));
             return;
@@ -144,7 +126,7 @@ public final class EidolonCraftPacket {
 
         ChunkUtils.loadChunk(level, pos);
         BlockEntity be = level.getBlockEntity(pos);
-        if (be == null || !crucibleTileEntityClass.isInstance(be)) {
+        if (be == null || !EidolonReflection.crucibleTileEntityClass.isInstance(be)) {
             player.sendSystemMessage(Component.translatable("rsi.eidolon.error.crucible_not_found"));
             return;
         }
@@ -260,7 +242,7 @@ public final class EidolonCraftPacket {
                     allExtracted.add(stack.copy());
                 }
 
-                Constructor<?> ctor = crucibleStepInnerClass.getConstructor(int.class, List.class);
+                Constructor<?> ctor = EidolonReflection.crucibleStepInnerClass.getConstructor(int.class, List.class);
                 Object step = ctor.newInstance(si.stirs, stepItems);
                 crucibleSteps.add(step);
             }

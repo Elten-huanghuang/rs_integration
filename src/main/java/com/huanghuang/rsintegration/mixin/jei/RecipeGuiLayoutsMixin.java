@@ -15,6 +15,8 @@ import com.huanghuang.rsintegration.sidepanel.network.OpenBoundMachineGuiPacket;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.mods.goety.GoetyRSNetworkHandler;
 import com.huanghuang.rsintegration.mods.goety.RSClientAvailabilityCache;
+import com.huanghuang.rsintegration.reflection.probes.FAReflection;
+import com.huanghuang.rsintegration.reflection.probes.TLMReflection;
 import com.huanghuang.rsintegration.util.ModIds;
 import mezz.jei.api.gui.IRecipeLayoutDrawable;
 import mezz.jei.api.gui.ingredient.IRecipeSlotView;
@@ -674,8 +676,6 @@ public class RecipeGuiLayoutsMixin {
         if (rsi$faCacheBuilt) return;
 
         try {
-            Class<?> ritualClass = Class.forName(
-                    "com.stal111.forbidden_arcanus.common.block.entity.forge.ritual.Ritual");
             int skipped = 0;
             int failed = 0;
             for (Object rawEntry : registry.entrySet()) {
@@ -683,7 +683,7 @@ public class RecipeGuiLayoutsMixin {
                 try {
                     var key = (net.minecraft.resources.ResourceKey<?>) entry.getKey();
                     Object value = entry.getValue();
-                    if (value == null || !ritualClass.isInstance(value)) {
+                    if (value == null || !FAReflection.ritualClass.isInstance(value)) {
                         skipped++;
                         continue;
                     }
@@ -764,8 +764,7 @@ public class RecipeGuiLayoutsMixin {
     @Unique
     private static net.minecraft.core.Registry<?> rsi$getFaRegistry(net.minecraft.client.multiplayer.ClientLevel level) {
         try {
-            Class<?> faReg = Class.forName("com.stal111.forbidden_arcanus.core.registry.FARegistries");
-            java.lang.reflect.Field f = faReg.getField("RITUAL");
+            java.lang.reflect.Field f = FAReflection.faRegistriesClass.getField("RITUAL");
             Object regKey = f.get(null);
             @SuppressWarnings({"unchecked", "rawtypes"})
             var key = (net.minecraft.resources.ResourceKey<? extends net.minecraft.core.Registry<?>>) regKey;
@@ -779,8 +778,7 @@ public class RecipeGuiLayoutsMixin {
                 for (java.lang.reflect.Method m : active.getClass().getMethods()) {
                     if (m.getName().equals("getRegistry") && m.getParameterCount() == 1) {
                         m.setAccessible(true);
-                        Class<?> faReg = Class.forName("com.stal111.forbidden_arcanus.core.registry.FARegistries");
-                        java.lang.reflect.Field f = faReg.getField("RITUAL");
+                        java.lang.reflect.Field f = FAReflection.faRegistriesClass.getField("RITUAL");
                         Object key = f.get(null);
                         Object reg = m.invoke(active, key);
                         if (reg instanceof net.minecraft.core.Registry<?> r) return r;
@@ -802,22 +800,13 @@ public class RecipeGuiLayoutsMixin {
     private static ResourceLocation rsi$faFingerprintMatch(
             net.minecraft.core.Registry registry, Object target) {
         try {
-            Class<?> ritualClass = Class.forName(
-                    "com.stal111.forbidden_arcanus.common.block.entity.forge.ritual.Ritual");
-            Class<?> essencesDefClass = Class.forName(
-                    "com.stal111.forbidden_arcanus.common.block.entity.forge.essence.EssencesDefinition");
-            Class<?> createItemResultClass = Class.forName(
-                    "com.stal111.forbidden_arcanus.common.block.entity.forge.ritual.result.CreateItemResult");
-            Class<?> upgradeTierResultClass = Class.forName(
-                    "com.stal111.forbidden_arcanus.common.block.entity.forge.ritual.result.UpgradeTierResult");
-
-            java.lang.reflect.Method essencesM = ritualClass.getMethod("essences");
-            java.lang.reflect.Method resultM = ritualClass.getMethod("result");
-            java.lang.reflect.Method inputsM = ritualClass.getMethod("inputs");
-            java.lang.reflect.Method aurealM = essencesDefClass.getMethod("aureal");
-            java.lang.reflect.Method soulsM  = essencesDefClass.getMethod("souls");
-            java.lang.reflect.Method bloodM  = essencesDefClass.getMethod("blood");
-            java.lang.reflect.Method expM    = essencesDefClass.getMethod("experience");
+            java.lang.reflect.Method essencesM = FAReflection.ritualClass.getMethod("essences");
+            java.lang.reflect.Method resultM = FAReflection.ritualClass.getMethod("result");
+            java.lang.reflect.Method inputsM = FAReflection.ritualClass.getMethod("inputs");
+            java.lang.reflect.Method aurealM = FAReflection.essencesDefinitionClass.getMethod("aureal");
+            java.lang.reflect.Method soulsM  = FAReflection.essencesDefinitionClass.getMethod("souls");
+            java.lang.reflect.Method bloodM  = FAReflection.essencesDefinitionClass.getMethod("blood");
+            java.lang.reflect.Method expM    = FAReflection.essencesDefinitionClass.getMethod("experience");
 
             Object targetResult = resultM.invoke(target);
             Object targetEssences = essencesM.invoke(target);
@@ -838,7 +827,7 @@ public class RecipeGuiLayoutsMixin {
 
             for (Object key : registry.keySet()) {
                 Object candidate = registry.get((net.minecraft.resources.ResourceKey<?>) key);
-                if (candidate == null || !ritualClass.isInstance(candidate)) continue;
+                if (candidate == null || !FAReflection.ritualClass.isInstance(candidate)) continue;
 
                 Object candResult = resultM.invoke(candidate);
                 Object candEssences = essencesM.invoke(candidate);
@@ -851,21 +840,21 @@ public class RecipeGuiLayoutsMixin {
                 List<?> candInputs = (List<?>) inputsM.invoke(candidate);
                 if ((candInputs != null ? candInputs.size() : 0) != targetInputCount) continue;
 
-                if (createItemResultClass.isInstance(targetResult)
-                        && createItemResultClass.isInstance(candResult)) {
+                if (FAReflection.createItemResultClass.isInstance(targetResult)
+                        && FAReflection.createItemResultClass.isInstance(candResult)) {
                     java.lang.reflect.Method getResultM =
-                            createItemResultClass.getMethod("getResult");
+                            FAReflection.createItemResultClass.getMethod("getResult");
                     ItemStack targetOut = (ItemStack) getResultM.invoke(targetResult);
                     ItemStack candOut = (ItemStack) getResultM.invoke(candResult);
                     if (ItemStack.isSameItemSameTags(targetOut, candOut)) {
                         return ((net.minecraft.resources.ResourceKey<?>) key).location();
                     }
-                } else if (upgradeTierResultClass.isInstance(targetResult)
-                        && upgradeTierResultClass.isInstance(candResult)) {
+                } else if (FAReflection.upgradeTierResultClass.isInstance(targetResult)
+                        && FAReflection.upgradeTierResultClass.isInstance(candResult)) {
                     java.lang.reflect.Method getReqM =
-                            upgradeTierResultClass.getMethod("getRequiredTier");
+                            FAReflection.upgradeTierResultClass.getMethod("getRequiredTier");
                     java.lang.reflect.Method getUpM =
-                            upgradeTierResultClass.getMethod("getUpgradedTier");
+                            FAReflection.upgradeTierResultClass.getMethod("getUpgradedTier");
                     if ((int) getReqM.invoke(targetResult) == (int) getReqM.invoke(candResult)
                             && (int) getUpM.invoke(targetResult) == (int) getUpM.invoke(candResult)) {
                         return ((net.minecraft.resources.ResourceKey<?>) key).location();
@@ -909,8 +898,7 @@ public class RecipeGuiLayoutsMixin {
             if (level == null) return null;
 
             // Access InitRecipes.ALTAR_CRAFTING recipe type
-            Class<?> initRecipes = Class.forName("com.github.tartaricacid.touhoulittlemaid.init.InitRecipes");
-            java.lang.reflect.Field f = initRecipes.getField("ALTAR_CRAFTING");
+            java.lang.reflect.Field f = TLMReflection.initRecipesClass.getField("ALTAR_CRAFTING");
             var recipeType = (net.minecraft.world.item.crafting.RecipeType<?>) f.get(null);
 
             var access = level.registryAccess();

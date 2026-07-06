@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
+import com.huanghuang.rsintegration.reflection.probes.FarmersDelightReflection;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.core.BlockPos;
@@ -33,8 +34,6 @@ import java.util.Map;
 
 public final class SkilletBatchDelegate implements com.huanghuang.rsintegration.crafting.batch.IBatchDelegate {
 
-    private static final String SKILLET_BE =
-            "vectorwing.farmersdelight.common.block.entity.SkilletBlockEntity";
     private static final String CAMPFIRE_BE =
             "net.minecraft.world.level.block.entity.CampfireBlockEntity";
 
@@ -55,10 +54,7 @@ public final class SkilletBatchDelegate implements com.huanghuang.rsintegration.
     private Object campfireBE;
     private boolean campfireChunkForced;
 
-    private static volatile Class<?> skilletClass;
     private static volatile Class<?> campfireClass;
-    private static volatile Field skilletCookingTime;
-    private static volatile Field skilletCookingTimeTotal;
     private static final Field CAMPFIRE_ITEMS;
     private static final Field CAMPFIRE_COOKING_PROGRESS;
     private static final Field CAMPFIRE_COOKING_TIME;
@@ -418,62 +414,23 @@ public final class SkilletBatchDelegate implements com.huanghuang.rsintegration.
 
     // ── reflection ──
 
-    private static void probeReflection() {
+    private static void ensureCampfireClass() {
         if (reflectionProbed) return;
         reflectionProbed = true;
         try {
-            skilletClass = Class.forName(SKILLET_BE);
             campfireClass = Class.forName(CAMPFIRE_BE);
-            // Fields may be declared on SkilletBlockEntity or inherited from
-            // CampfireBlockEntity. Walk the hierarchy and try SRG name fallbacks.
-            skilletCookingTime = resolveFieldInHierarchy(skilletClass,
-                    "cookingTime", "f_59044_");
-            skilletCookingTimeTotal = resolveFieldInHierarchy(skilletClass,
-                    "cookingTimeTotal", "f_");
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-Skillet] Reflection probe failed: {}", e.toString());
         }
     }
 
-    @Nullable
-    private static Field resolveFieldInHierarchy(Class<?> clazz, String official, String srgPrefix) {
-        Class<?> current = clazz;
-        while (current != null && current != Object.class) {
-            Field f = resolveField(current, official, "");
-            if (f != null) return f;
-            // Try SRG name: scan declared fields for names starting with the SRG prefix
-            for (Field df : current.getDeclaredFields()) {
-                if (df.getName().startsWith(srgPrefix) && df.getType() == int.class) {
-                    df.setAccessible(true);
-                    return df;
-                }
-            }
-            current = current.getSuperclass();
-        }
-        return null;
-    }
-
     private static boolean isSkilletBE(BlockEntity be) {
-        if (skilletClass == null) {
-            try { skilletClass = Class.forName(SKILLET_BE); } catch (Exception e) {
-                RSIntegrationMod.LOGGER.warn("[RSI-Skillet] Reflection read failed: {}", e.toString());
-            }
-        }
-        if (skilletClass != null && skilletClass.isAssignableFrom(be.getClass())) return true;
-        Class<?> clazz = be.getClass();
-        while (clazz != null) {
-            if (clazz.getName().equals(SKILLET_BE)) return true;
-            clazz = clazz.getSuperclass();
-        }
-        return false;
+        return FarmersDelightReflection.skilletBEClass != null
+                && FarmersDelightReflection.skilletBEClass.isAssignableFrom(be.getClass());
     }
 
     private static boolean isCampfireBE(BlockEntity be) {
-        if (campfireClass == null) {
-            try { campfireClass = Class.forName(CAMPFIRE_BE); } catch (Exception e) {
-                RSIntegrationMod.LOGGER.warn("[RSI-Skillet] Reflection read failed: {}", e.toString());
-            }
-        }
+        ensureCampfireClass();
         if (campfireClass != null && campfireClass.isAssignableFrom(be.getClass())) return true;
         Class<?> clazz = be.getClass();
         while (clazz != null) {

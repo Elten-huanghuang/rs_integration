@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
+import com.huanghuang.rsintegration.reflection.probes.YHKReflection;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.core.BlockPos;
@@ -30,9 +31,6 @@ import java.util.Map;
 
 public final class CuisineBoardBatchDelegate implements IBatchDelegate {
 
-    private static final String BE_CLASS =
-            "dev.xkmc.youkaishomecoming.content.pot.table.board.CuisineBoardBlockEntity";
-
     private ServerPlayer player;
     private ServerLevel myLevel;
     private ResourceKey<Level> myDim;
@@ -53,7 +51,6 @@ public final class CuisineBoardBatchDelegate implements IBatchDelegate {
     private static volatile Method getResultMethod;
     private static volatile Method recreateMethod;
     private static volatile Method collectIngredientsMethod;
-    private static volatile Class<?> beBaseClass;
     private static volatile boolean reflectionProbed;
 
     @Override
@@ -86,7 +83,7 @@ public final class CuisineBoardBatchDelegate implements IBatchDelegate {
         probeReflection();
         // Use recreate() + collectIngredients() to get ALL required items
         // including the base model ingredients (rice, kelp/nori, etc.) that
-        // getCustomIngredients() doesn't include — it only returns the
+        // getCustomIngredients() doesn't include -- it only returns the
         // recipe-specific input list.
         List<Ingredient> ingredients = collectAllIngredients(recipe);
         if (ingredients.isEmpty()) {
@@ -174,7 +171,7 @@ public final class CuisineBoardBatchDelegate implements IBatchDelegate {
         }
 
         // Place items via addItem().  The model tree has transition states
-        // with EMPTY ingredient (RICE→SUSHI→GUNKAN etc.) that require
+        // with EMPTY ingredient (RICE->SUSHI->GUNKAN etc.) that require
         // empty-hand clicks to advance through.  When a material fails to
         // place, try an empty click to advance the model; when all materials
         // are placed, continue empty-clicking until the model stops changing.
@@ -201,7 +198,7 @@ public final class CuisineBoardBatchDelegate implements IBatchDelegate {
 
             if (pending.isEmpty()) break;
 
-            // Material placement failed — try empty click to advance model
+            // Material placement failed -- try empty click to advance model
             int er = addItem(be, ItemStack.EMPTY);
             if (er > 0) {
                 progress = true;
@@ -255,7 +252,7 @@ public final class CuisineBoardBatchDelegate implements IBatchDelegate {
             RSIntegrationMod.LOGGER.debug("[RSI-Cuisine] empty click advanced model (step {})", i);
         }
 
-        // Try complete — returns result when model is fully assembled
+        // Try complete -- returns result when model is fully assembled
         Object model = getModel(be);
         if (model == null) {
             craftDone = true;
@@ -295,7 +292,7 @@ public final class CuisineBoardBatchDelegate implements IBatchDelegate {
         if (be != null && isCuisineBE(be)) {
             Object model = getModel(be);
             if (model == null) {
-                // Board is empty — nothing to collect, craft was manually completed
+                // Board is empty -- nothing to collect, craft was manually completed
                 RSIntegrationMod.LOGGER.debug("[RSI-Cuisine] collectResult: board empty, already taken");
                 craftDone = true;
                 forceChunkLoad(false);
@@ -342,7 +339,7 @@ public final class CuisineBoardBatchDelegate implements IBatchDelegate {
     @Override
     public BlockPos getMachinePos() { return myPos; }
 
-    // ── plan helpers ──
+    // -- plan helpers --
 
     public static void addFuelIfNeeded(@Nullable String recipeModTypeId,
                                        Map<Item, Integer> itemAvailable,
@@ -356,7 +353,7 @@ public final class CuisineBoardBatchDelegate implements IBatchDelegate {
         return new ArrayList<>();
     }
 
-    // ── recipe accessors ──
+    // -- recipe accessors --
 
     @SuppressWarnings("unchecked")
     private static List<Ingredient> getCustomIngredients(Recipe<?> recipe) {
@@ -381,12 +378,12 @@ public final class CuisineBoardBatchDelegate implements IBatchDelegate {
         return ItemStack.EMPTY;
     }
 
-    // ── complete ingredient collection ──
+    // -- complete ingredient collection --
     //
     // TableItem.collectIngredients(List) is a default no-op (verified from
     // 2.6.1 bytecode).  The correct API is VariantTableItemBase.collectIngredients
     // (List, List) on the base model, which delegates to IngredientTableItem
-    // .collectIngredients(List) — that override recurses through the tree and
+    // .collectIngredients(List) -- that override recurses through the tree and
     // actually adds ingredients.  We union base-model ingredients with
     // recipe-specific ingredients from getCustomIngredients().
 
@@ -400,37 +397,35 @@ public final class CuisineBoardBatchDelegate implements IBatchDelegate {
             ResourceLocation baseId = (ResourceLocation) baseMethod.invoke(recipe);
 
             // Preferred path: VariantTableItemBase (covers most recipes)
-            try {
-                Class<?> vtbClass = Class.forName(
-                        "dev.xkmc.youkaishomecoming.content.pot.table.item.VariantTableItemBase");
-                java.lang.reflect.Field mapField = vtbClass.getField("MAP");
-                Map<?, ?> map = (Map<?, ?>) mapField.get(null);
-                Object vtb = map.get(baseId);
-                if (vtb != null) {
-                    List<Ingredient> baseList = new ArrayList<>();
-                    List<Ingredient> extraList = new ArrayList<>();
-                    java.lang.reflect.Method cm = vtbClass.getMethod(
-                            "collectIngredients", List.class, List.class);
-                    cm.invoke(vtb, baseList, extraList);
-                    for (Ingredient ing : baseList) {
-                        if (!ing.isEmpty()) all.add(ing);
+            if (YHKReflection.variantTableItemBaseClass != null) {
+                try {
+                    java.lang.reflect.Field mapField = YHKReflection.variantTableItemBaseClass.getField("MAP");
+                    Map<?, ?> map = (Map<?, ?>) mapField.get(null);
+                    Object vtb = map.get(baseId);
+                    if (vtb != null) {
+                        List<Ingredient> baseList = new ArrayList<>();
+                        List<Ingredient> extraList = new ArrayList<>();
+                        java.lang.reflect.Method cm = YHKReflection.variantTableItemBaseClass.getMethod(
+                                "collectIngredients", List.class, List.class);
+                        cm.invoke(vtb, baseList, extraList);
+                        for (Ingredient ing : baseList) {
+                            if (!ing.isEmpty()) all.add(ing);
+                        }
                     }
+                } catch (Exception e) {
+                    RSIntegrationMod.LOGGER.debug("[RSI-Cuisine] VTB collect failed: {}",
+                            e.toString());
                 }
-            } catch (Exception e) {
-                RSIntegrationMod.LOGGER.debug("[RSI-Cuisine] VTB collect failed: {}",
-                        e.toString());
             }
 
             // Fallback: IngredientTableItem.FIXED (standalone fixed items)
-            if (all.isEmpty()) {
+            if (all.isEmpty() && YHKReflection.ingredientTableItemClass != null) {
                 try {
-                    Class<?> itiClass = Class.forName(
-                            "dev.xkmc.youkaishomecoming.content.pot.table.item.IngredientTableItem");
-                    java.lang.reflect.Field fixedField = itiClass.getField("FIXED");
+                    java.lang.reflect.Field fixedField = YHKReflection.ingredientTableItemClass.getField("FIXED");
                     Map<?, ?> fixedMap = (Map<?, ?>) fixedField.get(null);
                     Object fixed = fixedMap.get(baseId);
                     if (fixed != null) {
-                        java.lang.reflect.Method cm = itiClass.getMethod(
+                        java.lang.reflect.Method cm = YHKReflection.ingredientTableItemClass.getMethod(
                                 "collectIngredients", List.class);
                         cm.invoke(fixed, all);
                     }
@@ -462,43 +457,45 @@ public final class CuisineBoardBatchDelegate implements IBatchDelegate {
         return all;
     }
 
-    // ── reflection ──
+    // -- reflection --
 
     private static void probeReflection() {
         if (reflectionProbed) return;
         reflectionProbed = true;
+        if (YHKReflection.cuisineBoardBEClass == null) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Cuisine] YHKReflection cuisine probe not ready");
+            return;
+        }
         try {
-            beBaseClass = Class.forName(BE_CLASS);
-
-            addItemMethod = beBaseClass.getMethod("addItem", ItemStack.class);
+            addItemMethod = YHKReflection.cuisineBoardBEClass.getMethod("addItem", ItemStack.class);
             addItemMethod.setAccessible(true);
 
-            addToPlayerMethod = beBaseClass.getMethod("addToPlayer",
+            addToPlayerMethod = YHKReflection.cuisineBoardBEClass.getMethod("addToPlayer",
                     net.minecraft.world.entity.player.Player.class);
             addToPlayerMethod.setAccessible(true);
 
-            clearMethod = beBaseClass.getMethod("clear");
+            clearMethod = YHKReflection.cuisineBoardBEClass.getMethod("clear");
             clearMethod.setAccessible(true);
 
-            performToolActionMethod = beBaseClass.getMethod("performToolAction", ItemStack.class);
+            performToolActionMethod = YHKReflection.cuisineBoardBEClass.getMethod("performToolAction", ItemStack.class);
             performToolActionMethod.setAccessible(true);
 
-            getModelMethod = beBaseClass.getMethod("getModel");
+            getModelMethod = YHKReflection.cuisineBoardBEClass.getMethod("getModel");
             getModelMethod.setAccessible(true);
 
-            Class<?> tableItemClass = Class.forName(
-                    "dev.xkmc.youkaishomecoming.content.pot.table.item.TableItem");
-            completeMethod = tableItemClass.getMethod("complete", Level.class);
-            doTransformMethod = tableItemClass.getMethod("doTransform");
+            if (YHKReflection.tableItemClass != null) {
+                completeMethod = YHKReflection.tableItemClass.getMethod("complete", Level.class);
+                doTransformMethod = YHKReflection.tableItemClass.getMethod("doTransform");
+            }
 
-            Class<?> recipeClass = Class.forName(
-                    "dev.xkmc.youkaishomecoming.content.pot.table.recipe.CuisineRecipe");
-            getCustomIngredientsMethod = recipeClass.getMethod("getCustomIngredients");
-            getCustomIngredientsMethod.setAccessible(true);
-            getResultMethod = recipeClass.getMethod("getResult");
-            getResultMethod.setAccessible(true);
-            recreateMethod = recipeClass.getMethod("recreate");
-            recreateMethod.setAccessible(true);
+            if (YHKReflection.cuisineRecipeClass != null) {
+                getCustomIngredientsMethod = YHKReflection.cuisineRecipeClass.getMethod("getCustomIngredients");
+                getCustomIngredientsMethod.setAccessible(true);
+                getResultMethod = YHKReflection.cuisineRecipeClass.getMethod("getResult");
+                getResultMethod.setAccessible(true);
+                recreateMethod = YHKReflection.cuisineRecipeClass.getMethod("recreate");
+                recreateMethod.setAccessible(true);
+            }
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-Cuisine] Reflection probe failed: {}", e.toString());
         }
@@ -519,10 +516,10 @@ public final class CuisineBoardBatchDelegate implements IBatchDelegate {
 
     private static boolean isCuisineBE(BlockEntity be) {
         probeReflection();
-        if (beBaseClass != null && beBaseClass.isAssignableFrom(be.getClass())) return true;
+        if (YHKReflection.cuisineBoardBEClass != null && YHKReflection.cuisineBoardBEClass.isAssignableFrom(be.getClass())) return true;
         Class<?> clazz = be.getClass();
         while (clazz != null) {
-            if (clazz.getName().equals(BE_CLASS)) return true;
+            if (YHKReflection.cuisineBoardBEClass != null && YHKReflection.cuisineBoardBEClass.getName().equals(clazz.getName())) return true;
             clazz = clazz.getSuperclass();
         }
         return false;
@@ -601,18 +598,17 @@ public final class CuisineBoardBatchDelegate implements IBatchDelegate {
     }
 
     private static boolean isCuisineRecipe(Recipe<?> recipe) {
+        if (YHKReflection.cuisineRecipeClass == null) return false;
+        if (YHKReflection.cuisineRecipeClass.isAssignableFrom(recipe.getClass())) return true;
         Class<?> clazz = recipe.getClass();
         while (clazz != null) {
-            if (clazz.getName().equals(
-                    "dev.xkmc.youkaishomecoming.content.pot.table.recipe.CuisineRecipe")) {
-                return true;
-            }
+            if (YHKReflection.cuisineRecipeClass.getName().equals(clazz.getName())) return true;
             clazz = clazz.getSuperclass();
         }
         return false;
     }
 
-    // ── cleanup ──
+    // -- cleanup --
 
     private void clearAndRefund() {
         myLevel.getChunk(myPos);
@@ -620,7 +616,7 @@ public final class CuisineBoardBatchDelegate implements IBatchDelegate {
         if (be == null || !isCuisineBE(be)) return;
 
         // If the model is gone (player manually completed the craft and took
-        // the result), don't refund anything — that would duplicate items.
+        // the result), don't refund anything -- that would duplicate items.
         Object model = getModel(be);
         if (model == null) {
             RSIntegrationMod.LOGGER.debug("[RSI-Cuisine] clearAndRefund: board empty, skipping refund");

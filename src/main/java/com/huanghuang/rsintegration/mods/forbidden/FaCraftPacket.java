@@ -9,6 +9,7 @@ import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.MaterialSources;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
+import com.huanghuang.rsintegration.reflection.probes.FAReflection;
 import com.huanghuang.rsintegration.util.ChunkUtils;
 import com.huanghuang.rsintegration.util.Reflect;
 import com.refinedmods.refinedstorage.api.network.INetwork;
@@ -42,10 +43,6 @@ public final class FaCraftPacket {
     private final BlockPos pos;
 
     // ── static init ────────────────────────────────────────────
-
-    private static void ensureClasses() {
-        FaRitualHelper.ensureClasses();
-    }
 
     @Nullable
     private static Object getRitualById(ResourceLocation id, ServerLevel level) {
@@ -94,7 +91,6 @@ public final class FaCraftPacket {
 
     private static void tryCraft(ServerPlayer player, ResourceLocation ritualId,
                                   @Nullable ResourceLocation dim, BlockPos pos) {
-        ensureClasses();
         ServerLevel level = resolveLevel(player.server, dim, player);
         if (level == null) {
             player.sendSystemMessage(Component.translatable("rsi.generic.error.dim_not_found"));
@@ -109,7 +105,7 @@ public final class FaCraftPacket {
 
         ChunkUtils.loadChunk(level, pos);
         BlockEntity be = level.getBlockEntity(pos);
-        if (be == null || !FaRitualHelper.hephaestusForgeBEClass.isInstance(be)) {
+        if (be == null || !FAReflection.hephaestusForgeBEClass.isInstance(be)) {
             player.sendSystemMessage(Component.translatable("rsi.fa.error.forge_not_found"));
             return;
         }
@@ -119,7 +115,7 @@ public final class FaCraftPacket {
         // Log ritual result type for diagnostics
         try {
             Object result = FaRitualHelper.invoke(ritual, "result");
-            if (result != null && FaRitualHelper.upgradeTierResultClass.isInstance(result)) {
+            if (result != null && FAReflection.upgradeTierResultClass.isInstance(result)) {
                 RSIntegrationMod.LOGGER.debug("[RSI-FA] UpgradeTierResult ritual — output depends on main ingredient");
             }
         } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-FA] Reflection probe failed", e); }
@@ -135,7 +131,7 @@ public final class FaCraftPacket {
         // UpgradeTierResult: FA's checkConditions requires EXACT tier match
         try {
             Object result = FaRitualHelper.invoke(ritual, "result");
-            if (result != null && FaRitualHelper.upgradeTierResultClass.isInstance(result)) {
+            if (result != null && FAReflection.upgradeTierResultClass.isInstance(result)) {
                 int upgradeReqTier = FaRitualHelper.readUpgradeRequiredTier(result);
                 if (upgradeReqTier >= 0 && forgeTier != upgradeReqTier) {
                     player.sendSystemMessage(Component.translatable(
@@ -154,7 +150,7 @@ public final class FaCraftPacket {
             return;
         }
         try {
-            Boolean active = (Boolean) Reflect.getMethodOrThrow(FaRitualHelper.ritualManagerClass, "isRitualActive", "isRitualActive").invoke(ritualManager);
+            Boolean active = (Boolean) Reflect.getMethodOrThrow(FAReflection.ritualManagerClass, "isRitualActive", "isRitualActive").invoke(ritualManager);
             if (Boolean.TRUE.equals(active)) {
                 player.sendSystemMessage(Component.translatable("rsi.fa.warn.ritual_active"));
                 return;
@@ -168,13 +164,13 @@ public final class FaCraftPacket {
                 List<?> requiredEnhancers = FaRitualHelper.invokeList(requirements, "enhancers");
                 if (requiredEnhancers != null && !requiredEnhancers.isEmpty()) {
                     java.lang.reflect.Field accessorField = Reflect.findField(
-                            FaRitualHelper.ritualManagerClass, "enhancerAccessor").orElse(null);
+                            FAReflection.ritualManagerClass, "enhancerAccessor").orElse(null);
                     List<?> installedEnhancers = null;
                     if (accessorField != null) {
                         accessorField.setAccessible(true);
                         Object ea = accessorField.get(ritualManager);
                         if (ea != null) {
-                            installedEnhancers = (List<?>) Reflect.getMethodOrThrow(FaRitualHelper.enhancerAccessorClass, "getEnhancers", "getEnhancers").invoke(ea);
+                            installedEnhancers = (List<?>) Reflect.getMethodOrThrow(FAReflection.enhancerAccessorClass, "getEnhancers", "getEnhancers").invoke(ea);
                         }
                     }
                     for (Object holder : requiredEnhancers) {
@@ -254,7 +250,7 @@ public final class FaCraftPacket {
         List<Object> emptyPedestals = new ArrayList<>();
         for (Object ped : pedestals) {
             try {
-                ItemStack stack = (ItemStack) Reflect.getMethodOrThrow(FaRitualHelper.pedestalBEClass, "getStack", "getStack").invoke(ped);
+                ItemStack stack = (ItemStack) Reflect.getMethodOrThrow(FAReflection.pedestalBEClass, "getStack", "getStack").invoke(ped);
                 if (stack.isEmpty()) {
                     emptyPedestals.add(ped);
                 }
@@ -325,7 +321,7 @@ public final class FaCraftPacket {
                     ItemStack single = template.copy();
                     single.setCount(1);
                     Object ped = emptyPedestals.get(pedIdx++);
-                    Reflect.getMethodOrThrow(FaRitualHelper.pedestalBEClass, "setStackAndSync", "setStackAndSync", ItemStack.class)
+                    Reflect.getMethodOrThrow(FAReflection.pedestalBEClass, "setStackAndSync", "setStackAndSync", ItemStack.class)
                             .invoke(ped, single);
                     filledPedestals.add(ped);
                 }
@@ -340,19 +336,19 @@ public final class FaCraftPacket {
 
         // Populate cachedIngredients
         try {
-            Object curEssences = Reflect.getMethodOrThrow(FaRitualHelper.hephaestusForgeBEClass, "getEssences", "getEssences").invoke(be);
-            Method updateIngredient = Reflect.getMethodOrThrow(FaRitualHelper.ritualManagerClass, "updateIngredient", "updateIngredient",
-                    FaRitualHelper.pedestalBEClass, ItemStack.class, FaRitualHelper.essencesDefinitionClass);
+            Object curEssences = Reflect.getMethodOrThrow(FAReflection.hephaestusForgeBEClass, "getEssences", "getEssences").invoke(be);
+            Method updateIngredient = Reflect.getMethodOrThrow(FAReflection.ritualManagerClass, "updateIngredient", "updateIngredient",
+                    FAReflection.pedestalBEClass, ItemStack.class, FAReflection.essencesDefinitionClass);
             for (Object ped : pedestals) {
                 if (!filledPedestals.contains(ped)) {
                     updateIngredient.invoke(ritualManager, ped, ItemStack.EMPTY, curEssences);
                 }
             }
             for (Object ped : filledPedestals) {
-                ItemStack stack = (ItemStack) Reflect.getMethodOrThrow(FaRitualHelper.pedestalBEClass, "getStack", "getStack").invoke(ped);
+                ItemStack stack = (ItemStack) Reflect.getMethodOrThrow(FAReflection.pedestalBEClass, "getStack", "getStack").invoke(ped);
                 updateIngredient.invoke(ritualManager, ped, stack, curEssences);
             }
-            Reflect.getMethodOrThrow(FaRitualHelper.ritualManagerClass, "updateValidRitual", "updateValidRitual", FaRitualHelper.essencesDefinitionClass)
+            Reflect.getMethodOrThrow(FAReflection.ritualManagerClass, "updateValidRitual", "updateValidRitual", FAReflection.essencesDefinitionClass)
                     .invoke(ritualManager, curEssences);
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.debug("[RSI-FA] cachedIngredients/updateValidRitual failed: {}", e.toString());
@@ -381,16 +377,16 @@ public final class FaCraftPacket {
 
         // Phase 5: start the ritual AFTER committing ledger
         try {
-            Object essenceMgr = Reflect.getMethodOrThrow(FaRitualHelper.hephaestusForgeBEClass, "getEssenceManager", "getEssenceManager").invoke(be);
-            Object essencesStorage = Reflect.getMethodOrThrow(FaRitualHelper.essenceManagerClass, "getStorage", "getStorage").invoke(essenceMgr);
+            Object essenceMgr = Reflect.getMethodOrThrow(FAReflection.hephaestusForgeBEClass, "getEssenceManager", "getEssenceManager").invoke(be);
+            Object essencesStorage = Reflect.getMethodOrThrow(FAReflection.essenceManagerClass, "getStorage", "getStorage").invoke(essenceMgr);
             BooleanConsumerProxy callback = new BooleanConsumerProxy(
                     player, be, filledPedestals, network, starterStack);
             Object proxy = Proxy.newProxyInstance(
-                    FaRitualHelper.booleanConsumerClass.getClassLoader(),
-                    new Class<?>[]{FaRitualHelper.booleanConsumerClass},
+                    FAReflection.booleanConsumerClass.getClassLoader(),
+                    new Class<?>[]{FAReflection.booleanConsumerClass},
                     callback);
 
-            Reflect.getMethodOrThrow(FaRitualHelper.ritualManagerClass, "tryStartRitual", "tryStartRitual", FaRitualHelper.essencesStorageClass, FaRitualHelper.booleanConsumerClass)
+            Reflect.getMethodOrThrow(FAReflection.ritualManagerClass, "tryStartRitual", "tryStartRitual", FAReflection.essencesStorageClass, FAReflection.booleanConsumerClass)
                     .invoke(ritualManager, essencesStorage, proxy);
 
             if (callback.rejected) {
@@ -478,7 +474,7 @@ public final class FaCraftPacket {
                                      List<Object> filledPedestals, @Nullable INetwork network) {
         for (Object ped : filledPedestals) {
             try {
-                ItemStack stack = (ItemStack) Reflect.getMethodOrThrow(FaRitualHelper.pedestalBEClass, "getStack", "getStack").invoke(ped);
+                ItemStack stack = (ItemStack) Reflect.getMethodOrThrow(FAReflection.pedestalBEClass, "getStack", "getStack").invoke(ped);
                 if (stack != null && !stack.isEmpty()) {
                     if (network != null) {
                         ItemStack leftover = network.insertItem(stack, stack.getCount(),
@@ -490,7 +486,7 @@ public final class FaCraftPacket {
                         ItemHandlerHelper.giveItemToPlayer(player, stack);
                     }
                 }
-                Reflect.getMethodOrThrow(FaRitualHelper.pedestalBEClass, "clearStack", "clearStack", Level.class, boolean.class)
+                Reflect.getMethodOrThrow(FAReflection.pedestalBEClass, "clearStack", "clearStack", Level.class, boolean.class)
                         .invoke(ped, null, false);
             } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
         }
