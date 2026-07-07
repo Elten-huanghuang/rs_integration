@@ -65,5 +65,5 @@ public final class GoetyReflection {
         }
     }
 
-    public static boolean isAvailable() { return ready; }
+    public static boolean isAvailable() { return darkAltarBEClass != null; }
 }

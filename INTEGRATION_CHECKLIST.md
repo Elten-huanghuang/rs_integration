@@ -62,7 +62,7 @@ ModType.register("malum",
     new String[]{"com.sammy.malum.common.recipe."},  // 配方前缀
     new String[]{"spirit_altar"},                      // blockKey 关键词
     new String[0],                                      // blockKey 前缀
-    MalumBatchDelegate::new);                           // delegate 构造引用
+    ModType.delegateSupplier("com.huanghuang.rsintegration.mods.malum.MalumBatchDelegate"));
 ```
 
 ### 3.2 RecipeHandler（配方适配层）
@@ -87,24 +87,34 @@ public final class MalumRecipeHandler extends AbstractRecipeHandler {
 
 ### 3.3 BatchDelegate（合成委托）
 
-`IBatchDelegate` 是机器交互的核心，每个机器类型一个实现。继承自 `AbstractBatchDelegate`（`crafting/batch/AbstractBatchDelegate.java`），负责：
+`IBatchDelegate` 是机器交互的核心接口，所有实现继承自 `AbstractBatchDelegate`（`crafting/batch/AbstractBatchDelegate.java`）。
 
-| 方法 | 职责 |
+**模板方法（`final`，基类统一实现，子类禁止覆写）：**
+
+| 模板方法 | 内置保护 |
+|----------|----------|
+| `isCraftComplete(level)` | `level.isLoaded(pos)` 区块卸载保护；`be == null \| be.isRemoved()` → 视为完成 → 委托钩子 |
+| `onBatchFailed(player, reason)` | `usingSharedLedger` 防双倍退款 + 区块加载保护 → 委托钩子 |
+
+**钩子方法（子类覆写，业务逻辑在此）：**
+
+| 钩子 | 职责 |
 |------|------|
-| `validateAndInit()` | 验证机器存在、空闲、配方可执行 |
+| `validateAndInit(player, recipeId, dim, pos)` | 验证机器存在、空闲、配方可执行 |
 | `getRequiredMaterials()` | 返回合成所需全部材料 |
-| `tryStartSingleCraft()` | 从网络提取材料 → 填入机器 → 触发合成 |
-| `tryStartWithMaterials()` | 链式路径：材料已预扣，直接填机器 |
-| `isCraftComplete()` | tick 轮询：合成是否完成 |
-| `collectResult()` | 提取产物 |
-| `onBatchFailed()` / `onBatchFinished()` | 清理、退款 |
+| `getMachinePos()` | 返回绑定的机器坐标（`abstract`，每个子类必须实现） |
+| `tryStartSingleCraft(player)` | 独立路径：从网络提取材料 → 填入机器 → 触发合成 |
+| `tryStartSingleCraft(player, sharedLedger)` | 链式路径重载：材料已由链调度预扣（`default` 方法，按需覆写） |
+| `tryStartWithMaterials(player, materials, sharedLedger)` | 链式路径：材料已预扣，直接填机器 |
+| `isMachineCraftFinished(level, be)` | tick 轮询：合成是否完成（`level` + `be` 已由模板保证非空且区块已加载） |
+| `collectResult(player)` | 提取产物，返回 `ItemStack` |
+| `clearMachineState(be, player)` | 清退机器内残留材料 |
+| `onBatchFinished(player)` | 批次结束清理（覆写时须调用 `resetState()`） |
+| `resetState()` | 重置 ledger / network / sharedLedger / `usingSharedLedger` / `seenWarnStates`（基类提供，`onBatchFinished` 和 `clearMachineState` 末尾必须调用） |
 
 **Delegate 不应缓存 BlockEntity / IItemHandler**——每次 tick 重新 `level.getBlockEntity(pos)` 获取。
 
-**基类模板方法：** `AbstractBatchDelegate` 提供带保护的默认实现：
-- `isCraftComplete(level)` — 内含 `level.isLoaded(pos)` 区块卸载保护，子类覆写 `isMachineCraftFinished(be)` 即可
-- `onBatchFailed(player, reason)` — 内含 `usingSharedLedger` 防双倍退款保护，子类覆写 `clearMachineState(be, player)` 即可
-- `warnOnce(state, format, args...)` — tick 路径限流日志，只在错误状态变更时输出，避免每秒 20 条刷屏
+**`warnOnce(state, format, args...)`** — tick 路径限流日志（`HashSet<String>` 去重），每个不同的 `state` key 在批次生命周期内最多输出一次（A→B→A 不会重复输出 A）。`resetState()` 中清空。
 
 ### 3.4 绑定系统（Binding）
 
@@ -197,7 +207,7 @@ javap -c -p -cp <mod>.jar com.example.YourBlockEntity
 
 ### 5.4 创建 BatchDelegate
 
-`mods/<mod>/XXBatchDelegate.java`，实现 `IBatchDelegate`。
+`mods/<mod>/XXBatchDelegate.java`，继承 `AbstractBatchDelegate`，覆写钩子方法（`isMachineCraftFinished`、`clearMachineState` 等）。
 
 ### 5.5 注册 ModType + JEI
 

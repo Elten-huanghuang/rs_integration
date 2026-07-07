@@ -32,6 +32,7 @@ public final class GenericBatchDelegate extends AbstractBatchDelegate {
     private BlockPos myPos;
     private Recipe<?> recipe;
     private ItemStack pendingResult;
+    private final List<ItemStack> pendingSecondary = new ArrayList<>();
     private boolean craftDone;
 
     @Override
@@ -66,6 +67,7 @@ public final class GenericBatchDelegate extends AbstractBatchDelegate {
         this.ledger = new ExtractionLedger();
         this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
         this.craftDone = false;
+        this.pendingSecondary.clear();
 
         List<IngredientSpec> specs = CraftPacketUtils.extractIngredientSpecs(recipe);
         if (specs == null || specs.isEmpty()) {
@@ -79,6 +81,19 @@ public final class GenericBatchDelegate extends AbstractBatchDelegate {
         if (this.pendingResult.isEmpty()) {
             RSIntegrationMod.LOGGER.error("[RSI-Batch-Generic] Cannot determine result for recipe {}", recipe.getId());
             return false;
+        }
+
+        // Capture secondary outputs early.
+        // For CraftingRecipe, getRecipeRemainders (Forge API) handles all
+        // remainders — reflection-based scanning would duplicate them.
+        if (recipe instanceof net.minecraft.world.item.crafting.CraftingRecipe cr) {
+            for (ItemStack remainder : CraftPacketUtils.getRecipeRemainders(cr)) {
+                if (!remainder.isEmpty()) this.pendingSecondary.add(remainder.copy());
+            }
+        } else {
+            this.pendingSecondary.addAll(
+                    com.huanghuang.rsintegration.recipe.ModRecipeHandlers.tryGetSecondaryOutputs(
+                            recipe, player.serverLevel().registryAccess()));
         }
 
         // Phase 2: reserve all ingredients via ledger
@@ -131,12 +146,29 @@ public final class GenericBatchDelegate extends AbstractBatchDelegate {
         this.ledger = sharedLedger;
         this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
         this.craftDone = false;
+        this.pendingSecondary.clear();
 
         this.pendingResult = computeResult(player);
         if (this.pendingResult.isEmpty()) {
             RSIntegrationMod.LOGGER.error("[RSI-Batch-Generic] Cannot determine result for recipe {}",
                     recipe != null ? recipe.getId() : "null");
             return false;
+        }
+
+        // Capture secondary outputs (remainders, extra products) so they
+        // are not voided.  The chain collects them via getPendingSecondary().
+        // For CraftingRecipe, getRecipeRemainders (Forge API) handles all
+        // remainders — reflection-based scanning would duplicate them.
+        if (player != null) {
+            if (recipe instanceof net.minecraft.world.item.crafting.CraftingRecipe cr) {
+                for (ItemStack remainder : CraftPacketUtils.getRecipeRemainders(cr)) {
+                    if (!remainder.isEmpty()) this.pendingSecondary.add(remainder.copy());
+                }
+            } else {
+                this.pendingSecondary.addAll(
+                        com.huanghuang.rsintegration.recipe.ModRecipeHandlers.tryGetSecondaryOutputs(
+                                recipe, player.serverLevel().registryAccess()));
+            }
         }
 
         // Materials were already reserved and committed by the chain's
@@ -157,6 +189,14 @@ public final class GenericBatchDelegate extends AbstractBatchDelegate {
         pendingResult = ItemStack.EMPTY;
         craftDone = false;
         return r;
+    }
+
+    /** Secondary outputs (remainders, extra products) that the chain should
+     *  add to virtual inventory.  Call after {@link #collectResult}. */
+    public List<ItemStack> getPendingSecondary() {
+        List<ItemStack> copy = new ArrayList<>(pendingSecondary);
+        pendingSecondary.clear();
+        return copy;
     }
 
     @Override

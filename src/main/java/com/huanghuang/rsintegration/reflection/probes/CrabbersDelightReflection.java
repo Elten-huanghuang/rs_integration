@@ -28,5 +28,5 @@ public final class CrabbersDelightReflection {
         }
     }
 
-    public static boolean isAvailable() { return ready; }
+    public static boolean isAvailable() { return crabTrapBEClass != null; }
 }

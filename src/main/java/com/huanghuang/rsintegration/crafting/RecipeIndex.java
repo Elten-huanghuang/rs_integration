@@ -392,6 +392,9 @@ public final class RecipeIndex {
      */
     private static boolean isIdentityRecipe(Recipe<?> recipe, ItemStack result,
                                             ModRecipeHandler handler) {
+        // NBT-bearing results indicate a transformation (charge, repair, clean,
+        // compress-with-NBT, etc.) — not a trivial identity recipe.
+        if (result.hasTag()) return false;
         Item resultItem = result.getItem();
         List<net.minecraft.world.item.crafting.Ingredient> ingredients;
         if (handler != null) {
@@ -429,6 +432,13 @@ public final class RecipeIndex {
     // ── result-item extraction (formerly in ModRecipeIndex) ─────
 
     private static final Map<Class<?>, Method> resultMethodCache = new ConcurrentHashMap<>();
+    /** Caches the output ItemStack field (positive) or NEGATIVE sentinel per recipe class. */
+    private static final Map<Class<?>, java.lang.reflect.Field> outputFieldCache = new ConcurrentHashMap<>();
+    private static final java.lang.reflect.Field NO_OUTPUT_FIELD;
+    static {
+        try { NO_OUTPUT_FIELD = RecipeIndex.class.getDeclaredField("index"); }
+        catch (NoSuchFieldException e) { throw new RuntimeException(e); }
+    }
 
     public static ItemStack tryGetResultItem(Recipe<?> recipe, RegistryAccess access) {
         if (recipe == null) return ItemStack.EMPTY;
@@ -495,7 +505,19 @@ public final class RecipeIndex {
 
     @Nullable
     private static ItemStack tryGetOutputField(Recipe<?> recipe) {
-        Class<?> scan = recipe.getClass();
+        Class<?> clazz = recipe.getClass();
+        java.lang.reflect.Field cached = outputFieldCache.get(clazz);
+        if (cached != null) {
+            if (cached == NO_OUTPUT_FIELD) return ItemStack.EMPTY;
+            try {
+                Object val = cached.get(recipe);
+                if (val instanceof ItemStack s && !s.isEmpty()) return s;
+            } catch (Exception e) { return ItemStack.EMPTY; }
+            // Field was cached but now returns empty/null — still better
+            // than re-scanning. Keep the cache entry.
+            return ItemStack.EMPTY;
+        }
+        Class<?> scan = clazz;
         while (scan != null && scan != Object.class) {
             for (java.lang.reflect.Field field : scan.getDeclaredFields()) {
                 if (!ItemStack.class.isAssignableFrom(field.getType())) continue;
@@ -504,12 +526,16 @@ public final class RecipeIndex {
                     field.setAccessible(true);
                     try {
                         Object val = field.get(recipe);
-                        if (val instanceof ItemStack s && !s.isEmpty()) return s;
+                        if (val instanceof ItemStack s && !s.isEmpty()) {
+                            outputFieldCache.put(clazz, field);
+                            return s;
+                        }
                     } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
                 }
             }
             scan = scan.getSuperclass();
         }
+        outputFieldCache.put(clazz, NO_OUTPUT_FIELD);
         return ItemStack.EMPTY;
     }
 

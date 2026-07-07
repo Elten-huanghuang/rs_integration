@@ -42,5 +42,5 @@ public final class EidolonReflection {
         }
     }
 
-    public static boolean isAvailable() { return ready; }
+    public static boolean isAvailable() { return crucibleTileEntityClass != null; }
 }

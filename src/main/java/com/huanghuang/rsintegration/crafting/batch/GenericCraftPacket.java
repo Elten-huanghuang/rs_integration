@@ -466,7 +466,7 @@ public final class GenericCraftPacket {
                 chain.onDone(() -> {
                     AsyncCraftManager.getInstance().remove(chain);
                     ChainRepeatController.scheduleNext(
-                            chain, capturedServerA, capturedUuidA, repeatCount,
+                            chain, capturedServerA, capturedUuidA, repeatCount, chain.getMachineCount(),
                             (p, rem) -> tryResolve(p, recipeId, dim, pos, rem, inferMode, baseItem));
                 });
                 player.sendSystemMessage(
@@ -495,7 +495,7 @@ public final class GenericCraftPacket {
                     chain.onDone(() -> {
                         AsyncCraftManager.getInstance().remove(chain);
                         ChainRepeatController.scheduleNext(
-                                chain, capturedServerB, capturedUuidB, repeatCount,
+                                chain, capturedServerB, capturedUuidB, repeatCount, chain.getMachineCount(),
                                 (p, rem) -> tryResolve(p, recipeId, dim, pos, rem, inferMode, baseItem));
                     });
                     player.sendSystemMessage(
@@ -504,11 +504,11 @@ public final class GenericCraftPacket {
                     return;
                 }
                 // All GENERIC steps → execute sync chain
-                List<ResourceLocation> stepIds = allSteps.stream()
-                        .map(ResolutionStep::recipeId).collect(Collectors.toList());
-                stepIds.add(recipeId);
+                List<ResolutionStep> execSteps = new ArrayList<>(allSteps);
+                execSteps.add(new ResolutionStep(recipeId, ModType.GENERIC,
+                        new ResourceLocation("minecraft:crafting")));
                 for (int r = 0; r < repeatCount; r++) {
-                    if (!CraftPacketUtils.executeCraftingSteps(player, stepIds, network)) {
+                    if (!CraftPacketUtils.executeCraftingSteps(player, execSteps, network)) {
                         RSIntegrationMod.LOGGER.warn("[RSI-Generic] executeCraftingSteps (Path1) returned false for {} (iteration {}/{})", recipeId, r + 1, repeatCount);
                         player.sendSystemMessage(Component.translatable(
                                 "rsi.generic.error.craft_failed", "Intermediate crafting failed"));
@@ -540,7 +540,7 @@ public final class GenericCraftPacket {
                     chain.onDone(() -> {
                         AsyncCraftManager.getInstance().remove(chain);
                         ChainRepeatController.scheduleNext(
-                                chain, capturedServerC, capturedUuidC, repeatCount,
+                                chain, capturedServerC, capturedUuidC, repeatCount, chain.getMachineCount(),
                                 (p, rem) -> tryResolve(p, recipeId, dim, pos, rem, inferMode, baseItem));
                     });
                     player.sendSystemMessage(
@@ -548,11 +548,11 @@ public final class GenericCraftPacket {
                                     .build());
                     return;
                 }
-                List<ResourceLocation> stepIds = planSteps.stream()
-                        .map(ResolutionStep::recipeId).collect(Collectors.toList());
-                stepIds.add(recipeId);
+                List<ResolutionStep> execSteps2 = new ArrayList<>(planSteps);
+                execSteps2.add(new ResolutionStep(recipeId, ModType.GENERIC,
+                        new ResourceLocation("minecraft:crafting")));
                 for (int r = 0; r < repeatCount; r++) {
-                    if (!CraftPacketUtils.executeCraftingSteps(player, stepIds, network)) {
+                    if (!CraftPacketUtils.executeCraftingSteps(player, execSteps2, network)) {
                         RSIntegrationMod.LOGGER.warn("[RSI-Generic] executeCraftingSteps (Path2) returned false for {} (iteration {}/{})", recipeId, r + 1, repeatCount);
                         player.sendSystemMessage(Component.translatable(
                                 "rsi.generic.error.craft_failed", "Intermediate crafting failed"));
@@ -574,7 +574,9 @@ public final class GenericCraftPacket {
             // executeCraftingSteps so assemble() is called instead of the
             // legacy getResultItem() path which returns a bare, stat-less item.
             if (CraftPacketUtils.isSlashBladeRecipe(cr2)) {
-                List<ResourceLocation> soloSteps = List.of(recipeId);
+                List<ResolutionStep> soloSteps = List.of(
+                        new ResolutionStep(recipeId, ModType.GENERIC,
+                                new ResourceLocation("minecraft:crafting")));
                 for (int r = 0; r < repeatCount; r++) {
                     if (!CraftPacketUtils.executeCraftingSteps(player, soloSteps, network)) {
                         RSIntegrationMod.LOGGER.warn("[RSI-Generic] SlashBlade solo executeCraftingSteps failed for {} (iteration {}/{})", recipeId, r + 1, repeatCount);
@@ -625,9 +627,7 @@ public final class GenericCraftPacket {
                         smithingIngredients, avail, player.serverLevel(), player, network, missing);
                 if (interSteps != null && !interSteps.isEmpty() && missing.isEmpty()) {
                     if (interSteps.stream().allMatch(s -> s.modType() == ModType.GENERIC)) {
-                        List<ResourceLocation> stepIds = interSteps.stream()
-                                .map(ResolutionStep::recipeId).collect(Collectors.toList());
-                        if (!CraftPacketUtils.executeCraftingSteps(player, stepIds, network)) {
+                        if (!CraftPacketUtils.executeCraftingSteps(player, interSteps, network)) {
                             player.sendSystemMessage(Component.translatable(
                                     "rsi.generic.error.craft_failed", "Smithing intermediate failed"));
                             return;
@@ -1446,7 +1446,7 @@ public final class GenericCraftPacket {
                 for (ItemStack opt : source.getItems()) {
                     if (opt.isEmpty()) continue;
                     Item optItem = opt.getItem();
-                    totalNeeded += neededCounts.getOrDefault(optItem, 0);
+                    totalNeeded += Math.max(0, neededCounts.getOrDefault(optItem, 0));
                     totalHave += itemAvailable.getOrDefault(optItem, 0);
                 }
                 materials.put(displayItem, new PlanResponse.Availability(totalNeeded, totalHave));

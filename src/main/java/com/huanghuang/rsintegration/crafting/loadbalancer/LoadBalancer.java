@@ -5,6 +5,8 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.api.RSIMachineAccessor;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry.BoundMachine;
 import net.minecraft.core.BlockPos;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -67,13 +69,13 @@ public final class LoadBalancer {
      * @return dispatch decision
      */
     public static DispatchResult dispatch(ServerPlayer player, List<BoundMachine> machines,
-                                          int totalOps, ServerLevel level) {
+                                          int totalOps, MinecraftServer server) {
         if (machines.isEmpty()) {
             return DispatchResult.noIdle("rsi.loadbalancer.error.no_machines");
         }
 
         // 1. Filter to available (chunk loaded, BE present, not busy)
-        List<BoundMachine> available = filterAvailable(machines, level);
+        List<BoundMachine> available = filterAvailable(machines, server);
         if (available.isEmpty()) {
             return DispatchResult.noIdle("rsi.loadbalancer.error.all_busy");
         }
@@ -111,10 +113,19 @@ public final class LoadBalancer {
      *       block machines that might be idle).</li>
      * </ul>
      */
-    public static List<BoundMachine> filterAvailable(List<BoundMachine> machines, ServerLevel level) {
+    /**
+     * Filter machines to those that are ready to accept work.
+     * Resolves the correct {@link ServerLevel} per machine so machines in
+     * different dimensions are all checked correctly.
+     */
+    public static List<BoundMachine> filterAvailable(List<BoundMachine> machines, MinecraftServer server) {
         List<BoundMachine> available = new ArrayList<>(machines.size());
         for (BoundMachine m : machines) {
             BlockPos pos = m.pos();
+            var dimKey = ResourceKey.create(
+                    net.minecraft.core.registries.Registries.DIMENSION, m.dim());
+            ServerLevel level = server.getLevel(dimKey);
+            if (level == null) continue;
             if (!level.isLoaded(pos)) continue;
 
             BlockEntity be = level.getBlockEntity(pos);

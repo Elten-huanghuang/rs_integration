@@ -30,5 +30,5 @@ public final class FarmingForBlockheadsReflection {
         }
     }
 
-    public static boolean isAvailable() { return ready; }
+    public static boolean isAvailable() { return marketBEClass != null; }
 }

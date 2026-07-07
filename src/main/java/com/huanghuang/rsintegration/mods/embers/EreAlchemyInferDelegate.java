@@ -729,7 +729,7 @@ extends AbstractBatchDelegate {
         if (this.network == null) {
             return ItemStack.EMPTY;
         }
-        return RSIntegrationNetwork.extractFromNetwork((INetwork)this.network, (Ingredient)ing, (int)1);
+        return RSIntegrationNetwork.extractFromNetwork((INetwork)this.network, (Ingredient)ing, (int)1, this.player);
     }
 
     private void refundPartial(List<ItemStack> stacks) {

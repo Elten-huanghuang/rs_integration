@@ -4,10 +4,14 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 
+import javax.annotation.Nullable;
 import java.util.HashSet;
 import java.util.Set;
 
@@ -36,6 +40,14 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
     protected INetwork network;
     protected boolean usingSharedLedger;
 
+    /** The dimension the target machine lives in. Set by {@link #validateAndInit}. */
+    @Nullable
+    protected ResourceLocation machineDim;
+
+    /** Fallback server reference for dimension resolution when player is offline. */
+    @Nullable
+    protected net.minecraft.server.MinecraftServer machineServer;
+
     private final Set<String> seenWarnStates = new HashSet<>();
 
     /**
@@ -56,9 +68,10 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
      * Subclasses must NOT override this; override {@link #isMachineCraftFinished} instead.
      */
     @Override
-    public final boolean isCraftComplete(ServerLevel level) {
+    public final boolean isCraftComplete(ServerLevel playerLevel) {
         BlockPos pos = getMachinePos();
-        if (!level.isLoaded(pos)) return false;
+        ServerLevel level = resolveMachineLevel(playerLevel);
+        if (level == null || !level.isLoaded(pos)) return false;
         BlockEntity be = level.getBlockEntity(pos);
         if (be == null || be.isRemoved()) return true; // machine gone → treat as done
         return isMachineCraftFinished(level, be);
@@ -76,14 +89,57 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
     /**
      * Batch-failure handler with shared-ledger guard.
      * Subclasses must NOT override this; override {@link #clearMachineState} instead.
+     * When {@code player} is null (offline), resolves the machine level via
+     * {@link #machineServer} and drops refund items in-world.
      */
     @Override
-    public final void onBatchFailed(ServerPlayer player, String reason) {
+    public final void onBatchFailed(@Nullable ServerPlayer player, String reason) {
         if (usingSharedLedger) return;
         BlockPos pos = getMachinePos();
-        if (!player.level().isLoaded(pos)) return;
-        BlockEntity be = player.level().getBlockEntity(pos);
+        ServerLevel level = resolveMachineLevel(player != null ? player.serverLevel() : null);
+        if (level == null || !level.isLoaded(pos)) return;
+        BlockEntity be = level.getBlockEntity(pos);
         if (be != null) clearMachineState(be, player);
+    }
+
+    /**
+     * Resolve the {@link ServerLevel} where the target machine lives.
+     * Falls back to the player's current level when {@link #machineDim} is not set
+     * (e.g. virtual delegates like Market that have no physical machine).
+     * When {@code playerLevel} is null (player offline), uses {@link #machineServer}.
+     */
+    private ServerLevel resolveMachineLevel(@Nullable ServerLevel playerLevel) {
+        if (machineDim == null) return playerLevel;
+        try {
+            net.minecraft.server.MinecraftServer server;
+            if (playerLevel != null) {
+                server = playerLevel.getServer();
+            } else {
+                server = this.machineServer;
+            }
+            if (server == null) return playerLevel;
+            var key = ResourceKey.create(net.minecraft.core.registries.Registries.DIMENSION, machineDim);
+            ServerLevel resolved = server.getLevel(key);
+            return resolved != null ? resolved : playerLevel;
+        } catch (Exception e) {
+            return playerLevel;
+        }
+    }
+
+    /** Exposed for {@code ParallelCraftGroup} and chain-level dimension resolution. */
+    @Nullable
+    public ResourceLocation getMachineDim() {
+        return machineDim;
+    }
+
+    /** Called by the chain after {@link #validateAndInit} succeeds. */
+    public void setMachineDim(ResourceLocation dim) {
+        this.machineDim = dim;
+    }
+
+    /** Fallback server for dimension resolution when the player is offline. */
+    public void setMachineServer(net.minecraft.server.MinecraftServer server) {
+        this.machineServer = server;
     }
 
     /**
@@ -102,6 +158,8 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
         sharedLedger = null;
         network = null;
         usingSharedLedger = false;
+        machineDim = null;
+        machineServer = null;
         seenWarnStates.clear();
     }
 }

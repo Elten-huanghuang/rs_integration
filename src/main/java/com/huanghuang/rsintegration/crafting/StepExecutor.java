@@ -36,7 +36,7 @@ final class StepExecutor {
             return false;
         }
         if (depth > maxDepth()) return false;
-        if (ctx.steps.size() + batches > maxSteps()) return false;
+        if (ctx.steps.size() + 1 > maxSteps()) return false;
 
         ctx.beginUndo();
         edges.beginUndo();
@@ -47,21 +47,19 @@ final class StepExecutor {
             return false;
         }
 
-        for (int b = 0; b < batches; b++) {
-            for (ItemStack remainder : CraftPacketUtils.getRecipeRemainders(recipe)) {
-                ctx.add(remainder);
-            }
-
-            ItemStack result = recipe.getResultItem(ctx.level.registryAccess());
-            ctx.add(result);
-
-            for (ItemStack secondary : ModRecipeHandlers.tryGetSecondaryOutputs(recipe, ctx.level.registryAccess())) {
-                ctx.add(secondary);
-            }
-
-            ctx.steps.add(new CraftingResolver.ResolutionStep(recipe.getId(), ModType.GENERIC,
-                    new ResourceLocation("minecraft:crafting"), altIds, altModTypes));
+        for (ItemStack remainder : CraftPacketUtils.getRecipeRemainders(recipe)) {
+            ctx.add(remainder.copyWithCount(remainder.getCount() * batches));
         }
+
+        ItemStack result = recipe.getResultItem(ctx.level.registryAccess());
+        ctx.add(result.copyWithCount(result.getCount() * batches));
+
+        for (ItemStack secondary : ModRecipeHandlers.tryGetSecondaryOutputs(recipe, ctx.level.registryAccess())) {
+            ctx.add(secondary.copyWithCount(secondary.getCount() * batches));
+        }
+
+        ctx.steps.add(new CraftingResolver.ResolutionStep(recipe.getId(), ModType.GENERIC,
+                new ResourceLocation("minecraft:crafting"), altIds, altModTypes, false, batches));
 
         ctx.commitUndo();
         edges.commitUndo();
@@ -76,7 +74,7 @@ final class StepExecutor {
             return false;
         }
         if (depth > maxDepth()) return false;
-        if (ctx.steps.size() + batches > maxSteps()) return false;
+        if (ctx.steps.size() + 1 > maxSteps()) return false;
 
         if (entry.modType() == ModType.GENERIC && entry.recipe() instanceof CraftingRecipe cr) {
             return craftBatched(cr, ctx, depth, altIds, altModTypes, edges, batches);
@@ -129,53 +127,51 @@ final class StepExecutor {
             return false;
         }
 
-        for (int b = 0; b < batches; b++) {
-            if (entry.recipe() instanceof CraftingRecipe cr) {
-                for (ItemStack remainder : CraftPacketUtils.getRecipeRemainders(cr)) {
-                    ctx.add(remainder);
-                }
-            } else {
-                for (IngredientSpec spec : specs) {
-                    if (spec.isEmpty()) continue;
-                    addCraftingRemainder(spec.ingredient(), spec.count(), ctx);
-                }
+        if (entry.recipe() instanceof CraftingRecipe cr) {
+            for (ItemStack remainder : CraftPacketUtils.getRecipeRemainders(cr)) {
+                ctx.add(remainder.copyWithCount(remainder.getCount() * batches));
             }
-
-            var handler = ModRecipeHandlers.handlerFor(entry.recipe());
-            ItemStack result = ItemStack.EMPTY;
-            if (handler != null) {
-                result = handler.getResultItem(entry.recipe(), ctx.level.registryAccess());
+        } else {
+            for (IngredientSpec spec : specs) {
+                if (spec.isEmpty()) continue;
+                addCraftingRemainder(spec.ingredient(), spec.count() * batches, ctx);
             }
-            if (result.isEmpty()) {
-                result = ModRecipeHandlers.tryGetResultItem(entry.recipe(), ctx.level.registryAccess());
-            }
-            if (result.isEmpty()) {
-                RSIntegrationMod.LOGGER.warn("[RSI] craftBatched: empty result for recipe {} (handler={})",
-                        entry.recipe().getId(), handler != null ? handler.getClass().getSimpleName() : "null");
-            }
-            // If the result is bare (no NBT), scan fields for the real
-            // NBT-carrying output hidden by the mod author.
-            if (!result.isEmpty() && !result.hasTag()) {
-                ItemStack hidden = CraftingResolver.extractHiddenOutput(entry.recipe());
-                if (!hidden.isEmpty()) {
-                    result = hidden;
-                }
-            }
-            ctx.add(result);
-
-            if (handler != null) {
-                for (ItemStack secondary : handler.getSecondaryOutputs(entry.recipe(), ctx.level.registryAccess())) {
-                    ctx.add(secondary);
-                }
-            } else {
-                for (ItemStack secondary : ModRecipeHandlers.tryGetSecondaryOutputs(entry.recipe(), ctx.level.registryAccess())) {
-                    ctx.add(secondary);
-                }
-            }
-
-            ctx.steps.add(new CraftingResolver.ResolutionStep(entry.recipe().getId(), entry.modType(),
-                    entry.recipeTypeId(), altIds, altModTypes));
         }
+
+        var handler = ModRecipeHandlers.handlerFor(entry.recipe());
+        ItemStack result = ItemStack.EMPTY;
+        if (handler != null) {
+            result = handler.getResultItem(entry.recipe(), ctx.level.registryAccess());
+        }
+        if (result.isEmpty()) {
+            result = ModRecipeHandlers.tryGetResultItem(entry.recipe(), ctx.level.registryAccess());
+        }
+        if (result.isEmpty()) {
+            RSIntegrationMod.LOGGER.warn("[RSI] craftBatched: empty result for recipe {} (handler={})",
+                    entry.recipe().getId(), handler != null ? handler.getClass().getSimpleName() : "null");
+        }
+        // If the result is bare (no NBT), scan fields for the real
+        // NBT-carrying output hidden by the mod author.
+        if (!result.isEmpty() && !result.hasTag()) {
+            ItemStack hidden = CraftingResolver.extractHiddenOutput(entry.recipe());
+            if (!hidden.isEmpty()) {
+                result = hidden;
+            }
+        }
+        ctx.add(result.copyWithCount(result.getCount() * batches));
+
+        if (handler != null) {
+            for (ItemStack secondary : handler.getSecondaryOutputs(entry.recipe(), ctx.level.registryAccess())) {
+                ctx.add(secondary.copyWithCount(secondary.getCount() * batches));
+            }
+        } else {
+            for (ItemStack secondary : ModRecipeHandlers.tryGetSecondaryOutputs(entry.recipe(), ctx.level.registryAccess())) {
+                ctx.add(secondary.copyWithCount(secondary.getCount() * batches));
+            }
+        }
+
+        ctx.steps.add(new CraftingResolver.ResolutionStep(entry.recipe().getId(), entry.modType(),
+                entry.recipeTypeId(), altIds, altModTypes, false, batches));
 
         ctx.commitUndo();
         edges.commitUndo();

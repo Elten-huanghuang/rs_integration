@@ -30,5 +30,5 @@ public final class FRReflection {
         }
     }
 
-    public static boolean isAvailable() { return ready; }
+    public static boolean isAvailable() { return kettleBEClass != null; }
 }

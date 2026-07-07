@@ -43,6 +43,10 @@ final class ResolutionContext {
     @Nullable final List<String> missingOut;
     @Nullable final List<String> diagLog;
 
+    // Inverted index: Item → pre-cached stacks, built once from initial inventory.
+    // Eliminates the O(N) scan of all 546+ inventory types inside countMatching.
+    private final Map<Item, List<CachedStack>> inventoryIndex = new HashMap<>();
+
     ResolutionContext(Level level,
                       Map<Item, List<RecipeIndex.Entry>> index,
                       List<ItemStack> available,
@@ -70,6 +74,7 @@ final class ResolutionContext {
         this.diagLog = Diagnostics.isEnabled() ? new ArrayList<>() : null;
 
         for (ItemStack stack : available) add(stack);
+        buildInventoryIndex();
     }
 
     ResolutionContext(Level level,
@@ -92,6 +97,7 @@ final class ResolutionContext {
         this.bestEffort = bestEffort;
         this.missingOut = missingOut;
         this.diagLog = Diagnostics.isEnabled() ? new ArrayList<>() : null;
+        buildInventoryIndex();
     }
 
     void diag(String msg) {
@@ -127,24 +133,47 @@ final class ResolutionContext {
         if (stack.isEmpty() || stack.getCount() <= 0) return;
         CraftingResolver.StackKey key = CraftingResolver.StackKey.of(stack, true);
         if (!undoCheckpoints.isEmpty()) undoStack.push(new UndoEntry(key, counts.get(key)));
+        Integer prev = counts.get(key);
         counts.merge(key, stack.getCount(), Integer::sum);
+        if (prev == null) indexStack(key); // new item type — add to inverted index
     }
 
     void add(Item item, int count) {
         if (count <= 0) return;
         CraftingResolver.StackKey key = new CraftingResolver.StackKey(item, null);
         if (!undoCheckpoints.isEmpty()) undoStack.push(new UndoEntry(key, counts.get(key)));
+        Integer prev = counts.get(key);
         counts.merge(key, count, Integer::sum);
+        if (prev == null) indexStack(key);
+    }
+
+    private void indexStack(CraftingResolver.StackKey key) {
+        inventoryIndex.computeIfAbsent(key.item(), k -> new ArrayList<>())
+                .add(new CachedStack(key));
     }
 
     int countMatching(Ingredient ingredient) {
+        if (ingredient.isEmpty()) return 0;
+
         int total = 0;
-        for (var entry : counts.entrySet()) {
-            if (entry.getValue() > 0) {
-                ItemStack stack = entry.getKey().toStack();
-                if (ingredient.test(stack) || SlashBladeRecipeHandler.matchesStackKey(ingredient, entry.getKey())
-                        || matchesSlashBladeFallback(ingredient, entry.getKey())) {
-                    total += entry.getValue();
+        Set<Item> checkedItems = new HashSet<>();
+
+        // Inverted-index fast path: for each Item the ingredient accepts,
+        // do an O(1) lookup in inventoryIndex instead of scanning all 546+ types.
+        for (ItemStack template : ingredient.getItems()) {
+            if (template.isEmpty()) continue;
+            Item targetItem = template.getItem();
+            if (!checkedItems.add(targetItem)) continue; // dedupe repeated Items
+
+            List<CachedStack> candidates = inventoryIndex.get(targetItem);
+            if (candidates == null) continue; // nothing of this Item in storage
+
+            for (CachedStack candidate : candidates) {
+                // Use the pre-created ItemStack — zero allocation per call
+                if (ingredient.test(candidate.stack)
+                        || SlashBladeRecipeHandler.matchesStackKey(ingredient, candidate.key)
+                        || matchesSlashBladeFallback(ingredient, candidate.key)) {
+                    total += counts.getOrDefault(candidate.key, 0);
                 }
             }
         }
@@ -197,7 +226,36 @@ final class ResolutionContext {
         else counts.put(key, newCount);
     }
 
+    // ── inverted index ──────────────────────────────────────────
+
+    /** Populate the Item→CachedStack index from {@link #counts}. Called once per context. */
+    private void buildInventoryIndex() {
+        inventoryIndex.clear();
+        for (var entry : counts.entrySet()) {
+            inventoryIndex.computeIfAbsent(entry.getKey().item(), k -> new ArrayList<>())
+                    .add(new CachedStack(entry.getKey()));
+        }
+    }
+
     // ── inner types ──────────────────────────────────────────────
+
+    /** Pre-created ItemStack to avoid allocating 200K+ ItemStack instances
+     *  during candidate scoring.  The ItemStack is created once at index
+     *  build time and reused for every ingredient.test() call. */
+    private static class CachedStack {
+        final CraftingResolver.StackKey key;
+        final ItemStack stack;
+
+        CachedStack(CraftingResolver.StackKey key) {
+            this.key = key;
+            this.stack = new ItemStack(key.item());
+            if (key.tag() != null) {
+                try {
+                    this.stack.setTag(net.minecraft.nbt.TagParser.parseTag(key.tag()));
+                } catch (Exception e) { /* defensive — invalid NBT falls back to tag-less stack */ }
+            }
+        }
+    }
 
     private static final class UndoEntry {
         final CraftingResolver.StackKey key;

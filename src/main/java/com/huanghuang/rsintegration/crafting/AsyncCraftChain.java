@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.GenericBatchDelegate;
 import com.huanghuang.rsintegration.ModVersionDelegateRegistry;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
@@ -72,6 +73,7 @@ public final class AsyncCraftChain {
     private State state = State.PENDING;
     private String abortReason = "";
     @Nullable private Runnable onDoneCallback;
+    private int machineCount = 1;
     private int dropsThisChain;
     private boolean dropThrottleTripped;
     private static final int MAX_DROPS_PER_CHAIN = 20;
@@ -150,14 +152,34 @@ public final class AsyncCraftChain {
                     if (!result.isEmpty()) {
                         addToVirtualInventory(result);
                     }
-                    // Add secondary byproducts from multi-block recipes
-                    ServerLevel overworld = server.overworld();
-                    if (overworld == null) return true;
-                    Recipe<?> mbRecipe = overworld.getRecipeManager()
-                            .byKey(steps.get(currentStepIdx).recipeId()).orElse(null);
-                    if (mbRecipe != null) {
-                        for (ItemStack secondary : ModRecipeHandlers.tryGetSecondaryOutputs(mbRecipe, overworld.registryAccess())) {
+                    // Add secondary byproducts from multi-block recipes.
+                    // GenericBatchDelegate captures secondaries internally and
+                    // exposes them via getPendingSecondary() to avoid voiding
+                    // remainders (empty buckets, etc.) that the recipe-level
+                    // lookup below would miss for non-CraftingRecipe types.
+                    if (currentDelegate instanceof GenericBatchDelegate gbd) {
+                        for (ItemStack secondary : gbd.getPendingSecondary()) {
                             addToVirtualInventory(secondary);
+                        }
+                    } else {
+                        ServerLevel overworld = server.overworld();
+                        if (overworld == null) return true;
+                        Recipe<?> mbRecipe = overworld.getRecipeManager()
+                                .byKey(steps.get(currentStepIdx).recipeId()).orElse(null);
+                        if (mbRecipe != null) {
+                            for (ItemStack secondary : ModRecipeHandlers.tryGetSecondaryOutputs(mbRecipe, overworld.registryAccess())) {
+                                addToVirtualInventory(secondary);
+                            }
+                        }
+                    }
+                    // Update machineCount to reflect actual successes, not
+                    // the pre-allocation count (failed machines were removed).
+                    if (currentDelegate instanceof ParallelCraftGroup group) {
+                        int actual = group.getChildCount();
+                        if (actual != this.machineCount) {
+                            RSIntegrationMod.LOGGER.debug("[RSI-AsyncChain] machineCount corrected: {} → {}",
+                                    this.machineCount, actual);
+                            this.machineCount = actual;
                         }
                     }
                     try {
@@ -238,15 +260,15 @@ public final class AsyncCraftChain {
      * Returns the index of the first non-vanilla step (or steps.size()).
      */
     private int executeVanillaBatch(int startIdx, ServerPlayer online) {
-        List<ResourceLocation> vanillaIds = new ArrayList<>();
+        List<CraftingResolver.ResolutionStep> vanillaSteps = new ArrayList<>();
         int i = startIdx;
         while (i < steps.size() && steps.get(i).modType() == ModType.GENERIC) {
-            vanillaIds.add(steps.get(i).recipeId());
+            vanillaSteps.add(steps.get(i));
             i++;
         }
 
-        if (!vanillaIds.isEmpty()) {
-            executeVanillaStepsInline(vanillaIds, online);
+        if (!vanillaSteps.isEmpty()) {
+            executeVanillaStepsInline(vanillaSteps, online);
         }
         return i;
     }
@@ -255,22 +277,24 @@ public final class AsyncCraftChain {
      * Execute vanilla crafting steps inline, using the chain's virtual inventory
      * and ledger so intermediate outputs feed forward across the entire chain.
      */
-    private boolean executeVanillaStepsInline(List<ResourceLocation> stepIds, ServerPlayer online) {
+    private boolean executeVanillaStepsInline(List<CraftingResolver.ResolutionStep> vanillaSteps, ServerPlayer online) {
         ServerLevel overworld = server.overworld();
         if (overworld == null) return false;
         RecipeManager rm = overworld.getRecipeManager();
         RSIntegrationMod.LOGGER.debug("[RSI-AsyncChain] executeVanillaStepsInline: {} vanilla steps, currentStepIdx={}",
-                stepIds.size(), currentStepIdx);
+                vanillaSteps.size(), currentStepIdx);
         logVirtualInventory("before batch");
 
-        for (ResourceLocation stepId : stepIds) {
+        for (CraftingResolver.ResolutionStep step : vanillaSteps) {
+            ResourceLocation stepId = step.recipeId();
+            int executions = step.executions();
             Recipe<?> recipe = rm.byKey(stepId).orElse(null);
             if (recipe == null) {
                 RSIntegrationMod.LOGGER.debug("[RSI-AsyncChain]   step {} not found in recipe manager", stepId);
                 continue;
             }
 
-            RSIntegrationMod.LOGGER.debug("[RSI-AsyncChain]   processing step: {}", stepId);
+            RSIntegrationMod.LOGGER.debug("[RSI-AsyncChain]   processing step: {} x{}", stepId, executions);
 
             if (recipe instanceof net.minecraft.world.item.crafting.CraftingRecipe cr) {
                 // Track only the slots actually modified so we can roll back
@@ -279,7 +303,7 @@ public final class AsyncCraftChain {
 
                 for (Ingredient ing : cr.getIngredients()) {
                     if (ing.isEmpty()) continue;
-                    int stillNeeded = 1;
+                    int stillNeeded = executions;
                     for (int i = 0; i < virtualInventory.size() && stillNeeded > 0; i++) {
                         ItemStack vi = virtualInventory.get(i);
                         if (vi.isEmpty()) continue;
@@ -314,13 +338,13 @@ public final class AsyncCraftChain {
 
                 ItemStack result = cr.getResultItem(server.overworld().registryAccess());
                 if (!result.isEmpty()) {
-                    addToVirtualInventory(result);
+                    addToVirtualInventory(result.copyWithCount(result.getCount() * executions));
                 }
                 for (ItemStack secondary : ModRecipeHandlers.tryGetSecondaryOutputs(cr, server.overworld().registryAccess())) {
-                    addToVirtualInventory(secondary);
+                    addToVirtualInventory(secondary.copyWithCount(secondary.getCount() * executions));
                 }
                 for (ItemStack remainder : CraftPacketUtils.getRecipeRemainders(cr)) {
-                    addToVirtualInventory(remainder);
+                    addToVirtualInventory(remainder.copyWithCount(remainder.getCount() * executions));
                 }
             } else {
                 // Non-crafting GENERIC recipe (e.g. sawmill, custom mod type)
@@ -330,7 +354,7 @@ public final class AsyncCraftChain {
 
                 for (IngredientSpec spec : specs) {
                     if (spec.isEmpty()) continue;
-                    int stillNeeded = spec.count();
+                    int stillNeeded = spec.count() * executions;
                     var iter = virtualInventory.iterator();
                     while (iter.hasNext() && stillNeeded > 0) {
                         ItemStack vi = iter.next();
@@ -361,10 +385,10 @@ public final class AsyncCraftChain {
                 ItemStack result = ModRecipeHandlers.tryGetResultItem(
                         recipe, server.overworld().registryAccess());
                 if (!result.isEmpty()) {
-                    addToVirtualInventory(result);
+                    addToVirtualInventory(result.copyWithCount(result.getCount() * executions));
                 }
                 for (ItemStack secondary : ModRecipeHandlers.tryGetSecondaryOutputs(recipe, server.overworld().registryAccess())) {
-                    addToVirtualInventory(secondary);
+                    addToVirtualInventory(secondary.copyWithCount(secondary.getCount() * executions));
                 }
                 for (IngredientSpec spec : specs) {
                     if (spec.isEmpty()) continue;
@@ -373,7 +397,7 @@ public final class AsyncCraftChain {
                         try {
                             ItemStack remainder = stack.getCraftingRemainingItem();
                             if (!remainder.isEmpty()) {
-                                addToVirtualInventory(remainder.copyWithCount(spec.count()));
+                                addToVirtualInventory(remainder.copyWithCount(spec.count() * executions));
                                 break;
                             }
                         } catch (Exception e) {
@@ -440,6 +464,9 @@ public final class AsyncCraftChain {
             if (!delegate.validateAndInit(online, step.recipeId(), null, null)) {
                 return null;
             }
+            if (delegate instanceof AbstractBatchDelegate abd) {
+                abd.setMachineServer(server);
+            }
             return startGenericStep(delegate, step, online);
         }
 
@@ -449,6 +476,10 @@ public final class AsyncCraftChain {
             try {
                 if (delegate.validateAndInit(online, step.recipeId(), m.dim(), m.pos())) {
                     matchedMachine = m;
+                    if (delegate instanceof AbstractBatchDelegate abd) {
+                        abd.setMachineDim(m.dim());
+                        abd.setMachineServer(server);
+                    }
                     break;
                 }
             } catch (Exception e) {
@@ -615,14 +646,10 @@ public final class AsyncCraftChain {
     private IBatchDelegate tryStartParallel(List<BoundMachine> machines,
                                             CraftingResolver.ResolutionStep step,
                                             ServerPlayer online) {
-        // Resolve the dimension from the first machine for BE lookups
-        var dimKey = net.minecraft.resources.ResourceKey.create(
-                net.minecraft.core.registries.Registries.DIMENSION, machines.get(0).dim());
-        ServerLevel machineLevel = server.getLevel(dimKey);
-        if (machineLevel == null) return null;
+        if (server == null) return null;
 
-        // Filter: chunk loaded, BE present, not busy
-        List<BoundMachine> available = LoadBalancer.filterAvailable(machines, machineLevel);
+        // Filter: chunk loaded, BE present, not busy (resolves per-machine dimension)
+        List<BoundMachine> available = LoadBalancer.filterAvailable(machines, server);
         if (available.size() < 2) return null;
 
         // Build a parallel group — constructor internally creates and validates
@@ -634,8 +661,10 @@ public final class AsyncCraftChain {
             return null;
         }
 
+        this.machineCount = group.getChildCount();
+        group.setMachineServer(server);
         RSIntegrationMod.LOGGER.info("[RSI-AsyncChain] Load-balanced: {} machines for recipe {}",
-                available.size(), step.recipeId());
+                group.getChildCount(), step.recipeId());
 
         // Parallel groups use the tryStartSingleCraft path (each child extracts
         // its own materials independently)
@@ -647,15 +676,54 @@ public final class AsyncCraftChain {
                                              CraftingResolver.ResolutionStep step,
                                              ServerPlayer online) {
         try {
-            if (!group.tryStartSingleCraft(online, ledger)) {
-                RSIntegrationMod.LOGGER.warn("[RSI-AsyncChain] Parallel group tryStartSingleCraft failed for {}",
-                        step.recipeId());
-                online.sendSystemMessage(Component.translatable(
-                        "rsi.generic.error.craft_failed", step.recipeId()));
-                try { group.onBatchFailed(online, "tryStartSingleCraft failed"); } catch (Exception fe) {
-                    RSIntegrationMod.LOGGER.error("[RSI-AsyncChain] onBatchFailed threw during parallel cleanup", fe);
+            // Mirror the single-machine path: pre-reserve from virtualInventory
+            // first so intermediate outputs from prior steps are visible to all children.
+            List<IngredientSpec> specs = group.getRequiredMaterials();
+            if (specs != null && !specs.isEmpty()) {
+                List<ItemStack> materials = preReserveStepMaterials(specs, online);
+                if (materials == null) {
+                    RSIntegrationMod.LOGGER.warn("[RSI-AsyncChain] Failed to pre-reserve for parallel step {}",
+                            step.recipeId());
+                    online.sendSystemMessage(Component.translatable(
+                            "rsi.generic.error.missing_materials", step.recipeId()));
+                    try { group.onBatchFailed(online, "pre-reserve failed"); } catch (Exception fe) {
+                        RSIntegrationMod.LOGGER.error("[RSI-AsyncChain] onBatchFailed threw during pre-reserve cleanup", fe);
+                    }
+                    return null;
                 }
-                return null;
+                if (!ledger.commit(network, online)) {
+                    RSIntegrationMod.LOGGER.warn("[RSI-AsyncChain] Ledger commit failed for parallel {}",
+                            step.recipeId());
+                    online.sendSystemMessage(Component.translatable(
+                            "rsi.generic.error.missing_materials", step.recipeId()));
+                    try { group.onBatchFailed(online, "commit failed"); } catch (Exception fe) {
+                        RSIntegrationMod.LOGGER.error("[RSI-AsyncChain] onBatchFailed threw during commit cleanup", fe);
+                    }
+                    return null;
+                }
+                if (!group.tryStartWithMaterials(online, materials, ledger)) {
+                    RSIntegrationMod.LOGGER.warn("[RSI-AsyncChain] Parallel group tryStartWithMaterials failed for {}",
+                            step.recipeId());
+                    online.sendSystemMessage(Component.translatable(
+                            "rsi.generic.error.craft_failed", step.recipeId()));
+                    try { group.onBatchFailed(online, "tryStartWithMaterials failed"); } catch (Exception fe) {
+                        RSIntegrationMod.LOGGER.error("[RSI-AsyncChain] onBatchFailed threw during parallel cleanup", fe);
+                    }
+                    ledger.refundCommitted(network, online);
+                    return null;
+                }
+            } else {
+                // Fallback: each child self-extracts (no virtualInventory visibility)
+                if (!group.tryStartSingleCraft(online, ledger)) {
+                    RSIntegrationMod.LOGGER.warn("[RSI-AsyncChain] Parallel group tryStartSingleCraft failed for {}",
+                            step.recipeId());
+                    online.sendSystemMessage(Component.translatable(
+                            "rsi.generic.error.craft_failed", step.recipeId()));
+                    try { group.onBatchFailed(online, "tryStartSingleCraft failed"); } catch (Exception fe) {
+                        RSIntegrationMod.LOGGER.error("[RSI-AsyncChain] onBatchFailed threw during parallel cleanup", fe);
+                    }
+                    return null;
+                }
             }
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.error("[RSI-AsyncChain] Error starting parallel step", e);
@@ -708,7 +776,7 @@ public final class AsyncCraftChain {
                     } else {
                         material.grow(reserved.getCount());
                     }
-                    needed = 0;
+                    needed -= reserved.getCount();
                 }
             }
             if (needed > 0) {
@@ -719,7 +787,7 @@ public final class AsyncCraftChain {
                     } else {
                         material.grow(reserved.getCount());
                     }
-                    needed = 0;
+                    needed -= reserved.getCount();
                 }
             }
 
@@ -768,35 +836,47 @@ public final class AsyncCraftChain {
                 if (online != null && !leftover.isEmpty()) {
                     safeGiveToPlayer(online, leftover);
                 } else if (online == null && !leftover.isEmpty()) {
-                    insertOrDropAtSpawn(leftover);
+                    if (!insertOrDropAtSpawn(leftover)) {
+                        // Throttle tripped — stop flushing and abort so
+                        // remaining items are not silently destroyed.
+                        // Leave unconsumed items in virtualInventory for
+                        // the abort path to refund.
+                        abort("Drop throttle tripped — RS network full and player offline");
+                        return;
+                    }
                 }
                 iter.remove();
             }
         }
     }
 
-    private void insertOrDropAtSpawn(ItemStack stack) {
+    /**
+     * Try to insert into RS, then drop at world spawn as last resort.
+     * @return true if the item was handled, false if the chain should abort
+     *         (throttle tripped — further drops would be silently discarded)
+     */
+    private boolean insertOrDropAtSpawn(ItemStack stack) {
         if (network != null) {
             ItemStack stillLeft = network.insertItem(stack.copy(), stack.getCount(),
                     com.refinedmods.refinedstorage.api.util.Action.PERFORM);
-            if (stillLeft.isEmpty()) return;
+            if (stillLeft.isEmpty()) return true;
             stack = stillLeft;
         }
         if (dropThrottleTripped) {
             RSIntegrationMod.LOGGER.warn("[RSI] Drop throttle tripped — discarding {} x{} for player {}",
                     stack.getHoverName().getString(), stack.getCount(), playerId);
-            return;
+            return false;
         }
         dropsThisChain++;
         if (dropsThisChain > MAX_DROPS_PER_CHAIN) {
             dropThrottleTripped = true;
-            RSIntegrationMod.LOGGER.warn("[RSI] Drop throttle tripped ({} drops) — discarding {} x{} and all future drops for player {}",
+            RSIntegrationMod.LOGGER.warn("[RSI] Drop throttle tripped ({} drops) — discarding {} x{} and all future drops for player {}. Chain will abort.",
                     MAX_DROPS_PER_CHAIN, stack.getHoverName().getString(), stack.getCount(), playerId);
-            return;
+            return false;
         }
         if (server != null) {
             var spawnLevel = server.overworld();
-            if (spawnLevel == null) return;
+            if (spawnLevel == null) return true;
             var spawnPos = spawnLevel.getSharedSpawnPos();
             spawnLevel.addFreshEntity(
                 new ItemEntity(spawnLevel,
@@ -804,6 +884,7 @@ public final class AsyncCraftChain {
             RSIntegrationMod.LOGGER.warn("[RSI] Item dropped at world spawn (player {} offline): {} x{}",
                 playerId, stack.getHoverName().getString(), stack.getCount());
         }
+        return true;
     }
 
     // ── lifecycle ────────────────────────────────────────────────
@@ -850,6 +931,11 @@ public final class AsyncCraftChain {
         this.onDoneCallback = callback;
     }
 
+    /** How many machines produced output this chain run (1 for single machine, N for parallel). */
+    public int getMachineCount() {
+        return machineCount;
+    }
+
     public void abort(String reason) {
         if (state == State.ABORTED || state == State.COMPLETED) return;
 
@@ -861,17 +947,13 @@ public final class AsyncCraftChain {
         state = State.ABORTED;
         abortReason = reason;
 
-        // Delegate cleanup — guard with null check for offline player
-        if (currentDelegate != null && online != null) {
+        // Delegate cleanup — works even when player is offline
+        if (currentDelegate != null) {
             try {
                 currentDelegate.onBatchFailed(online, reason);
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.error("[RSI-AsyncChain] Error in onBatchFailed", e);
             }
-            currentDelegate = null;
-        } else if (currentDelegate != null) {
-            RSIntegrationMod.LOGGER.warn("[RSI-AsyncChain] Skipping delegate cleanup (player offline): delegate={}",
-                    currentDelegate.getClass().getSimpleName());
             currentDelegate = null;
         }
 
@@ -884,7 +966,8 @@ public final class AsyncCraftChain {
             }
         }
 
-        flushVirtualInventory(online);
+        // Do NOT flush virtualInventory on abort — the ledger refunded/rolled-back
+        // the inputs, so flushing intermediate products would duplicate items.
         virtualInventory.clear();
 
         // Only send message if player is still online
@@ -905,12 +988,15 @@ public final class AsyncCraftChain {
         abortReason = reason;
 
         if (currentDelegate != null) {
-            RSIntegrationMod.LOGGER.warn("[RSI-AsyncChain] Skipping delegate cleanup (player offline): delegate={}",
-                    currentDelegate.getClass().getSimpleName());
+            try {
+                currentDelegate.onBatchFailed(null, reason);
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.error("[RSI-AsyncChain] Error in silent delegate cleanup", e);
+            }
             currentDelegate = null;
         }
 
-        flushVirtualInventory(null);
+        // Do NOT flush virtualInventory on abort — see abort() for rationale.
         virtualInventory.clear();
 
         fireOnDone();

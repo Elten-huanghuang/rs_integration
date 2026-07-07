@@ -6,6 +6,7 @@ import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.mods.vanilla.VanillaMachineRecipeHandler;
 import com.huanghuang.rsintegration.mods.vanilla.SmithingRecipeHandler;
 import net.minecraft.core.RegistryAccess;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.CraftingRecipe;
 import net.minecraft.world.item.crafting.Recipe;
@@ -14,7 +15,9 @@ import javax.annotation.Nullable;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -27,6 +30,13 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class ModRecipeHandlers {
 
     private static final Map<Class<?>, Method> RESULT_METHOD_CACHE = new ConcurrentHashMap<>();
+    /** Caches the ItemStack-producing field per recipe class. */
+    private static final Map<Class<?>, java.lang.reflect.Field> OUTPUT_FIELD_CACHE = new ConcurrentHashMap<>();
+    /** Classes that have been scanned and have no suitable output field. */
+    private static final Set<Class<?>> NO_OUTPUT_FIELD_CACHE = ConcurrentHashMap.newKeySet();
+    /** Global result cache: recipe ID → output ItemStack (or EMPTY sentinel). */
+    private static final Map<ResourceLocation, ItemStack> GLOBAL_RESULT_CACHE = new ConcurrentHashMap<>();
+    private static final Set<ResourceLocation> GLOBAL_EMPTY_CACHE = ConcurrentHashMap.newKeySet();
     private static final Map<Class<?>, ModRecipeHandler> HANDLER_CACHE = new ConcurrentHashMap<>();
     /** Prevents infinite recursion when a handler's getResultItem() calls back into tryGetResultItem(). */
     private static final ThreadLocal<Class<?>> DISPATCH_GUARD = new ThreadLocal<>();
@@ -90,25 +100,50 @@ public final class ModRecipeHandlers {
     // ── shared result-item extraction ─────────────────────────────
 
     /**
-     * Common {@code getResultItem} implementation via reflection.
-     * Tries known method names and caches the resolved {@link Method} per class.
+     * Common {@code getResultItem} with global result cache.
+     * Expensive reflection is done at most once per recipe instance.
      */
     public static ItemStack tryGetResultItem(Recipe<?> recipe, RegistryAccess access) {
         if (recipe instanceof CraftingRecipe cr) {
             return cr.getResultItem(access);
         }
+        ResourceLocation id = recipe.getId();
+        if (GLOBAL_EMPTY_CACHE.contains(id)) return ItemStack.EMPTY;
+        ItemStack cached = GLOBAL_RESULT_CACHE.get(id);
+        if (cached != null) return cached.copy();
+
+        ItemStack result = internalTryGetResultItem(recipe, access);
+
+        if (result.isEmpty()) {
+            GLOBAL_EMPTY_CACHE.add(id);
+        } else {
+            GLOBAL_RESULT_CACHE.put(id, result.copy());
+        }
+        return result.copy();
+    }
+
+    /**
+     * Internal reflection-based result extraction.  Only called on cache miss
+     * for non-CraftingRecipe instances.
+     */
+    private static ItemStack internalTryGetResultItem(Recipe<?> recipe, RegistryAccess access) {
         // Re-entry guard: when a handler's getResultItem() calls back into
         // tryGetResultItem() for the same recipe class, skip handler dispatch
         // and fall through to reflection to avoid StackOverflowError.
         if (DISPATCH_GUARD.get() != recipe.getClass()) {
             ModRecipeHandler handler = handlerFor(recipe);
             if (handler != null) {
+                Class<?> prev = DISPATCH_GUARD.get();
                 DISPATCH_GUARD.set(recipe.getClass());
                 try {
                     ItemStack result = handler.getResultItem(recipe, access);
                     if (!result.isEmpty()) return result;
                 } finally {
-                    DISPATCH_GUARD.remove();
+                    if (prev != null) {
+                        DISPATCH_GUARD.set(prev);
+                    } else {
+                        DISPATCH_GUARD.remove();
+                    }
                 }
                 // Handler exists and returned EMPTY — don't fall through.
                 // The reflection probe would call getResultItem(RegistryAccess)
@@ -181,18 +216,39 @@ public final class ModRecipeHandlers {
     }
 
     private static ItemStack tryGetOutputField(Recipe<?> recipe) {
-        Class<?> scan = recipe.getClass();
+        Class<?> clazz = recipe.getClass();
+        if (NO_OUTPUT_FIELD_CACHE.contains(clazz)) return ItemStack.EMPTY;
+        java.lang.reflect.Field cachedField = OUTPUT_FIELD_CACHE.get(clazz);
+        if (cachedField != null) {
+            try {
+                ItemStack s = (ItemStack) cachedField.get(recipe);
+                if (s != null && !s.isEmpty()) return s.copy();
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.debug("[RSI-Handler] cached output field read failed for {}", clazz.getName(), e);
+            }
+            return ItemStack.EMPTY;
+        }
+        Class<?> scan = clazz;
         while (scan != null && scan != Object.class) {
             for (java.lang.reflect.Field f : scan.getDeclaredFields()) {
                 if (!ItemStack.class.isAssignableFrom(f.getType())) continue;
+                String name = f.getName().toLowerCase(Locale.ROOT);
+                if (!name.contains("output") && !name.contains("result") && !name.contains("assembled"))
+                    continue;
                 f.setAccessible(true);
                 try {
-                    ItemStack s = (ItemStack) f.get(recipe);
-                    if (s != null && !s.isEmpty()) return s.copy();
-                } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
+                    Object val = f.get(recipe);
+                    if (val instanceof ItemStack s && !s.isEmpty()) {
+                        OUTPUT_FIELD_CACHE.put(clazz, f);
+                        return s.copy();
+                    }
+                } catch (Exception e) {
+                    RSIntegrationMod.LOGGER.debug("[RSI-Handler] output field probe failed for {}", clazz.getName(), e);
+                }
             }
             scan = scan.getSuperclass();
         }
+        NO_OUTPUT_FIELD_CACHE.add(clazz);
         return ItemStack.EMPTY;
     }
 

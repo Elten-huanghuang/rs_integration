@@ -5,9 +5,11 @@ import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry.BoundMachine;
 import net.minecraft.core.BlockPos;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -38,6 +40,8 @@ public final class ParallelCraftGroup implements IBatchDelegate {
     private final ResourceLocation recipeId;
     private BlockPos representativePos = BlockPos.ZERO;
     private boolean started;
+    private ExtractionLedger sharedLedger;
+    private boolean usingSharedLedger;
 
     private record ChildSlot(IBatchDelegate delegate, BlockPos pos) {}
 
@@ -57,6 +61,9 @@ public final class ParallelCraftGroup implements IBatchDelegate {
             if (child == null) continue;
             try {
                 if (child.validateAndInit(player, recipeId, m.dim(), m.pos())) {
+                    if (child instanceof AbstractBatchDelegate abd) {
+                        abd.setMachineDim(m.dim());
+                    }
                     children.add(new ChildSlot(child, m.pos()));
                     if (this.representativePos.equals(BlockPos.ZERO))
                         this.representativePos = m.pos();
@@ -81,8 +88,79 @@ public final class ParallelCraftGroup implements IBatchDelegate {
     @Nullable
     @Override
     public List<IngredientSpec> getRequiredMaterials() {
-        // Each child extracts its own materials independently via tryStartSingleCraft.
-        return null;
+        if (children.isEmpty()) return null;
+        // Aggregate: each child needs the same materials, multiplied by child count.
+        // This lets the chain pre-reserve from virtualInventory (feed-forward) instead
+        // of each child independently extracting from the RS network.
+        IBatchDelegate first = children.get(0).delegate;
+        List<IngredientSpec> base = null;
+        if (first instanceof AbstractBatchDelegate abd) {
+            base = abd.getRequiredMaterials();
+        }
+        if (base == null || base.isEmpty()) return null;
+        List<IngredientSpec> aggregated = new ArrayList<>();
+        for (int i = 0; i < children.size(); i++) {
+            aggregated.addAll(base);
+        }
+        return aggregated;
+    }
+
+    @Override
+    public boolean tryStartWithMaterials(ServerPlayer player,
+                                         List<ItemStack> materials,
+                                         ExtractionLedger sharedLedger) {
+        if (children.isEmpty() || materials.isEmpty()) return false;
+        IBatchDelegate first = children.get(0).delegate;
+        List<IngredientSpec> base = null;
+        if (first instanceof AbstractBatchDelegate abd) {
+            base = abd.getRequiredMaterials();
+        }
+        if (base == null) return false;
+        int perChild = base.size();
+        if (perChild == 0) return false;
+
+        int startedCount = 0;
+        // Collect failed children to remove after iteration
+        List<ChildSlot> failed = null;
+        for (int i = 0; i < children.size(); i++) {
+            int from = i * perChild;
+            int to = from + perChild;
+            if (to > materials.size()) break;
+            List<ItemStack> childMats = new ArrayList<>(materials.subList(from, to));
+            try {
+                if (children.get(i).delegate.tryStartWithMaterials(player, childMats, sharedLedger)) {
+                    startedCount++;
+                } else {
+                    RSIntegrationMod.LOGGER.warn("[RSI-ParallelGroup] Child tryStartWithMaterials failed at {}",
+                            children.get(i).pos);
+                    if (failed == null) failed = new ArrayList<>();
+                    failed.add(children.get(i));
+                }
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.warn("[RSI-ParallelGroup] Child tryStartWithMaterials threw at {}: {}",
+                        children.get(i).pos, e.getMessage(), e);
+                if (failed == null) failed = new ArrayList<>();
+                failed.add(children.get(i));
+            }
+        }
+
+        if (failed != null && !failed.isEmpty()) {
+            children.removeAll(failed);
+            RSIntegrationMod.LOGGER.warn("[RSI-ParallelGroup] Removed {} failed children for {}",
+                    failed.size(), recipeId);
+        }
+
+        if (startedCount == 0) {
+            RSIntegrationMod.LOGGER.warn("[RSI-ParallelGroup] No children started with materials for {}", recipeId);
+            return false;
+        }
+
+        this.usingSharedLedger = true;
+        this.sharedLedger = sharedLedger;
+        started = true;
+        RSIntegrationMod.LOGGER.debug("[RSI-ParallelGroup] Started {}/{} children with materials for {}",
+                startedCount, children.size(), recipeId);
+        return true;
     }
 
     @Override
@@ -90,15 +168,27 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         if (children.isEmpty()) return false;
 
         int startedCount = 0;
+        List<ChildSlot> failed = null;
         for (ChildSlot child : children) {
             try {
                 if (child.delegate.tryStartSingleCraft(player)) {
                     startedCount++;
+                } else {
+                    if (failed == null) failed = new ArrayList<>();
+                    failed.add(child);
                 }
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.warn("[RSI-ParallelGroup] Child startCraft failed at {}: {}",
                         child.pos, e.getMessage(), e);
+                if (failed == null) failed = new ArrayList<>();
+                failed.add(child);
             }
+        }
+
+        if (failed != null && !failed.isEmpty()) {
+            children.removeAll(failed);
+            RSIntegrationMod.LOGGER.warn("[RSI-ParallelGroup] Removed {} failed children for {}",
+                    failed.size(), recipeId);
         }
 
         if (startedCount == 0) {
@@ -110,6 +200,21 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         RSIntegrationMod.LOGGER.debug("[RSI-ParallelGroup] Started {}/{} children for {}",
                 startedCount, children.size(), recipeId);
         return true;
+    }
+
+    @Override
+    public boolean tryStartSingleCraft(ServerPlayer player, ExtractionLedger sharedLedger) {
+        // Pre-reserve path: aggregate materials, let chain extract from virtualInventory
+        // first, then distribute to children via tryStartWithMaterials.
+        // Fall back to per-child self-extraction when children don't expose specs.
+        List<IngredientSpec> specs = getRequiredMaterials();
+        if (specs != null && !specs.isEmpty()) {
+            // Signal to the chain that we support the pre-reserve flow.
+            // The chain will call tryStartWithMaterials after pre-reserving.
+            return tryStartSingleCraft(player);
+        }
+        // Legacy: each child self-extracts (no virtualInventory visibility)
+        return tryStartSingleCraft(player);
     }
 
     @Override
@@ -161,6 +266,13 @@ public final class ParallelCraftGroup implements IBatchDelegate {
 
     @Override
     public void onBatchFailed(ServerPlayer player, String reason) {
+        if (usingSharedLedger) {
+            children.clear();
+            started = false;
+            sharedLedger = null;
+            usingSharedLedger = false;
+            return;
+        }
         for (ChildSlot child : children) {
             try {
                 child.delegate.onBatchFailed(player, reason);
@@ -185,11 +297,27 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         }
         children.clear();
         started = false;
+        sharedLedger = null;
+        usingSharedLedger = false;
     }
 
     @Override
     public BlockPos getMachinePos() {
         return representativePos;
+    }
+
+    /** Number of child delegates that successfully validated. */
+    public int getChildCount() {
+        return children.size();
+    }
+
+    /** Propagate server reference to all child delegates for offline cleanup. */
+    public void setMachineServer(net.minecraft.server.MinecraftServer server) {
+        for (ChildSlot child : children) {
+            if (child.delegate instanceof AbstractBatchDelegate abd) {
+                abd.setMachineServer(server);
+            }
+        }
     }
 
     // ── helpers ────────────────────────────────────────────────────

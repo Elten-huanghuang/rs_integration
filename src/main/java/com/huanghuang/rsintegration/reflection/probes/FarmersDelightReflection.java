@@ -34,5 +34,5 @@ public final class FarmersDelightReflection {
         }
     }
 
-    public static boolean isAvailable() { return ready; }
+    public static boolean isAvailable() { return cookingPotBEClass != null; }
 }

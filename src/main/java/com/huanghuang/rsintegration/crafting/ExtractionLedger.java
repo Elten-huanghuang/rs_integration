@@ -352,7 +352,7 @@ public final class ExtractionLedger {
             }
             case NETWORK -> {
                 if (network == null) yield ItemStack.EMPTY;
-                yield RSIntegrationNetwork.extractFromNetwork(network, entry.originalIngredient, entry.count);
+                yield RSIntegrationNetwork.extractFromNetwork(network, entry.originalIngredient, entry.count, player);
             }
             case PLAYER_INVENTORY -> {
                 ItemStack extracted = extractFromSlots(entry, player.getInventory().items);
@@ -389,7 +389,9 @@ public final class ExtractionLedger {
         ItemStack extracted = ItemStack.EMPTY;
         int needed = entry.count;
         for (ItemStack stack : slots) {
-            if (entry.originalIngredient.test(stack) && stack.getCount() > 0) {
+            if (entry.originalIngredient.test(stack)
+                    && ItemStack.isSameItemSameTags(stack, entry.template)
+                    && stack.getCount() > 0) {
                 int take = Math.min(needed, stack.getCount());
                 ItemStack part = stack.split(take);
                 if (extracted.isEmpty()) {
@@ -408,7 +410,9 @@ public final class ExtractionLedger {
         ItemStack extracted = ItemStack.EMPTY;
         int remaining = Math.min(limit, entry.count);
         for (ItemStack stack : slots) {
-            if (entry.originalIngredient.test(stack) && stack.getCount() > 0) {
+            if (entry.originalIngredient.test(stack)
+                    && ItemStack.isSameItemSameTags(stack, entry.template)
+                    && stack.getCount() > 0) {
                 int take = Math.min(remaining, stack.getCount());
                 ItemStack part = stack.split(take);
                 if (extracted.isEmpty()) {
@@ -725,7 +729,8 @@ public final class ExtractionLedger {
         for (IItemHandler bp : findAllBackpackInventories(player)) {
             for (int s = 0; s < bp.getSlots() && remaining > 0; s++) {
                 ItemStack inSlot = bp.getStackInSlot(s);
-                if (inSlot.isEmpty() || !entry.originalIngredient.test(inSlot)) continue;
+                if (inSlot.isEmpty() || !entry.originalIngredient.test(inSlot)
+                        || !ItemStack.isSameItemSameTags(inSlot, entry.template)) continue;
                 int take = Math.min(remaining, inSlot.getCount());
                 ItemStack taken = bp.extractItem(s, take, false);
                 if (!taken.isEmpty()) {
@@ -828,7 +833,7 @@ public final class ExtractionLedger {
     public void releaseReservations(List<ItemStack> stacks) {
         // Collect entry ids to remove upfront so we match by identity, not by
         // (item, count) which can collide across entries.
-        java.util.BitSet idsToRemove = new java.util.BitSet();
+        Set<Integer> idsToRemove = new HashSet<>();
         for (ItemStack stack : stacks) {
             if (stack.isEmpty()) continue;
             CraftingResolver.StackKey key = CraftingResolver.StackKey.of(stack, true);
@@ -845,17 +850,17 @@ public final class ExtractionLedger {
             // Search in reverse so we match the most recently added entry first.
             for (int i = entries.size() - 1; i >= 0; i--) {
                 Entry e = entries.get(i);
-                if (!idsToRemove.get(e.id)
+                if (!idsToRemove.contains(e.id)
                         && ItemStack.isSameItem(e.template, stack)
                         && e.count == stack.getCount()) {
-                    idsToRemove.set(e.id);
+                    idsToRemove.add(e.id);
                     break;
                 }
             }
         }
         // Remove matched entries by id (in reverse to avoid index shifting issues).
         for (int i = entries.size() - 1; i >= 0; i--) {
-            if (idsToRemove.get(entries.get(i).id)) {
+            if (idsToRemove.contains(entries.get(i).id)) {
                 entries.remove(i);
             }
         }

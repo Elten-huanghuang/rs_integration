@@ -67,7 +67,7 @@ public final class RSBindingHook implements IBindingHook {
         BlockPos pos = new BlockPos(data.getInt(KEY_X), data.getInt(KEY_Y), data.getInt(KEY_Z));
         INetwork network = RSIntegrationNetwork.resolveNetwork(player.server, dim, pos);
         if (network == null) return ItemStack.EMPTY;
-        return RSIntegrationNetwork.extractFromNetwork(network, ingredient, count);
+        return RSIntegrationNetwork.extractFromNetwork(network, ingredient, count, player);
     }
 
 }

@@ -46,11 +46,19 @@ public final class CraftPacketUtils {
 
     private static final Map<ResourceLocation, List<Ingredient>> ingredientCache = new ConcurrentHashMap<>();
     private static final Set<ResourceLocation> emptyIngredientMarkers = ConcurrentHashMap.newKeySet();
+    /** Caches the ingredient-list Field per recipe class for scanAllFieldsForIngredients. */
+    private static final Map<Class<?>, java.lang.reflect.Field> ingredientFieldCache = new ConcurrentHashMap<>();
+    private static final java.lang.reflect.Field NO_INGREDIENT_FIELD;
+    static {
+        try { NO_INGREDIENT_FIELD = CraftPacketUtils.class.getDeclaredField("ingredientCache"); }
+        catch (NoSuchFieldException e) { throw new RuntimeException(e); }
+    }
 
     /** Clear ingredient extraction cache — called when recipes are reloaded. */
     public static void clearIngredientCache() {
         ingredientCache.clear();
         emptyIngredientMarkers.clear();
+        ingredientFieldCache.clear();
     }
 
     // ── shared utilities used by all craft packets ──────────────
@@ -111,25 +119,27 @@ public final class CraftPacketUtils {
      * Ledger entries are committed atomically at the end.
      * On any failure, nothing is physically moved.
      */
-    public static boolean executeCraftingSteps(ServerPlayer player, List<ResourceLocation> steps,
+    public static boolean executeCraftingSteps(ServerPlayer player, List<CraftingResolver.ResolutionStep> steps,
                                                INetwork network) {
         RecipeManager rm = player.serverLevel().getRecipeManager();
         ExtractionLedger ledger = new ExtractionLedger();
         List<ItemStack> virtualInventory = new ArrayList<>();
 
-        RSIntegrationMod.LOGGER.debug("[RSI-exec] Starting {} steps: {}", steps.size(), steps);
+        RSIntegrationMod.LOGGER.debug("[RSI-exec] Starting {} steps", steps.size());
 
         // Phase 1: process each step, feeding outputs forward into virtual inventory
         for (int stepIdx = 0; stepIdx < steps.size(); stepIdx++) {
-            ResourceLocation stepId = steps.get(stepIdx);
+            CraftingResolver.ResolutionStep rstep = steps.get(stepIdx);
+            ResourceLocation stepId = rstep.recipeId();
+            int executions = rstep.executions();
             Recipe<?> recipe = rm.byKey(stepId).orElse(null);
             if (recipe == null) {
                 RSIntegrationMod.LOGGER.debug("[RSI-exec] Step {}/{} {}: recipe not found", stepIdx + 1, steps.size(), stepId);
                 continue;
             }
 
-            RSIntegrationMod.LOGGER.debug("[RSI-exec] Step {}/{} {} type={} virtualInvBefore={}",
-                    stepIdx + 1, steps.size(), stepId, recipe.getClass().getSimpleName(),
+            RSIntegrationMod.LOGGER.debug("[RSI-exec] Step {}/{} {} x{} type={} virtualInvBefore={}",
+                    stepIdx + 1, steps.size(), stepId, executions, recipe.getClass().getSimpleName(),
                     virtualInventory.stream().map(s -> net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(s.getItem()) + "x" + s.getCount()).toList());
 
             if (recipe instanceof CraftingRecipe craftingRecipe) {
@@ -139,7 +149,7 @@ public final class CraftPacketUtils {
                     Ingredient ing = ingredients.get(idx);
                     if (ing.isEmpty()) continue;
 
-                    int stillNeeded = 1;
+                    int stillNeeded = executions;
                     var iter = virtualInventory.iterator();
                     while (iter.hasNext() && stillNeeded > 0) {
                         ItemStack vItem = iter.next();
@@ -163,6 +173,7 @@ public final class CraftPacketUtils {
                             return false;
                         }
                         consumed[idx] = reserved.copyWithCount(1);
+                        stillNeeded -= reserved.getCount();
                         RSIntegrationMod.LOGGER.debug("[RSI-exec] Step {}/{} {}: reserved {} from ledger",
                                 stepIdx + 1, steps.size(), stepId,
                                 net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(reserved.getItem()) + "x" + reserved.getCount());
@@ -176,17 +187,17 @@ public final class CraftPacketUtils {
                     result = craftingRecipe.getResultItem(player.serverLevel().registryAccess());
                 }
                 if (!result.isEmpty()) {
-                    addToVirtual(virtualInventory, result);
+                    addToVirtual(virtualInventory, result.copyWithCount(result.getCount() * executions));
                     RSIntegrationMod.LOGGER.debug("[RSI-exec] Step {}/{} {}: produced {} to virtual",
                             stepIdx + 1, steps.size(), stepId,
-                            net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(result.getItem()) + "x" + result.getCount());
+                            net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(result.getItem()) + "x" + (result.getCount() * executions));
                 }
-                // Add secondary outputs (byproducts) to virtual inventory
-                for (ItemStack secondary : RecipeIndex.tryGetSecondaryOutputs(craftingRecipe, player.serverLevel().registryAccess())) {
-                    addToVirtual(virtualInventory, secondary);
-                }
-                for (ItemStack remainder : getRecipeRemainders(craftingRecipe)) {
-                    addToVirtual(virtualInventory, remainder);
+                // Add secondary outputs (byproducts) to virtual inventory.
+                // For CraftingRecipe, getRecipeRemainders (Forge API) already
+                // handles all remainders correctly — reflection-based scanning
+                // would duplicate them, causing a dupe exploit with buckets etc.
+                for (ItemStack remainder : getRecipeRemainders(craftingRecipe, consumed)) {
+                    addToVirtual(virtualInventory, remainder.copyWithCount(remainder.getCount() * executions));
                 }
             } else {
                 // Non-crafting recipe (sawmill, custom mod type, etc.)
@@ -199,7 +210,7 @@ public final class CraftPacketUtils {
 
                 for (IngredientSpec spec : specs) {
                     if (spec.isEmpty()) continue;
-                    int stillNeeded = spec.count();
+                    int stillNeeded = spec.count() * executions;
                     var iter = virtualInventory.iterator();
                     while (iter.hasNext() && stillNeeded > 0) {
                         ItemStack vItem = iter.next();
@@ -224,22 +235,24 @@ public final class CraftPacketUtils {
                                     stepIdx + 1, steps.size(), stepId);
                             return false;
                         }
-                        RSIntegrationMod.LOGGER.debug("[RSI-exec] Step {}/{} {}: reserved {} from ledger",
+                        stillNeeded -= reserved.getCount();
+                        RSIntegrationMod.LOGGER.debug("[RSI-exec] Step {}/{} {}: reserved {} from ledger (stillNeeded={})",
                                 stepIdx + 1, steps.size(), stepId,
-                                net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(reserved.getItem()) + "x" + reserved.getCount());
+                                net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(reserved.getItem()) + "x" + reserved.getCount(),
+                                stillNeeded);
                     }
                 }
 
                 ItemStack result = RecipeIndex.tryGetResultItem(recipe, player.serverLevel().registryAccess());
                 if (!result.isEmpty()) {
-                    addToVirtual(virtualInventory, result);
+                    addToVirtual(virtualInventory, result.copyWithCount(result.getCount() * executions));
                     RSIntegrationMod.LOGGER.debug("[RSI-exec] Step {}/{} {}: produced {} to virtual",
                             stepIdx + 1, steps.size(), stepId,
-                            net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(result.getItem()) + "x" + result.getCount());
+                            net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(result.getItem()) + "x" + (result.getCount() * executions));
                 }
                 // Add secondary outputs (byproducts) to virtual inventory
                 for (ItemStack secondary : RecipeIndex.tryGetSecondaryOutputs(recipe, player.serverLevel().registryAccess())) {
-                    addToVirtual(virtualInventory, secondary);
+                    addToVirtual(virtualInventory, secondary.copyWithCount(secondary.getCount() * executions));
                 }
                 if (result.isEmpty()) {
                     RSIntegrationMod.LOGGER.debug("[RSI-exec] Step {}/{} {}: result empty, nothing added to virtual",
@@ -306,13 +319,43 @@ public final class CraftPacketUtils {
     }
 
     /**
-     * Get crafting remainders from a {@link CraftingRecipe} using the Forge-patched
-     * {@code recipe.getRemainingItems(CraftingContainer)} method, which fires
-     * CraftTweaker hooks for {@code .reuse()}, {@code .transformDamage()},
-     * {@code .transformReplace()} etc.
+     * Get crafting remainders using the <b>actually consumed</b> items.
+     * This is critical for durability-based remainders (tools, weapons) —
+     * calling {@code getCraftingRemainingItem()} on a fresh template item
+     * would ignore damage and produce incorrect remainders.
      *
-     * <p>{@link ItemStack#getCraftingRemainingItem()} only returns vanilla
-     * Item-level remainders and misses CT Ingredient-level modifications.</p>
+     * @param consumed the items that were actually placed in the crafting grid
+     */
+    public static List<ItemStack> getRecipeRemainders(CraftingRecipe recipe, ItemStack[] consumed) {
+        List<Ingredient> ingredients = recipe.getIngredients();
+        AbstractContainerMenu dummyMenu = new AbstractContainerMenu(null, -1) {
+            @Override public ItemStack quickMoveStack(net.minecraft.world.entity.player.Player p, int i) { return ItemStack.EMPTY; }
+            @Override public boolean stillValid(net.minecraft.world.entity.player.Player p) { return false; }
+        };
+        var container = new net.minecraft.world.inventory.TransientCraftingContainer(dummyMenu, 3, 3);
+        int slots = Math.min(ingredients.size(), 9);
+        for (int i = 0; i < slots; i++) {
+            if (consumed[i] != null && !consumed[i].isEmpty()) {
+                container.setItem(i, consumed[i].copy());
+            } else if (!ingredients.get(i).isEmpty()) {
+                ItemStack[] items = ingredients.get(i).getItems();
+                if (items.length > 0 && !items[0].isEmpty()) {
+                    container.setItem(i, items[0].copy());
+                }
+            }
+        }
+        NonNullList<ItemStack> allRemainders = recipe.getRemainingItems(container);
+        List<ItemStack> result = new ArrayList<>();
+        for (ItemStack r : allRemainders) {
+            if (!r.isEmpty()) result.add(r.copy());
+        }
+        return result;
+    }
+
+    /**
+     * Get crafting remainders using template items from the ingredient list.
+     * Prefer {@link #getRecipeRemainders(CraftingRecipe, ItemStack[])} when
+     * actual consumed items are available, to correctly handle durability.
      */
     public static List<ItemStack> getRecipeRemainders(CraftingRecipe recipe) {
         List<Ingredient> ingredients = recipe.getIngredients();
@@ -622,19 +665,32 @@ public final class CraftPacketUtils {
     @SuppressWarnings("unchecked")
     private static List<Ingredient> scanAllFieldsForIngredients(Object recipe) {
         Class<?> clazz = recipe.getClass();
-        while (clazz != null && clazz != Object.class) {
-            for (java.lang.reflect.Field field : clazz.getDeclaredFields()) {
+        java.lang.reflect.Field cached = ingredientFieldCache.get(clazz);
+        if (cached != null) {
+            if (cached == NO_INGREDIENT_FIELD) return null;
+            try {
+                List<?> list = (List<?>) cached.get(recipe);
+                if (list != null && !list.isEmpty() && list.get(0) instanceof Ingredient) {
+                    return (List<Ingredient>) list;
+                }
+            } catch (Exception e) { /* fall through to rescan */ }
+        }
+        Class<?> scan = clazz;
+        while (scan != null && scan != Object.class) {
+            for (java.lang.reflect.Field field : scan.getDeclaredFields()) {
                 if (!List.class.isAssignableFrom(field.getType())) continue;
                 field.setAccessible(true);
                 try {
                     List<?> list = (List<?>) field.get(recipe);
                     if (list != null && !list.isEmpty() && list.get(0) instanceof Ingredient) {
+                        ingredientFieldCache.put(clazz, field);
                         return (List<Ingredient>) list;
                     }
                 } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
             }
-            clazz = clazz.getSuperclass();
+            scan = scan.getSuperclass();
         }
+        ingredientFieldCache.put(clazz, NO_INGREDIENT_FIELD);
         return null;
     }
 
@@ -873,15 +929,24 @@ public final class CraftPacketUtils {
      * @return true if the chain was executed/submitted and items should
      *         now (or eventually) be available
      */
+    /**
+     * Resolve and execute/submit a crafting chain for the given ingredient+count.
+     * Preserves the original {@link Ingredient} (which may represent a Tag with
+     * many valid item options) instead of degrading it to a single ItemStack.
+     *
+     * @return true if the chain was executed/submitted and items should
+     *         now (or eventually) be available
+     */
     private static boolean tryResolveAndRunChain(ServerPlayer player, INetwork network,
-                                                  ItemStack needed) {
+                                                  Ingredient ingredient, int count) {
         Map<StackKey, Integer> available = MaterialSources.listAllAvailable(player, network);
+        List<IngredientSpec> specs = List.of(new IngredientSpec(ingredient, count));
 
         // 1. Try typed resolver (includes multi-block candidates)
         if (RSIntegrationConfig.ENABLE_MULTIBLOCK_AUTO_CRAFTING.get()) {
             List<String> missing = new ArrayList<>();
-            List<ResolutionStep> steps = CraftingResolver.resolveStepsForKeyedWithTypes(
-                    List.of(needed), available, player.serverLevel(), player, network, missing);
+            List<ResolutionStep> steps = CraftingResolver.resolveStepsForSpecsWithTypes(
+                    specs, available, player.serverLevel(), player, network, missing, null, false);
             if (!missing.isEmpty()) {
                 RSIntegrationMod.LOGGER.debug("[RSI] tryResolveAndRunChain: typed resolver could not resolve: {}",
                         missing);
@@ -900,16 +965,14 @@ public final class CraftPacketUtils {
                 // All vanilla — execute inline
                 player.sendSystemMessage(Component.translatable(
                         "rsi.generic.info.auto_crafting", steps.size()));
-                List<ResourceLocation> recipeIds = steps.stream()
-                        .map(ResolutionStep::recipeId).collect(Collectors.toList());
-                return executeCraftingSteps(player, recipeIds, network);
+                return executeCraftingSteps(player, steps, network);
             }
         }
 
         // 2. Fallback: vanilla-only resolver
         List<String> missing = new ArrayList<>();
-        List<ResourceLocation> vanillaSteps = CraftingResolver.resolveStepsForKeyed(
-                List.of(needed), available, player.serverLevel(), missing);
+        List<ResourceLocation> vanillaSteps = CraftingResolver.resolveStepsForSpecs(
+                specs, available, player.serverLevel(), missing);
         if (!missing.isEmpty()) {
             RSIntegrationMod.LOGGER.debug("[RSI] tryResolveAndRunChain: vanilla resolver could not resolve: {}",
                     missing);
@@ -917,11 +980,16 @@ public final class CraftPacketUtils {
         if (!vanillaSteps.isEmpty() && missing.isEmpty()) {
             player.sendSystemMessage(Component.translatable(
                     "rsi.generic.info.auto_crafting", vanillaSteps.size()));
-            return executeCraftingSteps(player, vanillaSteps, network);
+            List<ResolutionStep> wrapped = new ArrayList<>();
+            for (ResourceLocation id : vanillaSteps) {
+                wrapped.add(new ResolutionStep(id, ModType.GENERIC,
+                        new ResourceLocation("minecraft:crafting")));
+            }
+            return executeCraftingSteps(player, wrapped, network);
         }
 
-        RSIntegrationMod.LOGGER.warn("[RSI] tryResolveAndRunChain: both typed and vanilla resolvers failed for {}",
-                needed.getHoverName().getString());
+        RSIntegrationMod.LOGGER.warn("[RSI] tryResolveAndRunChain: both typed and vanilla resolvers failed for {} x{}",
+                describeIngredient(ingredient).getString(), count);
         return false;
     }
 
@@ -959,14 +1027,10 @@ public final class CraftPacketUtils {
             // Auto-craft fallback (inline vanilla or async multi-block)
             if (RSIntegrationConfig.ENABLE_AUTO_CRAFTING.get() && !ingredient.isEmpty()
                     && network != null) {
-                ItemStack[] options = ingredient.getItems();
-                if (options.length > 0 && !options[0].isEmpty()) {
-                    ItemStack needed = options[0].copyWithCount(count);
-                    if (tryResolveAndRunChain(player, network, needed)) {
-                        reserved = ledger.reserve(ingredient, count, network,
-                                player, altarDim, altarPos);
-                        if (!reserved.isEmpty()) return reserved;
-                    }
+                if (tryResolveAndRunChain(player, network, ingredient, count)) {
+                    reserved = ledger.reserve(ingredient, count, network,
+                            player, altarDim, altarPos);
+                    if (!reserved.isEmpty()) return reserved;
                 }
             }
             return ItemStack.EMPTY;
@@ -985,17 +1049,13 @@ public final class CraftPacketUtils {
         if (!RSIntegrationConfig.ENABLE_AUTO_CRAFTING.get()) return ItemStack.EMPTY;
         if (ingredient.isEmpty()) return ItemStack.EMPTY;
 
-        ItemStack[] options = ingredient.getItems();
-        if (options.length == 0 || options[0].isEmpty()) return ItemStack.EMPTY;
-        ItemStack needed = options[0].copyWithCount(count);
-
         INetwork network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
         if (network == null) {
             network = AltarBindingRegistry.resolveNetworkForAltar(player, altarDim, altarPos);
         }
         if (network == null) return ItemStack.EMPTY;
 
-        if (!tryResolveAndRunChain(player, network, needed)) {
+        if (!tryResolveAndRunChain(player, network, ingredient, count)) {
             player.sendSystemMessage(Component.translatable("rsi.generic.error.auto_craft_failed"));
             return ItemStack.EMPTY;
         }
@@ -1066,11 +1126,12 @@ public final class CraftPacketUtils {
             ServerPlayer player, INetwork network, CraftingRecipe recipe) {
         Map<StackKey, Integer> available = MaterialSources.listAllAvailable(player, network);
 
+        List<IngredientSpec> specs = extractIngredientSpecs(recipe);
+        if (specs == null) return null;
+
         List<String> missingCheck = new ArrayList<>();
-        // Primary path: typed resolver with keyed counts (avoids NBT round-trip)
-        List<ResolutionStep> allSteps = CraftingResolver.resolveStepsForIngredientsWithTypes(
-                recipe.getIngredients(), available, player.serverLevel(),
-                player, network, missingCheck);
+        List<ResolutionStep> allSteps = CraftingResolver.resolveStepsForSpecsWithTypes(
+                specs, available, player.serverLevel(), player, network, missingCheck, null, false);
 
         if (!missingCheck.isEmpty()) {
             RSIntegrationMod.LOGGER.debug("[RSI] resolveIntermediateSteps: typed resolver could not resolve: {}",
@@ -1079,11 +1140,9 @@ public final class CraftPacketUtils {
         }
 
         if (allSteps == null) {
-            // Fallback: vanilla-only resolver (still needs ItemStack conversion)
             missingCheck.clear();
-            List<ItemStack> availStacks = stacksFromKeyed(available);
-            List<ResourceLocation> vanillaIds = CraftingResolver.resolveStepsForIngredients(
-                    recipe.getIngredients(), availStacks, player.serverLevel(), missingCheck);
+            List<ResourceLocation> vanillaIds = CraftingResolver.resolveStepsForSpecs(
+                    specs, available, player.serverLevel(), missingCheck);
             if (!missingCheck.isEmpty()) {
                 RSIntegrationMod.LOGGER.debug("[RSI] resolveIntermediateSteps: vanilla resolver also could not resolve: {}",
                         missingCheck);
@@ -1103,50 +1162,40 @@ public final class CraftPacketUtils {
     // ── availability pre-resolve ──────────────────────────────────
 
     /**
-     * Attempt to auto-craft intermediate items needed by a recipe so they
-     * show as available in GUI availability checks. Fires once before the
-     * availability check; crafted items are placed in the RS network.
+     * Check whether intermediate items needed by a recipe can be auto-crafted.
+     * Does NOT execute any crafting — read-only preview for GUI availability checks.
      */
-    public static void resolveMissingIngredients(ServerPlayer player, Recipe<?> recipe,
+    public static boolean canResolveMissingIngredients(ServerPlayer player, Recipe<?> recipe,
                                                   @Nullable ResourceKey<Level> altarDim,
                                                   @Nullable BlockPos altarPos) {
-        if (!RSIntegrationConfig.ENABLE_AUTO_CRAFTING.get()) return;
+        if (!RSIntegrationConfig.ENABLE_AUTO_CRAFTING.get()) return false;
 
-        List<Ingredient> ingredients = extractIngredients(recipe);
-        if (ingredients == null || ingredients.isEmpty()) return;
+        List<IngredientSpec> specs = extractIngredientSpecs(recipe);
+        if (specs == null || specs.isEmpty()) return false;
 
-        List<Ingredient> needed = new ArrayList<>();
-        for (Ingredient ing : ingredients) {
-            if (ing.isEmpty()) continue;
-            ItemStack[] opts = ing.getItems();
-            if (opts.length == 0 || opts[0].isEmpty()) continue;
-            needed.add(ing);
+        List<IngredientSpec> needed = new ArrayList<>();
+        for (IngredientSpec spec : specs) {
+            if (spec.isEmpty()) continue;
+            needed.add(spec);
         }
-        if (needed.isEmpty()) return;
+        if (needed.isEmpty()) return false;
 
         INetwork network = resolveNetworkForCraft(player, altarDim, altarPos);
-        if (network == null) return;
-
+        if (network == null) return false;
         Map<StackKey, Integer> available = MaterialSources.listAllAvailable(player, network);
-
         List<String> missing = new ArrayList<>();
-        // Use the typed resolver so multi-block recipe paths are also considered.
-        // Only vanilla (GENERIC) steps are executed inline; multi-block steps
-        // cannot run synchronously during a GUI availability check.
-        List<ResolutionStep> allSteps = CraftingResolver.resolveStepsForIngredientsWithTypes(
-                needed, available, player.serverLevel(), player, network, missing);
+        List<ResolutionStep> allSteps = CraftingResolver.resolveStepsForSpecsWithTypes(
+                needed, available, player.serverLevel(), player, network, missing, null, false);
 
-        // Only execute inline when every step is vanilla; filtering out
-        // multi-block steps from a mixed chain would break dependencies.
-        if (!allSteps.isEmpty() && missing.isEmpty()
-                && allSteps.stream().allMatch(s -> s.modType() == ModType.GENERIC)) {
-            List<ResourceLocation> vanillaSteps = allSteps.stream()
-                    .map(ResolutionStep::recipeId)
-                    .collect(Collectors.toList());
-            RSIntegrationMod.LOGGER.debug("[RSI] Auto-crafted {} intermediate steps for recipe {}",
-                    vanillaSteps.size(), recipe.getId());
-            executeCraftingSteps(player, vanillaSteps, network);
+        // Only report as craftable when every intermediate is vanilla;
+        // multi-block steps require async chain execution, not a preview.
+        boolean craftable = !allSteps.isEmpty() && missing.isEmpty()
+                && allSteps.stream().allMatch(s -> s.modType() == ModType.GENERIC);
+        if (craftable) {
+            RSIntegrationMod.LOGGER.debug("[RSI] Intermediate check for recipe {}: all {} steps can be auto-crafted",
+                    recipe.getId(), allSteps.size());
         }
+        return craftable;
     }
 
     /**

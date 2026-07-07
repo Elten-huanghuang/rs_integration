@@ -45,8 +45,12 @@
 | **拔刀剑**      | 工作台配方（NBT 判定） | ➖ | ✅ | ➖ |
 | **无尽贪婪**     | 导向工作台、中子态素压缩机、极致锻造台 | ✅ | ✅ | ✅ |
 | **金属桶**      | 铁桶、金桶、钻石桶等各级金属桶 | ✅ | ❌ | ✅ |
-| **蟹农乐事**     | 捕蟹笼等海产加工设备 | ✅ | ❌ | ✅ |
-| **汇流**       | 工坊 | ✅ | ❌ | ✅ |
+| **蟹农乐事**     | 捕蟹笼等海产加工设备 | ✅ | ✅ | ✅ |
+| **农夫乐事**     | 烹饪锅、煎锅 | ✅ | ✅ | ❌ |
+| **农夫暇事**     | 茶壶 | ✅ | ✅ | ❌ |
+| **妖怪归家**     | 烹饪锅、蒸笼、摩卡壶、水壶、发酵罐、料理盘 | ✅ | ✅ | ❌ |
+| **不死者乐事**   | 附魔冷却器 | ✅ | ✅ | ❌ |
+| **汇流**         | 工坊 | ✅ | ✅ | ✅ |
 | **神化**       | 重铸台 | ✅ | ❌ | ✅ |
 | **远古神化**     | 古代重铸台 | ✅ | ❌ | ✅ |
 | **PGP**      | PGP 枪械工作台 | ✅ | ❌ | ✅ |
@@ -55,7 +59,7 @@
 > ¹ Eidolon 远程 GUI 仅工作台支持。  
 > ² 禁忌与奥秘的 `apply_*_modifier` 配方需先绑定锻造台，通过 JEI `+` 打开锻造台 GUI 并自动填充模板与附加材料。
 
-**自定义 GUI 机器** — 任意带有容器 GUI 的模组机器（如金属桶、蟹农乐事/捕蟹笼、PGP、EMX Arms、神化、TerraCurio 等）可通过配置中的 `customGuiMachineMods` 添加远程 GUI 支持，无需编写 Java 代码。默认已包含 `crabbersdelight`、`farmingforblockheads`、`metalbarrels`、`pgp`、`emxarms`、`apotheosis`、`confluence`。需手持网络连接器手动潜行右键绑定方可出现在面板中。
+**自定义 GUI 机器** — 任意带有容器 GUI 的模组机器（如金属桶、蟹农乐事/捕蟹笼、PGP、EMX Arms、神化、TerraCurio 等）可通过配置中的 `customGuiMachineMods` 添加远程 GUI 支持，无需编写 Java 代码。默认已包含 `crabbersdelight`、`metalbarrels`、`pgp`、`emxarms`、`apotheosis`、`ancientreforging`。需手持网络连接器手动潜行右键绑定方可出现在面板中。
 
 ## 快速上手
 
@@ -106,6 +110,11 @@ enableVanillaMachines = true
 enableSophisticatedBackpacks = true
 enableJeiIntegration = true
 enableFarmingForBlockheads = true
+enableFarmersDelight = true
+enableFarmersRespite = true
+enableYoukaisHomecoming = true
+enableImmortalsDelight = true
+enableConfluence = true
 
 [autoCrafting]
 enableMultiblockAutoCrafting = true    # 允许多方块机器作为中间合成步骤
@@ -121,7 +130,7 @@ enableRSSidePanel = true
 
 [remoteMachineGui]
 enableMachineGuiTabs = true
-customGuiMachineMods = ["crabbersdelight", "farmingforblockheads", "metalbarrels", "pgp", "emxarms", "apotheosis", "confluence", "ancientreforging"]
+customGuiMachineMods = ["crabbersdelight", "metalbarrels", "pgp", "emxarms", "apotheosis", "ancientreforging"]
 
 [advanced]
 diagnosticVerboseLogging = false

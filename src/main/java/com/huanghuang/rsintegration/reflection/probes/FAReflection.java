@@ -59,5 +59,5 @@ public final class FAReflection {
         }
     }
 
-    public static boolean isAvailable() { return ready; }
+    public static boolean isAvailable() { return hephaestusForgeBEClass != null; }
 }

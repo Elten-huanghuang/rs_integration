@@ -2,6 +2,23 @@ package com.huanghuang.rsintegration.reflection.contract;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.api.VersionRange;
+import com.huanghuang.rsintegration.reflection.probes.AetherworksReflection;
+import com.huanghuang.rsintegration.reflection.probes.BackpackReflection;
+import com.huanghuang.rsintegration.reflection.probes.CrabbersDelightReflection;
+import com.huanghuang.rsintegration.reflection.probes.CrockPotReflection;
+import com.huanghuang.rsintegration.reflection.probes.EidolonReflection;
+import com.huanghuang.rsintegration.reflection.probes.EmbersReflection;
+import com.huanghuang.rsintegration.reflection.probes.FAReflection;
+import com.huanghuang.rsintegration.reflection.probes.FRReflection;
+import com.huanghuang.rsintegration.reflection.probes.FarmersDelightReflection;
+import com.huanghuang.rsintegration.reflection.probes.FarmingForBlockheadsReflection;
+import com.huanghuang.rsintegration.reflection.probes.GoetyReflection;
+import com.huanghuang.rsintegration.reflection.probes.ImmersalsDelightReflection;
+import com.huanghuang.rsintegration.reflection.probes.JEIReflection;
+import com.huanghuang.rsintegration.reflection.probes.MalumReflection;
+import com.huanghuang.rsintegration.reflection.probes.TLMReflection;
+import com.huanghuang.rsintegration.reflection.probes.WRReflection;
+import com.huanghuang.rsintegration.reflection.probes.YHKReflection;
 import net.minecraftforge.fml.ModList;
 import net.minecraftforge.fml.util.ObfuscationReflectionHelper;
 
@@ -56,6 +73,7 @@ public final class ContractValidation {
      * Called once from {@code RSIntegrationMod.onCommonSetup()}.
      */
     public static void validateAll() {
+        ensureProbeClassesLoaded();
         ClassLoader cl = ContractValidation.class.getClassLoader();
         int ok = 0, failed = 0, skipped = 0;
 
@@ -117,6 +135,36 @@ public final class ContractValidation {
         RSIntegrationMod.LOGGER.info(
                 "[RSI-Contract] Contract validation done: {} OK, {} failed, {} skipped",
                 ok, failed, skipped);
+    }
+
+    /**
+     * Access a non-constant static field on every probe class to trigger
+     * {@code <clinit>}.  Java only initializes a class on first active use
+     * (JLS §12.4.1); without this, the static blocks that call
+     * {@link #register} and {@link #registerTarget} never run and
+     * {@link #validateAll()} finds zero contracts.
+     */
+    private static void ensureProbeClassesLoaded() {
+        Object o;
+        o = AetherworksReflection.anvilBEClass;
+        o = BackpackReflection.backpackBEClass;
+        o = CrabbersDelightReflection.crabTrapBEClass;
+        o = CrockPotReflection.crockPotBEClass;
+        o = EidolonReflection.crucibleTileEntityClass;
+        o = EmbersReflection.alchemyTabletBEClass;
+        o = FAReflection.hephaestusForgeBEClass;
+        o = FarmersDelightReflection.cookingPotBEClass;
+        o = FarmingForBlockheadsReflection.marketBEClass;
+        o = FRReflection.kettleBEClass;
+        o = GoetyReflection.darkAltarBEClass;
+        o = ImmersalsDelightReflection.enchantalCoolerBEClass;
+        o = JEIReflection.ingredientListOverlayClass;
+        o = MalumReflection.spiritAltarBEClass;
+        o = TLMReflection.altarBEClass;
+        o = WRReflection.arcaneWorkbenchBEClass;
+        o = YHKReflection.cookingBEClass;
+        // suppress "unused" warning — the reads above are the whole point
+        if (o == null) { /* probe fields start null; contracts populate them */ }
     }
 
     private static Field resolveField(Class<?> clazz,

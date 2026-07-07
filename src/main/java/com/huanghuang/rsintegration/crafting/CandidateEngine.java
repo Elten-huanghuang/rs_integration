@@ -22,7 +22,6 @@ final class CandidateEngine {
 
     private CandidateEngine() {}
 
-    private static final int INGREDIENT_SCAN_LIMIT = 64;
     private static final int PREFERRED_RECIPE_BONUS = 10000;
 
     public record CandidateDiagnostic(ResourceLocation recipeId, int score, ModType modType,
@@ -42,9 +41,20 @@ final class CandidateEngine {
                                                    @javax.annotation.Nullable List<CandidateDiagnostic> diag) {
         // Phase 1: collect unique entries by recipe ID (cheap — no getResultItem calls)
         Map<ResourceLocation, RecipeIndex.Entry> byId = new LinkedHashMap<>();
+        long p1Start = System.nanoTime();
         ItemStack[] items = ingredient.getItems();
-        int limit = Math.min(items.length, INGREDIENT_SCAN_LIMIT);
-        for (int idx = 0; idx < limit; idx++) {
+        long itemsMs = (System.nanoTime() - p1Start) / 1_000_000;
+
+        // Diagnostic: Tag ingredient audit
+        boolean isTag = items.length > 1;
+        int itemsWithRecipes = 0;
+        Set<ResourceLocation> firstItems = new LinkedHashSet<>();
+        for (int s = 0; s < Math.min(items.length, 10); s++) {
+            if (!items[s].isEmpty()) firstItems.add(ForgeRegistries.ITEMS.getKey(items[s].getItem()));
+        }
+
+        long loopStart = System.nanoTime();
+        for (int idx = 0; idx < items.length; idx++) {
             ItemStack stack = items[idx];
             if (stack.isEmpty()) continue;
             Item item = stack.getItem();
@@ -54,6 +64,7 @@ final class CandidateEngine {
                 if (diag != null) logDiag(diag, item, null, 0, null, true, "No recipes indexed for this item");
                 continue;
             }
+            itemsWithRecipes++;
 
             for (RecipeIndex.Entry entry : recipes) {
                 ResourceLocation rid = entry.recipe().getId();
@@ -76,72 +87,112 @@ final class CandidateEngine {
                 byId.put(rid, entry);
             }
         }
+        long loopMs = (System.nanoTime() - loopStart) / 1_000_000;
 
-        // Phase 2: check output matching for each unique recipe (expensive calls once per recipe)
-        // Plain Ingredient.test() only checks item type, not NBT.  For items like
-        // tacz:attachment where every variant carries NBT to distinguish itself,
-        // that causes every variant to pass — the "or tree" becomes a flat soup of
-        // unrelated recipes.  StrictNBTIngredient already enforces the NBT check
-        // inside test(), so the extra guard only fires when the ingredient is a
-        // plain Ingredient whose items all carry NBT.
+        // Diagnostic: log Tag ingredient candidate search summary
+        if (isTag) {
+            com.huanghuang.rsintegration.RSIntegrationMod.LOGGER.debug(
+                    "[RSI-Candidate] Phase1: getItems={}ms, loop={}ms, {} items, {} recipes, {} unique candidates, first items: {}",
+                    itemsMs, loopMs, items.length, items.length, byId.size(), firstItems);
+        }
+
+        // Phase 2: check output matching for each unique recipe.
+        // Critical ordering: vanilla CraftingRecipe entries are instant
+        // (cr.getResultItem is pre-computed), but mod recipes go through
+        // ModRecipeHandlers.tryGetResultItem() which does reflection and
+        // takes ~1s each.  For Tag ingredients like forge:glass_panes
+        // with 21 variants, 4+ mod glass-pane recipes each take 1s+,
+        // burning the 500ms deadline before the vanilla minecraft:glass_pane
+        // recipe is found.
+        //
+        // Solution: process vanilla (CraftingRecipe) entries first.  If at
+        // least one matches, return immediately — no need to probe mod
+        // recipes for the same output item.  Only fall through to mod
+        // recipes when no vanilla recipe produces this ingredient.
         boolean nbtStrict = ingredient instanceof StrictNBTIngredient;
         boolean ingredientAllNbt = !nbtStrict && allItemsHaveNbt(ingredient);
         Map<ResourceLocation, RecipeIndex.Entry> dedup = new LinkedHashMap<>();
+
+        // Phase 2: validate outputs.  Vanilla CraftingRecipe entries are
+        // instant (getResultItem is pre-computed); mod recipes go through
+        // ModRecipeHandlers.tryGetResultItem() which uses a global cache.
+        // Both contribute to the candidate pool so players with mod-only
+        // ingredients (e.g. Botany glass but no vanilla glass) can still
+        // resolve recipes like glass → glass_pane.
+        long phase2Start = System.nanoTime();
+        int vanillaCount = 0;
         for (RecipeIndex.Entry entry : byId.values()) {
-            ItemStack output;
-            if (entry.recipe() instanceof CraftingRecipe cr) {
-                output = cr.getResultItem(ctx.level.registryAccess());
-            } else {
-                output = ModRecipeHandlers.tryGetResultItem(entry.recipe(), ctx.level.registryAccess());
+            if (ctx.timedOut()) break;
+            if (!(entry.recipe() instanceof CraftingRecipe cr)) continue;
+            vanillaCount++;
+            ItemStack output = cr.getResultItem(ctx.level.registryAccess());
+            if (passesOutputCheck(entry, output, ingredient, ingredientAllNbt, nbtStrict, diag)) {
+                dedup.put(entry.recipe().getId(), entry);
             }
-            if (output.isEmpty() || !ingredient.test(output)) {
-                // SlashBlade: getResultItem() returns bare blade without NBT,
-                // so SlashBladeIngredient.test() rejects it. Allow the chain
-                // if the output item type matches — real NBT validation
-                // happens via matchesStackKey / assembleBladeOutput later.
-                boolean slashBladeChain = false;
-                if (SlashBladeRecipeHandler.isSlashBladeIngredient(ingredient) && !output.isEmpty()) {
-                    for (ItemStack ingItem : ingredient.getItems()) {
-                        if (!ingItem.isEmpty() && ingItem.getItem() == output.getItem()) {
-                            slashBladeChain = true;
-                            break;
-                        }
-                    }
-                }
-                if (!slashBladeChain) {
-                    if (diag != null) logDiag(diag, null, entry, 0, entry.modType(), true, "Output does not match ingredient");
-                    continue;
-                }
+        }
+        int modCount = 0;
+        for (RecipeIndex.Entry entry : byId.values()) {
+            if (ctx.timedOut()) break;
+            if (entry.recipe() instanceof CraftingRecipe) continue;
+            modCount++;
+            ItemStack output = ModRecipeHandlers.tryGetResultItem(entry.recipe(), ctx.level.registryAccess());
+            if (passesOutputCheck(entry, output, ingredient, ingredientAllNbt, nbtStrict, diag)) {
+                dedup.put(entry.recipe().getId(), entry);
             }
-            // When the ingredient only contains NBT-bearing items, the output
-            // must match at least one of them by item AND NBT — otherwise
-            // unrelated tacz:attachment variants leak into the or-tree.
-            if (ingredientAllNbt && output.hasTag() && !anyIngredientItemMatchesNbt(ingredient, output)) {
-                if (diag != null) logDiag(diag, null, entry, 0, entry.modType(), true, "Output NBT does not match ingredient");
-                continue;
-            }
-            dedup.put(entry.recipe().getId(), entry);
+        }
+        long phase2Elapsed = System.nanoTime() - phase2Start;
+
+        if (isTag) {
+            com.huanghuang.rsintegration.RSIntegrationMod.LOGGER.debug(
+                    "[RSI-Candidate] Phase2: {} vanilla + {} mod recipes in {}ms, dedup={}",
+                    vanillaCount, modCount, phase2Elapsed / 1_000_000, dedup.size());
         }
 
         List<RecipeIndex.Entry> result = new ArrayList<>(dedup.values());
+
+        // Pre-compute score and availability before sorting so each entry is
+        // evaluated exactly once — NOT O(N log N) times inside the comparator.
+        // Use an ingredient→count cache so countMatching (which iterates all
+        // 546+ inventory item types) is called at most once per unique ingredient.
+        Map<Ingredient, Integer> matchCache = new HashMap<>();
+        Map<ResourceLocation, Integer> scoreCache = new HashMap<>();
+        Map<ResourceLocation, Integer> availCache = new HashMap<>();
+        for (RecipeIndex.Entry entry : result) {
+            if (ctx.timedOut()) break; // don't burn remaining budget on scoring
+            scoreCache.put(entry.recipe().getId(), scoreEntry(entry, ctx, nbtStrict, matchCache));
+            availCache.put(entry.recipe().getId(), countAvailableIngredients(entry, ctx, matchCache));
+        }
+
+        long sortStart = System.nanoTime();
         result.sort((a, b) -> {
-            int cmp = Integer.compare(scoreEntry(b, ctx, nbtStrict), scoreEntry(a, ctx, nbtStrict));
+            ResourceLocation idA = a.recipe().getId();
+            ResourceLocation idB = b.recipe().getId();
+
+            int cmp = Integer.compare(scoreCache.get(idB), scoreCache.get(idA));
             if (cmp != 0) return cmp;
+
             // Tiebreak: prefer recipes whose ingredients are available
-            cmp = Integer.compare(countAvailableIngredients(b, ctx),
-                    countAvailableIngredients(a, ctx));
+            cmp = Integer.compare(availCache.get(idB), availCache.get(idA));
             if (cmp != 0) return cmp;
+
             // Final tiebreak: prefer vanilla/minecraft recipes
-            boolean aMc = "minecraft".equals(a.recipe().getId().getNamespace());
-            boolean bMc = "minecraft".equals(b.recipe().getId().getNamespace());
+            boolean aMc = "minecraft".equals(idA.getNamespace());
+            boolean bMc = "minecraft".equals(idB.getNamespace());
             if (aMc && !bMc) return -1;
             if (bMc && !aMc) return 1;
             return 0;
         });
 
+        if (isTag) {
+            long sortElapsed = System.nanoTime() - sortStart;
+            com.huanghuang.rsintegration.RSIntegrationMod.LOGGER.debug(
+                    "[RSI-Candidate] Phase2 sort: {} entries in {}ms",
+                    result.size(), sortElapsed / 1_000_000);
+        }
+
         if (diag != null) {
             for (RecipeIndex.Entry e : result) {
-                int s = scoreEntry(e, ctx, nbtStrict);
+                int s = scoreEntry(e, ctx, nbtStrict, null);
                 String pref = isPreferred(e, ctx) ? " (PREFERRED)" : "";
                 logDiag(diag, null, e, s, e.modType(), false, "Score=" + s + pref);
             }
@@ -175,14 +226,13 @@ final class CandidateEngine {
         return pref != null && pref.equals(entry.recipe().getId());
     }
 
-    private static int scoreEntry(RecipeIndex.Entry entry, ResolutionContext ctx, boolean nbtStrict) {
+    private static int scoreEntry(RecipeIndex.Entry entry, ResolutionContext ctx, boolean nbtStrict,
+                                    @javax.annotation.Nullable Map<Ingredient, Integer> matchCache) {
         if (entry.recipe() instanceof CraftingRecipe cr) {
-            return scoreRecipe(cr, ctx, nbtStrict) + (entry.modType() == ModType.GENERIC ? 10 : 0);
+            return scoreRecipe(cr, ctx, nbtStrict, matchCache) + (entry.modType() == ModType.GENERIC ? 10 : 0);
         }
         int score = 0;
         if (entry.modType() == ModType.GENERIC) score += 10;
-        // When the requested ingredient is NBT-strict, prefer NBT-sensitive
-        // recipes (mod machines) whose handlers apply NBT during crafting.
         if (nbtStrict && entry.nbtSensitive()) score += 5;
         List<IngredientSpec> specs = CraftPacketUtils.extractIngredientSpecs(entry.recipe());
         if (specs != null) {
@@ -190,7 +240,7 @@ final class CandidateEngine {
             for (IngredientSpec spec : specs) {
                 if (spec.isEmpty()) continue;
                 nonEmpty++;
-                if (ctx.countMatching(spec.ingredient()) > 0) {
+                if (cachedCountMatching(ctx, spec.ingredient(), matchCache) > 0) {
                     score += 10;
                 }
             }
@@ -208,7 +258,8 @@ final class CandidateEngine {
         return score;
     }
 
-    private static int scoreRecipe(CraftingRecipe recipe, ResolutionContext ctx, boolean nbtStrict) {
+    private static int scoreRecipe(CraftingRecipe recipe, ResolutionContext ctx, boolean nbtStrict,
+                                     @javax.annotation.Nullable Map<Ingredient, Integer> matchCache) {
         int score = 0;
         ResourceLocation outputKey = ForgeRegistries.ITEMS.getKey(
                 recipe.getResultItem(ctx.level.registryAccess()).getItem());
@@ -221,7 +272,7 @@ final class CandidateEngine {
 
         for (Ingredient ing : recipe.getIngredients()) {
             if (ing.isEmpty()) continue;
-            if (ctx.countMatching(ing) > 0) {
+            if (cachedCountMatching(ctx, ing, matchCache) > 0) {
                 score += 10;
             }
         }
@@ -236,6 +287,12 @@ final class CandidateEngine {
         return score;
     }
 
+    private static int cachedCountMatching(ResolutionContext ctx, Ingredient ing,
+                                           @javax.annotation.Nullable Map<Ingredient, Integer> cache) {
+        if (cache == null) return ctx.countMatching(ing);
+        return cache.computeIfAbsent(ing, ctx::countMatching);
+    }
+
     /** Cap the per-batch output bonus so decompression recipes
      *  (e.g. 1 block → 9 items) don't dominate direct recipes
      *  (e.g. 1 calx + 1 dust → 2 calx).  Max +15 keeps the
@@ -245,11 +302,12 @@ final class CandidateEngine {
     }
 
     /** Count how many distinct ingredients of a recipe have matching items available. */
-    private static int countAvailableIngredients(RecipeIndex.Entry entry, ResolutionContext ctx) {
+    private static int countAvailableIngredients(RecipeIndex.Entry entry, ResolutionContext ctx,
+                                                   @javax.annotation.Nullable Map<Ingredient, Integer> matchCache) {
         if (entry.recipe() instanceof CraftingRecipe cr) {
             int c = 0;
             for (Ingredient ing : cr.getIngredients()) {
-                if (!ing.isEmpty() && ctx.countMatching(ing) > 0) c++;
+                if (!ing.isEmpty() && cachedCountMatching(ctx, ing, matchCache) > 0) c++;
             }
             return c;
         }
@@ -257,9 +315,35 @@ final class CandidateEngine {
         if (specs == null) return 0;
         int c = 0;
         for (IngredientSpec spec : specs) {
-            if (!spec.isEmpty() && ctx.countMatching(spec.ingredient()) > 0) c++;
+            if (!spec.isEmpty() && cachedCountMatching(ctx, spec.ingredient(), matchCache) > 0) c++;
         }
         return c;
+    }
+
+    private static boolean passesOutputCheck(RecipeIndex.Entry entry, ItemStack output,
+                                              Ingredient ingredient, boolean ingredientAllNbt,
+                                              boolean nbtStrict,
+                                              @javax.annotation.Nullable List<CandidateDiagnostic> diag) {
+        if (output.isEmpty() || !ingredient.test(output)) {
+            boolean slashBladeChain = false;
+            if (SlashBladeRecipeHandler.isSlashBladeIngredient(ingredient) && !output.isEmpty()) {
+                for (ItemStack ingItem : ingredient.getItems()) {
+                    if (!ingItem.isEmpty() && ingItem.getItem() == output.getItem()) {
+                        slashBladeChain = true;
+                        break;
+                    }
+                }
+            }
+            if (!slashBladeChain) {
+                if (diag != null) logDiag(diag, null, entry, 0, entry.modType(), true, "Output does not match ingredient");
+                return false;
+            }
+        }
+        if (ingredientAllNbt && output.hasTag() && !anyIngredientItemMatchesNbt(ingredient, output)) {
+            if (diag != null) logDiag(diag, null, entry, 0, entry.modType(), true, "Output NBT does not match ingredient");
+            return false;
+        }
+        return true;
     }
 
     private static boolean allItemsHaveNbt(Ingredient ingredient) {

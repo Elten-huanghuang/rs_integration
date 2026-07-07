@@ -38,5 +38,5 @@ public final class BackpackReflection {
         }
     }
 
-    public static boolean isAvailable() { return ready; }
+    public static boolean isAvailable() { return backpackBEClass != null; }
 }

@@ -9,7 +9,6 @@ import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.reflection.probes.FarmingForBlockheadsReflection;
 import com.huanghuang.rsintegration.util.Reflect;
 import com.refinedmods.refinedstorage.api.network.INetwork;
-import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.resources.ResourceLocation;
@@ -18,8 +17,6 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
-import net.minecraftforge.items.ItemHandlerHelper;
-
 import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
@@ -66,25 +63,14 @@ public final class MarketBatchDelegate extends AbstractBatchDelegate {
     public boolean tryStartSingleCraft(ServerPlayer player) {
         if (network == null || wrapper == null) return false;
 
-        // No shared ledger — extract payment from RS ourselves
+        // Extract payment — result is delivered by collectResult (chain flushes it).
         ItemStack cost = wrapper.costItem();
         if (!cost.isEmpty()) {
             ItemStack extracted = RSIntegrationNetwork.extractFromNetwork(
-                    network, Ingredient.of(cost), cost.getCount());
+                    network, Ingredient.of(cost), cost.getCount(), player);
             if (extracted.isEmpty() || extracted.getCount() < cost.getCount()) {
                 RSIntegrationMod.LOGGER.warn("[RSI-Market] Failed to extract payment: {}x {}",
                         cost.getCount(), cost.getHoverName().getString());
-                return false;
-            }
-        }
-
-        ItemStack result = wrapper.getResultItem(player.serverLevel().registryAccess());
-        if (!result.isEmpty()) {
-            ItemStack remainder = network.insertItem(ItemHandlerHelper.copyStackWithSize(
-                    result, result.getCount()), result.getCount(), Action.PERFORM);
-            if (!remainder.isEmpty()) {
-                RSIntegrationMod.LOGGER.warn("[RSI-Market] RS network full, result not inserted: {}",
-                        remainder.getCount());
                 return false;
             }
         }
@@ -100,18 +86,6 @@ public final class MarketBatchDelegate extends AbstractBatchDelegate {
         this.usingSharedLedger = true;
 
         if (network == null || wrapper == null) return false;
-
-        // Payment already reserved in sharedLedger by chain — just deposit result
-        ItemStack result = wrapper.getResultItem(player.serverLevel().registryAccess());
-        if (!result.isEmpty()) {
-            ItemStack remainder = network.insertItem(ItemHandlerHelper.copyStackWithSize(
-                    result, result.getCount()), result.getCount(), Action.PERFORM);
-            if (!remainder.isEmpty()) {
-                RSIntegrationMod.LOGGER.warn("[RSI-Market] RS network full, result not inserted: {}",
-                        remainder.getCount());
-                return false;
-            }
-        }
 
         sharedLedger.commit(network, player);
         done = true;
@@ -264,18 +238,8 @@ public final class MarketBatchDelegate extends AbstractBatchDelegate {
 
         if (wrapper == null || materials.isEmpty()) return false;
 
-        // Deposit result directly into RS network
-        ItemStack result = wrapper.getResultItem(player.serverLevel().registryAccess());
-        if (!result.isEmpty()) {
-            ItemStack remainder = network.insertItem(ItemHandlerHelper.copyStackWithSize(
-                    result, result.getCount()), result.getCount(), Action.PERFORM);
-            if (!remainder.isEmpty()) {
-                RSIntegrationMod.LOGGER.warn("[RSI-Market] RS network full, result not inserted: {}",
-                        remainder.getCount());
-                return false;
-            }
-        }
-
+        // Materials already committed by chain.  Result is delivered by
+        // collectResult — do NOT insert here or the chain flushes it twice.
         sharedLedger.commit(network, player);
         done = true;
         return true;

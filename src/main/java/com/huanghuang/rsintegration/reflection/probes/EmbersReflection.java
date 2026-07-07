@@ -40,5 +40,5 @@ public final class EmbersReflection {
         }
     }
 
-    public static boolean isAvailable() { return ready; }
+    public static boolean isAvailable() { return alchemyTabletBEClass != null; }
 }

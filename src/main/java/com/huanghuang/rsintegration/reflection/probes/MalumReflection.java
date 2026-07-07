@@ -38,5 +38,5 @@ public final class MalumReflection {
         }
     }
 
-    public static boolean isAvailable() { return ready; }
+    public static boolean isAvailable() { return spiritAltarBEClass != null; }
 }

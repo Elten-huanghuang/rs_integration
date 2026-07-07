@@ -45,9 +45,18 @@ Deep integration between [Refined Storage](https://www.curseforge.com/minecraft/
 | **SlashBlade** | Crafting table recipes with NBT | N/A | Yes | N/A |
 | **Avaritia** | Dire Crafting Table, Neutron Compressor, Extreme Smithing Table | Yes | Yes | Yes |
 | **Metal Barrels** | Iron, Gold, Diamond, and upgraded barrels | Yes | No | Yes |
-| **Crabber's Delight** | Crab traps and seafood processing blocks | Yes | No | Yes |
+| **Crabber's Delight** | Crab traps and seafood processing blocks | Yes | Yes | Yes |
+| **Farmer's Delight** | Cooking Pot, Skillet | Yes | Yes | No |
+| **Farmer's Respite** | Kettle | Yes | Yes | No |
+| **Youkais Homecoming** | Cooking Pot, Steamer, Moka Pot, Kettle, Fermentation Tank, Cuisine Board | Yes | Yes | No |
+| **Immortaler's Delight** | Enchantal Cooler | Yes | Yes | No |
+| **Confluence** | Workshop | Yes | Yes | Yes |
+| **Apotheosis** | Reforging Table | Yes | No | Yes |
+| **Ancient Reforging** | Ancient Reforging Table | Yes | No | Yes |
+| **PGP** | PGP Gun Workbench | Yes | No | Yes |
+| **EMX Arms** | EMX Weapon Workbench | Yes | No | Yes |
 
-**Custom GUI Machines** — Any mod with container-based machines (e.g. Metal Barrels, Crabber's Delight, PGP, EMX Arms, Apotheosis, TerraCurio) can be added via `customGuiMachineMods` in config for remote GUI access, without writing any Java code. The default list includes `crabbersdelight`, `farmingforblockheads`, `metalbarrels`, `pgp`, `emxarms`, `apotheosis`, `confluence`. You must manually bind each machine by shift-right-clicking it with a Network Linker.
+**Custom GUI Machines** — Any mod with container-based machines (e.g. Metal Barrels, PGP, EMX Arms, Apotheosis, TerraCurio) can be added via `customGuiMachineMods` in config for remote GUI access, without writing any Java code. The default list includes `crabbersdelight`, `metalbarrels`, `pgp`, `emxarms`, `apotheosis`, `ancientreforging`. You must manually bind each machine by shift-right-clicking it with a Network Linker.
 
 ## Quick Start
 
@@ -89,6 +98,11 @@ enableVanillaMachines = true
 enableSophisticatedBackpacks = true
 enableJeiIntegration = true
 enableFarmingForBlockheads = true
+enableFarmersDelight = true
+enableFarmersRespite = true
+enableYoukaisHomecoming = true
+enableImmortalsDelight = true
+enableConfluence = true
 
 [autoCrafting]
 enableMultiblockAutoCrafting = true    # Allow multi-block machines as intermediate steps
@@ -104,7 +118,7 @@ enableRSSidePanel = true
 
 [remoteMachineGui]
 enableMachineGuiTabs = true
-customGuiMachineMods = ["crabbersdelight", "farmingforblockheads", "metalbarrels", "pgp", "emxarms", "apotheosis", "confluence", "ancientreforging"]
+customGuiMachineMods = ["crabbersdelight", "metalbarrels", "pgp", "emxarms", "apotheosis", "ancientreforging"]
 
 [advanced]
 diagnosticVerboseLogging = false

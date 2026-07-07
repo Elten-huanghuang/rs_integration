@@ -48,5 +48,5 @@ public final class AetherworksReflection {
         }
     }
 
-    public static boolean isAvailable() { return ready; }
+    public static boolean isAvailable() { return anvilBEClass != null; }
 }

@@ -48,9 +48,11 @@ public final class AltarBindingRegistry {
     private static class TickCache {
         final long tick;
         final Set<String> modTypeIds;
-        TickCache(long tick, Set<String> modTypeIds) {
+        final Map<String, Set<String>> blockKeysByType;
+        TickCache(long tick, Set<String> modTypeIds, Map<String, Set<String>> blockKeysByType) {
             this.tick = tick;
             this.modTypeIds = modTypeIds;
+            this.blockKeysByType = blockKeysByType;
         }
     }
 
@@ -95,7 +97,9 @@ public final class AltarBindingRegistry {
     public static Optional<AltarBinding> getBinding(ResourceKey<Level> dim, BlockPos altarPos, ResourceLocation type) {
         List<AltarBinding> list = BINDINGS.get(GlobalPos.of(dim, altarPos));
         if (list == null) return Optional.empty();
-        return list.stream().filter(b -> b.type().equals(type)).findFirst();
+        synchronized (list) {
+            return list.stream().filter(b -> b.type().equals(type)).findFirst();
+        }
     }
 
     public static boolean isBound(ResourceKey<Level> dim, BlockPos altarPos) {
@@ -218,6 +222,29 @@ public final class AltarBindingRegistry {
             return normCurrent.equals(normExpected);
         }
         return currentId.equals(blockKey);
+    }
+
+    /**
+     * When a binding is detected as stale (machine no longer exists), purge
+     * the in-memory registration and remove NBT entries from all online
+     * players.  Only fires when the block at the position is definitively
+     * AIR — blocks replaced by other mod content are left alone (the player
+     * may have temporarily swapped the machine and will restore it later).
+     */
+    private static void lazyCleanupGhostBinding(net.minecraft.server.MinecraftServer server,
+                                                 ResourceKey<Level> dim, BlockPos pos) {
+        ServerLevel level = server.getLevel(dim);
+        if (level == null || !level.isLoaded(pos)) return;
+        if (!level.getBlockState(pos).isAir()) return;
+
+        unbindAll(dim, pos);
+        SCAN_CACHE.clear();
+        RSIntegrationMod.LOGGER.debug("[RSI-Bind] Lazy-cleaned ghost binding at dim={} pos={} (block is air)",
+                dim.location(), pos);
+
+        for (ServerPlayer p : server.getPlayerList().getPlayers()) {
+            cleanupPlayerNBT(p, dim.location(), pos);
+        }
     }
 
     /**
@@ -351,7 +378,7 @@ public final class AltarBindingRegistry {
                                 com.refinedmods.refinedstorage.item.NetworkItem.getY(stack),
                                 com.refinedmods.refinedstorage.item.NetworkItem.getZ(stack)));
                 if (net != null) {
-                    ItemStack extracted = RSIntegrationNetwork.extractFromNetwork(net, ingredient, count);
+                    ItemStack extracted = RSIntegrationNetwork.extractFromNetwork(net, ingredient, count, player);
                     if (!extracted.isEmpty()) return extracted;
                 }
             }
@@ -401,7 +428,8 @@ public final class AltarBindingRegistry {
                 BlockPos altarPos = entry.pos();
                 List<AltarBinding> altarBindings = BINDINGS.get(GlobalPos.of(altarDim, altarPos));
                 if (altarBindings == null) continue;
-                for (AltarBinding ab : altarBindings) {
+                synchronized (altarBindings) {
+                    for (AltarBinding ab : altarBindings) {
                     if (!ab.type().equals(AltarBinding.RS_NETWORK)) continue;
                     try {
                         CompoundTag data = ab.data();
@@ -414,8 +442,9 @@ public final class AltarBindingRegistry {
                         INetwork net = RSIntegrationNetwork.resolveNetwork(player.server, netDim, netPos);
                         if (net != null) return net;
                     } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
+                    }
+                    }
                 }
-            }
         }
         return null;
     }
@@ -442,52 +471,46 @@ public final class AltarBindingRegistry {
         if (slashIdx > 0) {
             subType = recipePath.substring(0, slashIdx).toLowerCase(java.util.Locale.ROOT);
         }
-
-        // Normalize recipe sub-type names to canonical machine prefixes.
-        // e.g. "crystal_infusion" recipe type → "crystal_ritual" binding prefix.
         subType = normalizeSubType(subType, type);
 
-        return scanBindingsForRecipe(player, type, subType);
+        TickCache cache = getTickCache(player);
+        if (!cache.modTypeIds.contains(type.id())) return false;
+        if (subType == null) return true;
+        Set<String> keys = cache.blockKeysByType.get(type.id());
+        if (keys == null) return false;
+        for (String bk : keys) {
+            if (bk != null && bk.toLowerCase(java.util.Locale.ROOT).contains(subType)) return true;
+        }
+        return false;
     }
 
-    private static boolean scanBindingsForRecipe(ServerPlayer player, ModType type,
-                                                  @Nullable String subType) {
+    private static TickCache getTickCache(ServerPlayer player) {
+        long tick = player.level().getGameTime();
+        UUID pid = player.getUUID();
+        TickCache cache = SCAN_CACHE.get(pid);
+        if (cache != null && cache.tick == tick) return cache;
+
+        Set<String> modTypeIds = new HashSet<>();
+        Map<String, Set<String>> blockKeysByType = new HashMap<>();
         var inv = player.getInventory();
-        if (scanForRecipe(inv.items, type, subType)) return true;
-        if (scanForRecipe(inv.offhand, type, subType)) return true;
-        if (scanForRecipe(inv.armor, type, subType)) return true;
+        collectBoundInfo(inv.items, player, modTypeIds, blockKeysByType);
+        collectBoundInfo(inv.offhand, player, modTypeIds, blockKeysByType);
+        collectBoundInfo(inv.armor, player, modTypeIds, blockKeysByType);
         try {
             var opt = top.theillusivec4.curios.api.CuriosApi.getCuriosInventory(player).resolve();
             if (opt.isPresent()) {
                 for (var handler : opt.get().getCurios().values()) {
                     var stacks = handler.getStacks();
                     for (int s = 0; s < stacks.getSlots(); s++) {
-                        if (scanForRecipe(List.of(stacks.getStackInSlot(s)), type, subType))
-                            return true;
+                        collectBoundInfo(List.of(stacks.getStackInSlot(s)), player, modTypeIds, blockKeysByType);
                     }
                 }
             }
-        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
-        return false;
-    }
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Curios scan failed", e); }
 
-    private static boolean scanForRecipe(List<ItemStack> stacks, ModType type,
-                                          @Nullable String subType) {
-        for (ItemStack stack : stacks) {
-            if (stack.isEmpty()) continue;
-            for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
-                ModType entryType = ModType.fromBlockKey(entry.blockKey());
-                if (entryType == null || !entryType.id().equals(type.id())) continue;
-                // If we can't determine sub-type, accept any machine of this mod
-                if (subType == null) return true;
-                // Match sub-type against block key (e.g. block key contains "wissen_crystallizer")
-                if (entry.blockKey() != null
-                        && entry.blockKey().toLowerCase(java.util.Locale.ROOT).contains(subType)) {
-                    return true;
-                }
-            }
-        }
-        return false;
+        cache = new TickCache(tick, modTypeIds, blockKeysByType);
+        SCAN_CACHE.put(pid, cache);
+        return cache;
     }
 
     /**
@@ -497,45 +520,17 @@ public final class AltarBindingRegistry {
      */
     public static boolean hasAnyBindingForType(ServerPlayer player, ModType type) {
         if (type == ModType.GENERIC) return true;
-
-        long tick = player.level().getGameTime();
-        UUID pid = player.getUUID();
-        TickCache cache = SCAN_CACHE.get(pid);
-        if (cache != null && cache.tick == tick) {
-            boolean result = cache.modTypeIds.contains(type.id());
-            RSIntegrationMod.LOGGER.debug("[RSI-DIAG] hasAnyBindingForType (cached): type={} → {}",
-                    type.id(), result);
-            return result;
-        }
-
-        // Build the full set of ModType IDs this player has bindings for.
-        Set<String> found = new HashSet<>();
-        var inv = player.getInventory();
-        collectBoundTypeIds(inv.items, player, found);
-        collectBoundTypeIds(inv.offhand, player, found);
-        collectBoundTypeIds(inv.armor, player, found);
-        try {
-            var opt = top.theillusivec4.curios.api.CuriosApi.getCuriosInventory(player).resolve();
-            if (opt.isPresent()) {
-                for (var handler : opt.get().getCurios().values()) {
-                    var stacks = handler.getStacks();
-                    for (int s = 0; s < stacks.getSlots(); s++) {
-                        collectBoundTypeIds(List.of(stacks.getStackInSlot(s)), player, found);
-                    }
-                }
-            }
-        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
-
-        SCAN_CACHE.put(pid, new TickCache(tick, found));
-        boolean result = found.contains(type.id());
-        RSIntegrationMod.LOGGER.debug("[RSI-DIAG] hasAnyBindingForType (fresh scan): type={} player={} → {} types={}",
-                type.id(), player.getName().getString(), result, found);
+        TickCache cache = getTickCache(player);
+        boolean result = cache.modTypeIds.contains(type.id());
+        RSIntegrationMod.LOGGER.debug("[RSI-DIAG] hasAnyBindingForType (cached): type={} → {}",
+                type.id(), result);
         return result;
     }
 
-    /** Collect all ModType IDs that this stack list has fresh bindings for. */
-    private static void collectBoundTypeIds(List<ItemStack> stacks, ServerPlayer player,
-                                            Set<String> out) {
+    /** Collect all ModType IDs and blockKeys that this stack list has fresh bindings for. */
+    private static void collectBoundInfo(List<ItemStack> stacks, ServerPlayer player,
+                                            Set<String> modTypeIds,
+                                            Map<String, Set<String>> blockKeysByType) {
         for (ItemStack stack : stacks) {
             if (stack.isEmpty()) continue;
             for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
@@ -544,10 +539,15 @@ public final class AltarBindingRegistry {
                 ResourceKey<Level> altarDim = ResourceKey.create(
                         net.minecraft.core.registries.Registries.DIMENSION, entry.dim());
                 ServerLevel entryLevel = player.server.getLevel(altarDim);
-                if (!isBindingFresh(entryLevel, altarDim, entry.pos(), entry.blockKey())) continue;
+                if (!isBindingFresh(entryLevel, altarDim, entry.pos(), entry.blockKey())) {
+                    lazyCleanupGhostBinding(player.server, altarDim, entry.pos());
+                    continue;
+                }
                 INetwork net = resolveNetworkForAltar(player, altarDim, entry.pos());
                 if (net != null) {
-                    out.add(entryType.id());
+                    modTypeIds.add(entryType.id());
+                    blockKeysByType.computeIfAbsent(entryType.id(), k -> new HashSet<>())
+                            .add(entry.blockKey());
                 }
             }
         }
@@ -661,7 +661,10 @@ public final class AltarBindingRegistry {
                 ResourceKey<Level> altarDim = ResourceKey.create(
                         net.minecraft.core.registries.Registries.DIMENSION, entry.dim());
                 ServerLevel entryLevel = player.server.getLevel(altarDim);
-                if (!isBindingFresh(entryLevel, altarDim, entry.pos(), entry.blockKey())) continue;
+                if (!isBindingFresh(entryLevel, altarDim, entry.pos(), entry.blockKey())) {
+                    lazyCleanupGhostBinding(player.server, altarDim, entry.pos());
+                    continue;
+                }
                 INetwork net = resolveNetworkForAltar(player, altarDim, entry.pos());
                 RSIntegrationMod.LOGGER.debug(
                         "[RSI-DIAG] scanBindingsForType: resolveNetworkForAltar({}, {}, {}) → {}",
@@ -703,7 +706,10 @@ public final class AltarBindingRegistry {
                 ResourceKey<Level> altarDim = ResourceKey.create(
                         net.minecraft.core.registries.Registries.DIMENSION, entry.dim());
                 ServerLevel entryLevel = player.server.getLevel(altarDim);
-                if (!isBindingFresh(entryLevel, altarDim, entry.pos(), entry.blockKey())) continue;
+                if (!isBindingFresh(entryLevel, altarDim, entry.pos(), entry.blockKey())) {
+                    lazyCleanupGhostBinding(player.server, altarDim, entry.pos());
+                    continue;
+                }
                 out.add(new BoundMachine(entry.dim(), entry.pos(), type, entry.blockKey()));
             }
         }

@@ -2,8 +2,8 @@ package com.huanghuang.rsintegration.network;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
-import com.huanghuang.rsintegration.util.ChunkUtils;
 import com.refinedmods.refinedstorage.api.network.INetwork;
+import com.refinedmods.refinedstorage.api.network.security.Permission;
 import com.refinedmods.refinedstorage.api.network.grid.INetworkAwareGrid;
 import com.refinedmods.refinedstorage.api.network.node.INetworkNode;
 import com.refinedmods.refinedstorage.api.util.Action;
@@ -143,7 +143,11 @@ public final class RSIntegrationNetwork {
                 RSIntegrationMod.LOGGER.debug("[RSI] resolveNetwork: null level for dim {}", dimension.location());
                 return null;
             }
-            ChunkUtils.loadChunk(level, controllerPos);
+            if (!level.isLoaded(controllerPos)) {
+                RSIntegrationMod.LOGGER.debug("[RSI] resolveNetwork: chunk not loaded at pos={} dim={}",
+                        controllerPos, dimension.location());
+                return null;
+            }
             BlockEntity be = level.getBlockEntity(controllerPos);
             if (be == null) {
                 RSIntegrationMod.LOGGER.debug("[RSI] resolveNetwork: no BlockEntity at pos={} dim={}",
@@ -377,8 +381,17 @@ public final class RSIntegrationNetwork {
         }
     }
 
-    public static ItemStack extractFromNetwork(INetwork network, Ingredient ingredient, int count) {
+    public static ItemStack extractFromNetwork(INetwork network, Ingredient ingredient, int count,
+                                               @Nullable ServerPlayer player) {
         try {
+            if (player != null) {
+                var sec = network.getSecurityManager();
+                if (sec != null && !sec.hasPermission(Permission.EXTRACT, player)) {
+                    RSIntegrationMod.LOGGER.warn("[RSI] extractFromNetwork: player {} lacks EXTRACT permission",
+                            player.getGameProfile().getName());
+                    return ItemStack.EMPTY;
+                }
+            }
             var cache = network.getItemStorageCache();
             if (cache == null) return ItemStack.EMPTY;
             var list = cache.getList();
@@ -414,22 +427,15 @@ public final class RSIntegrationNetwork {
                 }
             }
 
-            if (!result.isEmpty() && result.getCount() >= count) {
+            if (result.getCount() >= count) {
                 return result;
             }
 
-            // Partial extraction: refund what we got back to the network.
             if (!result.isEmpty()) {
-                ItemStack leftover = network.insertItem(result, result.getCount(), Action.PERFORM);
-                if (!leftover.isEmpty()) {
-                    RSIntegrationMod.LOGGER.warn("[RSI] extractFromNetwork: partial extraction refund incomplete — "
-                            + "requested {} but returning {} to prevent item loss",
-                            count, leftover.getCount());
-                    return leftover;
-                }
-                RSIntegrationMod.LOGGER.warn("[RSI] extractFromNetwork: partial extraction refunded — "
-                        + "requested {} but only got {} before refund", count, result.getCount());
+                RSIntegrationMod.LOGGER.warn("[RSI] extractFromNetwork: partial extraction — "
+                        + "requested {} but only got {}", count, result.getCount());
             }
+            return result;
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.error("[RSI] extractFromNetwork error — items may have been lost", e);
         }
@@ -458,7 +464,7 @@ public final class RSIntegrationNetwork {
     public static ItemStack tryExtractFromPlayerRS(ServerPlayer player, Ingredient ingredient, int count) {
         INetwork network = resolveNetworkFromPlayer(player);
         if (network == null) return ItemStack.EMPTY;
-        return extractFromNetwork(network, ingredient, count);
+        return extractFromNetwork(network, ingredient, count, player);
     }
 
     public static boolean hasItemInPlayerRS(ServerPlayer player, Ingredient ingredient) {

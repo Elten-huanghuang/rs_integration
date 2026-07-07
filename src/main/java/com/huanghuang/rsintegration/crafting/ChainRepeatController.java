@@ -26,12 +26,15 @@ public final class ChainRepeatController {
      * @param server           server instance for player lookup
      * @param playerId         UUID of the player who initiated the chain
      * @param remainingRepeats how many repeats remain (including the just-finished one)
+     * @param producedThisRound how many items were produced this chain run
+     *                          (1 for single machine, N for parallel)
      * @param resolver         callback to start the next chain: {@code (player, remaining) -> void}
      */
     public static void scheduleNext(AsyncCraftChain chain, MinecraftServer server, UUID playerId,
-                                     int remainingRepeats, RepeatResolver resolver) {
+                                     int remainingRepeats, int producedThisRound,
+                                     RepeatResolver resolver) {
         if (chain.isAborted()) {
-            int skipped = remainingRepeats - 1;
+            int skipped = remainingRepeats - producedThisRound;
             if (skipped > 0) {
                 PlayerUtils.safeSendMessage(server, playerId,
                         Component.translatable("rsi.repeat.aborted", skipped));
@@ -42,12 +45,11 @@ public final class ChainRepeatController {
             return;
         }
 
-        if (remainingRepeats <= 1) {
+        int next = remainingRepeats - producedThisRound;
+        if (next <= 0) {
             RSIntegrationMod.LOGGER.debug("[RSI-Repeat] All repeats completed");
             return;
         }
-
-        int next = remainingRepeats - 1;
         int maxRepeats = RSIntegrationConfig.REPEAT_COUNT_MAX.get();
         if (next > maxRepeats) {
             RSIntegrationMod.LOGGER.warn("[RSI-Repeat] Clamping repeat count {} -> {}", next, maxRepeats);

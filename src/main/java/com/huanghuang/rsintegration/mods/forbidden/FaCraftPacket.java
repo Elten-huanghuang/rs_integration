@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.mods.forbidden;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.CraftingResolver;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
@@ -233,7 +234,12 @@ public final class FaCraftPacket {
 
             if (!autoSteps.isEmpty() && network != null) {
                 player.displayClientMessage(Component.translatable("rsi.generic.info.auto_crafting", autoSteps.size()), true);
-                if (!CraftPacketUtils.executeCraftingSteps(player, autoSteps, network)) {
+                List<CraftingResolver.ResolutionStep> wrapped = new ArrayList<>();
+                for (ResourceLocation id : autoSteps) {
+                    wrapped.add(new CraftingResolver.ResolutionStep(id, ModType.GENERIC,
+                            new ResourceLocation("minecraft:crafting")));
+                }
+                if (!CraftPacketUtils.executeCraftingSteps(player, wrapped, network)) {
                     player.sendSystemMessage(Component.translatable("rsi.generic.error.auto_craft_failed"));
                     return;
                 }

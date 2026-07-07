@@ -86,5 +86,5 @@ public final class YHKReflection {
         }
     }
 
-    public static boolean isAvailable() { return ready; }
+    public static boolean isAvailable() { return cookingBEClass != null; }
 }
