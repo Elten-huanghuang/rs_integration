@@ -99,7 +99,6 @@ public final class BindingStorage {
     /** Parse a legacy-format binding entry without modifying the tag.
      *  Legacy format: aec_bound_dim, aec_bound_x/y/z, aec_bound_block
      *  as top-level keys in the CompoundTag. */
-    @javax.annotation.Nullable
     private static BindingEntry readLegacyEntry(CompoundTag tag) {
         String dimStr = tag.getString("aec_bound_dim");
         ResourceLocation dim = ResourceLocation.tryParse(dimStr);

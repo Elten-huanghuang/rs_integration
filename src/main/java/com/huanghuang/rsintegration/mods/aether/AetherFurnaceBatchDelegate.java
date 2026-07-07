@@ -333,7 +333,6 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
     }
 
     /** Resolve the incubator fuel map once, caching the result. */
-    @Nullable
     private static Map<Item, Integer> getIncubatorFuelMap() {
         if (incubatorMapProbed) return cachedIncubatorMap;
         incubatorMapProbed = true;

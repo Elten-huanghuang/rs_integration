@@ -20,6 +20,8 @@ import net.minecraftforge.eventbus.api.SubscribeEvent;
 
 import javax.annotation.Nullable;
 import java.util.*;
+import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -54,6 +56,58 @@ public final class AltarBindingRegistry {
             this.modTypeIds = modTypeIds;
             this.blockKeysByType = blockKeysByType;
         }
+    }
+
+    // ── inventory iteration helpers ──────────────────────────────
+
+    /** Apply action to every stack-group: main, offhand, armor, and one
+     *  call per Curios slot.  Eliminates the 4-tier iteration pattern
+     *  that was duplicated across 7 methods (~150 lines). */
+    private static void forEachInventoryGroup(ServerPlayer player, Consumer<List<ItemStack>> action) {
+        var inv = player.getInventory();
+        action.accept(inv.items);
+        action.accept(inv.offhand);
+        action.accept(inv.armor);
+        try {
+            var opt = top.theillusivec4.curios.api.CuriosApi.getCuriosInventory(player).resolve();
+            if (opt.isPresent()) {
+                for (var handler : opt.get().getCurios().values()) {
+                    var stacks = handler.getStacks();
+                    for (int s = 0; s < stacks.getSlots(); s++) {
+                        action.accept(List.of(stacks.getStackInSlot(s)));
+                    }
+                }
+            }
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI] Curios scan failed", e);
+        }
+    }
+
+    /** Search inventory stack-groups with early return.  Returns the first
+     *  non-null value produced by extractor, or null if no group matched. */
+    private static <T> T findInInventory(ServerPlayer player, Function<List<ItemStack>, T> extractor) {
+        var inv = player.getInventory();
+        T result = extractor.apply(inv.items);
+        if (result != null) return result;
+        result = extractor.apply(inv.offhand);
+        if (result != null) return result;
+        result = extractor.apply(inv.armor);
+        if (result != null) return result;
+        try {
+            var opt = top.theillusivec4.curios.api.CuriosApi.getCuriosInventory(player).resolve();
+            if (opt.isPresent()) {
+                for (var handler : opt.get().getCurios().values()) {
+                    var stacks = handler.getStacks();
+                    for (int s = 0; s < stacks.getSlots(); s++) {
+                        result = extractor.apply(List.of(stacks.getStackInSlot(s)));
+                        if (result != null) return result;
+                    }
+                }
+            }
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI] Curios scan failed", e);
+        }
+        return null;
     }
 
     private AltarBindingRegistry() {}
@@ -123,34 +177,9 @@ public final class AltarBindingRegistry {
                                                  ResourceKey<Level> dim,
                                                  BlockPos altarPos) {
         ResourceLocation dimLoc = dim.location();
-        var inv = player.getInventory();
-
-        // Scan all inventory slots
-        ItemStack found = findBindingItem(inv.items, dimLoc, altarPos);
-        if (found == null) found = findBindingItem(inv.offhand, dimLoc, altarPos);
-        if (found == null) found = findBindingItem(inv.armor, dimLoc, altarPos);
-        if (found == null) {
-            try {
-                var opt = top.theillusivec4.curios.api.CuriosApi.getCuriosInventory(player).resolve();
-                if (opt.isPresent()) {
-                    for (var stacksHandler : opt.get().getCurios().values()) {
-                        var stacks = stacksHandler.getStacks();
-                        for (int s = 0; s < stacks.getSlots(); s++) {
-                            found = findBindingItem(
-                                    List.of(stacks.getStackInSlot(s)), dimLoc, altarPos);
-                            if (found != null) break;
-                        }
-                        if (found != null) break;
-                    }
-                }
-            } catch (Exception e) {
-                RSIntegrationMod.LOGGER.debug("[RSI] Curios NBT scan failed", e);
-            }
-        }
-
+        ItemStack found = findInInventory(player, stacks -> findBindingItem(stacks, dimLoc, altarPos));
         if (found == null || !com.refinedmods.refinedstorage.item.NetworkItem.isValid(found))
             return false;
-
         Optional<AltarBinding> binding = RSBindingHook.INSTANCE.createBinding(found);
         if (binding.isPresent()) {
             bind(dim, altarPos, binding.get());
@@ -159,7 +188,6 @@ public final class AltarBindingRegistry {
         return false;
     }
 
-    @javax.annotation.Nullable
     private static ItemStack findBindingItem(List<ItemStack> stacks,
                                               ResourceLocation dimLoc, BlockPos pos) {
         for (ItemStack stack : stacks) {
@@ -278,32 +306,11 @@ public final class AltarBindingRegistry {
         return resolveNetworkFromPlayerItems(player, dim, altarPos);
     }
 
-    @Nullable
     private static INetwork resolveNetworkFromPlayerItems(ServerPlayer player, ResourceKey<Level> dim,
                                                            BlockPos altarPos) {
-        var inv = player.getInventory();
-        INetwork net = scanForNetwork(player, inv.items, dim, altarPos);
-        if (net != null) return net;
-        net = scanForNetwork(player, inv.offhand, dim, altarPos);
-        if (net != null) return net;
-        net = scanForNetwork(player, inv.armor, dim, altarPos);
-        if (net != null) return net;
-        try {
-            var opt = top.theillusivec4.curios.api.CuriosApi.getCuriosInventory(player).resolve();
-            if (opt.isPresent()) {
-                for (var stacksHandler : opt.get().getCurios().values()) {
-                    var stacks = stacksHandler.getStacks();
-                    for (int s = 0; s < stacks.getSlots(); s++) {
-                        net = scanForNetwork(player, List.of(stacks.getStackInSlot(s)), dim, altarPos);
-                        if (net != null) return net;
-                    }
-                }
-            }
-        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
-        return null;
+        return findInInventory(player, stacks -> scanForNetwork(player, stacks, dim, altarPos));
     }
 
-    @Nullable
     private static INetwork scanForNetwork(ServerPlayer player, List<ItemStack> stacks,
                                             ResourceKey<Level> dim, BlockPos altarPos) {
         for (ItemStack stack : stacks) {
@@ -340,29 +347,11 @@ public final class AltarBindingRegistry {
 
     private static ItemStack tryExtractFromPlayerItems(ServerPlayer player, ResourceKey<Level> dim,
                                                         BlockPos altarPos, Ingredient ingredient, int count) {
-        // Check main inventory + offhand + armor
-        var inv = player.getInventory();
-        ItemStack result = scanForNetworkItem(player, inv.items, dim, altarPos, ingredient, count);
-        if (!result.isEmpty()) return result;
-        result = scanForNetworkItem(player, inv.offhand, dim, altarPos, ingredient, count);
-        if (!result.isEmpty()) return result;
-        result = scanForNetworkItem(player, inv.armor, dim, altarPos, ingredient, count);
-        if (!result.isEmpty()) return result;
-        // Check Curios
-        try {
-            var opt = top.theillusivec4.curios.api.CuriosApi.getCuriosInventory(player).resolve();
-            if (opt.isPresent()) {
-                for (var stacksHandler : opt.get().getCurios().values()) {
-                    var stacks = stacksHandler.getStacks();
-                    for (int s = 0; s < stacks.getSlots(); s++) {
-                        result = scanForNetworkItem(player, List.of(stacks.getStackInSlot(s)),
-                                dim, altarPos, ingredient, count);
-                        if (!result.isEmpty()) return result;
-                    }
-                }
-            }
-        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
-        return ItemStack.EMPTY;
+        ItemStack result = findInInventory(player, stacks -> {
+            ItemStack s = scanForNetworkItem(player, stacks, dim, altarPos, ingredient, count);
+            return s.isEmpty() ? null : s;
+        });
+        return result != null ? result : ItemStack.EMPTY;
     }
 
     private static ItemStack scanForNetworkItem(ServerPlayer player, List<ItemStack> stacks,
@@ -396,29 +385,9 @@ public final class AltarBindingRegistry {
      */
     @Nullable
     public static INetwork resolveNetworkFromAnyBinding(ServerPlayer player) {
-        var inv = player.getInventory();
-        INetwork net = resolveNetFromBindings(player, inv.items);
-        if (net != null) return net;
-        net = resolveNetFromBindings(player, inv.offhand);
-        if (net != null) return net;
-        net = resolveNetFromBindings(player, inv.armor);
-        if (net != null) return net;
-        try {
-            var opt = top.theillusivec4.curios.api.CuriosApi.getCuriosInventory(player).resolve();
-            if (opt.isPresent()) {
-                for (var handler : opt.get().getCurios().values()) {
-                    var stacks = handler.getStacks();
-                    for (int s = 0; s < stacks.getSlots(); s++) {
-                        net = resolveNetFromBindings(player, List.of(stacks.getStackInSlot(s)));
-                        if (net != null) return net;
-                    }
-                }
-            }
-        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
-        return null;
+        return findInInventory(player, stacks -> resolveNetFromBindings(player, stacks));
     }
 
-    @Nullable
     private static INetwork resolveNetFromBindings(ServerPlayer player, List<ItemStack> stacks) {
         for (ItemStack stack : stacks) {
             if (stack.isEmpty()) continue;
@@ -492,21 +461,7 @@ public final class AltarBindingRegistry {
 
         Set<String> modTypeIds = new HashSet<>();
         Map<String, Set<String>> blockKeysByType = new HashMap<>();
-        var inv = player.getInventory();
-        collectBoundInfo(inv.items, player, modTypeIds, blockKeysByType);
-        collectBoundInfo(inv.offhand, player, modTypeIds, blockKeysByType);
-        collectBoundInfo(inv.armor, player, modTypeIds, blockKeysByType);
-        try {
-            var opt = top.theillusivec4.curios.api.CuriosApi.getCuriosInventory(player).resolve();
-            if (opt.isPresent()) {
-                for (var handler : opt.get().getCurios().values()) {
-                    var stacks = handler.getStacks();
-                    for (int s = 0; s < stacks.getSlots(); s++) {
-                        collectBoundInfo(List.of(stacks.getStackInSlot(s)), player, modTypeIds, blockKeysByType);
-                    }
-                }
-            }
-        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Curios scan failed", e); }
+        forEachInventoryGroup(player, stacks -> collectBoundInfo(stacks, player, modTypeIds, blockKeysByType));
 
         cache = new TickCache(tick, modTypeIds, blockKeysByType);
         SCAN_CACHE.put(pid, cache);
@@ -587,20 +542,9 @@ public final class AltarBindingRegistry {
     }
 
     private static void cleanupPlayerNBT(ServerPlayer player, ResourceLocation dim, BlockPos pos) {
-        var inv = player.getInventory();
-        for (ItemStack stack : inv.items) cleanupBindingEntry(stack, dim, pos);
-        for (ItemStack stack : inv.offhand) cleanupBindingEntry(stack, dim, pos);
-        for (ItemStack stack : inv.armor) cleanupBindingEntry(stack, dim, pos);
-        try {
-            var opt = top.theillusivec4.curios.api.CuriosApi.getCuriosInventory(player).resolve();
-            if (opt.isPresent()) {
-                for (var handler : opt.get().getCurios().values()) {
-                    for (int s = 0; s < handler.getStacks().getSlots(); s++) {
-                        cleanupBindingEntry(handler.getStacks().getStackInSlot(s), dim, pos);
-                    }
-                }
-            }
-        } catch (Exception e) { /* curios not present */ }
+        forEachInventoryGroup(player, stacks -> {
+            for (ItemStack stack : stacks) cleanupBindingEntry(stack, dim, pos);
+        });
     }
 
     private static void cleanupBindingEntry(ItemStack stack, ResourceLocation dim, BlockPos pos) {
@@ -627,20 +571,7 @@ public final class AltarBindingRegistry {
     public static List<BoundMachine> getBoundMachinesForType(ServerPlayer player, ModType type,
                                                               @Nullable String subTypeHint) {
         List<BoundMachine> result = new ArrayList<>();
-        collectBindingsForType(player.getInventory().items, type, subTypeHint, player, result);
-        collectBindingsForType(player.getInventory().offhand, type, subTypeHint, player, result);
-        collectBindingsForType(player.getInventory().armor, type, subTypeHint, player, result);
-        try {
-            var opt = top.theillusivec4.curios.api.CuriosApi.getCuriosInventory(player).resolve();
-            if (opt.isPresent()) {
-                for (var handler : opt.get().getCurios().values()) {
-                    var stacks = handler.getStacks();
-                    for (int s = 0; s < stacks.getSlots(); s++) {
-                        collectBindingsForType(List.of(stacks.getStackInSlot(s)), type, subTypeHint, player, result);
-                    }
-                }
-            }
-        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
+        forEachInventoryGroup(player, stacks -> collectBindingsForType(stacks, type, subTypeHint, player, result));
         return result;
     }
 
@@ -678,7 +609,7 @@ public final class AltarBindingRegistry {
     }
 
     private static void collectBindingsForType(List<ItemStack> stacks, ModType type,
-                                                @Nullable String subTypeHint,
+                                                String subTypeHint,
                                                 ServerPlayer player,
                                                 List<BoundMachine> out) {
         // Normalize recipe sub-type hint to canonical machine prefix.
@@ -723,7 +654,7 @@ public final class AltarBindingRegistry {
      *  crystal ritual recipes executed on the same Wissen Crystallizer.
      *  Malum names its recipe category "spirit_infusion" but the
      *  machine prefix used during binding is "spirit_altar". */
-    private static String normalizeSubType(@Nullable String hint, ModType type) {
+    private static String normalizeSubType(String hint, ModType type) {
         if (hint == null) return null;
         if (type == null) return hint;
         if (ModIds.WIZARDS_REBORN.equals(type.id())) {

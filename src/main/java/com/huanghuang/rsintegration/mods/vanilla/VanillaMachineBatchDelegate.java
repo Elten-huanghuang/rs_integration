@@ -28,6 +28,7 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 
+/** Batch delegate for vanilla machine cooking (Furnace, Blast Furnace, Smoker). */
 public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
 
     private ServerPlayer player;
@@ -73,7 +74,6 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         CAMPFIRE_COOKING_TIME = cookingTime;
     }
 
-    @Nullable
     private static java.lang.reflect.Field resolveCampfireField(Class<?> clazz, String official, String srg) {
         for (String name : new String[]{official, srg}) {
             try {

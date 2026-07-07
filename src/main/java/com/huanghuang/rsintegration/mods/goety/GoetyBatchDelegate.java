@@ -42,6 +42,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
+/** Batch delegate for Goety Dark Altar and Necro Brazier rituals. */
 public final class GoetyBatchDelegate extends AbstractBatchDelegate {
 
     // ── Instance state ───────────────────────────────────────────
@@ -53,7 +54,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
     private List<Object> filledPedestals;
     private int soulCost;
     private boolean ritualEverSeenActive;
-    @Nullable private ItemStack activationExtractedFromPlayer;
+    private ItemStack activationExtractedFromPlayer;
 
     // Brazier-mode state
     private boolean isBrazier;
@@ -322,7 +323,6 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
     }
 
     /** Extract the activation item, trying RS first then player inventory. Returns null on failure. */
-    @Nullable
     private ItemStack extractActivation(Ingredient activationIng) {
         if (activationIng == null || activationIng.isEmpty()) return ItemStack.EMPTY;
         ItemStack stack = CraftPacketUtils.ensureMaterialAvailable(

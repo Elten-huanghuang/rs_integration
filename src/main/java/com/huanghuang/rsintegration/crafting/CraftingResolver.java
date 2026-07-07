@@ -625,7 +625,6 @@ public final class CraftingResolver {
         return list;
     }
 
-    @Nullable
     private static Map<ResourceLocation, ResourceLocation> buildPreferredRecipes(Level level) {
         List<? extends String> ids = RSIntegrationConfig.PREFERRED_RECIPES.get();
         if (ids.isEmpty()) return null;
@@ -654,7 +653,6 @@ public final class CraftingResolver {
         return map.isEmpty() ? null : map;
     }
 
-    @Nullable
     private static Map<ResourceLocation, ResourceLocation> mergeForcedOverrides(
             Level level, @Nullable Map<ResourceLocation, ResourceLocation> forcedOverrides) {
         Map<ResourceLocation, ResourceLocation> prefs = buildPreferredRecipes(level);

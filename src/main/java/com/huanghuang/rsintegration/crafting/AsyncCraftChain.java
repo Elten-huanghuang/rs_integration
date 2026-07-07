@@ -61,18 +61,18 @@ public final class AsyncCraftChain {
     }
 
     private final UUID playerId;
-    @Nullable private final MinecraftServer server;
+    private final MinecraftServer server;
     private final INetwork network;
     private final List<CraftingResolver.ResolutionStep> steps;
     private final List<ItemStack> virtualInventory = new ArrayList<>();
     private final ExtractionLedger ledger = new ExtractionLedger();
 
     private int currentStepIdx;
-    @Nullable private IBatchDelegate currentDelegate;
+    private IBatchDelegate currentDelegate;
     private int waitTicks;
     private State state = State.PENDING;
     private String abortReason = "";
-    @Nullable private Runnable onDoneCallback;
+    private Runnable onDoneCallback;
     private int machineCount = 1;
     private int dropsThisChain;
     private boolean dropThrottleTripped;
@@ -103,7 +103,6 @@ public final class AsyncCraftChain {
      * Look up the player by UUID. Returns null if the player is offline
      * or the server reference is unavailable.
      */
-    @Nullable
     private ServerPlayer resolvePlayer() {
         if (server == null) return null;
         return server.getPlayerList().getPlayer(playerId);
@@ -412,7 +411,6 @@ public final class AsyncCraftChain {
 
     // ── multi-block step execution ───────────────────────────────
 
-    @Nullable
     private IBatchDelegate startModStep(CraftingResolver.ResolutionStep step, ServerPlayer online) {
         // Extract machine sub-type from recipe ID (e.g. "wissen_crystallizer"
         // from "wizards_reborn:wissen_crystallizer/earth_crystal_seed") so we
@@ -570,7 +568,6 @@ public final class AsyncCraftChain {
 
     // ── generic (no-machine) delegate: shared-ledger pre-reserve flow ──
 
-    @Nullable
     private IBatchDelegate startGenericStep(IBatchDelegate delegate,
                                             CraftingResolver.ResolutionStep step,
                                             ServerPlayer online) {
@@ -642,7 +639,6 @@ public final class AsyncCraftChain {
      * Returns a {@link ParallelCraftGroup} if at least 2 machines are available;
      * returns null to fall through to the single-machine path.
      */
-    @Nullable
     private IBatchDelegate tryStartParallel(List<BoundMachine> machines,
                                             CraftingResolver.ResolutionStep step,
                                             ServerPlayer online) {
@@ -671,7 +667,6 @@ public final class AsyncCraftChain {
         return startParallelStep(group, step, online);
     }
 
-    @Nullable
     private IBatchDelegate startParallelStep(IBatchDelegate group,
                                              CraftingResolver.ResolutionStep step,
                                              ServerPlayer online) {
@@ -737,7 +732,6 @@ public final class AsyncCraftChain {
         return group;
     }
 
-    @Nullable
     private List<ItemStack> preReserveStepMaterials(List<IngredientSpec> specs, ServerPlayer online) {
         List<ItemStack> materials = new ArrayList<>();
         List<ItemStack> virtualSnapshot = new ArrayList<>();
@@ -821,7 +815,7 @@ public final class AsyncCraftChain {
         virtualInventory.add(stack.copy());
     }
 
-    private void flushVirtualInventory(@Nullable ServerPlayer online) {
+    private void flushVirtualInventory(ServerPlayer online) {
         if (network == null) return;
         var iter = virtualInventory.iterator();
         while (iter.hasNext()) {
@@ -1004,7 +998,6 @@ public final class AsyncCraftChain {
 
     // ── delegate factory ─────────────────────────────────────────
 
-    @Nullable
     private static IBatchDelegate createDelegate(ModType type) {
         if (type == ModType.GENERIC) return null;
         // 1. Check version-specific delegate registry first

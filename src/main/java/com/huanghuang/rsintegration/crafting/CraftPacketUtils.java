@@ -30,6 +30,7 @@ import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.crafting.RecipeManager;
 import net.minecraft.world.level.Level;
 
+import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -64,8 +65,8 @@ public final class CraftPacketUtils {
     // ── shared utilities used by all craft packets ──────────────
 
     @Nullable
-    public static ServerLevel resolveLevel(MinecraftServer server, @Nullable ResourceLocation dim,
-                                           ServerPlayer player) {
+    public static ServerLevel resolveLevel(@Nonnull MinecraftServer server, @Nullable ResourceLocation dim,
+                                           @Nonnull ServerPlayer player) {
         if (dim != null) {
             ResourceKey<Level> key = ResourceKey.create(
                     net.minecraft.core.registries.Registries.DIMENSION, dim);
@@ -84,7 +85,8 @@ public final class CraftPacketUtils {
 
     /** Merge duplicate item names with counts: "大地精魂, 大地精魂, 大地精魂" → "大地精魂 x3".
      *  Caps output at ~120 chars to avoid flooding chat with an unreadable wall. */
-    public static String formatMissingSummary(List<String> missing) {
+    @Nonnull
+    public static String formatMissingSummary(@Nonnull List<String> missing) {
         java.util.LinkedHashMap<String, Integer> counts = new java.util.LinkedHashMap<>();
         for (String name : missing) {
             counts.merge(name, 1, Integer::sum);
@@ -119,8 +121,9 @@ public final class CraftPacketUtils {
      * Ledger entries are committed atomically at the end.
      * On any failure, nothing is physically moved.
      */
-    public static boolean executeCraftingSteps(ServerPlayer player, List<CraftingResolver.ResolutionStep> steps,
-                                               INetwork network) {
+    public static boolean executeCraftingSteps(@Nonnull ServerPlayer player,
+                                               @Nonnull List<CraftingResolver.ResolutionStep> steps,
+                                               @Nonnull INetwork network) {
         RecipeManager rm = player.serverLevel().getRecipeManager();
         ExtractionLedger ledger = new ExtractionLedger();
         List<ItemStack> virtualInventory = new ArrayList<>();
@@ -503,8 +506,7 @@ public final class CraftPacketUtils {
         return null;
     }
 
-    @Nullable
-    private static List<Ingredient> cacheAndReturn(@Nullable ResourceLocation recipeId, @Nullable List<Ingredient> result) {
+    private static List<Ingredient> cacheAndReturn(ResourceLocation recipeId, List<Ingredient> result) {
         if (result == null || recipeId == null) return result;
         List<Ingredient> immutable = Collections.unmodifiableList(result);
         ingredientCache.put(recipeId, immutable);
@@ -522,7 +524,6 @@ public final class CraftPacketUtils {
      * Fallback (no ritual available): detect crystal items by their class
      * (CrystalItem / FracturedCrystalItem / PrecisionCrystalItem).
      */
-    @Nullable
     private static List<Ingredient> filterWRCrystal(Object recipe, List<Ingredient> ingredients) {
         String className = recipe.getClass().getName();
         boolean isWR = className.startsWith("mod.maxbogomol.wizards_reborn.");
@@ -914,7 +915,6 @@ public final class CraftPacketUtils {
         return specs.isEmpty() ? null : specs;
     }
 
-    @Nullable
     private static java.lang.reflect.Field findAnyField(Class<?> clazz, String name) {
         return Reflect.findField(clazz, name).orElse(null);
     }

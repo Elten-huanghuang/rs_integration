@@ -322,7 +322,6 @@ public final class ParallelCraftGroup implements IBatchDelegate {
 
     // ── helpers ────────────────────────────────────────────────────
 
-    @Nullable
     private static IBatchDelegate createChildDelegate(ModType type) {
         if (type == ModType.GENERIC) return null;
         Class<? extends IBatchDelegate> versioned = ModVersionDelegateRegistry.resolve(type);

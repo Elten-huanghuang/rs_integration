@@ -29,6 +29,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+/** Batch delegate for Youkais Homecoming Cuisine Board. */
 public final class CuisineBoardBatchDelegate extends AbstractBatchDelegate {
 
     private ServerPlayer player;
@@ -497,7 +498,6 @@ public final class CuisineBoardBatchDelegate extends AbstractBatchDelegate {
         }
     }
 
-    @Nullable
     private static Method findMethodInHierarchy(Class<?> clazz, String name, Class<?>... paramTypes) {
         Class<?> current = clazz;
         while (current != null && current != Object.class) {
@@ -554,7 +554,6 @@ public final class CuisineBoardBatchDelegate extends AbstractBatchDelegate {
         return false;
     }
 
-    @Nullable
     private static Object getModel(BlockEntity be) {
         if (getModelMethod != null) {
             try {
@@ -566,7 +565,6 @@ public final class CuisineBoardBatchDelegate extends AbstractBatchDelegate {
         return null;
     }
 
-    @Nullable
     private static ItemStack completeModelGetResult(Object model, Level level) {
         if (completeMethod != null && model != null) {
             try {

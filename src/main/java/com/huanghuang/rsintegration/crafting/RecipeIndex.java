@@ -20,7 +20,6 @@ import net.minecraft.world.item.crafting.RecipeManager;
 import net.minecraft.world.level.Level;
 import net.minecraftforge.registries.ForgeRegistries;
 
-import javax.annotation.Nullable;
 import java.lang.reflect.Method;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -197,7 +196,6 @@ public final class RecipeIndex {
 
     /** Fallback output for FA rituals whose {@code result()} is null or
      *  has an unrecognized type (e.g. {@code apply_eternal_modifier}). */
-    @Nullable
     private static ItemStack rsi$faFallbackOutput(Object ritual, ResourceLocation id) {
         try {
             var m = Reflect.findMethod(ritual.getClass(), "mainIngredient", new Class<?>[0]);
@@ -503,7 +501,6 @@ public final class RecipeIndex {
         return ItemStack.EMPTY;
     }
 
-    @Nullable
     private static ItemStack tryGetOutputField(Recipe<?> recipe) {
         Class<?> clazz = recipe.getClass();
         java.lang.reflect.Field cached = outputFieldCache.get(clazz);

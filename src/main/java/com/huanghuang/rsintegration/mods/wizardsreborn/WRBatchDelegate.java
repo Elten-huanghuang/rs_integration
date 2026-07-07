@@ -32,6 +32,7 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 
+/** Batch delegate for Wizard's Reborn machines (Crystallizer, Workbench, Iterator, Crystal Ritual). */
 public final class WRBatchDelegate extends AbstractBatchDelegate {
 
     private enum MachineType {
@@ -1580,7 +1581,6 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         }
     }
 
-    @Nullable
     private static ItemStackHandler getWorkbenchItemHandler(Object be) {
         try {
             java.lang.reflect.Field f = be.getClass().getDeclaredField("itemHandler");
@@ -1592,7 +1592,6 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         }
     }
 
-    @Nullable
     private static ItemStackHandler getWorkbenchOutputHandler(Object be) {
         try {
             java.lang.reflect.Field f = be.getClass().getDeclaredField("itemOutputHandler");
@@ -1609,7 +1608,6 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
      * Forge capability system. This is the most reliable way to access
      * any well-behaved Forge mod's inventory.
      */
-    @Nullable
     private static IItemHandler getForgeItemHandler(Object be) {
         return WRContainerHelper.getForgeItemHandler(be);
     }
@@ -1619,12 +1617,10 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
      * SimpleContainer field. Unlike createItemHandler(), this gives us
      * the live instance that the BE itself uses.
      */
-    @Nullable
     private static net.minecraft.world.SimpleContainer getLiveSimpleContainer(Object be) {
         return WRContainerHelper.getLiveSimpleContainer(be);
     }
 
-    @Nullable
     private static net.minecraft.world.SimpleContainer getSimpleContainer(Object be) {
         return WRContainerHelper.getSimpleContainer(be);
     }
@@ -1719,7 +1715,6 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         return -1; // can't determine — fail safe
     }
 
-    @Nullable
     private static Object extractRitual(Object recipe) {
         Class<?> clazz = recipe.getClass();
         while (clazz != null && clazz != Object.class) {

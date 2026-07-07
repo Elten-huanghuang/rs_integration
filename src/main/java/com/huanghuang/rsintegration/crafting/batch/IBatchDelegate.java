@@ -8,19 +8,20 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 
+import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import java.util.List;
 
 public interface IBatchDelegate {
 
-    boolean validateAndInit(ServerPlayer player, ResourceLocation recipeId,
-                            @Nullable ResourceLocation dim, BlockPos pos);
+    boolean validateAndInit(@Nonnull ServerPlayer player, @Nonnull ResourceLocation recipeId,
+                            @Nullable ResourceLocation dim, @Nonnull BlockPos pos);
 
     /**
      * Check machine is idle, extract materials for one craft, place them, and start.
      * @return true if the craft was successfully started
      */
-    boolean tryStartSingleCraft(ServerPlayer player);
+    boolean tryStartSingleCraft(@Nonnull ServerPlayer player);
 
     /**
      * Variant that uses a shared ledger. The delegate should reserve from
@@ -28,7 +29,7 @@ public interface IBatchDelegate {
      * (the chain commits once at the end). Default impl falls back to
      * creating a private ledger for backward compat.
      */
-    default boolean tryStartSingleCraft(ServerPlayer player, ExtractionLedger sharedLedger) {
+    default boolean tryStartSingleCraft(@Nonnull ServerPlayer player, @Nonnull ExtractionLedger sharedLedger) {
         return tryStartSingleCraft(player);
     }
 
@@ -57,9 +58,9 @@ public interface IBatchDelegate {
      *                     do NOT commit)
      * @return true if all materials were placed and the craft was started
      */
-    default boolean tryStartWithMaterials(ServerPlayer player,
-                                          List<ItemStack> materials,
-                                          ExtractionLedger sharedLedger) {
+    default boolean tryStartWithMaterials(@Nonnull ServerPlayer player,
+                                          @Nonnull List<ItemStack> materials,
+                                          @Nonnull ExtractionLedger sharedLedger) {
         return false;
     }
 
@@ -67,20 +68,22 @@ public interface IBatchDelegate {
      * Poll machine state to detect craft completion.
      * Called every tick while in WAITING state.
      */
-    boolean isCraftComplete(ServerLevel level);
+    boolean isCraftComplete(@Nonnull ServerLevel level);
 
     /**
      * Collect the result item from the machine after craft completes.
      * @return the result ItemStack, or ItemStack.EMPTY if not yet available
      */
-    ItemStack collectResult(ServerPlayer player);
+    @Nonnull
+    ItemStack collectResult(@Nonnull ServerPlayer player);
 
     /** Cleanup and refund on batch failure. */
-    void onBatchFailed(ServerPlayer player, String reason);
+    void onBatchFailed(@Nonnull ServerPlayer player, @Nonnull String reason);
 
     /** Cleanup on successful batch completion. */
-    void onBatchFinished(ServerPlayer player);
+    void onBatchFinished(@Nonnull ServerPlayer player);
 
     /** The machine position this delegate is operating on. */
+    @Nonnull
     BlockPos getMachinePos();
 }

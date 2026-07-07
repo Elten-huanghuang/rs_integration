@@ -25,6 +25,7 @@ import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.List;
 
+/** Batch delegate for Crabber's Delight Crab Traps. */
 public final class CrabTrapBatchDelegate extends AbstractBatchDelegate {
 
     private static final int BAIT_SLOT = 0;
@@ -299,7 +300,6 @@ public final class CrabTrapBatchDelegate extends AbstractBatchDelegate {
         }
     }
 
-    @Nullable
     private static IItemHandler getInventory(BlockEntity be) {
         probeReflection();
         if (inventoryField != null) {

@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.api;
 
+import javax.annotation.Nonnull;
 import net.minecraft.world.item.crafting.Ingredient;
 
 /**
@@ -10,7 +11,10 @@ import net.minecraft.world.item.crafting.Ingredient;
  * against it without triggering Mixin's illegal-reference guard.
  */
 public interface ISmithingRecipeAccessor {
+    @Nonnull
     Ingredient rsi$getTemplate();
+    @Nonnull
     Ingredient rsi$getBase();
+    @Nonnull
     Ingredient rsi$getAddition();
 }

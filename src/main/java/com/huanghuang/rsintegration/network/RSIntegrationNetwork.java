@@ -66,7 +66,6 @@ public final class RSIntegrationNetwork {
         }
     }
 
-    @Nullable
     private static INetwork getNetworkFromContainer(AbstractContainerMenu container) {
         if (container == null) return null;
         try {
@@ -97,7 +96,6 @@ public final class RSIntegrationNetwork {
         return null;
     }
 
-    @Nullable
     private static INetwork resolveFromPlayerInventory(ServerPlayer player) {
         var inv = player.getInventory();
         for (ItemStack stack : inv.items) {
@@ -180,7 +178,6 @@ public final class RSIntegrationNetwork {
         return null;
     }
 
-    @Nullable
     private static INetwork resolveFromNetworkItem(ServerPlayer player, ItemStack stack) {
         if (stack == null || stack.isEmpty()) return null;
 
@@ -222,7 +219,6 @@ public final class RSIntegrationNetwork {
         return null;
     }
 
-    @Nullable
     private static INetwork resolveFromNbt(MinecraftServer server, CompoundTag tag) {
         // Phase 1: Try known key patterns (fast path)
         INetwork net = resolveFromKnownKeys(server, tag);
@@ -241,7 +237,6 @@ public final class RSIntegrationNetwork {
         return resolveHeuristic(server, tag);
     }
 
-    @Nullable
     private static INetwork resolveFromKnownKeys(MinecraftServer server, CompoundTag tag) {
         // Dimension key candidates (tried in order)
         String[] dimKeys = {"NetworkDimension", "Dimension", "dim", "dimension",
@@ -280,7 +275,6 @@ public final class RSIntegrationNetwork {
         return null;
     }
 
-    @Nullable
     private static INetwork resolveHeuristic(MinecraftServer server, CompoundTag tag) {
         // Only heuristically scan tags that already contain at least one known RS
         // key pattern — this prevents false matches against arbitrary mod NBT.
@@ -338,7 +332,6 @@ public final class RSIntegrationNetwork {
     private static final long NEARBY_SCAN_COOLDOWN_MS = 10_000;
     private static final int NEARBY_SCAN_RANGE = 8;
 
-    @Nullable
     private static INetwork resolveFromNearbyNode(ServerPlayer player) {
         UUID pid = player.getUUID();
         long now = System.currentTimeMillis();
@@ -365,7 +358,6 @@ public final class RSIntegrationNetwork {
         return null;
     }
 
-    @Nullable
     private static INetwork resolveFromContainerTerminal(ServerPlayer player) {
         if (player.containerMenu == null) return null;
         try {

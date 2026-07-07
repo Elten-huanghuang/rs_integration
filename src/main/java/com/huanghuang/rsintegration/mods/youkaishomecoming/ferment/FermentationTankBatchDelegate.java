@@ -34,6 +34,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+/** Batch delegate for Youkais Homecoming Fermentation Tank. */
 public final class FermentationTankBatchDelegate extends AbstractBatchDelegate {
 
     private ServerPlayer player;
@@ -349,7 +350,6 @@ public final class FermentationTankBatchDelegate extends AbstractBatchDelegate {
         return false;
     }
 
-    @Nullable
     private static SimpleContainer getItemHandler(BlockEntity be) {
         probeReflection();
         if (itemsField != null) {

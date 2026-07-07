@@ -72,6 +72,9 @@ dependencies {
     // Curios
     compileOnly fg.deobf(files('libs/curios-forge-5.14.1+1.20.1.jar'))
 
+    // JSR-305 annotations (@Nullable / @Nonnull / @ParametersAreNonnullByDefault)
+    compileOnly 'com.google.code.findbugs:jsr305:3.0.2'
+
     annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
 
     // MixinExtras — common API for @WrapOperation etc. (compile + AP).

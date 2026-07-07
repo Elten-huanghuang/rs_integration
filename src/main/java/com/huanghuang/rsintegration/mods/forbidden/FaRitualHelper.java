@@ -587,7 +587,7 @@ public final class FaRitualHelper {
     /** Return type for {@link #findRitualStarterItem}. */
     public static final class StarterResult {
         private final ItemStack stack;
-        @Nullable private final INetwork sourceNetwork;
+        private final INetwork sourceNetwork;
 
         StarterResult(ItemStack stack, @Nullable INetwork sourceNetwork) {
             this.stack = stack;

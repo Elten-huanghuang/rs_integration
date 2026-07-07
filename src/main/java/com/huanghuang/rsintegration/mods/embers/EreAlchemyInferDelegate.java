@@ -90,7 +90,6 @@ extends AbstractBatchDelegate {
         RSIntegrationMod.LOGGER.debug("[RSI-Embers-Infer] Saved progress for {}: {} candidates, {} attempts", (Object)rid, (Object)this.candidates.size(), (Object)this.attemptCount);
     }
 
-    @Nullable
     private static InferenceProgress takeProgress(UUID playerId, String recipeId) {
         if (playerId == null) {
             return null;
@@ -505,7 +504,6 @@ extends AbstractBatchDelegate {
         return guess;
     }
 
-    @Nullable
     private int[] selectNextGuess() {
         if (this.candidates.size() > 1024) {
             return this.candidates.get(new Random().nextInt(this.candidates.size()));
@@ -513,7 +511,6 @@ extends AbstractBatchDelegate {
         return this.selectMinimax();
     }
 
-    @Nullable
     private int[] selectMinimax() {
         int bestScore = Integer.MAX_VALUE;
         int[] bestCandidate = null;
@@ -837,7 +834,6 @@ extends AbstractBatchDelegate {
         return ModRecipeHandlers.tryGetResultItem((Recipe)this.recipe, (RegistryAccess)this.level.registryAccess());
     }
 
-    @Nullable
     private static List<Ingredient> readIngredientList(Object recipe, String fieldName) {
         try {
             return Reflect.getField((Object)recipe, (String)fieldName).map(o -> (List)o).orElse(null);

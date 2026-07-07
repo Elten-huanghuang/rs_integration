@@ -163,7 +163,7 @@ public final class RSAvailabilityChecker {
         return false;
     }
 
-    private static INetwork resolveNetwork(ServerPlayer player, @Nullable ResourceLocation altarDimId, BlockPos pos) {
+    private static INetwork resolveNetwork(ServerPlayer player, ResourceLocation altarDimId, BlockPos pos) {
         ResourceKey<Level> lookupDim = altarDimId != null
                 ? ResourceKey.create(net.minecraft.core.registries.Registries.DIMENSION, altarDimId)
                 : player.level().dimension();

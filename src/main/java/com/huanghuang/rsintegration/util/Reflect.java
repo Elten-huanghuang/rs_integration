@@ -250,7 +250,6 @@ public final class Reflect {
      * name and parameter count where every actual parameter type is assignable
      * to the declared type (with primitive↔boxed bridging).
      */
-    @Nullable
     private static Method findAssignable(Class<?> clazz, String name, Class<?>[] paramTypes) {
         Class<?> scan = clazz;
         while (scan != null && scan != Object.class) {

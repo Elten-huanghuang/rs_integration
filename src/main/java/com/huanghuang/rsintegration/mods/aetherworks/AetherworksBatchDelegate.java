@@ -28,14 +28,15 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 
+/** Batch delegate for Aetherworks Aetherium Anvil (Forge Anvil). */
 public final class AetherworksBatchDelegate extends AbstractBatchDelegate {
 
     // Instance state
     private ServerLevel level;
     private BlockPos machinePos;
-    @Nullable private BlockPos forgePos;
+    private BlockPos forgePos;
     private Object anvilBE;
-    @Nullable private Object forgeBE;
+    private Object forgeBE;
     private Recipe<?> recipe;
     private Item recordedInputItem;
     private boolean materialsPlaced;
@@ -106,7 +107,6 @@ public final class AetherworksBatchDelegate extends AbstractBatchDelegate {
         return true;
     }
 
-    @Nullable
     private static BlockPos findNearbyForge(Level level, BlockPos center) {
         if (AetherworksReflection.forgeBEClass == null) return null;
         BlockPos.MutableBlockPos mpos = center.mutable();

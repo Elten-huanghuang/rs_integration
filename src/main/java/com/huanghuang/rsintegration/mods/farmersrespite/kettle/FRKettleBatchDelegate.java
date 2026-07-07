@@ -390,14 +390,12 @@ public final class FRKettleBatchDelegate extends AbstractBatchDelegate {
                 && FRReflection.kettleBEClass.isInstance(be);
     }
 
-    @Nullable
     private static IFluidHandler getFluidHandler(BlockEntity be) {
         return be.getCapability(
                 net.minecraftforge.common.capabilities.ForgeCapabilities.FLUID_HANDLER)
                 .resolve().orElse(null);
     }
 
-    @Nullable
     private static ItemStackHandler getInventory(BlockEntity be) {
         probeReflection();
         if (getInventoryMethod != null) {
@@ -419,7 +417,6 @@ public final class FRKettleBatchDelegate extends AbstractBatchDelegate {
         return true;
     }
 
-    @Nullable
     private static FluidStack getFluidIn(Recipe<?> recipe) {
         if (getFluidInMethod != null) {
             try {
@@ -429,7 +426,6 @@ public final class FRKettleBatchDelegate extends AbstractBatchDelegate {
         return FluidStack.EMPTY;
     }
 
-    @Nullable
     private static FluidStack getFluidOut(Recipe<?> recipe) {
         if (getFluidOutMethod != null) {
             try {

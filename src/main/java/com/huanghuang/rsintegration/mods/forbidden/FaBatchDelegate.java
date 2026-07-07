@@ -39,16 +39,15 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
+/** Batch delegate for Forbidden & Arcanus Hephaestus Forge rituals. */
 public final class FaBatchDelegate extends AbstractBatchDelegate {
 
     // ── Shared class refs (delegated to FaRitualHelper) ──────────
 
-    @Nullable
     private static ResourceKey<?> getFARegistryKey() {
         return FaRitualHelper.getFARegistryKey();
     }
 
-    @Nullable
     private static Object getRitualById(ResourceLocation id, ServerLevel level) {
         return FaRitualHelper.getRitualById(id, level);
     }
@@ -865,7 +864,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
         starterFromRS = null;
     }
 
-    private ItemStack findRitualStarterItem(ServerPlayer player, @Nullable INetwork network) {
+    private ItemStack findRitualStarterItem(ServerPlayer player, INetwork network) {
         FaRitualHelper.StarterResult result = FaRitualHelper.findRitualStarterItem(player, network);
         starterFromRS = result.sourceNetwork() != null ? result.stack() : null;
         return result.stack();

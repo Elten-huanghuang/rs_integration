@@ -19,7 +19,6 @@ import net.p3pp3rf1y.sophisticatedbackpacks.api.IItemHandlerInteractionUpgrade;
 import net.p3pp3rf1y.sophisticatedbackpacks.upgrades.deposit.DepositUpgradeWrapper;
 import net.p3pp3rf1y.sophisticatedcore.api.IStorageWrapper;
 
-import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -184,7 +183,6 @@ final class ContainerTransferLogic {
         }
     }
 
-    @Nullable
     private static IItemHandler findBackpack(ServerPlayer player) {
         if (!ModList.get().isLoaded(ModIds.SOPHISTICATED_BACKPACKS)) return null;
 
@@ -223,7 +221,6 @@ final class ContainerTransferLogic {
      * Use reflection to scan ALL Curios slots for a backpack.
      * Curios is an optional dependency — this must not link directly.
      */
-    @Nullable
     private static IItemHandler findBackpackInCurios(ServerPlayer player) {
         if (!ModList.get().isLoaded(ModIds.CURIOS)) return null;
         try {
@@ -268,7 +265,6 @@ final class ContainerTransferLogic {
 
     // ── backpack wrapper (for accessing upgrade handlers) ────────────
 
-    @Nullable
     private static IStorageWrapper findBackpackWrapper(ServerPlayer player) {
         if (!ModList.get().isLoaded(ModIds.SOPHISTICATED_BACKPACKS)) return null;
         IStorageWrapper w = findBackpackWrapperInCurios(player);
@@ -287,14 +283,12 @@ final class ContainerTransferLogic {
         return null;
     }
 
-    @Nullable
     private static IStorageWrapper getBackpackWrapper(ItemStack stack) {
         if (stack.isEmpty()) return null;
         return stack.getCapability(CapabilityBackpackWrapper.getCapabilityInstance())
                 .resolve().orElse(null);
     }
 
-    @Nullable
     private static IStorageWrapper findBackpackWrapperInCurios(ServerPlayer player) {
         if (!ModList.get().isLoaded(ModIds.CURIOS)) return null;
         try {
@@ -363,7 +357,6 @@ final class ContainerTransferLogic {
         return false;
     }
 
-    @Nullable
     private static IItemHandler getBackpackHandler(ItemStack stack) {
         if (stack.isEmpty()) return null;
         var opt = stack.getCapability(CapabilityBackpackWrapper.getCapabilityInstance()).resolve();

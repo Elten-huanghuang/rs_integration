@@ -31,6 +31,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+/** Batch delegate for Farmer's Delight Cooking Pot. */
 public final class CookingPotBatchDelegate extends com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate {
 
     // Slot layout matching CookingPotBlockEntity
@@ -279,7 +280,6 @@ public final class CookingPotBatchDelegate extends com.huanghuang.rsintegration.
         }
     }
 
-    @Nullable
     private static IItemHandler getInventory(BlockEntity be) {
         probeReflection();
         if (inventoryField != null) {
@@ -300,7 +300,6 @@ public final class CookingPotBatchDelegate extends com.huanghuang.rsintegration.
         }
     }
 
-    @Nullable
     private static ItemStack getContainerItem(Recipe<?> recipe) {
         try {
             Method m = recipe.getClass().getMethod("getOutputContainer");

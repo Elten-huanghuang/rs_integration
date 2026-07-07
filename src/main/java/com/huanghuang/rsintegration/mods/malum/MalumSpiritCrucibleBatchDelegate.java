@@ -564,7 +564,6 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
 
     // ── helpers ───────────────────────────────────────────────────
 
-    @Nullable
     private static IItemHandler readHandler(Object be, String fieldName) {
         return Reflect.getField(be, fieldName)
                 .filter(IItemHandler.class::isInstance)
@@ -704,7 +703,6 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
      * The Spirit Crucible is a Lodestone multi-block; the player may
      * have shift+clicked a component block instead of the core.
      */
-    @Nullable
     private static BlockPos findCrucibleCore(Level level, BlockPos pos) {
         if (!MalumReflection.isAvailable()) return null;
         int r = 2;

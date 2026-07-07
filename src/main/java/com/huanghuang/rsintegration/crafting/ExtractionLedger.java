@@ -21,6 +21,7 @@ import net.minecraftforge.fml.ModList;
 import net.minecraftforge.items.IItemHandler;
 import net.minecraftforge.items.ItemHandlerHelper;
 
+import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -112,7 +113,8 @@ public final class ExtractionLedger {
         return ItemStack.EMPTY;
     }
 
-    public ItemStack reserveFromNetwork(Ingredient ingredient, int count, INetwork network) {
+    @Nonnull
+    public ItemStack reserveFromNetwork(@Nonnull Ingredient ingredient, int count, @Nonnull INetwork network) {
         requireState(State.IDLE, State.RESERVING);
         if (count <= 0 || ingredient.isEmpty()) return ItemStack.EMPTY;
         if (state == State.IDLE) transition(State.RESERVING);
@@ -125,7 +127,8 @@ public final class ExtractionLedger {
         return template;
     }
 
-    public ItemStack reserveFromInventory(Ingredient ingredient, int count, ServerPlayer player) {
+    @Nonnull
+    public ItemStack reserveFromInventory(@Nonnull Ingredient ingredient, int count, @Nonnull ServerPlayer player) {
         requireState(State.IDLE, State.RESERVING);
         if (count <= 0 || ingredient.isEmpty()) return ItemStack.EMPTY;
         if (state == State.IDLE) transition(State.RESERVING);
@@ -139,7 +142,7 @@ public final class ExtractionLedger {
     }
 
     // Three-phase atomic commit: pre-check, batch extract, confirm.
-    public boolean commit(@Nullable INetwork network, ServerPlayer player) {
+    public boolean commit(@Nullable INetwork network, @Nonnull ServerPlayer player) {
         if (state == State.COMMITTED) return true;
         // Allow IDLE only for no-op commit (no entries)
         if (state == State.IDLE && entries.isEmpty()) {
@@ -205,7 +208,7 @@ public final class ExtractionLedger {
      * Verifies that the total reserved count does not exceed physical
      * availability (correcting for any race with other systems).
      */
-    private boolean preCheck(@Nullable INetwork network, ServerPlayer player) {
+    private boolean preCheck(INetwork network, ServerPlayer player) {
         if (network != null) {
             // Group reservations by ingredient for accurate per-type checking.
             Map<Ingredient, Integer> neededByIngredient = new HashMap<>();
@@ -280,7 +283,7 @@ public final class ExtractionLedger {
                                   @Nullable INetwork sourceNetwork) {}
 
     /** Explicitly roll back all reservations without committing. */
-    public void rollback(ServerPlayer player) {
+    public void rollback(@Nonnull ServerPlayer player) {
         if (state == State.IDLE || state == State.ROLLED_BACK) return;
         if (state == State.COMMITTED) {
             refundCommitted(null, player);
@@ -341,7 +344,7 @@ public final class ExtractionLedger {
         }
     }
 
-    private static ItemStack extractOne(Entry entry, @Nullable INetwork network, ServerPlayer player) {
+    private static ItemStack extractOne(Entry entry, INetwork network, ServerPlayer player) {
         return switch (entry.source) {
             case ALTAR_BINDING -> {
                 if (entry.preExtracted != null) yield entry.preExtracted.copy();
@@ -645,7 +648,6 @@ public final class ExtractionLedger {
 
     // ── Backpack inventory scanning ──────────────────────────────
 
-    @Nullable
     private static IItemHandler getBackpackInventory(ItemStack stack) {
         if (stack.isEmpty()) return null;
         if (!ModList.get().isLoaded(ModIds.SOPHISTICATED_BACKPACKS)) return null;
@@ -766,7 +768,7 @@ public final class ExtractionLedger {
      * the original source (network, altar binding, or player inventory).
      * Best-effort: individual failures are logged but do not abort the loop.
      */
-    public void refundCommitted(@Nullable INetwork network, ServerPlayer player) {
+    public void refundCommitted(@Nullable INetwork network, @Nonnull ServerPlayer player) {
         if (state != State.COMMITTED) return;
         for (Entry e : entries) {
             if (e.template.isEmpty()) continue;

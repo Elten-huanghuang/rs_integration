@@ -87,12 +87,12 @@ public final class GenericCraftPacket {
     private final boolean preview;
     /** itemRegKey → forced recipeId (only for preview mode, empty when unused) */
     private final Map<String, String> forcedRecipes;
-    @Nullable private final ResourceLocation dim;
-    @Nullable private final net.minecraft.core.BlockPos pos;
+    private final ResourceLocation dim;
+    private final net.minecraft.core.BlockPos pos;
     private final int repeatCount;
     private final boolean inferMode;
     /** JEI-provided base item for FA ApplyModifierRecipe prefill */
-    @Nullable private final ItemStack baseItem;
+    private final ItemStack baseItem;
 
     /** Preview mode: compute plan and send GUI to client. */
     public GenericCraftPacket(ResourceLocation recipeId, boolean preview) {
@@ -295,7 +295,6 @@ public final class GenericCraftPacket {
      * Look up a recipe from RecipeManager first, then fall back to
      * FARegistries.RITUAL (wrapping the FA Ritual in a FaRitualWrapper).
      */
-    @Nullable
     private static Recipe<?> resolveRecipe(ServerLevel level, ResourceLocation recipeId) {
         // Strip JEI pagination prefix if present (e.g. mod:jei.real_path -> mod:real_path)
         recipeId = unwrapJeiId(recipeId);
@@ -330,7 +329,6 @@ public final class GenericCraftPacket {
         return null;
     }
 
-    @Nullable
     private static Recipe<?> resolveFARitual(ServerLevel level, ResourceLocation recipeId) {
         Object ritual = FaRitualHelper.getRitualById(recipeId, level);
         if (ritual == null) {
@@ -342,7 +340,6 @@ public final class GenericCraftPacket {
 
     /** Returns the blockKey keyword that a machine must contain to be
      *  compatible with the given recipe, or {@code null} for unknown types. */
-    @javax.annotation.Nullable
     private static String getMachineKeywordForRecipe(Recipe<?> recipe) {
         if (recipe instanceof SmithingTransformRecipe
                 || recipe instanceof SmithingTrimRecipe) {
@@ -375,6 +372,41 @@ public final class GenericCraftPacket {
             inner = inner.substring(0, slash);
         }
         return new ResourceLocation(id.getNamespace(), inner);
+    }
+
+    /** Launch an async craft chain with standard onDone/scheduleNext wiring. */
+    private static void launchAsyncChain(ServerPlayer player, List<ResolutionStep> steps,
+                                          INetwork network, int repeatCount,
+                                          ResourceLocation recipeId, @Nullable ResourceLocation dim,
+                                          @Nullable net.minecraft.core.BlockPos pos,
+                                          boolean inferMode, @Nullable ItemStack baseItem) {
+        AsyncCraftChain chain = new AsyncCraftChain(player.getUUID(), player.getServer(), network, steps);
+        final UUID capturedUuid = player.getUUID();
+        final var capturedServer = player.getServer();
+        AsyncCraftManager.getInstance().submit(chain);
+        chain.onDone(() -> {
+            AsyncCraftManager.getInstance().remove(chain);
+            ChainRepeatController.scheduleNext(
+                    chain, capturedServer, capturedUuid, repeatCount, chain.getMachineCount(),
+                    (p, rem) -> tryResolve(p, recipeId, dim, pos, rem, inferMode, baseItem));
+        });
+        player.sendSystemMessage(
+                TextBuilder.translate("rsi.async.chain_started", steps.size()).build());
+    }
+
+    /** Execute a list of GENERIC-only steps synchronously repeatCount times. */
+    private static boolean executeSyncLoop(ServerPlayer player, List<ResolutionStep> steps,
+                                            INetwork network, ResourceLocation recipeId,
+                                            int repeatCount, String failMsg) {
+        for (int r = 0; r < repeatCount; r++) {
+            if (!CraftPacketUtils.executeCraftingSteps(player, steps, network)) {
+                RSIntegrationMod.LOGGER.warn("[RSI-Generic] executeCraftingSteps failed for {} (iteration {}/{})",
+                        recipeId, r + 1, repeatCount);
+                player.sendSystemMessage(Component.translatable("rsi.generic.error.craft_failed", failMsg));
+                return false;
+            }
+        }
+        return true;
     }
 
     private static void tryResolve(ServerPlayer player, ResourceLocation recipeId,
@@ -459,19 +491,7 @@ public final class GenericCraftPacket {
                 }
                 // Append the mod recipe itself as the final multi-block step
                 modSteps.add(new ResolutionStep(recipeId, modType, recipeId, inferMode));
-                AsyncCraftChain chain = new AsyncCraftChain(player.getUUID(), player.getServer(), network, modSteps);
-                final UUID capturedUuidA = player.getUUID();
-                final var capturedServerA = player.getServer();
-                AsyncCraftManager.getInstance().submit(chain);
-                chain.onDone(() -> {
-                    AsyncCraftManager.getInstance().remove(chain);
-                    ChainRepeatController.scheduleNext(
-                            chain, capturedServerA, capturedUuidA, repeatCount, chain.getMachineCount(),
-                            (p, rem) -> tryResolve(p, recipeId, dim, pos, rem, inferMode, baseItem));
-                });
-                player.sendSystemMessage(
-                        TextBuilder.translate("rsi.async.chain_started", modSteps.size())
-                                .build());
+                launchAsyncChain(player, modSteps, network, repeatCount, recipeId, dim, pos, inferMode, baseItem);
                 return;
             }
         }
@@ -488,33 +508,14 @@ public final class GenericCraftPacket {
                     // Multi-block intermediates → async chain
                     allSteps.add(new ResolutionStep(recipeId, ModType.GENERIC,
                             new ResourceLocation("minecraft:crafting")));
-                    AsyncCraftChain chain = new AsyncCraftChain(player.getUUID(), player.getServer(), network, allSteps);
-                    final UUID capturedUuidB = player.getUUID();
-                    final var capturedServerB = player.getServer();
-                    AsyncCraftManager.getInstance().submit(chain);
-                    chain.onDone(() -> {
-                        AsyncCraftManager.getInstance().remove(chain);
-                        ChainRepeatController.scheduleNext(
-                                chain, capturedServerB, capturedUuidB, repeatCount, chain.getMachineCount(),
-                                (p, rem) -> tryResolve(p, recipeId, dim, pos, rem, inferMode, baseItem));
-                    });
-                    player.sendSystemMessage(
-                            TextBuilder.translate("rsi.async.chain_started", allSteps.size())
-                                    .build());
+                    launchAsyncChain(player, allSteps, network, repeatCount, recipeId, dim, pos, inferMode, baseItem);
                     return;
                 }
                 // All GENERIC steps → execute sync chain
                 List<ResolutionStep> execSteps = new ArrayList<>(allSteps);
                 execSteps.add(new ResolutionStep(recipeId, ModType.GENERIC,
                         new ResourceLocation("minecraft:crafting")));
-                for (int r = 0; r < repeatCount; r++) {
-                    if (!CraftPacketUtils.executeCraftingSteps(player, execSteps, network)) {
-                        RSIntegrationMod.LOGGER.warn("[RSI-Generic] executeCraftingSteps (Path1) returned false for {} (iteration {}/{})", recipeId, r + 1, repeatCount);
-                        player.sendSystemMessage(Component.translatable(
-                                "rsi.generic.error.craft_failed", "Intermediate crafting failed"));
-                        break;
-                    }
-                }
+                executeSyncLoop(player, execSteps, network, recipeId, repeatCount, "Intermediate crafting failed");
                 return;
             }
         }
@@ -533,32 +534,13 @@ public final class GenericCraftPacket {
                 if (planSteps.stream().anyMatch(s -> s.modType() != ModType.GENERIC)) {
                     planSteps.add(new ResolutionStep(recipeId, ModType.GENERIC,
                             new ResourceLocation("minecraft:crafting")));
-                    AsyncCraftChain chain = new AsyncCraftChain(player.getUUID(), player.getServer(), network, planSteps);
-                    final UUID capturedUuidC = player.getUUID();
-                    final var capturedServerC = player.getServer();
-                    AsyncCraftManager.getInstance().submit(chain);
-                    chain.onDone(() -> {
-                        AsyncCraftManager.getInstance().remove(chain);
-                        ChainRepeatController.scheduleNext(
-                                chain, capturedServerC, capturedUuidC, repeatCount, chain.getMachineCount(),
-                                (p, rem) -> tryResolve(p, recipeId, dim, pos, rem, inferMode, baseItem));
-                    });
-                    player.sendSystemMessage(
-                            TextBuilder.translate("rsi.async.chain_started", planSteps.size())
-                                    .build());
+                    launchAsyncChain(player, planSteps, network, repeatCount, recipeId, dim, pos, inferMode, baseItem);
                     return;
                 }
                 List<ResolutionStep> execSteps2 = new ArrayList<>(planSteps);
                 execSteps2.add(new ResolutionStep(recipeId, ModType.GENERIC,
                         new ResourceLocation("minecraft:crafting")));
-                for (int r = 0; r < repeatCount; r++) {
-                    if (!CraftPacketUtils.executeCraftingSteps(player, execSteps2, network)) {
-                        RSIntegrationMod.LOGGER.warn("[RSI-Generic] executeCraftingSteps (Path2) returned false for {} (iteration {}/{})", recipeId, r + 1, repeatCount);
-                        player.sendSystemMessage(Component.translatable(
-                                "rsi.generic.error.craft_failed", "Intermediate crafting failed"));
-                        break;
-                    }
-                }
+                executeSyncLoop(player, execSteps2, network, recipeId, repeatCount, "Intermediate crafting failed");
                 return;
             }
             // planSteps=0 with missing=[] means everything is directly available; not a failure
@@ -729,7 +711,6 @@ public final class GenericCraftPacket {
         }
     }
 
-    @Nullable
     private static INetwork resolveNetworkForRecipe(ServerPlayer player,
             @Nullable ResourceLocation dim, @Nullable net.minecraft.core.BlockPos pos,
             @Nullable ModType modType) {
@@ -1532,7 +1513,6 @@ public final class GenericCraftPacket {
      * Preserves NBT so TACZ/Applied Armorer items display with correct attachments.
      * Strips BlockEntityTag/BlockId to avoid purple-black block entity rendering.
      */
-    @Nullable
     private static ItemStack matchBestAvailable(Ingredient ingredient, Map<Item, Integer> itemAvailable) {
         ItemStack best = null;
         int bestCount = -1;
@@ -1581,7 +1561,6 @@ public final class GenericCraftPacket {
      * from the availability map so subsequent calls for the same tag-ingredient
      * spread across different valid items instead of always picking the same one.
      */
-    @Nullable
     private static ItemStack matchAndConsume(Ingredient ingredient, Map<Item, Integer> available) {
         ItemStack matched = matchBestAvailable(ingredient, available);
         if (matched != null) {

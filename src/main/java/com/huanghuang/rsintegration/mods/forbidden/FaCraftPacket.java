@@ -40,12 +40,11 @@ import java.util.function.Supplier;
 public final class FaCraftPacket {
 
     private final ResourceLocation ritualId;
-    @Nullable private final ResourceLocation dim;
+    private final ResourceLocation dim;
     private final BlockPos pos;
 
     // ── static init ────────────────────────────────────────────
 
-    @Nullable
     private static Object getRitualById(ResourceLocation id, ServerLevel level) {
         return FaRitualHelper.getRitualById(id, level);
     }
@@ -91,7 +90,7 @@ public final class FaCraftPacket {
     // ── main logic ─────────────────────────────────────────────
 
     private static void tryCraft(ServerPlayer player, ResourceLocation ritualId,
-                                  @Nullable ResourceLocation dim, BlockPos pos) {
+                                  ResourceLocation dim, BlockPos pos) {
         ServerLevel level = resolveLevel(player.server, dim, player);
         if (level == null) {
             player.sendSystemMessage(Component.translatable("rsi.generic.error.dim_not_found"));
@@ -468,8 +467,7 @@ public final class FaCraftPacket {
         return CraftPacketUtils.ensureMaterialAvailable(player, altarDim, altarPos, ingredient, count, ledger);
     }
 
-    @Nullable
-    private static ServerLevel resolveLevel(MinecraftServer server, @Nullable ResourceLocation dim,
+    private static ServerLevel resolveLevel(MinecraftServer server, ResourceLocation dim,
                                             ServerPlayer player) {
         return CraftPacketUtils.resolveLevel(server, dim, player);
     }
@@ -477,7 +475,7 @@ public final class FaCraftPacket {
     // ── rollback ───────────────────────────────────────────────
 
     private static void rollbackAll(ServerPlayer player, Object forge,
-                                     List<Object> filledPedestals, @Nullable INetwork network) {
+                                     List<Object> filledPedestals, INetwork network) {
         for (Object ped : filledPedestals) {
             try {
                 ItemStack stack = (ItemStack) Reflect.getMethodOrThrow(FAReflection.pedestalBEClass, "getStack", "getStack").invoke(ped);
@@ -520,8 +518,8 @@ public final class FaCraftPacket {
         private final ServerPlayer player;
         private final Object forge;
         private final List<Object> filledPedestals;
-        @Nullable private final INetwork network;
-        @javax.annotation.Nullable private final ItemStack starterStack;
+        private final INetwork network;
+        private final ItemStack starterStack;
         boolean rejected;
 
         BooleanConsumerProxy(ServerPlayer player, Object forge,

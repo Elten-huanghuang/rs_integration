@@ -35,6 +35,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+/** Batch delegate for Youkais Homecoming Kettle. */
 public final class KettleBatchDelegate extends AbstractBatchDelegate {
 
     private ServerPlayer player;
@@ -400,7 +401,6 @@ public final class KettleBatchDelegate extends AbstractBatchDelegate {
 
     // -- BE discovery --
 
-    @Nullable
     private BlockEntity findKettleBE() {
         BlockEntity be = myLevel.getBlockEntity(myPos);
         if (be != null && isKettleBE(be)) return be;
@@ -470,7 +470,6 @@ public final class KettleBatchDelegate extends AbstractBatchDelegate {
         return false;
     }
 
-    @Nullable
     private static IFluidHandler getFluidHandler(BlockEntity be) {
         probeReflection();
         if (getFluidHandlerMethod != null) {
@@ -484,7 +483,6 @@ public final class KettleBatchDelegate extends AbstractBatchDelegate {
                 .resolve().orElse(null);
     }
 
-    @Nullable
     private static SimpleContainer getItemHandler(BlockEntity be) {
         probeReflection();
         if (getItemHandlerMethod != null) {

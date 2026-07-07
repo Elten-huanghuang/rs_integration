@@ -31,6 +31,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+/** Batch delegate for Immortal's Delight Enchantal Cooler. */
 public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
 
     // Slot layout (matching EnchantalCoolerBlockEntity)
@@ -369,7 +370,6 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
         }
     }
 
-    @Nullable
     private static IItemHandler getInventory(BlockEntity be) {
         probeReflection();
         if (inventoryField != null) {

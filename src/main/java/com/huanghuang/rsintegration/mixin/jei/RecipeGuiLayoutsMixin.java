@@ -994,7 +994,6 @@ public class RecipeGuiLayoutsMixin {
      * </ul>
      */
     @Unique
-    @javax.annotation.Nullable
     private static ItemStack extractFaSmithingBaseItem(IRecipeLayoutDrawable<?> recipeLayout) {
         try {
             IRecipeSlotsView slotsView = recipeLayout.getRecipeSlotsView();
@@ -1024,7 +1023,6 @@ public class RecipeGuiLayoutsMixin {
         return null;
     }
 
-    @javax.annotation.Nullable
     @Unique
     private static BindingStorage.BindingEntry findBinding(@javax.annotation.Nullable AbstractContainerMenu container, String filter) {
         var player = Minecraft.getInstance().player;
@@ -1095,7 +1093,6 @@ public class RecipeGuiLayoutsMixin {
     }
 
     @Unique
-    @javax.annotation.Nullable
     private static ResourceLocation rsi$getMarketEntryId(Object recipe) {
         try {
             java.lang.reflect.Method getEntryId = Reflect.findMethod(recipe.getClass(),

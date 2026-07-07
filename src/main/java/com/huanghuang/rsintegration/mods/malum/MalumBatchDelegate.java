@@ -27,6 +27,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
+/** Batch delegate for Malum Spirit Altar (SpiritInfusion recipe). */
 public final class MalumBatchDelegate extends AbstractBatchDelegate {
 
     // ── Instance state ───────────────────────────────────────────
@@ -682,7 +683,6 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
 
     // ── Reflection helpers ───────────────────────────────────────
 
-    @Nullable
     private static Object getField(Object obj, String name) {
         Class<?> clazz = obj.getClass();
         while (clazz != null && clazz != Object.class) {

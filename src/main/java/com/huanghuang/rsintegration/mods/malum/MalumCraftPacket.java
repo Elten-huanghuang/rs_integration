@@ -35,7 +35,7 @@ import java.util.function.Supplier;
 public final class MalumCraftPacket {
 
     private final ResourceLocation recipeId;
-    @Nullable private final ResourceLocation dim;
+    private final ResourceLocation dim;
     private final BlockPos pos;
 
     public MalumCraftPacket(ResourceLocation recipeId, @Nullable ResourceLocation dim, BlockPos pos) {
@@ -76,7 +76,7 @@ public final class MalumCraftPacket {
     }
 
     private static void tryCraft(ServerPlayer player, ResourceLocation recipeId,
-                                  @Nullable ResourceLocation dim, BlockPos pos) {
+                                  ResourceLocation dim, BlockPos pos) {
         ServerLevel level = resolveLevel(player.server, dim, player);
         if (level == null) {
             player.sendSystemMessage(Component.translatable("rsi.generic.error.dim_not_found"));
@@ -305,7 +305,7 @@ public final class MalumCraftPacket {
     }
 
     private static void refundAndClearAltar(Object invMain, Object invSpirit, int mainSlots, int spiritSlots,
-                                            @Nullable INetwork network, ServerPlayer player) {
+                                            INetwork network, ServerPlayer player) {
         for (int i = 0; i < mainSlots; i++) {
             try {
                 ItemStack stack = (ItemStack) invMain.getClass()
@@ -345,7 +345,7 @@ public final class MalumCraftPacket {
     }
 
     private static void refundAndClearPedestals(List<?> pedestals, List<Integer> indices,
-                                                 @Nullable INetwork network, ServerPlayer player) {
+                                                 INetwork network, ServerPlayer player) {
         for (int idx : indices) {
             if (idx < 0 || idx >= pedestals.size()) continue;
             try {
@@ -411,14 +411,12 @@ public final class MalumCraftPacket {
 
     // -- Reflection helpers (safe for third-party Malum internals) --
 
-    @Nullable
     private static Object castSpiritAltar(BlockEntity be) {
         if (be == null) return null;
         if (MalumReflection.spiritAltarBEClass != null && MalumReflection.spiritAltarBEClass.isInstance(be)) return be;
         return null;
     }
 
-    @Nullable
     private static Object getField(Object obj, String name) {
         Class<?> clazz = obj.getClass();
         while (clazz != null && clazz != Object.class) {
@@ -471,8 +469,7 @@ public final class MalumCraftPacket {
         return recipe.getId().toString();
     }
 
-    @Nullable
-    private static ServerLevel resolveLevel(MinecraftServer server, @Nullable ResourceLocation dim,
+    private static ServerLevel resolveLevel(MinecraftServer server, ResourceLocation dim,
                                             ServerPlayer player) {
         return CraftPacketUtils.resolveLevel(server, dim, player);
     }

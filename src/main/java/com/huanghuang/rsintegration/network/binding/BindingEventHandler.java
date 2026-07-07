@@ -239,7 +239,6 @@ public final class BindingEventHandler {
         return resolveBlockName(blockKey, regKey, null);
     }
 
-    @Nullable
     private static String descIdToRegKey(String descId) {
         if (!descId.startsWith("block.")) return null;
         String rest = descId.substring(6);
@@ -381,7 +380,6 @@ public final class BindingEventHandler {
         return target != null && target.supportsGui;
     }
 
-    @Nullable
     private static String extractBlockId(net.minecraft.nbt.CompoundTag tag) {
         if (tag.contains("BlockId", net.minecraft.nbt.Tag.TAG_STRING)) {
             return tag.getString("BlockId");
@@ -512,8 +510,7 @@ public final class BindingEventHandler {
         return result;
     }
 
-    @Nullable
-    private static ItemStack getValidItemStack(@Nullable ResourceLocation rl) {
+    private static ItemStack getValidItemStack(ResourceLocation rl) {
         if (rl == null) return null;
         var item = ForgeRegistries.ITEMS.getValue(rl);
         if (item != null && item != Items.AIR) return new ItemStack(item);
@@ -607,7 +604,6 @@ public final class BindingEventHandler {
      * so we use the first entry — it is always inside the altar and consistent
      * across all clicks on the same multiblock.
      */
-    @Nullable
     private static BlockPos resolveTlmAltarCentre(BlockEntity be, BlockPos pos) {
         try {
             java.lang.reflect.Method getBlockPosList = be.getClass().getMethod("getBlockPosList");

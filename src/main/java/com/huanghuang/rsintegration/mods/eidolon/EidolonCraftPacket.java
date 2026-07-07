@@ -42,7 +42,7 @@ import java.util.function.Supplier;
 public final class EidolonCraftPacket {
 
     private final ResourceLocation recipeId;
-    @Nullable private final ResourceLocation dim;
+    private final ResourceLocation dim;
     private final BlockPos pos;
 
     // ── Shared class refs (resolved from probe) ─────────────────
@@ -107,7 +107,7 @@ public final class EidolonCraftPacket {
     // ── main logic ─────────────────────────────────────────────
 
     private static void tryCraft(ServerPlayer player, ResourceLocation recipeId,
-                                  @Nullable ResourceLocation dim, BlockPos pos) {
+                                  ResourceLocation dim, BlockPos pos) {
         ServerLevel level = resolveLevel(player.server, dim, player);
         if (level == null) {
             player.sendSystemMessage(Component.translatable("rsi.generic.error.dim_not_found"));
@@ -364,8 +364,7 @@ public final class EidolonCraftPacket {
         return CraftPacketUtils.ensureMaterialAvailable(player, altarDim, altarPos, ingredient, count, ledger);
     }
 
-    @Nullable
-    private static ServerLevel resolveLevel(MinecraftServer server, @Nullable ResourceLocation dim,
+    private static ServerLevel resolveLevel(MinecraftServer server, ResourceLocation dim,
                                             ServerPlayer player) {
         return CraftPacketUtils.resolveLevel(server, dim, player);
     }

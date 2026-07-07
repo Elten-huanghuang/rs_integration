@@ -109,7 +109,6 @@ public final class EidolonRecipeHandler extends AbstractRecipeHandler {
         return result.isEmpty() ? null : result;
     }
 
-    @Nullable
     private static List<IngredientSpec> readWorktableArrays(Recipe<?> recipe) {
         // Try getCore() / getOuter() methods first
         var coreOpt = Reflect.invoke(recipe, "getCore");

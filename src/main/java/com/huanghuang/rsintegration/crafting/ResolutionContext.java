@@ -260,7 +260,7 @@ final class ResolutionContext {
     private static final class UndoEntry {
         final CraftingResolver.StackKey key;
         @Nullable final Integer oldValue;
-        UndoEntry(CraftingResolver.StackKey key, @Nullable Integer oldValue) {
+        UndoEntry(CraftingResolver.StackKey key, Integer oldValue) {
             this.key = key;
             this.oldValue = oldValue;
         }

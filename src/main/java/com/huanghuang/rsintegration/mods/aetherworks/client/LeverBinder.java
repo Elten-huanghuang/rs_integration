@@ -20,7 +20,7 @@ public final class LeverBinder {
 
     private static final int MEDIAN_MARGIN = 50;
 
-    @Nullable private static BlockPos boundLeverPos;
+    private static BlockPos boundLeverPos;
     private static int tempMin;
     private static int tempMax = 3000;
     private static boolean leverControlEnabled = true;

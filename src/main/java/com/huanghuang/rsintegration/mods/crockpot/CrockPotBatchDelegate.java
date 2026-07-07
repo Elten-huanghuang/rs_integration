@@ -35,6 +35,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+/** Batch delegate for Crock Pot cooking recipes (all pot levels). */
 public final class CrockPotBatchDelegate extends com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate {
 
     private ServerPlayer player;
@@ -327,7 +328,6 @@ public final class CrockPotBatchDelegate extends com.huanghuang.rsintegration.cr
      * the recipe's category constraints. Returns null if constraints cannot
      * be satisfied.
      */
-    @Nullable
     private List<ItemStack> findAndExtractFoodValueItems(float[] currentFV, int remaining,
                                                           @Nullable IItemHandler itemHandler) {
         List<ItemStack> result = new ArrayList<>();
@@ -449,7 +449,6 @@ public final class CrockPotBatchDelegate extends com.huanghuang.rsintegration.cr
      * Validates post-extraction that the item passes the max-constraint check
      * with its actual food values (if any).
      */
-    @Nullable
     private ItemStack tryExtractFillerItem() {
         Ingredient filler = CrockPotRecipeHandler.resolveFillerIngredient();
         if (filler == null) return null;
@@ -530,7 +529,6 @@ public final class CrockPotBatchDelegate extends com.huanghuang.rsintegration.cr
         }
     }
 
-    @Nullable
     private float[] computeItemFoodValues(ItemStack stack) {
         if (stack.isEmpty()) return null;
         Item item = stack.getItem();
@@ -588,7 +586,6 @@ public final class CrockPotBatchDelegate extends com.huanghuang.rsintegration.cr
 
     // ── ingredient extraction (no filler for category recipes) ───
 
-    @Nullable
     private List<IngredientSpec> getIngredients() {
         // For category-constraint recipes, only extract the actual required
         // ingredients — remaining slots are filled by food-value selection.
@@ -673,7 +670,6 @@ public final class CrockPotBatchDelegate extends com.huanghuang.rsintegration.cr
         }
     }
 
-    @Nullable
     private static IItemHandler getItemHandler(BlockEntity be) {
         probeReflection();
         if (itemHandlerField != null) {
@@ -685,7 +681,6 @@ public final class CrockPotBatchDelegate extends com.huanghuang.rsintegration.cr
                 .resolve().orElse(null);
     }
 
-    @Nullable
     private IItemHandler getItemHandlerAtPos() {
         BlockEntity be = myLevel.getBlockEntity(myPos);
         if (be == null) return null;

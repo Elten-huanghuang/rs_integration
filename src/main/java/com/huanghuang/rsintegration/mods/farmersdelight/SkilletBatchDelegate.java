@@ -32,6 +32,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+/** Batch delegate for Farmer's Delight Skillet (also handles campfire). */
 public final class SkilletBatchDelegate extends com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate {
 
     private static final String CAMPFIRE_BE =
@@ -73,7 +74,6 @@ public final class SkilletBatchDelegate extends com.huanghuang.rsintegration.cra
         CAMPFIRE_COOKING_TIME = cookingTime;
     }
 
-    @Nullable
     private static Field resolveField(Class<?> clazz, String official, String srg) {
         for (String name : new String[]{official, srg}) {
             try {

@@ -30,6 +30,7 @@ import java.lang.reflect.Constructor;
 import java.util.ArrayList;
 import java.util.List;
 
+/** Batch delegate for Eidolon Worktable and Crucible. */
 public final class EidolonBatchDelegate extends AbstractBatchDelegate {
 
     // ── Shared class refs (resolved from probe) ─────────────────
@@ -515,7 +516,6 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
         return true;
     }
 
-    @Nullable
     private Ingredient getRitualReagent() {
         try {
             java.lang.reflect.Field f = EidolonReflection.ritualRecipeClass.getField("reagent");
@@ -526,7 +526,6 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
         }
     }
 
-    @Nullable
     private List<Ingredient> getRitualPedestalItems() {
         try {
             java.lang.reflect.Field f = EidolonReflection.ritualRecipeClass.getField("pedestalItems");
@@ -539,7 +538,6 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
         }
     }
 
-    @Nullable
     private List<Ingredient> getRitualFocusItems() {
         try {
             java.lang.reflect.Field f = EidolonReflection.ritualRecipeClass.getField("focusItems");
@@ -610,7 +608,6 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
 
     // ── Worktable ingredient helpers ────────────────────────────
 
-    @Nullable
     private List<Ingredient> getWorktableCoreIngredients() {
         try {
             Ingredient[] core = (Ingredient[]) recipe.getClass()
@@ -622,7 +619,6 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
         }
     }
 
-    @Nullable
     private List<Ingredient> getWorktableOuterIngredients() {
         try {
             Ingredient[] outer = (Ingredient[]) recipe.getClass()

@@ -30,34 +30,34 @@ final class AetherworksHelper {
 
     private static final boolean LOADED;
 
-    @Nullable private static Field f_anvil_progress;
-    @Nullable private static Field f_anvil_hitTimeout;
-    @Nullable private static Field f_anvil_mistakes;
-    @Nullable private static Field f_anvil_inventory;
+    private static Field f_anvil_progress;
+    private static Field f_anvil_hitTimeout;
+    private static Field f_anvil_mistakes;
+    private static Field f_anvil_inventory;
 
-    @Nullable private static Field f_ts_inventory;
+    private static Field f_ts_inventory;
 
-    @Nullable private static Field f_forge_heatCap;
-    @Nullable private static Field f_forge_emberCap;
+    private static Field f_forge_heatCap;
+    private static Field f_forge_emberCap;
 
     // IHeatCapability is from Aetherworks: net.sirplop.aetherworks.api.capabilities.IHeatCapability
-    @Nullable private static Method m_heat_getHeat;
+    private static Method m_heat_getHeat;
     // IEmberCapability is from Embers: com.rekindled.embers.api.power.IEmberCapability
-    @Nullable private static Method m_ember_getEmber;
-    @Nullable private static Method m_ember_getCapacity;
+    private static Method m_ember_getEmber;
+    private static Method m_ember_getCapacity;
 
-    @Nullable private static Object recipeType;
-    @Nullable private static Method m_recipe_getDisplayInput;
-    @Nullable private static Method m_recipe_getNumberOfHits;
-    @Nullable private static Method m_recipe_getTemperatureMin;
-    @Nullable private static Method m_recipe_getTemperatureMax;
-    @Nullable private static Method m_recipe_getEmberPerHit;
+    private static Object recipeType;
+    private static Method m_recipe_getDisplayInput;
+    private static Method m_recipe_getNumberOfHits;
+    private static Method m_recipe_getTemperatureMin;
+    private static Method m_recipe_getTemperatureMax;
+    private static Method m_recipe_getEmberPerHit;
 
-    @Nullable private static Object tsRecipeType;
-    @Nullable private static Method m_ts_recipe_getDisplayInputs;
-    @Nullable private static Method m_ts_recipe_getTemperature;
+    private static Object tsRecipeType;
+    private static Method m_ts_recipe_getDisplayInputs;
+    private static Method m_ts_recipe_getTemperature;
 
-    @Nullable private static Item hammerItem;
+    private static Item hammerItem;
 
     static {
         boolean ok = false;

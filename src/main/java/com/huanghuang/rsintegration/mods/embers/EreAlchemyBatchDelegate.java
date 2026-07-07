@@ -36,6 +36,7 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraftforge.items.ItemHandlerHelper;
 
+/** Batch delegate for Embers Alchemy Tablet (deterministic mode). */
 public final class EreAlchemyBatchDelegate
 extends AbstractBatchDelegate {
     private ServerLevel level;

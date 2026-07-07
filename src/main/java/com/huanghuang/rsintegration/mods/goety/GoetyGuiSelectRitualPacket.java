@@ -35,7 +35,7 @@ import java.util.function.Supplier;
 public final class GoetyGuiSelectRitualPacket {
 
     private final ResourceLocation recipeId;
-    @Nullable private final ResourceLocation dim;
+    private final ResourceLocation dim;
     private final BlockPos pos;
 
     public GoetyGuiSelectRitualPacket(ResourceLocation recipeId, @Nullable ResourceLocation dim, BlockPos pos) {
@@ -94,8 +94,7 @@ public final class GoetyGuiSelectRitualPacket {
         context.setPacketHandled(true);
     }
 
-    @Nullable
-    private static ServerLevel resolveLevel(MinecraftServer server, @Nullable ResourceLocation dim, ServerPlayer player) {
+    private static ServerLevel resolveLevel(MinecraftServer server, ResourceLocation dim, ServerPlayer player) {
         return CraftPacketUtils.resolveLevel(server, dim, player);
     }
 

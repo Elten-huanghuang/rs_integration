@@ -37,6 +37,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+/** Batch delegate for Youkais Homecoming Steamer. */
 public final class SteamerBatchDelegate extends AbstractBatchDelegate {
 
     private ServerPlayer player;
@@ -295,7 +296,6 @@ public final class SteamerBatchDelegate extends AbstractBatchDelegate {
 
     // -- multi-block structure --
 
-    @Nullable
     private BlockEntity findPotBase() {
         // Walk downward from myPos to find the steamer pot block.
         // The SteamerBlockEntity lives in the pot (bottom) block.
@@ -401,7 +401,6 @@ public final class SteamerBatchDelegate extends AbstractBatchDelegate {
 
     // -- rack operations --
 
-    @Nullable
     private static List<?> getRacks(BlockEntity be) {
         if (racksField != null) {
             try {
@@ -424,7 +423,6 @@ public final class SteamerBatchDelegate extends AbstractBatchDelegate {
         return false;
     }
 
-    @Nullable
     private static Object[] getRackItems(Object rack) {
         if (rack == null) return null;
         try {

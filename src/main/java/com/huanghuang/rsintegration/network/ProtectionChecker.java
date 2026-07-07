@@ -9,7 +9,6 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraftforge.fml.ModList;
 
-import javax.annotation.Nullable;
 import java.lang.reflect.Method;
 import java.util.Optional;
 import java.util.UUID;
@@ -64,7 +63,6 @@ public final class ProtectionChecker {
      * Invoke a static no-arg method on the given class. Returns {@code null}
      * on any failure.
      */
-    @Nullable
     private static Object invokeStatic(Class<?> clazz, String methodName) {
         try {
             Method m = Reflect.findMethod(clazz, methodName, new Class<?>[0]);
@@ -76,7 +74,6 @@ public final class ProtectionChecker {
     /**
      * Invoke a static method with explicit parameter types.
      */
-    @Nullable
     private static Object invokeStatic(Class<?> clazz, String methodName,
                                         Class<?>[] paramTypes, Object... args) {
         try {
@@ -162,7 +159,6 @@ public final class ProtectionChecker {
 
     // ── FTB Chunks: manager lookup ────────────────────────────────
 
-    @Nullable
     private static Object getFTBChunksManager(Class<?> ccClass) {
         // Try static get()
         Object manager = invokeStatic(ccClass, "get");
@@ -233,7 +229,6 @@ public final class ProtectionChecker {
 
     // ── FTB Chunks: claim owner extraction ────────────────────────
 
-    @Nullable
     private static Object getFTBClaimOwner(Object manager, ServerLevel level, BlockPos pos) {
         ChunkPos chunkPos = new ChunkPos(pos);
 
@@ -260,7 +255,6 @@ public final class ProtectionChecker {
         return extractTeamIdFromClaim(claim);
     }
 
-    @Nullable
     private static Object extractTeamIdFromClaim(Object claim) {
         // Try getTeamData() → getId() / getTeamId()
         try {
@@ -293,7 +287,6 @@ public final class ProtectionChecker {
 
     // ── FTB Teams: player team lookup ─────────────────────────────
 
-    @Nullable
     private static Object getFTBPlayerTeam(ServerPlayer player) {
         // Approach 1: FTBTeamsAPI.api().getManager().getPlayerTeam(uuid)
         try {
@@ -364,7 +357,6 @@ public final class ProtectionChecker {
 
     // ── FTB Teams: team ID extraction ─────────────────────────────
 
-    @Nullable
     private static Object getFTBTeamId(Object team) {
         for (String name : new String[]{"getId", "getTeamId", "getShortName", "getName", "getOwner"}) {
             Optional<Object> id = invokeInstance(team, name);

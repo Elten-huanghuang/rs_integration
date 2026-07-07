@@ -30,14 +30,14 @@ public final class ModType {
     private final String[] blockKeyKeywords;
     private final String[] blockKeyPrefixes;
     private final Supplier<IBatchDelegate> delegateFactory;
-    @Nullable private final Supplier<IBatchDelegate> inferDelegateFactory;
+    private final Supplier<IBatchDelegate> inferDelegateFactory;
 
     // JEI integration — set via configureJei() after register()
     // uidToFilter: [[jeiUid, filterString], ...] — filterString is what getBindingFilter returns
     // recipePrefixes: [[classPrefix, filterString], ...] — single-element [prefix] defaults to id
-    @Nullable private String[][] jeiUidToFilter;
-    @Nullable private String[][] jeiRecipePrefixes;
-    @Nullable private String jeiTooltipKey;
+    private String[][] jeiUidToFilter;
+    private String[][] jeiRecipePrefixes;
+    private String jeiTooltipKey;
 
 
     public static final ModType GENERIC;
@@ -243,7 +243,6 @@ public final class ModType {
      * needs as a container (stored as {@code getCraftingRemainingItem}).
      * Falls back to {@code youkaishomecoming_cooking_small} if undetermined.
      */
-    @Nullable
     private static ModType classifyCookingPotRecipe(Recipe<?> recipe) {
         try {
             java.lang.reflect.Method getResult = recipe.getClass().getMethod("getResult");

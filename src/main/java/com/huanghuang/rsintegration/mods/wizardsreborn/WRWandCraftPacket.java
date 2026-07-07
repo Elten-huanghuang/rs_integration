@@ -41,7 +41,7 @@ import java.util.function.Supplier;
 public final class WRWandCraftPacket {
 
     private final ResourceLocation recipeId;
-    @Nullable private final ResourceLocation dim;
+    private final ResourceLocation dim;
     private final BlockPos pos;
 
     public WRWandCraftPacket(ResourceLocation recipeId, @Nullable ResourceLocation dim, BlockPos pos) {
@@ -552,7 +552,6 @@ public final class WRWandCraftPacket {
         return true;
     }
 
-    @Nullable
     private static Object rsi$extractRitual(Recipe<?> recipe) {
         Class<?> clazz = recipe.getClass();
         while (clazz != null && clazz != Object.class) {
@@ -575,7 +574,7 @@ public final class WRWandCraftPacket {
         return CraftPacketUtils.ensureMaterialAvailable(player, altarDim, altarPos, ingredient, count, ledger);
     }
 
-    private static void refundTemplates(@Nullable INetwork network, ServerPlayer player, List<ItemStack> templates) {
+    private static void refundTemplates(INetwork network, ServerPlayer player, List<ItemStack> templates) {
         for (ItemStack t : templates) {
             if (t.isEmpty()) continue;
             ItemStack refund = t.copy();
@@ -591,8 +590,7 @@ public final class WRWandCraftPacket {
         }
     }
 
-    @Nullable
-    private static ServerLevel resolveLevel(MinecraftServer server, @Nullable ResourceLocation dim, ServerPlayer player) {
+    private static ServerLevel resolveLevel(MinecraftServer server, ResourceLocation dim, ServerPlayer player) {
         return CraftPacketUtils.resolveLevel(server, dim, player);
     }
 
@@ -650,17 +648,14 @@ public final class WRWandCraftPacket {
         return true;
     }
 
-    @Nullable
     private static IItemHandler rsi$getForgeItemHandler(Object be) {
         return WRContainerHelper.getForgeItemHandler(be);
     }
 
-    @Nullable
     private static net.minecraft.world.SimpleContainer rsi$getLiveSimpleContainer(Object be) {
         return WRContainerHelper.getLiveSimpleContainer(be);
     }
 
-    @Nullable
     private static net.minecraft.world.SimpleContainer rsi$getSimpleContainer(Object be) {
         return WRContainerHelper.getSimpleContainer(be);
     }

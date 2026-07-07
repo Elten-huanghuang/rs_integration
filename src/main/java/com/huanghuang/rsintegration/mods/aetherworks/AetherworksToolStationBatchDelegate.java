@@ -27,14 +27,15 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 
+/** Batch delegate for Aetherworks Tool Station. */
 public final class AetherworksToolStationBatchDelegate extends AbstractBatchDelegate {
 
     // Instance state
     private ServerLevel level;
     private BlockPos machinePos;
-    @Nullable private BlockPos forgePos;
+    private BlockPos forgePos;
     private Object toolStationBE;
-    @Nullable private Object forgeBE;
+    private Object forgeBE;
     private Recipe<?> recipe;
     private Item recordedInputItem;
     private boolean materialsPlaced;
@@ -101,7 +102,6 @@ public final class AetherworksToolStationBatchDelegate extends AbstractBatchDele
         return true;
     }
 
-    @Nullable
     private static BlockPos findNearbyForge(Level level, BlockPos center) {
         if (AetherworksReflection.forgeBEClass == null) return null;
         BlockPos.MutableBlockPos mpos = center.mutable();

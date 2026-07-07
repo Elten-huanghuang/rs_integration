@@ -32,6 +32,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+/** Batch delegate for Youkais Homecoming Moka Pot. */
 public final class MokaPotBatchDelegate extends AbstractBatchDelegate {
 
     // BasePotBlockEntity layout (INVENTORY_SIZE = 7):
@@ -371,7 +372,6 @@ public final class MokaPotBatchDelegate extends AbstractBatchDelegate {
     @Nullable
     private static volatile Field inventoryField;
 
-    @Nullable
     private static IItemHandler getInventory(BlockEntity be) {
         probeReflection();
         // Primary: direct field access to BasePotBlockEntity.inventory (private).
@@ -423,7 +423,6 @@ public final class MokaPotBatchDelegate extends AbstractBatchDelegate {
         return true; // can't check, assume heated so we don't block
     }
 
-    @Nullable
     private static ItemStack addItem(BlockEntity be, ItemStack stack) {
         probeReflection();
         if (addItemMethod != null) {
@@ -479,7 +478,6 @@ public final class MokaPotBatchDelegate extends AbstractBatchDelegate {
         }
     }
 
-    @Nullable
     private static ItemStack getOutputContainer(Recipe<?> recipe) {
         try {
             Method m = recipe.getClass().getMethod("getOutputContainer");

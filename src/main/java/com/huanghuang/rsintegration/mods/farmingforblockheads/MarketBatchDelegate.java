@@ -135,7 +135,6 @@ public final class MarketBatchDelegate extends AbstractBatchDelegate {
         return true;
     }
 
-    @Nullable
     private static Recipe<?> resolveWrapper(ResourceLocation recipeId) {
         String path = recipeId.getPath();
         if (!path.startsWith("market/")) return null;
@@ -149,7 +148,6 @@ public final class MarketBatchDelegate extends AbstractBatchDelegate {
         return resolveMarketEntry(uuid);
     }
 
-    @Nullable
     private static Recipe<?> resolveMarketEntry(UUID entryId) {
         probe();
         if (!available || marketRegistryInstance == null) return null;

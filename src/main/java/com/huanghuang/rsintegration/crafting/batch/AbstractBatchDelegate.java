@@ -11,6 +11,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 
+import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import java.util.HashSet;
 import java.util.Set;
@@ -82,7 +83,7 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
      * after the chunk-load and null/removed guards. Both {@code level} and {@code be}
      * are guaranteed non-null and loaded.
      */
-    protected boolean isMachineCraftFinished(ServerLevel level, BlockEntity be) {
+    protected boolean isMachineCraftFinished(@Nonnull ServerLevel level, @Nonnull BlockEntity be) {
         return false;
     }
 
@@ -108,7 +109,7 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
      * (e.g. virtual delegates like Market that have no physical machine).
      * When {@code playerLevel} is null (player offline), uses {@link #machineServer}.
      */
-    private ServerLevel resolveMachineLevel(@Nullable ServerLevel playerLevel) {
+    private ServerLevel resolveMachineLevel(ServerLevel playerLevel) {
         if (machineDim == null) return playerLevel;
         try {
             net.minecraft.server.MinecraftServer server;
@@ -133,12 +134,12 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
     }
 
     /** Called by the chain after {@link #validateAndInit} succeeds. */
-    public void setMachineDim(ResourceLocation dim) {
+    public void setMachineDim(@Nonnull ResourceLocation dim) {
         this.machineDim = dim;
     }
 
     /** Fallback server for dimension resolution when the player is offline. */
-    public void setMachineServer(net.minecraft.server.MinecraftServer server) {
+    public void setMachineServer(@Nonnull net.minecraft.server.MinecraftServer server) {
         this.machineServer = server;
     }
 

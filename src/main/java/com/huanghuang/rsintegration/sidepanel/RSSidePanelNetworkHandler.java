@@ -25,7 +25,6 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.network.chat.contents.TranslatableContents;
 import net.minecraft.world.item.ItemStack;
 
-import javax.annotation.Nullable;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import net.minecraftforge.common.MinecraftForge;
@@ -330,8 +329,8 @@ public final class RSSidePanelNetworkHandler {
         }
     }
 
-    private static String resolveDisplayName(String blockKey, @Nullable String blockRegKey,
-                                             @Nullable ItemStack displayStack) {
+    private static String resolveDisplayName(String blockKey, String blockRegKey,
+                                             ItemStack displayStack) {
         // Gun-pack workbenches carry their real translation key via the item's
         // hover name (e.g. GunSmithTableItem.getName reads BlockId from NBT and
         // returns Component.translatable("emxarms.block.emx_workbench_table")).

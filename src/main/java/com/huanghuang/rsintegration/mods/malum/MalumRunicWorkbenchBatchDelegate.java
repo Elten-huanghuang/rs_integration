@@ -29,6 +29,7 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 
+/** Batch delegate for Malum Runic Workbench (RuneWorking recipe). */
 public final class MalumRunicWorkbenchBatchDelegate extends AbstractBatchDelegate {
 
     private ServerPlayer player;
@@ -290,7 +291,6 @@ public final class MalumRunicWorkbenchBatchDelegate extends AbstractBatchDelegat
 
     // ── helpers ─────────────────────────────────────────────────────
 
-    @Nullable
     private static IItemHandler resolveHandler(BlockEntity be) {
         LazyOptional<IItemHandler> cap = be.getCapability(
                 net.minecraftforge.common.capabilities.ForgeCapabilities.ITEM_HANDLER, null);

@@ -231,7 +231,6 @@ public final class CraftingTableBatchDelegate extends AbstractBatchDelegate {
 
     // ── helpers ──
 
-    @Nullable
     private static IItemHandler getHandler(BlockEntity be) {
         LazyOptional<IItemHandler> cap = be.getCapability(
                 net.minecraftforge.common.capabilities.ForgeCapabilities.ITEM_HANDLER, null);

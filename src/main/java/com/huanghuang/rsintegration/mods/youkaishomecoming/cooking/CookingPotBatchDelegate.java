@@ -33,6 +33,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+/** Base batch delegate for Youkais Homecoming cooking pots. Subclasses: SmallPot, ShortPot, LargePot. */
 public class CookingPotBatchDelegate extends AbstractBatchDelegate {
 
     // indices into BOWL_KEYS / POT_KEYS / BE_CLASS_NAMES
@@ -336,7 +337,6 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
         "youkaishomecoming:cooking_short_iron_pot",
         "youkaishomecoming:cooking_stockpot" };
 
-    @Nullable
     private BlockEntity findCookingBE() {
         // Try direct chunk BE lookup first -- more reliable when chunk was just loaded.
         var chunk = myLevel.getChunk(myPos);
@@ -417,7 +417,6 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
         }
     }
 
-    @Nullable
     private static Method findMethodInHierarchy(Class<?> clazz, String name, Class<?>... paramTypes) {
         Class<?> current = clazz;
         while (current != null && current != Object.class) {
@@ -454,7 +453,6 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
 
     // -- operation helpers --
 
-    @Nullable
     private static Container getItemsContainer(BlockEntity be) {
         probeReflection();
         if (itemsField != null) {
