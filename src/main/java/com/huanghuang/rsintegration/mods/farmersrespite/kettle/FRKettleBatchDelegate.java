@@ -118,32 +118,32 @@ public final class FRKettleBatchDelegate extends AbstractBatchDelegate {
         if (specs == null || specs.isEmpty()) return false;
 
         List<ItemStack> materials = new ArrayList<>();
-        ExtractionLedger ledger = new ExtractionLedger();
-        this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
-        if (this.network == null) return false;
+        try (ExtractionLedger ledger = new ExtractionLedger()) {
+            this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+            if (this.network == null) return false;
 
-        for (IngredientSpec spec : specs) {
-            if (spec.isEmpty()) continue;
-            ItemStack reserved = CraftPacketUtils.ensureMaterialAvailable(
-                    player, myDim, myPos, spec.ingredient(), spec.count(), ledger);
-            if (reserved.isEmpty()) {
-                ledger.rollback(player);
+            for (IngredientSpec spec : specs) {
+                if (spec.isEmpty()) continue;
+                ItemStack reserved = CraftPacketUtils.ensureMaterialAvailable(
+                        player, myDim, myPos, spec.ingredient(), spec.count(), ledger);
+                if (reserved.isEmpty()) {
+                    return false;
+                }
+                materials.add(reserved.copy());
+            }
+
+            if (!ledger.commit(network, player)) return false;
+
+            this.usingSharedLedger = false;
+            if (!tryStartWithMaterials(player, materials, ledger)) {
+                for (ItemStack mat : materials) {
+                    if (!mat.isEmpty())
+                        network.insertItem(mat.copy(), mat.getCount(), Action.PERFORM);
+                }
                 return false;
             }
-            materials.add(reserved.copy());
+            return true;
         }
-
-        if (!ledger.commit(network, player)) return false;
-
-        this.usingSharedLedger = false;
-        if (!tryStartWithMaterials(player, materials, ledger)) {
-            for (ItemStack mat : materials) {
-                if (!mat.isEmpty())
-                    network.insertItem(mat.copy(), mat.getCount(), Action.PERFORM);
-            }
-            return false;
-        }
-        return true;
     }
 
     @Override

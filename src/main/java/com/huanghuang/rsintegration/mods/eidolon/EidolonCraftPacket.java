@@ -230,11 +230,10 @@ public final class EidolonCraftPacket {
         if (network == null) {
             network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
         }
-        ExtractionLedger ledger = new ExtractionLedger();
         List<Object> crucibleSteps = new ArrayList<>();
         List<ItemStack> allExtracted = new ArrayList<>(); // actual items extracted, for refund
 
-        try {
+        try (ExtractionLedger ledger = new ExtractionLedger()) {
             for (CrucibleStepInput si : stepInputs) {
                 List<ItemStack> stepItems = new ArrayList<>();
                 for (Ingredient ing : si.ingredients) {
@@ -262,16 +261,15 @@ public final class EidolonCraftPacket {
                 return;
             }
 
+            // Phase 2: commit all extractions atomically
+            if (!ledger.commit(network, player)) {
+                RSIntegrationMod.LOGGER.error("[RSI-Eidolon] Ledger commit failed for recipe {}", recipeId);
+                player.sendSystemMessage(Component.translatable("rsi.eidolon.error.craft_failed", "commit failed"));
+                return;
+            }
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.error("[RSI-Eidolon] Extraction/step creation failed for {}:", recipeId, e);
             player.sendSystemMessage(Component.translatable("rsi.generic.error.prepare_failed"));
-            return;
-        }
-
-        // Phase 2: commit all extractions atomically
-        if (!ledger.commit(network, player)) {
-            RSIntegrationMod.LOGGER.error("[RSI-Eidolon] Ledger commit failed for recipe {}", recipeId);
-            player.sendSystemMessage(Component.translatable("rsi.eidolon.error.craft_failed", "commit failed"));
             return;
         }
 

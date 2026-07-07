@@ -280,156 +280,155 @@ public final class FaCraftPacket {
         }
 
         // Phase 1: reserve all items via ledger
-        ExtractionLedger ledger = new ExtractionLedger();
         if (network == null) {
             network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
         }
 
-        ItemStack mainTemplate = ItemStack.EMPTY;
-        if (mainIng != null && !mainIng.isEmpty()) {
-            mainTemplate = ensureMaterialAvailable(player, altarDim, pos, mainIng, 1, ledger);
-            if (mainTemplate.isEmpty()) {
-                player.sendSystemMessage(Component.translatable("rsi.generic.error.missing_materials",
-                        CraftPacketUtils.describeIngredient(mainIng)));
-                return;
-            }
-        }
-
-        List<ItemStack> inputTemplates = new ArrayList<>();
-        for (int i = 0; i < inputEntryCount; i++) {
-            Object ri = inputs.get(i);
-            Ingredient ing = (Ingredient) FaRitualHelper.invoke(ri, "ingredient");
-            int amt = inputAmounts[i];
-            if (ing == null) continue;
-            ItemStack t = ensureMaterialAvailable(player, altarDim, pos, ing, amt, ledger);
-            if (t.isEmpty()) {
-                player.sendSystemMessage(Component.translatable("rsi.generic.error.missing_materials",
-                        CraftPacketUtils.describeIngredient(ing)));
-                return;
-            }
-            inputTemplates.add(t);
-        }
-
-        // Phase 2: place items BEFORE committing ledger
         List<Object> filledPedestals = new ArrayList<>();
-        try {
-            if (!mainTemplate.isEmpty()) {
-                int mainSlot = FaRitualHelper.getMainSlot();
-                FaRitualHelper.setForgeSlot(be, mainSlot, mainTemplate);
+        ItemStack mainTemplate = ItemStack.EMPTY;
+        List<ItemStack> inputTemplates = new ArrayList<>();
+        try (ExtractionLedger ledger = new ExtractionLedger()) {
+            if (mainIng != null && !mainIng.isEmpty()) {
+                mainTemplate = ensureMaterialAvailable(player, altarDim, pos, mainIng, 1, ledger);
+                if (mainTemplate.isEmpty()) {
+                    player.sendSystemMessage(Component.translatable("rsi.generic.error.missing_materials",
+                            CraftPacketUtils.describeIngredient(mainIng)));
+                    return;
+                }
             }
 
-            int pedIdx = 0;
-            for (int i = 0; i < inputEntryCount && i < inputTemplates.size(); i++) {
-                ItemStack template = inputTemplates.get(i);
+            for (int i = 0; i < inputEntryCount; i++) {
+                Object ri = inputs.get(i);
+                Ingredient ing = (Ingredient) FaRitualHelper.invoke(ri, "ingredient");
                 int amt = inputAmounts[i];
-                for (int p = 0; p < amt && p < template.getCount(); p++) {
-                    ItemStack single = template.copy();
-                    single.setCount(1);
-                    Object ped = emptyPedestals.get(pedIdx++);
-                    Reflect.getMethodOrThrow(FAReflection.pedestalBEClass, "setStackAndSync", "setStackAndSync", ItemStack.class)
-                            .invoke(ped, single);
-                    filledPedestals.add(ped);
+                if (ing == null) continue;
+                ItemStack t = ensureMaterialAvailable(player, altarDim, pos, ing, amt, ledger);
+                if (t.isEmpty()) {
+                    player.sendSystemMessage(Component.translatable("rsi.generic.error.missing_materials",
+                            CraftPacketUtils.describeIngredient(ing)));
+                    return;
                 }
+                inputTemplates.add(t);
             }
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.error("[RSI-FA] Placement failed for ritual {}:", ritualId, e);
-            rollbackAll(player, be, filledPedestals, network);
-            ledger.rollback(player);
-            player.sendSystemMessage(Component.translatable("rsi.generic.error.prepare_failed"));
-            return;
-        }
 
-        // Populate cachedIngredients
-        try {
-            Object curEssences = Reflect.getMethodOrThrow(FAReflection.hephaestusForgeBEClass, "getEssences", "getEssences").invoke(be);
-            Method updateIngredient = Reflect.getMethodOrThrow(FAReflection.ritualManagerClass, "updateIngredient", "updateIngredient",
-                    FAReflection.pedestalBEClass, ItemStack.class, FAReflection.essencesDefinitionClass);
-            for (Object ped : pedestals) {
-                if (!filledPedestals.contains(ped)) {
-                    updateIngredient.invoke(ritualManager, ped, ItemStack.EMPTY, curEssences);
+            // Phase 2: place items BEFORE committing ledger
+            try {
+                if (!mainTemplate.isEmpty()) {
+                    int mainSlot = FaRitualHelper.getMainSlot();
+                    FaRitualHelper.setForgeSlot(be, mainSlot, mainTemplate);
                 }
+
+                int pedIdx = 0;
+                for (int i = 0; i < inputEntryCount && i < inputTemplates.size(); i++) {
+                    ItemStack template = inputTemplates.get(i);
+                    int amt = inputAmounts[i];
+                    for (int p = 0; p < amt && p < template.getCount(); p++) {
+                        ItemStack single = template.copy();
+                        single.setCount(1);
+                        Object ped = emptyPedestals.get(pedIdx++);
+                        Reflect.getMethodOrThrow(FAReflection.pedestalBEClass, "setStackAndSync", "setStackAndSync", ItemStack.class)
+                                .invoke(ped, single);
+                        filledPedestals.add(ped);
+                    }
+                }
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.error("[RSI-FA] Placement failed for ritual {}:", ritualId, e);
+                rollbackAll(player, be, filledPedestals, network);
+                player.sendSystemMessage(Component.translatable("rsi.generic.error.prepare_failed"));
+                return;
             }
-            for (Object ped : filledPedestals) {
-                ItemStack stack = (ItemStack) Reflect.getMethodOrThrow(FAReflection.pedestalBEClass, "getStack", "getStack").invoke(ped);
-                updateIngredient.invoke(ritualManager, ped, stack, curEssences);
+
+            // Populate cachedIngredients
+            try {
+                Object curEssences = Reflect.getMethodOrThrow(FAReflection.hephaestusForgeBEClass, "getEssences", "getEssences").invoke(be);
+                Method updateIngredient = Reflect.getMethodOrThrow(FAReflection.ritualManagerClass, "updateIngredient", "updateIngredient",
+                        FAReflection.pedestalBEClass, ItemStack.class, FAReflection.essencesDefinitionClass);
+                for (Object ped : pedestals) {
+                    if (!filledPedestals.contains(ped)) {
+                        updateIngredient.invoke(ritualManager, ped, ItemStack.EMPTY, curEssences);
+                    }
+                }
+                for (Object ped : filledPedestals) {
+                    ItemStack stack = (ItemStack) Reflect.getMethodOrThrow(FAReflection.pedestalBEClass, "getStack", "getStack").invoke(ped);
+                    updateIngredient.invoke(ritualManager, ped, stack, curEssences);
+                }
+                Reflect.getMethodOrThrow(FAReflection.ritualManagerClass, "updateValidRitual", "updateValidRitual", FAReflection.essencesDefinitionClass)
+                        .invoke(ritualManager, curEssences);
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.debug("[RSI-FA] cachedIngredients/updateValidRitual failed", e);
             }
-            Reflect.getMethodOrThrow(FAReflection.ritualManagerClass, "updateValidRitual", "updateValidRitual", FAReflection.essencesDefinitionClass)
-                    .invoke(ritualManager, curEssences);
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-FA] cachedIngredients/updateValidRitual failed", e);
-        }
 
-        // Phase 3: require a RitualStarterItem
-        final FaRitualHelper.StarterResult starterResult = FaRitualHelper.findRitualStarterItem(player, network);
-        final ItemStack starterStack = starterResult.stack();
-        final INetwork starterNetwork = starterResult.sourceNetwork();
-        if (starterStack.isEmpty()) {
-            RSIntegrationMod.LOGGER.debug("[RSI-FA] tryCraft: no usable RitualStarterItem in inventory or RS");
-            player.sendSystemMessage(Component.translatable("rsi.fa.error.missing_starter_item"));
-            rollbackAll(player, be, filledPedestals, network);
-            ledger.rollback(player);
-            return;
-        }
+            // Phase 3: require a RitualStarterItem
+            final FaRitualHelper.StarterResult starterResult = FaRitualHelper.findRitualStarterItem(player, network);
+            final ItemStack starterStack = starterResult.stack();
+            final INetwork starterNetwork = starterResult.sourceNetwork();
+            if (starterStack.isEmpty()) {
+                RSIntegrationMod.LOGGER.debug("[RSI-FA] tryCraft: no usable RitualStarterItem in inventory or RS");
+                player.sendSystemMessage(Component.translatable("rsi.fa.error.missing_starter_item"));
+                rollbackAll(player, be, filledPedestals, network);
+                return;
+            }
 
-        // Phase 4: commit ledger first
-        if (!ledger.commit(network, player)) {
-            RSIntegrationMod.LOGGER.error("[RSI-FA] Ledger commit failed for ritual {}", ritualId);
-            rollbackAll(player, be, filledPedestals, network);
-            FaRitualHelper.returnStarterToSource(starterStack, player, starterNetwork);
-            player.sendSystemMessage(Component.translatable("rsi.fa.error.craft_failed"));
-            return;
-        }
+            // Phase 4: commit ledger first
+            if (!ledger.commit(network, player)) {
+                RSIntegrationMod.LOGGER.error("[RSI-FA] Ledger commit failed for ritual {}", ritualId);
+                rollbackAll(player, be, filledPedestals, network);
+                FaRitualHelper.returnStarterToSource(starterStack, player, starterNetwork);
+                player.sendSystemMessage(Component.translatable("rsi.fa.error.craft_failed"));
+                return;
+            }
 
-        // Phase 5: start the ritual AFTER committing ledger
-        try {
-            Object essenceMgr = Reflect.getMethodOrThrow(FAReflection.hephaestusForgeBEClass, "getEssenceManager", "getEssenceManager").invoke(be);
-            Object essencesStorage = Reflect.getMethodOrThrow(FAReflection.essenceManagerClass, "getStorage", "getStorage").invoke(essenceMgr);
-            BooleanConsumerProxy callback = new BooleanConsumerProxy(
-                    player, be, filledPedestals, network, starterStack);
-            Object proxy = Proxy.newProxyInstance(
-                    FAReflection.booleanConsumerClass.getClassLoader(),
-                    new Class<?>[]{FAReflection.booleanConsumerClass},
-                    callback);
+            // Phase 5: start the ritual AFTER committing ledger
+            try {
+                Object essenceMgr = Reflect.getMethodOrThrow(FAReflection.hephaestusForgeBEClass, "getEssenceManager", "getEssenceManager").invoke(be);
+                Object essencesStorage = Reflect.getMethodOrThrow(FAReflection.essenceManagerClass, "getStorage", "getStorage").invoke(essenceMgr);
+                BooleanConsumerProxy callback = new BooleanConsumerProxy(
+                        player, be, filledPedestals, network, starterStack);
+                Object proxy = Proxy.newProxyInstance(
+                        FAReflection.booleanConsumerClass.getClassLoader(),
+                        new Class<?>[]{FAReflection.booleanConsumerClass},
+                        callback);
 
-            Reflect.getMethodOrThrow(FAReflection.ritualManagerClass, "tryStartRitual", "tryStartRitual", FAReflection.essencesStorageClass, FAReflection.booleanConsumerClass)
-                    .invoke(ritualManager, essencesStorage, proxy);
+                Reflect.getMethodOrThrow(FAReflection.ritualManagerClass, "tryStartRitual", "tryStartRitual", FAReflection.essencesStorageClass, FAReflection.booleanConsumerClass)
+                        .invoke(ritualManager, essencesStorage, proxy);
 
-            if (callback.rejected) {
-                RSIntegrationMod.LOGGER.debug("[RSI-FA] tryStartRitual: ritual rejected by forge");
+                if (callback.rejected) {
+                    RSIntegrationMod.LOGGER.debug("[RSI-FA] tryStartRitual: ritual rejected by forge");
+                    rollbackAll(player, be, filledPedestals, network);
+                    ledger.rollback(player);
+                    FaRitualHelper.returnStarterToSource(starterStack, player, starterNetwork);
+                    player.sendSystemMessage(Component.translatable("rsi.fa.warn.ritual_rejected"));
+                    return;
+                }
+            } catch (java.lang.reflect.InvocationTargetException e) {
+                Throwable root = e.getCause() != null ? e.getCause() : e;
+                RSIntegrationMod.LOGGER.error("[RSI-FA] tryStartRitual failed — forge rejected", root);
                 rollbackAll(player, be, filledPedestals, network);
                 ledger.rollback(player);
                 FaRitualHelper.returnStarterToSource(starterStack, player, starterNetwork);
-                player.sendSystemMessage(Component.translatable("rsi.fa.warn.ritual_rejected"));
+                player.sendSystemMessage(Component.translatable("rsi.fa.error.craft_failed"));
+                return;
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.error("[RSI-FA] Failed to start ritual {}:", ritualId, e);
+                rollbackAll(player, be, filledPedestals, network);
+                ledger.rollback(player);
+                FaRitualHelper.returnStarterToSource(starterStack, player, starterNetwork);
+                player.sendSystemMessage(Component.translatable("rsi.fa.error.craft_failed"));
                 return;
             }
-        } catch (java.lang.reflect.InvocationTargetException e) {
-            Throwable root = e.getCause() != null ? e.getCause() : e;
-            RSIntegrationMod.LOGGER.error("[RSI-FA] tryStartRitual failed — forge rejected", root);
-            rollbackAll(player, be, filledPedestals, network);
-            ledger.rollback(player);
-            FaRitualHelper.returnStarterToSource(starterStack, player, starterNetwork);
-            player.sendSystemMessage(Component.translatable("rsi.fa.error.craft_failed"));
-            return;
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.error("[RSI-FA] Failed to start ritual {}:", ritualId, e);
-            rollbackAll(player, be, filledPedestals, network);
-            ledger.rollback(player);
-            FaRitualHelper.returnStarterToSource(starterStack, player, starterNetwork);
-            player.sendSystemMessage(Component.translatable("rsi.fa.error.craft_failed"));
-            return;
-        }
 
-        // Only consume the starter AFTER everything succeeded
-        FaRitualHelper.consumeRitualStarterUse(starterStack, player, starterNetwork);
+            // Only consume the starter AFTER everything succeeded
+            FaRitualHelper.consumeRitualStarterUse(starterStack, player, starterNetwork);
 
-        Object result = FaRitualHelper.invoke(FaRitualHelper.invoke(ritual, "result"), "getResult");
-        String resultName = "???";
-        if (result instanceof ItemStack rs && !rs.isEmpty()) {
-            resultName = rs.getDisplayName().getString();
+            Object result = FaRitualHelper.invoke(FaRitualHelper.invoke(ritual, "result"), "getResult");
+            String resultName = "???";
+            if (result instanceof ItemStack rs && !rs.isEmpty()) {
+                resultName = rs.getDisplayName().getString();
+            }
+            player.displayClientMessage(Component.translatable("rsi.fa.info.ritual_started", resultName), true);
+            RSIntegrationMod.LOGGER.debug("[RSI-FA] Player {} started FA ritual '{}'",
+                    player.getName().getString(), ritualId);
         }
-        player.displayClientMessage(Component.translatable("rsi.fa.info.ritual_started", resultName), true);
-        RSIntegrationMod.LOGGER.debug("[RSI-FA] Player {} started FA ritual '{}'",
-                player.getName().getString(), ritualId);
     }
 
     // ── helpers ────────────────────────────────────────────────

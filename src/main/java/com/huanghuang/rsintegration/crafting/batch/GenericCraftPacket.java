@@ -621,93 +621,93 @@ public final class GenericCraftPacket {
 
         for (int r = 0; r < repeatCount; r++) {
             List<ItemStack> allExtracted = new ArrayList<>();
-            ExtractionLedger ledger = new ExtractionLedger();
             boolean extractionIncomplete = false;
 
-            // Plan all extractions atomically — nothing physically moved yet
-            for (IngredientNeed need : grouped.values()) {
-                ItemStack reserved = CraftPacketUtils.ensureMaterialAvailable(
-                        player, player.serverLevel().dimension(),
-                        player.blockPosition(), need.ingredient, need.count, ledger);
-                if (reserved.isEmpty()) {
-                    RSIntegrationMod.LOGGER.warn("[RSI-Generic] Grouped extraction failed for {}: missing {} (needed {}) (iteration {}/{})",
-                            recipeId, CraftPacketUtils.describeIngredient(need.ingredient), need.count, r + 1, repeatCount);
-                    player.sendSystemMessage(Component.translatable(
-                            "rsi.generic.error.missing_materials",
-                            CraftPacketUtils.describeIngredient(need.ingredient)));
-                    extractionIncomplete = true;
+            try (ExtractionLedger ledger = new ExtractionLedger()) {
+                // Plan all extractions atomically — nothing physically moved yet
+                for (IngredientNeed need : grouped.values()) {
+                    ItemStack reserved = CraftPacketUtils.ensureMaterialAvailable(
+                            player, player.serverLevel().dimension(),
+                            player.blockPosition(), need.ingredient, need.count, ledger);
+                    if (reserved.isEmpty()) {
+                        RSIntegrationMod.LOGGER.warn("[RSI-Generic] Grouped extraction failed for {}: missing {} (needed {}) (iteration {}/{})",
+                                recipeId, CraftPacketUtils.describeIngredient(need.ingredient), need.count, r + 1, repeatCount);
+                        player.sendSystemMessage(Component.translatable(
+                                "rsi.generic.error.missing_materials",
+                                CraftPacketUtils.describeIngredient(need.ingredient)));
+                        extractionIncomplete = true;
+                        break;
+                    }
+                    allExtracted.add(reserved.copy());
+                }
+
+                if (extractionIncomplete) {
                     break;
                 }
-                allExtracted.add(reserved.copy());
-            }
 
-            if (extractionIncomplete) {
-                ledger.rollback(player);
-                break;
-            }
+                // Commit all extractions atomically
+                if (!ledger.commit(network, player)) {
+                    player.sendSystemMessage(Component.translatable(
+                            "rsi.generic.error.craft_failed", "Extraction commit failed"));
+                    break;
+                }
 
-            // Commit all extractions atomically
-            if (!ledger.commit(network, player)) {
-                player.sendSystemMessage(Component.translatable(
-                        "rsi.generic.error.craft_failed", "Extraction commit failed"));
-                break;
-            }
+                // Craft the final recipe — materials were paid from RS, give the result
+                ItemStack result = RecipeIndex.tryGetResultItem(recipe, player.serverLevel().registryAccess());
+                if (result.isEmpty()) {
+                    RSIntegrationMod.LOGGER.debug("[RSI-Generic] Result unavailable for {} ({})",
+                            recipeId, recipe.getClass().getSimpleName());
+                }
 
-            // Craft the final recipe — materials were paid from RS, give the result
-            ItemStack result = RecipeIndex.tryGetResultItem(recipe, player.serverLevel().registryAccess());
-            if (result.isEmpty()) {
-                RSIntegrationMod.LOGGER.debug("[RSI-Generic] Result unavailable for {} ({})",
-                        recipeId, recipe.getClass().getSimpleName());
-            }
-
-            if (!result.isEmpty()) {
-                if (network != null) {
-                    ItemStack leftover = network.insertItem(result.copy(), result.getCount(),
-                            com.refinedmods.refinedstorage.api.util.Action.PERFORM);
-                    if (!leftover.isEmpty()) {
-                        safeGiveToPlayer(player, leftover);
+                if (!result.isEmpty()) {
+                    if (network != null) {
+                        ItemStack leftover = network.insertItem(result.copy(), result.getCount(),
+                                com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                        if (!leftover.isEmpty()) {
+                            safeGiveToPlayer(player, leftover);
+                        }
+                    } else {
+                        safeGiveToPlayer(player, result);
+                    }
+                    player.displayClientMessage(
+                            Component.translatable("rsi.generic.info.resolved", result.getCount()), true);
+                    // Return CT catalyst items (e.g. .reuse(), .transformDamage()) to RS
+                    if (recipe instanceof CraftingRecipe cr && network != null) {
+                        for (ItemStack remainder : CraftPacketUtils.getRecipeRemainders(cr)) {
+                            if (!remainder.isEmpty()) {
+                                ItemStack leftover = network.insertItem(remainder.copy(),
+                                        remainder.getCount(),
+                                        com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                                var tracker = network.getItemStorageTracker();
+                                if (tracker != null) tracker.changed(player, remainder.copy());
+                                if (!leftover.isEmpty()) {
+                                    safeGiveToPlayer(player, leftover);
+                                }
+                            }
+                        }
                     }
                 } else {
-                    safeGiveToPlayer(player, result);
-                }
-                player.displayClientMessage(
-                        Component.translatable("rsi.generic.info.resolved", result.getCount()), true);
-                // Return CT catalyst items (e.g. .reuse(), .transformDamage()) to RS
-                if (recipe instanceof CraftingRecipe cr && network != null) {
-                    for (ItemStack remainder : CraftPacketUtils.getRecipeRemainders(cr)) {
-                        if (!remainder.isEmpty()) {
-                            ItemStack leftover = network.insertItem(remainder.copy(),
-                                    remainder.getCount(),
+                    // Failed to get result — refund actual extracted materials
+                    if (network != null) {
+                        for (ItemStack refundStack : allExtracted) {
+                            if (refundStack.isEmpty()) continue;
+                            ItemStack refund = refundStack.copy();
+                            ItemStack leftover = network.insertItem(refund, refund.getCount(),
                                     com.refinedmods.refinedstorage.api.util.Action.PERFORM);
                             var tracker = network.getItemStorageTracker();
-                            if (tracker != null) tracker.changed(player, remainder.copy());
+                            if (tracker != null) tracker.changed(player, refund.copy());
                             if (!leftover.isEmpty()) {
                                 safeGiveToPlayer(player, leftover);
                             }
                         }
                     }
+                    player.sendSystemMessage(Component.translatable(
+                            "rsi.generic.error.craft_failed", "Result unavailable"));
+                    break;
                 }
-            } else {
-                // Failed to get result — refund actual extracted materials
-                if (network != null) {
-                    for (ItemStack refundStack : allExtracted) {
-                        if (refundStack.isEmpty()) continue;
-                        ItemStack refund = refundStack.copy();
-                        ItemStack leftover = network.insertItem(refund, refund.getCount(),
-                                com.refinedmods.refinedstorage.api.util.Action.PERFORM);
-                        var tracker = network.getItemStorageTracker();
-                        if (tracker != null) tracker.changed(player, refund.copy());
-                        if (!leftover.isEmpty()) {
-                            safeGiveToPlayer(player, leftover);
-                        }
-                    }
-                }
-                player.sendSystemMessage(Component.translatable(
-                        "rsi.generic.error.craft_failed", "Result unavailable"));
-                break;
+                RSIntegrationMod.LOGGER.debug("[RSI-Generic] Crafted {} (iteration {}/{}) for {}",
+                        result.getCount(), r + 1, repeatCount, recipeId);
             }
-            RSIntegrationMod.LOGGER.debug("[RSI-Generic] Crafted {} (iteration {}/{}) for {}",
-                    result.getCount(), r + 1, repeatCount, recipeId);
         }
     }
 

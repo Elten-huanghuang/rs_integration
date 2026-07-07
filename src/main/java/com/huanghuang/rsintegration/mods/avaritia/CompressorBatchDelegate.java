@@ -77,23 +77,23 @@ public final class CompressorBatchDelegate extends AbstractBatchDelegate {
         if (specs == null || specs.isEmpty()) return false;
 
         List<ItemStack> materials = new ArrayList<>();
-        ExtractionLedger ledger = new ExtractionLedger();
-        var network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
-        if (network == null) return false;
+        try (ExtractionLedger ledger = new ExtractionLedger()) {
+            var network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+            if (network == null) return false;
 
-        for (IngredientSpec spec : specs) {
-            if (spec.isEmpty()) continue;
-            ItemStack reserved = CraftPacketUtils.ensureMaterialAvailable(
-                    player, myDim, myPos, spec.ingredient(), spec.count(), ledger);
-            if (reserved.isEmpty()) {
-                ledger.rollback(player);
-                return false;
+            for (IngredientSpec spec : specs) {
+                if (spec.isEmpty()) continue;
+                ItemStack reserved = CraftPacketUtils.ensureMaterialAvailable(
+                        player, myDim, myPos, spec.ingredient(), spec.count(), ledger);
+                if (reserved.isEmpty()) {
+                    return false;
+                }
+                materials.add(reserved.copy());
             }
-            materials.add(reserved.copy());
-        }
 
-        if (!ledger.commit(network, player)) return false;
-        return tryStartWithMaterials(player, materials, ledger);
+            if (!ledger.commit(network, player)) return false;
+            return tryStartWithMaterials(player, materials, ledger);
+        }
     }
 
     @Override

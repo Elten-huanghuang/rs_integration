@@ -137,74 +137,74 @@ public final class WRWandCraftPacket {
         if (!tryAutoCraftMissing(player, ingredients, dim, pos)) return false;
 
         INetwork network = CraftPacketUtils.resolveNetworkForCraft(player, dim, pos);
-        ExtractionLedger ledger = new ExtractionLedger();
 
-        // Phase 1: reserve all ingredients + validate slots
         List<ItemStack> templates = new ArrayList<>();
-        for (int i = 0; i < ingredients.size() && i < totalSlots; i++) {
-            Ingredient ing = ingredients.get(i);
-            ItemStack existing = rsi$getContainerItem(be, i);
-            if (!existing.isEmpty()) {
-                if (ing.test(existing)) {
-                    templates.add(ItemStack.EMPTY);
-                    continue;
+        try (ExtractionLedger ledger = new ExtractionLedger()) {
+            // Phase 1: reserve all ingredients + validate slots
+            for (int i = 0; i < ingredients.size() && i < totalSlots; i++) {
+                Ingredient ing = ingredients.get(i);
+                ItemStack existing = rsi$getContainerItem(be, i);
+                if (!existing.isEmpty()) {
+                    if (ing.test(existing)) {
+                        templates.add(ItemStack.EMPTY);
+                        continue;
+                    }
+                    player.displayClientMessage(
+                            Component.translatable("rsi.wr.error.slot_occupied", i, existing.getHoverName()), true);
+                    return false;
                 }
-                player.displayClientMessage(
-                        Component.translatable("rsi.wr.error.slot_occupied", i, existing.getHoverName()), true);
+
+                ItemStack taken = ensureMaterialAvailable(player, dim, pos, ing, 1, ledger);
+                if (taken.isEmpty()) {
+                    player.displayClientMessage(
+                            Component.translatable("rsi.generic.error.missing_materials",
+                                    CraftPacketUtils.describeIngredient(ing)), true);
+                    return false;
+                }
+                templates.add(taken);
+            }
+
+            // Phase 1.5: check wissen energy before extracting items from RS
+            if (!checkWissen(player, be, recipe)) return false;
+
+            // Phase 2: commit all extractions atomically
+            if (!ledger.commit(network, player)) {
+                RSIntegrationMod.LOGGER.error("[RSI-WR] Ledger commit failed for WissenCrystallizer");
                 return false;
             }
 
-            ItemStack taken = ensureMaterialAvailable(player, dim, pos, ing, 1, ledger);
-            if (taken.isEmpty()) {
-                player.displayClientMessage(
-                        Component.translatable("rsi.generic.error.missing_materials",
-                                CraftPacketUtils.describeIngredient(ing)), true);
+            // Phase 3: place items in slots
+            try {
+                for (int i = 0; i < templates.size(); i++) {
+                    ItemStack taken = templates.get(i);
+                    if (!taken.isEmpty()) {
+                        rsi$setContainerItem(be, i, taken);
+                    }
+                }
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.warn("[RSI-WR] WissenCrystallizer item placement failed, rolling back", e);
+                for (int j = 0; j < templates.size(); j++) {
+                    if (!templates.get(j).isEmpty()) {
+                        try { rsi$setContainerItem(be, j, ItemStack.EMPTY); } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI-WR] rollback setContainerItem failed", ex); }
+                    }
+                }
+                refundTemplates(network, player, templates);
                 return false;
             }
-            templates.add(taken);
-        }
 
-        // Phase 1.5: check wissen energy before extracting items from RS
-        if (!checkWissen(player, be, recipe)) return false;
-
-        // Phase 2: commit all extractions atomically
-        if (!ledger.commit(network, player)) {
-            RSIntegrationMod.LOGGER.error("[RSI-WR] Ledger commit failed for WissenCrystallizer");
-            return false;
-        }
-
-        // Phase 3: place items in slots
-        try {
-            for (int i = 0; i < templates.size(); i++) {
-                ItemStack taken = templates.get(i);
-                if (!taken.isEmpty()) {
-                    rsi$setContainerItem(be, i, taken);
+            try {
+                rsi$getMethod(be.getClass(), "wissenWandFunction").invoke(be);
+                rsi$syncBlockEntity(be);
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.warn("[RSI-WR] wissenWandFunction invoke failed, rolling back", e);
+                for (int i = 0; i < templates.size(); i++) {
+                    if (!templates.get(i).isEmpty()) {
+                        rsi$setContainerItem(be, i, ItemStack.EMPTY);
+                    }
                 }
+                refundTemplates(network, player, templates);
+                return false;
             }
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-WR] WissenCrystallizer item placement failed, rolling back", e);
-            // Clear slots that may have been filled before the exception
-            for (int j = 0; j < templates.size(); j++) {
-                if (!templates.get(j).isEmpty()) {
-                    try { rsi$setContainerItem(be, j, ItemStack.EMPTY); } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI-WR] rollback setContainerItem failed", ex); }
-                }
-            }
-            refundTemplates(network, player, templates);
-            return false;
-        }
-
-        try {
-            rsi$getMethod(be.getClass(), "wissenWandFunction").invoke(be);
-            rsi$syncBlockEntity(be);
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-WR] wissenWandFunction invoke failed, rolling back", e);
-            for (int i = 0; i < templates.size(); i++) {
-                if (!templates.get(i).isEmpty()) {
-                    rsi$setContainerItem(be, i, ItemStack.EMPTY);
-                }
-            }
-            refundTemplates(network, player, templates);
-            return false;
         }
 
         RSIntegrationMod.LOGGER.debug("Player {} remote-crafted WR recipe '{}' via WissenCrystallizer.",
@@ -241,61 +241,62 @@ public final class WRWandCraftPacket {
         if (!tryAutoCraftMissing(player, ingredients, dim, pos)) return false;
 
         INetwork network = CraftPacketUtils.resolveNetworkForCraft(player, dim, pos);
-        ExtractionLedger ledger = new ExtractionLedger();
 
-        // Phase 1: reserve all ingredients
         List<ItemStack> templates = new ArrayList<>();
-        for (int i = 0; i < ingredients.size(); i++) {
-            Ingredient ing = ingredients.get(i);
-            ItemStack taken = ensureMaterialAvailable(player, dim, pos, ing, 1, ledger);
-            if (taken.isEmpty()) {
-                player.displayClientMessage(
-                        Component.translatable("rsi.generic.error.missing_materials",
-                                CraftPacketUtils.describeIngredient(ing)), true);
+        try (ExtractionLedger ledger = new ExtractionLedger()) {
+            // Phase 1: reserve all ingredients
+            for (int i = 0; i < ingredients.size(); i++) {
+                Ingredient ing = ingredients.get(i);
+                ItemStack taken = ensureMaterialAvailable(player, dim, pos, ing, 1, ledger);
+                if (taken.isEmpty()) {
+                    player.displayClientMessage(
+                            Component.translatable("rsi.generic.error.missing_materials",
+                                    CraftPacketUtils.describeIngredient(ing)), true);
+                    return false;
+                }
+                templates.add(taken);
+            }
+
+            // Phase 1.5: check wissen energy before extracting items from RS
+            if (!checkWissen(player, be, recipe)) return false;
+
+            // Phase 2: commit all extractions atomically
+            if (!ledger.commit(network, player)) {
+                RSIntegrationMod.LOGGER.error("[RSI-WR] Ledger commit failed for ArcaneIterator");
                 return false;
             }
-            templates.add(taken);
-        }
 
-        // Phase 1.5: check wissen energy before extracting items from RS
-        if (!checkWissen(player, be, recipe)) return false;
-
-        // Phase 2: commit all extractions atomically
-        if (!ledger.commit(network, player)) {
-            RSIntegrationMod.LOGGER.error("[RSI-WR] Ledger commit failed for ArcaneIterator");
-            return false;
-        }
-
-        // Phase 3: place items on pedestals
-        for (int i = 0; i < templates.size(); i++) {
-            ItemStack taken = templates.get(i);
-            try {
-                Object pedestal = pedestals.get(i);
-                ItemStack existing = rsi$getContainerItem(pedestal, 0);
-                if (!existing.isEmpty()) {
-                    ItemHandlerHelper.giveItemToPlayer(player, existing.copy());
+            // Phase 3: place items on pedestals
+            for (int i = 0; i < templates.size(); i++) {
+                ItemStack taken = templates.get(i);
+                try {
+                    Object pedestal = pedestals.get(i);
+                    ItemStack existing = rsi$getContainerItem(pedestal, 0);
+                    if (!existing.isEmpty()) {
+                        ItemHandlerHelper.giveItemToPlayer(player, existing.copy());
+                    }
+                    rsi$setContainerItem(pedestal, 0, taken);
+                    rsi$syncBlockEntity(pedestal);
+                } catch (Exception e) {
+                    RSIntegrationMod.LOGGER.warn("[RSI-WR] Failed to place item on ArcaneIterator pedestal {}: {}", i, e.getMessage());
+                    for (int j = 0; j < i; j++) {
+                        try { rsi$setContainerItem(pedestals.get(j), 0, ItemStack.EMPTY); rsi$syncBlockEntity(pedestals.get(j)); } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI-WR] rollback pedestal clear failed", ex); }
+                    }
+                    refundTemplates(network, player, templates);
+                    return false;
                 }
-                rsi$setContainerItem(pedestal, 0, taken);
-                rsi$syncBlockEntity(pedestal);
-            } catch (Exception e) {
-                RSIntegrationMod.LOGGER.warn("[RSI-WR] Failed to place item on ArcaneIterator pedestal {}: {}", i, e.getMessage());
-                for (int j = 0; j < i; j++) {
-                    try { rsi$setContainerItem(pedestals.get(j), 0, ItemStack.EMPTY); rsi$syncBlockEntity(pedestals.get(j)); } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI-WR] rollback pedestal clear failed", ex); }
+            }
+
+            try {
+                rsi$getMethod(be.getClass(), "wissenWandFunction").invoke(be);
+                rsi$syncBlockEntity(be);
+            } catch (Exception ex) {
+                for (int i = 0; i < templates.size(); i++) {
+                    try { rsi$setContainerItem(pedestals.get(i), 0, ItemStack.EMPTY); rsi$syncBlockEntity(pedestals.get(i)); } catch (Exception exc) { RSIntegrationMod.LOGGER.debug("[RSI-WR] rollback pedestal clear failed", exc); }
                 }
                 refundTemplates(network, player, templates);
                 return false;
             }
-        }
-
-        try {
-            rsi$getMethod(be.getClass(), "wissenWandFunction").invoke(be);
-            rsi$syncBlockEntity(be);
-        } catch (Exception ex) {
-            for (int i = 0; i < templates.size(); i++) {
-                try { rsi$setContainerItem(pedestals.get(i), 0, ItemStack.EMPTY); rsi$syncBlockEntity(pedestals.get(i)); } catch (Exception exc) { RSIntegrationMod.LOGGER.debug("[RSI-WR] rollback pedestal clear failed", exc); }
-            }
-            refundTemplates(network, player, templates);
-            return false;
         }
 
         RSIntegrationMod.LOGGER.debug("Player {} remote-crafted WR recipe '{}' via ArcaneIterator.",
@@ -335,66 +336,67 @@ public final class WRWandCraftPacket {
         if (!tryAutoCraftMissing(player, ingredients, dim, pos)) return false;
 
         INetwork network = CraftPacketUtils.resolveNetworkForCraft(player, dim, pos);
-        ExtractionLedger ledger = new ExtractionLedger();
 
-        // Phase 1: reserve all ingredients + validate slots
         List<ItemStack> templates = new ArrayList<>();
-        for (int i = 0; i < ingredients.size(); i++) {
-            Ingredient ing = ingredients.get(i);
-            if (ing.getItems().length == 0) {
-                templates.add(ItemStack.EMPTY);
-                continue;
-            }
-            ItemStack existing = itemHandler.getStackInSlot(i);
-            if (!existing.isEmpty()) {
-                if (ing.test(existing)) {
+        try (ExtractionLedger ledger = new ExtractionLedger()) {
+            // Phase 1: reserve all ingredients + validate slots
+            for (int i = 0; i < ingredients.size(); i++) {
+                Ingredient ing = ingredients.get(i);
+                if (ing.getItems().length == 0) {
                     templates.add(ItemStack.EMPTY);
                     continue;
                 }
-                player.displayClientMessage(
-                        Component.translatable("rsi.wr.error.slot_occupied", i, existing.getHoverName()), true);
+                ItemStack existing = itemHandler.getStackInSlot(i);
+                if (!existing.isEmpty()) {
+                    if (ing.test(existing)) {
+                        templates.add(ItemStack.EMPTY);
+                        continue;
+                    }
+                    player.displayClientMessage(
+                            Component.translatable("rsi.wr.error.slot_occupied", i, existing.getHoverName()), true);
+                    return false;
+                }
+
+                ItemStack taken = ensureMaterialAvailable(player, dim, pos, ing, 1, ledger);
+                if (taken.isEmpty()) {
+                    player.displayClientMessage(
+                            Component.translatable("rsi.generic.error.missing_materials",
+                                    CraftPacketUtils.describeIngredient(ing)), true);
+                    return false;
+                }
+                templates.add(taken);
+            }
+
+            // Phase 1.5: check wissen energy before extracting items from RS
+            if (!checkWissen(player, be, recipe)) return false;
+
+            // Phase 2: commit all extractions atomically
+            if (!ledger.commit(network, player)) {
+                RSIntegrationMod.LOGGER.error("[RSI-WR] Ledger commit failed for ArcaneWorkbench");
                 return false;
             }
 
-            ItemStack taken = ensureMaterialAvailable(player, dim, pos, ing, 1, ledger);
-            if (taken.isEmpty()) {
-                player.displayClientMessage(
-                        Component.translatable("rsi.generic.error.missing_materials",
-                                CraftPacketUtils.describeIngredient(ing)), true);
-                return false;
-            }
-            templates.add(taken);
-        }
-
-        // Phase 1.5: check wissen energy before extracting items from RS
-        if (!checkWissen(player, be, recipe)) return false;
-
-        // Phase 2: commit all extractions atomically
-        if (!ledger.commit(network, player)) {
-            RSIntegrationMod.LOGGER.error("[RSI-WR] Ledger commit failed for ArcaneWorkbench");
-            return false;
-        }
-
-        // Phase 3: place items in slots
-        for (int i = 0; i < templates.size(); i++) {
-            ItemStack taken = templates.get(i);
-            if (!taken.isEmpty()) {
-                itemHandler.setStackInSlot(i, taken);
-            }
-        }
-
-        try {
-            rsi$getMethod(be.getClass(), "wissenWandFunction").invoke(be);
-            rsi$syncBlockEntity(be);
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-WR] wissenWandFunction invoke failed, rolling back", e);
+            // Phase 3: place items in slots
             for (int i = 0; i < templates.size(); i++) {
-                if (!templates.get(i).isEmpty()) {
-                    itemHandler.setStackInSlot(i, ItemStack.EMPTY);
+                ItemStack taken = templates.get(i);
+                if (!taken.isEmpty()) {
+                    itemHandler.setStackInSlot(i, taken);
                 }
             }
-            refundTemplates(network, player, templates);
-            return false;
+
+            try {
+                rsi$getMethod(be.getClass(), "wissenWandFunction").invoke(be);
+                rsi$syncBlockEntity(be);
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.warn("[RSI-WR] wissenWandFunction invoke failed, rolling back", e);
+                for (int i = 0; i < templates.size(); i++) {
+                    if (!templates.get(i).isEmpty()) {
+                        itemHandler.setStackInSlot(i, ItemStack.EMPTY);
+                    }
+                }
+                refundTemplates(network, player, templates);
+                return false;
+            }
         }
 
         RSIntegrationMod.LOGGER.debug("Player {} remote-crafted WR recipe '{}' via ArcaneWorkbench.",
@@ -469,82 +471,83 @@ public final class WRWandCraftPacket {
         if (!tryAutoCraftMissing(player, ingredients, dim, pos)) return false;
 
         INetwork network = CraftPacketUtils.resolveNetworkForCraft(player, dim, pos);
-        ExtractionLedger ledger = new ExtractionLedger();
 
-        // Phase 1: reserve all ingredients
         List<ItemStack> templates = new ArrayList<>();
-        for (int i = 0; i < ingredients.size(); i++) {
-            Ingredient ing = ingredients.get(i);
-            if (ing.getItems().length == 0) {
-                templates.add(ItemStack.EMPTY);
-                continue;
+        try (ExtractionLedger ledger = new ExtractionLedger()) {
+            // Phase 1: reserve all ingredients
+            for (int i = 0; i < ingredients.size(); i++) {
+                Ingredient ing = ingredients.get(i);
+                if (ing.getItems().length == 0) {
+                    templates.add(ItemStack.EMPTY);
+                    continue;
+                }
+
+                Object pedestal = pedestals.get(i);
+                ItemStack existing = rsi$getContainerItem(pedestal, 0);
+                if (!existing.isEmpty() && ing.test(existing)) {
+                    templates.add(ItemStack.EMPTY);
+                    continue;
+                }
+
+                ItemStack taken = ensureMaterialAvailable(player, dim, pos, ing, 1, ledger);
+                if (taken.isEmpty()) {
+                    player.displayClientMessage(
+                            Component.translatable("rsi.generic.error.missing_materials",
+                                    CraftPacketUtils.describeIngredient(ing)), true);
+                    return false;
+                }
+                templates.add(taken);
             }
 
-            Object pedestal = pedestals.get(i);
-            ItemStack existing = rsi$getContainerItem(pedestal, 0);
-            if (!existing.isEmpty() && ing.test(existing)) {
-                templates.add(ItemStack.EMPTY);
-                continue;
-            }
+            // Phase 1.5: check wissen energy before extracting items from RS
+            if (!checkWissen(player, be, recipe)) return false;
 
-            ItemStack taken = ensureMaterialAvailable(player, dim, pos, ing, 1, ledger);
-            if (taken.isEmpty()) {
-                player.displayClientMessage(
-                        Component.translatable("rsi.generic.error.missing_materials",
-                                CraftPacketUtils.describeIngredient(ing)), true);
+            // Phase 2: commit all extractions atomically
+            if (!ledger.commit(network, player)) {
+                RSIntegrationMod.LOGGER.error("[RSI-WR] Ledger commit failed for CrystalRitual");
                 return false;
             }
-            templates.add(taken);
-        }
 
-        // Phase 1.5: check wissen energy before extracting items from RS
-        if (!checkWissen(player, be, recipe)) return false;
+            // Phase 3: place items on pedestals
+            for (int i = 0; i < templates.size(); i++) {
+                ItemStack taken = templates.get(i);
+                if (taken.isEmpty()) continue;
 
-        // Phase 2: commit all extractions atomically
-        if (!ledger.commit(network, player)) {
-            RSIntegrationMod.LOGGER.error("[RSI-WR] Ledger commit failed for CrystalRitual");
-            return false;
-        }
+                Object pedestal = pedestals.get(i);
+                ItemStack existing = rsi$getContainerItem(pedestal, 0);
+                if (!existing.isEmpty()) {
+                    ItemHandlerHelper.giveItemToPlayer(player, existing.copy());
+                }
 
-        // Phase 3: place items on pedestals
-        for (int i = 0; i < templates.size(); i++) {
-            ItemStack taken = templates.get(i);
-            if (taken.isEmpty()) continue;
-
-            Object pedestal = pedestals.get(i);
-            ItemStack existing = rsi$getContainerItem(pedestal, 0);
-            if (!existing.isEmpty()) {
-                ItemHandlerHelper.giveItemToPlayer(player, existing.copy());
+                try {
+                    rsi$setContainerItem(pedestal, 0, taken);
+                    rsi$syncBlockEntity(pedestal);
+                } catch (Exception e) {
+                    RSIntegrationMod.LOGGER.warn("Failed to place item on ArcanePedestal slot {}: {}", i, e.getMessage());
+                    for (int j = 0; j < i; j++) {
+                        if (!templates.get(j).isEmpty()) {
+                            try { rsi$setContainerItem(pedestals.get(j), 0, ItemStack.EMPTY); rsi$syncBlockEntity(pedestals.get(j)); } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", ex); }
+                        }
+                    }
+                    refundTemplates(network, player, templates);
+                    return false;
+                }
             }
 
             try {
-                rsi$setContainerItem(pedestal, 0, taken);
-                rsi$syncBlockEntity(pedestal);
+                rsi$getMethod(be.getClass(), "wissenWandFunction").invoke(be);
+                rsi$syncBlockEntity(be);
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.warn("Failed to place item on ArcanePedestal slot {}: {}", i, e.getMessage());
-                for (int j = 0; j < i; j++) {
-                    if (!templates.get(j).isEmpty()) {
-                        try { rsi$setContainerItem(pedestals.get(j), 0, ItemStack.EMPTY); rsi$syncBlockEntity(pedestals.get(j)); } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", ex); }
+                RSIntegrationMod.LOGGER.warn("Failed to invoke wissenWandFunction on CrystalBlockEntity", e);
+                for (int i = 0; i < templates.size(); i++) {
+                    if (!templates.get(i).isEmpty()) {
+                        try { rsi$setContainerItem(pedestals.get(i), 0, ItemStack.EMPTY); rsi$syncBlockEntity(pedestals.get(i)); } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", ex); }
                     }
                 }
                 refundTemplates(network, player, templates);
+                player.sendSystemMessage(Component.translatable("rsi.wr.error.cant_start"));
                 return false;
             }
-        }
-
-        try {
-            rsi$getMethod(be.getClass(), "wissenWandFunction").invoke(be);
-            rsi$syncBlockEntity(be);
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("Failed to invoke wissenWandFunction on CrystalBlockEntity", e);
-            for (int i = 0; i < templates.size(); i++) {
-                if (!templates.get(i).isEmpty()) {
-                    try { rsi$setContainerItem(pedestals.get(i), 0, ItemStack.EMPTY); rsi$syncBlockEntity(pedestals.get(i)); } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", ex); }
-                }
-            }
-            refundTemplates(network, player, templates);
-            player.sendSystemMessage(Component.translatable("rsi.wr.error.cant_start"));
-            return false;
         }
 
         RSIntegrationMod.LOGGER.debug("Player {} remote-crafted CrystalRitual '{}' via CrystalBlock.",

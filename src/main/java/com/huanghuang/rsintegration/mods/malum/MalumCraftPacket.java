@@ -153,125 +153,126 @@ public final class MalumCraftPacket {
 
         // -- Phase 2: reserve all items (deferred extraction via ledger) --
         INetwork network = CraftPacketUtils.resolveNetworkForCraft(player, altarDim, pos);
-        ExtractionLedger ledger = new ExtractionLedger();
         List<Integer> filledPedestalIndices = new ArrayList<>();
-        try {
-            // 1. Center item -> altar inventory slot 0
-            if (inputObj != null) {
-                Ingredient centerIng = (Ingredient) getField(inputObj, "ingredient");
-                if (centerIng != null) {
-                    ItemStack stack = ensureMaterialAvailable(player, altarDim, pos, centerIng, centerCount, ledger);
+        try (ExtractionLedger ledger = new ExtractionLedger()) {
+            try {
+                // 1. Center item -> altar inventory slot 0
+                if (inputObj != null) {
+                    Ingredient centerIng = (Ingredient) getField(inputObj, "ingredient");
+                    if (centerIng != null) {
+                        ItemStack stack = ensureMaterialAvailable(player, altarDim, pos, centerIng, centerCount, ledger);
+                        if (stack.isEmpty()) {
+                            player.sendSystemMessage(Component.translatable("rsi.generic.error.missing_materials",
+                                    CraftPacketUtils.describeIngredient(centerIng)));
+                            return;
+                        }
+                        setIHandlerSlot(invMain, 0, stack);
+                    }
+                }
+
+                // 2. Extra items -> runewood pedestals
+                int pedIdx = 0;
+                for (int i = 0; i < extraCount; i++) {
+                    Object eItem = extraItems.get(i);
+                    Ingredient ing = (Ingredient) getField(eItem, "ingredient");
+                    if (ing == null) continue;
+                    int itemCount = CraftPacketUtils.readIngredientCount(eItem, 1);
+                    ItemStack stack = ensureMaterialAvailable(player, altarDim, pos, ing, itemCount, ledger);
                     if (stack.isEmpty()) {
                         player.sendSystemMessage(Component.translatable("rsi.generic.error.missing_materials",
-                                CraftPacketUtils.describeIngredient(centerIng)));
+                                CraftPacketUtils.describeIngredient(ing)));
+                        clearAltarSlots(invMain, invSpirit, inputObj != null ? 1 : 0, 0);
+                        clearPedestalsByIndex(pedestals, filledPedestalIndices);
                         return;
                     }
-                    setIHandlerSlot(invMain, 0, stack);
+                    int placedIdx = placeOnNextEmptyPedestal(pedestals, pedIdx, stack);
+                    filledPedestalIndices.add(placedIdx - 1);
+                    pedIdx = placedIdx;
                 }
-            }
 
-            // 2. Extra items -> runewood pedestals
-            int pedIdx = 0;
-            for (int i = 0; i < extraCount; i++) {
-                Object eItem = extraItems.get(i);
-                Ingredient ing = (Ingredient) getField(eItem, "ingredient");
-                if (ing == null) continue;
-                int itemCount = CraftPacketUtils.readIngredientCount(eItem, 1);
-                ItemStack stack = ensureMaterialAvailable(player, altarDim, pos, ing, itemCount, ledger);
-                if (stack.isEmpty()) {
-                    player.sendSystemMessage(Component.translatable("rsi.generic.error.missing_materials",
-                            CraftPacketUtils.describeIngredient(ing)));
-                    clearAltarSlots(invMain, invSpirit, inputObj != null ? 1 : 0, 0);
-                    clearPedestalsByIndex(pedestals, filledPedestalIndices);
-                    return;
+                // 3. Spirit items -> altar spiritInventory
+                for (int i = 0; i < spiritCount; i++) {
+                    Object swc = spirits.get(i);
+                    int sCount = CraftPacketUtils.readIngredientCount(swc, 1);
+                    Item spiritItem = (Item) swc.getClass().getMethod("getItem").invoke(swc);
+                    Ingredient spiritIng = Ingredient.of(spiritItem);
+                    ItemStack stack = ensureMaterialAvailable(player, altarDim, pos, spiritIng, sCount, ledger);
+                    if (stack.isEmpty()) {
+                        player.sendSystemMessage(Component.translatable("rsi.generic.error.missing_materials",
+                                CraftPacketUtils.describeIngredient(spiritIng)));
+                        clearAltarSlots(invMain, invSpirit, inputObj != null ? 1 : 0, i);
+                        clearPedestalsByIndex(pedestals, filledPedestalIndices);
+                        return;
+                    }
+                    setIHandlerSlot(invSpirit, i, stack);
                 }
-                int placedIdx = placeOnNextEmptyPedestal(pedestals, pedIdx, stack);
-                filledPedestalIndices.add(placedIdx - 1);
-                pedIdx = placedIdx;
-            }
 
-            // 3. Spirit items -> altar spiritInventory
-            for (int i = 0; i < spiritCount; i++) {
-                Object swc = spirits.get(i);
-                int sCount = CraftPacketUtils.readIngredientCount(swc, 1);
-                Item spiritItem = (Item) swc.getClass().getMethod("getItem").invoke(swc);
-                Ingredient spiritIng = Ingredient.of(spiritItem);
-                ItemStack stack = ensureMaterialAvailable(player, altarDim, pos, spiritIng, sCount, ledger);
-                if (stack.isEmpty()) {
-                    player.sendSystemMessage(Component.translatable("rsi.generic.error.missing_materials",
-                            CraftPacketUtils.describeIngredient(spiritIng)));
-                    clearAltarSlots(invMain, invSpirit, inputObj != null ? 1 : 0, i);
-                    clearPedestalsByIndex(pedestals, filledPedestalIndices);
-                    return;
-                }
-                setIHandlerSlot(invSpirit, i, stack);
-            }
-
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.error("[RSI-Malum] Placement failed for recipe {}:", recipeId, e);
-            clearAltarSlots(invMain, invSpirit, inputObj != null ? 1 : 0, spiritCount);
-            clearPedestalsByIndex(pedestals, filledPedestalIndices);
-            player.sendSystemMessage(Component.translatable("rsi.malum.error.craft_failed"));
-            return;
-        }
-
-        // Commit all extractions atomically
-        if (!ledger.commit(network, player)) {
-            RSIntegrationMod.LOGGER.error("[RSI-Malum] Ledger commit failed for recipe {}", recipeId);
-            clearAltarSlots(invMain, invSpirit, inputObj != null ? 1 : 0, spiritCount);
-            clearPedestalsByIndex(pedestals, filledPedestalIndices);
-            player.sendSystemMessage(Component.translatable("rsi.malum.error.craft_failed", "commit failed"));
-            return;
-        }
-
-        // -- Phase 3: start the infusion --
-        boolean startedWithAnimation = false;
-        try {
-            for (java.lang.reflect.Method m : altar.getClass().getMethods()) {
-                if (m.getName().equals("craft") && m.getParameterCount() == 1
-                        && Recipe.class.isAssignableFrom(m.getParameterTypes()[0])) {
-                    m.invoke(altar, recipe);
-                    startedWithAnimation = true;
-                    break;
-                }
-            }
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.error("[RSI-Malum] craft(Recipe) threw for recipe {}:", recipeId, e);
-            player.sendSystemMessage(Component.translatable("rsi.malum.error.start_failed"));
-            refundAndClearAltar(invMain, invSpirit, inputObj != null ? 1 : 0, spiritCount, network, player);
-            refundAndClearPedestals(pedestals, filledPedestalIndices, network, player);
-            return;
-        }
-
-        if (!startedWithAnimation) {
-            try {
-                setField(altar, "recipe", recipe);
-                altar.getClass().getMethod("craft").invoke(altar);
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.error("[RSI-Malum] craft() threw for recipe {}:", recipeId, e);
+                RSIntegrationMod.LOGGER.error("[RSI-Malum] Placement failed for recipe {}:", recipeId, e);
+                clearAltarSlots(invMain, invSpirit, inputObj != null ? 1 : 0, spiritCount);
+                clearPedestalsByIndex(pedestals, filledPedestalIndices);
+                player.sendSystemMessage(Component.translatable("rsi.malum.error.craft_failed"));
+                return;
+            }
+
+            // Commit all extractions atomically
+            if (!ledger.commit(network, player)) {
+                RSIntegrationMod.LOGGER.error("[RSI-Malum] Ledger commit failed for recipe {}", recipeId);
+                clearAltarSlots(invMain, invSpirit, inputObj != null ? 1 : 0, spiritCount);
+                clearPedestalsByIndex(pedestals, filledPedestalIndices);
+                player.sendSystemMessage(Component.translatable("rsi.malum.error.craft_failed", "commit failed"));
+                return;
+            }
+
+            // -- Phase 3: start the infusion --
+            boolean startedWithAnimation = false;
+            try {
+                for (java.lang.reflect.Method m : altar.getClass().getMethods()) {
+                    if (m.getName().equals("craft") && m.getParameterCount() == 1
+                            && Recipe.class.isAssignableFrom(m.getParameterTypes()[0])) {
+                        m.invoke(altar, recipe);
+                        startedWithAnimation = true;
+                        break;
+                    }
+                }
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.error("[RSI-Malum] craft(Recipe) threw for recipe {}:", recipeId, e);
                 player.sendSystemMessage(Component.translatable("rsi.malum.error.start_failed"));
                 refundAndClearAltar(invMain, invSpirit, inputObj != null ? 1 : 0, spiritCount, network, player);
                 refundAndClearPedestals(pedestals, filledPedestalIndices, network, player);
                 return;
             }
 
-            // Fallback cleanup: no-arg craft() doesn't consume items
-            try {
-                if (inputObj != null) {
-                    setIHandlerSlot(invMain, 0, ItemStack.EMPTY);
+            if (!startedWithAnimation) {
+                try {
+                    setField(altar, "recipe", recipe);
+                    altar.getClass().getMethod("craft").invoke(altar);
+                } catch (Exception e) {
+                    RSIntegrationMod.LOGGER.error("[RSI-Malum] craft() threw for recipe {}:", recipeId, e);
+                    player.sendSystemMessage(Component.translatable("rsi.malum.error.start_failed"));
+                    refundAndClearAltar(invMain, invSpirit, inputObj != null ? 1 : 0, spiritCount, network, player);
+                    refundAndClearPedestals(pedestals, filledPedestalIndices, network, player);
+                    return;
                 }
-                for (int i = 0; i < spiritCount; i++) {
-                    setIHandlerSlot(invSpirit, i, ItemStack.EMPTY);
-                }
-                clearPedestalsByIndex(pedestals, filledPedestalIndices);
-            } catch (Exception e) {
-                RSIntegrationMod.LOGGER.warn("[RSI-Malum] Failed to clear items after craft: {}", e.getMessage());
-            }
-        }
 
-        player.displayClientMessage(Component.translatable("rsi.malum.info.craft_started", getRecipeName(recipe)), true);
-        RSIntegrationMod.LOGGER.debug("[RSI-Malum] Player {} started spirit infusion '{}'",
-                player.getName().getString(), recipeId);
+                // Fallback cleanup: no-arg craft() doesn't consume items
+                try {
+                    if (inputObj != null) {
+                        setIHandlerSlot(invMain, 0, ItemStack.EMPTY);
+                    }
+                    for (int i = 0; i < spiritCount; i++) {
+                        setIHandlerSlot(invSpirit, i, ItemStack.EMPTY);
+                    }
+                    clearPedestalsByIndex(pedestals, filledPedestalIndices);
+                } catch (Exception e) {
+                    RSIntegrationMod.LOGGER.warn("[RSI-Malum] Failed to clear items after craft: {}", e.getMessage());
+                }
+            }
+
+            player.displayClientMessage(Component.translatable("rsi.malum.info.craft_started", getRecipeName(recipe)), true);
+            RSIntegrationMod.LOGGER.debug("[RSI-Malum] Player {} started spirit infusion '{}'",
+                    player.getName().getString(), recipeId);
+        }
     }
 
     // -- Pedestal helpers --

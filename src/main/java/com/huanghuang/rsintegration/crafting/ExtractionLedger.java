@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.crafting.RSICraftException;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
+import com.huanghuang.rsintegration.util.CraftLogContext;
 import com.huanghuang.rsintegration.util.Diagnostics;
 import com.huanghuang.rsintegration.util.ModIds;
 import com.huanghuang.rsintegration.util.PlayerUtils;
@@ -26,7 +27,7 @@ import javax.annotation.Nullable;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
-public final class ExtractionLedger {
+public final class ExtractionLedger implements AutoCloseable {
 
     public enum State {
         IDLE, RESERVING, RESERVED, COMMITTING, COMMITTED, ROLLED_BACK
@@ -37,7 +38,19 @@ public final class ExtractionLedger {
     private final Map<CraftingResolver.StackKey, Integer> pendingInv = new HashMap<>();
     private State state = State.IDLE;
 
+    @Nullable
+    private CraftLogContext logContext;
+
     private final Map<INetwork, List<ItemStack>> networkEntryCache = new HashMap<>();
+
+    /** Attach a correlation context for structured log output. */
+    public void setLogContext(@Nullable CraftLogContext ctx) {
+        this.logContext = ctx;
+    }
+
+    private String fmt(String message) {
+        return logContext != null ? logContext.format(message) : message;
+    }
 
     // ── state guards ─────────────────────────────────────────────
 
@@ -50,7 +63,7 @@ public final class ExtractionLedger {
     }
 
     private void transition(State to) {
-        RSIntegrationMod.LOGGER.debug("[RSI-Ledger] {} → {}", state, to);
+        RSIntegrationMod.LOGGER.debug(fmt("Ledger {} → {}"), state, to);
         Diagnostics.record(Diagnostics.Category.LEDGER_RESERVE,
                 state + "→" + to + " entries=" + entries.size());
         state = to;
@@ -160,7 +173,7 @@ public final class ExtractionLedger {
 
         // ── Phase 1: Pre-check ──────────────────────────────────
         if (!preCheck(network, player)) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Ledger] Commit pre-check failed, rolling back");
+            RSIntegrationMod.LOGGER.warn(fmt("Ledger commit pre-check failed, rolling back"));
             transition(State.ROLLED_BACK);
             return false;
         }
@@ -171,7 +184,7 @@ public final class ExtractionLedger {
             for (Entry entry : entries) {
                 ItemStack item = extractOne(entry, network, player);
                 if (item.isEmpty() || item.getCount() < entry.count) {
-                    RSIntegrationMod.LOGGER.warn("[RSI-Ledger] Commit: extractOne returned empty/insufficient for entry {} (need {}, got {})",
+                    RSIntegrationMod.LOGGER.warn(fmt("Ledger commit: extractOne returned empty/insufficient for entry {} (need {}, got {})"),
                             entry.id, entry.count, item.getCount());
                     rollbackExtractedPhases(extracted, player);
                     transition(State.ROLLED_BACK);
@@ -312,6 +325,23 @@ public final class ExtractionLedger {
         pendingInv.clear();
         networkEntryCache.clear();
         state = State.IDLE;
+    }
+
+    /**
+     * Auto-rollback guard for try-with-resources.
+     * No-op if already committed or rolled back; otherwise releases
+     * all in-memory reservations (no physical items were moved, so
+     * no refunds are needed).
+     */
+    @Override
+    public void close() {
+        if (state == State.COMMITTED || state == State.ROLLED_BACK) return;
+        RSIntegrationMod.LOGGER.warn(fmt("Ledger auto-rollback via close() — {} entries abandoned"), entries.size());
+        entries.clear();
+        pendingNet.clear();
+        pendingInv.clear();
+        networkEntryCache.clear();
+        state = State.ROLLED_BACK;
     }
 
     private enum Source { NETWORK, PLAYER_INVENTORY, ALTAR_BINDING }

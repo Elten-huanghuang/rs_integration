@@ -155,6 +155,9 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
 
     /** Call at end of onBatchFailed and onBatchFinished — resets all shared state. */
     protected void resetState() {
+        if (ledger != null) {
+            ledger.close();
+        }
         ledger = null;
         sharedLedger = null;
         network = null;

@@ -21,16 +21,19 @@ JEI/REI 界面 → 侧边栏配方列表 → 选择配方 → 自动合成计划
 
 ```
 src/main/java/com/huanghuang/rsintegration/
-├── api/                    # 对外接口（ISmithingRecipeAccessor 等）
+├── api/                    # 对外接口（ISmithingRecipeAccessor, RSIMachineAccessor, VersionRange）
 ├── config/                 # 配置项（RSIntegrationConfig）
 ├── crafting/               # 合成调度核心
 │   ├── batch/              #   IBatchDelegate 接口 + 链式调度
 │   ├── plan/               #   合成计划生成
-│   └── ExtractionLedger    #   事务账本
+│   ├── loadbalancer/       #   负载均衡（ParallelCraftGroup + LoadBalancer）
+│   └── ExtractionLedger    #   事务账本（AutoCloseable）
 ├── mixin/                  # Mixin 注入
 │   ├── minecraft/          #   原版
 │   ├── refinedstorage/     #   RS
-│   └── jei/                #   JEI
+│   ├── jei/                #   JEI
+│   ├── crockpot/           #   Crock Pot 菜单
+│   └── sophisticatedbackpacks/  # 背包升级自动化
 ├── mods/                   # 各模组集成代码（按 mod 分目录）
 │   ├── goety/              #   Delegate + Packet + 辅助类
 │   ├── malum/
@@ -38,9 +41,8 @@ src/main/java/com/huanghuang/rsintegration/
 ├── network/                # 网络包定义与注册
 ├── recipe/                 # ModRecipeHandler 配方适配层
 ├── reflection/             # 反射系统
-│   ├── probes/             #   XXReflection 探针类（Class<?> 集中管理）
-│   ├── contract/           #   ReflectionContract + ContractValidation（启动期校验）
-│   └── probes/             #   17 个探针文件
+│   ├── probes/             #   18 个 XXReflection 探针（Class<?> 集中管理）
+│   └── contract/           #   ReflectionContract + ContractValidation（启动期校验）
 ├── sidepanel/              # RS 侧边栏 UI
 └── util/                   # 工具类（Reflect, ModIds, ModClassLoader）
 ```
@@ -311,16 +313,34 @@ new ModuleEntry("modId", RSIntegrationConfig.ENABLE_XXX,
 
 ## 七、事务安全（Ledger）
 
+`ExtractionLedger` 实现 `AutoCloseable`，**所有新创建的 ledger 必须用 try-with-resources 包裹或在 finally 中显式 `close()`**。
+
+### 状态机
+
 ```
-Phase 1: reserve → Phase 2: commit → Phase 3: craft
-                                     ↑
-                          commit 失败 → 已 reserve 归零，物品未动
-                          commit 成功 → 物品已消耗，craft 必须完成或退款
+IDLE → RESERVING → RESERVED → COMMITTING → COMMITTED
+                           ↓                  ↓
+                       ROLLED_BACK      (物理物品已移动)
 ```
 
-- **共享账本**（`usingSharedLedger = true`）：退款由链式调度统一执行，单个 Delegate 不自行退款
+- `close()` 是安全操作：`COMMITTED` / `ROLLED_BACK` 状态下为 no-op；否则清除内存预留（物品未被物理移动）
+- `rollback(player)` 对 `COMMITTED` 状态调用 `refundCommitted()` 退还物理物品；对 `RESERVING` 状态清除预留
+- `commit()` 成功 → `COMMITTED`；失败 → `ROLLED_BACK`
+
+### 三类使用模式
+
+| 类别 | 生命周期 | 模式 |
+|------|---------|------|
+| **A — 字段级** | 对象存续期间 | `ledger.close()` 放在 `resetState()` / `abort()` / `abortSilently()` 中 |
+| **B — 方法局部** | 方法内 | `try (ExtractionLedger ledger = new ExtractionLedger()) { ... }` |
+| **C — 条件共享** | 可能共享或自建 | `boolean ownsLedger = !usingSharedLedger \|\| sharedLedger == null;` + `finally { if (ownsLedger) localLedger.close(); }` |
+
+### 关键规则
+
+- **共享账本**（`usingSharedLedger = true`）：退款由链式调度统一执行，单个 Delegate 不自行退款（`onBatchFailed` 中 `if (usingSharedLedger) return;`）
 - **独立账本**：`tryStartSingleCraft` 自行 create / commit / abort
 - `abort()` 前检查 `network != null && network.canRun()`
+- `commit()` 后失败需要手动 `ledger.rollback(player)` — `close()` 对 `COMMITTED` 是 no-op，不退还物理物品
 
 ---
 
@@ -342,6 +362,9 @@ Phase 1: reserve → Phase 2: commit → Phase 3: craft
 | 类名写死字符串而非探针 | 上游改名后运行时 NPE | 类名统一放探针，启动期校验 |
 | `Field`/`Method` 存探针 | 违反探针设计原则 | 探针只存 `Class<?>`，字段/方法在调用点用 `Reflect` |
 | Tick 路径中每帧读 `ConfigValue.get()` | Map 查找+同步开销累积 | 缓存 boolean 原语，监听 `ModConfigEvent.Reloading` |
+| `new ExtractionLedger()` 不用 try-with-resources | 异常路径物品泄漏 | 三类模式（字段级 `close()` / 方法局部 try / 条件共享 `ownsLedger`），见第七节 |
+| 覆写 `isCraftComplete` / `onBatchFailed` 而非钩子 | 丢失区块保护 / 双倍退款 | 只覆写 `isMachineCraftFinished` / `clearMachineState`，模板方法是 `final` |
+| `commit()` 后用 `close()` 而非 `rollback(player)` | 物品静默消失 | `close()` 对 `COMMITTED` 是 no-op；必须显式 `rollback(player)` 才能退还物理物品 |
 
 ---
 

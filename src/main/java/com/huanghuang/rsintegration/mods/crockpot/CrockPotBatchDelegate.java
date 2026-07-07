@@ -119,63 +119,62 @@ public final class CrockPotBatchDelegate extends com.huanghuang.rsintegration.cr
         this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
         if (this.network == null) return false;
 
-        ExtractionLedger ledger = new ExtractionLedger();
-        List<ItemStack> materials = new ArrayList<>();
-        extraExtractedItems.clear();
+        try (ExtractionLedger ledger = new ExtractionLedger()) {
+            List<ItemStack> materials = new ArrayList<>();
+            extraExtractedItems.clear();
 
-        // Phase 1: extract specific ingredients from RS
-        List<IngredientSpec> specs = getIngredients();
-        if (specs != null) {
-            for (IngredientSpec spec : specs) {
-                if (spec.isEmpty()) continue;
-                ItemStack reserved = CraftPacketUtils.ensureMaterialAvailable(
-                        player, myDim, myPos, spec.ingredient(), spec.count(), ledger);
-                if (reserved.isEmpty()) {
-                    ledger.rollback(player);
-                    refundExtraExtracted();
-                    return false;
-                }
-                materials.add(reserved.copy());
-            }
-        }
-
-        // Phase 2: if category constraints exist, fill remaining slots from RS
-        if (hasCatConstraints) {
-            int remaining = potLevel - materials.size();
-            if (remaining > 0) {
-                IItemHandler itemHandler = getItemHandlerAtPos();
-                float[] currentFV = computeCombinedFoodValues(materials);
-                List<ItemStack> fvItems = findAndExtractFoodValueItems(currentFV, remaining, itemHandler);
-                if (fvItems == null) {
-                    ledger.rollback(player);
-                    refundExtraExtracted();
-                    player.sendSystemMessage(Component.translatable("rsi.crockpot.error.food_values"));
-                    // Detailed diagnostics: which max constraints are zero
-                    String blocked = buildBlockedCategoriesMessage();
-                    if (!blocked.isEmpty()) {
-                        player.sendSystemMessage(Component.literal(blocked));
+            // Phase 1: extract specific ingredients from RS
+            List<IngredientSpec> specs = getIngredients();
+            if (specs != null) {
+                for (IngredientSpec spec : specs) {
+                    if (spec.isEmpty()) continue;
+                    ItemStack reserved = CraftPacketUtils.ensureMaterialAvailable(
+                            player, myDim, myPos, spec.ingredient(), spec.count(), ledger);
+                    if (reserved.isEmpty()) {
+                        refundExtraExtracted();
+                        return false;
                     }
-                    return false;
+                    materials.add(reserved.copy());
                 }
-                materials.addAll(fvItems);
             }
-        }
 
-        if (!ledger.commit(network, player)) {
-            refundExtraExtracted();
-            return false;
-        }
-
-        this.usingSharedLedger = false;
-        if (!tryStartWithMaterials(player, materials, ledger)) {
-            for (ItemStack mat : materials) {
-                if (!mat.isEmpty())
-                    network.insertItem(mat.copy(), mat.getCount(), Action.PERFORM);
+            // Phase 2: if category constraints exist, fill remaining slots from RS
+            if (hasCatConstraints) {
+                int remaining = potLevel - materials.size();
+                if (remaining > 0) {
+                    IItemHandler itemHandler = getItemHandlerAtPos();
+                    float[] currentFV = computeCombinedFoodValues(materials);
+                    List<ItemStack> fvItems = findAndExtractFoodValueItems(currentFV, remaining, itemHandler);
+                    if (fvItems == null) {
+                        refundExtraExtracted();
+                        player.sendSystemMessage(Component.translatable("rsi.crockpot.error.food_values"));
+                        // Detailed diagnostics: which max constraints are zero
+                        String blocked = buildBlockedCategoriesMessage();
+                        if (!blocked.isEmpty()) {
+                            player.sendSystemMessage(Component.literal(blocked));
+                        }
+                        return false;
+                    }
+                    materials.addAll(fvItems);
+                }
             }
-            refundExtraExtracted();
-            return false;
+
+            if (!ledger.commit(network, player)) {
+                refundExtraExtracted();
+                return false;
+            }
+
+            this.usingSharedLedger = false;
+            if (!tryStartWithMaterials(player, materials, ledger)) {
+                for (ItemStack mat : materials) {
+                    if (!mat.isEmpty())
+                        network.insertItem(mat.copy(), mat.getCount(), Action.PERFORM);
+                }
+                refundExtraExtracted();
+                return false;
+            }
+            return true;
         }
-        return true;
     }
 
     @Override

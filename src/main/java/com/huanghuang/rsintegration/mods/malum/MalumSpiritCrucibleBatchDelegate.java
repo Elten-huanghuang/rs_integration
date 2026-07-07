@@ -326,6 +326,8 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
         }
 
         ExtractionLedger localLedger = usingSharedLedger ? sharedLedger : new ExtractionLedger();
+        boolean ownsLedger = !usingSharedLedger || sharedLedger == null;
+        try {
         if (!usingSharedLedger || sharedLedger == null) {
             this.ledger = localLedger;
             this.usingSharedLedger = false;
@@ -418,6 +420,11 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
         this.craftWasSeenActive = false;
         RSIntegrationMod.LOGGER.debug("[RSI-Crucible] Craft started for {} at {}", recipe.getId(), myPos);
         return true;
+        } finally {
+            if (ownsLedger) {
+                localLedger.close();
+            }
+        }
     }
 
     private boolean tryStartWithMaterialsImpl(ServerPlayer player, List<ItemStack> materials) {

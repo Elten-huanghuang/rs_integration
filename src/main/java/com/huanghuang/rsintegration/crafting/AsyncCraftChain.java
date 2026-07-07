@@ -12,6 +12,7 @@ import com.huanghuang.rsintegration.crafting.loadbalancer.ParallelCraftGroup;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry.BoundMachine;
 import com.huanghuang.rsintegration.network.ProtectionChecker;
+import com.huanghuang.rsintegration.util.CraftLogContext;
 import com.huanghuang.rsintegration.util.Diagnostics;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.util.PlayerUtils;
@@ -66,6 +67,7 @@ public final class AsyncCraftChain {
     private final List<CraftingResolver.ResolutionStep> steps;
     private final List<ItemStack> virtualInventory = new ArrayList<>();
     private final ExtractionLedger ledger = new ExtractionLedger();
+    private final CraftLogContext ctx;
 
     private int currentStepIdx;
     private IBatchDelegate currentDelegate;
@@ -84,10 +86,13 @@ public final class AsyncCraftChain {
         this.server = server;
         this.network = network;
         this.steps = steps;
-        RSIntegrationMod.LOGGER.debug("[RSI-AsyncChain] Created for {}: {} steps",
-                playerId, steps.size());
+        ResourceLocation primaryRecipe = steps.isEmpty() ? new ResourceLocation("rsintegration", "empty_chain")
+                : steps.get(0).recipeId();
+        this.ctx = CraftLogContext.create(playerId, primaryRecipe);
+        this.ledger.setLogContext(ctx);
+        RSIntegrationMod.LOGGER.debug(ctx.format("Chain created: {} steps"), steps.size());
         if (RSIntegrationMod.LOGGER.isDebugEnabled()) {
-            StringBuilder sb = new StringBuilder("[RSI-AsyncChain] Steps: [");
+            StringBuilder sb = new StringBuilder(ctx.format("Steps: ["));
                 for (int i = 0; i < steps.size(); i++) {
                     if (i > 0) sb.append(", ");
                     sb.append(steps.get(i).recipeId());
@@ -119,7 +124,7 @@ public final class AsyncCraftChain {
 
         // First tick transition
         if (state == State.PENDING) {
-            RSIntegrationMod.LOGGER.debug("[RSI-AsyncChain] PENDING → EXECUTING");
+            RSIntegrationMod.LOGGER.debug(ctx.format("PENDING → EXECUTING"));
             state = State.EXECUTING;
             Diagnostics.record(Diagnostics.Category.CHAIN_STATE, "PENDING→EXECUTING steps=" + steps.size());
         }
@@ -176,7 +181,7 @@ public final class AsyncCraftChain {
                     if (currentDelegate instanceof ParallelCraftGroup group) {
                         int actual = group.getChildCount();
                         if (actual != this.machineCount) {
-                            RSIntegrationMod.LOGGER.debug("[RSI-AsyncChain] machineCount corrected: {} → {}",
+                            RSIntegrationMod.LOGGER.debug(ctx.format("machineCount corrected: {} → {}"),
                                     this.machineCount, actual);
                             this.machineCount = actual;
                         }
@@ -184,7 +189,7 @@ public final class AsyncCraftChain {
                     try {
                         currentDelegate.onBatchFinished(online);
                     } catch (Exception fe) {
-                        RSIntegrationMod.LOGGER.error("[RSI-AsyncChain] onBatchFinished error", fe);
+                        RSIntegrationMod.LOGGER.error(ctx.format("onBatchFinished error"), fe);
                     }
                     currentDelegate = null;
                     waitTicks = 0;
@@ -193,10 +198,10 @@ public final class AsyncCraftChain {
                     ledger.reset();
                     currentStepIdx++;
                     state = State.EXECUTING;
-                    RSIntegrationMod.LOGGER.debug("[RSI-AsyncChain] WAITING_MOD → EXECUTING");
+                    RSIntegrationMod.LOGGER.debug(ctx.format("WAITING_MOD → EXECUTING"));
                 }
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.error("[RSI-AsyncChain] Error polling craft completion", e);
+                RSIntegrationMod.LOGGER.error(ctx.format("Error polling craft completion"), e);
                 abort("Internal error during craft polling");
                 return true;
             }
@@ -230,7 +235,7 @@ public final class AsyncCraftChain {
             Diagnostics.record(Diagnostics.Category.CHAIN_STATE,
                     "EXECUTING→WAITING_MOD step=" + step.recipeId(),
                     step.recipeId(), step.modType());
-            RSIntegrationMod.LOGGER.debug("[RSI-AsyncChain] EXECUTING → WAITING_MOD for step {}",
+            RSIntegrationMod.LOGGER.debug(ctx.format("EXECUTING → WAITING_MOD for step {}"),
                     step.recipeId());
             waitTicks = 0;
         }
@@ -280,7 +285,7 @@ public final class AsyncCraftChain {
         ServerLevel overworld = server.overworld();
         if (overworld == null) return false;
         RecipeManager rm = overworld.getRecipeManager();
-        RSIntegrationMod.LOGGER.debug("[RSI-AsyncChain] executeVanillaStepsInline: {} vanilla steps, currentStepIdx={}",
+        RSIntegrationMod.LOGGER.debug(ctx.format("executeVanillaStepsInline: {} vanilla steps, currentStepIdx={}"),
                 vanillaSteps.size(), currentStepIdx);
         logVirtualInventory("before batch");
 
@@ -289,11 +294,11 @@ public final class AsyncCraftChain {
             int executions = step.executions();
             Recipe<?> recipe = rm.byKey(stepId).orElse(null);
             if (recipe == null) {
-                RSIntegrationMod.LOGGER.debug("[RSI-AsyncChain]   step {} not found in recipe manager", stepId);
+                RSIntegrationMod.LOGGER.debug(ctx.format("  step {} not found in recipe manager"), stepId);
                 continue;
             }
 
-            RSIntegrationMod.LOGGER.debug("[RSI-AsyncChain]   processing step: {} x{}", stepId, executions);
+            RSIntegrationMod.LOGGER.debug(ctx.format("  processing step: {} x{}"), stepId, executions);
 
             if (recipe instanceof net.minecraft.world.item.crafting.CraftingRecipe cr) {
                 // Track only the slots actually modified so we can roll back
@@ -400,7 +405,7 @@ public final class AsyncCraftChain {
                                 break;
                             }
                         } catch (Exception e) {
-                            RSIntegrationMod.LOGGER.debug("[RSI-AsyncChain] getCraftingRemainingItem failed", e);
+                            RSIntegrationMod.LOGGER.debug(ctx.format("getCraftingRemainingItem failed"), e);
                         }
                     }
                 }
@@ -427,7 +432,7 @@ public final class AsyncCraftChain {
             // no binding at all.
             int totalForMod = AltarBindingRegistry.getBoundMachinesForType(
                     online, step.modType()).size();
-            RSIntegrationMod.LOGGER.warn("[RSI-AsyncChain] No bound machine for mod type {} subType={} (total {} bindings for this mod)",
+            RSIntegrationMod.LOGGER.warn(ctx.format("No bound machine for mod type {} subType={} (total {} bindings for this mod)"),
                     step.modType(), subTypeHint != null ? subTypeHint : "*", totalForMod);
             if (totalForMod > 0) {
                 // Machines of this mod ARE bound, but none match the sub-type filter
@@ -481,13 +486,13 @@ public final class AsyncCraftChain {
                     break;
                 }
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.debug("[RSI-AsyncChain] validateAndInit failed for machine at {}", m.pos(), e);
+                RSIntegrationMod.LOGGER.debug(ctx.format("validateAndInit failed for machine at {}"), m.pos(), e);
             }
         }
         if (matchedMachine == null) {
             // Machines were found but validateAndInit failed on every one.
             // The delegate already printed a specific error (pedestal, energy, etc.).
-            RSIntegrationMod.LOGGER.warn("[RSI-AsyncChain] All {} bound machines failed validateAndInit for mod type {}: recipe={}",
+            RSIntegrationMod.LOGGER.warn(ctx.format("All {} bound machines failed validateAndInit for mod type {}: recipe={}"),
                     machines.size(), step.modType(), step.recipeId());
             online.sendSystemMessage(Component.translatable(
                     "rsi.async.error.machine_valid_failed", step.recipeId()));
@@ -505,7 +510,7 @@ public final class AsyncCraftChain {
                 return null;
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-AsyncChain] Protection check failed", e);
+            RSIntegrationMod.LOGGER.warn(ctx.format("Protection check failed"), e);
         }
 
         try {
@@ -513,55 +518,55 @@ public final class AsyncCraftChain {
             if (specs != null && !specs.isEmpty()) {
                 List<ItemStack> materials = preReserveStepMaterials(specs, online);
                 if (materials == null) {
-                    RSIntegrationMod.LOGGER.warn("[RSI-AsyncChain] Failed to pre-reserve materials for {}",
+                    RSIntegrationMod.LOGGER.warn(ctx.format("Failed to pre-reserve materials for {}"),
                             step.recipeId());
                     online.sendSystemMessage(Component.translatable(
                             "rsi.generic.error.missing_materials", step.recipeId()));
                     try { delegate.onBatchFailed(online, "pre-reserve failed"); } catch (Exception fe) {
-    RSIntegrationMod.LOGGER.error("[RSI-AsyncChain] onBatchFailed threw during pre-reserve cleanup", fe);
+    RSIntegrationMod.LOGGER.error(ctx.format("onBatchFailed threw during pre-reserve cleanup"), fe);
 }
                     return null;
                 }
                 if (!ledger.commit(network, online)) {
-                    RSIntegrationMod.LOGGER.warn("[RSI-AsyncChain] Ledger commit failed for {}",
+                    RSIntegrationMod.LOGGER.warn(ctx.format("Ledger commit failed for {}"),
                             step.recipeId());
                     online.sendSystemMessage(Component.translatable(
                             "rsi.generic.error.missing_materials", step.recipeId()));
                     try { delegate.onBatchFailed(online, "commit failed"); } catch (Exception fe) {
-    RSIntegrationMod.LOGGER.error("[RSI-AsyncChain] onBatchFailed threw during commit cleanup", fe);
+    RSIntegrationMod.LOGGER.error(ctx.format("onBatchFailed threw during commit cleanup"), fe);
 }
                     return null;
                 }
                 if (!delegate.tryStartWithMaterials(online, materials, ledger)) {
-                    RSIntegrationMod.LOGGER.warn("[RSI-AsyncChain] Delegate tryStartWithMaterials failed for {}",
+                    RSIntegrationMod.LOGGER.warn(ctx.format("Delegate tryStartWithMaterials failed for {}"),
                             step.recipeId());
                     online.sendSystemMessage(Component.translatable(
                             "rsi.generic.error.craft_failed", step.recipeId()));
                     try { delegate.onBatchFailed(online, "tryStartWithMaterials failed"); } catch (Exception fe) {
-    RSIntegrationMod.LOGGER.error("[RSI-AsyncChain] onBatchFailed threw during tryStartWithMaterials cleanup", fe);
+    RSIntegrationMod.LOGGER.error(ctx.format("onBatchFailed threw during tryStartWithMaterials cleanup"), fe);
 }
                     ledger.refundCommitted(network, online);
                     return null;
                 }
             } else {
                 if (!delegate.tryStartSingleCraft(online, ledger)) {
-                    RSIntegrationMod.LOGGER.warn("[RSI-AsyncChain] Delegate tryStartSingleCraft failed for {}",
+                    RSIntegrationMod.LOGGER.warn(ctx.format("Delegate tryStartSingleCraft failed for {}"),
                             step.recipeId());
                     try { delegate.onBatchFailed(online, "tryStartSingleCraft failed"); } catch (Exception fe) {
-    RSIntegrationMod.LOGGER.error("[RSI-AsyncChain] onBatchFailed threw during tryStartSingleCraft cleanup", fe);
+    RSIntegrationMod.LOGGER.error(ctx.format("onBatchFailed threw during tryStartSingleCraft cleanup"), fe);
 }
                     return null;
                 }
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.error("[RSI-AsyncChain] Error starting multi-block step", e);
+            RSIntegrationMod.LOGGER.error(ctx.format("Error starting multi-block step"), e);
             try { delegate.onBatchFailed(online, "exception in startModStep"); } catch (Exception fe) {
-    RSIntegrationMod.LOGGER.error("[RSI-AsyncChain] onBatchFailed threw during exception cleanup", fe);
+    RSIntegrationMod.LOGGER.error(ctx.format("onBatchFailed threw during exception cleanup"), fe);
 }
             return null;
         }
 
-        RSIntegrationMod.LOGGER.debug("[RSI-AsyncChain] Multi-block step started OK: recipe={} delegate={}",
+        RSIntegrationMod.LOGGER.debug(ctx.format("Multi-block step started OK: recipe={} delegate={}"),
                 step.recipeId(), delegate.getClass().getSimpleName());
         return delegate;
     }
@@ -576,32 +581,32 @@ public final class AsyncCraftChain {
             if (specs != null && !specs.isEmpty()) {
                 List<ItemStack> materials = preReserveStepMaterials(specs, online);
                 if (materials == null) {
-                    RSIntegrationMod.LOGGER.warn("[RSI-AsyncChain] Failed to pre-reserve for generic step {}",
+                    RSIntegrationMod.LOGGER.warn(ctx.format("Failed to pre-reserve for generic step {}"),
                             step.recipeId());
                     online.sendSystemMessage(Component.translatable(
                             "rsi.generic.error.missing_materials", step.recipeId()));
                     try { delegate.onBatchFailed(online, "pre-reserve failed"); } catch (Exception fe) {
-                        RSIntegrationMod.LOGGER.error("[RSI-AsyncChain] onBatchFailed threw during pre-reserve cleanup", fe);
+                        RSIntegrationMod.LOGGER.error(ctx.format("onBatchFailed threw during pre-reserve cleanup"), fe);
                     }
                     return null;
                 }
                 if (!ledger.commit(network, online)) {
-                    RSIntegrationMod.LOGGER.warn("[RSI-AsyncChain] Ledger commit failed for generic step {}",
+                    RSIntegrationMod.LOGGER.warn(ctx.format("Ledger commit failed for generic step {}"),
                             step.recipeId());
                     online.sendSystemMessage(Component.translatable(
                             "rsi.generic.error.missing_materials", step.recipeId()));
                     try { delegate.onBatchFailed(online, "commit failed"); } catch (Exception fe) {
-                        RSIntegrationMod.LOGGER.error("[RSI-AsyncChain] onBatchFailed threw during commit cleanup", fe);
+                        RSIntegrationMod.LOGGER.error(ctx.format("onBatchFailed threw during commit cleanup"), fe);
                     }
                     return null;
                 }
                 if (!delegate.tryStartWithMaterials(online, materials, ledger)) {
-                    RSIntegrationMod.LOGGER.warn("[RSI-AsyncChain] tryStartWithMaterials failed for generic step {}",
+                    RSIntegrationMod.LOGGER.warn(ctx.format("tryStartWithMaterials failed for generic step {}"),
                             step.recipeId());
                     online.sendSystemMessage(Component.translatable(
                             "rsi.generic.error.craft_failed", step.recipeId()));
                     try { delegate.onBatchFailed(online, "tryStartWithMaterials failed"); } catch (Exception fe) {
-                        RSIntegrationMod.LOGGER.error("[RSI-AsyncChain] onBatchFailed threw during tryStartWithMaterials cleanup", fe);
+                        RSIntegrationMod.LOGGER.error(ctx.format("onBatchFailed threw during tryStartWithMaterials cleanup"), fe);
                     }
                     ledger.refundCommitted(network, online);
                     return null;
@@ -611,23 +616,23 @@ public final class AsyncCraftChain {
                 // Note: this does NOT see virtualInventory; new delegates should
                 // implement getRequiredMaterials() + tryStartWithMaterials().
                 if (!delegate.tryStartSingleCraft(online, ledger)) {
-                    RSIntegrationMod.LOGGER.warn("[RSI-AsyncChain] tryStartSingleCraft failed for generic step {}",
+                    RSIntegrationMod.LOGGER.warn(ctx.format("tryStartSingleCraft failed for generic step {}"),
                             step.recipeId());
                     try { delegate.onBatchFailed(online, "tryStartSingleCraft failed"); } catch (Exception fe) {
-                        RSIntegrationMod.LOGGER.error("[RSI-AsyncChain] onBatchFailed threw during cleanup", fe);
+                        RSIntegrationMod.LOGGER.error(ctx.format("onBatchFailed threw during cleanup"), fe);
                     }
                     return null;
                 }
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.error("[RSI-AsyncChain] Error in generic step", e);
+            RSIntegrationMod.LOGGER.error(ctx.format("Error in generic step"), e);
             try { delegate.onBatchFailed(online, "exception in startGenericStep"); } catch (Exception fe) {
-                RSIntegrationMod.LOGGER.error("[RSI-AsyncChain] onBatchFailed threw during exception cleanup", fe);
+                RSIntegrationMod.LOGGER.error(ctx.format("onBatchFailed threw during exception cleanup"), fe);
             }
             return null;
         }
 
-        RSIntegrationMod.LOGGER.debug("[RSI-AsyncChain] Generic step started OK: recipe={}",
+        RSIntegrationMod.LOGGER.debug(ctx.format("Generic step started OK: recipe={}"),
                 step.recipeId());
         return delegate;
     }
@@ -653,13 +658,13 @@ public final class AsyncCraftChain {
         ParallelCraftGroup group = new ParallelCraftGroup(available, step.modType(),
                 step.recipeId(), online);
         if (!group.validateAndInit(online, step.recipeId(), null, BlockPos.ZERO)) {
-            RSIntegrationMod.LOGGER.debug("[RSI-AsyncChain] Parallel group empty — all children failed validateAndInit");
+            RSIntegrationMod.LOGGER.debug(ctx.format("Parallel group empty — all children failed validateAndInit"));
             return null;
         }
 
         this.machineCount = group.getChildCount();
         group.setMachineServer(server);
-        RSIntegrationMod.LOGGER.info("[RSI-AsyncChain] Load-balanced: {} machines for recipe {}",
+        RSIntegrationMod.LOGGER.info(ctx.format("Load-balanced: {} machines for recipe {}"),
                 group.getChildCount(), step.recipeId());
 
         // Parallel groups use the tryStartSingleCraft path (each child extracts
@@ -677,32 +682,32 @@ public final class AsyncCraftChain {
             if (specs != null && !specs.isEmpty()) {
                 List<ItemStack> materials = preReserveStepMaterials(specs, online);
                 if (materials == null) {
-                    RSIntegrationMod.LOGGER.warn("[RSI-AsyncChain] Failed to pre-reserve for parallel step {}",
+                    RSIntegrationMod.LOGGER.warn(ctx.format("Failed to pre-reserve for parallel step {}"),
                             step.recipeId());
                     online.sendSystemMessage(Component.translatable(
                             "rsi.generic.error.missing_materials", step.recipeId()));
                     try { group.onBatchFailed(online, "pre-reserve failed"); } catch (Exception fe) {
-                        RSIntegrationMod.LOGGER.error("[RSI-AsyncChain] onBatchFailed threw during pre-reserve cleanup", fe);
+                        RSIntegrationMod.LOGGER.error(ctx.format("onBatchFailed threw during pre-reserve cleanup"), fe);
                     }
                     return null;
                 }
                 if (!ledger.commit(network, online)) {
-                    RSIntegrationMod.LOGGER.warn("[RSI-AsyncChain] Ledger commit failed for parallel {}",
+                    RSIntegrationMod.LOGGER.warn(ctx.format("Ledger commit failed for parallel {}"),
                             step.recipeId());
                     online.sendSystemMessage(Component.translatable(
                             "rsi.generic.error.missing_materials", step.recipeId()));
                     try { group.onBatchFailed(online, "commit failed"); } catch (Exception fe) {
-                        RSIntegrationMod.LOGGER.error("[RSI-AsyncChain] onBatchFailed threw during commit cleanup", fe);
+                        RSIntegrationMod.LOGGER.error(ctx.format("onBatchFailed threw during commit cleanup"), fe);
                     }
                     return null;
                 }
                 if (!group.tryStartWithMaterials(online, materials, ledger)) {
-                    RSIntegrationMod.LOGGER.warn("[RSI-AsyncChain] Parallel group tryStartWithMaterials failed for {}",
+                    RSIntegrationMod.LOGGER.warn(ctx.format("Parallel group tryStartWithMaterials failed for {}"),
                             step.recipeId());
                     online.sendSystemMessage(Component.translatable(
                             "rsi.generic.error.craft_failed", step.recipeId()));
                     try { group.onBatchFailed(online, "tryStartWithMaterials failed"); } catch (Exception fe) {
-                        RSIntegrationMod.LOGGER.error("[RSI-AsyncChain] onBatchFailed threw during parallel cleanup", fe);
+                        RSIntegrationMod.LOGGER.error(ctx.format("onBatchFailed threw during parallel cleanup"), fe);
                     }
                     ledger.refundCommitted(network, online);
                     return null;
@@ -710,25 +715,25 @@ public final class AsyncCraftChain {
             } else {
                 // Fallback: each child self-extracts (no virtualInventory visibility)
                 if (!group.tryStartSingleCraft(online, ledger)) {
-                    RSIntegrationMod.LOGGER.warn("[RSI-AsyncChain] Parallel group tryStartSingleCraft failed for {}",
+                    RSIntegrationMod.LOGGER.warn(ctx.format("Parallel group tryStartSingleCraft failed for {}"),
                             step.recipeId());
                     online.sendSystemMessage(Component.translatable(
                             "rsi.generic.error.craft_failed", step.recipeId()));
                     try { group.onBatchFailed(online, "tryStartSingleCraft failed"); } catch (Exception fe) {
-                        RSIntegrationMod.LOGGER.error("[RSI-AsyncChain] onBatchFailed threw during parallel cleanup", fe);
+                        RSIntegrationMod.LOGGER.error(ctx.format("onBatchFailed threw during parallel cleanup"), fe);
                     }
                     return null;
                 }
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.error("[RSI-AsyncChain] Error starting parallel step", e);
+            RSIntegrationMod.LOGGER.error(ctx.format("Error starting parallel step"), e);
             try { group.onBatchFailed(online, "exception in startParallelStep"); } catch (Exception fe) {
-                RSIntegrationMod.LOGGER.error("[RSI-AsyncChain] onBatchFailed threw during exception cleanup", fe);
+                RSIntegrationMod.LOGGER.error(ctx.format("onBatchFailed threw during exception cleanup"), fe);
             }
             return null;
         }
 
-        RSIntegrationMod.LOGGER.debug("[RSI-AsyncChain] Parallel step started OK: recipe={}", step.recipeId());
+        RSIntegrationMod.LOGGER.debug(ctx.format("Parallel step started OK: recipe={}"), step.recipeId());
         return group;
     }
 
@@ -792,7 +797,7 @@ public final class AsyncCraftChain {
                 ledger.releaseReservations(materials);
                 virtualInventory.clear();
                 virtualInventory.addAll(virtualSnapshot);
-                RSIntegrationMod.LOGGER.warn("[RSI-AsyncChain] preReserveStepMaterials failed: need {} more of '{}' (spec {}/{}) for step {}",
+                RSIntegrationMod.LOGGER.warn(ctx.format("preReserveStepMaterials failed: need {} more of '{}' (spec {}/{}) for step {}"),
                         needed, CraftPacketUtils.describeIngredient(spec.ingredient()).getString(),
                         materials.size() + 1, specs.size(), steps.get(currentStepIdx).recipeId());
                 return null;
@@ -885,7 +890,7 @@ public final class AsyncCraftChain {
 
     private void finish(ServerPlayer online) {
         if (!ledger.commit(network, online)) {
-            RSIntegrationMod.LOGGER.warn("[RSI-AsyncChain] Commit failed for player {} after {} steps",
+            RSIntegrationMod.LOGGER.warn(ctx.format("Commit failed for player {} after {} steps"),
                     online.getName().getString(), steps.size());
             online.sendSystemMessage(Component.translatable("rsi.async.error.commit_failed"));
             abort("Final commit failed");
@@ -908,7 +913,7 @@ public final class AsyncCraftChain {
 
         state = State.COMPLETED;
         Diagnostics.record(Diagnostics.Category.CHAIN_STATE, "→COMPLETED steps=" + steps.size());
-        RSIntegrationMod.LOGGER.info("[RSI-AsyncChain] COMPLETED for player {}: {} steps",
+        RSIntegrationMod.LOGGER.info(ctx.format("COMPLETED for player {}: {} steps"),
                 online.getName().getString(), steps.size());
         fireOnDone();
     }
@@ -916,7 +921,7 @@ public final class AsyncCraftChain {
     private void fireOnDone() {
         if (onDoneCallback != null) {
             try { onDoneCallback.run(); } catch (Exception e) {
-                RSIntegrationMod.LOGGER.error("[RSI-AsyncChain] onDone callback threw", e);
+                RSIntegrationMod.LOGGER.error(ctx.format("onDone callback threw"), e);
             }
         }
     }
@@ -934,7 +939,7 @@ public final class AsyncCraftChain {
         if (state == State.ABORTED || state == State.COMPLETED) return;
 
         ServerPlayer online = resolvePlayer();
-        RSIntegrationMod.LOGGER.warn("[RSI-AsyncChain] Aborting chain (state={}) for {}: {}",
+        RSIntegrationMod.LOGGER.warn(ctx.format("Aborting chain (state={}) for {}: {}"),
                 state, online != null ? online.getName().getString() : playerId, reason);
         Diagnostics.record(Diagnostics.Category.CHAIN_STATE,
                 "→ABORTED reason=" + reason + " atStep=" + currentStepIdx + "/" + steps.size());
@@ -946,7 +951,7 @@ public final class AsyncCraftChain {
             try {
                 currentDelegate.onBatchFailed(online, reason);
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.error("[RSI-AsyncChain] Error in onBatchFailed", e);
+                RSIntegrationMod.LOGGER.error(ctx.format("Error in onBatchFailed"), e);
             }
             currentDelegate = null;
         }
@@ -968,13 +973,14 @@ public final class AsyncCraftChain {
         if (online != null) {
             online.sendSystemMessage(Component.translatable("rsi.async.chain_aborted", reason));
         }
+        ledger.close();
         fireOnDone();
     }
 
     private void abortSilently(String reason) {
         if (state == State.ABORTED || state == State.COMPLETED) return;
 
-        RSIntegrationMod.LOGGER.warn("[RSI-AsyncChain] Aborting silently (state={}) for {}: {}",
+        RSIntegrationMod.LOGGER.warn(ctx.format("Aborting silently (state={}) for {}: {}"),
                 state, playerId, reason);
         Diagnostics.record(Diagnostics.Category.CHAIN_STATE,
                 "→ABORTED_SILENT reason=" + reason + " atStep=" + currentStepIdx + "/" + steps.size());
@@ -985,7 +991,7 @@ public final class AsyncCraftChain {
             try {
                 currentDelegate.onBatchFailed(null, reason);
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.error("[RSI-AsyncChain] Error in silent delegate cleanup", e);
+                RSIntegrationMod.LOGGER.error(ctx.format("Error in silent delegate cleanup"), e);
             }
             currentDelegate = null;
         }
@@ -993,6 +999,7 @@ public final class AsyncCraftChain {
         // Do NOT flush virtualInventory on abort — see abort() for rationale.
         virtualInventory.clear();
 
+        ledger.close();
         fireOnDone();
     }
 
@@ -1030,8 +1037,8 @@ public final class AsyncCraftChain {
         return "Unknown";
     }
 
-    private static void logMissingIngredient(Ingredient ing, ResourceLocation stepId) {
-        StringBuilder sb = new StringBuilder("[RSI-AsyncChain] Missing ingredient for step ");
+    private void logMissingIngredient(Ingredient ing, ResourceLocation stepId) {
+        StringBuilder sb = new StringBuilder(ctx.format("Missing ingredient for step "));
         sb.append(stepId).append(" — options: ");
         for (ItemStack stack : ing.getItems()) {
             if (!stack.isEmpty()) {
@@ -1045,7 +1052,7 @@ public final class AsyncCraftChain {
 
     private void logVirtualInventory(String context) {
         if (!RSIntegrationMod.LOGGER.isDebugEnabled()) return;
-        StringBuilder sb = new StringBuilder("[RSI-AsyncChain] VirtualInventory ");
+        StringBuilder sb = new StringBuilder(ctx.format("VirtualInventory "));
         sb.append(context).append(" (size=").append(virtualInventory.size()).append("):");
         for (ItemStack vi : virtualInventory) {
             if (vi.isEmpty()) continue;
@@ -1060,9 +1067,9 @@ public final class AsyncCraftChain {
 
     private void logLedgerState() {
         if (!RSIntegrationMod.LOGGER.isDebugEnabled()) return;
-        RSIntegrationMod.LOGGER.debug("[RSI-AsyncChain] Ledger entries={} committed={}",
+        RSIntegrationMod.LOGGER.debug(ctx.format("Ledger entries={} committed={}"),
                 ledger.size(), ledger.isCommitted());
-        RSIntegrationMod.LOGGER.debug("[RSI-AsyncChain] Network available (sample): {}",
+        RSIntegrationMod.LOGGER.debug(ctx.format("Network available (sample): {}"),
                 ledger.describePending());
     }
 }
