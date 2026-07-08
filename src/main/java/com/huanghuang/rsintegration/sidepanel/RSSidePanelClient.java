@@ -94,8 +94,6 @@ public final class RSSidePanelClient {
     static boolean isShifting;
     static final Set<UUID> gridDragKeys = new LinkedHashSet<>();
     static boolean gridDragCrossedSlots;
-    static int clickLockTicks;
-    static volatile Set<ResourceLocation> lockedItems = Set.of();
 
     // ── Tooltip bleed guard ──────────────────────────────────────
     // Set while the side panel is rendering its own tooltips, so
@@ -192,21 +190,6 @@ public final class RSSidePanelClient {
     }
 
     // ── Item key helper ──────────────────────────────────────────
-
-    public static boolean isItemLocked(ItemStack stack) {
-        if (stack == null || stack.isEmpty()) return false;
-        ResourceLocation rl = ForgeRegistries.ITEMS.getKey(stack.getItem());
-        return rl != null && lockedItems.contains(rl);
-    }
-
-    /** Called from GridScreenMouseMixin (cross-package) for optimistic client-side toggle. */
-    public static void toggleClientLock(ResourceLocation rl) {
-        Set<ResourceLocation> cur = new LinkedHashSet<>(lockedItems);
-        if (!cur.remove(rl)) cur.add(rl);
-        lockedItems = Set.copyOf(cur);
-        displayDirty = true;
-        clickLockTicks = 5;
-    }
 
     public static String keyOf(ItemStack stack) {
         if (stack == null || stack.getItem() == net.minecraft.world.item.Items.AIR) return "";
@@ -353,24 +336,6 @@ public final class RSSidePanelClient {
                 SidePanelRenderer.renderItemTooltip(g, mc.font, hs,
                         lastMouseX, lastMouseY);
                 isRenderingOurTooltip = false;
-
-                if (isItemLocked(hs)) {
-                    int col = hoveredSlotIndex % COLUMNS;
-                    int row = hoveredSlotIndex / COLUMNS - scrollRow;
-                    if (row >= 0 && row < visibleRows) {
-                        int lix = panelX + GRID_ITEM_X + col * SLOT_SIZE + 1 + 1;
-                        int liy = panelY + HEADER_H + row * SLOT_SIZE + 1 + 1;
-                        if (lastMouseX >= lix && lastMouseX < lix + 7
-                                && lastMouseY >= liy && lastMouseY < liy + 7) {
-                            isRenderingOurTooltip = true;
-                            g.renderTooltip(mc.font,
-                                    Component.translatable(
-                                            "rsi.side_panel.locked_item"),
-                                    lastMouseX, lastMouseY);
-                            isRenderingOurTooltip = false;
-                        }
-                    }
-                }
 
                 String hsKey = keyOf(hs);
                 if (!hsKey.isEmpty()

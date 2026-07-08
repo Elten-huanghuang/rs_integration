@@ -295,7 +295,7 @@ public final class CraftingResolver {
         }
         if (++ctx.ensureCalls > MAX_ENSURE_CALLS) return false;
 
-        int minReserve = RSIntegrationConfig.getProtectedReserve(ingredient, ctx.player);
+        int minReserve = RSIntegrationConfig.getProtectedReserve(ingredient);
 
         ctx.beginUndo();
         edges.beginUndo();

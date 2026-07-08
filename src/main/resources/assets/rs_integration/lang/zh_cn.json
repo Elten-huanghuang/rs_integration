@@ -299,6 +299,8 @@
   "key.rsi.mod_filter": "JEI 按模组过滤",
   
   "key.rsi.transfer_recipe": "JEI 传输配方",
+  "key.rsi.swipe_extract": "RS 网格滑动提取",
+  "rsi.swipe.extracted": "§a已从 RS 网络提取 %s 种物品",
   "rsi.side_panel.no_network": "无 RS 网络",
   "rsi.side_panel.search_hint": "搜索...",
   "rsi.side_panel.search.prefix_mod": "@模组名  按模组搜索",
@@ -336,8 +338,6 @@
   "rsi.side_panel.transferred": "§a已从网络转移 %s 个物品到物品栏",
   "rsi.side_panel.transfer_missing": "§e%s 种材料在 RS 网络中不可用",
   "rsi.side_panel.open_machine": "打开已绑定的机器",
-  "rsi.side_panel.locked_item": "已锁定 - 递归合成会保留",
-
   "rsi.error.not_bound": "§c该机器未绑定到你的 RS 网络",
   "rsi.error.protected_block": "§c你没有权限访问该机器",
   "rsi.error.chunk_unloaded": "§c目标机器所在区块未加载，请放置区块加载器",

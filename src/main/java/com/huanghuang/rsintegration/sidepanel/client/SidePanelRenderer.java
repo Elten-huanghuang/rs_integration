@@ -192,11 +192,6 @@ public final class SidePanelRenderer {
                     pose.popPose();
                 }
 
-                // Lock icon (top-left corner)
-                if (RSSidePanelClient.isItemLocked(stack)) {
-                    renderLockIcon(g, ix + 1, iy + 1);
-                }
-
                 // GUI icon for bound machines
                 String itemKey = RSSidePanelClient.keyOf(stack);
                 if (!itemKey.isEmpty() && com.huanghuang.rsintegration.sidepanel.data.BindingCache.getInstance().hasGui(itemKey)) {
@@ -469,30 +464,6 @@ public final class SidePanelRenderer {
         }
 
         pose.popPose();
-    }
-
-    // ── Lock icon ─────────────────────────────────────────────────
-
-    /** Render a 6×7 amber padlock icon at (x, y). */
-    public static void renderLockIcon(GuiGraphics g, int x, int y) {
-        int amber = 0xFFDAA520;
-        int amberLight = 0xFFF0D060;
-        int keyhole = 0xFF3C2415;
-
-        // Shackle
-        g.fill(x + 2, y, x + 4, y + 1, amberLight);
-        g.fill(x + 1, y + 1, x + 2, y + 3, amberLight);
-        g.fill(x + 4, y + 1, x + 5, y + 3, amberLight);
-
-        // Body
-        g.fill(x + 1, y + 2, x + 5, y + 7, amber);
-
-        // Keyhole
-        g.fill(x + 2, y + 4, x + 3, y + 6, keyhole);
-        g.fill(x + 3, y + 5, x + 4, y + 6, keyhole);
-
-        // Top highlight
-        g.fill(x + 2, y + 2, x + 4, y + 3, amberLight);
     }
 
     // ── Quantity formatter ───────────────────────────────────────

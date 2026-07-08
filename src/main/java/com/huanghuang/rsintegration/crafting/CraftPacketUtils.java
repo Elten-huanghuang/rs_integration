@@ -55,12 +55,26 @@ public final class CraftPacketUtils {
         try { NO_INGREDIENT_FIELD = CraftPacketUtils.class.getDeclaredField("ingredientCache"); }
         catch (NoSuchFieldException e) { throw new RuntimeException(e); }
     }
+    /**
+     * ThreadLocal guard to prevent re-entrant {@link #extractIngredients(Object)} calls.
+     * <p>
+     * When the crafting resolver checks {@code isIdentityRecipe}, it triggers ingredient
+     * extraction which can re-enter the crafting system and cause exponential regress.
+     */
+    private static final ThreadLocal<Boolean> extractingIngredients = ThreadLocal.withInitial(() -> false);
+    /**
+     * Cache of "this method does not exist on this class" so we don't re-probe the
+     * same {@code getMethod} for every recipe instance of the same type.
+     * Key: {@code className::methodName}.
+     */
+    private static final Set<String> methodAbsenceMarkers = ConcurrentHashMap.newKeySet();
 
     /** Clear ingredient extraction cache — called when recipes are reloaded. */
     public static void clearIngredientCache() {
         ingredientCache.clear();
         emptyIngredientMarkers.clear();
         ingredientFieldCache.clear();
+        methodAbsenceMarkers.clear();
     }
 
     // ── shared utilities used by all craft packets ──────────────
@@ -461,6 +475,18 @@ public final class CraftPacketUtils {
     @Nullable
     @SuppressWarnings("unchecked")
     public static List<Ingredient> extractIngredients(Object recipe) {
+        if (extractingIngredients.get()) return null;
+        extractingIngredients.set(true);
+        try {
+            return extractIngredientsImpl(recipe);
+        } finally {
+            extractingIngredients.set(false);
+        }
+    }
+
+    @Nullable
+    @SuppressWarnings("unchecked")
+    private static List<Ingredient> extractIngredientsImpl(Object recipe) {
         Class<?> clazz = recipe.getClass();
         ResourceLocation recipeId = recipe instanceof Recipe<?> r ? r.getId() : null;
 
@@ -650,8 +676,11 @@ public final class CraftPacketUtils {
     @Nullable
     @SuppressWarnings("unchecked")
     private static List<Ingredient> tryGetIngredients(Object recipe, String methodName) {
+        Class<?> clazz = recipe.getClass();
+        String key = clazz.getName() + "::" + methodName;
+        if (methodAbsenceMarkers.contains(key)) return null;
         try {
-            Object result = recipe.getClass().getMethod(methodName).invoke(recipe);
+            Object result = clazz.getMethod(methodName).invoke(recipe);
             if (result instanceof List<?> list) {
                 if (!list.isEmpty()) {
                     if (list.get(0) instanceof Ingredient) return (List<Ingredient>) list;
@@ -664,7 +693,11 @@ public final class CraftPacketUtils {
                     }
                 }
             }
-        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
+        } catch (NoSuchMethodException e) {
+            methodAbsenceMarkers.add(key);
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed: {}.{}", clazz.getSimpleName(), methodName);
+        }
         return null;
     }
 
@@ -693,7 +726,7 @@ public final class CraftPacketUtils {
                         ingredientFieldCache.put(clazz, field);
                         return (List<Ingredient>) list;
                     }
-                } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
+                } catch (Exception e) { /* skip — field may not be accessible on this hierarchy */ }
             }
             scan = scan.getSuperclass();
         }
@@ -704,8 +737,11 @@ public final class CraftPacketUtils {
     @Nullable
     @SuppressWarnings("unchecked")
     private static List<Ingredient> tryExtractStepBasedIngredients(Object recipe) {
+        Class<?> clazz = recipe.getClass();
+        String key = clazz.getName() + "::getSteps";
+        if (methodAbsenceMarkers.contains(key)) return null;
         try {
-            java.lang.reflect.Method stepsMethod = recipe.getClass().getMethod("getSteps");
+            java.lang.reflect.Method stepsMethod = clazz.getMethod("getSteps");
             List<?> steps = (List<?>) stepsMethod.invoke(recipe);
             if (steps == null || steps.isEmpty()) return null;
             List<Ingredient> all = new ArrayList<>();
@@ -718,10 +754,14 @@ public final class CraftPacketUtils {
                             if (!ing.isEmpty()) all.add(ing);
                         }
                     }
-                } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
+                } catch (Exception e) { /* skip — step structure may differ */ }
             }
             if (!all.isEmpty()) return all;
-        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
+        } catch (NoSuchMethodException e) {
+            methodAbsenceMarkers.add(key);
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed: {}.getSteps", clazz.getSimpleName());
+        }
         return null;
     }
 
@@ -738,7 +778,7 @@ public final class CraftPacketUtils {
                 Ingredient main = (Ingredient) mainField.get(recipe);
                 if (main != null && !main.isEmpty()) all.add(main);
             }
-        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
+        } catch (Exception e) { /* skip — field structure may differ */ }
 
         // Probe inputs field — list of objects each with an `ingredient` sub-field
         try {
@@ -755,11 +795,11 @@ public final class CraftPacketUtils {
                                 Ingredient ing = (Ingredient) ingField.get(ri);
                                 if (ing != null && !ing.isEmpty()) all.add(ing);
                             }
-                        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
+                        } catch (Exception e) { /* skip — input structure may differ */ }
                     }
                 }
             }
-        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
+        } catch (Exception e) { /* skip — inputs field may not exist */ }
 
         return all.isEmpty() ? null : all;
     }

@@ -2,10 +2,8 @@ package com.huanghuang.rsintegration.sidepanel;
 
 import com.huanghuang.rsintegration.sidepanel.client.SidePanelInputHandler;
 import net.minecraft.client.Minecraft;
-import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.client.event.InputEvent;
-import net.minecraftforge.registries.ForgeRegistries;
 import net.minecraftforge.client.event.ScreenEvent;
 import org.lwjgl.glfw.GLFW;
 
@@ -106,7 +104,6 @@ final class SidePanelMouseHandler {
 
         SearchController.onSearchBlur();
 
-        if (RSSidePanelClient.clickLockTicks > 0) return;
         if (!RSSidePanelClient.networkAvailable) return;
 
         // Scrollbar
@@ -194,7 +191,6 @@ final class SidePanelMouseHandler {
                 }
             }
         }
-        RSSidePanelClient.clickLockTicks = 5;
     }
 
     private static void handleExtract(int col, int row, int btn) {
@@ -202,22 +198,6 @@ final class SidePanelMouseHandler {
         if (dIdx < 0 || dIdx >= RSSidePanelClient.displayList.size()) return;
         PanelStack clickedPs = RSSidePanelClient.displayList.get(dIdx);
         if (clickedPs == null || clickedPs.zeroed || clickedPs.getStack().isEmpty()) return;
-
-        if (btn == GLFW.GLFW_MOUSE_BUTTON_LEFT && net.minecraft.client.gui.screens.Screen.hasControlDown()) {
-            // Ctrl+Left Click: toggle item lock
-            if (!RSSidePanelClient.networkAvailable) return;
-            ResourceLocation rl = ForgeRegistries.ITEMS.getKey(clickedPs.getStack().getItem());
-            if (rl != null) {
-                RSSidePanelNetworkHandler.CHANNEL.sendToServer(new RSItemLockPacket(rl));
-                // Optimistic client-side toggle — instant visual feedback before server response
-                Set<ResourceLocation> cur = new LinkedHashSet<>(RSSidePanelClient.lockedItems);
-                if (!cur.remove(rl)) cur.add(rl);
-                RSSidePanelClient.lockedItems = Set.copyOf(cur);
-                RSSidePanelClient.displayDirty = true;
-                RSSidePanelClient.clickLockTicks = 5;
-            }
-            return;
-        }
 
         ItemStack clickedItem = clickedPs.getStack();
         byte action;
@@ -234,7 +214,6 @@ final class SidePanelMouseHandler {
         }
         RSSidePanelNetworkHandler.sendClick(clickedItem, action,
                 net.minecraft.client.gui.screens.Screen.hasShiftDown(), clickedPs.getId());
-        RSSidePanelClient.clickLockTicks = 5;
 
         if (extractCount > 0) {
             UUID pk = clickedPs.getId();
@@ -292,8 +271,7 @@ final class SidePanelMouseHandler {
         }
 
         if (!RSSidePanelClient.panelVisible || RSSidePanelClient.panelHidden) return;
-        if (RSSidePanelClient.anyPanelContains(event.getMouseX(), event.getMouseY())
-                || RSSidePanelClient.clickLockTicks > 0)
+        if (RSSidePanelClient.anyPanelContains(event.getMouseX(), event.getMouseY()))
             event.setCanceled(true);
     }
 
@@ -399,7 +377,6 @@ final class SidePanelMouseHandler {
         if (mc.player == null || mc.screen == null) return;
 
         double mx = event.getMouseX(), my = event.getMouseY();
-        if (RSSidePanelClient.clickLockTicks > 0) { event.setCanceled(true); return; }
         if (!RSSidePanelClient.anyPanelContains(mx, my)) return;
         event.setCanceled(true);
         applyScrollDelta(event.getScrollDelta());

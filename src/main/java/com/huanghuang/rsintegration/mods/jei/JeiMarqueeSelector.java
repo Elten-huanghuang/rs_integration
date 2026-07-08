@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.mods.jei;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.sidepanel.client.RSIKeyBindings;
 import com.huanghuang.rsintegration.network.RSJeiPlugin;
 import com.mojang.blaze3d.platform.InputConstants;
@@ -51,6 +52,7 @@ public final class JeiMarqueeSelector {
     private static boolean potentialDrag;
     private static boolean selecting;
     private static boolean dragging;
+    private static boolean dragOnBookmarks;
     private static int dragOriginX, dragOriginY;
     private static int startX, startY, endX, endY;
 
@@ -64,12 +66,14 @@ public final class JeiMarqueeSelector {
 
     // ── Reflection cache ──
     private static volatile Field overlayContentsField;
+    private static volatile Field bookmarkContentsField;
     private static volatile Field bookmarkListField;
     private static volatile Method bookmarkCreateMethod;
     private static volatile boolean reflectionProbed;
 
     // ── Bounding-box cache (only recompute on screen resize) ──
     private static int cachedJeiMinX, cachedJeiMinY, cachedJeiMaxX, cachedJeiMaxY;
+    private static int cachedBmMinX, cachedBmMinY, cachedBmMaxX, cachedBmMaxY;
     private static int cachedScreenW, cachedScreenH;
 
     // ── Registration ──
@@ -116,30 +120,6 @@ public final class JeiMarqueeSelector {
 
         KeyMapping km;
 
-        km = RSIKeyBindings.KEY_CLEAR_SEARCH;
-        if (km != null && km.isActiveAndMatches(input)) {
-            if (!isOverVanillaGui(screen, mx, my)) {
-                runtime.getIngredientFilter().setFilterText("");
-                return true;
-            }
-        }
-
-        km = RSIKeyBindings.KEY_MOD_FILTER;
-        if (km != null && km.isActiveAndMatches(input)) {
-            IIngredientListOverlay overlay = runtime.getIngredientListOverlay();
-            if (overlay != null) {
-                var opt = overlay.getIngredientUnderMouse();
-                if (opt.isPresent()) {
-                    String modId = getModId(opt.get());
-                    if (modId != null && !modId.isEmpty()) {
-                        runtime.getIngredientFilter().setFilterText("@" + modId);
-                        clearSelection();
-                        return true;
-                    }
-                }
-            }
-        }
-
         km = RSIKeyBindings.KEY_TRANSFER_RECIPE;
         if (km != null && km.isActiveAndMatches(input)) {
             if (typingSafe && screen instanceof RecipesGui) {
@@ -169,19 +149,33 @@ public final class JeiMarqueeSelector {
     //  Drag start check
     // ═══════════════════════════════════════════════════════════
 
+    /**
+     * Checks whether a drag can start at (mx, my). Prefers bookmark overlay
+     * when the mouse is over it; otherwise checks the ingredient list.
+     * Sets {@link #dragOnBookmarks} accordingly.
+     */
     private static boolean canStartDrag(Screen screen, int mx, int my) {
         IJeiRuntime runtime = RSJeiPlugin.getRuntime();
         if (runtime == null) return false;
 
-        IIngredientListOverlay overlay = runtime.getIngredientListOverlay();
-        if (overlay == null || !overlay.isListDisplayed()) return false;
-
-        // 1. Avoid overlapping vanilla GUI elements
         if (isOverVanillaGui(screen, mx, my)) return false;
 
-        // 2. Restrict drag initiation to within the JEI item list bounding box
+        // Check bookmark overlay first (left panel)
+        if (RSIntegrationConfig.ENABLE_JEI_BOOKMARK_MARQUEE_SELECTION.get()) {
+            if (isOverBookmarkList(mx, my)) {
+                dragOnBookmarks = true;
+                return true;
+            }
+        }
+
+        // Check ingredient list overlay (right panel)
+        if (!RSIntegrationConfig.ENABLE_JEI_MARQUEE_SELECTION.get()) return false;
+
+        IIngredientListOverlay overlay = runtime.getIngredientListOverlay();
+        if (overlay == null || !overlay.isListDisplayed()) return false;
         if (!isOverJeiList(mx, my)) return false;
 
+        dragOnBookmarks = false;
         return true;
     }
 
@@ -239,6 +233,55 @@ public final class JeiMarqueeSelector {
         }
     }
 
+    /** Same as {@link #isOverJeiList} but for the bookmark panel on the left. */
+    private static boolean isOverBookmarkList(int mx, int my) {
+        Minecraft mc = Minecraft.getInstance();
+        int sw = mc.getWindow().getGuiScaledWidth();
+        int sh = mc.getWindow().getGuiScaledHeight();
+
+        if (sw == cachedScreenW && sh == cachedScreenH && cachedBmMaxX > cachedBmMinX) {
+            int padding = 30;
+            return mx >= cachedBmMinX - padding && mx <= cachedBmMaxX + padding
+                && my >= cachedBmMinY - padding && my <= cachedBmMaxY + padding;
+        }
+
+        probeReflection();
+        if (bookmarkContentsField == null) return false;
+        IJeiRuntime runtime = RSJeiPlugin.getRuntime();
+        if (runtime == null) return false;
+        IBookmarkOverlay bmOverlay = runtime.getBookmarkOverlay();
+        if (bmOverlay == null) return false;
+
+        try {
+            IngredientGridWithNavigation grid = (IngredientGridWithNavigation) bookmarkContentsField.get(bmOverlay);
+            if (grid == null) return false;
+
+            int[] minX = {Integer.MAX_VALUE}, minY = {Integer.MAX_VALUE};
+            int[] maxX = {Integer.MIN_VALUE}, maxY = {Integer.MIN_VALUE};
+
+            grid.getSlots().forEach(slot -> {
+                ImmutableRect2i area = slot.getArea();
+                if (area != null) {
+                    if (area.x() < minX[0]) minX[0] = area.x();
+                    if (area.y() < minY[0]) minY[0] = area.y();
+                    if (area.x() + area.width() > maxX[0]) maxX[0] = area.x() + area.width();
+                    if (area.y() + area.height() > maxY[0]) maxY[0] = area.y() + area.height();
+                }
+            });
+            if (minX[0] > maxX[0]) return false;
+
+            cachedBmMinX = minX[0]; cachedBmMinY = minY[0];
+            cachedBmMaxX = maxX[0]; cachedBmMaxY = maxY[0];
+            cachedScreenW = sw; cachedScreenH = sh;
+
+            int padding = 30;
+            return mx >= minX[0] - padding && mx <= maxX[0] + padding
+                && my >= minY[0] - padding && my <= maxY[0] + padding;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     // ═══════════════════════════════════════════════════════════
     //  Mouse handlers
     // ═══════════════════════════════════════════════════════════
@@ -251,15 +294,20 @@ public final class JeiMarqueeSelector {
         int my = (int) event.getMouseY();
         IJeiRuntime runtime = RSJeiPlugin.getRuntime();
 
-        // ── Middle-click over JEI area → clear search ──
-        if (event.getButton() == 2 && runtime != null && !isOverVanillaGui(screen, mx, my)) {
+        // ── Alt + middle-click over JEI area → clear search ──
+        KeyMapping km = RSIKeyBindings.KEY_CLEAR_SEARCH;
+        InputConstants.Key mouseKey = InputConstants.Type.MOUSE.getOrCreate(event.getButton());
+        if (km != null && km.isActiveAndMatches(mouseKey)
+                && runtime != null && !isOverVanillaGui(screen, mx, my)) {
             runtime.getIngredientFilter().setFilterText("");
             event.setCanceled(true);
             return;
         }
 
         // ── Alt + left-click on ingredient → filter by mod ──
-        if (event.getButton() == 0 && Screen.hasAltDown() && runtime != null) {
+        km = RSIKeyBindings.KEY_MOD_FILTER;
+        if (km != null && km.isActiveAndMatches(mouseKey)
+                && runtime != null) {
             IIngredientListOverlay overlay = runtime.getIngredientListOverlay();
             if (overlay != null) {
                 var opt = overlay.getIngredientUnderMouse();
@@ -386,7 +434,11 @@ public final class JeiMarqueeSelector {
 
         if (selecting && !dragging) {
             if (key == InputConstants.KEY_A) {
-                batchBookmark(cachedIngredients);
+                if (dragOnBookmarks) {
+                    batchUnbookmark(cachedIngredients);
+                } else {
+                    batchBookmark(cachedIngredients);
+                }
                 clearSelection();
                 event.setCanceled(true);
                 return;
@@ -413,11 +465,15 @@ public final class JeiMarqueeSelector {
     public static void onRender(ScreenEvent.Render.Post event) {
         IJeiRuntime runtime = RSJeiPlugin.getRuntime();
         if (runtime == null) { clearSelection(); return; }
-        IIngredientListOverlay overlay = runtime.getIngredientListOverlay();
-        if (overlay == null || !overlay.isListDisplayed()) {
-            clearSelection();
-            return;
+
+        boolean anyVisible;
+        if (dragOnBookmarks) {
+            anyVisible = runtime.getBookmarkOverlay() != null;
+        } else {
+            IIngredientListOverlay overlay = runtime.getIngredientListOverlay();
+            anyVisible = overlay != null && overlay.isListDisplayed();
         }
+        if (!anyVisible) { clearSelection(); return; }
 
         GuiGraphics gfx = event.getGuiGraphics();
         RenderSystem.enableBlend();
@@ -462,16 +518,25 @@ public final class JeiMarqueeSelector {
     private static void updateRealTimeSelection() {
         IJeiRuntime runtime = RSJeiPlugin.getRuntime();
         if (runtime == null) return;
-        IIngredientListOverlay overlay = runtime.getIngredientListOverlay();
-        if (overlay == null) return;
 
         probeReflection();
-        if (overlayContentsField == null) return;
 
         IngredientGridWithNavigation grid;
-        try {
-            grid = (IngredientGridWithNavigation) overlayContentsField.get(overlay);
-        } catch (Exception e) { return; }
+        if (dragOnBookmarks) {
+            if (bookmarkContentsField == null) return;
+            IBookmarkOverlay bmOverlay = runtime.getBookmarkOverlay();
+            if (bmOverlay == null) return;
+            try {
+                grid = (IngredientGridWithNavigation) bookmarkContentsField.get(bmOverlay);
+            } catch (Exception e) { return; }
+        } else {
+            if (overlayContentsField == null) return;
+            IIngredientListOverlay overlay = runtime.getIngredientListOverlay();
+            if (overlay == null) return;
+            try {
+                grid = (IngredientGridWithNavigation) overlayContentsField.get(overlay);
+            } catch (Exception e) { return; }
+        }
         if (grid == null) return;
 
         int x1 = Math.min(startX, endX);
@@ -545,6 +610,35 @@ public final class JeiMarqueeSelector {
         }
     }
 
+    private static void batchUnbookmark(List<ITypedIngredient<?>> ingredients) {
+        if (ingredients.isEmpty()) return;
+        IJeiRuntime runtime = RSJeiPlugin.getRuntime();
+        if (runtime == null) return;
+
+        probeReflection();
+        if (bookmarkListField == null || bookmarkCreateMethod == null) return;
+
+        IIngredientManager im = runtime.getIngredientManager();
+        IBookmarkOverlay bmOverlay = runtime.getBookmarkOverlay();
+        if (bmOverlay == null) return;
+
+        BookmarkList list;
+        try {
+            list = (BookmarkList) bookmarkListField.get(bmOverlay);
+        } catch (Exception e) { return; }
+        if (list == null) return;
+
+        int removed = 0;
+        for (ITypedIngredient<?> ing : ingredients) {
+            if (ing == null) continue;
+            try {
+                IBookmark bookmark = (IBookmark) bookmarkCreateMethod.invoke(null, ing, im);
+                if (bookmark != null && list.remove(bookmark)) removed++;
+            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-JEI-Marquee] bookmark remove failed", e); }
+        }
+        RSIntegrationMod.LOGGER.debug("[RSI-JEI-Marquee] Unbookmarked {} items", removed);
+    }
+
     // ═══════════════════════════════════════════════════════════
     //  Helpers
     // ═══════════════════════════════════════════════════════════
@@ -593,6 +687,7 @@ public final class JeiMarqueeSelector {
         selecting = false;
         dragging = false;
         potentialDrag = false;
+        dragOnBookmarks = false;
         startX = startY = endX = endY = 0;
         selectedSlotAreas = Collections.emptyList();
         cachedIngredients = Collections.emptyList();
@@ -611,6 +706,8 @@ public final class JeiMarqueeSelector {
             overlayContentsField.setAccessible(true);
 
             Class<?> bmOverlayClass = mezz.jei.gui.overlay.bookmarks.BookmarkOverlay.class;
+            bookmarkContentsField = bmOverlayClass.getDeclaredField("contents");
+            bookmarkContentsField.setAccessible(true);
             bookmarkListField = bmOverlayClass.getDeclaredField("bookmarkList");
             bookmarkListField.setAccessible(true);
 

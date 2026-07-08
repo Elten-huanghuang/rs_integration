@@ -298,6 +298,8 @@
   "key.rsi.mod_filter": "JEI Filter by Mod",
   
   "key.rsi.transfer_recipe": "JEI Transfer Recipe",
+  "key.rsi.swipe_extract": "RS Grid Swipe Extract",
+  "rsi.swipe.extracted": "§aExtracted %s item(s) from RS network",
   "rsi.side_panel.no_network": "No RS Network",
   "rsi.side_panel.search_hint": "Search...",
   "rsi.side_panel.search.prefix_mod": "@modname  to search by mod",
@@ -335,8 +337,6 @@
   "rsi.side_panel.transferred": "§aTransferred %s items from network to inventory",
   "rsi.side_panel.transfer_missing": "§e%s ingredient(s) not available in RS network",
   "rsi.side_panel.open_machine": "Open bound machine GUI",
-  "rsi.side_panel.locked_item": "Locked - Protected during recursive crafting",
-
   "rsi.error.not_bound": "This machine is not bound to your RS network.",
   "rsi.error.protected_block": "You don't have permission to access this machine.",
   "rsi.error.chunk_unloaded": "The target machine's chunk is not loaded. Place a Chunk Loader nearby.",

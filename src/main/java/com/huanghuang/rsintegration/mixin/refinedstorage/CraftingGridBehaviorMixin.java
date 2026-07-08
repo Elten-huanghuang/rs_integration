@@ -23,14 +23,8 @@ public class CraftingGridBehaviorMixin {
             ),
             remap = false
     )
-    private ItemStack rsi$redirectExtract(
-            INetwork network,
-            ItemStack stack, int size, int flags, Action action
-    ) {
+    private ItemStack rsi$redirectExtract(INetwork network, ItemStack stack, int size, int flags, Action action) {
         if (!RSIntegrationConfig.ENABLE_BINDING.get()) return network.extractItem(stack, size, flags, action);
-        // Two-stage: exact NBT first, then NBT-agnostic fallback.
-        // Preserves deterministic extraction for specific-NBT items
-        // (e.g. Sharpness 10 needed for Sharpness 15 book recipe).
         ItemStack result = network.extractItem(stack, size, flags, action);
         if (!result.isEmpty()) return result;
         return network.extractItem(stack, size, flags & ~IComparer.COMPARE_NBT, action);
@@ -45,13 +39,8 @@ public class CraftingGridBehaviorMixin {
             ),
             remap = false
     )
-    private boolean rsi$redirectIsEqual(
-            IComparer comparer,
-            ItemStack a, ItemStack b, int flags
-    ) {
+    private boolean rsi$redirectIsEqual(IComparer comparer, ItemStack a, ItemStack b, int flags) {
         if (!RSIntegrationConfig.ENABLE_BINDING.get()) return comparer.isEqual(a, b, flags);
-        // If the ingredient has NBT, require exact match.
-        // If not, NBT-agnostic is fine (generic item recipe).
         if (a.hasTag()) return comparer.isEqual(a, b, flags);
         return comparer.isEqual(a, b, flags & ~IComparer.COMPARE_NBT);
     }

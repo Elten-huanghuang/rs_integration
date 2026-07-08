@@ -80,10 +80,6 @@ public final class RSSidePanelNetworkHandler {
                 RSBindingSyncPacket::encode, RSBindingSyncPacket::decode, RSBindingSyncPacket::handle);
         ch.registerMessage(NetworkHandler.nextId(), ConfigSyncPacket.class,
                 ConfigSyncPacket::encode, ConfigSyncPacket::decode, ConfigSyncPacket::handle);
-        ch.registerMessage(NetworkHandler.nextId(), RSItemLockPacket.class,
-                RSItemLockPacket::encode, RSItemLockPacket::decode, RSItemLockPacket::handle);
-        ch.registerMessage(NetworkHandler.nextId(), RSItemLockSyncPacket.class,
-                RSItemLockSyncPacket::encode, RSItemLockSyncPacket::decode, RSItemLockSyncPacket::handle);
         ch.registerMessage(NetworkHandler.nextId(), ReturnToRSPacket.class,
                 ReturnToRSPacket::encode, ReturnToRSPacket::decode, ReturnToRSPacket::handle);
         registered = true;
@@ -281,13 +277,6 @@ public final class RSSidePanelNetworkHandler {
         }
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.debug("[RSI] Failed to build binding info", e);
-        }
-
-        // Piggyback lock sync
-        Set<ResourceLocation> locked = PlayerLockManager.getLockedItems(player);
-        if (!locked.isEmpty()) {
-            CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
-                    new RSItemLockSyncPacket(new ArrayList<>(locked)));
         }
 
         int total = ids.size();
@@ -549,17 +538,6 @@ public final class RSSidePanelNetworkHandler {
     /** @return true if the player has an active storage-cache listener. */
     public static boolean hasListener(UUID playerId) {
         return playerListeners.containsKey(playerId);
-    }
-
-    @SubscribeEvent
-    public static void onPlayerLogin(PlayerEvent.PlayerLoggedInEvent event) {
-        if (event.getEntity() instanceof ServerPlayer sp) {
-            Set<ResourceLocation> locked = PlayerLockManager.getLockedItems(sp);
-            if (!locked.isEmpty()) {
-                CHANNEL.send(PacketDistributor.PLAYER.with(() -> sp),
-                        new RSItemLockSyncPacket(new ArrayList<>(locked)));
-            }
-        }
     }
 
     @SubscribeEvent

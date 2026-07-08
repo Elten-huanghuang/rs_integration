@@ -1,8 +1,6 @@
 package com.huanghuang.rsintegration.config;
 
-import com.huanghuang.rsintegration.sidepanel.PlayerLockManager;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
@@ -11,9 +9,7 @@ import net.minecraftforge.fml.ModLoadingContext;
 import net.minecraftforge.fml.config.ModConfig;
 import net.minecraftforge.registries.ForgeRegistries;
 
-import javax.annotation.Nullable;
 import java.util.List;
-import java.util.Set;
 
 public final class RSIntegrationConfig {
 
@@ -55,11 +51,15 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.BooleanValue ENABLE_VANILLA_MACHINES;
     public static ForgeConfigSpec.BooleanValue ENABLE_SOPHISTICATED_BACKPACKS;
     public static ForgeConfigSpec.BooleanValue ENABLE_JEI;
+    public static ForgeConfigSpec.BooleanValue ENABLE_JEI_MARQUEE_SELECTION;
+    public static ForgeConfigSpec.BooleanValue ENABLE_JEI_BOOKMARK_MARQUEE_SELECTION;
+    public static ForgeConfigSpec.BooleanValue ENABLE_RS_GRID_SWIPE_EXTRACT;
     public static ForgeConfigSpec.BooleanValue DEPOSIT_UPGRADE_RS;
     public static ForgeConfigSpec.BooleanValue ENABLE_MAJ_ACCESSORY_COMPRESSION;
     public static ForgeConfigSpec.BooleanValue ENABLE_MACHINE_GUI_TABS;
     public static ForgeConfigSpec.BooleanValue ENABLE_CONTAINER_TRANSFER;
     public static ForgeConfigSpec.BooleanValue ENABLE_RS_SIDE_PANEL;
+    public static ForgeConfigSpec.BooleanValue ENABLE_RS_PASSIVE_EFFECTS;
     public static ForgeConfigSpec.BooleanValue DIAGNOSTIC_VERBOSE_LOGGING;
 
     // ── per-mod tuning (server, per-world) ───────────────────────
@@ -183,6 +183,22 @@ public final class RSIntegrationConfig {
                 .comment("Show '+' buttons in JEI recipe views for remote crafting.",
                         "Client-side; the server value is synced to the client.")
                 .define("enableJeiIntegration", true);
+        ENABLE_JEI_MARQUEE_SELECTION = c
+                .comment("Enable drag-to-select (marquee) in JEI ingredient list for batch bookmarking/hiding.",
+                        "Disable if you find drag gestures interfere with your workflow.",
+                        "Client-side; the server value is synced to the client.")
+                .define("enableJeiMarqueeSelection", true);
+        ENABLE_JEI_BOOKMARK_MARQUEE_SELECTION = c
+                .comment("Enable drag-to-select (marquee) in JEI bookmark panel for batch removal/hiding.",
+                        "Works the same as ingredient list marquee, but on the left bookmark panel.",
+                        "Client-side; the server value is synced to the client.")
+                .define("enableJeiBookmarkMarqueeSelection", true);
+        ENABLE_RS_GRID_SWIPE_EXTRACT = c
+                .comment("Enable mouse swipe-to-extract on the RS grid.",
+                        "Hold Ctrl and drag across grid slots to extract one of each item you pass over.",
+                        "Disable if you find this gesture interferes with your normal grid usage.",
+                        "Client-side; the server value is synced to the client.")
+                .define("enableRSGridSwipeExtract", true);
         ENABLE_FARMINGFORBLOCKHEADS = c
                 .comment("Enable FarmingForBlockheads Market integration for recursive crafting.",
                         "Allows the Market to participate in JEI-to-RS auto-crafting chains.",
@@ -211,6 +227,19 @@ public final class RSIntegrationConfig {
                         "that match the upgrade's whitelist filter. Accessories are combined",
                         "two at a time (max efficiency + another) until they reach 100%.")
                 .define("enableMajAccessoryCompression", true);
+        c.pop();
+
+        c.push("passiveEffects");
+        ENABLE_RS_PASSIVE_EFFECTS = c
+                .comment("Enable RS passive effects system. Items stored in a bound RS network",
+                        "that say \"works from inventory/hotbar\" will grant their passive effects",
+                        "to the player as if carried in the inventory.",
+                        "Three layers:",
+                        "  Phase 1 — Attribute modifiers (zero-config, ~50-70% of items),",
+                        "  Phase 2 — inventoryTick simulation (JSON whitelist, ~20-35% of items),",
+                        "  Phase 3 — event-driven Mixin redirect (per-item, ~5-15% of items).",
+                        "Disable this if you prefer vanilla inventory-only passive mechanics.")
+                .define("enableRSPassiveEffects", true);
         c.pop();
 
         c.push("containerTransfer");
@@ -422,26 +451,6 @@ public final class RSIntegrationConfig {
             if (item == null) continue;
             if (ingredient.test(new ItemStack(item))) {
                 return reserve;
-            }
-        }
-        return 0;
-    }
-
-    /**
-     * Returns the minimum reserve count, checking both config-protected items
-     * and player-locked items. Player locks use the same reserve count from config.
-     */
-    public static int getProtectedReserve(Ingredient ingredient, @Nullable ServerPlayer player) {
-        int reserve = getProtectedReserve(ingredient);
-        if (reserve > 0) return reserve;
-        if (player == null) return 0;
-        Set<ResourceLocation> locked = PlayerLockManager.getLockedItems(player);
-        if (locked.isEmpty()) return 0;
-        for (ItemStack stack : ingredient.getItems()) {
-            if (stack.isEmpty()) continue;
-            ResourceLocation rl = ForgeRegistries.ITEMS.getKey(stack.getItem());
-            if (rl != null && locked.contains(rl)) {
-                return PROTECTED_RESERVE.get();
             }
         }
         return 0;

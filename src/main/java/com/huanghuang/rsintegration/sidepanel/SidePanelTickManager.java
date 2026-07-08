@@ -39,7 +39,6 @@ final class SidePanelTickManager {
         if (!RSSidePanelClient.panelVisible) return;
 
         RSSidePanelClient.tickCounter++;
-        if (RSSidePanelClient.clickLockTicks > 0) RSSidePanelClient.clickLockTicks--;
         RSSidePanelClient.isShifting = Screen.hasShiftDown();
         if (RSSidePanelClient.gridDragging
                 && GLFW.glfwGetMouseButton(mc.getWindow().getWindow(), GLFW.GLFW_MOUSE_BUTTON_LEFT) == GLFW.GLFW_RELEASE)
