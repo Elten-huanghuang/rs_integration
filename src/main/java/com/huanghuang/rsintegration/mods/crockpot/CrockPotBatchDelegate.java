@@ -30,8 +30,7 @@ import net.minecraftforge.items.ItemHandlerHelper;
 import javax.annotation.Nullable;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -51,15 +50,10 @@ public final class CrockPotBatchDelegate extends com.huanghuang.rsintegration.cr
     private final float[] catMins = new float[CrockPotRecipeHandler.CAT_COUNT];
     private final float[] catMaxs = new float[CrockPotRecipeHandler.CAT_COUNT];
 
-    // Reflection handles — loaded once
-    private static volatile boolean reflectionProbed;
+    // Reflection handle for the pot's private item handler — loaded once
+    private static volatile boolean itemHandlerProbed;
     private static volatile java.lang.reflect.Field itemHandlerField;
-    private static volatile Object[] foodCategoryValues;
-    private static volatile Method getFoodValuesMethod;
-    private static volatile Method fvGetMethod;
 
-    // Cache: Item → food value float[10]
-    private final Map<Item, float[]> foodValueCache = new HashMap<>();
     // Items extracted outside the ledger (food-value fillers) for refund on failure
     private final List<ItemStack> extraExtractedItems = new ArrayList<>();
 
@@ -91,7 +85,6 @@ public final class CrockPotBatchDelegate extends com.huanghuang.rsintegration.cr
             float[][] constraints = CrockPotRecipeHandler.parseCategoryConstraints(found);
             System.arraycopy(constraints[0], 0, catMins, 0, CrockPotRecipeHandler.CAT_COUNT);
             System.arraycopy(constraints[1], 0, catMaxs, 0, CrockPotRecipeHandler.CAT_COUNT);
-            foodValueCache.clear();
         }
 
         RSIntegrationMod.LOGGER.debug("[RSI-Batch-CrockPot] validateAndInit OK: recipe={} potLevel={} hasCatConstraints={}",
@@ -329,159 +322,34 @@ public final class CrockPotBatchDelegate extends com.huanghuang.rsintegration.cr
      */
     private List<ItemStack> findAndExtractFoodValueItems(float[] currentFV, int remaining,
                                                           @Nullable IItemHandler itemHandler) {
-        List<ItemStack> result = new ArrayList<>();
-        float[] current = Arrays.copyOf(currentFV, CrockPotRecipeHandler.CAT_COUNT);
+        if (!CrockPotFoodValues.isReady()) return null;
 
-        ensureFoodValueReflection();
-        if (CrockPotReflection.foodValuesDefinitionClass == null || CrockPotReflection.foodValuesClass == null || foodCategoryValues == null) {
+        // Snapshot the network as selection candidates (respecting the pot's slot filter).
+        List<CrockPotFoodValues.Candidate> candidates = new ArrayList<>();
+        for (var entry : network.getItemStorageCache().getList().getStacks()) {
+            ItemStack stack = entry.getStack();
+            if (stack.isEmpty() || stack.getCount() <= 0) continue;
+            if (itemHandler != null && !itemHandler.isItemValid(0, stack)) continue;
+            candidates.add(new CrockPotFoodValues.Candidate(stack, stack.getCount()));
+        }
+
+        // Same selection the plan preview ran — guarantees the craft consumes the previewed items.
+        List<ItemStack> plan = CrockPotFoodValues.select(
+                currentFV, catMins, catMaxs, remaining, candidates, myLevel);
+        if (plan == null) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Batch-CrockPot] findFV: no item set satisfies constraints. currentFV=[{}]",
+                    fvToString(currentFV));
             return null;
         }
 
-        int consecutiveFailures = 0;
-        for (int r = 0; r < remaining; r++) {
-            boolean constraintsMet = true;
-            for (int c = 0; c < CrockPotRecipeHandler.CAT_COUNT; c++) {
-                if (catMins[c] - current[c] > 0.001f) { constraintsMet = false; break; }
-            }
-
-            ItemStack bestItem = ItemStack.EMPTY;
-            float bestScore = -1f;
-
-            var stacks = network.getItemStorageCache().getList().getStacks();
-            for (var entry : stacks) {
-                ItemStack stack = entry.getStack();
-                if (stack.isEmpty() || stack.getCount() <= 0) continue;
-
-                if (itemHandler != null && !itemHandler.isItemValid(0, stack)) continue;
-
-                float[] fv = computeItemFoodValues(stack);
-                if (fv == null) continue;
-
-                if (violatesMax(current, fv)) continue;
-
-                float score;
-                if (!constraintsMet) {
-                    // Reward filling deficits; penalize noise in categories
-                    // the recipe doesn't target (avoids competing recipes).
-                    score = 0;
-                    for (int c = 0; c < CrockPotRecipeHandler.CAT_COUNT; c++) {
-                        float deficit = catMins[c] - current[c];
-                        if (deficit > 0) {
-                            score += Math.min(fv[c], deficit) * 10f;
-                        } else if (fv[c] > 0 && catMins[c] <= 0.001f) {
-                            score -= fv[c] * 5f;
-                        }
-                    }
-                } else {
-                    // Constraints met: prefer items whose food values are in
-                    // categories the recipe actually targets. Penalize values
-                    // in non-target categories — they add noise that can
-                    // shift the output to a different recipe.
-                    score = 0;
-                    boolean hasAnyFV = false;
-                    for (int c = 0; c < CrockPotRecipeHandler.CAT_COUNT; c++) {
-                        if (fv[c] <= 0) continue;
-                        hasAnyFV = true;
-                        if (catMins[c] > 0.001f) {
-                            score += fv[c] * 10f;
-                        } else {
-                            score -= fv[c] * 5f;
-                        }
-                    }
-                    if (!hasAnyFV) {
-                        score = 50; // completely neutral filler
-                    }
-                }
-
-                if (score > bestScore) {
-                    bestScore = score;
-                    bestItem = stack;
-                }
-            }
-
-            // If strict pass found nothing and constraints are met, try the
-            // configured filler item as a safe neutral fallback.
-            if (bestItem.isEmpty() && constraintsMet) {
-                bestItem = tryExtractFillerItem();
-                if (!bestItem.isEmpty()) bestScore = 99;
-            }
-
-            if (bestItem.isEmpty()) {
-                RSIntegrationMod.LOGGER.warn("[RSI-Batch-CrockPot] findFV: no valid item. constraintsMet={} currentFV=[{}]",
-                        constraintsMet, fvToString(current));
-                return null;
-            }
-
-            ItemStack extracted = network.extractItem(bestItem.copyWithCount(1), 1, Action.PERFORM);
-            if (extracted.isEmpty()) {
-                if (++consecutiveFailures > 3) return null;
-                r--;
-                continue;
-            }
-            consecutiveFailures = 0;
-
-            {
-                float[] sfv = computeItemFoodValues(extracted);
-                RSIntegrationMod.LOGGER.info("[RSI-Batch-CrockPot] findFV: round {} '{}' score={} FV=[{}]",
-                        result.size(), extracted.getHoverName().getString(), bestScore,
-                        sfv != null ? fvToString(sfv) : "null");
-            }
-
+        List<ItemStack> result = new ArrayList<>();
+        for (ItemStack want : plan) {
+            ItemStack extracted = network.extractItem(want.copyWithCount(1), 1, Action.PERFORM);
+            if (extracted.isEmpty()) return null; // network changed since selection — caller refunds
             result.add(extracted);
             extraExtractedItems.add(extracted.copy());
-            float[] fv = computeItemFoodValues(extracted);
-            if (fv != null) {
-                for (int c = 0; c < CrockPotRecipeHandler.CAT_COUNT; c++) {
-                    current[c] += fv[c];
-                }
-            }
-        }
-
-        for (int c = 0; c < CrockPotRecipeHandler.CAT_COUNT; c++) {
-            if (current[c] < catMins[c] - 0.001f) return null;
         }
         return result;
-    }
-
-    /**
-     * Try to extract the configured filler item from RS, bypassing isItemValid.
-     * Validates post-extraction that the item passes the max-constraint check
-     * with its actual food values (if any).
-     */
-    private ItemStack tryExtractFillerItem() {
-        Ingredient filler = CrockPotRecipeHandler.resolveFillerIngredient();
-        if (filler == null) return null;
-        for (ItemStack candidate : filler.getItems()) {
-            if (candidate.isEmpty()) continue;
-            ItemStack extracted = network.extractItem(candidate.copy(), 1, Action.PERFORM);
-            if (!extracted.isEmpty()) {
-                float[] fv = computeItemFoodValues(extracted);
-                if (fv != null) {
-                    for (int c = 0; c < CrockPotRecipeHandler.CAT_COUNT; c++) {
-                        float sum = 0;
-                        for (ItemStack already : extraExtractedItems) {
-                            float[] afv = computeItemFoodValues(already);
-                            if (afv != null) sum += afv[c];
-                        }
-                        if (fv[c] > catMaxs[c] - sum + 0.001f) {
-                            // Filler violates max — refund and skip
-                            network.insertItem(extracted, extracted.getCount(), Action.PERFORM);
-                            return null;
-                        }
-                    }
-                }
-                RSIntegrationMod.LOGGER.info("[RSI-Batch-CrockPot] findFV: using config filler '{}'", extracted.getHoverName().getString());
-                return extracted;
-            }
-        }
-        return null;
-    }
-
-    private boolean violatesMax(float[] current, float[] fv) {
-        for (int c = 0; c < CrockPotRecipeHandler.CAT_COUNT; c++) {
-            if (current[c] + fv[c] > catMaxs[c] + 0.001f) return true;
-        }
-        return false;
     }
 
     /** Build a message listing categories whose max=0 block all available items. */
@@ -499,12 +367,6 @@ public final class CrockPotBatchDelegate extends com.huanghuang.rsintegration.cr
         return "§7Blocked (max=0): " + sb;
     }
 
-    private static float sumPositive(float[] fv) {
-        float s = 0;
-        for (float v : fv) if (v > 0) s += v;
-        return s;
-    }
-
     private static String fvToString(float[] fv) {
         String[] cats = {"M", "MO", "F", "E", "FR", "V", "D", "S", "FZ", "I"};
         StringBuilder sb = new StringBuilder();
@@ -514,64 +376,63 @@ public final class CrockPotBatchDelegate extends com.huanghuang.rsintegration.cr
         return sb.isEmpty() ? "empty" : sb.toString().trim();
     }
 
-    // ── food-value computation via reflection ────────────────────
-
-    private static void ensureFoodValueReflection() {
-        if (reflectionProbed) return;
-        reflectionProbed = true;
-        try {
-            foodCategoryValues = (Object[]) CrockPotReflection.foodCategoryClass.getMethod("values").invoke(null);
-            getFoodValuesMethod = CrockPotReflection.foodValuesDefinitionClass.getMethod("getFoodValues", ItemStack.class, Level.class);
-            fvGetMethod = CrockPotReflection.foodValuesClass.getMethod("get", CrockPotReflection.foodCategoryClass);
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Batch-CrockPot] FoodValue reflection probe failed", e);
-        }
-    }
-
-    private float[] computeItemFoodValues(ItemStack stack) {
-        if (stack.isEmpty()) return null;
-        Item item = stack.getItem();
-        float[] cached = foodValueCache.get(item);
-        if (cached != null) return cached;
-
-        ensureFoodValueReflection();
-        if (getFoodValuesMethod == null || fvGetMethod == null || foodCategoryValues == null) {
-            return null;
-        }
-
-        try {
-            Object fv = getFoodValuesMethod.invoke(null, stack, myLevel);
-            if (fv == null) return null;
-
-            float[] result = new float[CrockPotRecipeHandler.CAT_COUNT];
-            for (int i = 0; i < CrockPotRecipeHandler.CAT_COUNT; i++) {
-                result[i] = (float) fvGetMethod.invoke(fv, foodCategoryValues[i]);
-            }
-            foodValueCache.put(item, result);
-
-            // Diagnostic: log first few computed items to verify reflection works
-            if (foodValueCache.size() <= 3) {
-                RSIntegrationMod.LOGGER.info("[RSI-Batch-CrockPot] computeFV: {} -> [{}]",
-                        stack.getHoverName().getString(), fvToString(result));
-            }
-            return result;
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Batch-CrockPot] computeItemFoodValues failed for {}", stack.getHoverName().getString(), e);
-            return null;
-        }
-    }
+    // ── food-value computation ───────────────────────────────────
 
     private float[] computeCombinedFoodValues(List<ItemStack> items) {
-        float[] total = new float[CrockPotRecipeHandler.CAT_COUNT];
-        for (ItemStack stack : items) {
-            float[] fv = computeItemFoodValues(stack);
-            if (fv != null) {
-                for (int c = 0; c < CrockPotRecipeHandler.CAT_COUNT; c++) {
-                    total[c] += fv[c];
-                }
+        return CrockPotFoodValues.combined(items, myLevel);
+    }
+
+    /**
+     * Plan-build helper for pure-category Crock Pot recipes, which carry no fixed ingredient list —
+     * a match is decided by the summed food values of the pot's contents. Runs the same food-value
+     * selection the batch delegate uses at craft time so the plan preview shows exactly the items the
+     * craft will place. Returns null if the network cannot satisfy the recipe's category constraints.
+     */
+    @Nullable
+    public static List<IngredientSpec> buildCategoryPlanIngredients(Recipe<?> recipe,
+                                                                    @Nullable INetwork network, Level level) {
+        if (network == null || !CrockPotFoodValues.isReady()) return null;
+
+        List<IngredientSpec> result = new ArrayList<>();
+        List<ItemStack> fixedStacks = new ArrayList<>();
+        int usedSlots = 0;
+
+        // Fixed MustContain requirements first (empty for pure-category recipes).
+        List<IngredientSpec> fixed = CrockPotRecipeHandler.getSpecificIngredients(recipe, false);
+        if (fixed != null) {
+            for (IngredientSpec spec : fixed) {
+                if (spec.isEmpty()) continue;
+                result.add(spec);
+                usedSlots += spec.count();
+                ItemStack[] matches = spec.ingredient().getItems();
+                if (matches.length > 0) fixedStacks.add(matches[0].copyWithCount(spec.count()));
             }
         }
-        return total;
+
+        int remaining = CrockPotRecipeHandler.getPotLevel(recipe) - usedSlots;
+        if (remaining <= 0) return result.isEmpty() ? null : result;
+
+        float[][] constraints = CrockPotRecipeHandler.parseCategoryConstraints(recipe);
+        float[] startFV = CrockPotFoodValues.combined(fixedStacks, level);
+
+        List<CrockPotFoodValues.Candidate> candidates = new ArrayList<>();
+        for (var entry : network.getItemStorageCache().getList().getStacks()) {
+            ItemStack stack = entry.getStack();
+            if (stack.isEmpty() || stack.getCount() <= 0) continue;
+            candidates.add(new CrockPotFoodValues.Candidate(stack, stack.getCount()));
+        }
+
+        List<ItemStack> chosen = CrockPotFoodValues.select(
+                startFV, constraints[0], constraints[1], remaining, candidates, level);
+        if (chosen == null) return null;
+
+        // Merge selected filler by item into IngredientSpecs (e.g. "apple ×3").
+        LinkedHashMap<Item, Integer> counts = new LinkedHashMap<>();
+        for (ItemStack st : chosen) counts.merge(st.getItem(), 1, Integer::sum);
+        for (Map.Entry<Item, Integer> e : counts.entrySet()) {
+            result.add(new IngredientSpec(Ingredient.of(new ItemStack(e.getKey())), e.getValue()));
+        }
+        return result.isEmpty() ? null : result;
     }
 
     private void refundExtraExtracted() {
@@ -659,8 +520,8 @@ public final class CrockPotBatchDelegate extends com.huanghuang.rsintegration.cr
     // ── reflection helpers ───────────────────────────────────────
 
     private static void probeReflection() {
-        ensureFoodValueReflection();
-        if (itemHandlerField != null) return;
+        if (itemHandlerProbed) return;
+        itemHandlerProbed = true;
         try {
             itemHandlerField = CrockPotReflection.crockPotBEClass.getDeclaredField("itemHandler");
             itemHandlerField.setAccessible(true);

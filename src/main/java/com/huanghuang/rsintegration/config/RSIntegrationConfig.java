@@ -83,6 +83,10 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.IntValue SIDE_PANEL_EXTRACTION_TIMEOUT;
     public static ForgeConfigSpec.IntValue CRAFTING_MAX_DEPTH;
     public static ForgeConfigSpec.IntValue CRAFTING_MAX_STEPS;
+    public static ForgeConfigSpec.IntValue RECIPE_TREE_MAX_DEPTH;
+    public static ForgeConfigSpec.IntValue RECIPE_TREE_MAX_NODES;
+    public static ForgeConfigSpec.IntValue RECIPE_TREE_BATCH_DEBOUNCE_MS;
+    public static ForgeConfigSpec.IntValue RECIPE_TREE_MAX_CANDIDATES;
 
     // ── client-only ──────────────────────────────────────────────
     public static ForgeConfigSpec.IntValue RS_SIDE_PANEL_X;
@@ -354,6 +358,26 @@ public final class RSIntegrationConfig {
                         "Prevents runaway plans from consuming excessive server resources.",
                         "Range: 256-16384.")
                 .defineInRange("craftingMaxSteps", 4096, 256, 16384);
+        RECIPE_TREE_MAX_DEPTH = s
+                .comment("Maximum depth for the client-side recipe tree view.",
+                        "Limits how many nested layers the tree renders.",
+                        "Range: 4-32.")
+                .defineInRange("recipeTreeMaxDepth", 16, 4, 32);
+        RECIPE_TREE_MAX_NODES = s
+                .comment("Maximum number of nodes in the recipe tree.",
+                        "Prevents the tree renderer from consuming excessive client resources.",
+                        "Range: 64-4096.")
+                .defineInRange("recipeTreeMaxNodes", 512, 64, 4096);
+        RECIPE_TREE_BATCH_DEBOUNCE_MS = s
+                .comment("Batch count scroll debounce in milliseconds for the recipe tree.",
+                        "Shorter = more responsive; longer = fewer server round-trips.",
+                        "Range: 100-2000.")
+                .defineInRange("recipeTreeBatchDebounceMs", 300, 100, 2000);
+        RECIPE_TREE_MAX_CANDIDATES = s
+                .comment("Maximum number of alternative recipes shown in a tree node's dropdown.",
+                        "Nodes with more alternatives than this are marked 'limited' and the extras are hidden.",
+                        "Range: 2-32.")
+                .defineInRange("recipeTreeMaxCandidates", 8, 2, 32);
         PROTECTED_ITEMS = s
                 .comment("Items that should be kept in reserve during recursive auto-crafting.",
                         "When a recipe would consume these items, the system first crafts extra",

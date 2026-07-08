@@ -110,6 +110,15 @@ public final class PlanResponsePacket {
         buf.writeBoolean(plan.executionMachineSupportsGui());
         buf.writeBoolean(plan.baseItem() != null);
         if (plan.baseItem() != null) buf.writeItem(plan.baseItem());
+        // boundMachineTypes availability passport
+        buf.writeVarInt(plan.boundMachineTypes().size());
+        for (String mt : plan.boundMachineTypes()) buf.writeUtf(mt);
+        // Leftovers (overproduction from integer batch rounding)
+        buf.writeVarInt(plan.leftovers().size());
+        for (Map.Entry<Item, Integer> e : plan.leftovers().entrySet()) {
+            buf.writeResourceLocation(net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(e.getKey()));
+            buf.writeVarInt(e.getValue());
+        }
     }
 
     public static PlanResponsePacket decode(FriendlyByteBuf buf) {
@@ -212,11 +221,24 @@ public final class PlanResponsePacket {
         boolean embersCodeFromCache = buf.readBoolean();
         boolean executionMachineSupportsGui = buf.readBoolean();
         ItemStack baseItem = buf.readBoolean() ? buf.readItem() : null;
+        // boundMachineTypes availability passport
+        int boundMtCount = buf.readVarInt();
+        Set<String> boundMachineTypes = new LinkedHashSet<>();
+        for (int i = 0; i < boundMtCount; i++) boundMachineTypes.add(buf.readUtf());
+        // Leftovers (overproduction)
+        int leftoverCount = buf.readVarInt();
+        Map<Item, Integer> leftovers = new LinkedHashMap<>();
+        for (int i = 0; i < leftoverCount; i++) {
+            Item item = net.minecraftforge.registries.ForgeRegistries.ITEMS.getValue(buf.readResourceLocation());
+            int cnt = buf.readVarInt();
+            if (item != null) leftovers.put(item, cnt);
+        }
         return new PlanResponsePacket(new PlanResponse(success, targetName, targetResult,
                 steps, materials, missing, recipeId,
                 execModType, execDim, execX, execY, execZ, modWarnings, repeatCount,
                 embersCode, embersAspectNames, embersInputNames, embersSeed, embersCanInfer,
-                embersCodeFromCache, executionMachineSupportsGui, baseItem));
+                embersCodeFromCache, executionMachineSupportsGui, baseItem, boundMachineTypes,
+                leftovers));
     }
 
     @SuppressWarnings("resource")

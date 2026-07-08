@@ -17,17 +17,18 @@ public final class CrockPotReflection {
     public static boolean ready;
 
     static {
-        register("com.sihenzhang.crockpot.block.entity.CrockPotBlockEntity", "crockPotBEClass");
-        register("com.sihenzhang.crockpot.base.FoodCategory", "foodCategoryClass");
-        register("com.sihenzhang.crockpot.base.FoodValues", "foodValuesClass");
-        register("com.sihenzhang.crockpot.base.FoodValuesDefinition", "foodValuesDefinitionClass");
+        register("com.sihenzhang.crockpot.block.entity.CrockPotBlockEntity", "crockPotBEClass", true);
+        register("com.sihenzhang.crockpot.base.FoodCategory", "foodCategoryClass", true);
+        register("com.sihenzhang.crockpot.base.FoodValues", "foodValuesClass", true);
+        // Moved from base to recipe package in CrockPot 1.0.4; still exposes static getFoodValues(ItemStack, Level).
+        register("com.sihenzhang.crockpot.recipe.FoodValuesDefinition", "foodValuesDefinitionClass", true);
     }
 
-    private static void register(String className, String fieldName) {
+    private static void register(String className, String fieldName, boolean required) {
         String description = className.substring(className.lastIndexOf('.') + 1);
         try {
             java.lang.reflect.Field targetField = CrockPotReflection.class.getDeclaredField(fieldName);
-            ContractValidation.register(new ReflectionContract(MOD, description, className, true));
+            ContractValidation.register(new ReflectionContract(MOD, description, className, required));
             ContractValidation.registerTarget(description, targetField);
         } catch (NoSuchFieldException e) {
             throw new RuntimeException("CrockPotReflection field not found: " + fieldName, e);

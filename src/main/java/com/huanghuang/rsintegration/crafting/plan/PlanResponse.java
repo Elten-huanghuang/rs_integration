@@ -7,6 +7,7 @@ import javax.annotation.Nullable;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Full crafting plan sent from server to client.
@@ -34,7 +35,9 @@ public record PlanResponse(
         boolean embersCanInfer,               // true when a tablet is bound and Mode 1 is available
         boolean embersCodeFromCache,          // true when embersCode was loaded from KnownCodeSavedData (previously inferred)
         boolean executionMachineSupportsGui,  // true when the bound execution machine supports remote GUI
-        @Nullable ItemStack baseItem          // JEI-provided base item for FA ApplyModifierRecipe prefill
+        @Nullable ItemStack baseItem,         // JEI-provided base item for FA ApplyModifierRecipe prefill
+        Set<String> boundMachineTypes,        // v3.4 availability passport: modType ids of machines the player has bound
+        Map<Item, Integer> leftovers          // overproduction from integer batch rounding: item → surplus count
 ) {
     public record Availability(int needed, int available) {
         public boolean isEnough() { return available >= needed; }
@@ -47,7 +50,8 @@ public record PlanResponse(
                         List<String> missing, String recipeId) {
         this(success, targetName, targetResult, steps, materials, missing, recipeId,
                 null, null, 0, 0, 0, Collections.emptyList(), 1,
-                null, null, null, 0, false, false, false, null);
+                null, null, null, 0, false, false, false, null, Collections.emptySet(),
+                Collections.emptyMap());
     }
 
     /** Backward-compat: no mod warnings. */
@@ -60,7 +64,8 @@ public record PlanResponse(
         this(success, targetName, targetResult, steps, materials, missing, recipeId,
                 executionModTypeId, executionDim, executionPosX, executionPosY, executionPosZ,
                 Collections.emptyList(), 1,
-                null, null, null, 0, false, false, false, null);
+                null, null, null, 0, false, false, false, null, Collections.emptySet(),
+                Collections.emptyMap());
     }
 
     /** Backward-compat: no embers data. */
@@ -74,6 +79,7 @@ public record PlanResponse(
         this(success, targetName, targetResult, steps, materials, missing, recipeId,
                 executionModTypeId, executionDim, executionPosX, executionPosY, executionPosZ,
                 modWarnings, repeatCount,
-                null, null, null, 0, false, false, false, null);
+                null, null, null, 0, false, false, false, null, Collections.emptySet(),
+                Collections.emptyMap());
     }
 }

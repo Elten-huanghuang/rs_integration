@@ -524,7 +524,9 @@ public class RecipeGuiLayoutsMixin {
         if (recipeClassName.startsWith("alabaster.crabbersdelight."))
             return "crabbersdelight";
 
-        RSIntegrationMod.LOGGER.warn("[RSI-JEI-Mixin] getBindingFilter returned NULL: uid={} class={}",
+        // Returning null is the normal case for any recipe RS Integration doesn't bind
+        // (vanilla crafting/anvil, unsupported mods) — keep at debug to avoid log spam.
+        RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] getBindingFilter returned NULL: uid={} class={}",
                     rsi$safeCategoryUid(recipeLayout), recipe.getClass().getName());
         return null;
     }

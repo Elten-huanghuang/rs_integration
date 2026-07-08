@@ -290,6 +290,9 @@ public final class JeiMarqueeSelector {
     public static void onMousePressed(ScreenEvent.MouseButtonPressed.Pre event) {
         Screen screen = event.getScreen();
         if (screen == null) return;
+        // Our own full-screen planning UI owns its whole area — JEI's list overlays it, but the
+        // marquee and JEI click-shortcuts must not hijack drags meant for the recipe tree.
+        if (screen instanceof com.huanghuang.rsintegration.crafting.plan.CraftingPlanScreen) return;
         int mx = (int) event.getMouseX();
         int my = (int) event.getMouseY();
         IJeiRuntime runtime = RSJeiPlugin.getRuntime();

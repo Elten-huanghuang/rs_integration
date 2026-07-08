@@ -360,7 +360,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
         }
 
         try {
-            crucible.getClass().getMethod("setChanged").invoke(crucible);
+            ((BlockEntity) crucible).setChanged();
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.error("[RSI-Eidolon] Crucible drain/clear failed", e);
             return false;
@@ -482,7 +482,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
         try {
             java.lang.reflect.Method setStack = brazier.getClass().getMethod("setStack", ItemStack.class);
             setStack.invoke(brazier, reagentStack.copy());
-            brazier.getClass().getMethod("setChanged").invoke(brazier);
+            ((BlockEntity) brazier).setChanged();
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.error("[RSI-Batch-Eidolon] Failed to place reagent on brazier", e);
             refundAll();
@@ -580,7 +580,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
         try {
             java.lang.reflect.Method setStack = brazier.getClass().getMethod("setStack", ItemStack.class);
             setStack.invoke(brazier, reagentStack);
-            brazier.getClass().getMethod("setChanged").invoke(brazier);
+            ((BlockEntity) brazier).setChanged();
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.error("[RSI-Batch-Eidolon] Failed to place reagent on brazier", e);
             return false;
@@ -830,7 +830,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
         }
 
         try {
-            crucible.getClass().getMethod("setChanged").invoke(crucible);
+            ((BlockEntity) crucible).setChanged();
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.error("[RSI-Eidolon] Crucible drain/clear failed", e);
             return false;
@@ -927,7 +927,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
             // Clear reagent from brazier if ritual didn't consume it
             java.lang.reflect.Method setStack = brazier.getClass().getMethod("setStack", ItemStack.class);
             setStack.invoke(brazier, ItemStack.EMPTY);
-            brazier.getClass().getMethod("setChanged").invoke(brazier);
+            ((BlockEntity) brazier).setChanged();
 
             java.lang.reflect.Field f = EidolonReflection.brazierTileEntityClass.getDeclaredField("ritualDone");
             f.setAccessible(true);

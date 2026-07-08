@@ -437,7 +437,7 @@ public final class FaRitualHelper {
             if (f != null) {
                 f.setAccessible(true);
                 var list = (net.minecraft.core.NonNullList<ItemStack>) f.get(be);
-                if (slot < list.size()) { list.set(slot, stack.copy()); be.getClass().getMethod("setChanged").invoke(be); }
+                if (slot < list.size()) { list.set(slot, stack.copy()); ((net.minecraft.world.level.block.entity.BlockEntity) be).setChanged(); }
                 return;
             }
         } catch (Exception e) {

@@ -13,6 +13,7 @@ import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
 import com.huanghuang.rsintegration.crafting.plan.PlanResponse;
 import com.huanghuang.rsintegration.crafting.plan.PlanResponsePacket;
 import com.huanghuang.rsintegration.crafting.plan.PlanStep;
+import com.huanghuang.rsintegration.crafting.tree.PlanTreeModel;
 import com.huanghuang.rsintegration.crafting.plan.PlanWarnings;
 import com.huanghuang.rsintegration.mods.crabbersdelight.CrabTrapRecipeResolver;
 import com.huanghuang.rsintegration.mods.crockpot.CrockPotBatchDelegate;
@@ -34,6 +35,7 @@ import com.huanghuang.rsintegration.crafting.MaterialSources;
 import com.huanghuang.rsintegration.crafting.PreviewRateLimiter;
 import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
+import com.huanghuang.rsintegration.recipe.CrockPotRecipeHandler;
 import com.huanghuang.rsintegration.util.TextBuilder;
 import com.huanghuang.rsintegration.util.ModIds;
 import com.refinedmods.refinedstorage.api.network.INetwork;
@@ -270,8 +272,8 @@ public final class GenericCraftPacket {
                     tryBuildPlan(player, packet.recipeId, packet.forcedRecipes,
                             packet.dim, packet.pos, packet.repeatCount, packet.baseItem);
                 } else {
-                    RSIntegrationMod.LOGGER.debug("[RSI-Generic] handle() → tryResolve: recipeId={}", packet.recipeId);
-                    tryResolve(player, packet.recipeId, packet.dim, packet.pos,
+                    RSIntegrationMod.LOGGER.debug("[RSI-Generic] handle() → tryResolve: recipeId={} forced={}", packet.recipeId, packet.forcedRecipes.size());
+                    tryResolve(player, packet.recipeId, packet.forcedRecipes, packet.dim, packet.pos,
                             packet.repeatCount, packet.inferMode, packet.baseItem);
                 }
             } catch (Throwable e) {
@@ -377,7 +379,9 @@ public final class GenericCraftPacket {
     /** Launch an async craft chain with standard onDone/scheduleNext wiring. */
     private static void launchAsyncChain(ServerPlayer player, List<ResolutionStep> steps,
                                           INetwork network, int repeatCount,
-                                          ResourceLocation recipeId, @Nullable ResourceLocation dim,
+                                          ResourceLocation recipeId,
+                                          Map<String, String> forcedRecipes,
+                                          @Nullable ResourceLocation dim,
                                           @Nullable net.minecraft.core.BlockPos pos,
                                           boolean inferMode, @Nullable ItemStack baseItem) {
         AsyncCraftChain chain = new AsyncCraftChain(player.getUUID(), player.getServer(), network, steps);
@@ -388,7 +392,7 @@ public final class GenericCraftPacket {
             AsyncCraftManager.getInstance().remove(chain);
             ChainRepeatController.scheduleNext(
                     chain, capturedServer, capturedUuid, repeatCount, chain.getMachineCount(),
-                    (p, rem) -> tryResolve(p, recipeId, dim, pos, rem, inferMode, baseItem));
+                    (p, rem) -> tryResolve(p, recipeId, forcedRecipes, dim, pos, rem, inferMode, baseItem));
         });
         player.sendSystemMessage(
                 TextBuilder.translate("rsi.async.chain_started", steps.size()).build());
@@ -410,10 +414,24 @@ public final class GenericCraftPacket {
     }
 
     private static void tryResolve(ServerPlayer player, ResourceLocation recipeId,
+                                   Map<String, String> forcedRecipes,
                                    @Nullable ResourceLocation dim,
                                    @Nullable net.minecraft.core.BlockPos pos,
                                    int repeatCount, boolean inferMode,
                                    @Nullable ItemStack baseItem) {
+        // v3.4: convert forced recipe overrides for the resolver (same format as tryBuildPlan).
+        Map<ResourceLocation, ResourceLocation> forcedOverrides = null;
+        if (!forcedRecipes.isEmpty()) {
+            forcedOverrides = new HashMap<>();
+            for (var e : forcedRecipes.entrySet()) {
+                ResourceLocation itemKey = ResourceLocation.tryParse(e.getKey());
+                ResourceLocation forcedId = ResourceLocation.tryParse(e.getValue());
+                if (itemKey != null && forcedId != null) {
+                    forcedOverrides.put(itemKey, forcedId);
+                }
+            }
+        }
+
         Recipe<?> recipe = resolveRecipe(player.serverLevel(), recipeId);
         if (recipe == null) {
             player.sendSystemMessage(Component.translatable("rsi.generic.error.recipe_not_found", recipeId.toString()));
@@ -429,8 +447,15 @@ public final class GenericCraftPacket {
 
         List<IngredientSpec> specs = CraftPacketUtils.extractIngredientSpecs(recipe);
         if (specs == null || specs.isEmpty()) {
-            player.sendSystemMessage(Component.translatable("rsi.generic.error.no_ingredients"));
-            return;
+            // CrockPot pure-category recipes carry no fixed ingredient list — the batch delegate
+            // selects items by food value at run time (Phase 2). Let these through with an empty
+            // spec list so they reach the machine dispatch below; the no-bound-machine guard still
+            // blocks genuinely unrunnable cases.
+            if (!CrockPotRecipeHandler.hasCategoryConstraints(recipe)) {
+                player.sendSystemMessage(Component.translatable("rsi.generic.error.no_ingredients"));
+                return;
+            }
+            specs = new ArrayList<>();
         }
 
         // Group non-empty ingredients by item type with total count
@@ -483,7 +508,7 @@ public final class GenericCraftPacket {
                 Map<StackKey, Integer> avail = MaterialSources.listAllAvailable(player, network);
                 List<String> missing = new ArrayList<>();
                 List<ResolutionStep> modSteps = CraftingResolver.resolveStepsForIngredientsWithTypes(
-                        expanded, avail, player.serverLevel(), player, network, missing);
+                        expanded, avail, player.serverLevel(), player, network, missing, forcedOverrides);
                 if (!missing.isEmpty()) {
                     player.sendSystemMessage(Component.translatable(
                             "rsi.generic.error.missing_materials", CraftPacketUtils.formatMissingSummary(missing)));
@@ -491,7 +516,7 @@ public final class GenericCraftPacket {
                 }
                 // Append the mod recipe itself as the final multi-block step
                 modSteps.add(new ResolutionStep(recipeId, modType, recipeId, inferMode));
-                launchAsyncChain(player, modSteps, network, repeatCount, recipeId, dim, pos, inferMode, baseItem);
+                launchAsyncChain(player, modSteps, network, repeatCount, recipeId, forcedRecipes, dim, pos, inferMode, baseItem);
                 return;
             }
         }
@@ -508,7 +533,7 @@ public final class GenericCraftPacket {
                     // Multi-block intermediates → async chain
                     allSteps.add(new ResolutionStep(recipeId, ModType.GENERIC,
                             new ResourceLocation("minecraft:crafting")));
-                    launchAsyncChain(player, allSteps, network, repeatCount, recipeId, dim, pos, inferMode, baseItem);
+                    launchAsyncChain(player, allSteps, network, repeatCount, recipeId, forcedRecipes, dim, pos, inferMode, baseItem);
                     return;
                 }
                 // All GENERIC steps → execute sync chain
@@ -529,12 +554,12 @@ public final class GenericCraftPacket {
             List<String> missingCheck = new ArrayList<>();
             List<ResolutionStep> planSteps = CraftingResolver.resolveStepsForIngredientsWithTypes(
                     cr2.getIngredients(), avail, player.serverLevel(),
-                    player, network, missingCheck);
+                    player, network, missingCheck, forcedOverrides);
             if (planSteps != null && !planSteps.isEmpty() && missingCheck.isEmpty()) {
                 if (planSteps.stream().anyMatch(s -> s.modType() != ModType.GENERIC)) {
                     planSteps.add(new ResolutionStep(recipeId, ModType.GENERIC,
                             new ResourceLocation("minecraft:crafting")));
-                    launchAsyncChain(player, planSteps, network, repeatCount, recipeId, dim, pos, inferMode, baseItem);
+                    launchAsyncChain(player, planSteps, network, repeatCount, recipeId, forcedRecipes, dim, pos, inferMode, baseItem);
                     return;
                 }
                 List<ResolutionStep> execSteps2 = new ArrayList<>(planSteps);
@@ -606,7 +631,7 @@ public final class GenericCraftPacket {
                 Map<StackKey, Integer> avail = MaterialSources.listAllAvailable(player, network);
                 List<String> missing = new ArrayList<>();
                 List<ResolutionStep> interSteps = CraftingResolver.resolveStepsForIngredientsWithTypes(
-                        smithingIngredients, avail, player.serverLevel(), player, network, missing);
+                        smithingIngredients, avail, player.serverLevel(), player, network, missing, forcedOverrides);
                 if (interSteps != null && !interSteps.isEmpty() && missing.isEmpty()) {
                     if (interSteps.stream().allMatch(s -> s.modType() == ModType.GENERIC)) {
                         if (!CraftPacketUtils.executeCraftingSteps(player, interSteps, network)) {
@@ -851,8 +876,25 @@ public final class GenericCraftPacket {
         } else {
             List<IngredientSpec> specs = CraftPacketUtils.extractIngredientSpecs(recipe);
             if (specs == null || specs.isEmpty()) {
-                sendPlanError(player, Component.translatable("rsi.generic.error.no_ingredients").getString());
-                return;
+                // CrockPot pure-category recipes carry no fixed ingredient list — a match is decided
+                // by the summed food values of the pot's contents. Preview the exact items the batch
+                // delegate will place by running the shared food-value selection against the network.
+                boolean crockCategory = CrockPotRecipeHandler.hasCategoryConstraints(recipe);
+                if (crockCategory) {
+                    net.minecraft.resources.ResourceKey<Level> cpDim = dim != null
+                            ? net.minecraft.resources.ResourceKey.create(Registries.DIMENSION, dim)
+                            : player.serverLevel().dimension();
+                    net.minecraft.core.BlockPos cpPos = pos != null ? pos : player.blockPosition();
+                    INetwork cpNetwork = CraftPacketUtils.resolveNetworkForCraft(player, cpDim, cpPos);
+                    specs = CrockPotBatchDelegate.buildCategoryPlanIngredients(
+                            recipe, cpNetwork, player.serverLevel());
+                }
+                if (specs == null || specs.isEmpty()) {
+                    sendPlanError(player, Component.translatable(crockCategory
+                            ? "rsi.crockpot.error.food_values"
+                            : "rsi.generic.error.no_ingredients").getString());
+                    return;
+                }
             }
             List<Ingredient> perRecipe = new ArrayList<>();
             List<Ingredient> expanded = new ArrayList<>();
@@ -1003,21 +1045,40 @@ public final class GenericCraftPacket {
                     itemAvailable.size(), totalItems);
         }
 
-        // Merge only consecutive identical recipe IDs to preserve dependency order.
-        // A global merge (e.g. LinkedHashMap.merge) collapses non-adjacent
-        // occurrences and can reorder steps (e.g. [A, B, A, C] → [A:2, B:1, C:1]
-        // vs correct consecutive: [A:1, B:1, A:1, C:1]).
+        // Aggregate every run of a recipe into one step, keeping first-seen order.
+        // Quantity reaches us two ways: the target's ingredients are pre-expanded
+        // ×repeatCount (many entries, executions=1 each) and deeper intermediates use
+        // inner batching (one entry, executions=N). Summing executions per recipe
+        // captures both; counting bare occurrences would drop inner-batched runs and
+        // under-scale that sub-recipe — both its tree children (amount = inputCount ×
+        // parent.batches) and its material draw. Distinct recipes keep first-seen
+        // order; hierarchy comes from the depth pass below (item graph, not list
+        // position), and each recipe maps to one output item → one depth, so folding
+        // duplicates never crosses depth boundaries.
         List<PlanStep> steps = new ArrayList<>();
 
         List<ResourceLocation> mergedStepIds = new ArrayList<>();
         List<Integer> mergedBatchCounts = new ArrayList<>();
-        for (ResourceLocation id : stepIds) {
-            int lastIdx = mergedStepIds.size() - 1;
-            if (lastIdx >= 0 && mergedStepIds.get(lastIdx).equals(id)) {
-                mergedBatchCounts.set(lastIdx, mergedBatchCounts.get(lastIdx) + 1);
+        Map<ResourceLocation, Integer> mergeIndex = new HashMap<>();
+        int mergeSrcCount = usedTypedResolver ? resolutionSteps.size() : stepIds.size();
+        for (int mi = 0; mi < mergeSrcCount; mi++) {
+            ResourceLocation id;
+            int runs;
+            if (usedTypedResolver) {
+                ResolutionStep rs = resolutionSteps.get(mi);
+                id = rs.recipeId();
+                runs = Math.max(1, rs.executions());
             } else {
+                id = stepIds.get(mi);
+                runs = 1;
+            }
+            Integer idx = mergeIndex.get(id);
+            if (idx != null) {
+                mergedBatchCounts.set(idx, mergedBatchCounts.get(idx) + runs);
+            } else {
+                mergeIndex.put(id, mergedStepIds.size());
                 mergedStepIds.add(id);
-                mergedBatchCounts.add(1);
+                mergedBatchCounts.add(runs);
             }
         }
 
@@ -1345,19 +1406,24 @@ public final class GenericCraftPacket {
             }
             Recipe<?> stepRecipe = resolveRecipe(player.serverLevel(), step.recipeId());
             if (stepRecipe == null) continue;
-            List<Ingredient> stepIngs;
             if (stepRecipe instanceof CraftingRecipe scr) {
-                stepIngs = scr.getIngredients();
+                // Vanilla crafting: ingredient-per-slot preserves grid layout
+                for (Ingredient ing : scr.getIngredients()) {
+                    if (ing.isEmpty()) continue;
+                    ItemStack matched = matchAndConsume(ing, matAvailable);
+                    if (matched != null) {
+                        neededCounts.merge(matched.getItem(), step.batches(), Integer::sum);
+                        itemSource.putIfAbsent(matched.getItem(), ing);
+                    }
+                }
             } else {
-                stepIngs = CraftPacketUtils.extractIngredients(stepRecipe);
-            }
-            // Fallback: some mod recipes (e.g. CrockPot) don't expose
-            // getIngredients() — use extractIngredientSpecs which goes through
-            // the registered ModRecipeHandler and preserves per-ingredient counts.
-            if (stepIngs == null) {
-                List<IngredientSpec> fallbackSpecs = CraftPacketUtils.extractIngredientSpecs(stepRecipe);
-                if (fallbackSpecs != null) {
-                    for (IngredientSpec spec : fallbackSpecs) {
+                // Mod recipes: extractIngredientSpecs preserves per-ingredient
+                // counts via registered ModRecipeHandler (extractIngredients
+                // returns a flat list that drops per-craft quantities, causing
+                // the material strip to under-report vs. the tree display).
+                List<IngredientSpec> specs = CraftPacketUtils.extractIngredientSpecs(stepRecipe);
+                if (specs != null) {
+                    for (IngredientSpec spec : specs) {
                         if (spec.isEmpty()) continue;
                         ItemStack matched = matchAndConsume(spec.ingredient(), matAvailable);
                         if (matched != null) {
@@ -1365,15 +1431,6 @@ public final class GenericCraftPacket {
                                     spec.count() * step.batches(), Integer::sum);
                             itemSource.putIfAbsent(matched.getItem(), spec.ingredient());
                         }
-                    }
-                }
-            } else {
-                for (Ingredient ing : stepIngs) {
-                    if (ing.isEmpty()) continue;
-                    ItemStack matched = matchAndConsume(ing, matAvailable);
-                    if (matched != null) {
-                        neededCounts.merge(matched.getItem(), step.batches(), Integer::sum);
-                        itemSource.putIfAbsent(matched.getItem(), ing);
                     }
                 }
             }
@@ -1439,6 +1496,31 @@ public final class GenericCraftPacket {
 
         boolean feasible = missing.isEmpty() && materials.values().stream().allMatch(PlanResponse.Availability::isEnough);
 
+        // Overproduction from integer batch rounding — items produced beyond what
+        // the plan consumes surface as negative neededCounts. The target output is
+        // intentionally negative (it's the goal, not surplus) so it's excluded.
+        Map<Item, Integer> leftovers = new LinkedHashMap<>();
+        for (var entry : neededCounts.entrySet()) {
+            if (entry.getValue() >= 0) continue;
+            if (entry.getKey() == targetOutput.getItem()) continue;
+            leftovers.put(entry.getKey(), -entry.getValue());
+        }
+
+        // 总需求条 = 树显示的毛需求（从零开始，忽略库存与 resolver 批次封顶）。上面的 neededCounts
+        // 用的是 step.batches()（净/封顶批次），逐支路会偏小、且和库存交互后偶尔偏大；这里用客户端
+        // 同一套 PlanTreeModel 重算毛需求并覆盖 materials 的 needed，保证「总需求条 == 树」永不漂移。
+        // available 仍是 RS 网络实际库存；feasible（上面按净需求判定）不动，不影响启动门控。
+        PlanResponse treeSource = new PlanResponse(true, "", targetOutput, steps,
+                Collections.emptyMap(), Collections.emptyList(), "",
+                null, null, 0, 0, 0, Collections.emptyList(), repeatCount);
+        Map<Item, Integer> grossDemand = PlanTreeModel.grossDemandByItem(PlanTreeModel.from(treeSource));
+        materials.replaceAll((item, avail) -> {
+            Integer gross = grossDemand.get(item);
+            return (gross != null && gross > 0)
+                    ? new PlanResponse.Availability(gross, avail.available())
+                    : avail;
+        });
+
         if (RSIntegrationMod.LOGGER.isDebugEnabled()) {
             long shortageCount = materials.values().stream().filter(a -> !a.isEnough()).count();
             RSIntegrationMod.LOGGER.debug("[RSI-Generic] Plan for {}: {} steps, feasible={}, resolver={}, missing={}, shortages={}",
@@ -1467,6 +1549,14 @@ public final class GenericCraftPacket {
             }
         }
 
+        // v3.4 availability passport: collect modTypes the player has bound machines for.
+        Set<String> boundMachineTypes = new java.util.LinkedHashSet<>();
+        for (ModType mt : ModType.values()) {
+            if (AltarBindingRegistry.hasAnyBindingForType(player, mt)) {
+                boundMachineTypes.add(mt.id());
+            }
+        }
+
         PlanResponse plan = new PlanResponse(
                 feasible,
                 targetName,
@@ -1489,7 +1579,9 @@ public final class GenericCraftPacket {
                 embersInfo.canInfer(),
                 embersInfo.codeFromCache(),
                 executionMachineSupportsGui,
-                baseItem
+                baseItem,
+                boundMachineTypes,
+                leftovers
         );
 
         PLAN_CACHE.put(cacheKey, new CachedPlan(plan, System.nanoTime()));

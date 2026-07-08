@@ -181,13 +181,14 @@ public final class PlanRenderEngine {
 
     /**
      * Render the material requirements area with availability-colored pill badges.
-     * Matches the production {@code CraftingPlanScreen} style.
+     * The grid is capped to the panel height and scrolls vertically; returns the maximum
+     * scroll offset (px) so the caller can clamp its stored {@code scrollOffset}.
      */
-    public void renderMaterialArea(GuiGraphics gfx, int left, int top,
-                                    int contentW, int areaHeight,
-                                    Map<Item, PlanResponse.Availability> materials,
-                                    int mouseX, int mouseY,
-                                    MaterialTooltipSink tooltipSink) {
+    public int renderMaterialArea(GuiGraphics gfx, int left, int top,
+                                   int contentW, int areaHeight,
+                                   Map<Item, PlanResponse.Availability> materials,
+                                   int mouseX, int mouseY, int scrollOffset,
+                                   MaterialTooltipSink tooltipSink) {
         UIRenderer.roundedGradient(gfx, left, top, contentW, areaHeight, 6f,
                 0xE6141E18, 0xE6101814);
         gfx.fill(left + 1, top + 2, left + 4, top + areaHeight - 2, 0xFF44AA66);
@@ -210,14 +211,33 @@ public final class PlanRenderEngine {
         }
         int cellW = SLOT_SIZE + maxPillW + 10;
         int cols = Math.max(1, (contentW - 16) / cellW);
+        int rowStride = SLOT_SIZE + 8;
+
+        int gridTop = y;
+        int gridBottom = top + areaHeight;
+        int visibleGridH = gridBottom - gridTop;
+        int rows = (int) Math.ceil((double) materials.size() / cols);
+        int contentGridH = rows * rowStride;
+        int maxScroll = Math.max(0, contentGridH - visibleGridH);
+        scrollOffset = Math.max(0, Math.min(maxScroll, scrollOffset));
+
         int cx = left + 8;
-        int cy = y;
+        int cy = gridTop - scrollOffset;
         int col = 0;
 
-        gfx.enableScissor(left, top, left + contentW, top + areaHeight);
+        gfx.enableScissor(left, gridTop, left + contentW, gridBottom);
         try {
             pi = 0;
             for (var entry : materials.entrySet()) {
+                // Skip rows fully scrolled out of the visible band.
+                if (cy + SLOT_SIZE < gridTop || cy > gridBottom) {
+                    pi++;
+                    col++;
+                    cx += cellW;
+                    if (col >= cols) { col = 0; cx = left + 8; cy += rowStride; }
+                    continue;
+                }
+
                 int needed = entry.getValue().needed();
                 int have = entry.getValue().available();
                 int border = have >= needed ? C_GREEN : (have > 0 ? C_ORANGE : C_RED);
@@ -229,6 +249,7 @@ public final class PlanRenderEngine {
                 gfx.renderItemDecorations(font, stack, cx + 1, cy + 1);
 
                 if (tooltipSink != null
+                        && mouseY >= gridTop && mouseY <= gridBottom
                         && mouseX >= cx - 1 && mouseX <= cx + SLOT_SIZE + 1
                         && mouseY >= cy - 1 && mouseY <= cy + SLOT_SIZE + 1) {
                     tooltipSink.setHoveredItem(stack, mouseX, mouseY, have, needed);
@@ -256,12 +277,14 @@ public final class PlanRenderEngine {
                 if (col >= cols) {
                     col = 0;
                     cx = left + 8;
-                    cy += SLOT_SIZE + 8;
+                    cy += rowStride;
                 }
             }
         } finally {
             gfx.disableScissor();
         }
+
+        return maxScroll;
     }
 
     // ── Material tooltip callback ─────────────────────────────────────
