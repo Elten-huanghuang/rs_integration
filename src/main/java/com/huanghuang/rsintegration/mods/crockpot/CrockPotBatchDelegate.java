@@ -43,7 +43,8 @@ public final class CrockPotBatchDelegate extends com.huanghuang.rsintegration.cr
     private BlockPos myPos;
     private Recipe<?> recipe;
     private boolean craftDone;
-    private int potLevel;
+    private int potLevel;        // block's actual pot level (input slot count)
+    private int recipeMinLevel;  // recipe's minimum required pot level
 
     // Food-value category constraint state
     private boolean hasCatConstraints;
@@ -77,7 +78,17 @@ public final class CrockPotBatchDelegate extends com.huanghuang.rsintegration.cr
         }
         this.recipe = found;
         this.craftDone = false;
-        this.potLevel = CrockPotRecipeHandler.getPotLevel(found);
+        this.recipeMinLevel = CrockPotRecipeHandler.getPotLevel(found);
+        this.potLevel = getBlockPotLevel(level, pos);
+        if (potLevel <= 0) this.potLevel = recipeMinLevel;
+
+        if (potLevel < recipeMinLevel) {
+            player.sendSystemMessage(Component.translatable(
+                    "rsi.crockpot.error.pot_level_too_low", recipeMinLevel, potLevel));
+            RSIntegrationMod.LOGGER.warn("[RSI-Batch-CrockPot] Block potLevel={} < recipeMinLevel={} for {}",
+                    potLevel, recipeMinLevel, recipeId);
+            return false;
+        }
 
         // Parse category constraints
         this.hasCatConstraints = CrockPotRecipeHandler.hasCategoryConstraints(found);
@@ -87,8 +98,8 @@ public final class CrockPotBatchDelegate extends com.huanghuang.rsintegration.cr
             System.arraycopy(constraints[1], 0, catMaxs, 0, CrockPotRecipeHandler.CAT_COUNT);
         }
 
-        RSIntegrationMod.LOGGER.debug("[RSI-Batch-CrockPot] validateAndInit OK: recipe={} potLevel={} hasCatConstraints={}",
-                recipeId, potLevel, hasCatConstraints);
+        RSIntegrationMod.LOGGER.debug("[RSI-Batch-CrockPot] validateAndInit OK: recipe={} blockPotLevel={} recipeMinLevel={} hasCatConstraints={}",
+                recipeId, potLevel, recipeMinLevel, hasCatConstraints);
         return true;
     }
 
@@ -133,7 +144,8 @@ public final class CrockPotBatchDelegate extends com.huanghuang.rsintegration.cr
 
             // Phase 2: if category constraints exist, fill remaining slots from RS
             if (hasCatConstraints) {
-                int remaining = potLevel - materials.size();
+                int usedSlots = materials.stream().mapToInt(ItemStack::getCount).sum();
+                int remaining = potLevel - usedSlots;
                 if (remaining > 0) {
                     IItemHandler itemHandler = getItemHandlerAtPos();
                     float[] currentFV = computeCombinedFoodValues(materials);
@@ -190,14 +202,16 @@ public final class CrockPotBatchDelegate extends com.huanghuang.rsintegration.cr
         }
 
         IItemHandler itemHandler = getItemHandler(be);
-        if (itemHandler == null || itemHandler.getSlots() < 6) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Batch-CrockPot] Cannot access item handler");
+        int expectedSlots = potLevel + 2; // input + fuel + output
+        if (itemHandler == null || itemHandler.getSlots() < expectedSlots) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Batch-CrockPot] Item handler too small: {} < {}",
+                    itemHandler != null ? itemHandler.getSlots() : 0, expectedSlots);
             return false;
         }
 
         forceChunkLoad(true);
 
-        // Place materials into input slots
+        // Place materials into input slots — each item occupies one slot
         int slot = 0;
         for (ItemStack mat : materials) {
             if (mat.isEmpty()) continue;
@@ -212,7 +226,7 @@ public final class CrockPotBatchDelegate extends com.huanghuang.rsintegration.cr
                 if (!remainder.isEmpty()) {
                     RSIntegrationMod.LOGGER.warn("[RSI-Batch-CrockPot] Failed to insert into slot {}: {}", slot,
                             remainder.getHoverName().getString());
-                    for (int back = 0; back < slot; back++) {
+                    for (int back = 0; back <= slot; back++) {
                         ItemStack refund = itemHandler.extractItem(back, 64, false);
                         if (!refund.isEmpty() && !usingSharedLedger && network != null)
                             network.insertItem(refund, refund.getCount(), Action.PERFORM);
@@ -390,7 +404,8 @@ public final class CrockPotBatchDelegate extends com.huanghuang.rsintegration.cr
      */
     @Nullable
     public static List<IngredientSpec> buildCategoryPlanIngredients(Recipe<?> recipe,
-                                                                    @Nullable INetwork network, Level level) {
+                                                                    @Nullable INetwork network, Level level,
+                                                                    @Nullable BlockPos pos) {
         if (network == null || !CrockPotFoodValues.isReady()) return null;
 
         List<IngredientSpec> result = new ArrayList<>();
@@ -409,7 +424,9 @@ public final class CrockPotBatchDelegate extends com.huanghuang.rsintegration.cr
             }
         }
 
-        int remaining = CrockPotRecipeHandler.getPotLevel(recipe) - usedSlots;
+        int blockPotLevel = getBlockPotLevel(level, pos);
+        if (blockPotLevel <= 0) blockPotLevel = CrockPotRecipeHandler.getPotLevel(recipe);
+        int remaining = blockPotLevel - usedSlots;
         if (remaining <= 0) return result.isEmpty() ? null : result;
 
         float[][] constraints = CrockPotRecipeHandler.parseCategoryConstraints(recipe);
@@ -470,9 +487,11 @@ public final class CrockPotBatchDelegate extends com.huanghuang.rsintegration.cr
                                                 @Nullable ResourceLocation dim,
                                                 @Nullable BlockPos pos) {
         List<String> warnings = new ArrayList<>();
-        int potLevel = CrockPotRecipeHandler.getPotLevel(recipe);
+        net.minecraft.server.level.ServerLevel level = CraftPacketUtils.resolveLevel(player.server, dim, player);
+        int blockPotLevel = getBlockPotLevel(level, pos);
+        if (blockPotLevel <= 0) blockPotLevel = CrockPotRecipeHandler.getPotLevel(recipe);
         int slotReqs = CrockPotRecipeHandler.countSlotRequirements(recipe);
-        int remaining = potLevel - slotReqs;
+        int remaining = blockPotLevel - slotReqs;
 
         if (CrockPotRecipeHandler.hasCategoryConstraints(recipe)) {
             float[][] constraints = CrockPotRecipeHandler.parseCategoryConstraints(recipe);
@@ -515,6 +534,23 @@ public final class CrockPotBatchDelegate extends com.huanghuang.rsintegration.cr
         String[] names = {"MEAT", "MONSTER", "FISH", "EGG", "FRUIT",
                 "VEGGIE", "DAIRY", "SWEETENER", "FROZEN", "INEDIBLE"};
         return ordinal >= 0 && ordinal < names.length ? names[ordinal] : "?";
+    }
+
+    // ── block pot level ──────────────────────────────────────────
+
+    /**
+     * Read the Crock Pot block's actual pot level from its item handler.
+     * The item handler has {@code potLevel + 2} slots (input + fuel + output).
+     * Falls back to the recipe minimum if the block entity is unavailable
+     * (e.g. during plan preview without a selected machine).
+     */
+    public static int getBlockPotLevel(Level level, BlockPos pos) {
+        if (level == null || pos == null) return -1;
+        BlockEntity be = level.getBlockEntity(pos);
+        if (be == null || !CrockPotReflection.crockPotBEClass.isInstance(be)) return -1;
+        IItemHandler handler = getItemHandler(be);
+        if (handler == null) return -1;
+        return handler.getSlots() - 2; // subtract fuel + output slots
     }
 
     // ── reflection helpers ───────────────────────────────────────

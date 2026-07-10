@@ -1,0 +1,16 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    " A ",
+    "EPE",
+    " A "
+  ],
+  "key": {
+    "P": { "item": "refinedstorage:4k_storage_part" },
+    "E": { "item": "minecraft:ender_pearl" },
+    "A": { "item": "minecraft:amethyst_shard" }
+  },
+  "result": {
+    "item": "rs_integration:resonance_storage_disk"
+  }
+}

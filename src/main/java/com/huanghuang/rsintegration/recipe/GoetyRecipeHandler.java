@@ -18,30 +18,40 @@ public final class GoetyRecipeHandler extends AbstractRecipeHandler {
     @Override
     public ModType modType() { return ModType.byId("goety"); }
 
+    private static final String RITUAL_CLASS = "com.Polarice3.Goety.common.crafting.RitualRecipe";
+    private static final String BRAZIER_CLASS = "com.Polarice3.Goety.common.crafting.BrazierRecipe";
+
     @Override
     public boolean canHandle(Recipe<?> recipe) {
-        if (!recipe.getClass().getName().startsWith("com.Polarice3.Goety."))
+        String cn = recipe.getClass().getName();
+
+        // Only RitualRecipe and BrazierRecipe are automatable by RS.
+        // PulverizeRecipe, CursedInfuserRecipes, SoulAbsorberRecipes,
+        // BrewingRecipe, ModCookingRecipe, TaglockRecipe, etc. require
+        // machines or mechanics that RS cannot control.
+        if (!cn.equals(RITUAL_CLASS) && !cn.equals(BRAZIER_CLASS))
             return false;
 
         // Filter out rituals that can't be automated safely:
         // ConvertRitual (converts mobs), TeleportRitual (teleports players).
         // SummonRitual is allowed — spawns entities.
-        var ritualOpt = Reflect.invoke(recipe, "getRitual");
-        if (ritualOpt.isPresent()) {
-            String name = ritualOpt.get().getClass().getSimpleName();
-            if (name.equals("ConvertRitual")
-                    || name.equals("TeleportRitual")) {
-                return false;
+        if (cn.equals(RITUAL_CLASS)) {
+            var ritualOpt = Reflect.invoke(recipe, "getRitual");
+            if (ritualOpt.isPresent()) {
+                String name = ritualOpt.get().getClass().getSimpleName();
+                if (name.equals("ConvertRitual")
+                        || name.equals("TeleportRitual")) {
+                    return false;
+                }
             }
-        }
 
-        // Filter out sacrificial rituals — auto-craft cannot perform entity sacrifices.
-        // Even CraftItemRitual/EnchantItemRitual can require sacrifices.
-        try {
-            if ((boolean) recipe.getClass().getMethod("requiresSacrifice").invoke(recipe)) {
-                return false;
-            }
-        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Goety] requiresSacrifice probe failed", e); }
+            // Filter out sacrificial rituals — auto-craft cannot perform entity sacrifices.
+            try {
+                if ((boolean) recipe.getClass().getMethod("requiresSacrifice").invoke(recipe)) {
+                    return false;
+                }
+            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Goety] requiresSacrifice probe failed", e); }
+        }
 
         return true;
     }

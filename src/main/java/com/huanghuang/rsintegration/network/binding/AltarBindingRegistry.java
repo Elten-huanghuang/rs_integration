@@ -568,10 +568,28 @@ public final class AltarBindingRegistry {
      * by a machine sub-type hint (e.g. "wissen_crystallizer" for WR recipes).
      * This avoids probing machines of the wrong sub-type during async chains.
      */
+    // Aether sub-type IDs under the "aether" parent fallback.
+    // When a recipe resolves to the generic "aether" ModType we also
+    // search these concrete machine types — machine blockKeys are
+    // prefixed with the sub-type name (e.g. "aether_freezer||..."),
+    // so fromBlockKey returns the sub-type, not "aether".
+    private static final String[] AETHER_SUB_IDS = {"aether_freezer", "aether_incubator", "aether_altar"};
+
     public static List<BoundMachine> getBoundMachinesForType(ServerPlayer player, ModType type,
                                                               @Nullable String subTypeHint) {
         List<BoundMachine> result = new ArrayList<>();
         forEachInventoryGroup(player, stacks -> collectBindingsForType(stacks, type, subTypeHint, player, result));
+        // Aether fallback: the generic "aether" ModType acts as a recipe
+        // classifier but machines are bound under concrete sub-types.
+        if ("aether".equals(type.id()) && result.isEmpty()) {
+            for (String subId : AETHER_SUB_IDS) {
+                ModType subType = ModType.byId(subId);
+                if (subType != ModType.GENERIC) {
+                    forEachInventoryGroup(player, stacks ->
+                            collectBindingsForType(stacks, subType, subTypeHint, player, result));
+                }
+            }
+        }
         return result;
     }
 
@@ -725,7 +743,9 @@ public final class AltarBindingRegistry {
         // Aether recipe path prefixes (freezing/incubating/enchanting) don't
         // match block keys (freezer/incubator/altar).  Sub-type filtering
         // is handled by validateAndInit() in AetherFurnaceBatchDelegate.
-        if (ModIds.AETHER.equals(type.id())) {
+        // Covers both the generic "aether" fallback and the split sub-types
+        // (aether_freezer, aether_incubator, aether_altar).
+        if (ModIds.AETHER.equals(type.id()) || type.id().startsWith(ModIds.AETHER + "_")) {
             return null;
         }
         return hint;

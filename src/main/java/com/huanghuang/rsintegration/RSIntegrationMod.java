@@ -33,6 +33,7 @@ import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
 import com.huanghuang.rsintegration.network.binding.BindingTooltipHandler;
 import com.huanghuang.rsintegration.network.binding.RSBindingHook;
 import com.huanghuang.rsintegration.network.gui.RemoteGuiAuth;
+import com.huanghuang.rsintegration.network.packet.ResonanceNetworkHandler;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.sidepanel.RSSidePanelClient;
 import com.huanghuang.rsintegration.sidepanel.RSSidePanelModule;
@@ -40,7 +41,13 @@ import com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler;
 import com.huanghuang.rsintegration.transfer.ContainerTransferClient;
 import com.huanghuang.rsintegration.transfer.ContainerTransferNetworkHandler;
 import com.huanghuang.rsintegration.util.ModIds;
+import com.huanghuang.rsintegration.resonance.disk.ResonanceDiskFactory;
+import com.huanghuang.rsintegration.resonance.disk.ResonanceDiskWrapper;
+import com.huanghuang.rsintegration.resonance.passive.PassiveEffectEngine;
+import com.huanghuang.rsintegration.resonance.passive.PassiveRegistry;
+import com.refinedmods.refinedstorage.api.IRSAPI;
 import com.refinedmods.refinedstorage.api.network.INetwork;
+import com.refinedmods.refinedstorage.apiimpl.API;
 
 import java.util.List;
 import java.util.function.Supplier;
@@ -148,6 +155,7 @@ public final class RSIntegrationMod {
         if (enabled(RSIntegrationConfig.ENABLE_SOPHISTICATED_BACKPACKS, ModIds.SOPHISTICATED_BACKPACKS)) {
             SophisticatedBackpacksItems.init(MOD_BUS);
         }
+        ModItems.init(MOD_BUS);
 
         DistExecutor.safeRunWhenOn(Dist.CLIENT,
                 () -> ContainerTransferClient::registerKeyMappings);
@@ -155,6 +163,7 @@ public final class RSIntegrationMod {
                 () -> RSSidePanelClient::registerKeyMappings);
         DistExecutor.safeRunWhenOn(Dist.CLIENT,
                 () -> RSIKeyBindings::registerKeyMappings);
+        MOD_BUS.addListener(this::onClientSetup);
 
         FMLJavaModLoadingContext.get().getModEventBus().addListener(this::onCommonSetup);
     }
@@ -403,9 +412,24 @@ public final class RSIntegrationMod {
         // (e.g. another mod force-unloading the chunk).
         MinecraftForge.EVENT_BUS.addListener(RemoteGuiAuth::onChunkUnload);
 
+        // Resonance disk factory — register with RS storage disk registry
+        if (RSIntegrationConfig.ENABLE_RS_PASSIVE_EFFECTS.get()) {
+            ResonanceNetworkHandler.register();
+            API.instance().getStorageDiskRegistry().add(
+                    ResonanceDiskWrapper.FACTORY_ID, new ResonanceDiskFactory());
+            PassiveRegistry.scanAllItems();
+            MinecraftForge.EVENT_BUS.register(PassiveEffectEngine.class);
+        }
+
         ContractValidation.validateAll();
 
         LOGGER.info("{} initialized.", MOD_NAME);
+    }
+
+    private void onClientSetup(final net.minecraftforge.fml.event.lifecycle.FMLClientSetupEvent event) {
+        net.minecraft.client.gui.screens.MenuScreens.register(
+                ModItems.RESONANCE_BACKPACK.get(),
+                com.huanghuang.rsintegration.resonance.backpack.ResonanceBackpackScreen::new);
     }
 
     private static boolean enabled(ForgeConfigSpec.BooleanValue config, String modId) {

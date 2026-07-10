@@ -87,14 +87,17 @@ public final class CrockPotRecipeHandler extends AbstractRecipeHandler {
     private static int collectIngredients(Object requirement, List<IngredientSpec> specs) {
         String className = requirement.getClass().getName();
         try {
-            if (className.endsWith("RequirementMustContainIngredient")
-                    || className.endsWith("RequirementMustContainIngredientLessThan")) {
+            if (className.endsWith("RequirementMustContainIngredient")) {
                 Method getIngredient = requirement.getClass().getMethod("getIngredient");
                 Method getQuantity = requirement.getClass().getMethod("getQuantity");
                 Ingredient ing = (Ingredient) getIngredient.invoke(requirement);
                 int qty = (int) getQuantity.invoke(requirement);
                 if (!ing.isEmpty()) specs.add(new IngredientSpec(ing, qty));
-                return 1;
+                return qty;
+            } else if (className.endsWith("RequirementMustContainIngredientLessThan")) {
+                // This is an upper-bound constraint ("less than N"), not a
+                // requirement to put items in.  Putting 0 is always safe.
+                return 0;
             } else if (className.endsWith("RequirementCombinationAnd")) {
                 Method getFirst = requirement.getClass().getMethod("getFirst");
                 Method getSecond = requirement.getClass().getMethod("getSecond");
@@ -153,9 +156,11 @@ public final class CrockPotRecipeHandler extends AbstractRecipeHandler {
     private static int countSlots(Object requirement) {
         String className = requirement.getClass().getName();
         try {
-            if (className.endsWith("RequirementMustContainIngredient")
-                    || className.endsWith("RequirementMustContainIngredientLessThan")) {
-                return 1;
+            if (className.endsWith("RequirementMustContainIngredient")) {
+                Method getQuantity = requirement.getClass().getMethod("getQuantity");
+                return (int) getQuantity.invoke(requirement);
+            } else if (className.endsWith("RequirementMustContainIngredientLessThan")) {
+                return 0; // upper-bound constraint, not a slot consumer
             } else if (className.endsWith("RequirementCombinationAnd")) {
                 Method getFirst = requirement.getClass().getMethod("getFirst");
                 Method getSecond = requirement.getClass().getMethod("getSecond");
@@ -174,15 +179,43 @@ public final class CrockPotRecipeHandler extends AbstractRecipeHandler {
         }
     }
 
+    // Lazy-loaded recipe class for guard check
+    private static volatile Class<?> crockPotRecipeClass;
+    private static volatile boolean recipeClassProbed;
+
+    private static boolean isCrockPotRecipe(Recipe<?> recipe) {
+        if (!recipeClassProbed) {
+            recipeClassProbed = true;
+            try {
+                crockPotRecipeClass = Class.forName(RECIPE_CLASS);
+            } catch (Exception ignored) {
+                // CrockPot mod not loaded
+            }
+        }
+        return crockPotRecipeClass != null && crockPotRecipeClass.isInstance(recipe);
+    }
+
     public static boolean hasCategoryConstraints(Recipe<?> recipe) {
+        // Guard: only CrockPotCookingRecipe has getRequirements().
+        // This is called from the generic plan-building path for ALL mod
+        // recipes, which would otherwise throw NoSuchMethodException on
+        // every non-CrockPot recipe (Malum, Aether, etc.).
+        if (!isCrockPotRecipe(recipe)) return false;
+
         try {
             Method getRequirements = recipe.getClass().getMethod("getRequirements");
             List<?> requirements = (List<?>) getRequirements.invoke(recipe);
+            List<String> reqNames = new ArrayList<>();
             for (Object req : requirements) {
+                String name = req.getClass().getName();
+                reqNames.add(name.substring(name.lastIndexOf('.') + 1));
                 if (hasCategoryConstraint(req)) return true;
             }
+            RSIntegrationMod.LOGGER.debug("[RSI-CrockPot] hasCategoryConstraints: recipe={} requirements={} result=false",
+                    recipe.getId(), reqNames);
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-CrockPot] Recipe reflection failed", e);
+            RSIntegrationMod.LOGGER.warn("[RSI-CrockPot] hasCategoryConstraints failed for {}: {}",
+                    recipe.getId(), e.toString());
         }
         return false;
     }

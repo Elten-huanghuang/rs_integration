@@ -659,6 +659,11 @@ public class RecipeGuiLayoutsMixin {
                 ResourceLocation cached = rsi$faFingerprintCache.get(fp);
                 if (cached != null) return cached;
 
+                // 4. Per-call direct field comparison (handles wrapper/clone objects
+                //    whose Ingredient.getItems() order differs from the cache entry)
+                ResourceLocation fallback = rsi$faFingerprintMatch(registry, ritual);
+                if (fallback != null) return fallback;
+
                 RSIntegrationMod.LOGGER.warn("[RSI-JEI-Mixin] FA ritual not found ({} entries, fp={})",
                         registry.keySet().size(), fp);
             } catch (Exception e) {

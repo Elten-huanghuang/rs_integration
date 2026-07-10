@@ -38,6 +38,7 @@ import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.recipe.CrockPotRecipeHandler;
 import com.huanghuang.rsintegration.util.TextBuilder;
 import com.huanghuang.rsintegration.util.ModIds;
+import com.huanghuang.rsintegration.util.Reflect;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
@@ -384,7 +385,31 @@ public final class GenericCraftPacket {
                                           @Nullable ResourceLocation dim,
                                           @Nullable net.minecraft.core.BlockPos pos,
                                           boolean inferMode, @Nullable ItemStack baseItem) {
-        AsyncCraftChain chain = new AsyncCraftChain(player.getUUID(), player.getServer(), network, steps);
+        // Amplify mod-step executions by repeatCount so a single chain covers
+        // all repeats and the parallel multi-machine path can trigger inside
+        // AsyncCraftChain.startModStep. ChainRepeatController handles any
+        // remainder when there are fewer machines than repeatCount.
+        List<ResolutionStep> chainSteps = steps;
+        if (repeatCount > 1) {
+            boolean hasMod = false;
+            for (ResolutionStep s : steps) {
+                if (s.modType() != ModType.GENERIC) { hasMod = true; break; }
+            }
+            if (hasMod) {
+                List<ResolutionStep> amplified = new ArrayList<>(steps.size());
+                for (ResolutionStep s : steps) {
+                    if (s.modType() != ModType.GENERIC) {
+                        amplified.add(new ResolutionStep(s.recipeId(), s.modType(), s.recipeTypeId(),
+                                s.alternativeIds(), s.alternativeModTypes(), s.inferMode(),
+                                s.executions() * repeatCount));
+                    } else {
+                        amplified.add(s);
+                    }
+                }
+                chainSteps = amplified;
+            }
+        }
+        AsyncCraftChain chain = new AsyncCraftChain(player.getUUID(), player.getServer(), network, chainSteps);
         final UUID capturedUuid = player.getUUID();
         final var capturedServer = player.getServer();
         AsyncCraftManager.getInstance().submit(chain);
@@ -395,7 +420,7 @@ public final class GenericCraftPacket {
                     (p, rem) -> tryResolve(p, recipeId, forcedRecipes, dim, pos, rem, inferMode, baseItem));
         });
         player.sendSystemMessage(
-                TextBuilder.translate("rsi.async.chain_started", steps.size()).build());
+                TextBuilder.translate("rsi.async.chain_started", chainSteps.size()).build());
     }
 
     /** Execute a list of GENERIC-only steps synchronously repeatCount times. */
@@ -875,26 +900,28 @@ public final class GenericCraftPacket {
             targetOutput = cr.getResultItem(player.serverLevel().registryAccess());
         } else {
             List<IngredientSpec> specs = CraftPacketUtils.extractIngredientSpecs(recipe);
-            if (specs == null || specs.isEmpty()) {
-                // CrockPot pure-category recipes carry no fixed ingredient list — a match is decided
-                // by the summed food values of the pot's contents. Preview the exact items the batch
-                // delegate will place by running the shared food-value selection against the network.
-                boolean crockCategory = CrockPotRecipeHandler.hasCategoryConstraints(recipe);
-                if (crockCategory) {
-                    net.minecraft.resources.ResourceKey<Level> cpDim = dim != null
-                            ? net.minecraft.resources.ResourceKey.create(Registries.DIMENSION, dim)
-                            : player.serverLevel().dimension();
-                    net.minecraft.core.BlockPos cpPos = pos != null ? pos : player.blockPosition();
-                    INetwork cpNetwork = CraftPacketUtils.resolveNetworkForCraft(player, cpDim, cpPos);
-                    specs = CrockPotBatchDelegate.buildCategoryPlanIngredients(
-                            recipe, cpNetwork, player.serverLevel());
-                }
+            boolean crockCategory = CrockPotRecipeHandler.hasCategoryConstraints(recipe);
+            if (crockCategory) {
+                // For any category-constrained recipe (pure or mixed), run
+                // the food-value-aware selection so the plan preview shows
+                // exactly the items the batch delegate will place — both
+                // specific MustContain ingredients and filler items.
+                net.minecraft.resources.ResourceKey<Level> cpDim = dim != null
+                        ? net.minecraft.resources.ResourceKey.create(Registries.DIMENSION, dim)
+                        : player.serverLevel().dimension();
+                net.minecraft.core.BlockPos cpPos = pos != null ? pos : player.blockPosition();
+                INetwork cpNetwork = CraftPacketUtils.resolveNetworkForCraft(player, cpDim, cpPos);
+                specs = CrockPotBatchDelegate.buildCategoryPlanIngredients(
+                        recipe, cpNetwork, player.serverLevel(), cpPos);
                 if (specs == null || specs.isEmpty()) {
-                    sendPlanError(player, Component.translatable(crockCategory
-                            ? "rsi.crockpot.error.food_values"
-                            : "rsi.generic.error.no_ingredients").getString());
+                    sendPlanError(player, Component.translatable(
+                            "rsi.crockpot.error.food_values").getString());
                     return;
                 }
+            } else if (specs == null || specs.isEmpty()) {
+                sendPlanError(player, Component.translatable(
+                        "rsi.generic.error.no_ingredients").getString());
+                return;
             }
             List<Ingredient> perRecipe = new ArrayList<>();
             List<Ingredient> expanded = new ArrayList<>();
@@ -920,7 +947,9 @@ public final class GenericCraftPacket {
                     && !ModIds.TOUHOU_LITTLE_MAID.equals(recipeModType.id())
                     && !ModIds.FORBIDDEN_ARCANUS.equals(recipeModType.id())
                     && !ModIds.AETHER.equals(recipeModType.id())
+                    && !recipeModType.id().startsWith(ModIds.AETHER + "_")
                     && !ModIds.ID_YHK_KETTLE.equals(recipeModType.id())
+                    && !ModIds.ID_YHK_FERMENT.equals(recipeModType.id())
                     && !ModIds.ID_FR_KETTLE.equals(recipeModType.id())) {
                 sendPlanError(player, Component.translatable("rsi.generic.error.unsupported_machine", recipe.getClass().getSimpleName()).getString());
                 return;
@@ -1539,6 +1568,41 @@ public final class GenericCraftPacket {
                 recipeModType != null ? recipeModType.id() : null,
                 dim, pos);
 
+        // Inject aspectus catalysts into the material map at count 1 (not
+        // multiplied by repeatCount). Catalysts are placed once per craft and
+        // recycled; they are not consumed. Without this, the plan would show
+        // zero aspectus requirement, making feasibility checks inaccurate.
+        if (embersInfo.code() != null
+                && ModIds.ID_EMBERS_ALCHEMY.equals(recipeModType != null ? recipeModType.id() : null)) {
+            try {
+                var af = Reflect.findField(recipe.getClass(), "aspects");
+                if (af.isPresent()) {
+                    af.get().setAccessible(true);
+                    @SuppressWarnings("unchecked")
+                    var aspects = (List<Ingredient>) af.get().get(recipe);
+                    if (aspects != null) {
+                        for (int ci : embersInfo.code()) {
+                            if (ci < 0 || ci >= aspects.size()) continue;
+                            Ingredient aspectIng = aspects.get(ci);
+                            for (ItemStack opt : aspectIng.getItems()) {
+                                if (opt.isEmpty()) continue;
+                                Item key = opt.getItem();
+                                materials.merge(key,
+                                        new PlanResponse.Availability(1, itemAvailable.getOrDefault(key, 0)),
+                                        (old, neu) -> new PlanResponse.Availability(
+                                                old.needed(), Math.max(old.available(), neu.available())));
+                            }
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.debug("[RSI-Embers] Catalyst injection into plan materials failed", e);
+            }
+            // Reassess feasibility after injecting catalyst items — the player
+            // may be missing aspectus items that are required for execution.
+            feasible = feasible && materials.values().stream().allMatch(PlanResponse.Availability::isEnough);
+        }
+
         boolean executionMachineSupportsGui = false;
         if (dim != null && pos != null) {
             ServerLevel execLevel = player.getServer().getLevel(
@@ -1575,7 +1639,7 @@ public final class GenericCraftPacket {
                 embersInfo.code(),
                 embersInfo.aspectNames(),
                 embersInfo.inputNames(),
-                embersInfo.seed(),
+                embersInfo.code() != null ? 0 : embersInfo.seed(),
                 embersInfo.canInfer(),
                 embersInfo.codeFromCache(),
                 executionMachineSupportsGui,

@@ -365,7 +365,12 @@ public final class SteamerBatchDelegate extends AbstractBatchDelegate {
 
             if (YHKReflection.steamerPotBlockClass != null) {
                 try {
-                    waterPropertyField = YHKReflection.steamerPotBlockClass.getDeclaredField("WATER");
+                    // Try WATER (old YHK SteamerPotBlock) then WATERLOGGED (new YHK BasePotBlock)
+                    try {
+                        waterPropertyField = YHKReflection.steamerPotBlockClass.getDeclaredField("WATER");
+                    } catch (NoSuchFieldException e) {
+                        waterPropertyField = YHKReflection.steamerPotBlockClass.getDeclaredField("WATERLOGGED");
+                    }
                     waterPropertyField.setAccessible(true);
                 } catch (Exception e) {
                     RSIntegrationMod.LOGGER.warn("[RSI-Steamer] Water property probe failed", e);
@@ -513,7 +518,9 @@ public final class SteamerBatchDelegate extends AbstractBatchDelegate {
             }
         }
         for (var prop : state.getProperties()) {
-            if (prop.getName().equalsIgnoreCase("water") && prop instanceof BooleanProperty bp)
+            String name = prop.getName();
+            if ((name.equalsIgnoreCase("water") || name.equalsIgnoreCase("waterlogged"))
+                    && prop instanceof BooleanProperty bp)
                 return state.getValue(bp);
         }
         return true;
@@ -533,7 +540,9 @@ public final class SteamerBatchDelegate extends AbstractBatchDelegate {
             }
         }
         for (var prop : state.getProperties()) {
-            if (prop.getName().equalsIgnoreCase("water") && prop instanceof BooleanProperty bp) {
+            String name = prop.getName();
+            if ((name.equalsIgnoreCase("water") || name.equalsIgnoreCase("waterlogged"))
+                    && prop instanceof BooleanProperty bp) {
                 myLevel.setBlock(p, state.setValue(bp, value), 3);
                 return;
             }

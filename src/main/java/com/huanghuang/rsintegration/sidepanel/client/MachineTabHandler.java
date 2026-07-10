@@ -8,6 +8,7 @@ import com.huanghuang.rsintegration.sidepanel.data.BindingInfo;
 import com.huanghuang.rsintegration.sidepanel.network.MachineCollectPacket;
 import com.huanghuang.rsintegration.sidepanel.network.MachineInsertPacket;
 import com.huanghuang.rsintegration.sidepanel.network.OpenBoundMachineGuiPacket;
+import com.huanghuang.rsintegration.resonance.backpack.OpenResonanceBackpackPacket;
 import com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler;
 
 import java.util.ArrayList;
@@ -18,6 +19,8 @@ public final class MachineTabHandler {
 
     private static final List<BindingInfo> EMPTY = List.of();
     private static int hoveredTabIndex = -1;
+    private static boolean machineCenterHovered;
+    private static boolean resonanceBackpackHovered;
     private static long lastClickTime;
     private static final long CLICK_COOLDOWN_MS = 500; // prevent GUI DDoS
 
@@ -49,6 +52,27 @@ public final class MachineTabHandler {
     public static int getHoveredTabIndex() { return hoveredTabIndex; }
 
     public static void setHoveredTabIndex(int idx) { hoveredTabIndex = idx; }
+
+    public static boolean isMachineCenterHovered() { return machineCenterHovered; }
+
+    public static void setMachineCenterHovered(boolean hovered) { machineCenterHovered = hovered; }
+
+    public static boolean isResonanceBackpackHovered() { return resonanceBackpackHovered; }
+
+    public static void setResonanceBackpackHovered(boolean hovered) { resonanceBackpackHovered = hovered; }
+
+    /** Toggle the Machine Hub overlay. Called when Machine Center side button is clicked. */
+    public static void toggleMachineCenter() {
+        List<BindingInfo> all = getAllMachines();
+        if (all.isEmpty()) return;
+        MachineHub.toggle(all);
+    }
+
+    /** Open the Resonance Backpack GUI. Called when Resonance Backpack side button is clicked. */
+    public static void toggleResonanceBackpack() {
+        RSIntegrationMod.LOGGER.info("[RSI-Backpack] Button clicked, sending open packet to server");
+        RSSidePanelNetworkHandler.CHANNEL.sendToServer(new OpenResonanceBackpackPacket());
+    }
 
     /** Handle a click on a machine tab. Sends the OpenBoundMachineGuiPacket to server. */
     public static void onClick(BindingInfo info) {

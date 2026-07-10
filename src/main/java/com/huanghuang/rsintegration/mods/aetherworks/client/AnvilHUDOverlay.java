@@ -123,26 +123,49 @@ public final class AnvilHUDOverlay implements IGuiOverlay {
                 y += lineHeight;
             }
         } else if (isTs) {
-            // Tool station: always show forge heat if available
+            // Tool station: show forge heat, ember, temp rate
             if (forge != null) {
                 double heat = AetherworksHelper.getForgeHeat(forge);
+                double ember = AetherworksHelper.getForgeEmber(forge);
+                double emberMax = AetherworksHelper.getForgeEmberCapacity(forge);
                 if (recipe != null) {
                     int target = AetherworksHelper.getTsRecipeTemp(recipe);
+                    double rate = AetherworksHelper.getTsRecipeTempRate(recipe);
                     boolean tempOk = Math.abs(heat - target) <= 50;
                     graphics.drawString(font,
                             Component.literal(String.format("温度: %.0f°  [需求 %d°]", heat, target)),
                             x, y, tempOk ? goodColor : badColor);
+                    y += lineHeight;
+                    if (rate > 0) {
+                        graphics.drawString(font,
+                                Component.literal(String.format("温变率: %.1f°/t", rate)),
+                                x, y, color);
+                        y += lineHeight;
+                    }
+                    graphics.drawString(font,
+                            Component.literal(String.format("余烬: %.0f/%.0f EM", ember, emberMax)),
+                            x, y, ember > 0 ? goodColor : warnColor);
                 } else {
                     graphics.drawString(font,
                             Component.literal(String.format("温度: %.0f°", heat)), x, y, color);
+                    y += lineHeight;
+                    graphics.drawString(font,
+                            Component.literal(String.format("余烬: %.0f/%.0f EM", ember, emberMax)), x, y, color);
                 }
                 y += lineHeight;
             } else if (recipe != null) {
                 int target = AetherworksHelper.getTsRecipeTemp(recipe);
+                double rate = AetherworksHelper.getTsRecipeTempRate(recipe);
                 graphics.drawString(font,
                         Component.literal(String.format("温度需求: %d°", target)),
                         x, y, target > 0 ? color : warnColor);
                 y += lineHeight;
+                if (rate > 0) {
+                    graphics.drawString(font,
+                            Component.literal(String.format("温变率: %.1f°/t", rate)),
+                            x, y, color);
+                    y += lineHeight;
+                }
                 graphics.drawString(font, Component.translatable("rsi.aetherworks.warn.no_forge"), x, y, warnColor);
                 y += lineHeight;
             }

@@ -29,6 +29,9 @@ public final class FarmersDelightRecipeHandler extends AbstractRecipeHandler {
 
     @Override
     public ItemStack getResultItem(Recipe<?> recipe, RegistryAccess access) {
+        if (recipe instanceof CampfireCookingRecipe ccr) {
+            return ccr.getResultItem(access);
+        }
         return ModRecipeHandlers.tryGetResultItem(recipe, access);
     }
 

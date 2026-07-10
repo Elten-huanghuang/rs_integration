@@ -16,13 +16,14 @@ public final class JEIReflection {
     public static boolean ready;
 
     static {
-        register("mezz.jei.library.ingredients.IngredientListOverlay", "ingredientListOverlayClass");
-        register("mezz.jei.library.bookmarks.BookmarkOverlay", "bookmarkOverlayClass");
-        register("mezz.jei.library.ingredients.IngredientBookmark", "ingredientBookmarkClass");
+        // JEI 15.x moved these from mezz.jei.library.* to mezz.jei.gui.*
+        register("mezz.jei.gui.overlay.IngredientListOverlay", "ingredientListOverlayClass");
+        register("mezz.jei.gui.overlay.bookmarks.BookmarkOverlay", "bookmarkOverlayClass");
+        register("mezz.jei.gui.bookmarks.IngredientBookmark", "ingredientBookmarkClass");
     }
 
     private static void register(String className, String fieldName) {
-        String description = className.substring(className.lastIndexOf('.') + 1);
+        String description = MOD + "." + className.substring(className.lastIndexOf('.') + 1);
         try {
             java.lang.reflect.Field targetField = JEIReflection.class.getDeclaredField(fieldName);
             ContractValidation.register(new ReflectionContract(MOD, description, className, false));

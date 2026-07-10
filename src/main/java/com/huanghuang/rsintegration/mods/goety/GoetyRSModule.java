@@ -35,13 +35,17 @@ public final class GoetyRSModule implements IModIntegration {
     @Override
     public void registerModType() {
         ModType.register("goety",
-                new String[]{"com.Polarice3.Goety."},
+                new String[]{
+                        "com.Polarice3.Goety.common.crafting.RitualRecipe",
+                        "com.Polarice3.Goety.common.crafting.BrazierRecipe"},
                 new String[]{"goety"},
                 new String[]{"goety", "goety_altar", "goety_component"},
                 ModType.delegateSupplier("com.huanghuang.rsintegration.mods.goety.GoetyBatchDelegate"));
         ModType.configureJei("goety",
                 new String[][]{{"goety:brazier"}},
-                new String[][]{{"com.Polarice3.Goety.", "goety"}},
+                new String[][]{
+                        {"com.Polarice3.Goety.common.crafting.RitualRecipe", "goety"},
+                        {"com.Polarice3.Goety.common.crafting.BrazierRecipe", "goety"}},
                 null);
     }
 
@@ -73,7 +77,6 @@ public final class GoetyRSModule implements IModIntegration {
     @Override
     public void registerNetworkPackets() {
         GoetyRSNetworkHandler.register();
-        GoetyGuiNetworkHandler.register();
     }
 
     @Override

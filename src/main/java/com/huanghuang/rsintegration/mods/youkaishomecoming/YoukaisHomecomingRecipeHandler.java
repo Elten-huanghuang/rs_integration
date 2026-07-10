@@ -48,7 +48,8 @@ public final class YoukaisHomecomingRecipeHandler implements com.huanghuang.rsin
         // SimpleFermentationRecipe.getResultItem() returns EMPTY — extract from results field
         if (FERMENT_RECIPE.equals(recipe.getClass().getName())) {
             try {
-                java.lang.reflect.Field f = recipe.getClass().getDeclaredField("results");
+                java.lang.reflect.Field f = findFieldUp(recipe.getClass(), "results");
+                if (f == null) return ItemStack.EMPTY;
                 f.setAccessible(true);
                 Object val = f.get(recipe);
                 if (val instanceof java.util.List<?> list && !list.isEmpty()) {
@@ -69,7 +70,8 @@ public final class YoukaisHomecomingRecipeHandler implements com.huanghuang.rsin
         String cn = recipe.getClass().getName();
         if (cn.equals(FERMENT_RECIPE)) {
             try {
-                java.lang.reflect.Field f = recipe.getClass().getDeclaredField("ingredients");
+                java.lang.reflect.Field f = findFieldUp(recipe.getClass(), "ingredients");
+                if (f == null) return null;
                 f.setAccessible(true);
                 Object val = f.get(recipe);
                 if (val instanceof java.util.List<?> list) {
@@ -130,6 +132,19 @@ public final class YoukaisHomecomingRecipeHandler implements com.huanghuang.rsin
             if (!ing.isEmpty()) specs.add(new IngredientSpec(ing, 1));
         }
         return specs.isEmpty() ? null : specs;
+    }
+
+    @Nullable
+    private static java.lang.reflect.Field findFieldUp(Class<?> clazz, String name) {
+        Class<?> scan = clazz;
+        while (scan != null && scan != Object.class) {
+            try {
+                return scan.getDeclaredField(name);
+            } catch (NoSuchFieldException e) {
+                scan = scan.getSuperclass();
+            }
+        }
+        return null;
     }
 
     private static boolean isPotCookingRecipe(Recipe<?> recipe) {

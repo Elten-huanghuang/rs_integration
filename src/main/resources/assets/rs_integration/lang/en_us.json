@@ -416,6 +416,8 @@
   "rsi.aetherworks.error.not_tool_station": "§cNo Forge Tool Station at the bound position.",
   "rsi.aetherworks.error.slot_occupied": "§cAetherium Anvil slot is already occupied.",
   "rsi.aetherworks.warn.temp_range": "§7Temperature: %s° — %s°",
+  "rsi.aetherworks.warn.temp_target": "§7Target Temperature: %s°",
+  "rsi.aetherworks.info.temp_rate": "§7Temp Rate: %s°/t",
   "rsi.aetherworks.info.hits_required": "§7Requires %s hammer hits",
   "rsi.aetherworks.info.ember_per_hit": "§7Consumes %s ember per hit",
   "rsi.aetherworks.warn.no_forge": "§6No Aether Forge found nearby.",
@@ -433,6 +435,7 @@
   "rsi.crockpot.cat_min": "§7  Food category %s >= %s",
   "rsi.crockpot.cat_max": "§7  Food category %s <= %s",
   "rsi.crockpot.error.food_values": "§cCould not find items in RS storage that satisfy the recipe's food category requirements. Ensure you have enough items with the required food values.",
+  "rsi.crockpot.error.pot_level_too_low": "§cThis recipe requires at least a level %s Crock Pot, but yours is level %s. Upgrade your Crock Pot first.",
   "rsi.crockpot.no_fuel": "§cCrock Pot needs fuel. Ensure fuel items are available in the RS network.",
   "rsi.crockpot.fuel_warning": "§7Crock Pot requires standard burnable fuel (coal, charcoal, wood, lava bucket, etc.)",
   "gui.rs_integration.jei.crabbersdelight_trap": "Catch via Crab Trap",
@@ -482,6 +485,9 @@
   "rsi.batch.mod.youkaishomecoming_cooking_pot": "Cooking Pot",
   "rsi.youkaishomecoming.lid_open": "§cThe fermentation tank lid is open. Close the lid before starting fermentation.",
   "rsi.youkaishomecoming.ferment_lid_warning": "§7Fermentation tank lid must be closed during operation. Ensure the lid is closed before crafting.",
+  "rsi.youkaishomecoming.ferment_water_needed": "§7Requires %s water bottle(s) (%s mB total). Ensure water bottles or buckets are in the RS network.",
+  "rsi.youkaishomecoming.ferment_water_needed_mb": "§7Requires %s mB of water. Ensure water bottles or buckets are in the RS network.",
+  "rsi.youkaishomecoming.ferment_water_warning": "§cNo water bottles or buckets found in RS network! Please store water bottles or buckets first.",
   "rsi.youkaishomecoming.cookpot_heat_warning": "§7Requires a heat source placed beneath the cooking pot.",
   "rsi.youkaishomecoming.kettle_water_warning": "§7Kettle must contain water to brew. Fill it with a water container before crafting.",
   "rsi.youkaishomecoming.kettle_fluid_output": "§7Kettle produces fluid output — manually collect with a glass bottle after brewing.",
@@ -492,5 +498,19 @@
   "gui.rs_integration.jei.yhk_kettle_craft": "Brew via Kettle",
   "rsi.batch.mod.youkaishomecoming_kettle": "Kettle",
   "rsi.batch.mod.youkaishomecoming_cuisine": "Cuisine Board",
-  "rsi.batch.mod.youkaishomecoming": "YHK Machine"
+  "rsi.batch.mod.youkaishomecoming": "YHK Machine",
+
+  "item.rs_integration.resonance_storage_disk": "Resonance Storage Disk",
+  "item.rs_integration.resonance_storage_disk.tooltip": "§dResonance Disk §7— insert into Disk Drive to activate passive effects",
+
+  "rsi.machine_center.title": "Machine Center",
+  "rsi.machine_center.machine_count": "%s bound machine(s)",
+  "rsi.machine_center.no_machines": "No bound machines",
+  "rsi.machine_center.tooltip_click": "Click to open / Enter to toggle",
+
+  "rsi.resonance_backpack.title": "Resonance Backpack",
+  "rsi.resonance_backpack.tooltip_click": "Click to open Resonance Backpack",
+  "rsi.resonance_backpack.no_disk": "No resonance disk in network",
+
+  "rsi.resonance.duplicate_disk": "§cThis RS network already has a resonance disk. Only one resonance disk is allowed per network."
 }

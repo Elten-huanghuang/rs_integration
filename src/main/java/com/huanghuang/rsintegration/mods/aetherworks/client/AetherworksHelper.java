@@ -56,6 +56,7 @@ final class AetherworksHelper {
     private static Object tsRecipeType;
     private static Method m_ts_recipe_getDisplayInputs;
     private static Method m_ts_recipe_getTemperature;
+    private static Method m_ts_recipe_getTemperatureRate;
 
     private static Item hammerItem;
 
@@ -64,10 +65,14 @@ final class AetherworksHelper {
         if (AetherworksReflection.ready) {
             try {
                 // Essential: anvil fields for HUD + auto-hammer
-                f_anvil_progress = AetherworksReflection.anvilBEClass.getField("progress");
-                f_anvil_hitTimeout = AetherworksReflection.anvilBEClass.getField("hitTimeout");
-                f_anvil_mistakes = AetherworksReflection.anvilBEClass.getField("mistakes");
-                f_anvil_inventory = AetherworksReflection.anvilBEClass.getField("inventory");
+                f_anvil_progress = AetherworksReflection.anvilBEClass.getDeclaredField("progress");
+                f_anvil_hitTimeout = AetherworksReflection.anvilBEClass.getDeclaredField("hitTimeout");
+                f_anvil_mistakes = AetherworksReflection.anvilBEClass.getDeclaredField("mistakes");
+                f_anvil_inventory = AetherworksReflection.anvilBEClass.getDeclaredField("inventory");
+                f_anvil_progress.setAccessible(true);
+                f_anvil_hitTimeout.setAccessible(true);
+                f_anvil_mistakes.setAccessible(true);
+                f_anvil_inventory.setAccessible(true);
 
                 ok = true; // Core HUD and auto-hammer can work
 
@@ -76,7 +81,7 @@ final class AetherworksHelper {
                     f_ts_inventory = AetherworksReflection.toolStationBEClass.getField("inventory");
                 } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Aetherworks] reflection probe failed", e); }
             } catch (Exception e) {
-                // Aetherworks not properly installed — core classes missing
+                RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] Anvil block entity field probe failed — HUD disabled", e);
             }
 
             if (ok) {
@@ -113,6 +118,7 @@ final class AetherworksHelper {
                 try {
                     m_ts_recipe_getDisplayInputs = AetherworksReflection.toolStationRecipeClass.getMethod("getDisplayInputs");
                     m_ts_recipe_getTemperature = AetherworksReflection.toolStationRecipeClass.getMethod("getTemperature");
+                    m_ts_recipe_getTemperatureRate = AetherworksReflection.toolStationRecipeClass.getMethod("getTemperatureRate");
 
                     Class<?> awReg = AetherworksReflection.awRegistryClass;
                     Field f2 = awReg.getField("TOOL_STATION");
@@ -321,6 +327,14 @@ final class AetherworksHelper {
     static int getTsRecipeTemp(Object recipe) {
         if (m_ts_recipe_getTemperature == null) return 0;
         try { return (int) m_ts_recipe_getTemperature.invoke(recipe); } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] Reflection read failed", e);
+            return 0;
+        }
+    }
+
+    static double getTsRecipeTempRate(Object recipe) {
+        if (m_ts_recipe_getTemperatureRate == null) return 0;
+        try { return (double) m_ts_recipe_getTemperatureRate.invoke(recipe); } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] Reflection read failed", e);
             return 0;
         }

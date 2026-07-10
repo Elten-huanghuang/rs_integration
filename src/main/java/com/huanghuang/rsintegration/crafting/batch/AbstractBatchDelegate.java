@@ -71,6 +71,9 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
     @Override
     public final boolean isCraftComplete(ServerLevel playerLevel) {
         BlockPos pos = getMachinePos();
+        // Virtual delegate (e.g. GenericBatchDelegate for CUSTOM_GUI recipes)
+        // has no physical machine — skip chunk-load and BE checks.
+        if (pos == null) return isMachineCraftFinished(null, null);
         ServerLevel level = resolveMachineLevel(playerLevel);
         if (level == null || !level.isLoaded(pos)) return false;
         BlockEntity be = level.getBlockEntity(pos);

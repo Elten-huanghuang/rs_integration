@@ -13,29 +13,24 @@ import net.minecraftforge.network.simple.SimpleChannel;
  * (which lives in the same package as its packets, avoiding Java
  * visibility issues with method references).</p>
  *
- * <p>Protocol version is strictly enforced — mismatched client/server
- * versions will be rejected at connection time.</p>
+ * <p>Protocol version is strictly enforced — a remote running a different
+ * rs_integration protocol is rejected at connection time (with a clear error)
+ * instead of silently connecting with a mismatched packet-id table. A remote
+ * without the mod at all is still allowed to connect (the mod is simply inert
+ * there). Bump {@link #PROTOCOL_VERSION} whenever any packet's wire format, or
+ * the set/ids of registered packets, changes.</p>
  */
 public final class NetworkHandler {
 
-    /** Bump this whenever packet serialization changes. */
-    private static final String PROTOCOL_VERSION = "5";
+    /** Bump this whenever packet serialization or the registered packet set changes. */
+    private static final String PROTOCOL_VERSION = "6";
 
     public static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
             new ResourceLocation(RSIntegrationMod.MOD_ID, "main"),
             () -> PROTOCOL_VERSION,
-            remote -> true,
-            remote -> true
+            NetworkRegistry.acceptMissingOr(PROTOCOL_VERSION),
+            NetworkRegistry.acceptMissingOr(PROTOCOL_VERSION)
     );
-
-    /** Global auto-incrementing packet discriminator ID.
-     *  Every call to registerMessage must use {@link #nextId()} instead of a
-     *  hard-coded number to prevent collisions across subsystems. */
-    private static int packetId;
-
-    public static int nextId() {
-        return packetId++;
-    }
 
     private NetworkHandler() {}
 

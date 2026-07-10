@@ -83,6 +83,10 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
 
         // Validate recipe-machine type match
         if (be != null && !validateMachineForRecipe(be, found)) {
+            player.sendSystemMessage(Component.translatable(
+                    "rsi.aether.error.machine_type_mismatch",
+                    found.getClass().getSimpleName(),
+                    be.getClass().getSimpleName()));
             return false;
         }
 
@@ -188,18 +192,12 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
         }
 
         // ── Phase 2: Ensure fuel (slot 1 for all three machines) ──
-        ItemStack fuelSlot = handler.getStackInSlot(1);
-        boolean hasFuel = !fuelSlot.isEmpty() && isValidFuelForMachine(be, fuelSlot);
-        if (!hasFuel && network != null) {
-            ItemStack fuel = extractFuelForMachine(be, network);
-            if (!fuel.isEmpty()) {
-                ItemStack fuelRemainder = handler.insertItem(1, fuel, false);
-                if (!fuelRemainder.isEmpty()) {
-                    // Machine rejected fuel — refund to RS.
-                    network.insertItem(fuelRemainder, fuelRemainder.getCount(),
-                            com.refinedmods.refinedstorage.api.util.Action.PERFORM);
-                }
-            }
+        // Fill the fuel slot rather than inserting a single item: Aether machines
+        // consume fuel lazily over the recipe's processing time, and one unit (an
+        // Icestone, Ambrosium, etc.) rarely lasts a whole craft. Any unconsumed
+        // remainder is refunded to RS when the batch finishes.
+        if (network != null) {
+            fillFuelSlot(be, handler, network);
         }
 
         be.setChanged();
@@ -271,6 +269,7 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
                 if (!slot0.isEmpty()) refundToRSNetwork(slot0);
             }
         }
+        refundLeftoverFuel(be);
         forceChunkLoad(false);
     }
 
@@ -288,6 +287,9 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public void onBatchFinished(ServerPlayer player) {
+        myLevel.getChunk(myPos);
+        BlockEntity be = myLevel.getBlockEntity(myPos);
+        if (be != null) refundLeftoverFuel(be);
         forceChunkLoad(false);
         network = null;
     }
@@ -348,18 +350,59 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
         }
     }
 
-    /** Extract one fuel item from the RS network that is valid for this machine. */
-    private static ItemStack extractFuelForMachine(BlockEntity be, INetwork network) {
+    /**
+     * Fill fuel slot 1 to a full stack of a single valid fuel type, drawn from RS.
+     * Aether machines consume fuel lazily over the recipe's processing time, so a
+     * single unit (an Icestone, Ambrosium, etc.) rarely lasts a whole craft. We top
+     * the slot up to its stack limit; any unconsumed remainder is refunded to RS when
+     * the batch finishes via {@link #refundLeftoverFuel}.
+     */
+    private static void fillFuelSlot(BlockEntity be, IItemHandler handler, INetwork network) {
+        ItemStack fuelSlot = handler.getStackInSlot(1);
+
+        // Slot occupied by a non-fuel item — leave it alone.
+        if (!fuelSlot.isEmpty() && !isValidFuelForMachine(be, fuelSlot)) return;
+
+        // Match the existing fuel type, else pick any valid fuel present in RS.
+        ItemStack fuelType = fuelSlot.isEmpty() ? findFuelInNetwork(be, network) : fuelSlot;
+        if (fuelType.isEmpty()) return;
+
+        int slotLimit = Math.min(handler.getSlotLimit(1), fuelType.getMaxStackSize());
+        int room = slotLimit - fuelSlot.getCount();
+        if (room <= 0) return;
+
+        ItemStack extracted = network.extractItem(fuelType.copyWithCount(1), room,
+                com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+        if (extracted.isEmpty()) return;
+
+        ItemStack remainder = handler.insertItem(1, extracted, false);
+        if (!remainder.isEmpty()) {
+            network.insertItem(remainder, remainder.getCount(),
+                    com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+        }
+    }
+
+    /** Find the first valid fuel type for this machine present in the RS network. */
+    private static ItemStack findFuelInNetwork(BlockEntity be, INetwork network) {
         for (var entry : new java.util.ArrayList<>(network.getItemStorageCache().getList().getStacks())) {
             ItemStack stack = entry.getStack();
             if (stack.isEmpty()) continue;
-            if (isValidFuelForMachine(be, stack)) {
-                var extracted = network.extractItem(stack.copyWithCount(1), 1,
-                        com.refinedmods.refinedstorage.api.util.Action.PERFORM);
-                if (!extracted.isEmpty()) return extracted;
-            }
+            if (isValidFuelForMachine(be, stack)) return stack;
         }
         return ItemStack.EMPTY;
+    }
+
+    /** Refund any unconsumed fuel left in slot 1 back to RS (or the player). */
+    private void refundLeftoverFuel(BlockEntity be) {
+        if (be == null) return;
+        IItemHandler handler = be.getCapability(
+                net.minecraftforge.common.capabilities.ForgeCapabilities.ITEM_HANDLER, null)
+                .orElse(null);
+        if (handler == null) return;
+        ItemStack fuel = handler.getStackInSlot(1);
+        if (fuel.isEmpty() || !isValidFuelForMachine(be, fuel)) return;
+        ItemStack extracted = handler.extractItem(1, fuel.getCount(), false);
+        if (!extracted.isEmpty()) refundToRSNetwork(extracted);
     }
 
     private void forceChunkLoad(boolean load) {

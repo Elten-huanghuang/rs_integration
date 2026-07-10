@@ -395,57 +395,94 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
     }
 
     private boolean ensureFuel(ServerPlayer player) {
-        // Check if furnace already has litTime > 0
+        int cookingTime = (recipe instanceof AbstractCookingRecipe acr) ? acr.getCookingTime() : 200;
+
+        // Burn time already banked in litTime counts toward this item's cook.
+        int litTime = 0;
         try {
             java.lang.reflect.Field litTimeField = AbstractFurnaceBlockEntity.class
                     .getDeclaredField("litTime");
             litTimeField.setAccessible(true);
-            if (litTimeField.getInt(furnaceBE) > 0) return true;
+            litTime = litTimeField.getInt(furnaceBE);
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.debug("[RSI-Vanilla] litTime probe failed", e);
         }
+        int remainingCook = Math.max(0, cookingTime - litTime);
+        if (remainingCook == 0) return true; // current burn already covers the whole cook
 
-        // Check existing fuel in slot 1
-        ItemStack existingFuel = furnaceBE.getItem(1);
-        if (!existingFuel.isEmpty()) {
-            int burnTime = ForgeHooks.getBurnTime(existingFuel, recipe.getType());
-            if (burnTime > 0) return true;
+        // Existing fuel in slot 1: top up with more of the SAME type until it covers
+        // the remaining cook. A single stick (burn 100) can't finish a 200-tick smelt,
+        // so we must ensure enough units are present rather than trusting burnTime > 0.
+        ItemStack existing = furnaceBE.getItem(1);
+        if (!existing.isEmpty()) {
+            int singleBurn = ForgeHooks.getBurnTime(existing, recipe.getType());
+            if (singleBurn <= 0) return false; // non-fuel item blocking the slot
+            int needed = Math.max(1, (remainingCook + singleBurn - 1) / singleBurn);
+            if (existing.getCount() >= needed) return true;
+            if (network != null) {
+                int topUp = needed - existing.getCount();
+                ItemStack extra = network.extractItem(existing.copyWithCount(1), topUp,
+                        com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                if (!extra.isEmpty()) {
+                    ItemStack merged = existing.copy();
+                    merged.grow(extra.getCount());
+                    furnaceBE.setItem(1, merged);
+                }
+            }
+            return !furnaceBE.getItem(1).isEmpty();
         }
 
-        // Try to extract fuel from RS network
+        // Slot empty: pick a single fuel type from RS that can cover the whole cook.
+        // Prefer a type with enough units; fall back to the type with the most total
+        // burn coverage so long crafts don't stall on the first (insufficient) type.
         if (network == null) return false;
-
-        int cookingTime;
-        if (recipe instanceof AbstractCookingRecipe acr) {
-            cookingTime = acr.getCookingTime();
-        } else {
-            cookingTime = 200; // default
-        }
-
-        // Scan RS storage for burnable items
         this.fuelStacks = new ArrayList<>();
         var stacks = new ArrayList<>(network.getItemStorageCache().getList().getStacks());
+
+        ItemStack bestPartial = ItemStack.EMPTY;
+        int bestPartialCoverage = 0;
         for (var entry : stacks) {
             ItemStack candidate = entry.getStack();
             if (candidate.isEmpty()) continue;
             int singleBurnTime = ForgeHooks.getBurnTime(candidate, recipe.getType());
             if (singleBurnTime <= 0) continue;
-            int needed = Math.max(1, (cookingTime + singleBurnTime - 1) / singleBurnTime);
-            int available = Math.min(needed, candidate.getCount());
+            int needed = Math.max(1, (remainingCook + singleBurnTime - 1) / singleBurnTime);
 
-            ItemStack extracted = network.extractItem(
-                    candidate.copyWithCount(1), available,
-                    com.refinedmods.refinedstorage.api.util.Action.PERFORM);
-            if (!extracted.isEmpty()) {
-                fuelStacks.add(extracted.copy());
-                furnaceBE.setItem(1, extracted.copy());
-                player.displayClientMessage(
-                        Component.translatable("rsi.vanilla.info.fuel_supplied", extracted.getCount()), true);
-                return true;
+            if (candidate.getCount() >= needed) {
+                if (supplyFuel(player, candidate, needed)) return true;
+            } else {
+                int coverage = candidate.getCount() * singleBurnTime;
+                if (coverage > bestPartialCoverage) {
+                    bestPartialCoverage = coverage;
+                    bestPartial = candidate;
+                }
             }
         }
 
-        return false;
+        // No single type fully covers the cook — use the best partial available.
+        return !bestPartial.isEmpty() && supplyFuel(player, bestPartial, bestPartial.getCount());
+    }
+
+    /** Extract {@code amount} of {@code fuelType} from RS into the fuel slot. */
+    private boolean supplyFuel(ServerPlayer player, ItemStack fuelType, int amount) {
+        ItemStack extracted = network.extractItem(fuelType.copyWithCount(1), amount,
+                com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+        if (extracted.isEmpty()) return false;
+        fuelStacks.add(extracted.copy());
+        furnaceBE.setItem(1, extracted.copy());
+        player.displayClientMessage(
+                Component.translatable("rsi.vanilla.info.fuel_supplied", extracted.getCount()), true);
+        return true;
+    }
+
+    /** Refund any whole (unburned) fuel items left in slot 1 back to RS. */
+    private void refundLeftoverFuel() {
+        if (furnaceBE == null) return;
+        ItemStack fuel = furnaceBE.getItem(1);
+        if (fuel.isEmpty() || ForgeHooks.getBurnTime(fuel, recipe.getType()) <= 0) return;
+        furnaceBE.setItem(1, ItemStack.EMPTY);
+        furnaceBE.setChanged();
+        refundToRSNetwork(fuel);
     }
 
     // ── VIRTUAL path ──────────────────────────────────────────────
@@ -696,7 +733,8 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
                 furnaceBE.setItem(2, ItemStack.EMPTY);
                 refundToRSNetwork(slot2);
             }
-            // Do NOT refund fuel from slot 1 (already partially consumed)
+            // Refund whole fuel items left in slot 1 (only spent litTime is lost).
+            refundLeftoverFuel();
             furnaceBE.setChanged();
         }
         if (kind == MachineKind.CAMPFIRE && campfireBE != null) {
@@ -717,6 +755,9 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public void onBatchFinished(ServerPlayer player) {
+        if (kind == MachineKind.FURNACE) {
+            refundLeftoverFuel();
+        }
         if (kind == MachineKind.CAMPFIRE) {
             campfireForceLoad(false);
         }

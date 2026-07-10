@@ -271,7 +271,7 @@ new ModuleEntry("modId", RSIntegrationConfig.ENABLE_XXX,
 
 - 模组目录：小写无分隔符（`goety`, `malum`, `youkaishomecoming`）
 - Delegate 类：`<MachineName>BatchDelegate`
-- Packet 类：`<Mod><Action>Packet`（如 `GoetyGuiSelectRitualPacket`）
+- Packet 类：`<Mod><Action>Packet`（如 `MalumCraftPacket`）
 - Module 类：`<Mod>RSModule`
 - 探针类：`<Mod>Reflection`
 - 私有辅助方法：`rsi$` 前缀（避免 Mixin 冲突）

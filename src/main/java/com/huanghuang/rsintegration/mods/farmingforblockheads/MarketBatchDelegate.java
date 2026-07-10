@@ -43,6 +43,7 @@ public final class MarketBatchDelegate extends AbstractBatchDelegate {
     private MarketRecipeWrapper wrapper;
     private ServerPlayer player;
     private boolean done;
+    private boolean resultInserted;
 
     private static void probe() {
         if (probed) return;
@@ -63,7 +64,7 @@ public final class MarketBatchDelegate extends AbstractBatchDelegate {
     public boolean tryStartSingleCraft(ServerPlayer player) {
         if (network == null || wrapper == null) return false;
 
-        // Extract payment — result is delivered by collectResult (chain flushes it).
+        // Extract payment from RS network.
         ItemStack cost = wrapper.costItem();
         if (!cost.isEmpty()) {
             ItemStack extracted = RSIntegrationNetwork.extractFromNetwork(
@@ -73,6 +74,15 @@ public final class MarketBatchDelegate extends AbstractBatchDelegate {
                         cost.getCount(), cost.getHoverName().getString());
                 return false;
             }
+        }
+
+        // Direct path: insert result immediately.  The chain path uses the
+        // ledger-overloaded tryStartSingleCraft + collectResult instead.
+        ItemStack result = wrapper.getResultItem(player.serverLevel().registryAccess());
+        if (!result.isEmpty()) {
+            network.insertItem(result.copy(), result.getCount(),
+                    com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+            resultInserted = true;
         }
 
         done = true;
@@ -253,6 +263,10 @@ public final class MarketBatchDelegate extends AbstractBatchDelegate {
     @Override
     public ItemStack collectResult(ServerPlayer player) {
         done = false;
+        if (resultInserted) {
+            resultInserted = false;
+            return ItemStack.EMPTY; // already inserted in tryStartSingleCraft (direct path)
+        }
         if (wrapper != null) {
             return wrapper.getResultItem(player.serverLevel().registryAccess());
         }
@@ -264,12 +278,14 @@ public final class MarketBatchDelegate extends AbstractBatchDelegate {
     @Override
     protected void clearMachineState(BlockEntity be, ServerPlayer player) {
         done = false;
+        resultInserted = false;
         resetState();
     }
 
     @Override
     public void onBatchFinished(ServerPlayer player) {
         done = false;
+        resultInserted = false;
         resetState();
     }
 

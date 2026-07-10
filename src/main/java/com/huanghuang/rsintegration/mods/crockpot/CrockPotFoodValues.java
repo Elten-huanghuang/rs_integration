@@ -79,7 +79,11 @@ public final class CrockPotFoodValues {
         if (getFoodValues == null || fvGet == null || categoryValues == null) return null;
         try {
             Object fv = getFoodValues.invoke(null, stack, level);
-            if (fv == null) return null;
+            if (fv == null) {
+                RSIntegrationMod.LOGGER.debug("[RSI-CrockPot] getFoodValues returned null for {}",
+                        stack.getHoverName().getString());
+                return null;
+            }
             float[] result = new float[CAT];
             for (int i = 0; i < CAT; i++) {
                 result[i] = (float) fvGet.invoke(fv, categoryValues[i]);
@@ -108,9 +112,13 @@ public final class CrockPotFoodValues {
     /**
      * Greedily choose up to {@code remaining} items whose food values, added to {@code startFV},
      * satisfy every category minimum without breaching any maximum. Nothing is consumed — the
-     * caller extracts the returned items. Selection stops as soon as all minimums are met (Crock
-     * Pot matches on food-value sums, so extra neutral filler is unnecessary and only risks
-     * shifting the match to another recipe).
+     * caller extracts the returned items.
+     *
+     * <p>Two-phase selection: Phase 1 picks items that reduce category deficits. Once all
+     * minimums are met, Phase 2 fills any remaining slots with the most neutral items
+     * (lowest total food-value magnitude) that don't breach any maximum. Crock Pot requires
+     * every slot up to potLevel to be filled for cooking to start, so stopping early would
+     * leave the pot unable to begin.</p>
      *
      * @return the chosen items (each count 1), or null if the constraints cannot be met.
      */
@@ -124,6 +132,8 @@ public final class CrockPotFoodValues {
         for (Candidate c : candidates) avail.merge(c.stack().getItem(), c.available(), Integer::sum);
 
         List<ItemStack> chosen = new ArrayList<>();
+
+        // Phase 1: fill deficits greedily
         for (int r = 0; r < remaining; r++) {
             if (meetsMins(current, catMins)) break;
 
@@ -145,7 +155,32 @@ public final class CrockPotFoodValues {
             if (fv != null) for (int c = 0; c < CAT; c++) current[c] += fv[c];
         }
 
-        return meetsMins(current, catMins) ? chosen : null;
+        if (!meetsMins(current, catMins)) return null;
+
+        // Phase 2: fill remaining slots with neutral items (lowest total food-value
+        // magnitude) that don't breach any max.  Needed because Crock Pot requires
+        // all slots up to potLevel to be occupied for cooking to start.
+        int slotsLeft = remaining - chosen.size();
+        for (int r = 0; r < slotsLeft; r++) {
+            ItemStack best = ItemStack.EMPTY;
+            float bestImpact = Float.POSITIVE_INFINITY; // lower = more neutral
+            for (Candidate cand : candidates) {
+                ItemStack stack = cand.stack();
+                if (stack.isEmpty() || avail.getOrDefault(stack.getItem(), 0) <= 0) continue;
+                float[] fv = compute(stack, level);
+                if (fv == null || breachesMax(current, catMaxs, fv)) continue;
+                float impact = foodValueMagnitude(fv);
+                if (impact < bestImpact) { bestImpact = impact; best = stack; }
+            }
+            if (best.isEmpty()) break; // no neutral filler available — pot starts with fewer slots
+
+            avail.merge(best.getItem(), -1, Integer::sum);
+            chosen.add(best.copyWithCount(1));
+            float[] fv = compute(best, level);
+            if (fv != null) for (int c = 0; c < CAT; c++) current[c] += fv[c];
+        }
+
+        return chosen;
     }
 
     private static boolean meetsMins(float[] current, float[] mins) {
@@ -161,6 +196,13 @@ public final class CrockPotFoodValues {
     private static boolean breachesMax(float[] current, float[] maxs, float[] fv) {
         for (int c = 0; c < CAT; c++) if (current[c] + fv[c] > maxs[c] + 0.001f) return true;
         return false;
+    }
+
+    /** Sum of absolute food values — lower means more neutral (less likely to shift recipe match). */
+    private static float foodValueMagnitude(float[] fv) {
+        float sum = 0;
+        for (int c = 0; c < CAT; c++) sum += Math.abs(fv[c]);
+        return sum;
     }
 
     /** Reward filling deficits (×10); penalize food values in categories the recipe doesn't want (×5). */

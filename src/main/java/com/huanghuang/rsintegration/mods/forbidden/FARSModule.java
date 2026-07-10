@@ -36,7 +36,7 @@ public final class FaRSModule implements IModIntegration {
                 new String[0],
                 ModType.delegateSupplier("com.huanghuang.rsintegration.mods.forbidden.FaBatchDelegate"));
         ModType.configureJei("forbidden_arcanus",
-                new String[][]{{"forbidden_arcanus:hephaestus_smithing", "hephaestus_forge"}, {"forbidden_arcanus:hephaestus_forge_upgrading", "hephaestus_forge"}},
+                new String[][]{{"forbidden_arcanus:hephaestus_smithing", "hephaestus_forge"}, {"forbidden_arcanus:hephaestus_forge_upgrading", "hephaestus_forge"}, {"forbidden_arcanus:hephaestus_forge", "hephaestus_forge"}},
                 new String[][]{{"com.stal111.forbidden_arcanus.", "hephaestus_forge"}},
                 null);
     }

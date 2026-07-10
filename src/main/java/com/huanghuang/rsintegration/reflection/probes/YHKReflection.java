@@ -66,7 +66,9 @@ public final class YHKReflection {
         register("dev.xkmc.youkaishomecoming.content.pot.steamer.SteamerBlockEntity", "steamerBEClass");
         register("dev.xkmc.youkaishomecoming.content.pot.steamer.RackData", "rackDataClass");
         register("dev.xkmc.youkaishomecoming.content.pot.steamer.RackItemData", "rackItemDataClass");
-        register("dev.xkmc.youkaishomecoming.content.pot.steamer.SteamerPotBlock", "steamerPotBlockClass");
+        // SteamerPotBlock was removed in YHK 2.6.x — water is now vanilla WATERLOGGED on BasePotBlock
+        registerOptional("dev.xkmc.youkaishomecoming.content.pot.steamer.SteamerPotBlock", "steamerPotBlockClass");
+        registerOptional("dev.xkmc.youkaishomecoming.content.pot.base.BasePotBlock", "steamerPotBlockClass");
         // Moka Pot
         register("dev.xkmc.youkaishomecoming.content.pot.moka.MokaMakerBlockEntity", "mokaMakerBEClass");
         register("dev.xkmc.youkaishomecoming.content.pot.moka.MokaRecipe", "mokaRecipeClass");
@@ -76,10 +78,18 @@ public final class YHKReflection {
     }
 
     private static void register(String className, String fieldName) {
-        String description = className.substring(className.lastIndexOf('.') + 1);
+        register(className, fieldName, true);
+    }
+
+    private static void registerOptional(String className, String fieldName) {
+        register(className, fieldName, false);
+    }
+
+    private static void register(String className, String fieldName, boolean required) {
+        String description = MOD + "." + className.substring(className.lastIndexOf('.') + 1);
         try {
             java.lang.reflect.Field targetField = YHKReflection.class.getDeclaredField(fieldName);
-            ContractValidation.register(new ReflectionContract(MOD, description, className, true));
+            ContractValidation.register(new ReflectionContract(MOD, description, className, required));
             ContractValidation.registerTarget(description, targetField);
         } catch (NoSuchFieldException e) {
             throw new RuntimeException("YHKReflection field not found: " + fieldName, e);

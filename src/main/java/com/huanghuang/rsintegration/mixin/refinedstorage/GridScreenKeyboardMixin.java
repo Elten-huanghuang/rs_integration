@@ -22,17 +22,24 @@ public abstract class GridScreenKeyboardMixin {
             }
         }
 
-        if (MachineTabHandler.getHoveredTabIndex() < 0) return;
-        if (keyCode != 257 && keyCode != 32) return;
+        // Machine Center button: Enter/Space → toggle Hub overlay
+        if (MachineTabHandler.isMachineCenterHovered() && (keyCode == 257 || keyCode == 32)) {
+            GuiEventListener focused = ((net.minecraft.client.gui.screens.Screen) (Object) this).getFocused();
+            if (!(focused instanceof net.minecraft.client.gui.components.EditBox)) {
+                MachineTabHandler.toggleMachineCenter();
+                cir.setReturnValue(true);
+            }
+            return;
+        }
 
-        GuiEventListener focused = ((net.minecraft.client.gui.screens.Screen) (Object) this).getFocused();
-        if (focused instanceof net.minecraft.client.gui.components.EditBox) return;
-
-        var machines = MachineTabHandler.getVisibleTabs();
-        int idx = MachineTabHandler.getHoveredTabIndex();
-        if (idx < machines.size()) {
-            MachineTabHandler.onClick(machines.get(idx));
-            cir.setReturnValue(true);
+        // Resonance Backpack button: Enter/Space → open backpack GUI
+        if (MachineTabHandler.isResonanceBackpackHovered() && (keyCode == 257 || keyCode == 32)) {
+            GuiEventListener focused = ((net.minecraft.client.gui.screens.Screen) (Object) this).getFocused();
+            if (!(focused instanceof net.minecraft.client.gui.components.EditBox)) {
+                MachineTabHandler.toggleResonanceBackpack();
+                cir.setReturnValue(true);
+            }
+            return;
         }
     }
 

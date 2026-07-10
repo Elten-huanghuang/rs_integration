@@ -301,7 +301,7 @@ public final class RecipeIndex {
     private static volatile Object marketRegistryInst;
 
     private static void probeMarket() {
-        if (marketClassesProbed) return;
+        if (marketClassesProbed && marketAvailable) return;
         marketClassesProbed = true;
         try {
             Class<?> registryClass = Class.forName(
@@ -309,8 +309,11 @@ public final class RecipeIndex {
             java.lang.reflect.Field instField = registryClass.getField("INSTANCE");
             marketRegistryInst = instField.get(null);
             marketAvailable = marketRegistryInst != null;
+            if (!marketAvailable) {
+                RSIntegrationMod.LOGGER.warn("[RecipeIndex] MarketRegistry INSTANCE is null — market entries will be skipped");
+            }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RecipeIndex] MarketRegistry not available", e);
+            RSIntegrationMod.LOGGER.warn("[RecipeIndex] MarketRegistry not available — market entries will be skipped: {}", e.toString());
             marketAvailable = false;
         }
     }
@@ -324,10 +327,21 @@ public final class RecipeIndex {
             Class<?> registryClass = marketRegistryInst.getClass();
             java.lang.reflect.Method getEntries = Reflect.findMethod(registryClass,
                     "getEntries", new Class<?>[0]);
-            if (getEntries == null) return 0;
+            if (getEntries == null) {
+                RSIntegrationMod.LOGGER.warn("[RecipeIndex] MarketRegistry.getEntries() method not found");
+                return 0;
+            }
             @SuppressWarnings("unchecked")
             Collection<Object> entries = (Collection<Object>) getEntries.invoke(marketRegistryInst);
-            if (entries == null) return 0;
+            if (entries == null || entries.isEmpty()) {
+                // MarketRegistry exists but has no entries yet — may be built
+                // before MarketRegistryReloadEvent fires. Reset probe state so
+                // the next index rebuild can pick up entries loaded later.
+                RSIntegrationMod.LOGGER.warn("[RecipeIndex] MarketRegistry has {} entries — will retry on next build",
+                        entries == null ? "null" : "0");
+                marketClassesProbed = false;
+                return 0;
+            }
 
             Class<?> entryClass = null;
             java.lang.reflect.Method getOutput = null;

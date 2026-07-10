@@ -25,7 +25,7 @@ public final class CrockPotReflection {
     }
 
     private static void register(String className, String fieldName, boolean required) {
-        String description = className.substring(className.lastIndexOf('.') + 1);
+        String description = MOD + "." + className.substring(className.lastIndexOf('.') + 1);
         try {
             java.lang.reflect.Field targetField = CrockPotReflection.class.getDeclaredField(fieldName);
             ContractValidation.register(new ReflectionContract(MOD, description, className, required));

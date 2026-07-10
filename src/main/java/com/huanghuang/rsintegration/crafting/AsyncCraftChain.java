@@ -448,7 +448,10 @@ public final class AsyncCraftChain {
         // ── Load-balanced multi-machine dispatch ──
         // When multiple machines are bound for this mod type, try to distribute
         // work across them instead of sending everything to one machine.
-        if (!step.inferMode() && machines.size() >= 2) {
+        // Only parallelize when there are multiple executions to distribute;
+        // a single-execution step would double the material requirement (one
+        // set per child) and fail if the player only has enough for one craft.
+        if (!step.inferMode() && machines.size() >= 2 && step.executions() > 1) {
             IBatchDelegate parallel = tryStartParallel(machines, step, online);
             if (parallel != null) return parallel;
             // Fall through: single-machine path below
@@ -652,6 +655,13 @@ public final class AsyncCraftChain {
         // Filter: chunk loaded, BE present, not busy (resolves per-machine dimension)
         List<BoundMachine> available = LoadBalancer.filterAvailable(machines, server);
         if (available.size() < 2) return null;
+
+        // Cap children at step.executions() — the resolver may have set
+        // executions higher than the number of machines; ChainRepeatController
+        // handles the remainder.
+        if (available.size() > step.executions()) {
+            available = new ArrayList<>(available.subList(0, step.executions()));
+        }
 
         // Build a parallel group — constructor internally creates and validates
         // one delegate per machine

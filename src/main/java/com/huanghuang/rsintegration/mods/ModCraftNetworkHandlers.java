@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.mods.forbidden.FaCraftPacket;
 import com.huanghuang.rsintegration.mods.malum.MalumCraftPacket;
 import com.huanghuang.rsintegration.mods.wizardsreborn.WRWandCraftPacket;
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;
+import com.huanghuang.rsintegration.network.packet.NetworkPacketIds;
 
 public final class ModCraftNetworkHandlers {
 
@@ -15,7 +16,7 @@ public final class ModCraftNetworkHandlers {
     public static void registerMalum() {
         if (malumRegistered) return;
         var ch = NetworkHandler.CHANNEL;
-        ch.registerMessage(NetworkHandler.nextId(), MalumCraftPacket.class,
+        ch.registerMessage(NetworkPacketIds.MALUM_CRAFT, MalumCraftPacket.class,
                 MalumCraftPacket::encode, MalumCraftPacket::decode, MalumCraftPacket::handle);
         malumRegistered = true;
     }
@@ -23,7 +24,7 @@ public final class ModCraftNetworkHandlers {
     public static void registerFa() {
         if (faRegistered) return;
         var ch = NetworkHandler.CHANNEL;
-        ch.registerMessage(NetworkHandler.nextId(), FaCraftPacket.class,
+        ch.registerMessage(NetworkPacketIds.FA_CRAFT, FaCraftPacket.class,
                 FaCraftPacket::encode, FaCraftPacket::decode, FaCraftPacket::handle);
         faRegistered = true;
     }
@@ -31,7 +32,7 @@ public final class ModCraftNetworkHandlers {
     public static void registerEidolon() {
         if (eidolonRegistered) return;
         var ch = NetworkHandler.CHANNEL;
-        ch.registerMessage(NetworkHandler.nextId(), EidolonCraftPacket.class,
+        ch.registerMessage(NetworkPacketIds.EIDOLON_CRAFT, EidolonCraftPacket.class,
                 EidolonCraftPacket::encode, EidolonCraftPacket::decode, EidolonCraftPacket::handle);
         eidolonRegistered = true;
     }
@@ -39,7 +40,7 @@ public final class ModCraftNetworkHandlers {
     public static void registerWRWand() {
         if (wrWandRegistered) return;
         var ch = NetworkHandler.CHANNEL;
-        ch.registerMessage(NetworkHandler.nextId(), WRWandCraftPacket.class,
+        ch.registerMessage(NetworkPacketIds.WR_WAND_CRAFT, WRWandCraftPacket.class,
                 WRWandCraftPacket::encode, WRWandCraftPacket::decode, WRWandCraftPacket::handle);
         wrWandRegistered = true;
     }

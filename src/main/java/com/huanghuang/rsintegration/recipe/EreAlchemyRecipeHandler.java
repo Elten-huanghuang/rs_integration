@@ -42,29 +42,11 @@ public final class EreAlchemyRecipeHandler extends AbstractRecipeHandler {
     public List<IngredientSpec> getIngredients(Recipe<?> recipe) {
         List<IngredientSpec> specs = new ArrayList<>();
 
-        // tablet — center Ingredient
-        Reflect.findField(recipe.getClass(), "tablet").ifPresent(f -> {
-            if (!Ingredient.class.isAssignableFrom(f.getType())) return;
-            f.setAccessible(true);
-            try {
-                Ingredient ing = (Ingredient) f.get(recipe);
-                if (ing != null && !ing.isEmpty()) specs.add(new IngredientSpec(ing, 1));
-            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
-        });
-
-        // aspects — ArrayList<Ingredient> (element items, M aspects)
-        Reflect.findField(recipe.getClass(), "aspects").ifPresent(f -> {
-            if (!List.class.isAssignableFrom(f.getType())) return;
-            f.setAccessible(true);
-            try {
-                List<Ingredient> aspects = (List<Ingredient>) f.get(recipe);
-                if (aspects != null) {
-                    for (Ingredient ing : aspects) {
-                        if (ing != null && !ing.isEmpty()) specs.add(new IngredientSpec(ing, 1));
-                    }
-                }
-            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
-        });
+        // tablet (center Ingredient) and aspects (catalyst items) are NOT
+        // included — they are placed once and recycled across repeat batches.
+        // The EmbersPlanInfo pedestal layout shows which catalysts are needed
+        // per pedestal, and the execution delegate handles extraction/refund
+        // internally. Only consumed inputs are listed here.
 
         // inputs — ArrayList<Ingredient> (material items, N pedestals)
         Reflect.findField(recipe.getClass(), "inputs").ifPresent(f -> {

@@ -37,6 +37,9 @@ public final class PlanWarnings {
         List<String> warnings = new ArrayList<>();
         switch (typeId) {
             case ModIds.AETHER:
+            case "aether_freezer":
+            case "aether_incubator":
+            case "aether_altar":
                 warnings.addAll(AetherFurnaceBatchDelegate.getPlanWarnings(player, recipe, dim, pos));
                 break;
             case ModIds.GOETY:

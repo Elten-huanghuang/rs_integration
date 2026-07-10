@@ -3,15 +3,9 @@ package com.huanghuang.rsintegration.mixin.refinedstorage;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.machine.MachineHub;
 import com.huanghuang.rsintegration.machine.MachineHubInputHandler;
-import com.huanghuang.rsintegration.machine.MachineInteractType;
-import com.huanghuang.rsintegration.machine.MachineSlotType;
-import com.huanghuang.rsintegration.machine.MachineState;
-import com.huanghuang.rsintegration.machine.MachineStatus;
 import com.huanghuang.rsintegration.mixin.minecraft.AbstractContainerScreenAccessor;
 import com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler;
 import com.huanghuang.rsintegration.sidepanel.client.MachineTabHandler;
-import com.huanghuang.rsintegration.sidepanel.data.BindingInfo;
-import com.huanghuang.rsintegration.sidepanel.data.MachineStatusCache;
 import com.refinedmods.refinedstorage.screen.grid.GridScreen;
 import com.refinedmods.refinedstorage.screen.grid.stack.IGridStack;
 import net.minecraft.client.Minecraft;
@@ -85,7 +79,7 @@ public abstract class GridScreenMouseMixin {
 
         if (RSIntegrationConfig.ENABLE_RS_GRID_SWIPE_EXTRACT.get()
                 && Screen.hasControlDown() && button == 0
-                && MachineTabHandler.getHoveredTabIndex() < 0) {
+                && !MachineTabHandler.isMachineCenterHovered()) {
             GridScreen screen = (GridScreen) (Object) this;
             AbstractContainerScreenAccessor acc = (AbstractContainerScreenAccessor) this;
             double relX = mouseX - acc.getLeftPos();
@@ -109,59 +103,18 @@ public abstract class GridScreenMouseMixin {
             }
         }
 
-        if (button == 0) {
-            int ht = MachineTabHandler.getHoveredTabIndex();
-            List<BindingInfo> visibleTabs = MachineTabHandler.getVisibleTabs();
-            List<BindingInfo> allMachines = MachineTabHandler.getAllMachines();
-            boolean shouldUse = MachineHub.shouldUseHub(allMachines.size());
-            if (ht == 0 && visibleTabs.isEmpty() && shouldUse) {
-                MachineHub.toggle(allMachines);
-                cir.setReturnValue(true);
-                return;
-            }
+        // Machine Center side button click → toggle Hub overlay
+        if (button == 0 && MachineTabHandler.isMachineCenterHovered()) {
+            MachineTabHandler.toggleMachineCenter();
+            cir.setReturnValue(true);
+            return;
         }
 
-        int hovered = MachineTabHandler.getHoveredTabIndex();
-        if (hovered < 0) return;
-
-        List<BindingInfo> visibleTabs = MachineTabHandler.getVisibleTabs();
-        if (!visibleTabs.isEmpty() && hovered < visibleTabs.size()) {
-            BindingInfo info = visibleTabs.get(hovered);
-
-            if (button == 1) {
-                MachineTabHandler.onClick(info);
-                cir.setReturnValue(true);
-                return;
-            }
-
-            if (button == 0) {
-                MachineInteractType type = MachineInteractType.fromBlockKey(info.blockKey());
-
-                if (type == MachineInteractType.GUI) {
-                    MachineTabHandler.onClick(info);
-                    cir.setReturnValue(true);
-                    return;
-                }
-
-                boolean shift = Minecraft.getInstance().screen != null
-                        && Minecraft.getInstance().screen.hasShiftDown();
-                Minecraft mc = Minecraft.getInstance();
-                ItemStack carried = mc.player != null
-                    ? mc.player.containerMenu.getCarried()
-                    : ItemStack.EMPTY;
-                MachineStatus status = MachineStatusCache.getInstance().get(info);
-
-                if (carried.isEmpty() && status.state() == MachineState.HAS_OUTPUT) {
-                    MachineTabHandler.onCollect(info, shift);
-                } else if (!carried.isEmpty()) {
-                    MachineSlotType slot = shift ? MachineSlotType.FUEL : MachineSlotType.INPUT;
-                    MachineTabHandler.onInsert(info, slot);
-                } else {
-                    MachineTabHandler.onClick(info);
-                }
-                cir.setReturnValue(true);
-                return;
-            }
+        // Resonance Backpack side button click → open backpack GUI
+        if (button == 0 && MachineTabHandler.isResonanceBackpackHovered()) {
+            MachineTabHandler.toggleResonanceBackpack();
+            cir.setReturnValue(true);
+            return;
         }
 
     }

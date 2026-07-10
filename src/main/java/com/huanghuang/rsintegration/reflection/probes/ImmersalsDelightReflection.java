@@ -18,7 +18,7 @@ public final class ImmersalsDelightReflection {
     }
 
     private static void register(String className, String fieldName) {
-        String description = className.substring(className.lastIndexOf('.') + 1);
+        String description = MOD + "." + className.substring(className.lastIndexOf('.') + 1);
         try {
             java.lang.reflect.Field targetField = ImmersalsDelightReflection.class.getDeclaredField(fieldName);
             ContractValidation.register(new ReflectionContract(MOD, description, className, true));

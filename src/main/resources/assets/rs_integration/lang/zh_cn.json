@@ -417,6 +417,8 @@
   "rsi.aetherworks.error.not_tool_station": "§c绑定位置没有锻造工具站。",
   "rsi.aetherworks.error.slot_occupied": "§c天华砧槽位已被占用。",
   "rsi.aetherworks.warn.temp_range": "§7温度要求: %s° — %s°",
+  "rsi.aetherworks.warn.temp_target": "§7目标温度: %s°",
+  "rsi.aetherworks.info.temp_rate": "§7温变率: %s°/t",
   "rsi.aetherworks.info.hits_required": "§7需要 %s 次锤击",
   "rsi.aetherworks.info.ember_per_hit": "§7每次锤击消耗 %s 余烬",
   "rsi.aetherworks.warn.no_forge": "§6附近未找到天华锻造炉。",
@@ -434,6 +436,7 @@
   "rsi.crockpot.cat_min": "§7  食物等级 %s >= %s",
   "rsi.crockpot.cat_max": "§7  食物等级 %s <= %s",
   "rsi.crockpot.error.food_values": "§c无法在 RS 存储中找到满足食物等级要求的物品，请确保您有足够的对应食物等级物品",
+  "rsi.crockpot.error.pot_level_too_low": "§c此配方需要至少 %s 级烹饪锅，当前为 %s 级，请升级烹饪锅后再试",
   "rsi.crockpot.no_fuel": "§c烹饪锅缺少燃料，请在 RS 网络中提供燃料物品",
   "rsi.crockpot.fuel_warning": "§7烹饪锅需要标准可燃物作为燃料（煤炭、木炭、木板、岩浆桶等）",
   "gui.rs_integration.jei.crabbersdelight_trap": "通过蟹笼诱捕",
@@ -447,9 +450,13 @@
   "rsi.batch.mod.immortalers_delight": "魔凝机",
   "rsi.aether.incubation_warning": "§6孵化配方产出的是实体而非物品，RS 无法回收结果",
   "rsi.aether.fuel_warning": "§7天境机器（冷冻器/祭坛/孵化器）使用专用燃料而非普通熔炉燃料，请在 JEI 中确认有效燃料",
+  "rsi.aether.error.machine_type_mismatch": "§c绑定机器类型不匹配：配方需要 %s 但绑定的是 %s。请绑定正确的天境机器类型。",
   "rsi.cooler.fuel_warning": "§7魔凝机使用青金石作为燃料",
   "rsi.cooler.no_fuel": "§7没有青金石 — 无法开始制冷",
   "rsi.batch.mod.aether": "天境熔炉",
+  "rsi.batch.mod.aether_freezer": "天境冷冻器",
+  "rsi.batch.mod.aether_incubator": "天境孵化器",
+  "rsi.batch.mod.aether_altar": "天境祭坛",
   "rsi.batch.mod.avaritia_crafting": "无尽贪婪合成台",
   "rsi.batch.mod.avaritia_compressor": "中子压缩机",
   "rsi.batch.mod.avaritia_smithing": "终极锻造台",
@@ -484,6 +491,9 @@
   "rsi.batch.mod.youkaishomecoming_cooking_pot": "煮锅",
   "rsi.youkaishomecoming.lid_open": "§c发酵罐的盖子现在是打开的，请先盖上盖子再开始发酵。",
   "rsi.youkaishomecoming.ferment_lid_warning": "§7发酵罐在运行过程中盖子需要保持关闭状态，请在开始前确认盖子已盖好。",
+  "rsi.youkaishomecoming.ferment_water_needed": "§7需要 %s 瓶水（共 %s mB），请确保RS网络中有水瓶或水桶。",
+  "rsi.youkaishomecoming.ferment_water_needed_mb": "§7需要 %s mB 水，请确保RS网络中有水瓶或水桶。",
+  "rsi.youkaishomecoming.ferment_water_warning": "§cRS网络中找不到水瓶或水桶！请先存入水瓶或水桶后再试。",
   "rsi.youkaishomecoming.cookpot_heat_warning": "§7需要在煮锅下方放置热源。",
   "rsi.youkaishomecoming.kettle_water_warning": "§7水壶中需要有水才能泡制，请先用水容器填充水壶。",
   "rsi.youkaishomecoming.kettle_fluid_output": "§7水壶产出为流体，泡制完成后请用玻璃瓶右键手动取出。",
@@ -494,5 +504,19 @@
   "gui.rs_integration.jei.yhk_kettle_craft": "通过水壶远程泡制",
   "rsi.batch.mod.youkaishomecoming_kettle": "水壶",
   "rsi.batch.mod.youkaishomecoming_cuisine": "料理台",
-  "rsi.batch.mod.youkaishomecoming": "YHK设备"
+  "rsi.batch.mod.youkaishomecoming": "YHK设备",
+
+  "item.rs_integration.resonance_storage_disk": "共振存储盘",
+  "item.rs_integration.resonance_storage_disk.tooltip": "§d共振盘 §7— 放入磁盘驱动器激活被动效果",
+
+  "rsi.machine_center.title": "机器管理中心",
+  "rsi.machine_center.machine_count": "%s 台机器已绑定",
+  "rsi.machine_center.no_machines": "暂无已绑定的机器",
+  "rsi.machine_center.tooltip_click": "点击打开 / Enter 切换",
+
+  "rsi.resonance_backpack.title": "共振背包",
+  "rsi.resonance_backpack.tooltip_click": "点击打开共振背包",
+  "rsi.resonance_backpack.no_disk": "当前网络无共振盘",
+
+  "rsi.resonance.duplicate_disk": "§c此 RS 网络已绑定共振盘，同一网络只能使用一个共振盘。"
 }

@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.mods.goety;
 
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;
+import com.huanghuang.rsintegration.network.packet.NetworkPacketIds;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
@@ -20,9 +21,9 @@ public final class GoetyRSNetworkHandler {
     public static void register() {
         if (registered) return;
         var ch = NetworkHandler.CHANNEL;
-        ch.registerMessage(NetworkHandler.nextId(), GoetyGuiCheckRSItemsPacket.class,
+        ch.registerMessage(NetworkPacketIds.GOETY_CHECK_RS, GoetyGuiCheckRSItemsPacket.class,
                 GoetyGuiCheckRSItemsPacket::encode, GoetyGuiCheckRSItemsPacket::decode, GoetyGuiCheckRSItemsPacket::handle);
-        ch.registerMessage(NetworkHandler.nextId(), GoetyGuiRSItemsResultPacket.class,
+        ch.registerMessage(NetworkPacketIds.GOETY_RS_RESULT, GoetyGuiRSItemsResultPacket.class,
                 GoetyGuiRSItemsResultPacket::encode, GoetyGuiRSItemsResultPacket::decode, GoetyGuiRSItemsResultPacket::handle);
         registered = true;
     }

@@ -30,21 +30,41 @@ public final class AetherworksToolStationRecipeHandler extends AbstractRecipeHan
 
     @Override
     public ItemStack getResultItem(Recipe<?> recipe, RegistryAccess access) {
-        try {
-            java.lang.reflect.Method m = recipe.getClass().getMethod("getResultItem");
-            Object r = m.invoke(recipe);
-            if (r instanceof ItemStack s && !s.isEmpty()) return s;
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Recipe] reflection probe failed", e);
+        // Probe multiple method names with both 1-arg and 0-arg variants,
+        // matching the Anvil handler's thorough approach.  The deprecated
+        // no-arg getResultItem() rarely works in 1.20.1 — the canonical
+        // call is getResultItem(RegistryAccess).
+        for (String name : new String[]{"getResultItem", "getResult", "getOutput", "getOutputCopy", "getAssembledItem"}) {
+            for (java.lang.reflect.Method m : recipe.getClass().getMethods()) {
+                if (!m.getName().equals(name)) continue;
+                if (!ItemStack.class.isAssignableFrom(m.getReturnType())) continue;
+                if (m.getParameterCount() == 1) {
+                    try {
+                        Object r = m.invoke(recipe, access);
+                        if (r instanceof ItemStack s && !s.isEmpty()) return s;
+                    } catch (Exception e) {
+                        RSIntegrationMod.LOGGER.debug("[RSI-Recipe] reflection probe failed", e);
+                    }
+                } else if (m.getParameterCount() == 0) {
+                    try {
+                        Object r = m.invoke(recipe);
+                        if (r instanceof ItemStack s && !s.isEmpty()) return s;
+                    } catch (Exception e) {
+                        RSIntegrationMod.LOGGER.debug("[RSI-Recipe] reflection probe failed", e);
+                    }
+                }
+            }
         }
-        // Field fallback
-        try {
-            java.lang.reflect.Field f = recipe.getClass().getDeclaredField("output");
-            f.setAccessible(true);
-            Object v = f.get(recipe);
-            if (v instanceof ItemStack s && !s.isEmpty()) return s;
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Recipe] reflection probe failed", e);
+        // Field fallback — probe multiple common field names
+        for (String fieldName : new String[]{"output", "result"}) {
+            try {
+                java.lang.reflect.Field f = recipe.getClass().getDeclaredField(fieldName);
+                f.setAccessible(true);
+                Object v = f.get(recipe);
+                if (v instanceof ItemStack s && !s.isEmpty()) return s;
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.debug("[RSI-Recipe] reflection probe failed", e);
+            }
         }
         return ItemStack.EMPTY;
     }

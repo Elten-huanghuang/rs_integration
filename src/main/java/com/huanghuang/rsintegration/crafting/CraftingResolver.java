@@ -541,6 +541,19 @@ public final class CraftingResolver {
         }
         if (specs == null || specs.isEmpty()) return false;
 
+        // Allow amplification recipes (output > self-consumed) even when
+        // a self-matching ingredient is temporarily unavailable — recursive
+        // ensureIngredient will either locate the base material or hit
+        // cycle detection via the resolving set.
+        int selfConsumed = 0;
+        for (IngredientSpec spec : specs) {
+            if (spec.isEmpty()) continue;
+            if (spec.ingredient().test(output)) {
+                selfConsumed += spec.count();
+            }
+        }
+        if (output.getCount() > selfConsumed) return false;
+
         for (IngredientSpec spec : specs) {
             if (spec.isEmpty()) continue;
             if (spec.ingredient().test(output) && ctx.countMatching(spec.ingredient()) <= 0)
@@ -550,11 +563,19 @@ public final class CraftingResolver {
     }
 
     private static boolean requiresMissingSelfInput(CraftingRecipe recipe, ItemStack output, ResolutionContext ctx) {
+        int selfConsumed = 0;
+        boolean anyMissing = false;
         for (Ingredient ing : recipe.getIngredients()) {
             if (ing.isEmpty()) continue;
-            if (ing.test(output) && ctx.countMatching(ing) <= 0) return true;
+            if (ing.test(output)) {
+                selfConsumed++;
+                if (ctx.countMatching(ing) <= 0) anyMissing = true;
+            }
         }
-        return false;
+        // Amplification recipes (A + catalyst → n*A, n > 1): allow even when
+        // the self-matching input is temporarily unavailable.
+        if (output.getCount() > selfConsumed) return false;
+        return anyMissing;
     }
 
     private static int netGainPerBatch(RecipeIndex.Entry entry, ItemStack output,

@@ -63,7 +63,8 @@ public final class AetherworksToolStationBatchDelegate extends AbstractBatchDele
         ChunkUtils.loadChunk(lvl, pos);
 
         BlockEntity be = lvl.getBlockEntity(pos);
-        if (be == null || !AetherworksReflection.toolStationBEClass.isInstance(be)) {
+        if (be == null || AetherworksReflection.toolStationBEClass == null
+                || !AetherworksReflection.toolStationBEClass.isInstance(be)) {
             player.sendSystemMessage(Component.translatable("rsi.aetherworks.error.not_tool_station"));
             return false;
         }
@@ -185,7 +186,7 @@ public final class AetherworksToolStationBatchDelegate extends AbstractBatchDele
         // Place all materials in consecutive slots
         for (int i = 0; i < materials.size(); i++) {
             ItemStack existing = Reflect.invoke(inv, "getStackInSlot", i)
-                    .map(o -> (ItemStack) o).orElse(ItemStack.EMPTY);
+                    .filter(ItemStack.class::isInstance).map(ItemStack.class::cast).orElse(ItemStack.EMPTY);
             if (!existing.isEmpty()) {
                 player.sendSystemMessage(Component.translatable("rsi.aetherworks.error.slot_occupied"));
                 return false;
@@ -291,19 +292,29 @@ public final class AetherworksToolStationBatchDelegate extends AbstractBatchDele
 
         if (craftTimedOut) return true;
 
-        // Completion detection: slot 0 item type changed
-        Object inv = Reflect.getField(be, "inventory").orElse(null);
-        if (inv == null) return false;
-        ItemStack slotItem = Reflect.invoke(inv, "getStackInSlot", 0)
-                .map(o -> (ItemStack) o).orElse(ItemStack.EMPTY);
+        // Completion detection: slot 0 item type changed or all input slots emptied
+        try {
+            Object inv = Reflect.getField(be, "inventory").orElse(null);
+            if (inv == null) return false;
+            ItemStack slotItem = Reflect.invoke(inv, "getStackInSlot", 0)
+                    .filter(ItemStack.class::isInstance).map(ItemStack.class::cast)
+                    .orElse(ItemStack.EMPTY);
 
-        if (!slotItem.isEmpty() && recordedInputItem != null
-                && slotItem.getItem() != recordedInputItem) {
-            return true;
-        }
-        // Also detect if all input slots became empty (recipe consumed them all)
-        if (slotItem.isEmpty() && recordedInputItem != null) {
-            return true;
+            if (!slotItem.isEmpty() && recordedInputItem != null
+                    && slotItem.getItem() != recordedInputItem) {
+                return true;
+            }
+            // Also detect if all input slots became empty (recipe consumed them all)
+            if (slotItem.isEmpty() && recordedInputItem != null) {
+                return true;
+            }
+        } catch (Exception e) {
+            abortTimer++;
+            if (abortTimer > 300) {
+                craftTimedOut = true;
+                warnOnce("toolstation_completion_detection_failed",
+                        "[RSI-Aetherworks] ToolStation completion detection failed >300 ticks, aborting craft", e);
+            }
         }
 
         return false;
@@ -321,10 +332,10 @@ public final class AetherworksToolStationBatchDelegate extends AbstractBatchDele
         // Scan all slots for the result
         for (int i = 0; i < 6; i++) {
             ItemStack slot = Reflect.invoke(inv, "getStackInSlot", i)
-                    .map(o -> (ItemStack) o).orElse(ItemStack.EMPTY);
+                    .filter(ItemStack.class::isInstance).map(ItemStack.class::cast).orElse(ItemStack.EMPTY);
             if (!slot.isEmpty() && (recordedInputItem == null || slot.getItem() != recordedInputItem)) {
                 ItemStack result = Reflect.invoke(inv, "extractItem", i, 64, false)
-                        .map(o -> (ItemStack) o).orElse(ItemStack.EMPTY);
+                        .filter(ItemStack.class::isInstance).map(ItemStack.class::cast).orElse(ItemStack.EMPTY);
                 if (!result.isEmpty()) {
                     ((BlockEntity) toolStationBE).setChanged();
                     recordedInputItem = null;
@@ -347,7 +358,7 @@ public final class AetherworksToolStationBatchDelegate extends AbstractBatchDele
         if (inv != null) {
             for (int i = 0; i < 6; i++) {
                 ItemStack leftover = Reflect.invoke(inv, "extractItem", i, 64, false)
-                        .map(o -> (ItemStack) o).orElse(ItemStack.EMPTY);
+                        .filter(ItemStack.class::isInstance).map(ItemStack.class::cast).orElse(ItemStack.EMPTY);
                 if (!leftover.isEmpty() && network != null) {
                     network.insertItem(leftover, leftover.getCount(), Action.PERFORM);
                 }
@@ -376,10 +387,19 @@ public final class AetherworksToolStationBatchDelegate extends AbstractBatchDele
 
         try {
             int temp = (int) recipe.getClass().getMethod("getTemperature").invoke(recipe);
-            warnings.add(Component.translatable("rsi.aetherworks.warn.temp_range",
-                    Math.max(0, temp - 100), temp + 100).getString());
+            warnings.add(Component.translatable("rsi.aetherworks.warn.temp_target", temp).getString());
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] ToolStation getTemperature reflection failed in plan warnings", e);
+        }
+
+        try {
+            double rate = (double) recipe.getClass().getMethod("getTemperatureRate").invoke(recipe);
+            if (rate > 0) {
+                warnings.add(Component.translatable("rsi.aetherworks.info.temp_rate",
+                        String.format("%.1f", rate)).getString());
+            }
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] ToolStation getTemperatureRate reflection failed in plan warnings", e);
         }
 
         if (dim != null && pos != null) {

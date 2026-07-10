@@ -60,6 +60,8 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.BooleanValue ENABLE_CONTAINER_TRANSFER;
     public static ForgeConfigSpec.BooleanValue ENABLE_RS_SIDE_PANEL;
     public static ForgeConfigSpec.BooleanValue ENABLE_RS_PASSIVE_EFFECTS;
+    public static ForgeConfigSpec.ConfigValue<List<? extends String>> PASSIVE_TICK_ITEMS;
+    public static ForgeConfigSpec.IntValue NINE_SWORD_MAX_COUNT;
     public static ForgeConfigSpec.BooleanValue DIAGNOSTIC_VERBOSE_LOGGING;
 
     // ── per-mod tuning (server, per-world) ───────────────────────
@@ -244,6 +246,20 @@ public final class RSIntegrationConfig {
                         "  Phase 3 — event-driven Mixin redirect (per-item, ~5-15% of items).",
                         "Disable this if you prefer vanilla inventory-only passive mechanics.")
                 .define("enableRSPassiveEffects", true);
+        PASSIVE_TICK_ITEMS = c
+                .comment("Items whose inventoryTick should be simulated from the resonance disk.",
+                        "Format: \"modid:item_id\" or \"modid:item_id|mutates\".",
+                        "Items marked |mutates will use extract→tick→insert to persist NBT changes.",
+                        "Items without |mutates will be ticked on a snapshot copy (read-only).")
+                .defineList("passiveTickItems",
+                        List.of("reliquary:pyromancer_staff|mutates", "enigmaticaddons:artificial_flower|mutates", "forbidden_arcanus:spectral_eye_amulet|mutates"),
+                        obj -> obj instanceof String && ((String) obj).contains(":"));
+        NINE_SWORD_MAX_COUNT = c
+                .comment("Maximum effective count of Nine Sword Books across inventory + resonance disk.",
+                        "Books beyond this limit are ignored. Hotbar slots (9) is the vanilla maximum,",
+                        "so this prevents exceeding it via the resonance disk.",
+                        "Range: 1-36.")
+                .defineInRange("nineSwordMaxCount", 9, 1, 36);
         c.pop();
 
         c.push("containerTransfer");

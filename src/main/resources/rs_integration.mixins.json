@@ -9,6 +9,7 @@
     "minecraft.ContainerDistanceMixin",
     "minecraft.EntityMixin",
     "minecraft.FurnaceMenuMixin",
+    "minecraft.InventoryAccessor",
     "minecraft.ServerPlayerTickMixin",
     "minecraft.ServerGamePacketListenerMixin",
     "minecraft.SmithingTransformRecipeAccessor",
@@ -17,6 +18,7 @@
     "refinedstorage.IngredientTrackerMixin",
     "refinedstorage.MixinGridTransferMessage",
     "refinedstorage.NetworkItemUseMixin",
+    "refinedstorage.StackUtilsMixin",
     "minecraft.AbstractFurnaceAccessor",
     "sophisticatedbackpacks.InventoryInteractionHelperMixin",
     "sophisticatedbackpacks.MagnetUpgradeWrapperMixin",
@@ -28,7 +30,11 @@
     "sophisticatedbackpacks.StorageUpgradeSlotMixin",
     "sophisticatedbackpacks.StorageContainerMenuBaseMixin",
     "sophisticatedbackpacks.CompactingUpgradeWrapperMixin",
-    "crockpot.CrockPotMenuMixin"
+    "crockpot.CrockPotMenuMixin",
+    "reliquary.PyromancerStaffMixin",
+    "enigmaticaddons.AvariceRingMixin",
+    "moonstone.NineSwordBookMixin",
+    "enigmaticlegacy.SuperpositionHandlerMixin"
   ],
   "client": [
     "jei.GuiIconToggleButtonAccessor",

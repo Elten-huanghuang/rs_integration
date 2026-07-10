@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.sidepanel;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.resonance.backpack.OpenResonanceBackpackPacket;
 import com.huanghuang.rsintegration.machine.MachineInteractType;
 import com.huanghuang.rsintegration.machine.MachineStatus;
 import com.huanghuang.rsintegration.machine.MachineStatusReader;
@@ -8,6 +9,7 @@ import com.huanghuang.rsintegration.network.binding.BindingStorage;
 import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
 import com.huanghuang.rsintegration.network.packet.ConfigSyncPacket;
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;
+import com.huanghuang.rsintegration.network.packet.NetworkPacketIds;
 import com.huanghuang.rsintegration.network.gui.GuiOpenRateLimiter;
 import com.huanghuang.rsintegration.network.gui.RemoteGuiAuth;
 import com.huanghuang.rsintegration.sidepanel.data.BindingInfo;
@@ -58,30 +60,32 @@ public final class RSSidePanelNetworkHandler {
     public static void register() {
         if (registered) return;
         var ch = NetworkHandler.CHANNEL;
-        ch.registerMessage(NetworkHandler.nextId(), RSSidePanelRequestPacket.class,
+        ch.registerMessage(NetworkPacketIds.SIDE_PANEL_REQUEST, RSSidePanelRequestPacket.class,
                 RSSidePanelRequestPacket::encode, RSSidePanelRequestPacket::decode, RSSidePanelRequestPacket::handle);
-        ch.registerMessage(NetworkHandler.nextId(), RSSidePanelSyncPacket.class,
+        ch.registerMessage(NetworkPacketIds.SIDE_PANEL_SYNC, RSSidePanelSyncPacket.class,
                 RSSidePanelSyncPacket::encode, RSSidePanelSyncPacket::decode, RSSidePanelSyncPacket::handle);
-        ch.registerMessage(NetworkHandler.nextId(), RSSidePanelClickPacket.class,
+        ch.registerMessage(NetworkPacketIds.SIDE_PANEL_CLICK, RSSidePanelClickPacket.class,
                 RSSidePanelClickPacket::encode, RSSidePanelClickPacket::decode, RSSidePanelClickPacket::handle);
-        ch.registerMessage(NetworkHandler.nextId(), RSSidePanelDeltaPacket.class,
+        ch.registerMessage(NetworkPacketIds.SIDE_PANEL_DELTA, RSSidePanelDeltaPacket.class,
                 RSSidePanelDeltaPacket::encode, RSSidePanelDeltaPacket::decode, RSSidePanelDeltaPacket::handle);
-        ch.registerMessage(NetworkHandler.nextId(), RSInventoryTransferPacket.class,
+        ch.registerMessage(NetworkPacketIds.INVENTORY_TRANSFER, RSInventoryTransferPacket.class,
                 RSInventoryTransferPacket::encode, RSInventoryTransferPacket::decode, RSInventoryTransferPacket::handle);
-        ch.registerMessage(NetworkHandler.nextId(), OpenBoundMachineGuiPacket.class,
+        ch.registerMessage(NetworkPacketIds.OPEN_BOUND_MACHINE_GUI, OpenBoundMachineGuiPacket.class,
                 OpenBoundMachineGuiPacket::encode, OpenBoundMachineGuiPacket::decode, OpenBoundMachineGuiPacket::handle);
-        ch.registerMessage(NetworkHandler.nextId(), MachineStatusDeltaPacket.class,
+        ch.registerMessage(NetworkPacketIds.MACHINE_STATUS_DELTA, MachineStatusDeltaPacket.class,
                 MachineStatusDeltaPacket::encode, MachineStatusDeltaPacket::decode, MachineStatusDeltaPacket::handle);
-        ch.registerMessage(NetworkHandler.nextId(), MachineCollectPacket.class,
+        ch.registerMessage(NetworkPacketIds.MACHINE_COLLECT, MachineCollectPacket.class,
                 MachineCollectPacket::encode, MachineCollectPacket::decode, MachineCollectPacket::handle);
-        ch.registerMessage(NetworkHandler.nextId(), MachineInsertPacket.class,
+        ch.registerMessage(NetworkPacketIds.MACHINE_INSERT, MachineInsertPacket.class,
                 MachineInsertPacket::encode, MachineInsertPacket::decode, MachineInsertPacket::handle);
-        ch.registerMessage(NetworkHandler.nextId(), RSBindingSyncPacket.class,
+        ch.registerMessage(NetworkPacketIds.RS_BINDING_SYNC, RSBindingSyncPacket.class,
                 RSBindingSyncPacket::encode, RSBindingSyncPacket::decode, RSBindingSyncPacket::handle);
-        ch.registerMessage(NetworkHandler.nextId(), ConfigSyncPacket.class,
+        ch.registerMessage(NetworkPacketIds.CONFIG_SYNC, ConfigSyncPacket.class,
                 ConfigSyncPacket::encode, ConfigSyncPacket::decode, ConfigSyncPacket::handle);
-        ch.registerMessage(NetworkHandler.nextId(), ReturnToRSPacket.class,
+        ch.registerMessage(NetworkPacketIds.RETURN_TO_RS, ReturnToRSPacket.class,
                 ReturnToRSPacket::encode, ReturnToRSPacket::decode, ReturnToRSPacket::handle);
+        ch.registerMessage(NetworkPacketIds.OPEN_RESONANCE_BACKPACK, OpenResonanceBackpackPacket.class,
+                OpenResonanceBackpackPacket::encode, OpenResonanceBackpackPacket::decode, OpenResonanceBackpackPacket::handle);
         registered = true;
 
         MinecraftForge.EVENT_BUS.register(RSSidePanelNetworkHandler.class);
