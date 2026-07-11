@@ -26,7 +26,6 @@ public final class FAReflection {
     public static Class<?> essenceModifierClass;
     public static Class<?> faRegistriesClass;
 
-    public static boolean ready;
 
     static {
         // Register contracts -- ContractValidation.validateAll() will verify and populate

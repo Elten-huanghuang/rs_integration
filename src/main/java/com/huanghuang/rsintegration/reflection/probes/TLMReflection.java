@@ -15,7 +15,6 @@ public final class TLMReflection {
     public static Class<?> powerCapProviderClass;
     public static Class<?> initRecipesClass;
 
-    public static boolean ready;
 
     static {
         register("com.github.tartaricacid.touhoulittlemaid.tileentity.TileEntityAltar", "altarBEClass");

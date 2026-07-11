@@ -536,6 +536,7 @@
   "rsi.autoeat.result.diet": "营养已补满: %s",
   "rsi.autoeat.result.none": "没有可食用的食物",
   "rsi.autoeat.missing_effect": "缺少所需效果: %s",
+  "rsi.autoeat.invalid_effect_config": "自动进食配置错误: 无效效果 '%s' (请使用 命名空间:路径 格式)",
   "rsi.autoeat.missing_cost": "RS 网络中材料不足",
   "rsi.autoeat.full": "已经饱了",
   "rsi.autoeat.no_item_selected": "未选择食物",
@@ -546,6 +547,7 @@
   "rsi.autoeat.title.select": "选择食物: %s",
   "rsi.autoeat.btn.eat.tooltip": "点击食用",
   "rsi.autoeat.btn.select.tooltip": "选择要吃的食物 / 管理黑名单",
+  "rsi.autoeat.btn.blacklist.tooltip": "管理自动进食黑名单",
   "rsi.autoeat.btn.mode.tooltip": "切换自动进食模式",
   "rsi.autoeat.error.diet_tracker_missing": "未检测到 Diet 营养追踪器",
   "rsi.autoeat.error.diet_no_groups": "Diet 营养组为空"

@@ -25,14 +25,28 @@ public class AbstractSpiritListMalumRecipeMixin {
     @Unique
     private static Field rsi$spiritsField;
 
+    private static Field findSpiritsField(Class<?> clazz) {
+        Class<?> scan = clazz;
+        while (scan != null && scan != Object.class) {
+            try {
+                Field f = scan.getDeclaredField("spirits");
+                f.setAccessible(true);
+                return f;
+            } catch (NoSuchFieldException e) {
+                scan = scan.getSuperclass();
+            }
+        }
+        return null;
+    }
+
     @Inject(method = "doSpiritsMatch", at = @At("HEAD"), cancellable = true)
     @SuppressWarnings("unchecked")
     private void rsi$relaxedDoSpiritsMatch(List<ItemStack> altarSpirits, CallbackInfoReturnable<Boolean> cir) {
         List<?> requiredSpirits;
         try {
             if (rsi$spiritsField == null) {
-                rsi$spiritsField = this.getClass().getField("spirits");
-                rsi$spiritsField.setAccessible(true);
+                rsi$spiritsField = findSpiritsField(this.getClass());
+                if (rsi$spiritsField == null) return;
             }
             requiredSpirits = (List<?>) rsi$spiritsField.get(this);
         } catch (Exception e) {

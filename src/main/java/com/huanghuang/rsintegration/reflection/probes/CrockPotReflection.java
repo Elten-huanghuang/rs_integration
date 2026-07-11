@@ -14,7 +14,6 @@ public final class CrockPotReflection {
     public static Class<?> foodValuesClass;
     public static Class<?> foodValuesDefinitionClass;
 
-    public static boolean ready;
 
     static {
         register("com.sihenzhang.crockpot.block.entity.CrockPotBlockEntity", "crockPotBEClass", true);

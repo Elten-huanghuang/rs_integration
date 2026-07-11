@@ -44,7 +44,13 @@ public class ResonanceDiskInventory implements Container {
             int slotVal = (tag != null && tag.contains(RSI_SLOT_TAG)) ? tag.getInt(RSI_SLOT_TAG) : -1;
             if (slotVal >= 0 && slotVal < SLOTS) continue; // already placed by pass 1
             int slot = nextEmpty();
-            if (slot < 0) break;
+            if (slot < 0) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Backpack] loadFromDisk: {} distinct stacks exceed {} slots — "
+                    + "{} orphaned stacks are only accessible via RS Grid, not backpack UI",
+                    disk.delegate().getStacks().size(), SLOTS,
+                    disk.delegate().getStacks().size() - SLOTS);
+            break;
+        }
             slots[slot] = stack.copy();
             loaded++;
             migrated++;
@@ -108,10 +114,13 @@ public class ResonanceDiskInventory implements Container {
 
     @Override
     public void clearContent() {
-        for (int i = 0; i < SLOTS; i++) {
-            if (!slots[i].isEmpty()) {
-                disk.manualExtract(i, slots[i].copy(), slots[i].getCount(), 0, Action.PERFORM);
+        // Extract all stacks from disk — handles both slot-mapped and orphaned entries
+        for (ItemStack stack : new ArrayList<>(disk.delegate().getStacks())) {
+            if (!stack.isEmpty()) {
+                disk.manualExtractExact(stack, stack.getCount(), 0, Action.PERFORM);
             }
+        }
+        for (int i = 0; i < SLOTS; i++) {
             slots[i] = ItemStack.EMPTY;
         }
     }

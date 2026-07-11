@@ -12,7 +12,6 @@ public final class FarmingForBlockheadsReflection {
     public static Class<?> marketRegistryClass;
     public static Class<?> marketBEClass;
 
-    public static boolean ready;
 
     static {
         register("net.blay09.mods.farmingforblockheads.registry.MarketRegistry", "marketRegistryClass");

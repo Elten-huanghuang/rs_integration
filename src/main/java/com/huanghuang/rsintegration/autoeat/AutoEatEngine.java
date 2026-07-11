@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.autoeat;
 
+import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.autoeat.network.AutoEatSyncPacket;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;
@@ -185,15 +186,21 @@ public final class AutoEatEngine {
         String requiredEffect = RSIntegrationConfig.AUTO_EAT_REQUIRED_EFFECT.get();
         if (!requiredEffect.isEmpty()) {
             String[] parts = requiredEffect.split(":", 2);
-            if (parts.length == 2) {
-                ResourceLocation rl = new ResourceLocation(parts[0], parts[1]);
-                MobEffect effect = ForgeRegistries.MOB_EFFECTS.getValue(rl);
-                if (effect == null || !player.hasEffect(effect)) {
-                    NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
-                            new AutoEatSyncPacket(mode, 0,
-                                    Component.translatable("rsi.autoeat.missing_effect", requiredEffect)));
-                    return;
-                }
+            if (parts.length != 2) {
+                RSIntegrationMod.LOGGER.warn("[RSI-AutoEat] requiredEffect '{}' is malformed — must be namespace:path. "
+                        + "Auto-eat blocked until config is fixed.", requiredEffect);
+                NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
+                        new AutoEatSyncPacket(mode, 0,
+                                Component.translatable("rsi.autoeat.invalid_effect_config", requiredEffect)));
+                return;
+            }
+            ResourceLocation rl = new ResourceLocation(parts[0], parts[1]);
+            MobEffect effect = ForgeRegistries.MOB_EFFECTS.getValue(rl);
+            if (effect == null || !player.hasEffect(effect)) {
+                NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
+                        new AutoEatSyncPacket(mode, 0,
+                                Component.translatable("rsi.autoeat.missing_effect", requiredEffect)));
+                return;
             }
         }
 

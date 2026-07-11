@@ -186,6 +186,11 @@ public final class ExtractionLedger implements AutoCloseable {
                 if (item.isEmpty() || item.getCount() < entry.count) {
                     RSIntegrationMod.LOGGER.warn(fmt("Ledger commit: extractOne returned empty/insufficient for entry {} (need {}, got {})"),
                             entry.id, entry.count, item.getCount());
+                    // Include the partial extract so rollback can return already-split items
+                    if (!item.isEmpty()) {
+                        extracted.add(new ExtractRecord(entry.source, item,
+                                entry.altarDim, entry.altarPos, entry.sourceNetwork));
+                    }
                     rollbackExtractedPhases(extracted, player);
                     transition(State.ROLLED_BACK);
                     return false;

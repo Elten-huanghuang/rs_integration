@@ -18,7 +18,6 @@ public final class EidolonReflection {
     public static Class<?> ritualRecipeClass;
     public static Class<?> brazierTileEntityClass;
 
-    public static boolean ready;
 
     static {
         register("elucent.eidolon.recipe.CrucibleRecipe", "crucibleRecipeClass");

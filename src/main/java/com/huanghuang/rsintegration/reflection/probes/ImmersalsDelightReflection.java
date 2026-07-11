@@ -11,7 +11,6 @@ public final class ImmersalsDelightReflection {
 
     public static Class<?> enchantalCoolerBEClass;
 
-    public static boolean ready;
 
     static {
         register("com.renyigesai.immortalers_delight.block.enchantal_cooler.EnchantalCoolerBlockEntity", "enchantalCoolerBEClass");

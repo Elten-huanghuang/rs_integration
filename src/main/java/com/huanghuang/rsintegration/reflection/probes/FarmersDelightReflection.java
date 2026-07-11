@@ -14,7 +14,6 @@ public final class FarmersDelightReflection {
     public static Class<?> skilletBEClass;
     public static Class<?> stoveBEClass;
 
-    public static boolean ready;
 
     static {
         register("vectorwing.farmersdelight.common.block.entity.CookingPotBlockEntity", "cookingPotBEClass");

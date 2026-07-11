@@ -13,7 +13,6 @@ public final class JEIReflection {
     public static Class<?> bookmarkOverlayClass;
     public static Class<?> ingredientBookmarkClass;
 
-    public static boolean ready;
 
     static {
         // JEI 15.x moved these from mezz.jei.library.* to mezz.jei.gui.*

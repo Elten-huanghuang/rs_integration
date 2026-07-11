@@ -34,6 +34,8 @@ import com.huanghuang.rsintegration.network.binding.BindingTooltipHandler;
 import com.huanghuang.rsintegration.network.binding.RSBindingHook;
 import com.huanghuang.rsintegration.network.gui.RemoteGuiAuth;
 import com.huanghuang.rsintegration.autoeat.network.AutoEatNetworkHandler;
+import com.huanghuang.rsintegration.network.packet.ConfigSyncPacket;
+import com.huanghuang.rsintegration.network.packet.NetworkHandler;
 import com.huanghuang.rsintegration.network.packet.ResonanceNetworkHandler;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.sidepanel.RSSidePanelClient;
@@ -70,6 +72,7 @@ import net.minecraftforge.fml.event.config.ModConfigEvent;
 import net.minecraftforge.fml.event.lifecycle.FMLCommonSetupEvent;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 import net.minecraftforge.network.NetworkConstants;
+import net.minecraftforge.network.PacketDistributor;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -386,6 +389,15 @@ public final class RSIntegrationMod {
 
         // Async craft chains
         MinecraftForge.EVENT_BUS.register(AsyncCraftManager.getInstance());
+        // Sync server config to client on login
+        MinecraftForge.EVENT_BUS.addListener((PlayerEvent.PlayerLoggedInEvent e) -> {
+            if (e.getEntity() instanceof ServerPlayer sp) {
+                NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> sp),
+                        new ConfigSyncPacket(
+                                RSIntegrationConfig.ENABLE_MACHINE_GUI_TABS.get(),
+                                RSIntegrationConfig.MACHINE_TAB_THRESHOLD.get()));
+            }
+        });
         MinecraftForge.EVENT_BUS.addListener((PlayerEvent.PlayerLoggedOutEvent e) -> {
             if (e.getEntity() instanceof ServerPlayer sp)
                 AsyncCraftManager.getInstance().cancelAllForPlayer(sp.getUUID());

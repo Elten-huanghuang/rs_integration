@@ -16,13 +16,13 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
-import java.util.HashSet;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Mixin(value = SuperpositionHandler.class, remap = false)
 public abstract class SuperpositionHandlerMixin {
 
-    private static final Set<String> rsi$seenItems = new HashSet<>();
+    private static final Set<String> rsi$seenItems = ConcurrentHashMap.newKeySet();
     private static int rsi$diagCount;
 
     // Log every unique item queried via hasItem, regardless of return value.

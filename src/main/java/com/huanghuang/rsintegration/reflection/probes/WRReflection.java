@@ -18,7 +18,6 @@ public final class WRReflection {
     public static Class<?> crystalInfusionRecipeClass;
     public static Class<?> runicPedestalBEClass;
 
-    public static boolean ready;
 
     static {
         register("mod.maxbogomol.wizards_reborn.common.block.wissen_crystallizer.WissenCrystallizerBlockEntity",

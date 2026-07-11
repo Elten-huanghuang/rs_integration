@@ -19,7 +19,6 @@ public final class AetherworksReflection {
     public static Class<?> iheatCapabilityClass;
     public static Class<?> awRegistryClass;
 
-    public static boolean ready;
 
     static {
         register("net.sirplop.aetherworks.blockentity.AetheriumAnvilBlockEntity", "anvilBEClass");

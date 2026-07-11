@@ -17,7 +17,6 @@ public final class EmbersReflection {
     public static Class<?> iemberCapabilityClass;
     public static Class<?> registryManagerClass;
 
-    public static boolean ready;
 
     static {
         register("com.rekindled.embers.blockentity.AlchemyTabletBlockEntity", "alchemyTabletBEClass");

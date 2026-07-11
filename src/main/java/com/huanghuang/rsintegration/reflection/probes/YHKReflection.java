@@ -40,7 +40,6 @@ public final class YHKReflection {
     // -- Base (shared parent class) --
     public static Class<?> timedRecipeBEClass;
 
-    public static boolean ready;
 
     static {
         // Cooking Pot

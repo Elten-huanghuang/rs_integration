@@ -28,6 +28,15 @@ final class StepExecutor {
     static int maxDepth() { return RSIntegrationConfig.CRAFTING_MAX_DEPTH.get(); }
     static int maxSteps() { return RSIntegrationConfig.CRAFTING_MAX_STEPS.get(); }
 
+    static int mulCount(int count, int batches) {
+        long result = (long) count * (long) batches;
+        if (result > Integer.MAX_VALUE) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Step] count overflow: {} * {} = {}, clamping", count, batches, result);
+            return Integer.MAX_VALUE;
+        }
+        return (int) result;
+    }
+
     static boolean craftBatched(CraftingRecipe recipe, ResolutionContext ctx, int depth,
                                 List<ResourceLocation> altIds, List<String> altModTypes,
                                 CraftingResolver.EdgeTracker edges, int batches) {
@@ -48,14 +57,14 @@ final class StepExecutor {
         }
 
         for (ItemStack remainder : CraftPacketUtils.getRecipeRemainders(recipe)) {
-            ctx.add(remainder.copyWithCount(remainder.getCount() * batches));
+            ctx.add(remainder.copyWithCount(mulCount(remainder.getCount(), batches)));
         }
 
         ItemStack result = recipe.getResultItem(ctx.level.registryAccess());
-        ctx.add(result.copyWithCount(result.getCount() * batches));
+        ctx.add(result.copyWithCount(mulCount(result.getCount(), batches)));
 
         for (ItemStack secondary : ModRecipeHandlers.tryGetSecondaryOutputs(recipe, ctx.level.registryAccess())) {
-            ctx.add(secondary.copyWithCount(secondary.getCount() * batches));
+            ctx.add(secondary.copyWithCount(mulCount(secondary.getCount(), batches)));
         }
 
         ctx.steps.add(new CraftingResolver.ResolutionStep(recipe.getId(), ModType.GENERIC,
@@ -129,12 +138,12 @@ final class StepExecutor {
 
         if (entry.recipe() instanceof CraftingRecipe cr) {
             for (ItemStack remainder : CraftPacketUtils.getRecipeRemainders(cr)) {
-                ctx.add(remainder.copyWithCount(remainder.getCount() * batches));
+                ctx.add(remainder.copyWithCount(mulCount(remainder.getCount(), batches)));
             }
         } else {
             for (IngredientSpec spec : specs) {
                 if (spec.isEmpty()) continue;
-                addCraftingRemainder(spec.ingredient(), spec.count() * batches, ctx);
+                addCraftingRemainder(spec.ingredient(), mulCount(spec.count(), batches), ctx);
             }
         }
 
@@ -158,15 +167,15 @@ final class StepExecutor {
                 result = hidden;
             }
         }
-        ctx.add(result.copyWithCount(result.getCount() * batches));
+        ctx.add(result.copyWithCount(mulCount(result.getCount(), batches)));
 
         if (handler != null) {
             for (ItemStack secondary : handler.getSecondaryOutputs(entry.recipe(), ctx.level.registryAccess())) {
-                ctx.add(secondary.copyWithCount(secondary.getCount() * batches));
+                ctx.add(secondary.copyWithCount(mulCount(secondary.getCount(), batches)));
             }
         } else {
             for (ItemStack secondary : ModRecipeHandlers.tryGetSecondaryOutputs(entry.recipe(), ctx.level.registryAccess())) {
-                ctx.add(secondary.copyWithCount(secondary.getCount() * batches));
+                ctx.add(secondary.copyWithCount(mulCount(secondary.getCount(), batches)));
             }
         }
 
@@ -202,7 +211,7 @@ final class StepExecutor {
 
         for (Map.Entry<CraftingResolver.StackKey, Integer> entry : grouped.entrySet()) {
             Ingredient ing = representatives.get(entry.getKey());
-            if (!CraftingResolver.ensureIngredient(ing, entry.getValue() * batches, ctx, depth + 1, edges)) {
+            if (!CraftingResolver.ensureIngredient(ing, mulCount(entry.getValue(), batches), ctx, depth + 1, edges)) {
                 ctx.rollback();
                 edges.rollback();
                 return false;
@@ -237,7 +246,7 @@ final class StepExecutor {
 
         for (Map.Entry<CraftingResolver.StackKey, Integer> entry : grouped.entrySet()) {
             Ingredient ing = representatives.get(entry.getKey());
-            if (!CraftingResolver.ensureIngredient(ing, entry.getValue() * batches, ctx, depth + 1, edges)) {
+            if (!CraftingResolver.ensureIngredient(ing, mulCount(entry.getValue(), batches), ctx, depth + 1, edges)) {
                 ctx.rollback();
                 edges.rollback();
                 return false;

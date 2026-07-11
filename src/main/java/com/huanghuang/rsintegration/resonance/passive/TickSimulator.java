@@ -38,7 +38,10 @@ public final class TickSimulator {
                     extracted.getItem().inventoryTick(
                             extracted, player.level(), player, -1, false);
                     if (!extracted.isEmpty()) {
-                        disk.manualInsert(originalSlot, extracted, extracted.getCount(), Action.PERFORM);
+                        ItemStack remainder = disk.manualInsert(originalSlot, extracted, extracted.getCount(), Action.PERFORM);
+                        if (!remainder.isEmpty()) {
+                            player.drop(remainder, false);
+                        }
                     }
                 }
             } else {

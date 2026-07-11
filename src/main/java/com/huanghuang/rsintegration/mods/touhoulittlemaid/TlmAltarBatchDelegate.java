@@ -322,7 +322,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
                 }
                 handler.setStackInSlot(0, placed);
                 slotsFilled[i] = true;
-                Reflect.invoke(storageBe, "setChanged");
+                ((BlockEntity) storageBe).setChanged();
                 Reflect.invoke(storageBe, "refresh");
                 templateIdx++;
             }
@@ -400,7 +400,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
                 }
                 handler.setStackInSlot(0, stack.copy());
                 slotsFilled[i] = true;
-                Reflect.invoke(storageBe, "setChanged");
+                ((BlockEntity) storageBe).setChanged();
                 Reflect.invoke(storageBe, "refresh");
             }
         } catch (Exception e) {
@@ -677,7 +677,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
                     ServerLevel machineLevel = resolveMachineLevel(player);
                     if (machineLevel != null && machineLevel.isLoaded(storagePositions.get(i))) {
                         handler.setStackInSlot(0, ItemStack.EMPTY);
-                        Reflect.invoke(storageBe, "setChanged");
+                        ((BlockEntity) storageBe).setChanged();
                         Reflect.invoke(storageBe, "refresh");
                     } else {
                         RSIntegrationMod.LOGGER.debug("[RSI-Batch-TLM] Skipping clear -- chunk unloaded at {}", storagePositions.get(i));

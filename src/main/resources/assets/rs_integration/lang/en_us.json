@@ -530,6 +530,7 @@
   "rsi.autoeat.result.diet": "Nutrition balanced: %s",
   "rsi.autoeat.result.none": "No edible food found",
   "rsi.autoeat.missing_effect": "Missing required effect: %s",
+  "rsi.autoeat.invalid_effect_config": "Auto-eat config error: invalid effect '%s' (use namespace:path format)",
   "rsi.autoeat.missing_cost": "Insufficient materials in RS network",
   "rsi.autoeat.full": "Already full",
   "rsi.autoeat.no_item_selected": "No item selected",
@@ -540,6 +541,7 @@
   "rsi.autoeat.title.select": "Select Food: %s",
   "rsi.autoeat.btn.eat.tooltip": "Click to eat",
   "rsi.autoeat.btn.select.tooltip": "Select food / Manage blacklist",
+  "rsi.autoeat.btn.blacklist.tooltip": "Manage auto-eat blacklist",
   "rsi.autoeat.btn.mode.tooltip": "Switch auto-eat mode",
   "rsi.autoeat.error.diet_tracker_missing": "Diet tracker not found",
   "rsi.autoeat.error.diet_no_groups": "No Diet nutrition groups"

@@ -113,6 +113,9 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
     @Override
     public final void onBatchFailed(@Nullable ServerPlayer player, String reason) {
         BlockPos pos = getMachinePos();
+        // Virtual delegates (e.g. GenericBatchDelegate for CUSTOM_GUI recipes)
+        // have no physical machine — nothing to clean up.
+        if (pos == null) return;
         ServerLevel level = resolveMachineLevel(player != null ? player.serverLevel() : null);
         if (level == null) return;
         // Force-load chunk if unloaded so physical items can always be recovered.

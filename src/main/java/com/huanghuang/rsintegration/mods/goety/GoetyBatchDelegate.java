@@ -232,7 +232,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         }
 
         // Inventory must be empty
-        if (!Reflect.<Boolean>invoke(brazier, GoetyReflection.M_IS_EMPTY).orElse(true)) {
+        if (!Reflect.<Boolean>invoke(brazier, GoetyReflection.M_IS_EMPTY, "m_7962_").orElse(true)) {
             player.sendSystemMessage(Component.translatable("rsi.goety.warn.altar_busy"));
             return false;
         }
@@ -536,7 +536,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         // Re-verify idle
         int ct = Reflect.getIntField(brazier, GoetyReflection.F_CURRENT_TIME).orElse(1);
         Object recipe = Reflect.getField(brazier, GoetyReflection.F_RECIPE).orElse(null);
-        boolean empty = Reflect.<Boolean>invoke(brazier, GoetyReflection.M_IS_EMPTY).orElse(false);
+        boolean empty = Reflect.<Boolean>invoke(brazier, GoetyReflection.M_IS_EMPTY, "m_7962_").orElse(false);
         if (ct > 0 || recipe != null || !empty) {
             player.sendSystemMessage(Component.translatable("rsi.goety.warn.altar_busy"));
             return false;
@@ -545,7 +545,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         List<Ingredient> ingredients = ((Recipe<?>) brazierRecipeObj).getIngredients();
         Object container = Reflect.invoke(brazier, GoetyReflection.M_GET_CONTAINER).orElse(null);
         int containerSize = container != null
-                ? Reflect.<Integer>invoke(container, GoetyReflection.M_GET_CONTAINER_SIZE).orElse(3)
+                ? Reflect.<Integer>invoke(container, GoetyReflection.M_GET_CONTAINER_SIZE, "m_6643_").orElse(3)
                 : 3;
         NonNullList<ItemStack> toPlace = NonNullList.withSize(containerSize, ItemStack.EMPTY);
 
@@ -756,7 +756,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
 
         int ct = Reflect.getIntField(brazier, GoetyReflection.F_CURRENT_TIME).orElse(1);
         Object recipe = Reflect.getField(brazier, GoetyReflection.F_RECIPE).orElse(null);
-        boolean empty = Reflect.<Boolean>invoke(brazier, GoetyReflection.M_IS_EMPTY).orElse(false);
+        boolean empty = Reflect.<Boolean>invoke(brazier, GoetyReflection.M_IS_EMPTY, "m_7962_").orElse(false);
         if (ct > 0 || recipe != null || !empty) {
             player.sendSystemMessage(Component.translatable("rsi.goety.warn.altar_busy"));
             return false;
@@ -764,7 +764,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
 
         Object container = Reflect.invoke(brazier, GoetyReflection.M_GET_CONTAINER).orElse(null);
         int containerSize = container != null
-                ? Reflect.<Integer>invoke(container, GoetyReflection.M_GET_CONTAINER_SIZE).orElse(3)
+                ? Reflect.<Integer>invoke(container, GoetyReflection.M_GET_CONTAINER_SIZE, "m_6643_").orElse(3)
                 : 3;
         NonNullList<ItemStack> toPlace = NonNullList.withSize(containerSize, ItemStack.EMPTY);
         int slot = 0;
@@ -855,7 +855,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         // Recipe was non-null (processing), now null (finished — success or failure)
         Object recipe = Reflect.getField(brazier, GoetyReflection.F_RECIPE).orElse(null);
         int ct = Reflect.getIntField(brazier, GoetyReflection.F_CURRENT_TIME).orElse(1);
-        boolean empty = Reflect.<Boolean>invoke(brazier, GoetyReflection.M_IS_EMPTY).orElse(true);
+        boolean empty = Reflect.<Boolean>invoke(brazier, GoetyReflection.M_IS_EMPTY, "m_7962_").orElse(true);
         if (recipe == null && ct == 0 && empty) {
             return true;
         }
@@ -1042,7 +1042,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         }
         Object container = Reflect.invoke(brazier, GoetyReflection.M_GET_CONTAINER).orElse(null);
         int containerSize = container != null
-                ? Reflect.<Integer>invoke(container, GoetyReflection.M_GET_CONTAINER_SIZE).orElse(3)
+                ? Reflect.<Integer>invoke(container, GoetyReflection.M_GET_CONTAINER_SIZE, "m_6643_").orElse(3)
                 : 3;
         Reflect.invoke(brazier, GoetyReflection.M_SET_ITEMS,
                 NonNullList.withSize(containerSize, ItemStack.EMPTY));

@@ -12,7 +12,6 @@ public final class BackpackReflection {
     public static Class<?> backpackBEClass;
     public static Class<?> playerAttackHelperClass;
 
-    public static boolean ready;
 
     static {
         register("net.p3pp3rf1y.sophisticatedbackpacks.backpack.BackpackBlockEntity", "backpackBEClass");

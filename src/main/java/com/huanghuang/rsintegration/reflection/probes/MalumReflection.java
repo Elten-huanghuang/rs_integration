@@ -16,7 +16,6 @@ public final class MalumReflection {
     public static Class<?> altarCraftingHelperClass;
     public static Class<?> spiritInfusionRecipeClass;
 
-    public static boolean ready;
 
     static {
         register("com.sammy.malum.common.block.curiosities.spirit_altar.SpiritAltarBlockEntity", "spiritAltarBEClass");

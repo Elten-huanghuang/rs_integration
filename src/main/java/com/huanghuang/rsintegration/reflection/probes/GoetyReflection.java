@@ -29,7 +29,6 @@ public final class GoetyReflection {
     public static Class<?> cursedCageBlockClass;
     public static Class<?> soulCandlestickBlockClass;
 
-    public static boolean ready;
 
     // ── Reflection field/method names (centralized so renames only touch one file) ──
 

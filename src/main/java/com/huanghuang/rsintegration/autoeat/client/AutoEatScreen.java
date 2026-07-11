@@ -351,6 +351,7 @@ public final class AutoEatScreen extends Screen {
     // ── helpers ───────────────────────────────────────────────────
 
     private int getSlotAt(double mx, double my) {
+        if (mx < leftPos || my < topPos) return -1;
         int col = (int) ((mx - leftPos) / SLOT_SIZE);
         int row = (int) ((my - topPos) / SLOT_SIZE);
         if (col < 0 || col >= COLS || row < 0 || row >= ROWS) return -1;

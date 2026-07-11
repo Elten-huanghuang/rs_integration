@@ -102,6 +102,13 @@ public final class Reflect {
         return invokeExact(obj, methodName, new Class<?>[0]);
     }
 
+    /** Invoke a no-arg method, trying MCP name first then SRG fallback. */
+    public static <T> Optional<T> invoke(Object obj, String mcpName, String srgName) {
+        Optional<T> result = invokeExact(obj, mcpName, new Class<?>[0]);
+        if (result.isPresent()) return result;
+        return invokeExact(obj, srgName, new Class<?>[0]);
+    }
+
     /** Invoke a method, auto-detecting parameter types from the args. */
     public static <T> Optional<T> invoke(Object obj, String methodName, Object... args) {
         Class<?>[] paramTypes = new Class<?>[args.length];
@@ -177,23 +184,24 @@ public final class Reflect {
 
     // ── Field discovery ──────────────────────────────────────────
 
-    /** Walk the class hierarchy to find a declared field by name. Results are cached. */
+    /** Walk the class hierarchy to find a declared field by name. Positive results are cached. */
     public static Optional<Field> findField(Class<?> clazz, String name) {
         String key = clazz.getName() + "." + name;
-        return fieldCache.computeIfAbsent(key, k -> {
-            Class<?> scan = clazz;
-            while (scan != null && scan != Object.class) {
-                try {
-                    Field f = scan.getDeclaredField(name);
-                    f.setAccessible(true);
-                    return Optional.of(f);
-                } catch (NoSuchFieldException e) {
-                    scan = scan.getSuperclass();
-                }
+        var cached = fieldCache.get(key);
+        if (cached != null) return cached;
+        Class<?> scan = clazz;
+        while (scan != null && scan != Object.class) {
+            try {
+                Field f = scan.getDeclaredField(name);
+                f.setAccessible(true);
+                fieldCache.put(key, Optional.of(f));
+                return Optional.of(f);
+            } catch (NoSuchFieldException e) {
+                scan = scan.getSuperclass();
             }
-            LOG.debug("{} Field not found in hierarchy: {}.{}", TAG, clazz.getName(), name);
-            return Optional.empty();
-        });
+        }
+        LOG.warn("{} Field not found in hierarchy: {}.{}", TAG, clazz.getName(), name);
+        return Optional.empty();
     }
 
     // ── Method discovery ───────────────────────────────────────────
@@ -241,7 +249,8 @@ public final class Reflect {
             return found;
         }
 
-        methodCache.put(key, Optional.empty());
+        LOG.warn("{} Method not found in hierarchy: {}.{}({})",
+                TAG, clazz.getName(), name, paramTypes.length);
         return null;
     }
 

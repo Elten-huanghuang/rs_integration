@@ -18,7 +18,7 @@ public abstract class ContainerDistanceMixin {
     private static void rsi$bypassDistanceCheck(ContainerLevelAccess access, Player player, Block block,
                                                  CallbackInfoReturnable<Boolean> cir) {
         if (player.level().isClientSide
-                || RemoteGuiAuth.hasActiveAuthorization(player.getUUID())) {
+                || RemoteGuiAuth.hasActiveAuthorizationForBlock(player.getUUID(), block)) {
             cir.setReturnValue(true);
         }
     }

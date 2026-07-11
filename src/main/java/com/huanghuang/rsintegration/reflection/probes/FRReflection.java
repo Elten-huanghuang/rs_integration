@@ -12,7 +12,6 @@ public final class FRReflection {
     public static Class<?> kettleBEClass;
     public static Class<?> kettleRecipeClass;
 
-    public static boolean ready;
 
     static {
         register("umpaz.farmersrespite.common.block.entity.KettleBlockEntity", "kettleBEClass");

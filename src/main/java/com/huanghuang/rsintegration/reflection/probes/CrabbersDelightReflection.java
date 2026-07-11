@@ -11,7 +11,6 @@ public final class CrabbersDelightReflection {
 
     public static Class<?> crabTrapBEClass;
 
-    public static boolean ready;
 
     static {
         register("alabaster.crabbersdelight.common.block.entity.CrabTrapBlockEntity", "crabTrapBEClass");
