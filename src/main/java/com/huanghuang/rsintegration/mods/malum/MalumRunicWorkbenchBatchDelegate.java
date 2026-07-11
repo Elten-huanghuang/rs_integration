@@ -219,6 +219,12 @@ public final class MalumRunicWorkbenchBatchDelegate extends AbstractBatchDelegat
         setSlot(0, expectedOutput.copy());
         be.setChanged();
 
+        // Secondary input (materials[1]) was committed from RS by the caller but
+        // the runic workbench only consumes the primary — refund it so it is not lost.
+        if (materials.size() > 1 && !materials.get(1).isEmpty()) {
+            refundItem(materials.get(1).copy());
+        }
+
         this.craftDone = true;
         RSIntegrationMod.LOGGER.debug("[RSI-Batch-Runic] Craft started with materials: recipe={}", recipe.getId());
         return true;

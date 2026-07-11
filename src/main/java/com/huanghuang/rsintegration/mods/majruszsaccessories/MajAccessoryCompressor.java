@@ -90,27 +90,24 @@ public final class MajAccessoryCompressor {
             AccessoryHolder newHolder = AccessoryHolder.create(best.holder.getItem());
             newHolder.setBonus(newBonus);
             ItemStack result = newHolder.getItemStack();
-            int resultCount = result.getCount();
 
-            // Insert result — prefer best's slot, then other's, then any
-            ItemStack leftover = inventory.insertItem(best.slot, result, false);
+            // Insert result — prefer best's slot, then other's, then any — recording
+            // the exact (slot, count) placements so a rollback undoes only what we
+            // inserted, never a pre-existing identical accessory elsewhere.
+            List<int[]> placements = new ArrayList<>();
+            ItemStack leftover = insertTracked(inventory, best.slot, result, placements);
             if (!leftover.isEmpty()) {
-                leftover = inventory.insertItem(other.slot, leftover, false);
+                leftover = insertTracked(inventory, other.slot, leftover, placements);
             }
             if (!leftover.isEmpty()) {
                 for (int i = 0; i < inventory.getSlots() && !leftover.isEmpty(); i++) {
-                    leftover = inventory.insertItem(i, leftover, false);
+                    leftover = insertTracked(inventory, i, leftover, placements);
                 }
             }
             if (!leftover.isEmpty()) {
-                // Rollback: undo any result portion already placed, otherwise the
-                // placed portion + restored inputs would duplicate items.
-                int placed = resultCount - leftover.getCount();
-                for (int i = 0; i < inventory.getSlots() && placed > 0; i++) {
-                    ItemStack slotStack = inventory.getStackInSlot(i);
-                    if (!slotStack.isEmpty() && ItemStack.isSameItemSameTags(slotStack, result)) {
-                        placed -= inventory.extractItem(i, placed, false).getCount();
-                    }
+                // Rollback: extract exactly the placements we made, then restore inputs.
+                for (int[] p : placements) {
+                    inventory.extractItem(p[0], p[1], false);
                 }
                 inventory.insertItem(best.slot, extractedBest, false);
                 inventory.insertItem(other.slot, extractedOther, false);
@@ -128,6 +125,20 @@ public final class MajAccessoryCompressor {
                 entries.remove(bestIdx);
             }
         }
+    }
+
+    /**
+     * Insert {@code stack} into {@code slot}, recording the placed count into
+     * {@code placements} (as {@code [slot, count]}) so it can be undone precisely.
+     * Returns the leftover that did not fit.
+     */
+    private static ItemStack insertTracked(IItemHandler inventory, int slot,
+                                           ItemStack stack, List<int[]> placements) {
+        int before = stack.getCount();
+        ItemStack leftover = inventory.insertItem(slot, stack, false);
+        int placed = before - leftover.getCount();
+        if (placed > 0) placements.add(new int[]{slot, placed});
+        return leftover;
     }
 
     private record SlotEntry(int slot, AccessoryHolder holder) {}

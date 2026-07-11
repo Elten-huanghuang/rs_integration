@@ -133,12 +133,14 @@ public final class ParallelCraftGroup implements IBatchDelegate {
                 } else {
                     RSIntegrationMod.LOGGER.warn("[RSI-ParallelGroup] Child tryStartWithMaterials failed at {}",
                             children.get(i).pos);
+                    refundChildMaterials(player, childMats);
                     if (failed == null) failed = new ArrayList<>();
                     failed.add(children.get(i));
                 }
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.warn("[RSI-ParallelGroup] Child tryStartWithMaterials threw at {}: {}",
                         children.get(i).pos, e.getMessage(), e);
+                refundChildMaterials(player, childMats);
                 if (failed == null) failed = new ArrayList<>();
                 failed.add(children.get(i));
             }
@@ -321,6 +323,21 @@ public final class ParallelCraftGroup implements IBatchDelegate {
     }
 
     // ── helpers ────────────────────────────────────────────────────
+
+    /**
+     * Return a failed child's material slice to the player. These items were
+     * committed from the shared ledger by the chain but the child placed them
+     * nowhere, so without this they would be lost. Mirrors the stranded-result
+     * handling in {@link #collectResult}.
+     */
+    private static void refundChildMaterials(ServerPlayer player, List<ItemStack> childMats) {
+        if (player == null) return;
+        for (ItemStack mat : childMats) {
+            if (mat != null && !mat.isEmpty()) {
+                net.minecraftforge.items.ItemHandlerHelper.giveItemToPlayer(player, mat.copy());
+            }
+        }
+    }
 
     private static IBatchDelegate createChildDelegate(ModType type) {
         if (type == ModType.GENERIC) return null;

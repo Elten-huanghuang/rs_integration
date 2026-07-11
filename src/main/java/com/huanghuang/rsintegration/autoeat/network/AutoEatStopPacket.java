@@ -13,7 +13,7 @@ public class AutoEatStopPacket {
     public static void handle(AutoEatStopPacket packet, java.util.function.Supplier<net.minecraftforge.network.NetworkEvent.Context> ctx) {
         ctx.get().enqueueWork(() -> {
             var sender = ctx.get().getSender();
-            if (sender != null) {
+            if (sender != null && !(sender instanceof net.minecraftforge.common.util.FakePlayer)) {
                 com.huanghuang.rsintegration.autoeat.AutoEatEngine.stop(sender);
             }
         });

@@ -85,6 +85,8 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         return null;
     }
 
+    private static final java.lang.reflect.Field LIT_TIME_FIELD = resolveLitTimeField();
+
     private static java.lang.reflect.Field resolveLitTimeField() {
         for (String name : new String[]{"litTime", "f_58315_"}) {
             try {
@@ -398,9 +400,8 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         // Burn time already banked in litTime counts toward this item's cook.
         int litTime = 0;
         try {
-            java.lang.reflect.Field litTimeField = resolveLitTimeField();
-            if (litTimeField != null) {
-                litTime = litTimeField.getInt(furnaceBE);
+            if (LIT_TIME_FIELD != null) {
+                litTime = LIT_TIME_FIELD.getInt(furnaceBE);
             }
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.debug("[RSI-Vanilla] litTime probe failed", e);
@@ -417,17 +418,23 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
             if (singleBurn <= 0) return false; // non-fuel item blocking the slot
             int needed = Math.max(1, (remainingCook + singleBurn - 1) / singleBurn);
             if (existing.getCount() >= needed) return true;
-            if (network != null) {
-                int topUp = needed - existing.getCount();
-                ItemStack extra = network.extractItem(existing.copyWithCount(1), topUp,
-                        com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+            if (network == null) return false; // can't top up — insufficient fuel
+            int topUp = needed - existing.getCount();
+            ItemStack extra = network.extractItem(existing.copyWithCount(1), topUp,
+                    com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+            if (extra.getCount() < topUp) {
+                // Not enough fuel available to finish the cook. Refund the partial
+                // extraction and fail cleanly rather than half-fueling and stalling.
                 if (!extra.isEmpty()) {
-                    ItemStack merged = existing.copy();
-                    merged.grow(extra.getCount());
-                    furnaceBE.setItem(1, merged);
+                    network.insertItem(extra, extra.getCount(),
+                            com.refinedmods.refinedstorage.api.util.Action.PERFORM);
                 }
+                return false;
             }
-            return !furnaceBE.getItem(1).isEmpty();
+            ItemStack merged = existing.copy();
+            merged.grow(extra.getCount());
+            furnaceBE.setItem(1, merged);
+            return true;
         }
 
         // Slot empty: pick a single fuel type from RS that can cover the whole cook.

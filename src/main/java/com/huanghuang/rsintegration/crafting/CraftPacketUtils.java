@@ -46,6 +46,11 @@ public final class CraftPacketUtils {
 
     private CraftPacketUtils() {}
 
+    /** Public bridge to {@link StepExecutor#mulCount} for callers outside this package. */
+    public static int mulCount(int count, int factor) {
+        return StepExecutor.mulCount(count, factor);
+    }
+
     private static final Map<ResourceLocation, List<Ingredient>> ingredientCache = new ConcurrentHashMap<>();
     private static final Set<ResourceLocation> emptyIngredientMarkers = ConcurrentHashMap.newKeySet();
     /** Caches the ingredient-list Field per recipe class for scanAllFieldsForIngredients. */

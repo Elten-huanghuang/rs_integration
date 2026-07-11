@@ -401,7 +401,7 @@ public final class GenericCraftPacket {
                     if (s.modType() != ModType.GENERIC) {
                         amplifiedList.add(new ResolutionStep(s.recipeId(), s.modType(), s.recipeTypeId(),
                                 s.alternativeIds(), s.alternativeModTypes(), s.inferMode(),
-                                s.executions() * repeatCount));
+                                CraftPacketUtils.mulCount(s.executions(), repeatCount)));
                     } else {
                         amplifiedList.add(s);
                     }
@@ -856,7 +856,7 @@ public final class GenericCraftPacket {
                 for (IngredientSpec spec : specs) {
                     if (spec.isEmpty()) continue;
                     perRecipe.add(spec.ingredient());
-                    for (int i = 0; i < spec.count() * repeatCount; i++) expanded.add(spec.ingredient());
+                    for (int i = 0; i < CraftPacketUtils.mulCount(spec.count(), repeatCount); i++) expanded.add(spec.ingredient());
                 }
                 displayIngredients = perRecipe;
                 recipeIngredients = expanded;
@@ -1457,7 +1457,7 @@ public final class GenericCraftPacket {
                         ItemStack matched = matchAndConsume(spec.ingredient(), matAvailable);
                         if (matched != null) {
                             neededCounts.merge(matched.getItem(),
-                                    spec.count() * step.batches(), Integer::sum);
+                                    CraftPacketUtils.mulCount(spec.count(), step.batches()), Integer::sum);
                             itemSource.putIfAbsent(matched.getItem(), spec.ingredient());
                         }
                     }

@@ -19,6 +19,7 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraftforge.common.util.LazyOptional;
 import net.minecraftforge.common.world.ForgeChunkManager;
 import net.minecraftforge.items.IItemHandler;
+import net.minecraftforge.items.ItemHandlerHelper;
 import net.minecraftforge.items.ItemStackHandler;
 
 import javax.annotation.Nullable;
@@ -132,16 +133,7 @@ public final class CraftingTableBatchDelegate extends AbstractBatchDelegate {
         forceChunkLoad(true);
 
         // Clear existing grid contents — refund to RS to prevent item loss
-        for (int i = 0; i < handler.getSlots(); i++) {
-            ItemStack extracted = handler.extractItem(i, 64, false);
-            if (!extracted.isEmpty()) {
-                var net = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
-                if (net != null) {
-                    net.insertItem(extracted, extracted.getCount(),
-                            com.refinedmods.refinedstorage.api.util.Action.PERFORM);
-                }
-            }
-        }
+        refundGrid(handler, player);
 
         // Insert materials into grid slots
         int slot = 0;
@@ -154,7 +146,7 @@ public final class CraftingTableBatchDelegate extends AbstractBatchDelegate {
             ItemStack remainder = handler.insertItem(slot, mat.copy(), false);
             if (!remainder.isEmpty()) {
                 RSIntegrationMod.LOGGER.warn("[RSI-Batch-CT] Failed to insert into slot {} at {}", slot, myPos);
-                clearGrid(handler);
+                refundGrid(handler, player);
                 return false;
             }
             slot++;
@@ -166,7 +158,7 @@ public final class CraftingTableBatchDelegate extends AbstractBatchDelegate {
             boolean matched = (boolean) matchMethod.invoke(recipe, handler);
             if (!matched) {
                 RSIntegrationMod.LOGGER.warn("[RSI-Batch-CT] Recipe mismatch at {}", myPos);
-                clearGrid(handler);
+                refundGrid(handler, player);
                 return false;
             }
 
@@ -195,7 +187,7 @@ public final class CraftingTableBatchDelegate extends AbstractBatchDelegate {
             }
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.error("[RSI-Batch-CT] Assemble failed at {}", myPos, e);
-            clearGrid(handler);
+            refundGrid(handler, player);
             return false;
         }
 
@@ -247,6 +239,28 @@ public final class CraftingTableBatchDelegate extends AbstractBatchDelegate {
     private void clearGrid(IItemHandler handler) {
         for (int i = 0; i < handler.getSlots(); i++) {
             handler.extractItem(i, 64, false);
+        }
+    }
+
+    /**
+     * Failure-path grid clear: empties every slot and returns the contents to
+     * the RS network (falling back to the player if the network cannot accept
+     * the remainder), so materials extracted from RS are never destroyed.
+     */
+    private void refundGrid(IItemHandler handler, ServerPlayer player) {
+        var net = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+        for (int i = 0; i < handler.getSlots(); i++) {
+            ItemStack extracted = handler.extractItem(i, 64, false);
+            if (extracted.isEmpty()) continue;
+            ItemStack remainder = extracted;
+            if (net != null) {
+                remainder = net.insertItem(extracted, extracted.getCount(),
+                        com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+            }
+            if (remainder != null && !remainder.isEmpty()
+                    && player != null && !player.hasDisconnected()) {
+                ItemHandlerHelper.giveItemToPlayer(player, remainder);
+            }
         }
     }
 
