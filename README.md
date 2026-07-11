@@ -184,6 +184,7 @@ Existing Sophisticated Backpacks upgrades that, when bound to an RS Grid (via NB
 | **Refill Upgrade (RS)** | Refills hotbar items from the RS network |
 | **Restock Upgrade (RS)** | Restocks player inventory on interact from the RS network |
 | **Deposit Upgrade (RS)** | When targeting an RS Grid, pushes backpack contents into the RS network (config `depositUpgradeRS`, default off) |
+| **Compacting Upgrade (RS)** | Auto-compresses compactable items from the RS network; also auto-combines Majrusz's Accessories matching the whitelist filter |
 
 ## Embers Alchemy Calculate Mode
 

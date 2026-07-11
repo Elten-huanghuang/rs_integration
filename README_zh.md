@@ -182,6 +182,9 @@ Sophisticated Backpacks 现有升级，通过 NBT 绑定 RS Grid 后，将行为
 | **拾取升级（RS）** | 自动拾取范围内的物品存入 RS 网络 |
 | **喂食升级（RS）** | 从 RS 网络自动消耗食物 |
 | **补货升级（RS）** | 从 RS 网络补充快捷栏消耗物品 |
+| **重存升级（RS）** | 从 RS 网络补满身上物品 |
+| **存款升级（RS）** | 对准 RS Grid 时将背包物品存入 RS 网络（需开启配置 `depositUpgradeRS`） |
+| **压制升级（RS）** | 从 RS 网络自动合并可压缩物品，同时支持 Majrusz's Accessories 饰品自动合成 |
 
 
 ## 余烬炼金计算模式

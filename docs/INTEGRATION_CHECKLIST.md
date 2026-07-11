@@ -374,3 +374,81 @@ IDLE → RESERVING → RESERVED → COMMITTING → COMMITTED
 2. `findBinding` 没找到？→ filter 字符串是否与绑定注册时一致
 3. Config 开关 false？→ 检查 `ENABLE_XXX`
 4. 模块未注册？→ `RSIntegrationMod.MODULES` 列表
+
+---
+
+## 十、共振磁盘被动效果系统
+
+### 10.1 三层架构
+
+被动效果系统让 RS 共振磁盘中的物品像在玩家背包里一样生效，分为三层：
+
+| 层 | 机制 | 覆盖率 | 配置 |
+|---|---|---|---|
+| Phase 1 | 属性修饰符 (AttributeScanner) | ~50-70% | 零配置 |
+| Phase 2 | inventoryTick 模拟 (TickSimulator) | ~20-35% | `passiveTickItems` JSON 白名单 |
+| Phase 3 | 事件驱动 Mixin 重定向 | ~5-15% | 每个物品一个 Mixin |
+
+**Phase 1 — AttributeScanner**：扫描物品的 `AttributeModifier`，自动应用到玩家。绝大多数"放在背包里加属性"的物品走这一层。
+
+**Phase 2 — TickSimulator**：模拟调用物品的 `inventoryTick`。`|mutates` 标记的物品走 extract→tick→insert 以持久化 NBT 变更；无标记的物品在快照副本上 tick（只读）。
+
+**Phase 3 — Event-driven Mixins**：特定物品需要劫持原版事件处理器，因为原版代码通过 `hasItem()` / `instanceof` 检查而非属性修饰符。当前覆盖：
+
+| Mixin | 目标 | 策略 |
+|---|---|---|
+| `SuperpositionHandlerMixin` | `SuperpositionHandler.hasItem()` | RETURN 注入补查磁盘 |
+| `AddonEventHandlerMixin` | `AddonEventHandler` 中的 `hasItem` 调用 | `@Redirect` 重定向含磁盘查找 |
+| `NineSwordBooksMixin` | Moonstone `nine_sword_books` | `@Redirect` `List.size()` + ThreadLocal |
+| `YuushaNineSwordBooksMixin` | Yuusha compat `NineSwordBooks` | `@Inject RETURN` `countValidSwords` + `calculateTotalSwordDamage` |
+| `AvariceRingMixin` | `AvariceRing` 背包遍历 | 遍历重定向到磁盘 |
+| `PyromancerStaffMixin` | `PyromancerStaff` 消耗 | 消耗重定向到磁盘 |
+
+### 10.2 Phase 3 Mixin 写作模式
+
+向已有模组事件处理器添加磁盘感知的两种模式：
+
+**模式 A — 通用 hasItem 拦截**（适用多数物品）：
+
+在 `SuperpositionHandler.hasItem()` RETURN 处注入，原版返回 false 时补查磁盘。无需修改 call site。所有调用者自动受益。
+
+**模式 B — 特定 call site 重定向**（仅当模式 A 不够时使用）：
+
+当调用者在到达 `hasItem()` 前因前置条件失败退出时，用 `@Redirect` 劫持前置条件检查本身（如 `betrayalAvailable`），补充磁盘感知。需反编译目标类的字节码以确定精确注入点。
+
+### 10.3 调试 hasItem 问题
+
+Mixin 日志前缀：`[RSI-hasItem]`、`[RSI-NineSwords]`、`[RSI-YuushaNineSwords]`。
+
+排查步骤：
+1. 检查 `SuperpositionHandlerMixin.rsi$logCall` 日志确认该物品是否被查询过
+2. 若从未查询 → 前置条件在 `hasItem` 之前就失败了，需反编译 Caller 找阻塞点
+3. 若查询了但没找到 → 检查磁盘是否真的包含该物品，以及 `stack.is(item)` 是否匹配
+
+### 10.4 核心类
+
+```
+src/main/java/com/huanghuang/rsintegration/resonance/
+├── disk/
+│   ├── ResonanceDiskWrapper      # IStorageDisk 装饰器，重导出磁盘只读视图
+│   ├── ResonanceDiskFactory       # RS 磁盘注册表 SPI
+│   └── ResonanceDiskItem          # 磁盘物品
+├── bridge/
+│   └── RSInventoryBridge          # 共享工具：getResonanceDisk() / insertToDisk()
+├── passive/
+│   ├── PassiveEffectEngine        # 主调度器（PlayerTick + 缓存 + 三层编排）
+│   ├── PassiveRegistry            # Phase 2 白名单注册表
+│   ├── TickSimulator              # inventoryTick 模拟（snapshot / mutate 模式）
+│   └── AttributeScanner           # Phase 1 属性扫描器
+└── backpack/
+    └── ResonanceDiskInventory      # 共振背包 GUI 容器
+```
+
+### 10.5 新增被动效果集成流程
+
+1. **判定层级**：先确认物品是否已通过 Phase 1 或 Phase 2 支持——大部分是。
+2. **若需 Phase 3**：反编译物品相关的事件处理器，找到 `hasItem()` 或等效的背包查验点。
+3. **首选模式 A**：在 `SuperpositionHandlerMixin` 层面解决问题（泛用，低侵入）。
+4. **必要时模式 B**：针对特定 call site 写独立的 `@Redirect` / `@Inject`。
+5. **ThreadLocal 注意**：若需在多个方法间传递信息（如 HEAD→ModifyVariable），用 `@Unique ThreadLocal`，并在 RETURN 时 `remove()` 防止泄漏。
+6. **诊断日志**：前 5 次触发用计数器和 `LOGGER.info` 输出诊断信息，确认 Mixin 正确命中。
