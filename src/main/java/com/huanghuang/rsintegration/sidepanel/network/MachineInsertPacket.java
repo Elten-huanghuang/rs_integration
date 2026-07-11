@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.sidepanel.network;
 
 import com.huanghuang.rsintegration.machine.MachineSlotType;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
+import com.huanghuang.rsintegration.util.ChunkUtils;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.network.FriendlyByteBuf;
@@ -102,6 +103,7 @@ public final class MachineInsertPacket {
                 return;
             }
 
+            ChunkUtils.loadChunk(targetLevel, packet.pos);
             BlockEntity be = targetLevel.getBlockEntity(packet.pos);
             if (!(be instanceof AbstractFurnaceBlockEntity furnace)) {
                 player.sendSystemMessage(

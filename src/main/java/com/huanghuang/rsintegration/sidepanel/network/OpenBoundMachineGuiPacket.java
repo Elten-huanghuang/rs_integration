@@ -105,7 +105,7 @@ public final class OpenBoundMachineGuiPacket {
     public static OpenBoundMachineGuiPacket decode(FriendlyByteBuf buf) {
         ResourceLocation dim = buf.readResourceLocation();
         BlockPos pos = buf.readBlockPos();
-        String key = buf.readUtf();
+        String key = buf.readUtf(256);
         ResourceLocation rid = buf.readBoolean() ? buf.readResourceLocation() : null;
         ItemStack base = buf.readBoolean() ? buf.readItem() : null;
         return new OpenBoundMachineGuiPacket(dim, pos, key, rid, base);

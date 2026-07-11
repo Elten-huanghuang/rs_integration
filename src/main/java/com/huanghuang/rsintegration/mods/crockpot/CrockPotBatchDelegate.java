@@ -190,7 +190,6 @@ public final class CrockPotBatchDelegate extends com.huanghuang.rsintegration.cr
     public boolean tryStartWithMaterials(ServerPlayer player, List<ItemStack> materials,
                                          ExtractionLedger sharedLedger) {
         this.player = player;
-        this.usingSharedLedger = true;
         this.craftDone = false;
 
         myLevel.getChunk(myPos);

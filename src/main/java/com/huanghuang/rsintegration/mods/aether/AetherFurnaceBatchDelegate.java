@@ -252,12 +252,12 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
             ItemStack slot0 = furnace.getItem(0);
             if (!slot0.isEmpty()) {
                 furnace.setItem(0, ItemStack.EMPTY);
-                refundToRSNetwork(slot0);
+                if (!usingSharedLedger) refundToRSNetwork(slot0);
             }
             ItemStack slot2 = furnace.getItem(2);
             if (!slot2.isEmpty()) {
                 furnace.setItem(2, ItemStack.EMPTY);
-                refundToRSNetwork(slot2);
+                if (!usingSharedLedger) refundToRSNetwork(slot2);
             }
             furnace.setChanged();
         } else {
@@ -266,7 +266,7 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
                     .orElse(null);
             if (handler != null) {
                 ItemStack slot0 = handler.extractItem(0, 64, false);
-                if (!slot0.isEmpty()) refundToRSNetwork(slot0);
+                if (!slot0.isEmpty() && !usingSharedLedger) refundToRSNetwork(slot0);
             }
         }
         refundLeftoverFuel(be);

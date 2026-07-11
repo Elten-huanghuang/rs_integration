@@ -256,6 +256,9 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
         }
         ItemStack out = handler.extractItem(OUTPUT_SLOT, 64, false);
         if (!out.isEmpty() && !usingSharedLedger) refundToRSNetwork(out);
+        // Fuel is out-of-band (not in shared ledger) — refund unconditionally
+        ItemStack fuel = handler.extractItem(FUEL_SLOT, 64, false);
+        if (!fuel.isEmpty()) refundToRSNetwork(fuel);
         be.setChanged();
     }
 

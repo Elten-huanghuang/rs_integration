@@ -339,8 +339,10 @@ public final class AutoEatEngine {
         }
 
         int maxStackSize = targetItem.getMaxStackSize();
-        ItemStack template = new ItemStack(targetItem, maxStackSize);
-        ItemStack extracted = network.extractItem(template, maxStackSize, Action.PERFORM);
+        int maxPerBatch = RSIntegrationConfig.AUTO_EAT_MAX_PER_BATCH.get();
+        int toExtract = Math.min(maxStackSize, maxPerBatch);
+        ItemStack template = new ItemStack(targetItem, toExtract);
+        ItemStack extracted = network.extractItem(template, toExtract, Action.PERFORM);
         if (extracted.isEmpty()) {
             NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
                     new AutoEatSyncPacket(AutoEatMode.STACK, 0,

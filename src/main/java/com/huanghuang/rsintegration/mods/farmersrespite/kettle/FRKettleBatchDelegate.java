@@ -150,7 +150,6 @@ public final class FRKettleBatchDelegate extends AbstractBatchDelegate {
     public boolean tryStartWithMaterials(ServerPlayer player, List<ItemStack> materials,
                                          ExtractionLedger sharedLedger) {
         this.player = player;
-        this.usingSharedLedger = true;
         this.craftDone = false;
 
         forceChunkLoad(true);

@@ -42,12 +42,12 @@ public record BindingInfo(
     /** Deserialize from network buffer (called client-side). */
     public static BindingInfo decode(FriendlyByteBuf buf) {
         return new BindingInfo(
-            buf.readUtf(),
+            buf.readUtf(256),
             buf.readResourceLocation(),
             buf.readBlockPos(),
-            buf.readUtf(),
-            buf.readUtf(),
-            buf.readBoolean() ? buf.readUtf() : null,
+            buf.readUtf(256),
+            buf.readUtf(128),
+            buf.readBoolean() ? buf.readUtf(128) : null,
             buf.readBoolean() ? buf.readItem() : null
         );
     }

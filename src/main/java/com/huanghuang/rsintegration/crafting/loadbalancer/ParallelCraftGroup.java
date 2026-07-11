@@ -120,29 +120,40 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         if (perChild == 0) return false;
 
         int startedCount = 0;
-        // Collect failed children to remove after iteration
         List<ChildSlot> failed = null;
+        List<ItemStack> orphanedMats = null;
         for (int i = 0; i < children.size(); i++) {
             int from = i * perChild;
             int to = from + perChild;
             if (to > materials.size()) break;
-            List<ItemStack> childMats = new ArrayList<>(materials.subList(from, to));
+            // Deep-copy each slice so a child mutating its stacks (shrink/split/NBT)
+            // cannot corrupt the pristine copies we refund on failure. childMats goes
+            // to the child; pristineMats is the untouched reference for the refund.
+            List<ItemStack> childMats = new ArrayList<>(to - from);
+            List<ItemStack> pristineMats = new ArrayList<>(to - from);
+            for (int j = from; j < to; j++) {
+                ItemStack src = materials.get(j);
+                childMats.add(src.copy());
+                pristineMats.add(src.copy());
+            }
             try {
                 if (children.get(i).delegate.tryStartWithMaterials(player, childMats, sharedLedger)) {
                     startedCount++;
                 } else {
                     RSIntegrationMod.LOGGER.warn("[RSI-ParallelGroup] Child tryStartWithMaterials failed at {}",
                             children.get(i).pos);
-                    refundChildMaterials(player, childMats);
                     if (failed == null) failed = new ArrayList<>();
                     failed.add(children.get(i));
+                    if (orphanedMats == null) orphanedMats = new ArrayList<>();
+                    orphanedMats.addAll(pristineMats);
                 }
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.warn("[RSI-ParallelGroup] Child tryStartWithMaterials threw at {}: {}",
                         children.get(i).pos, e.getMessage(), e);
-                refundChildMaterials(player, childMats);
                 if (failed == null) failed = new ArrayList<>();
                 failed.add(children.get(i));
+                if (orphanedMats == null) orphanedMats = new ArrayList<>();
+                orphanedMats.addAll(pristineMats);
             }
         }
 
@@ -153,8 +164,19 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         }
 
         if (startedCount == 0) {
+            // Whole group failed → return false so the chain aborts and the
+            // shared ledger's refundCommitted() refunds ALL committed materials
+            // (including the orphaned slices). Refunding here too would double-refund.
             RSIntegrationMod.LOGGER.warn("[RSI-ParallelGroup] No children started with materials for {}", recipeId);
             return false;
+        }
+
+        // Partial success: we return true, so the chain will NOT abort and the
+        // shared ledger will NOT be refunded. The failed children's material
+        // slices were already committed (physically extracted) but placed
+        // nowhere — refund them here or they are permanently lost.
+        if (orphanedMats != null && !orphanedMats.isEmpty()) {
+            refundChildMaterials(player, orphanedMats);
         }
 
         this.usingSharedLedger = true;

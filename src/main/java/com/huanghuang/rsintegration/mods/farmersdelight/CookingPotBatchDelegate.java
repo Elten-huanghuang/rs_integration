@@ -330,8 +330,9 @@ public final class CookingPotBatchDelegate extends com.huanghuang.rsintegration.
             ItemStack s = handler.extractItem(slot, 64, false);
             if (!s.isEmpty() && !usingSharedLedger) refundToRSNetwork(s);
         }
+        // Container is out-of-band (not in shared ledger) — refund unconditionally
         ItemStack container = handler.extractItem(CONTAINER_SLOT, 64, false);
-        if (!container.isEmpty() && !usingSharedLedger) refundToRSNetwork(container);
+        if (!container.isEmpty()) refundToRSNetwork(container);
         ItemStack out = handler.extractItem(OUTPUT_SLOT, 64, false);
         if (!out.isEmpty() && !usingSharedLedger) refundToRSNetwork(out);
         be.setChanged();

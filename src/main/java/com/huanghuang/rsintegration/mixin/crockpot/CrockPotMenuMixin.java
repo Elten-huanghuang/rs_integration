@@ -25,6 +25,7 @@ public abstract class CrockPotMenuMixin {
     public void rsi$safeGetCookingProgress(CallbackInfoReturnable<Integer> cir) {
         if (this.blockEntity == null) {
             cir.setReturnValue(0);
+            cir.cancel();
         }
     }
 
@@ -33,6 +34,7 @@ public abstract class CrockPotMenuMixin {
     public void rsi$safeGetBurningProgress(CallbackInfoReturnable<Integer> cir) {
         if (this.blockEntity == null) {
             cir.setReturnValue(0);
+            cir.cancel();
         }
     }
 
@@ -50,6 +52,7 @@ public abstract class CrockPotMenuMixin {
     public void rsi$safeStillValid(Player player, CallbackInfoReturnable<Boolean> cir) {
         if (this.blockEntity == null) {
             cir.setReturnValue(true);
+            cir.cancel();
         }
     }
 }

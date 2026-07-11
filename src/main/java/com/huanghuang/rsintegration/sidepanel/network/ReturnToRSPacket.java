@@ -1,16 +1,24 @@
 package com.huanghuang.rsintegration.sidepanel.network;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.network.gui.RemoteGuiAuth;
 import com.huanghuang.rsintegration.util.ChunkUtils;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.InteractionHand;
 import net.minecraft.world.MenuProvider;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.Vec3;
+import net.minecraftforge.common.MinecraftForge;
+import net.minecraftforge.event.entity.player.PlayerInteractEvent;
 import net.minecraftforge.network.NetworkEvent;
 
 import java.util.function.Supplier;
@@ -52,6 +60,26 @@ public final class ReturnToRSPacket {
             if (server == null) return;
             var level = server.getLevel(dimKey);
             if (level == null) return;
+
+            // Validate the player is bound to this machine (same gate as all
+            // sibling packets to prevent remote container opening from a modified client).
+            if (!AltarBindingRegistry.isBound(dimKey, packet.pos, player)) {
+                player.sendSystemMessage(
+                    Component.translatable("rsi.error.not_bound"));
+                return;
+            }
+
+            PlayerInteractEvent.RightClickBlock event = new PlayerInteractEvent.RightClickBlock(
+                    player, InteractionHand.MAIN_HAND, packet.pos,
+                    new BlockHitResult(new Vec3(packet.pos.getX() + 0.5,
+                            packet.pos.getY() + 1.0, packet.pos.getZ() + 0.5),
+                            Direction.UP, packet.pos, false));
+            MinecraftForge.EVENT_BUS.post(event);
+            if (event.isCanceled()) {
+                player.sendSystemMessage(
+                    Component.translatable("rsi.error.protected_block"));
+                return;
+            }
 
             if (!level.hasChunkAt(packet.pos)) {
                 ChunkUtils.loadChunk(level, packet.pos);

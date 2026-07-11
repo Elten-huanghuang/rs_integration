@@ -77,30 +77,29 @@ public abstract class NineSwordBooksMixin {
 
         Player player = rsi$currentPlayer.get();
         if (player != null && player.tickCount % 40 == 0 && extra > 0) {
-            RSIntegrationMod.LOGGER.info("[RSI-NineSwords] size() Hack! HotbarSize: {}, DiskSize(Bug-Scaled): {}, Total: {}", originalSize, extra, finalSize);
+            // 已移除 "Bug-Scaled" 字眼，因为原模组已修复该 Bug，现在是 1:1 绝对公平转换
+            RSIntegrationMod.LOGGER.info("[RSI-NineSwords] size() Hack! HotbarSize: {}, DiskSize(Extra): {}, Total: {}", originalSize, extra, finalSize);
         }
 
         return finalSize;
     }
 
-    // ========== 核心逻辑：完美复刻原版的多倍统计 Bug ==========
+    // ========== 核心逻辑：1:1 统计快捷栏与 RS 盘的剑 ==========
     @Unique
     private int rsi$computeExtraSize(Player player) {
         if (!(player instanceof ServerPlayer sp)) return 0;
         ResonanceDiskWrapper disk = RSInventoryBridge.getResonanceDisk(sp);
         if (disk == null) return 0;
 
-        // 获取原模组的 Config List，判断它当前会将一把剑翻多少倍
+        // 获取原模组的 Config List，用于备用判定
         @SuppressWarnings("unchecked")
         List<? extends String> configList = (List<? extends String>) com.moonstone.moonstonemod.Config.SERVER.nineSwordList.get();
-        int bugMultiplier = configList.size();
-        if (bugMultiplier == 0) bugMultiplier = 1;
 
         // 先数清楚快捷栏里已经有多少把有效剑
         int hotbarSwords = 0;
         for (int i = 0; i < 9; i++) {
             ItemStack sword = player.getInventory().items.get(i);
-            if (!sword.isEmpty() && rsi$getSwordWeight(sword, configList, bugMultiplier) > 0) {
+            if (!sword.isEmpty() && rsi$isValidSword(sword, configList)) {
                 hotbarSwords++;
             }
         }
@@ -115,10 +114,9 @@ public abstract class NineSwordBooksMixin {
             if (needed <= 0) break;
             if (sword.isEmpty()) continue;
 
-            int weight = rsi$getSwordWeight(sword, configList, bugMultiplier);
-            if (weight > 0) {
-                // 如果是一把合格的剑，我们同样把它乘以 bugMultiplier 塞进去
-                extraSize += weight;
+            if (rsi$isValidSword(sword, configList)) {
+                // 原模组 Bug 已修复，现在每一把符合条件的剑都严格只算作 1 把
+                extraSize++;
                 needed--;
             }
         }
@@ -126,27 +124,26 @@ public abstract class NineSwordBooksMixin {
     }
 
     @Unique
-    private static int rsi$getSwordWeight(ItemStack sword, List<? extends String> configList, int bugMultiplier) {
+    private static boolean rsi$isValidSword(ItemStack sword, List<? extends String> configList) {
         Item item = sword.getItem();
         boolean isSwordItem = item instanceof SwordItem;
         ResourceLocation key = BuiltInRegistries.ITEM.getKey(item);
         String regName = key != null ? key.toString() : "";
         boolean containsSword = regName.contains("sword");
 
-        // 兼容拔刀剑等各种武器
+        // 兼容拔刀剑等各种武器，弥补原作者“只认原版剑”的歧视判定
         boolean isRsiCompat = regName.contains("slashblade") || regName.contains("blade") ||
                 regName.contains("katana") || sword.is(ItemTags.SWORDS) || sword.is(ItemTags.AXES);
 
-        // 如果是标准的剑/拔刀剑，原版代码会给它乘上 config 的长度 (默认是 2)
         if (isSwordItem || containsSword || isRsiCompat) {
-            return bugMultiplier;
+            return true;
         }
 
-        // 如果都不是，但在 config 配置列表里，原版只会给它 1 的权重
+        // 如果都不是，去查配置列表里有没有强制指定的特殊武器
         for (String s : configList) {
-            if (regName.equals(s)) return 1;
+            if (regName.equals(s)) return true;
         }
 
-        return 0;
+        return false;
     }
 }

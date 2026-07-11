@@ -1065,6 +1065,14 @@ public final class AsyncCraftChain {
         // Do NOT flush virtualInventory on abort — see abort() for rationale.
         virtualInventory.clear();
 
+        if (network != null) {
+            try {
+                ledger.refundCommitted(network, null);
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.error(ctx.format("Failed to refund ledger on silent abort"), e);
+            }
+        }
+
         ledger.close();
         fireOnDone();
     }

@@ -16,6 +16,7 @@ public abstract class EntityMixin {
         if ((Object) this instanceof Player player) {
             if (RemoteGuiAuth.hasActiveAuthorization(player.getUUID())) {
                 cir.setReturnValue(0.0D);
+                cir.cancel();
             }
         }
     }
@@ -25,6 +26,7 @@ public abstract class EntityMixin {
         if ((Object) this instanceof Player player) {
             if (RemoteGuiAuth.hasActiveAuthorization(player.getUUID())) {
                 cir.setReturnValue(0.0D);
+                cir.cancel();
             }
         }
     }
@@ -34,6 +36,7 @@ public abstract class EntityMixin {
         if ((Object) this instanceof Player player) {
             if (RemoteGuiAuth.hasActiveAuthorization(player.getUUID())) {
                 cir.setReturnValue(0.0D);
+                cir.cancel();
             }
         }
     }

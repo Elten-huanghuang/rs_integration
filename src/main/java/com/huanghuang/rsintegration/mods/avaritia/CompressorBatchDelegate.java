@@ -92,7 +92,17 @@ public final class CompressorBatchDelegate extends AbstractBatchDelegate {
             }
 
             if (!ledger.commit(network, player)) return false;
-            return tryStartWithMaterials(player, materials, ledger);
+
+            this.usingSharedLedger = false;
+            if (!tryStartWithMaterials(player, materials, ledger)) {
+                for (ItemStack mat : materials) {
+                    if (!mat.isEmpty())
+                        network.insertItem(mat.copy(), mat.getCount(),
+                                com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                }
+                return false;
+            }
+            return true;
         }
     }
 
@@ -163,6 +173,17 @@ public final class CompressorBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     protected void clearMachineState(BlockEntity be, ServerPlayer player) {
+        // Recover items left in input slot — only on private-ledger path
+        if (!usingSharedLedger && be != null && network != null) {
+            IItemHandler handler = getHandler(be);
+            if (handler != null) {
+                ItemStack input = handler.extractItem(1, 64, false);
+                if (!input.isEmpty()) {
+                    network.insertItem(input.copy(), input.getCount(),
+                            com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                }
+            }
+        }
         forceChunkLoad(false);
     }
 

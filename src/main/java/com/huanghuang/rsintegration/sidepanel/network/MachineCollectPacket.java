@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.sidepanel.network;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
+import com.huanghuang.rsintegration.util.ChunkUtils;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.core.BlockPos;
@@ -101,6 +102,7 @@ public final class MachineCollectPacket {
                 return;
             }
 
+            ChunkUtils.loadChunk(targetLevel, packet.pos);
             BlockEntity be = targetLevel.getBlockEntity(packet.pos);
             if (!(be instanceof AbstractFurnaceBlockEntity furnace)) {
                 player.sendSystemMessage(

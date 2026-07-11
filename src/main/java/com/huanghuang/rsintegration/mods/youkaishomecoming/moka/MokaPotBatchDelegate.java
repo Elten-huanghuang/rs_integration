@@ -511,8 +511,9 @@ public final class MokaPotBatchDelegate extends AbstractBatchDelegate {
             ItemStack s = handler.extractItem(slot, 64, false);
             if (!s.isEmpty() && !usingSharedLedger) refund(s);
         }
+        // Container is out-of-band (not in shared ledger) — refund unconditionally
         ItemStack container = handler.extractItem(CONTAINER_SLOT, 64, false);
-        if (!container.isEmpty() && !usingSharedLedger) refund(container);
+        if (!container.isEmpty()) refund(container);
         ItemStack out = handler.extractItem(OUTPUT_SLOT, 64, false);
         if (!out.isEmpty() && !usingSharedLedger) refund(out);
         be.setChanged();

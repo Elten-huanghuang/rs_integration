@@ -588,11 +588,13 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
     }
 
     private void clearAllSlots() {
+        // Shared ledger handles refund — do not double-insert from crucible slots
+        final boolean refund = !usingSharedLedger;
         if (invCatalyst != null) {
             for (int i = 0; i < invCatalyst.getSlots(); i++) {
                 ItemStack s = invCatalyst.getStackInSlot(i);
                 if (!s.isEmpty()) {
-                    returnCrucibleItem(s);
+                    if (refund) returnCrucibleItem(s);
                     setSlot(invCatalyst, i, ItemStack.EMPTY);
                 }
             }
@@ -601,7 +603,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
             for (int i = 0; i < invSpirits.getSlots(); i++) {
                 ItemStack s = invSpirits.getStackInSlot(i);
                 if (!s.isEmpty()) {
-                    returnCrucibleItem(s);
+                    if (refund) returnCrucibleItem(s);
                     setSlot(invSpirits, i, ItemStack.EMPTY);
                 }
             }

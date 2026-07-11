@@ -18,14 +18,14 @@ import net.minecraftforge.eventbus.api.SubscribeEvent;
 
 import javax.annotation.Nullable;
 import java.lang.reflect.Field;
-import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 public final class PassiveEffectEngine {
 
     private static final Field DRIVE_PARENT;
-    private static final Map<UUID, ResonanceDiskWrapper> DISK_CACHE = new HashMap<>();
+    private static final Map<UUID, ResonanceDiskWrapper> DISK_CACHE = new ConcurrentHashMap<>();
 
     static {
         Field f = null;

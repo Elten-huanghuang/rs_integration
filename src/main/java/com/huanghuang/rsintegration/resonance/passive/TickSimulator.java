@@ -35,13 +35,17 @@ public final class TickSimulator {
                 int originalSlot = getSlot(stack);
                 ItemStack extracted = disk.manualExtractExact(stack, 1, 0, Action.PERFORM);
                 if (!extracted.isEmpty()) {
+                    ItemStack preTick = extracted.copy();
                     extracted.getItem().inventoryTick(
                             extracted, player.level(), player, -1, false);
-                    if (!extracted.isEmpty()) {
-                        ItemStack remainder = disk.manualInsert(originalSlot, extracted, extracted.getCount(), Action.PERFORM);
-                        if (!remainder.isEmpty()) {
-                            player.drop(remainder, false);
-                        }
+                    if (extracted.isEmpty()) {
+                        // inventoryTick consumed the item — re-insert the original
+                        extracted = preTick;
+                    }
+                    ItemStack remainder = disk.manualInsert(
+                            originalSlot, extracted, extracted.getCount(), Action.PERFORM);
+                    if (!remainder.isEmpty()) {
+                        player.drop(remainder, false);
                     }
                 }
             } else {

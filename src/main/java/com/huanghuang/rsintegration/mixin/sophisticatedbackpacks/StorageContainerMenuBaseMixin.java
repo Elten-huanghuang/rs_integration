@@ -37,6 +37,7 @@ public abstract class StorageContainerMenuBaseMixin {
                                   CallbackInfoReturnable<Boolean> cir) {
         if (isOpenTabFilterOnly()) {
             cir.setReturnValue(false);
+            cir.cancel();
         }
     }
 

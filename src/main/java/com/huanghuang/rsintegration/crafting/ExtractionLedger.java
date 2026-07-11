@@ -803,7 +803,7 @@ public final class ExtractionLedger implements AutoCloseable {
      * the original source (network, altar binding, or player inventory).
      * Best-effort: individual failures are logged but do not abort the loop.
      */
-    public void refundCommitted(@Nullable INetwork network, @Nonnull ServerPlayer player) {
+    public void refundCommitted(@Nullable INetwork network, @Nullable ServerPlayer player) {
         if (state != State.COMMITTED) return;
         for (Entry e : entries) {
             if (e.template.isEmpty()) continue;
@@ -813,21 +813,62 @@ public final class ExtractionLedger implements AutoCloseable {
                     INetwork net = e.sourceNetwork != null ? e.sourceNetwork : network;
                     if (net != null) {
                         var tracker = net.getItemStorageTracker();
-                        if (tracker != null) tracker.changed(player, refund.copy());
+                        if (tracker != null && player != null) tracker.changed(player, refund.copy());
                         ItemStack leftover = net.insertItem(refund, refund.getCount(), Action.PERFORM);
                         if (!leftover.isEmpty()) {
                             RSIntegrationMod.LOGGER.warn("[RSI-Ledger] Refund: RS insert had leftover for {} x{}",
                                     refund.getDisplayName().getString(), refund.getCount());
-                            PlayerUtils.safeGiveToPlayer(player, leftover, network);
+                            refundLeftoverToPlayerOrNetwork(leftover, player, network);
                         }
                     } else {
-                        PlayerUtils.safeGiveToPlayer(player, refund, network);
+                        refundLeftoverToPlayerOrNetwork(refund, player, network);
                     }
                 }
-                case PLAYER_INVENTORY -> PlayerUtils.safeGiveToPlayer(player, refund, network);
+                case PLAYER_INVENTORY -> refundLeftoverToPlayerOrNetwork(refund, player, network);
             }
         }
         transition(State.ROLLED_BACK);
+    }
+
+    /**
+     * Give {@code stack} back to the player if online; otherwise (offline abort,
+     * player == null) fall back to inserting into the network. If the network is
+     * full or missing, DROP the item as a physical ItemEntity at the network's
+     * controller position so the material is never silently destroyed.
+     */
+    private static void refundLeftoverToPlayerOrNetwork(ItemStack stack, @Nullable ServerPlayer player,
+                                                        @Nullable INetwork network) {
+        if (stack.isEmpty()) return;
+        if (player != null) {
+            PlayerUtils.safeGiveToPlayer(player, stack, network);
+            return;
+        }
+
+        ItemStack leftover = stack;
+        if (network != null) {
+            leftover = network.insertItem(stack, stack.getCount(), Action.PERFORM);
+            if (leftover.isEmpty()) return;
+        }
+
+        // Player offline AND (network full or absent) — never discard. Drop a
+        // physical ItemEntity at the network controller so nothing is lost.
+        if (network != null) {
+            Level level = network.getLevel();
+            BlockPos pos = network.getPosition();
+            if (level instanceof net.minecraft.server.level.ServerLevel serverLevel && pos != null) {
+                ItemEntity drop = new ItemEntity(serverLevel,
+                        pos.getX() + 0.5, pos.getY() + 1.0, pos.getZ() + 0.5, leftover.copy());
+                drop.setDeltaMovement(0, 0.2, 0);
+                serverLevel.addFreshEntity(drop);
+                RSIntegrationMod.LOGGER.warn("[RSI-Ledger] Player offline & network full — dropped refund at {} {}: {} x{}",
+                        level.dimension().location(), pos,
+                        leftover.getDisplayName().getString(), leftover.getCount());
+                return;
+            }
+        }
+
+        RSIntegrationMod.LOGGER.error("[RSI-Ledger] CRITICAL: could not refund/drop item (no network level) — LOST: {} x{}",
+                leftover.getDisplayName().getString(), leftover.getCount());
     }
 
     public String describePending() {

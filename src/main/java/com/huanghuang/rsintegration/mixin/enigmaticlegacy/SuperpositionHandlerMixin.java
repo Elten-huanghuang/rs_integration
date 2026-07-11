@@ -29,7 +29,9 @@ public abstract class SuperpositionHandlerMixin {
     @Inject(method = "hasItem", at = @At("HEAD"))
     private static void rsi$logCall(Player player, Item item, CallbackInfoReturnable<Boolean> ci) {
         if (!(player instanceof ServerPlayer)) return;
-        String key = BuiltInRegistries.ITEM.getKey(item).toString();
+        ResourceLocation rl = BuiltInRegistries.ITEM.getKey(item);
+        if (rl == null) return;
+        String key = rl.toString();
         if (rsi$seenItems.add(key)) {
             RSIntegrationMod.LOGGER.info("[RSI-hasItem] queried: {}", key);
         }

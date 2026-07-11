@@ -429,7 +429,7 @@ public final class DebugCommand {
                     }
                 }
             }
-        } catch (Exception e) { /* curios not present */ }
+        } catch (Throwable e) { /* curios not present */ }
 
         int totalBindings = 0;
         for (ItemStack stack : allStacks) {

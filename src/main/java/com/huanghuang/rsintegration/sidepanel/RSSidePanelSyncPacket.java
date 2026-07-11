@@ -82,7 +82,7 @@ public final class RSSidePanelSyncPacket {
     }
 
     static RSSidePanelSyncPacket decode(FriendlyByteBuf buf) {
-        int count = Math.min(buf.readVarInt(), 4096);
+        int count = Math.max(0, Math.min(buf.readVarInt(), 4096));
         List<UUID> ids = new ArrayList<>(count);
         List<ItemStack> items = new ArrayList<>(count);
         List<Long> timestamps = new ArrayList<>(count);
@@ -98,8 +98,8 @@ public final class RSSidePanelSyncPacket {
         }
         int total = buf.readVarInt();
         boolean available = buf.readBoolean();
-        String name = buf.readUtf();
-        int bindingCount = Math.min(buf.readVarInt(), 4096);
+        String name = buf.readUtf(256);
+        int bindingCount = Math.max(0, Math.min(buf.readVarInt(), 4096));
         List<BindingInfo> bindings = new ArrayList<>(bindingCount);
         for (int i = 0; i < bindingCount; i++) {
             bindings.add(BindingInfo.decode(buf));

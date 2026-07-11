@@ -83,7 +83,7 @@ public final class RSSidePanelClickPacket {
     static RSSidePanelClickPacket decode(FriendlyByteBuf buf) {
         byte action = buf.readByte();
         if (action == ACTION_DRAG_DISTRIBUTE) {
-            int count = Math.min(buf.readVarInt(), 4096);
+            int count = Math.max(0, Math.min(buf.readVarInt(), 4096));
             List<ItemStack> items = new ArrayList<>(count);
             for (int i = 0; i < count; i++) items.add(readStack(buf));
             return new RSSidePanelClickPacket(items);

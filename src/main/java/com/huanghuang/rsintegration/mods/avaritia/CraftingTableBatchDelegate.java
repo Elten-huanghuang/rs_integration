@@ -248,6 +248,11 @@ public final class CraftingTableBatchDelegate extends AbstractBatchDelegate {
      * the remainder), so materials extracted from RS are never destroyed.
      */
     private void refundGrid(IItemHandler handler, ServerPlayer player) {
+        // Shared ledger handles refund — do not double-insert from grid
+        if (usingSharedLedger) {
+            clearGrid(handler);
+            return;
+        }
         var net = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
         for (int i = 0; i < handler.getSlots(); i++) {
             ItemStack extracted = handler.extractItem(i, 64, false);

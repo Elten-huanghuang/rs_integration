@@ -165,7 +165,6 @@ public final class SkilletBatchDelegate extends com.huanghuang.rsintegration.cra
     public boolean tryStartWithMaterials(ServerPlayer player, List<ItemStack> materials,
                                          ExtractionLedger sharedLedger) {
         this.player = player;
-        this.usingSharedLedger = true;
         this.craftDone = false;
 
         BlockEntity be = myLevel.getBlockEntity(myPos);

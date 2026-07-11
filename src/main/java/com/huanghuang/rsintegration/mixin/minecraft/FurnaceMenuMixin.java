@@ -15,6 +15,7 @@ public abstract class FurnaceMenuMixin {
     private void rsi$bypassDistanceForRemoteGui(Player player, CallbackInfoReturnable<Boolean> cir) {
         if (RemoteGuiAuth.hasActiveAuthorization(player.getUUID())) {
             cir.setReturnValue(true);
+            cir.cancel();
         }
     }
 }
