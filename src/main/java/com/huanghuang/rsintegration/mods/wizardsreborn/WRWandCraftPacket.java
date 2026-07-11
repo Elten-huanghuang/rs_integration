@@ -84,6 +84,15 @@ public final class WRWandCraftPacket {
                 return;
             }
 
+            // Verify binding before accessing remote machine at client-supplied coords
+            if (packet.dim != null) {
+                ResourceKey<Level> key = ResourceKey.create(net.minecraft.core.registries.Registries.DIMENSION, packet.dim);
+                if (!AltarBindingRegistry.isBound(key, packet.pos, player)) {
+                    player.sendSystemMessage(Component.translatable("rsi.generic.error.not_bound"));
+                    return;
+                }
+            }
+
             if (!level.isLoaded(packet.pos)) {
                 level.getChunk(packet.pos);
             }

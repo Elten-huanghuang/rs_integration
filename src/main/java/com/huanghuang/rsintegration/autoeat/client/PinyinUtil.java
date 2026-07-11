@@ -3,12 +3,12 @@ package com.huanghuang.rsintegration.autoeat.client;
 import com.github.stuxuhai.jpinyin.PinyinFormat;
 import com.github.stuxuhai.jpinyin.PinyinHelper;
 
-final class PinyinUtil {
+public final class PinyinUtil {
 
     private PinyinUtil() {}
 
     /** Convert Chinese text to pinyin (no tones, lowercase). Non-Chinese chars pass through unchanged. */
-    static String toPinyin(String text) {
+    public static String toPinyin(String text) {
         if (text == null || text.isEmpty()) return "";
         try {
             return PinyinHelper.convertToPinyinString(text, "", PinyinFormat.WITHOUT_TONE).toLowerCase();

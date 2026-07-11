@@ -17,9 +17,11 @@ public final class BatchCraftNetworkHandler {
         if (registered) return;
         var ch = NetworkHandler.CHANNEL;
         ch.registerMessage(NetworkPacketIds.GENERIC_CRAFT, GenericCraftPacket.class,
-                GenericCraftPacket::encode, GenericCraftPacket::decode, GenericCraftPacket::handle);
+                GenericCraftPacket::encode, GenericCraftPacket::decode, GenericCraftPacket::handle,
+                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_SERVER));
         ch.registerMessage(NetworkPacketIds.PLAN_RESPONSE, PlanResponsePacket.class,
-                PlanResponsePacket::encode, PlanResponsePacket::decode, PlanResponsePacket::handle);
+                PlanResponsePacket::encode, PlanResponsePacket::decode, PlanResponsePacket::handle,
+                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_CLIENT));
         registered = true;
     }
 }

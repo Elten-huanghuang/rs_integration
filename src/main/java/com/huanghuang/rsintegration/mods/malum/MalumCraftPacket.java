@@ -89,6 +89,15 @@ public final class MalumCraftPacket {
             return;
         }
 
+        // Verify binding before accessing remote machine at client-supplied coords
+        if (dim != null) {
+            ResourceKey<Level> key = ResourceKey.create(net.minecraft.core.registries.Registries.DIMENSION, dim);
+            if (!AltarBindingRegistry.isBound(key, pos, player)) {
+                player.sendSystemMessage(Component.translatable("rsi.generic.error.not_bound"));
+                return;
+            }
+        }
+
         com.huanghuang.rsintegration.util.ChunkUtils.loadChunk(level, pos);
         BlockEntity be = level.getBlockEntity(pos);
         Object altar = castSpiritAltar(be);

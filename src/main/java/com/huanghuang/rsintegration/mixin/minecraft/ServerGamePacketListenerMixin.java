@@ -21,7 +21,8 @@ public abstract class ServerGamePacketListenerMixin {
     )
     public boolean rsi$wrapStillValidClicks(AbstractContainerMenu menu, Player player,
                                              Operation<Boolean> original) {
-        if (RemoteGuiAuth.hasActiveAuthorization(player.getUUID())) {
+        if (player instanceof net.minecraft.server.level.ServerPlayer sp
+                && RemoteGuiAuth.isAuthorized(sp, menu)) {
             return true;
         }
         return original.call(menu, player);

@@ -49,7 +49,10 @@
     "refinedstorage.GridScreenMachineTabMixin",
     "refinedstorage.GridScreenMouseMixin",
     "refinedstorage.GridScreenKeyboardMixin",
-    "refinedstorage.GridScreenTooltipMixin"
+    "refinedstorage.GridScreenTooltipMixin",
+    "refinedstorage.TooltipGridFilterMixin",
+    "refinedstorage.TagGridFilterMixin",
+    "refinedstorage.ModGridFilterMixin"
   ],
   "injectors": {
     "defaultRequire": 0

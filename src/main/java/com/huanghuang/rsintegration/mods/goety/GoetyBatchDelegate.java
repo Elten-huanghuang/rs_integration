@@ -193,6 +193,13 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] validateAndInit [9/9] pedestal scan skipped (ritual is null)");
         }
 
+        // Structure/dimension pre-check: some rituals require specific multiblocks
+        // (e.g. Nether-only).  Reject mismatched altars at validation time so the
+        // same-dimension priority sort can fall back to a correct-dimension machine.
+        if (!checkStructureRequirements(ritualRecipe)) {
+            return false;
+        }
+
         RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] validateAndInit [OK] all checks passed: recipe={} altar at {}", recipeId, pos);
         return true;
     }
@@ -497,18 +504,21 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             if (!checkRitualIsValid(ritual, activationItemStack)) {
                 player.sendSystemMessage(Component.translatable("rsi.goety.error.ritual_invalid"));
                 refundActivationToPlayer();
+                ledger.refundCommitted(network, player);
                 recoverFromPedestals();
                 return false;
             }
             if (!startAltarRitual(altar, player, activationItemStack, ritualRecipe)) {
                 player.sendSystemMessage(Component.translatable("rsi.goety.error.ritual_start_failed"));
                 refundActivationToPlayer();
+                ledger.refundCommitted(network, player);
                 recoverFromPedestals();
                 return false;
             }
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.error("[RSI-Batch-Goety] Placement/start failed:", e);
             refundActivationToPlayer();
+            ledger.refundCommitted(network, player);
             recoverFromPedestals();
             return false;
         }

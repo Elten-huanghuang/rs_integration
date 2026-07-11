@@ -471,6 +471,17 @@ public final class AsyncCraftChain {
             return null;
         }
 
+        // ── Same-dimension priority ──
+        // Prefer machines in the player's current dimension so cross-dimension
+        // crafts only fall back to remote dimensions when no local machine exists.
+        ResourceLocation playerDim = online.level().dimension().location();
+        machines.sort((a, b) -> {
+            boolean aSame = a.dim().equals(playerDim);
+            boolean bSame = b.dim().equals(playerDim);
+            if (aSame == bSame) return 0;
+            return aSame ? -1 : 1;
+        });
+
         // ── Load-balanced multi-machine dispatch ──
         // When multiple machines are bound for this mod type, try to distribute
         // work across them instead of sending everything to one machine.

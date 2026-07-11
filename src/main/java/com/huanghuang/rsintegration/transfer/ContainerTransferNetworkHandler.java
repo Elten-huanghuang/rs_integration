@@ -16,7 +16,8 @@ public final class ContainerTransferNetworkHandler {
         if (registered) return;
         var ch = NetworkHandler.CHANNEL;
         ch.registerMessage(NetworkPacketIds.STORE_ALL, StoreAllPacket.class,
-                StoreAllPacket::encode, StoreAllPacket::decode, StoreAllPacket::handle);
+                StoreAllPacket::encode, StoreAllPacket::decode, StoreAllPacket::handle,
+                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_SERVER));
         registered = true;
     }
 }

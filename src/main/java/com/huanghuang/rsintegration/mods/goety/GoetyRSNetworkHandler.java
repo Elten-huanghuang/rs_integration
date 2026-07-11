@@ -22,9 +22,11 @@ public final class GoetyRSNetworkHandler {
         if (registered) return;
         var ch = NetworkHandler.CHANNEL;
         ch.registerMessage(NetworkPacketIds.GOETY_CHECK_RS, GoetyGuiCheckRSItemsPacket.class,
-                GoetyGuiCheckRSItemsPacket::encode, GoetyGuiCheckRSItemsPacket::decode, GoetyGuiCheckRSItemsPacket::handle);
+                GoetyGuiCheckRSItemsPacket::encode, GoetyGuiCheckRSItemsPacket::decode, GoetyGuiCheckRSItemsPacket::handle,
+                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_SERVER));
         ch.registerMessage(NetworkPacketIds.GOETY_RS_RESULT, GoetyGuiRSItemsResultPacket.class,
-                GoetyGuiRSItemsResultPacket::encode, GoetyGuiRSItemsResultPacket::decode, GoetyGuiRSItemsResultPacket::handle);
+                GoetyGuiRSItemsResultPacket::encode, GoetyGuiRSItemsResultPacket::decode, GoetyGuiRSItemsResultPacket::handle,
+                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_CLIENT));
         registered = true;
     }
 

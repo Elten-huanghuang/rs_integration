@@ -32,6 +32,7 @@ import java.util.*;
 public final class AutoEatEngine {
 
     private static final String NBT_KEY = "rsi:food_blacklist";
+    private static final int MAX_BLACKLIST_SIZE = 512;
     private static final Set<UUID> runningTasks = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     // MethodHandles for SolCarrot (com.cazsius.solcarrot)
@@ -158,6 +159,9 @@ public final class AutoEatEngine {
         Set<ResourceLocation> current = getBlacklist(player);
         current.addAll(added);
         current.removeAll(removed);
+        if (current.size() > MAX_BLACKLIST_SIZE) {
+            return;
+        }
         ListTag list = new ListTag();
         for (ResourceLocation rl : current) {
             list.add(StringTag.valueOf(rl.toString()));

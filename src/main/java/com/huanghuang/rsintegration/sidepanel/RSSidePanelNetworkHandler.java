@@ -61,31 +61,44 @@ public final class RSSidePanelNetworkHandler {
         if (registered) return;
         var ch = NetworkHandler.CHANNEL;
         ch.registerMessage(NetworkPacketIds.SIDE_PANEL_REQUEST, RSSidePanelRequestPacket.class,
-                RSSidePanelRequestPacket::encode, RSSidePanelRequestPacket::decode, RSSidePanelRequestPacket::handle);
+                RSSidePanelRequestPacket::encode, RSSidePanelRequestPacket::decode, RSSidePanelRequestPacket::handle,
+                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_SERVER));
         ch.registerMessage(NetworkPacketIds.SIDE_PANEL_SYNC, RSSidePanelSyncPacket.class,
-                RSSidePanelSyncPacket::encode, RSSidePanelSyncPacket::decode, RSSidePanelSyncPacket::handle);
+                RSSidePanelSyncPacket::encode, RSSidePanelSyncPacket::decode, RSSidePanelSyncPacket::handle,
+                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_CLIENT));
         ch.registerMessage(NetworkPacketIds.SIDE_PANEL_CLICK, RSSidePanelClickPacket.class,
-                RSSidePanelClickPacket::encode, RSSidePanelClickPacket::decode, RSSidePanelClickPacket::handle);
+                RSSidePanelClickPacket::encode, RSSidePanelClickPacket::decode, RSSidePanelClickPacket::handle,
+                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_SERVER));
         ch.registerMessage(NetworkPacketIds.SIDE_PANEL_DELTA, RSSidePanelDeltaPacket.class,
-                RSSidePanelDeltaPacket::encode, RSSidePanelDeltaPacket::decode, RSSidePanelDeltaPacket::handle);
+                RSSidePanelDeltaPacket::encode, RSSidePanelDeltaPacket::decode, RSSidePanelDeltaPacket::handle,
+                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_CLIENT));
         ch.registerMessage(NetworkPacketIds.INVENTORY_TRANSFER, RSInventoryTransferPacket.class,
-                RSInventoryTransferPacket::encode, RSInventoryTransferPacket::decode, RSInventoryTransferPacket::handle);
+                RSInventoryTransferPacket::encode, RSInventoryTransferPacket::decode, RSInventoryTransferPacket::handle,
+                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_SERVER));
         ch.registerMessage(NetworkPacketIds.OPEN_BOUND_MACHINE_GUI, OpenBoundMachineGuiPacket.class,
-                OpenBoundMachineGuiPacket::encode, OpenBoundMachineGuiPacket::decode, OpenBoundMachineGuiPacket::handle);
+                OpenBoundMachineGuiPacket::encode, OpenBoundMachineGuiPacket::decode, OpenBoundMachineGuiPacket::handle,
+                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_SERVER));
         ch.registerMessage(NetworkPacketIds.MACHINE_STATUS_DELTA, MachineStatusDeltaPacket.class,
-                MachineStatusDeltaPacket::encode, MachineStatusDeltaPacket::decode, MachineStatusDeltaPacket::handle);
+                MachineStatusDeltaPacket::encode, MachineStatusDeltaPacket::decode, MachineStatusDeltaPacket::handle,
+                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_CLIENT));
         ch.registerMessage(NetworkPacketIds.MACHINE_COLLECT, MachineCollectPacket.class,
-                MachineCollectPacket::encode, MachineCollectPacket::decode, MachineCollectPacket::handle);
+                MachineCollectPacket::encode, MachineCollectPacket::decode, MachineCollectPacket::handle,
+                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_SERVER));
         ch.registerMessage(NetworkPacketIds.MACHINE_INSERT, MachineInsertPacket.class,
-                MachineInsertPacket::encode, MachineInsertPacket::decode, MachineInsertPacket::handle);
+                MachineInsertPacket::encode, MachineInsertPacket::decode, MachineInsertPacket::handle,
+                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_SERVER));
         ch.registerMessage(NetworkPacketIds.RS_BINDING_SYNC, RSBindingSyncPacket.class,
-                RSBindingSyncPacket::encode, RSBindingSyncPacket::decode, RSBindingSyncPacket::handle);
+                RSBindingSyncPacket::encode, RSBindingSyncPacket::decode, RSBindingSyncPacket::handle,
+                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_CLIENT));
         ch.registerMessage(NetworkPacketIds.CONFIG_SYNC, ConfigSyncPacket.class,
-                ConfigSyncPacket::encode, ConfigSyncPacket::decode, ConfigSyncPacket::handle);
+                ConfigSyncPacket::encode, ConfigSyncPacket::decode, ConfigSyncPacket::handle,
+                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_CLIENT));
         ch.registerMessage(NetworkPacketIds.RETURN_TO_RS, ReturnToRSPacket.class,
-                ReturnToRSPacket::encode, ReturnToRSPacket::decode, ReturnToRSPacket::handle);
+                ReturnToRSPacket::encode, ReturnToRSPacket::decode, ReturnToRSPacket::handle,
+                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_SERVER));
         ch.registerMessage(NetworkPacketIds.OPEN_RESONANCE_BACKPACK, OpenResonanceBackpackPacket.class,
-                OpenResonanceBackpackPacket::encode, OpenResonanceBackpackPacket::decode, OpenResonanceBackpackPacket::handle);
+                OpenResonanceBackpackPacket::encode, OpenResonanceBackpackPacket::decode, OpenResonanceBackpackPacket::handle,
+                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_SERVER));
         registered = true;
 
         MinecraftForge.EVENT_BUS.register(RSSidePanelNetworkHandler.class);

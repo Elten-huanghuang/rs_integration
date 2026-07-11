@@ -125,6 +125,15 @@ public final class EidolonCraftPacket {
             return;
         }
 
+        // Verify binding before accessing remote machine at client-supplied coords
+        if (dim != null) {
+            ResourceKey<Level> key = ResourceKey.create(net.minecraft.core.registries.Registries.DIMENSION, dim);
+            if (!AltarBindingRegistry.isBound(key, pos, player)) {
+                player.sendSystemMessage(Component.translatable("rsi.generic.error.not_bound"));
+                return;
+            }
+        }
+
         ChunkUtils.loadChunk(level, pos);
         BlockEntity be = level.getBlockEntity(pos);
         if (be == null || !EidolonReflection.crucibleTileEntityClass.isInstance(be)) {

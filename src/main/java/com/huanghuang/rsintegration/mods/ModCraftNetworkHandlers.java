@@ -17,7 +17,8 @@ public final class ModCraftNetworkHandlers {
         if (malumRegistered) return;
         var ch = NetworkHandler.CHANNEL;
         ch.registerMessage(NetworkPacketIds.MALUM_CRAFT, MalumCraftPacket.class,
-                MalumCraftPacket::encode, MalumCraftPacket::decode, MalumCraftPacket::handle);
+                MalumCraftPacket::encode, MalumCraftPacket::decode, MalumCraftPacket::handle,
+                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_SERVER));
         malumRegistered = true;
     }
 
@@ -25,7 +26,8 @@ public final class ModCraftNetworkHandlers {
         if (faRegistered) return;
         var ch = NetworkHandler.CHANNEL;
         ch.registerMessage(NetworkPacketIds.FA_CRAFT, FaCraftPacket.class,
-                FaCraftPacket::encode, FaCraftPacket::decode, FaCraftPacket::handle);
+                FaCraftPacket::encode, FaCraftPacket::decode, FaCraftPacket::handle,
+                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_SERVER));
         faRegistered = true;
     }
 
@@ -33,7 +35,8 @@ public final class ModCraftNetworkHandlers {
         if (eidolonRegistered) return;
         var ch = NetworkHandler.CHANNEL;
         ch.registerMessage(NetworkPacketIds.EIDOLON_CRAFT, EidolonCraftPacket.class,
-                EidolonCraftPacket::encode, EidolonCraftPacket::decode, EidolonCraftPacket::handle);
+                EidolonCraftPacket::encode, EidolonCraftPacket::decode, EidolonCraftPacket::handle,
+                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_SERVER));
         eidolonRegistered = true;
     }
 
@@ -41,7 +44,8 @@ public final class ModCraftNetworkHandlers {
         if (wrWandRegistered) return;
         var ch = NetworkHandler.CHANNEL;
         ch.registerMessage(NetworkPacketIds.WR_WAND_CRAFT, WRWandCraftPacket.class,
-                WRWandCraftPacket::encode, WRWandCraftPacket::decode, WRWandCraftPacket::handle);
+                WRWandCraftPacket::encode, WRWandCraftPacket::decode, WRWandCraftPacket::handle,
+                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_SERVER));
         wrWandRegistered = true;
     }
 

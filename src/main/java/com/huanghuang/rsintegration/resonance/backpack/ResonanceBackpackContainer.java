@@ -100,7 +100,9 @@ public class ResonanceBackpackContainer extends AbstractContainerMenu {
     }
 
     @Override
-    public boolean stillValid(Player player) { return true; }
+    public boolean stillValid(Player player) {
+        return player.isAlive();
+    }
 
     public int getStoredCount() {
         if (disk != null) return disk.getStored();

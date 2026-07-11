@@ -14,7 +14,8 @@ public final class ResonanceNetworkHandler {
         if (registered) return;
         var ch = NetworkHandler.CHANNEL;
         ch.registerMessage(NetworkPacketIds.RESONANCE_SYNC, ResonanceSyncPacket.class,
-                ResonanceSyncPacket::encode, ResonanceSyncPacket::decode, ResonanceSyncPacket::handle);
+                ResonanceSyncPacket::encode, ResonanceSyncPacket::decode, ResonanceSyncPacket::handle,
+                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_CLIENT));
         registered = true;
     }
 }

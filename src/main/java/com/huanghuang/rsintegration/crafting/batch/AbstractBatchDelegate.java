@@ -75,7 +75,15 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
         // has no physical machine — skip chunk-load and BE checks.
         if (pos == null) return isMachineCraftFinished(null, null);
         ServerLevel level = resolveMachineLevel(playerLevel);
-        if (level == null || !level.isLoaded(pos)) return false;
+        if (level == null) return false;
+        // Force-load the chunk each poll tick so the machine keeps ticking
+        // even after the player leaves the area. Without this, cross-dimension
+        // crafts silently stall: items are already placed on the machine but
+        // isCraftComplete keeps returning false, the chain times out, and the
+        // abort path must unwind committed extractions.
+        if (!level.isLoaded(pos)) {
+            level.getChunk(pos);
+        }
         BlockEntity be = level.getBlockEntity(pos);
         if (be == null || be.isRemoved()) return true; // machine gone → treat as done
         return isMachineCraftFinished(level, be);
@@ -91,14 +99,19 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
     }
 
     /**
-     * Batch-failure handler with shared-ledger guard.
+     * Batch-failure handler.
      * Subclasses must NOT override this; override {@link #clearMachineState} instead.
      * When {@code player} is null (offline), resolves the machine level via
      * {@link #machineServer} and drops refund items in-world.
+     * <p>
+     * Always calls {@link #clearMachineState} even for shared-ledger delegates:
+     * the chain's abort refunds the ledger, but the physical items on the machine
+     * still need to be removed. The {@code clearMachineState} implementations
+     * already guard against double-refund via {@code usingSharedLedger} /
+     * {@code refundToRS} checks.
      */
     @Override
     public final void onBatchFailed(@Nullable ServerPlayer player, String reason) {
-        if (usingSharedLedger) return;
         BlockPos pos = getMachinePos();
         ServerLevel level = resolveMachineLevel(player != null ? player.serverLevel() : null);
         if (level == null) return;

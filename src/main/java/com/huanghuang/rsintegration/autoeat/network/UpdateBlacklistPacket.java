@@ -44,7 +44,10 @@ public class UpdateBlacklistPacket {
 
     private static Set<ResourceLocation> readSet(FriendlyByteBuf buf) {
         int size = buf.readVarInt();
-        Set<ResourceLocation> set = new HashSet<>(size);
+        if (size < 0 || size > 4096) {
+            throw new io.netty.handler.codec.DecoderException("blacklist size out of range: " + size);
+        }
+        Set<ResourceLocation> set = new HashSet<>(Math.min(size, 256));
         for (int i = 0; i < size; i++) {
             set.add(buf.readResourceLocation());
         }
