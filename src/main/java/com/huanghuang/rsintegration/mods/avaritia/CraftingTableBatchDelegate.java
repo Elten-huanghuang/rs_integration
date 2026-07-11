@@ -131,9 +131,16 @@ public final class CraftingTableBatchDelegate extends AbstractBatchDelegate {
 
         forceChunkLoad(true);
 
-        // Clear existing grid contents (defensive)
+        // Clear existing grid contents — refund to RS to prevent item loss
         for (int i = 0; i < handler.getSlots(); i++) {
-            handler.extractItem(i, 64, false);
+            ItemStack extracted = handler.extractItem(i, 64, false);
+            if (!extracted.isEmpty()) {
+                var net = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+                if (net != null) {
+                    net.insertItem(extracted, extracted.getCount(),
+                            com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                }
+            }
         }
 
         // Insert materials into grid slots

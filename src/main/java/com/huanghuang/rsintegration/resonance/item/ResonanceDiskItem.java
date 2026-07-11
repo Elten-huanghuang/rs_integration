@@ -32,7 +32,7 @@ public final class ResonanceDiskItem extends StorageDiskItem {
 
     @Override
     public void inventoryTick(ItemStack stack, Level level, Entity entity, int slot, boolean selected) {
-        if (level.isClientSide() || stack.hasTag() || !(entity instanceof Player player)) {
+        if (level.isClientSide() || getId(stack) != null || !(entity instanceof Player player)) {
             return;
         }
 

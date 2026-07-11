@@ -139,7 +139,7 @@ public final class KettleBatchDelegate extends AbstractBatchDelegate {
     public boolean tryStartWithMaterials(ServerPlayer player, List<ItemStack> materials,
                                          ExtractionLedger sharedLedger) {
         this.player = player;
-        this.usingSharedLedger = true;
+        // usingSharedLedger already set by caller — don't overwrite
         this.craftDone = false;
 
         forceChunkLoad(true);

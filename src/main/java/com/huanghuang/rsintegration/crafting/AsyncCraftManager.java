@@ -70,11 +70,10 @@ public final class AsyncCraftManager {
      * may already be partially torn down by the time this runs.
      */
     public static void abortAll() {
-        List<AsyncCraftChain> snapshot;
-        synchronized (INSTANCE.activeChains) {
-            snapshot = new ArrayList<>(INSTANCE.activeChains);
-            INSTANCE.activeChains.clear();
-        }
+        // Runs on the server thread; CopyOnWriteArrayList makes the snapshot+clear
+        // safe without external locking.
+        List<AsyncCraftChain> snapshot = new ArrayList<>(INSTANCE.activeChains);
+        INSTANCE.activeChains.clear();
         for (AsyncCraftChain chain : snapshot) {
             try {
                 chain.abort("Server stopping");

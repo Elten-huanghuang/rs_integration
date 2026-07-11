@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.machine;
 
 import com.github.stuxuhai.jpinyin.PinyinFormat;
 import com.github.stuxuhai.jpinyin.PinyinHelper;
+import com.huanghuang.rsintegration.config.ClientSyncedConfig;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
 import com.huanghuang.rsintegration.sidepanel.client.MachineTabHandler;
@@ -289,7 +290,9 @@ public final class MachineHub {
     /** Check whether the Hub should be used instead of individual tabs. */
     public static boolean shouldUseHub(int machineCount) {
         if (machineCount == 0) return false;
-        int threshold = RSIntegrationConfig.MACHINE_TAB_THRESHOLD.get();
+        int threshold = ClientSyncedConfig.isSynced()
+                ? ClientSyncedConfig.MACHINE_TAB_THRESHOLD
+                : RSIntegrationConfig.MACHINE_TAB_THRESHOLD.get();
         if (threshold == 0) return true;
         return machineCount > threshold;
     }

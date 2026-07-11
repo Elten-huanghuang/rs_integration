@@ -68,7 +68,9 @@ public final class RSGridSearchCache {
     public static void onClientTick(TickEvent.ClientTickEvent event) {
         if (event.phase != TickEvent.Phase.END) return;
         Minecraft mc = Minecraft.getInstance();
-        if (mc.player == null) return;
+        // mc.level can be briefly null mid-dimension-switch while mc.player is set;
+        // guard here so all downstream mc.level.getGameTime() reads are safe.
+        if (mc.player == null || mc.level == null) return;
 
         // ── state-polling invalidation ──
         boolean currAdvanced = mc.options.advancedItemTooltips;

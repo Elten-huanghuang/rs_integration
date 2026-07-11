@@ -22,8 +22,18 @@ public final class MachineStatusReader {
     // Cached reflective accessors for AbstractFurnaceBlockEntity private fields
     private static final Field COOKING_PROGRESS = resolveField("cookingProgress", "f_18769_");
     private static final Field COOKING_TOTAL_TIME = resolveField("cookingTotalTime", "f_18768_");
-    private static final Method IS_LIT = Reflect.findMethod(
-            AbstractFurnaceBlockEntity.class, "isLit", new Class<?>[0]);
+    // MCP dev name + SRG name fallback for vanilla isLit()
+    private static final Method IS_LIT = resolveIsLit();
+
+    private static Method resolveIsLit() {
+        String[] names = {"isLit", "m_6050_"};
+        for (String name : names) {
+            var m = Reflect.findMethod(AbstractFurnaceBlockEntity.class, name, new Class<?>[0]);
+            if (m != null) return m;
+        }
+        RSIntegrationMod.LOGGER.warn("[RSI-MachineStatus] isLit method not found (no SRG match)");
+        return null;
+    }
 
     private static Field resolveField(String mcp, String srg) {
         var f = Reflect.findField(AbstractFurnaceBlockEntity.class, mcp);

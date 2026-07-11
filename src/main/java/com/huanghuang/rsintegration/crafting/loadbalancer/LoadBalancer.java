@@ -61,11 +61,10 @@ public final class LoadBalancer {
     /**
      * Dispatch a recipe to bound machines of the given mod type.
      *
-     * @param player         the requesting player
-     * @param machines       all bound machines of the target mod type (from AltarBindingRegistry)
-     * @param totalOps       total recipe operations needed
-     * @param outputPerCraft items produced per recipe operation
-     * @param level          the server level for BE lookups
+     * @param player   the requesting player
+     * @param machines all bound machines of the target mod type (from AltarBindingRegistry)
+     * @param totalOps total recipe operations needed
+     * @param server   the server, used to resolve each machine's level for BE lookups
      * @return dispatch decision
      */
     public static DispatchResult dispatch(ServerPlayer player, List<BoundMachine> machines,

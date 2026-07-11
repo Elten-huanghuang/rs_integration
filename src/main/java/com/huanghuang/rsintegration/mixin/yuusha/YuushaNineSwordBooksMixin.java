@@ -26,13 +26,14 @@ public abstract class YuushaNineSwordBooksMixin {
     private void rsi$addDiskSwords(Player player, CallbackInfoReturnable<Integer> cir) {
         int extra = rsi$countDiskSwords(player);
         if (extra > 0) {
-            int total = Math.min(cir.getReturnValue() + extra,
+            int hotbar = cir.getReturnValue();
+            int total = Math.min(hotbar + extra,
                     RSIntegrationConfig.NINE_SWORD_MAX_COUNT.get());
             cir.setReturnValue(total);
             if (rsi$diagCount < 5) {
                 rsi$diagCount++;
                 RSIntegrationMod.LOGGER.info("[RSI-YuushaNineSwords] countValidSwords: hotbar={}, disk={}, final={}",
-                        cir.getReturnValue() - extra, extra, total);
+                        hotbar, extra, total);
             }
         }
     }

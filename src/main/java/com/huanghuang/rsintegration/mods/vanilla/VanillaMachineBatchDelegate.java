@@ -85,6 +85,18 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         return null;
     }
 
+    private static java.lang.reflect.Field resolveLitTimeField() {
+        for (String name : new String[]{"litTime", "f_58315_"}) {
+            try {
+                java.lang.reflect.Field f = AbstractFurnaceBlockEntity.class.getDeclaredField(name);
+                f.setAccessible(true);
+                return f;
+            } catch (NoSuchFieldException ignored) {}
+        }
+        RSIntegrationMod.LOGGER.warn("[RSI-Vanilla] litTime field not found (no SRG match)");
+        return null;
+    }
+
     @Override
     public boolean validateAndInit(ServerPlayer player, ResourceLocation recipeId,
                                    @Nullable ResourceLocation dim, BlockPos pos) {
@@ -386,10 +398,10 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         // Burn time already banked in litTime counts toward this item's cook.
         int litTime = 0;
         try {
-            java.lang.reflect.Field litTimeField = AbstractFurnaceBlockEntity.class
-                    .getDeclaredField("litTime");
-            litTimeField.setAccessible(true);
-            litTime = litTimeField.getInt(furnaceBE);
+            java.lang.reflect.Field litTimeField = resolveLitTimeField();
+            if (litTimeField != null) {
+                litTime = litTimeField.getInt(furnaceBE);
+            }
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.debug("[RSI-Vanilla] litTime probe failed", e);
         }

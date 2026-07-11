@@ -22,7 +22,7 @@ public class BlacklistSyncPacket {
     }
 
     public static BlacklistSyncPacket decode(FriendlyByteBuf buf) {
-        int size = buf.readVarInt();
+        int size = Math.min(buf.readVarInt(), 4096);
         Set<ResourceLocation> set = new HashSet<>(size);
         for (int i = 0; i < size; i++) {
             set.add(buf.readResourceLocation());

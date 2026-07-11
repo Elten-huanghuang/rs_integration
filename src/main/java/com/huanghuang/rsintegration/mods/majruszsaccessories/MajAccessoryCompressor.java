@@ -90,6 +90,7 @@ public final class MajAccessoryCompressor {
             AccessoryHolder newHolder = AccessoryHolder.create(best.holder.getItem());
             newHolder.setBonus(newBonus);
             ItemStack result = newHolder.getItemStack();
+            int resultCount = result.getCount();
 
             // Insert result — prefer best's slot, then other's, then any
             ItemStack leftover = inventory.insertItem(best.slot, result, false);
@@ -102,7 +103,15 @@ public final class MajAccessoryCompressor {
                 }
             }
             if (!leftover.isEmpty()) {
-                // Rollback: return extracted items
+                // Rollback: undo any result portion already placed, otherwise the
+                // placed portion + restored inputs would duplicate items.
+                int placed = resultCount - leftover.getCount();
+                for (int i = 0; i < inventory.getSlots() && placed > 0; i++) {
+                    ItemStack slotStack = inventory.getStackInSlot(i);
+                    if (!slotStack.isEmpty() && ItemStack.isSameItemSameTags(slotStack, result)) {
+                        placed -= inventory.extractItem(i, placed, false).getCount();
+                    }
+                }
                 inventory.insertItem(best.slot, extractedBest, false);
                 inventory.insertItem(other.slot, extractedOther, false);
                 break;

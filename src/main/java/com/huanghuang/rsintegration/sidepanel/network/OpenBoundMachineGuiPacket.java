@@ -49,6 +49,21 @@ import java.util.function.Supplier;
  */
 public final class OpenBoundMachineGuiPacket {
 
+    // Cached litTime field with SRG fallback — vanilla fields are remapped at runtime
+    private static final java.lang.reflect.Field LIT_TIME = resolveLitTimeField();
+
+    private static java.lang.reflect.Field resolveLitTimeField() {
+        for (String name : new String[]{"litTime", "f_58315_"}) {
+            try {
+                java.lang.reflect.Field f = AbstractFurnaceBlockEntity.class.getDeclaredField(name);
+                f.setAccessible(true);
+                return f;
+            } catch (NoSuchFieldException ignored) {}
+        }
+        RSIntegrationMod.LOGGER.warn("[RSI-Prefill] litTime field not found — fuel prefill may over-supply");
+        return null;
+    }
+
     private final ResourceLocation dim;
     private final BlockPos pos;
     private final String itemKey;
@@ -238,14 +253,12 @@ public final class OpenBoundMachineGuiPacket {
             int burnTime = ForgeHooks.getBurnTime(existingFuel, recipe.getType());
             if (burnTime > 0) hasFuel = true;
         }
-        // Check litTime
-        if (!hasFuel) {
+        // Check litTime via cached field (dev + SRG fallback)
+        if (!hasFuel && LIT_TIME != null) {
             try {
-                var f = AbstractFurnaceBlockEntity.class.getDeclaredField("litTime");
-                f.setAccessible(true);
-                if (f.getInt(furnace) > 0) hasFuel = true;
+                if (LIT_TIME.getInt(furnace) > 0) hasFuel = true;
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.debug("[RSI-SidePanel] reflection probe failed", e);
+                RSIntegrationMod.LOGGER.debug("[RSI-SidePanel] litTime probe failed", e);
             }
         }
         if (!hasFuel) {

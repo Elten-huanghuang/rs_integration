@@ -7,6 +7,8 @@ import net.minecraft.world.Container;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 
+import java.util.ArrayList;
+
 public class ResonanceDiskInventory implements Container {
 
     static final int SLOTS = 36;
@@ -83,7 +85,7 @@ public class ResonanceDiskInventory implements Container {
         if (stack.isEmpty()) return ItemStack.EMPTY;
         ItemStack taken = stack.split(count);
         if (stack.isEmpty()) slots[index] = ItemStack.EMPTY;
-        // Disk sync handled by ResonanceSlot.setChanged() — always called after removeItem.
+        disk.manualExtract(index, taken.copy(), taken.getCount(), 0, Action.PERFORM);
         ResonanceDiskWrapper.rsi$stripSlotTag(taken);
         return taken;
     }
@@ -100,6 +102,9 @@ public class ResonanceDiskInventory implements Container {
 
     @Override
     public void setItem(int index, ItemStack stack) {
+        // Pure slot writer by design: the only caller is ResonanceSlot.set(),
+        // which already extracts/inserts against the disk before delegating here.
+        // Syncing the disk again would double-apply the swap and dupe/lose items.
         slots[index] = stack;
     }
 

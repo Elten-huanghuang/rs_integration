@@ -33,7 +33,7 @@ public final class RSBindingSyncPacket {
     }
 
     public static RSBindingSyncPacket decode(FriendlyByteBuf buf) {
-        int count = buf.readVarInt();
+        int count = Math.min(buf.readVarInt(), 4096);
         List<BindingInfo> list = new ArrayList<>(count);
         for (int i = 0; i < count; i++) {
             list.add(BindingInfo.decode(buf));

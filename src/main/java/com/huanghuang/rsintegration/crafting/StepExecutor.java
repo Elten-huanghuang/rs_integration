@@ -190,7 +190,7 @@ final class StepExecutor {
     static boolean planRecipeIngredients(CraftingRecipe recipe, ResolutionContext ctx, int depth,
                                          CraftingResolver.EdgeTracker edges, int batches) {
         if (depth > maxDepth()) return false;
-        if (ctx.steps.size() + batches > maxSteps()) return false;
+        if (ctx.steps.size() + 1 > maxSteps()) return false;
 
         ctx.beginUndo();
         edges.beginUndo();
@@ -225,7 +225,7 @@ final class StepExecutor {
     static boolean planRecipeIngredients(List<IngredientSpec> specs, ResolutionContext ctx, int depth,
                                          CraftingResolver.EdgeTracker edges, int batches) {
         if (depth > maxDepth()) return false;
-        if (ctx.steps.size() + batches > maxSteps()) return false;
+        if (ctx.steps.size() + 1 > maxSteps()) return false;
 
         ctx.beginUndo();
         edges.beginUndo();

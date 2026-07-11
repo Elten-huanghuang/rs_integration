@@ -368,13 +368,13 @@ public final class AsyncCraftChain {
 
                 ItemStack result = CraftPacketUtils.assembleCraftingOutput(cr, consumed, online);
                 if (!result.isEmpty()) {
-                    addToVirtualInventory(result.copyWithCount(result.getCount() * executions));
+                    addToVirtualInventory(result.copyWithCount(StepExecutor.mulCount(result.getCount(), executions)));
                 }
                 for (ItemStack secondary : ModRecipeHandlers.tryGetSecondaryOutputs(cr, server.overworld().registryAccess())) {
-                    addToVirtualInventory(secondary.copyWithCount(secondary.getCount() * executions));
+                    addToVirtualInventory(secondary.copyWithCount(StepExecutor.mulCount(secondary.getCount(), executions)));
                 }
                 for (ItemStack remainder : CraftPacketUtils.getRecipeRemainders(cr)) {
-                    addToVirtualInventory(remainder.copyWithCount(remainder.getCount() * executions));
+                    addToVirtualInventory(remainder.copyWithCount(StepExecutor.mulCount(remainder.getCount(), executions)));
                 }
             } else {
                 // Non-crafting GENERIC recipe (e.g. sawmill, custom mod type)
@@ -384,7 +384,7 @@ public final class AsyncCraftChain {
 
                 for (IngredientSpec spec : specs) {
                     if (spec.isEmpty()) continue;
-                    int stillNeeded = spec.count() * executions;
+                    int stillNeeded = StepExecutor.mulCount(spec.count(), executions);
                     var iter = virtualInventory.iterator();
                     while (iter.hasNext() && stillNeeded > 0) {
                         ItemStack vi = iter.next();
@@ -415,10 +415,10 @@ public final class AsyncCraftChain {
                 ItemStack result = ModRecipeHandlers.tryGetResultItem(
                         recipe, server.overworld().registryAccess());
                 if (!result.isEmpty()) {
-                    addToVirtualInventory(result.copyWithCount(result.getCount() * executions));
+                    addToVirtualInventory(result.copyWithCount(StepExecutor.mulCount(result.getCount(), executions)));
                 }
                 for (ItemStack secondary : ModRecipeHandlers.tryGetSecondaryOutputs(recipe, server.overworld().registryAccess())) {
-                    addToVirtualInventory(secondary.copyWithCount(secondary.getCount() * executions));
+                    addToVirtualInventory(secondary.copyWithCount(StepExecutor.mulCount(secondary.getCount(), executions)));
                 }
                 for (IngredientSpec spec : specs) {
                     if (spec.isEmpty()) continue;
@@ -427,7 +427,7 @@ public final class AsyncCraftChain {
                         try {
                             ItemStack remainder = stack.getCraftingRemainingItem();
                             if (!remainder.isEmpty()) {
-                                addToVirtualInventory(remainder.copyWithCount(spec.count() * executions));
+                                addToVirtualInventory(remainder.copyWithCount(StepExecutor.mulCount(spec.count(), executions)));
                                 break;
                             }
                         } catch (Exception e) {

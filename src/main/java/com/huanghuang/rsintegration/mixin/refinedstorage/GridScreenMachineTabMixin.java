@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.mixin.refinedstorage;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.config.ClientSyncedConfig;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.machine.MachineHub;
 import com.huanghuang.rsintegration.mixin.minecraft.AbstractContainerScreenAccessor;
@@ -49,7 +50,9 @@ public abstract class GridScreenMachineTabMixin {
 
     @Inject(method = "renderForeground", at = @At("TAIL"), remap = false)
     private void rsi$renderMachineTabs(GuiGraphics gfx, int mouseX, int mouseY, CallbackInfo ci) {
-        if (!RSIntegrationConfig.ENABLE_MACHINE_GUI_TABS.get()) return;
+        if (!(ClientSyncedConfig.isSynced()
+                ? ClientSyncedConfig.ENABLE_MACHINE_GUI_TABS
+                : RSIntegrationConfig.ENABLE_MACHINE_GUI_TABS.get())) return;
 
         if (!rsi$bindingSyncRequested) {
             rsi$bindingSyncRequested = true;

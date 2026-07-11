@@ -167,6 +167,12 @@ public final class MalumRunicWorkbenchBatchDelegate extends AbstractBatchDelegat
         setSlot(0, expectedOutput.copy());
         be.setChanged();
 
+        // Refund secondary input — extracted from RS but the runic workbench
+        // doesn't consume it via the workbench slot.
+        if (reserved.size() > 1 && !reserved.get(1).isEmpty()) {
+            refundItem(reserved.get(1).copy());
+        }
+
         this.craftDone = true;
         RSIntegrationMod.LOGGER.debug("[RSI-Batch-Runic] Craft started (instant): recipe={}", recipe.getId());
         return true;

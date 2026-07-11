@@ -50,7 +50,7 @@ public final class AetherworksBatchDelegate extends AbstractBatchDelegate {
     @Override
     public boolean validateAndInit(ServerPlayer player, ResourceLocation recipeId,
                                    @Nullable ResourceLocation dim, BlockPos pos) {
-        if (!AetherworksReflection.ready) {
+        if (!AetherworksReflection.isAvailable()) {
             player.sendSystemMessage(Component.translatable("rsi.batch.error.mod_missing", "Aetherworks"));
             return false;
         }

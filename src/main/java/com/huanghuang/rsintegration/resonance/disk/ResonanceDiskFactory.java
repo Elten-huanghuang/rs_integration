@@ -14,22 +14,38 @@ import java.util.UUID;
 
 public final class ResonanceDiskFactory implements IStorageDiskFactory<ItemStack> {
 
-    private final IStorageDiskFactory<ItemStack> rsFactory;
+    private IStorageDiskFactory<ItemStack> rsFactory;
 
     public ResonanceDiskFactory() {
         IRSAPI api = API.instance();
-        this.rsFactory = (IStorageDiskFactory<ItemStack>) api.getStorageDiskRegistry()
-                .get(ItemStorageDiskFactory.ID);
+        var registry = api.getStorageDiskRegistry();
+        this.rsFactory = registry != null
+                ? (IStorageDiskFactory<ItemStack>) registry.get(ItemStorageDiskFactory.ID)
+                : null;
+    }
+
+    private IStorageDiskFactory<ItemStack> rsFactoryOrThrow() {
+        if (rsFactory == null) {
+            IRSAPI api = API.instance();
+            var registry = api.getStorageDiskRegistry();
+            this.rsFactory = registry != null
+                    ? (IStorageDiskFactory<ItemStack>) registry.get(ItemStorageDiskFactory.ID)
+                    : null;
+        }
+        if (rsFactory == null) {
+            throw new IllegalStateException("ResonanceDiskFactory: RS storage disk registry not available");
+        }
+        return rsFactory;
     }
 
     @Override
     public IStorageDisk<ItemStack> createFromNbt(ServerLevel level, CompoundTag tag) {
-        return new ResonanceDiskWrapper(rsFactory.createFromNbt(level, tag));
+        return new ResonanceDiskWrapper(rsFactoryOrThrow().createFromNbt(level, tag));
     }
 
     @Override
     public IStorageDisk<ItemStack> create(ServerLevel level, int capacity, UUID owner) {
-        return new ResonanceDiskWrapper(rsFactory.create(level, capacity, owner));
+        return new ResonanceDiskWrapper(rsFactoryOrThrow().create(level, capacity, owner));
     }
 
     @Override

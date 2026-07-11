@@ -204,17 +204,17 @@ public final class CraftPacketUtils {
 
                     ItemStack result = assembleCraftingOutput(craftingRecipe, consumed, player);
                     if (!result.isEmpty()) {
-                        addToVirtual(virtualInventory, result.copyWithCount(result.getCount() * executions));
+                        addToVirtual(virtualInventory, result.copyWithCount(StepExecutor.mulCount(result.getCount(), executions)));
                         RSIntegrationMod.LOGGER.debug(ctx.format("Step {}/{} {}: produced {} to virtual"),
                                 stepIdx + 1, steps.size(), stepId,
-                                net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(result.getItem()) + "x" + (result.getCount() * executions));
+                                net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(result.getItem()) + "x" + StepExecutor.mulCount(result.getCount(), executions));
                     }
                     // Add secondary outputs (byproducts) to virtual inventory.
                     // For CraftingRecipe, getRecipeRemainders (Forge API) already
                     // handles all remainders correctly — reflection-based scanning
                     // would duplicate them, causing a dupe exploit with buckets etc.
                     for (ItemStack remainder : getRecipeRemainders(craftingRecipe, consumed)) {
-                        addToVirtual(virtualInventory, remainder.copyWithCount(remainder.getCount() * executions));
+                        addToVirtual(virtualInventory, remainder.copyWithCount(StepExecutor.mulCount(remainder.getCount(), executions)));
                     }
                 } else {
                     // Non-crafting recipe (sawmill, custom mod type, etc.)
@@ -227,7 +227,7 @@ public final class CraftPacketUtils {
 
                     for (IngredientSpec spec : specs) {
                         if (spec.isEmpty()) continue;
-                        int stillNeeded = spec.count() * executions;
+                        int stillNeeded = StepExecutor.mulCount(spec.count(), executions);
                         var iter = virtualInventory.iterator();
                         while (iter.hasNext() && stillNeeded > 0) {
                             ItemStack vItem = iter.next();
@@ -262,14 +262,14 @@ public final class CraftPacketUtils {
 
                     ItemStack result = RecipeIndex.tryGetResultItem(recipe, player.serverLevel().registryAccess());
                     if (!result.isEmpty()) {
-                        addToVirtual(virtualInventory, result.copyWithCount(result.getCount() * executions));
+                        addToVirtual(virtualInventory, result.copyWithCount(StepExecutor.mulCount(result.getCount(), executions)));
                         RSIntegrationMod.LOGGER.debug(ctx.format("Step {}/{} {}: produced {} to virtual"),
                                 stepIdx + 1, steps.size(), stepId,
-                                net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(result.getItem()) + "x" + (result.getCount() * executions));
+                                net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(result.getItem()) + "x" + StepExecutor.mulCount(result.getCount(), executions));
                     }
                     // Add secondary outputs (byproducts) to virtual inventory
                     for (ItemStack secondary : RecipeIndex.tryGetSecondaryOutputs(recipe, player.serverLevel().registryAccess())) {
-                        addToVirtual(virtualInventory, secondary.copyWithCount(secondary.getCount() * executions));
+                        addToVirtual(virtualInventory, secondary.copyWithCount(StepExecutor.mulCount(secondary.getCount(), executions)));
                     }
                     if (result.isEmpty()) {
                         RSIntegrationMod.LOGGER.debug(ctx.format("Step {}/{} {}: result empty, nothing added to virtual"),

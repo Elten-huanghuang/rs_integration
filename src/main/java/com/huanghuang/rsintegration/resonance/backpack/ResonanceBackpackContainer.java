@@ -106,9 +106,12 @@ public class ResonanceBackpackContainer extends AbstractContainerMenu {
 
     public int getStoredCount() {
         if (disk != null) return disk.getStored();
+        // Client side: vanilla menu-sync fills the display container with real
+        // counts, so sum item counts rather than non-empty slots to match the
+        // server's getStored() semantics.
         int count = 0;
         for (int i = 0; i < DISK_SLOTS; i++)
-            if (!diskInventory.getItem(i).isEmpty()) count++;
+            count += diskInventory.getItem(i).getCount();
         return count;
     }
 

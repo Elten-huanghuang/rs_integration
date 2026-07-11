@@ -62,7 +62,7 @@ final class AetherworksHelper {
 
     static {
         boolean ok = false;
-        if (AetherworksReflection.ready) {
+        if (AetherworksReflection.isAvailable()) {
             try {
                 // Essential: anvil fields for HUD + auto-hammer
                 f_anvil_progress = AetherworksReflection.anvilBEClass.getDeclaredField("progress");

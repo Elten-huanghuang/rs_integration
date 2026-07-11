@@ -193,7 +193,10 @@ final class ResolutionContext {
         int remaining = needed;
         List<CraftingResolver.StackKey> sortedKeys = new ArrayList<>(counts.keySet());
         sortedKeys.sort(Comparator.comparing((CraftingResolver.StackKey k) -> k.tag() != null)
-                .thenComparing(k -> ForgeRegistries.ITEMS.getKey(k.item()).toString()));
+                .thenComparing(k -> {
+                    var rl = ForgeRegistries.ITEMS.getKey(k.item());
+                    return rl != null ? rl.toString() : "";
+                }));
 
         for (CraftingResolver.StackKey key : sortedKeys) {
             if (remaining <= 0) return true;

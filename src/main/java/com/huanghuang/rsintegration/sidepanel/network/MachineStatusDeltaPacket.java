@@ -37,7 +37,7 @@ public final class MachineStatusDeltaPacket {
     }
 
     public static MachineStatusDeltaPacket decode(FriendlyByteBuf buf) {
-        int count = buf.readVarInt();
+        int count = Math.min(buf.readVarInt(), 4096);
         List<Entry> list = new ArrayList<>(count);
         for (int i = 0; i < count; i++) {
             list.add(new Entry(
