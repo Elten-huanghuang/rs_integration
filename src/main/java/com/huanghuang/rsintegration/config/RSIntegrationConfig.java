@@ -57,6 +57,13 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.BooleanValue DEPOSIT_UPGRADE_RS;
     public static ForgeConfigSpec.BooleanValue ENABLE_MAJ_ACCESSORY_COMPRESSION;
     public static ForgeConfigSpec.BooleanValue ENABLE_MACHINE_GUI_TABS;
+    // ── auto-eat ─────────────────────────────────────────────────
+    public static ForgeConfigSpec.BooleanValue ENABLE_AUTO_EAT;
+    public static ForgeConfigSpec.ConfigValue<String> AUTO_EAT_REQUIRED_EFFECT;
+    public static ForgeConfigSpec.ConfigValue<String> AUTO_EAT_COST_ITEM;
+    public static ForgeConfigSpec.IntValue AUTO_EAT_COST_PER_ITEM;
+    public static ForgeConfigSpec.IntValue AUTO_EAT_MAX_PER_BATCH;
+
     public static ForgeConfigSpec.BooleanValue ENABLE_CONTAINER_TRANSFER;
     public static ForgeConfigSpec.BooleanValue ENABLE_RS_SIDE_PANEL;
     public static ForgeConfigSpec.BooleanValue ENABLE_RS_PASSIVE_EFFECTS;
@@ -252,7 +259,7 @@ public final class RSIntegrationConfig {
                         "Items marked |mutates will use extract→tick→insert to persist NBT changes.",
                         "Items without |mutates will be ticked on a snapshot copy (read-only).")
                 .defineList("passiveTickItems",
-                        List.of("reliquary:pyromancer_staff|mutates", "enigmaticaddons:artificial_flower|mutates", "forbidden_arcanus:spectral_eye_amulet|mutates"),
+                        List.of("reliquary:pyromancer_staff|mutates", "enigmaticaddons:artificial_flower|mutates", "forbidden_arcanus:spectral_eye_amulet|mutates", "apotheosis:potion_charm|mutates"),
                         obj -> obj instanceof String && ((String) obj).contains(":"));
         NINE_SWORD_MAX_COUNT = c
                 .comment("Maximum effective count of Nine Sword Books across inventory + resonance disk.",
@@ -260,6 +267,32 @@ public final class RSIntegrationConfig {
                         "so this prevents exceeding it via the resonance disk.",
                         "Range: 1-36.")
                 .defineInRange("nineSwordMaxCount", 9, 1, 36);
+        c.pop();
+
+        c.push("autoEat");
+        ENABLE_AUTO_EAT = c
+                .comment("Enable the auto-eat system on the RS Grid Screen.",
+                        "Adds three buttons to the Grid Screen for automated eating from the RS network.",
+                        "Modes: Diversity (SolCarrot), Stack (bulk eat), Diet (nutrition balance).")
+                .define("enableAutoEat", true);
+        AUTO_EAT_REQUIRED_EFFECT = c
+                .comment("Required potion effect to use auto-eat. Format: \"modid:effect_id\".",
+                        "Empty string = no requirement (always available).",
+                        "Example: \"crockpot:gnaws_gift\" (requires CrockPot's Gnaw's Gift effect).")
+                .define("requiredEffect", "crockpot:gnaws_gift");
+        AUTO_EAT_COST_ITEM = c
+                .comment("Item consumed from RS network per auto-eat execution. Format: \"modid:item_id\".",
+                        "\"minecraft:air\" = no item cost.",
+                        "Example: \"crockpot:gnaws_gift\".")
+                .define("costItem", "minecraft:air");
+        AUTO_EAT_COST_PER_ITEM = c
+                .comment("How many cost items to consume per food item eaten.",
+                        "0 = no cost. Range: 0-64.")
+                .defineInRange("costPerItem", 0, 0, 64);
+        AUTO_EAT_MAX_PER_BATCH = c
+                .comment("Maximum number of food items eaten in a single batch.",
+                        "Range: 1-1024.")
+                .defineInRange("maxPerBatch", 128, 1, 1024);
         c.pop();
 
         c.push("containerTransfer");

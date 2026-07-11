@@ -33,8 +33,11 @@
     "crockpot.CrockPotMenuMixin",
     "reliquary.PyromancerStaffMixin",
     "enigmaticaddons.AvariceRingMixin",
-    "moonstone.NineSwordBookMixin",
-    "enigmaticlegacy.SuperpositionHandlerMixin"
+    "moonstone.NineSwordBooksMixin",
+    "enigmaticlegacy.SuperpositionHandlerMixin",
+    "enigmaticlegacy.AddonEventHandlerMixin",
+    "malum.AbstractSpiritListMalumRecipeMixin",
+    "yuusha.YuushaNineSwordBooksMixin"
   ],
   "client": [
     "jei.GuiIconToggleButtonAccessor",

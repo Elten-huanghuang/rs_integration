@@ -242,8 +242,8 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
         this.ledger = new ExtractionLedger();
         this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
 
-        if (myPos != null && player.serverLevel().isLoaded(myPos)) {
-            BlockEntity current = player.serverLevel().getBlockEntity(myPos);
+        if (myPos != null && resolveMachineLevel(player).isLoaded(myPos)) {
+            BlockEntity current = resolveMachineLevel(player).getBlockEntity(myPos);
             if (current == null || current.isRemoved()) {
                 player.sendSystemMessage(Component.translatable("rsi.error.machine_missing"));
                 if (ledger != null && ledger.isCommitted()) {
@@ -268,7 +268,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
 
         List<Object> foundPedestals;
         try {
-            foundPedestals = findPedestals(player.serverLevel());
+            foundPedestals = findPedestals(resolveMachineLevel(player));
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.error("[RSI-Batch-FA] tryStartSingleCraft: pedestals not found", e);
             return false;
@@ -331,7 +331,13 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
             inputTemplates.add(t);
         }
 
-        // Phase 2: place items BEFORE committing ledger
+        // Phase 2: commit ledger — extract items from RS BEFORE physical placement
+        if (!ledger.commit(network, player)) {
+            RSIntegrationMod.LOGGER.error("[RSI-Batch-FA] Ledger commit failed (no items placed yet)");
+            return false;
+        }
+
+        // Phase 3: place items on pedestals
         try {
             if (!mainTemplate.isEmpty()) {
                 int mainSlot = FaRitualHelper.getMainSlot();
@@ -353,8 +359,8 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
             }
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.error("[RSI-Batch-FA] tryStartSingleCraft: placement failed:", e);
-            rollbackAll();
-            ledger.rollback(player);
+            rollbackPhysical();
+            ledger.refundCommitted(network, player);
             return false;
         }
 
@@ -377,23 +383,23 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
             Reflect.getMethodOrThrow(FAReflection.ritualManagerClass, "updateValidRitual", "updateValidRitual", FAReflection.essencesDefinitionClass)
                     .invoke(ritualManager, curEssences);
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] cachedIngredients/updateValidRitual failed: {}");
+            RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] cachedIngredients/updateValidRitual failed");
         }
 
-        // Phase 3: require a RitualStarterItem
+        // Phase 4: require a RitualStarterItem
         RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] (single) Searching for RitualStarterItem...");
         final ItemStack starterStack = findRitualStarterItem(player, network);
         if (starterStack.isEmpty()) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-FA] tryStartSingleCraft: no usable RitualStarterItem in inventory or RS");
             player.sendSystemMessage(Component.translatable("rsi.fa.error.missing_starter_item"));
-            rollbackAll();
-            ledger.rollback(player);
+            rollbackPhysical();
+            ledger.refundCommitted(network, player);
             return false;
         }
         RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] (single) Found starter '{}' from {}",
                 starterStack.getHoverName().getString(), starterFromRS != null ? "RS" : "inventory");
 
-        // Phase 4: start the ritual BEFORE committing ledger
+        // Phase 5: start the ritual
         try {
             Object essenceMgr = Reflect.getMethodOrThrow(FAReflection.hephaestusForgeBEClass, "getEssenceManager", "getEssenceManager").invoke(forge);
             this.essencesStorage = Reflect.getMethodOrThrow(FAReflection.essenceManagerClass, "getStorage", "getStorage").invoke(essenceMgr);
@@ -412,31 +418,22 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
 
             if (callback.wasCalled && !callback.accepted) {
                 RSIntegrationMod.LOGGER.warn("[RSI-Batch-FA] tryStartSingleCraft: ritual rejected by forge");
-                rollbackAll();
-                ledger.rollback(player);
+                rollbackPhysical();
+                ledger.refundCommitted(network, player);
                 returnStarterToSource(starterStack);
                 return false;
             }
         } catch (java.lang.reflect.InvocationTargetException e) {
             Throwable root = e.getCause() != null ? e.getCause() : e;
             RSIntegrationMod.LOGGER.error("[RSI-Batch-FA] tryStartRitual failed — forge rejected", root);
-            rollbackAll();
-            ledger.rollback(player);
+            rollbackPhysical();
+            ledger.refundCommitted(network, player);
             returnStarterToSource(starterStack);
             return false;
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.error("[RSI-Batch-FA] tryStartSingleCraft: start ritual failed:", e);
-            rollbackAll();
-            ledger.rollback(player);
-            returnStarterToSource(starterStack);
-            return false;
-        }
-
-        // Phase 5: commit
-        if (!ledger.commit(network, player)) {
-            RSIntegrationMod.LOGGER.error("[RSI-Batch-FA] Ledger commit failed after ritual start");
-            rollbackAll();
-            ledger.rollback(player);
+            rollbackPhysical();
+            ledger.refundCommitted(network, player);
             returnStarterToSource(starterStack);
             return false;
         }
@@ -477,8 +474,8 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
         this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
         this.usingSharedLedger = true;
 
-        if (myPos != null && player.serverLevel().isLoaded(myPos)) {
-            BlockEntity current = player.serverLevel().getBlockEntity(myPos);
+        if (myPos != null && resolveMachineLevel(player).isLoaded(myPos)) {
+            BlockEntity current = resolveMachineLevel(player).getBlockEntity(myPos);
             if (current == null || current.isRemoved()) {
                 player.sendSystemMessage(Component.translatable("rsi.error.machine_missing"));
                 if (ledger != null && ledger.isCommitted()) {
@@ -503,7 +500,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
 
         List<Object> foundPedestals;
         try {
-            foundPedestals = findPedestals(player.serverLevel());
+            foundPedestals = findPedestals(resolveMachineLevel(player));
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.error("[RSI-Batch-FA] tryStartWithMaterials: pedestals not found", e);
             player.sendSystemMessage(Component.translatable("rsi.fa.error.pedestal_not_found"));
@@ -606,7 +603,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
                 RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] validRitual check failed (harmless)", vEx);
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Batch-FA] cachedIngredients/updateValidRitual failed: {}");
+            RSIntegrationMod.LOGGER.warn("[RSI-Batch-FA] cachedIngredients/updateValidRitual failed");
         }
 
         // Require a RitualStarterItem
@@ -787,6 +784,11 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
     }
 
     // ── Rollback / cleanup ───────────────────────────────────────
+
+    void rollbackPhysical() {
+        clearFilledPedestalsNoRefund();
+        clearMainSlotNoRefund();
+    }
 
     void rollbackAll() {
         if (usingSharedLedger) {
@@ -1015,7 +1017,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
                         }
                     }
                 } catch (Exception e) {
-                    RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Plan essence read failed: {}");
+                    RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Plan essence read failed");
                 }
             }
 
@@ -1082,7 +1084,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
                     }
                 }
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Plan essence slot check failed: {}");
+                RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Plan essence slot check failed");
             }
         }
 
@@ -1110,7 +1112,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
                     }
                 }
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Plan tier check failed: {}");
+                RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Plan tier check failed");
             }
         }
 
@@ -1183,7 +1185,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
                             "rsi.fa.warn.cant_check_enhancers").getString());
                 }
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Plan enhancer check failed: {}");
+                RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Plan enhancer check failed");
                 warnings.add(Component.translatable(
                         "rsi.fa.warn.cant_check_enhancers").getString());
             }

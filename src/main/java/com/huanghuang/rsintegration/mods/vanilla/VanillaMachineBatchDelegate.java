@@ -314,56 +314,42 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         List<Ingredient> ingredients = recipe.getIngredients();
         if (ingredients.isEmpty()) return false;
 
-        // Extract and place input ingredient
+        // Phase 1: Reserve input in ledger (template — not yet extracted from RS)
         Ingredient input = ingredients.get(0);
+        ItemStack inputTemplate = ItemStack.EMPTY;
         if (!input.isEmpty()) {
             ExtractionLedger activeLedger = usingSharedLedger ? sharedLedger : ledger;
-            ItemStack extracted = CraftPacketUtils.ensureMaterialAvailable(
+            inputTemplate = CraftPacketUtils.ensureMaterialAvailable(
                     player, myDim, myPos, input, 1, activeLedger);
-            if (extracted.isEmpty()) {
+            if (inputTemplate.isEmpty()) {
                 player.sendSystemMessage(Component.translatable(
                         "rsi.generic.error.missing_materials",
                         CraftPacketUtils.describeIngredient(input)));
                 return false;
             }
-            furnaceBE.setItem(0, extracted.copy());
         }
 
-        // Auto-supply fuel (extracts directly from RS, outside ledger)
-        if (!ensureFuel(player)) {
-            // Refund the input
-            ItemStack refund = furnaceBE.getItem(0);
-            if (!refund.isEmpty()) {
-                furnaceBE.setItem(0, ItemStack.EMPTY);
-                if (usingSharedLedger) {
-                    // Chain will handle refund via refundCommitted; just clear slot
-                } else if (ledger != null && !ledger.isCommitted()) {
-                    ledger.rollback(player);
-                }
-            }
-            player.sendSystemMessage(Component.translatable("rsi.vanilla.error.no_fuel"));
-            return false;
-        }
-
-        // Commit private ledger
+        // Phase 2: Commit BEFORE placing — commit failure leaves the furnace untouched
         if (!usingSharedLedger && ledger != null && !ledger.isCommitted()) {
             if (!ledger.commit(network, player)) {
-                // Refund input
-                ItemStack refund = furnaceBE.getItem(0);
-                if (!refund.isEmpty()) {
-                    furnaceBE.setItem(0, ItemStack.EMPTY);
-                    ItemHandlerHelper.giveItemToPlayer(player, refund);
-                }
-                // Refund fuel (extracted outside ledger)
-                ItemStack fuelRefund = furnaceBE.getItem(1);
-                if (!fuelRefund.isEmpty()) {
-                    furnaceBE.setItem(1, ItemStack.EMPTY);
-                    ItemHandlerHelper.giveItemToPlayer(player, fuelRefund);
-                }
                 player.sendSystemMessage(Component.translatable(
                         "rsi.generic.error.craft_failed", "Extraction commit failed"));
                 return false;
             }
+        }
+
+        // Phase 3: Place REAL input (post-commit) on furnace
+        if (!inputTemplate.isEmpty()) {
+            furnaceBE.setItem(0, inputTemplate.copy());
+        }
+
+        // Phase 4: Supply fuel (real extraction + placement, outside ledger)
+        if (!ensureFuel(player)) {
+            // Discard input from furnace — abort() refunds the ledger, so
+            // refunding the physical item here would double-refund.
+            furnaceBE.setItem(0, ItemStack.EMPTY);
+            player.sendSystemMessage(Component.translatable("rsi.vanilla.error.no_fuel"));
+            return false;
         }
 
         furnaceBE.setChanged();
@@ -546,35 +532,42 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         if (ingredients.isEmpty()) return false;
 
         Ingredient input = ingredients.get(0);
+        ItemStack inputTemplate = ItemStack.EMPTY;
         if (!input.isEmpty()) {
             ExtractionLedger activeLedger = usingSharedLedger ? sharedLedger : ledger;
-            ItemStack extracted = CraftPacketUtils.ensureMaterialAvailable(
+            inputTemplate = CraftPacketUtils.ensureMaterialAvailable(
                     player, myDim, myPos, input, 1, activeLedger);
-            if (extracted.isEmpty()) {
+            if (inputTemplate.isEmpty()) {
                 player.sendSystemMessage(Component.translatable(
                         "rsi.generic.error.missing_materials",
                         CraftPacketUtils.describeIngredient(input)));
                 return false;
             }
+        }
+
+        // Commit BEFORE placing — commit failure leaves campfire untouched
+        if (!usingSharedLedger && ledger != null && !ledger.isCommitted()) {
+            if (!ledger.commit(network, player)) {
+                player.sendSystemMessage(Component.translatable(
+                        "rsi.generic.error.craft_failed", "Extraction commit failed"));
+                return false;
+            }
+        }
+
+        // Place REAL item (post-commit) on campfire
+        if (!inputTemplate.isEmpty()) {
             int cookTime = recipe instanceof CampfireCookingRecipe ccr ? ccr.getCookingTime() : 600;
             try {
                 @SuppressWarnings("unchecked")
                 net.minecraft.core.NonNullList<ItemStack> items =
                         (net.minecraft.core.NonNullList<ItemStack>) CAMPFIRE_ITEMS.get(campfireBE);
-                items.set(campfireSlot, extracted.copy());
+                items.set(campfireSlot, inputTemplate.copy());
                 int[] prog = (int[]) CAMPFIRE_COOKING_PROGRESS.get(campfireBE);
                 prog[campfireSlot] = 0;
                 int[] times = (int[]) CAMPFIRE_COOKING_TIME.get(campfireBE);
                 times[campfireSlot] = cookTime;
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.error("[RSI-Vanilla] Campfire placement failed", e);
-                return false;
-            }
-        }
-
-        if (!usingSharedLedger && ledger != null && !ledger.isCommitted()) {
-            if (!ledger.commit(network, player)) {
-                clearCampfireSlot();
                 return false;
             }
         }
@@ -652,14 +645,14 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         return computeResult();
     }
 
-    private void clearCampfireSlot() {
+    private void clearCampfireSlot(boolean refundToRS) {
         try {
             @SuppressWarnings("unchecked")
             net.minecraft.core.NonNullList<ItemStack> items =
                     (net.minecraft.core.NonNullList<ItemStack>) CAMPFIRE_ITEMS.get(campfireBE);
             ItemStack slotItem = items.get(campfireSlot);
             if (!slotItem.isEmpty()) {
-                refundToRSNetwork(slotItem.copy());
+                if (refundToRS) refundToRSNetwork(slotItem.copy());
             }
             items.set(campfireSlot, ItemStack.EMPTY);
             int[] prog = (int[]) CAMPFIRE_COOKING_PROGRESS.get(campfireBE);
@@ -721,25 +714,28 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
     @Override
     protected void clearMachineState(BlockEntity be, ServerPlayer player) {
         if (kind == MachineKind.FURNACE && furnaceBE != null) {
-            // Refund unprocessed input from slot 0
+            // When player != null, abort() will refund the ledger — don't double-refund
+            // physical items from the machine slots. Only refund to RS when the player
+            // is offline (abortSilently path, ledger is NOT refunded).
+            boolean refundToRS = player == null;
+
             ItemStack slot0 = furnaceBE.getItem(0);
             if (!slot0.isEmpty()) {
                 furnaceBE.setItem(0, ItemStack.EMPTY);
-                refundToRSNetwork(slot0);
+                if (refundToRS) refundToRSNetwork(slot0);
             }
-            // Refund any result from slot 2
             ItemStack slot2 = furnaceBE.getItem(2);
             if (!slot2.isEmpty()) {
                 furnaceBE.setItem(2, ItemStack.EMPTY);
-                refundToRSNetwork(slot2);
+                if (refundToRS) refundToRSNetwork(slot2);
             }
-            // Refund whole fuel items left in slot 1 (only spent litTime is lost).
+            // Fuel is outside the ledger, always refund unburned fuel
             refundLeftoverFuel();
             furnaceBE.setChanged();
         }
         if (kind == MachineKind.CAMPFIRE && campfireBE != null) {
             campfireForceLoad(false);
-            clearCampfireSlot();
+            clearCampfireSlot(player == null);
         }
 
         // Rollback uncommitted private ledger

@@ -97,6 +97,12 @@ public final class ModRecipeHandlers {
         return null;
     }
 
+    /** Clear recipe-result caches. Called on /reload so new recipes take effect. */
+    public static void clearResultCaches() {
+        GLOBAL_RESULT_CACHE.clear();
+        GLOBAL_EMPTY_CACHE.clear();
+    }
+
     // ── shared result-item extraction ─────────────────────────────
 
     /**

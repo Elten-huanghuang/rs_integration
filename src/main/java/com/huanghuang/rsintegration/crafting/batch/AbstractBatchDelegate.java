@@ -101,7 +101,14 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
         if (usingSharedLedger) return;
         BlockPos pos = getMachinePos();
         ServerLevel level = resolveMachineLevel(player != null ? player.serverLevel() : null);
-        if (level == null || !level.isLoaded(pos)) return;
+        if (level == null) return;
+        // Force-load chunk if unloaded so physical items can always be recovered.
+        // Without this, cross-dimension crafts lose items when the chunk unloads
+        // before the chain aborts: the ledger gets refunded but the machine items
+        // stay in NBT, then get consumed by vanilla mechanics on chunk reload.
+        if (!level.isLoaded(pos)) {
+            level.getChunk(pos);
+        }
         BlockEntity be = level.getBlockEntity(pos);
         if (be != null) clearMachineState(be, player);
     }
@@ -112,7 +119,7 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
      * (e.g. virtual delegates like Market that have no physical machine).
      * When {@code playerLevel} is null (player offline), uses {@link #machineServer}.
      */
-    private ServerLevel resolveMachineLevel(ServerLevel playerLevel) {
+    protected ServerLevel resolveMachineLevel(@Nullable ServerLevel playerLevel) {
         if (machineDim == null) return playerLevel;
         try {
             net.minecraft.server.MinecraftServer server;
@@ -128,6 +135,11 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
         } catch (Exception e) {
             return playerLevel;
         }
+    }
+
+    /** Convenience overload: resolve machine level from a player reference. */
+    protected ServerLevel resolveMachineLevel(@Nullable ServerPlayer player) {
+        return resolveMachineLevel(player != null ? player.serverLevel() : null);
     }
 
     /** Exposed for {@code ParallelCraftGroup} and chain-level dimension resolution. */

@@ -33,6 +33,7 @@ import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
 import com.huanghuang.rsintegration.network.binding.BindingTooltipHandler;
 import com.huanghuang.rsintegration.network.binding.RSBindingHook;
 import com.huanghuang.rsintegration.network.gui.RemoteGuiAuth;
+import com.huanghuang.rsintegration.autoeat.network.AutoEatNetworkHandler;
 import com.huanghuang.rsintegration.network.packet.ResonanceNetworkHandler;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.sidepanel.RSSidePanelClient;
@@ -379,6 +380,10 @@ public final class RSIntegrationMod {
         // Altar binding registry (BINDINGS cache + scan caches)
         MinecraftForge.EVENT_BUS.register(AltarBindingRegistry.class);
 
+        // /reload clears recipe output caches so new datapack recipes take effect
+        MinecraftForge.EVENT_BUS.addListener((net.minecraftforge.event.AddReloadListenerEvent e) ->
+                com.huanghuang.rsintegration.recipe.ModRecipeHandlers.clearResultCaches());
+
         // Async craft chains
         MinecraftForge.EVENT_BUS.register(AsyncCraftManager.getInstance());
         MinecraftForge.EVENT_BUS.addListener((PlayerEvent.PlayerLoggedOutEvent e) -> {
@@ -411,6 +416,16 @@ public final class RSIntegrationMod {
         // force-loading in RemoteGuiAuth.authorize(); this catches edge cases
         // (e.g. another mod force-unloading the chunk).
         MinecraftForge.EVENT_BUS.addListener(RemoteGuiAuth::onChunkUnload);
+
+        // Auto-eat system
+        AutoEatNetworkHandler.register();
+        DistExecutor.safeRunWhenOn(Dist.CLIENT, () -> () ->
+                net.minecraftforge.common.MinecraftForge.EVENT_BUS.register(
+                        com.huanghuang.rsintegration.autoeat.client.AutoEatClientEvents.class));
+        DistExecutor.safeRunWhenOn(Dist.CLIENT, () -> () ->
+                net.minecraftforge.common.MinecraftForge.EVENT_BUS.addListener(
+                        (net.minecraftforge.client.event.ClientPlayerNetworkEvent.LoggingOut e) ->
+                                com.huanghuang.rsintegration.mods.goety.RSClientAvailabilityCache.clear()));
 
         // Resonance disk factory — register with RS storage disk registry
         if (RSIntegrationConfig.ENABLE_RS_PASSIVE_EFFECTS.get()) {

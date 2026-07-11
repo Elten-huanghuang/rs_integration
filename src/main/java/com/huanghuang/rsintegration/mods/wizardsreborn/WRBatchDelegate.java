@@ -459,8 +459,8 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         this.waitTicks = 0;
 
         // Verify the cached BlockEntity is still valid
-        if (myPos != null && player.serverLevel().isLoaded(myPos)) {
-            BlockEntity current = player.serverLevel().getBlockEntity(myPos);
+        if (myPos != null && resolveMachineLevel(player).isLoaded(myPos)) {
+            BlockEntity current = resolveMachineLevel(player).getBlockEntity(myPos);
             if (current == null || current.isRemoved()) {
                 player.sendSystemMessage(Component.translatable("rsi.error.machine_missing"));
                 if (ledger != null && ledger.isCommitted()) {
@@ -715,7 +715,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
 
         List<?> pedestals;
         try {
-            ServerLevel level = player.serverLevel();
+            ServerLevel level = resolveMachineLevel(player);
             pedestals = (List<?>) Reflect.getMethodOrThrow(WRReflection.crystalRitualClass, "getPedestalsWithArea", "getPedestalsWithArea", Level.class, BlockPos.class, WRReflection.ritualAreaClass)
                     .invoke(null, level, myPos, area);
         } catch (Exception e) {
@@ -821,8 +821,8 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
 
         // Verify the cached BlockEntity is still valid
-        if (myPos != null && player.serverLevel().isLoaded(myPos)) {
-            BlockEntity current = player.serverLevel().getBlockEntity(myPos);
+        if (myPos != null && resolveMachineLevel(player).isLoaded(myPos)) {
+            BlockEntity current = resolveMachineLevel(player).getBlockEntity(myPos);
             if (current == null || current.isRemoved()) {
                 player.sendSystemMessage(Component.translatable("rsi.error.machine_missing"));
                 if (ledger != null && ledger.isCommitted()) {
@@ -1001,7 +1001,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
 
         List<?> pedestals;
         try {
-            ServerLevel level = player.serverLevel();
+            ServerLevel level = resolveMachineLevel(player);
             pedestals = (List<?>) Reflect.getMethodOrThrow(WRReflection.crystalRitualClass, "getPedestalsWithArea", "getPedestalsWithArea", Level.class, BlockPos.class, WRReflection.ritualAreaClass)
                     .invoke(null, level, myPos, area);
         } catch (Exception e) {
@@ -1389,7 +1389,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
                 // 2) Scan for ItemEntity dropped near the crystal block.
                 //    Some WR rituals spawn the output as a world item entity
                 //    rather than delivering to the player.
-                ServerLevel slevel = player.serverLevel();
+                ServerLevel slevel = resolveMachineLevel(player);
                 var aabb = new net.minecraft.world.phys.AABB(
                         myPos.offset(-2, -1, -2), myPos.offset(2, 3, 2));
                 for (var entity : slevel.getEntitiesOfClass(

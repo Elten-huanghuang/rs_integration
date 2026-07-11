@@ -202,12 +202,7 @@ public final class CraftPacketUtils {
                         }
                     }
 
-                    ItemStack result;
-                    if (isSlashBladeRecipe(craftingRecipe)) {
-                        result = assembleBladeOutput(craftingRecipe, consumed, player);
-                    } else {
-                        result = craftingRecipe.getResultItem(player.serverLevel().registryAccess());
-                    }
+                    ItemStack result = assembleCraftingOutput(craftingRecipe, consumed, player);
                     if (!result.isEmpty()) {
                         addToVirtual(virtualInventory, result.copyWithCount(result.getCount() * executions));
                         RSIntegrationMod.LOGGER.debug(ctx.format("Step {}/{} {}: produced {} to virtual"),
@@ -404,19 +399,15 @@ public final class CraftPacketUtils {
         return result;
     }
 
-    public static boolean isSlashBladeRecipe(CraftingRecipe recipe) {
-        String name = recipe.getClass().getName();
-        return name.startsWith("mods.flammpfeil.slashblade.recipe.SlashBlade");
-    }
-
     /**
-     * Assemble a SlashBlade recipe output by feeding the real consumed items
-     * into a 3×3 crafting container and calling {@code recipe.assemble()}.
-     * This transfers input blade stats (ProudSoul, KillCount, Refine,
-     * enchantments) to the output, which {@code getResultItem()} skips.
+     * Assemble crafting output by feeding the actually consumed items into a
+     * 3×3 crafting container and calling {@code recipe.assemble()}. This is
+     * required for any recipe whose result depends on input NBT (backpack
+     * upgrades, blade smithing, etc.) — {@code getResultItem()} returns a
+     * bare template with no NBT, silently discarding stored data.
      */
-    private static ItemStack assembleBladeOutput(CraftingRecipe recipe, ItemStack[] consumed,
-                                                  ServerPlayer player) {
+    public static ItemStack assembleCraftingOutput(CraftingRecipe recipe, ItemStack[] consumed,
+                                                    ServerPlayer player) {
         AbstractContainerMenu dummyMenu = new AbstractContainerMenu(null, -1) {
             @Override public ItemStack quickMoveStack(net.minecraft.world.entity.player.Player p, int i) { return ItemStack.EMPTY; }
             @Override public boolean stillValid(net.minecraft.world.entity.player.Player p) { return false; }

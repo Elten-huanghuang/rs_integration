@@ -119,6 +119,26 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
             return false;
         }
 
+        // Auto-recover stray spirit items before starting (matches crucible behavior)
+        boolean hadStray = false;
+        try {
+            int spiritSlots = (int) invSpirit.getClass().getMethod("getSlots").invoke(invSpirit);
+            for (int i = 0; i < spiritSlots; i++) {
+                ItemStack stack = (ItemStack) invSpirit.getClass()
+                        .getMethod("getStackInSlot", int.class).invoke(invSpirit, i);
+                if (stack != null && !stack.isEmpty()) {
+                    returnItem(stack);
+                    setIHandlerSlot(invSpirit, i, ItemStack.EMPTY);
+                    hadStray = true;
+                }
+            }
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-Batch-Malum] Spirit stray recovery failed", e);
+        }
+        if (hadStray) {
+            RSIntegrationMod.LOGGER.debug("[RSI-Batch-Malum] Recovered stray spirits from altar at {}", pos);
+        }
+
         // Require enough empty pedestals for this recipe (not ALL pedestals)
         try {
             this.pedestals = capturePedestals();
@@ -467,8 +487,8 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
         if (expected.isEmpty()) return ItemStack.EMPTY;
 
         // 1. Scan for ItemEntity spawned by altar's craft() method
-        if (myPos != null && player.serverLevel().isLoaded(myPos)) {
-            var entities = player.serverLevel().getEntitiesOfClass(
+        if (myPos != null && resolveMachineLevel(player).isLoaded(myPos)) {
+            var entities = resolveMachineLevel(player).getEntitiesOfClass(
                     net.minecraft.world.entity.item.ItemEntity.class,
                     new net.minecraft.world.phys.AABB(myPos).inflate(3),
                     e -> ItemStack.isSameItemSameTags(e.getItem(), expected)

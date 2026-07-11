@@ -291,6 +291,7 @@
   "rsi.goety.warn.no_bound_altar": "§6⚠ 未绑定祭坛，无法验证结构 (%s)",
   "rsi.goety.error.brazier_wrong_biome": "§c亡灵火炉必须放置在深暗群系才能工作",
   "rsi.goety.error.brazier_no_candlesticks": "§c附近没有灵魂烛台 — 亡灵火炉需要烛台提供灵魂能量",
+  "rsi.goety.summon_prepared": "§a基座材料已从RS网络填充完毕，§e%s§a 已放入背包。请手持激活物品手动右键黑暗祭坛来开始召唤仪式。",
 
   "key.categories.rsi": "RS Integration",
   "key.rsi.store_all": "一键存入RS",
@@ -518,5 +519,34 @@
   "rsi.resonance_backpack.tooltip_click": "点击打开共振背包",
   "rsi.resonance_backpack.no_disk": "当前网络无共振盘",
 
-  "rsi.resonance.duplicate_disk": "§c此 RS 网络已绑定共振盘，同一网络只能使用一个共振盘。"
+  "rsi.resonance.duplicate_disk": "§c此 RS 网络已绑定共振盘，同一网络只能使用一个共振盘。",
+
+  "rsi.autoeat.mode.diversity": "多样饮食",
+  "rsi.autoeat.mode.stack": "堆叠暴食",
+  "rsi.autoeat.mode.diet": "膳食均衡",
+  "rsi.autoeat.btn.mode": "模式: %s",
+  "rsi.autoeat.btn.select": "选择物品",
+  "rsi.autoeat.btn.eat": "开始食用",
+  "rsi.autoeat.btn.blacklist": "黑名单",
+  "rsi.autoeat.btn.stop": "停止",
+  "rsi.autoeat.btn.prev_page": "<",
+  "rsi.autoeat.btn.next_page": ">",
+  "rsi.autoeat.result.diversity": "已食用 %d 种新食物",
+  "rsi.autoeat.result.stack": "已食用 %d 个 %s",
+  "rsi.autoeat.result.diet": "营养已补满: %s",
+  "rsi.autoeat.result.none": "没有可食用的食物",
+  "rsi.autoeat.missing_effect": "缺少所需效果: %s",
+  "rsi.autoeat.missing_cost": "RS 网络中材料不足",
+  "rsi.autoeat.full": "已经饱了",
+  "rsi.autoeat.no_item_selected": "未选择食物",
+  "rsi.autoeat.not_edible": "不可食用: %s",
+  "rsi.autoeat.search_hint": "搜索...",
+  "rsi.autoeat.btn.select_all": "全选",
+  "rsi.autoeat.btn.deselect": "取消选择",
+  "rsi.autoeat.title.select": "选择食物: %s",
+  "rsi.autoeat.btn.eat.tooltip": "点击食用",
+  "rsi.autoeat.btn.select.tooltip": "选择要吃的食物 / 管理黑名单",
+  "rsi.autoeat.btn.mode.tooltip": "切换自动进食模式",
+  "rsi.autoeat.error.diet_tracker_missing": "未检测到 Diet 营养追踪器",
+  "rsi.autoeat.error.diet_no_groups": "Diet 营养组为空"
 }

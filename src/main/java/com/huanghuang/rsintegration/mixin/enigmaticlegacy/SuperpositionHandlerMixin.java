@@ -27,7 +27,7 @@ public abstract class SuperpositionHandlerMixin {
 
     // Log every unique item queried via hasItem, regardless of return value.
     @Inject(method = "hasItem", at = @At("HEAD"))
-    private static void rsi$logCall(Player player, Item item, CallbackInfo ci) {
+    private static void rsi$logCall(Player player, Item item, CallbackInfoReturnable<Boolean> ci) {
         if (!(player instanceof ServerPlayer)) return;
         String key = BuiltInRegistries.ITEM.getKey(item).toString();
         if (rsi$seenItems.add(key)) {

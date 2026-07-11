@@ -54,4 +54,12 @@ public final class NetworkPacketIds {
     // ── Resonance backpack (70-79) ──────────────────────────────────
     public static final int OPEN_RESONANCE_BACKPACK = 70;
     public static final int RESONANCE_SYNC = 71;
+
+    // ── Auto-eat (80-89) ─────────────────────────────────────────────
+    public static final int AUTO_EAT_REQUEST = 80;
+    public static final int AUTO_EAT_STOP = 81;
+    public static final int AUTO_EAT_SYNC = 82;
+    public static final int AUTO_EAT_BLACKLIST_UPDATE = 83;
+    public static final int AUTO_EAT_BLACKLIST_REQUEST = 84;
+    public static final int AUTO_EAT_BLACKLIST_SYNC = 85;
 }

@@ -290,6 +290,7 @@
   "rsi.goety.warn.no_bound_altar": "§6⚠ No altar bound, cannot verify structure (%s)",
   "rsi.goety.error.brazier_wrong_biome": "§cNecroBrazier must be placed in a Deep Dark biome to function",
   "rsi.goety.error.brazier_no_candlesticks": "§cNo Soul Candlesticks nearby — brazier needs candlestick souls to operate",
+  "rsi.goety.summon_prepared": "§aPedestal materials filled from RS. §e%s§a has been placed in your inventory. Right-click the Dark Altar with it to start the summon.",
 
   "key.categories.rsi": "RS Integration",
   "key.rsi.store_all": "Transfer to RS",
@@ -512,5 +513,34 @@
   "rsi.resonance_backpack.tooltip_click": "Click to open Resonance Backpack",
   "rsi.resonance_backpack.no_disk": "No resonance disk in network",
 
-  "rsi.resonance.duplicate_disk": "§cThis RS network already has a resonance disk. Only one resonance disk is allowed per network."
+  "rsi.resonance.duplicate_disk": "§cThis RS network already has a resonance disk. Only one resonance disk is allowed per network.",
+
+  "rsi.autoeat.mode.diversity": "Diversity",
+  "rsi.autoeat.mode.stack": "Stack Eat",
+  "rsi.autoeat.mode.diet": "Diet Balance",
+  "rsi.autoeat.btn.mode": "Mode: %s",
+  "rsi.autoeat.btn.select": "Select Item",
+  "rsi.autoeat.btn.eat": "Start Eat",
+  "rsi.autoeat.btn.blacklist": "Blacklist",
+  "rsi.autoeat.btn.stop": "Stop",
+  "rsi.autoeat.btn.prev_page": "<",
+  "rsi.autoeat.btn.next_page": ">",
+  "rsi.autoeat.result.diversity": "Ate %d new food(s)",
+  "rsi.autoeat.result.stack": "Ate %d of %s",
+  "rsi.autoeat.result.diet": "Nutrition balanced: %s",
+  "rsi.autoeat.result.none": "No edible food found",
+  "rsi.autoeat.missing_effect": "Missing required effect: %s",
+  "rsi.autoeat.missing_cost": "Insufficient materials in RS network",
+  "rsi.autoeat.full": "Already full",
+  "rsi.autoeat.no_item_selected": "No item selected",
+  "rsi.autoeat.not_edible": "Not edible: %s",
+  "rsi.autoeat.search_hint": "Search...",
+  "rsi.autoeat.btn.select_all": "Select All",
+  "rsi.autoeat.btn.deselect": "Deselect",
+  "rsi.autoeat.title.select": "Select Food: %s",
+  "rsi.autoeat.btn.eat.tooltip": "Click to eat",
+  "rsi.autoeat.btn.select.tooltip": "Select food / Manage blacklist",
+  "rsi.autoeat.btn.mode.tooltip": "Switch auto-eat mode",
+  "rsi.autoeat.error.diet_tracker_missing": "Diet tracker not found",
+  "rsi.autoeat.error.diet_no_groups": "No Diet nutrition groups"
 }

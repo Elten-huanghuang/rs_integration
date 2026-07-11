@@ -55,9 +55,6 @@ public final class CrockPotBatchDelegate extends com.huanghuang.rsintegration.cr
     private static volatile boolean itemHandlerProbed;
     private static volatile java.lang.reflect.Field itemHandlerField;
 
-    // Items extracted outside the ledger (food-value fillers) for refund on failure
-    private final List<ItemStack> extraExtractedItems = new ArrayList<>();
-
     @Override
     public boolean validateAndInit(ServerPlayer player, ResourceLocation recipeId,
                                    @Nullable ResourceLocation dim, BlockPos pos) {
@@ -125,49 +122,57 @@ public final class CrockPotBatchDelegate extends com.huanghuang.rsintegration.cr
 
         try (ExtractionLedger ledger = new ExtractionLedger()) {
             List<ItemStack> materials = new ArrayList<>();
-            extraExtractedItems.clear();
 
-            // Phase 1: extract specific ingredients from RS
+            // Phase 1: reserve specific ingredients through ledger
             List<IngredientSpec> specs = getIngredients();
             if (specs != null) {
                 for (IngredientSpec spec : specs) {
                     if (spec.isEmpty()) continue;
                     ItemStack reserved = CraftPacketUtils.ensureMaterialAvailable(
                             player, myDim, myPos, spec.ingredient(), spec.count(), ledger);
-                    if (reserved.isEmpty()) {
-                        refundExtraExtracted();
-                        return false;
-                    }
+                    if (reserved.isEmpty()) return false; // ledger auto-rollback via close()
                     materials.add(reserved.copy());
                 }
             }
 
-            // Phase 2: if category constraints exist, fill remaining slots from RS
+            // Phase 2: reserve food-value filler items through ledger
             if (hasCatConstraints) {
                 int usedSlots = materials.stream().mapToInt(ItemStack::getCount).sum();
                 int remaining = potLevel - usedSlots;
                 if (remaining > 0) {
                     IItemHandler itemHandler = getItemHandlerAtPos();
                     float[] currentFV = computeCombinedFoodValues(materials);
-                    List<ItemStack> fvItems = findAndExtractFoodValueItems(currentFV, remaining, itemHandler);
-                    if (fvItems == null) {
-                        refundExtraExtracted();
+
+                    if (!CrockPotFoodValues.isReady()) return false;
+                    List<CrockPotFoodValues.Candidate> candidates = new ArrayList<>();
+                    for (var entry : network.getItemStorageCache().getList().getStacks()) {
+                        ItemStack stack = entry.getStack();
+                        if (stack.isEmpty() || stack.getCount() <= 0) continue;
+                        if (itemHandler != null && !itemHandler.isItemValid(0, stack)) continue;
+                        candidates.add(new CrockPotFoodValues.Candidate(stack, stack.getCount()));
+                    }
+                    List<ItemStack> plan = CrockPotFoodValues.select(
+                            currentFV, catMins, catMaxs, remaining, candidates, myLevel);
+                    if (plan == null) {
                         player.sendSystemMessage(Component.translatable("rsi.crockpot.error.food_values"));
-                        // Detailed diagnostics: which max constraints are zero
                         String blocked = buildBlockedCategoriesMessage();
                         if (!blocked.isEmpty()) {
                             player.sendSystemMessage(Component.literal(blocked));
                         }
-                        return false;
+                        return false; // ledger auto-rollback via close()
                     }
-                    materials.addAll(fvItems);
+
+                    for (ItemStack want : plan) {
+                        ItemStack reserved = ledger.reserveFromNetwork(
+                                Ingredient.of(want.getItem()), 1, network);
+                        if (reserved.isEmpty()) return false; // network changed, auto-rollback
+                        materials.add(reserved.copy());
+                    }
                 }
             }
 
-            if (!ledger.commit(network, player)) {
-                refundExtraExtracted();
-                return false;
-            }
+            // All reservations done — commit (performs actual extraction)
+            if (!ledger.commit(network, player)) return false;
 
             this.usingSharedLedger = false;
             if (!tryStartWithMaterials(player, materials, ledger)) {
@@ -175,7 +180,6 @@ public final class CrockPotBatchDelegate extends com.huanghuang.rsintegration.cr
                     if (!mat.isEmpty())
                         network.insertItem(mat.copy(), mat.getCount(), Action.PERFORM);
                 }
-                refundExtraExtracted();
                 return false;
             }
             return true;
@@ -310,7 +314,6 @@ public final class CrockPotBatchDelegate extends com.huanghuang.rsintegration.cr
     @Override
     protected void clearMachineState(BlockEntity be, ServerPlayer player) {
         clearMachineSlotsAndRefund();
-        refundExtraExtracted();
         forceChunkLoad(false);
         craftDone = false;
     }
@@ -318,7 +321,6 @@ public final class CrockPotBatchDelegate extends com.huanghuang.rsintegration.cr
     @Override
     public void onBatchFinished(ServerPlayer player) {
         clearMachineSlotsAndRefund();
-        extraExtractedItems.clear();
         forceChunkLoad(false);
         craftDone = false;
         network = null;
@@ -326,45 +328,6 @@ public final class CrockPotBatchDelegate extends com.huanghuang.rsintegration.cr
 
     @Override
     public BlockPos getMachinePos() { return myPos; }
-
-    // ── food-value-aware item selection ──────────────────────────
-
-    /**
-     * Find and extract items from the RS network whose food values satisfy
-     * the recipe's category constraints. Returns null if constraints cannot
-     * be satisfied.
-     */
-    private List<ItemStack> findAndExtractFoodValueItems(float[] currentFV, int remaining,
-                                                          @Nullable IItemHandler itemHandler) {
-        if (!CrockPotFoodValues.isReady()) return null;
-
-        // Snapshot the network as selection candidates (respecting the pot's slot filter).
-        List<CrockPotFoodValues.Candidate> candidates = new ArrayList<>();
-        for (var entry : network.getItemStorageCache().getList().getStacks()) {
-            ItemStack stack = entry.getStack();
-            if (stack.isEmpty() || stack.getCount() <= 0) continue;
-            if (itemHandler != null && !itemHandler.isItemValid(0, stack)) continue;
-            candidates.add(new CrockPotFoodValues.Candidate(stack, stack.getCount()));
-        }
-
-        // Same selection the plan preview ran — guarantees the craft consumes the previewed items.
-        List<ItemStack> plan = CrockPotFoodValues.select(
-                currentFV, catMins, catMaxs, remaining, candidates, myLevel);
-        if (plan == null) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Batch-CrockPot] findFV: no item set satisfies constraints. currentFV=[{}]",
-                    fvToString(currentFV));
-            return null;
-        }
-
-        List<ItemStack> result = new ArrayList<>();
-        for (ItemStack want : plan) {
-            ItemStack extracted = network.extractItem(want.copyWithCount(1), 1, Action.PERFORM);
-            if (extracted.isEmpty()) return null; // network changed since selection — caller refunds
-            result.add(extracted);
-            extraExtractedItems.add(extracted.copy());
-        }
-        return result;
-    }
 
     /** Build a message listing categories whose max=0 block all available items. */
     private String buildBlockedCategoriesMessage() {
@@ -379,15 +342,6 @@ public final class CrockPotBatchDelegate extends com.huanghuang.rsintegration.cr
         }
         if (sb.length() == 0) return "";
         return "§7Blocked (max=0): " + sb;
-    }
-
-    private static String fvToString(float[] fv) {
-        String[] cats = {"M", "MO", "F", "E", "FR", "V", "D", "S", "FZ", "I"};
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < fv.length; i++) {
-            if (fv[i] != 0) sb.append(cats[i]).append("=").append(String.format("%.1f", fv[i])).append(" ");
-        }
-        return sb.isEmpty() ? "empty" : sb.toString().trim();
     }
 
     // ── food-value computation ───────────────────────────────────
@@ -450,15 +404,6 @@ public final class CrockPotBatchDelegate extends com.huanghuang.rsintegration.cr
             result.add(new IngredientSpec(Ingredient.of(new ItemStack(e.getKey())), e.getValue()));
         }
         return result.isEmpty() ? null : result;
-    }
-
-    private void refundExtraExtracted() {
-        for (ItemStack stack : extraExtractedItems) {
-            if (!stack.isEmpty() && network != null) {
-                network.insertItem(stack.copy(), stack.getCount(), Action.PERFORM);
-            }
-        }
-        extraExtractedItems.clear();
     }
 
     // ── ingredient extraction (no filler for category recipes) ───

@@ -447,7 +447,8 @@ public final class CraftingPlanScreen extends Screen {
                 }
             }
             sendCraftPacket(ResourceLocation.tryParse(recipeId), false, forced,
-                    Math.max(1, Math.min(currentRepeat, 64)), embersInferMode);
+                    Math.max(1, Math.min(currentRepeat, 64)),
+                    plan.embersCode() != null && embersInferMode);
         }
         onClose();
     }

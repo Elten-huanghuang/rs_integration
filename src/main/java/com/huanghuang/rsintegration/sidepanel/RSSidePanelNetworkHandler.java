@@ -184,7 +184,6 @@ public final class RSSidePanelNetworkHandler {
                 k -> new ConcurrentHashMap<>());
 
         List<MachineStatusDeltaPacket.Entry> changed = new ArrayList<>();
-        var level = player.level();
 
         for (BindingInfo info : bindings) {
             // Defensive: skip entries with invalid dims before they reach network encoding
@@ -197,8 +196,11 @@ public final class RSSidePanelNetworkHandler {
             if (MachineInteractType.fromBlockKey(info.blockKey()) != MachineInteractType.QUICK)
                 continue;
 
+            var machineLevel = player.server.getLevel(info.dimensionKey());
+            if (machineLevel == null) continue;
+
             String key = statusKey(info.dim(), info.pos());
-            MachineStatus current = MachineStatusReader.read(level, info.pos());
+            MachineStatus current = MachineStatusReader.read(machineLevel, info.pos());
             MachineStatus last = playerLast.get(key);
 
             if (last == null || !current.equals(last)) {

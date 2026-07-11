@@ -43,6 +43,7 @@ import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import javax.annotation.Nullable;
 
 public final class JeiMarqueeSelector {
 
@@ -70,11 +71,6 @@ public final class JeiMarqueeSelector {
     private static volatile Field bookmarkListField;
     private static volatile Method bookmarkCreateMethod;
     private static volatile boolean reflectionProbed;
-
-    // ── Bounding-box cache (only recompute on screen resize) ──
-    private static int cachedJeiMinX, cachedJeiMinY, cachedJeiMaxX, cachedJeiMaxY;
-    private static int cachedBmMinX, cachedBmMinY, cachedBmMaxX, cachedBmMaxY;
-    private static int cachedScreenW, cachedScreenH;
 
     // ── Registration ──
 
@@ -153,8 +149,18 @@ public final class JeiMarqueeSelector {
      * Checks whether a drag can start at (mx, my). Prefers bookmark overlay
      * when the mouse is over it; otherwise checks the ingredient list.
      * Sets {@link #dragOnBookmarks} accordingly.
+     * <p>
+     * Returns false when the mouse is directly over an ingredient — that is an
+     * item-drag gesture, not a marquee.  Users can start a marquee from the
+     * small gaps between slots or from the panel edges.
      */
     private static boolean canStartDrag(Screen screen, int mx, int my) {
+        // JEI only renders overlays on inventory screens. Full-screen mod GUIs
+        // (FTB Quests, FTB Chunks, world maps, etc.) must not be hijacked.
+        if (!(screen instanceof net.minecraft.client.gui.screens.inventory.AbstractContainerScreen)) {
+            return false;
+        }
+
         IJeiRuntime runtime = RSJeiPlugin.getRuntime();
         if (runtime == null) return false;
 
@@ -163,6 +169,12 @@ public final class JeiMarqueeSelector {
         // Check bookmark overlay first (left panel)
         if (RSIntegrationConfig.ENABLE_JEI_BOOKMARK_MARQUEE_SELECTION.get()) {
             if (isOverBookmarkList(mx, my)) {
+                IBookmarkOverlay bmOverlay = runtime.getBookmarkOverlay();
+                if (bmOverlay != null && bmOverlay.getIngredientUnderMouse().isPresent()) {
+                    return false;
+                }
+                IngredientGridWithNavigation bmGrid = getJeiGrid(bookmarkContentsField, bmOverlay);
+                if (bmGrid != null && !isNearAnySlot(bmGrid, mx, my)) return false;
                 dragOnBookmarks = true;
                 return true;
             }
@@ -175,27 +187,49 @@ public final class JeiMarqueeSelector {
         if (overlay == null || !overlay.isListDisplayed()) return false;
         if (!isOverJeiList(mx, my)) return false;
 
+        // Mouse is on a specific ingredient → this is an item-drag, not marquee
+        if (overlay.getIngredientUnderMouse().isPresent()) return false;
+        // Mouse is far from all slots → likely over a pagination/config button
+        IngredientGridWithNavigation grid = getJeiGrid(overlayContentsField, overlay);
+        if (grid != null && !isNearAnySlot(grid, mx, my)) return false;
+
         dragOnBookmarks = false;
         return true;
+    }
+
+    /** Only allow drag start near a known slot, keeping page/config buttons safe. */
+    private static boolean isNearAnySlot(IngredientGridWithNavigation grid, int mx, int my) {
+        for (var slot : grid.getSlots().toList()) {
+            ImmutableRect2i area = slot.getArea();
+            if (area == null) continue;
+            if (mx >= area.x() - 5 && mx <= area.x() + area.width() + 5
+                    && my >= area.y() - 5 && my <= area.y() + area.height() + 5) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Extract the IngredientGridWithNavigation from an overlay via reflection. */
+    @Nullable
+    private static IngredientGridWithNavigation getJeiGrid(Field field, Object overlay) {
+        try {
+            return (IngredientGridWithNavigation) field.get(overlay);
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     /**
      * Computes the bounding rectangle of all JEI item-list slots.
      * Drag initiation is only allowed within this area, preventing false
      * triggers from mods that don't properly declare exclusion zones.
+     * <p>
+     * Slot positions are recomputed on every call — cheap enough for a
+     * mouse-press event, and immune to layout shifts from search,
+     * bookmark toggling, or JEI config changes.
      */
     private static boolean isOverJeiList(int mx, int my) {
-        Minecraft mc = Minecraft.getInstance();
-        int sw = mc.getWindow().getGuiScaledWidth();
-        int sh = mc.getWindow().getGuiScaledHeight();
-
-        // Return cached result if screen hasn't resized
-        if (sw == cachedScreenW && sh == cachedScreenH && cachedJeiMaxX > cachedJeiMinX) {
-            int padding = 30;
-            return mx >= cachedJeiMinX - padding && mx <= cachedJeiMaxX + padding
-                && my >= cachedJeiMinY - padding && my <= cachedJeiMaxY + padding;
-        }
-
         probeReflection();
         if (overlayContentsField == null) return false;
         IJeiRuntime runtime = RSJeiPlugin.getRuntime();
@@ -207,27 +241,24 @@ public final class JeiMarqueeSelector {
             IngredientGridWithNavigation grid = (IngredientGridWithNavigation) overlayContentsField.get(overlay);
             if (grid == null) return false;
 
-            int[] minX = {Integer.MAX_VALUE}, minY = {Integer.MAX_VALUE};
-            int[] maxX = {Integer.MIN_VALUE}, maxY = {Integer.MIN_VALUE};
+            int minX = Integer.MAX_VALUE, minY = Integer.MAX_VALUE;
+            int maxX = Integer.MIN_VALUE, maxY = Integer.MIN_VALUE;
 
-            grid.getSlots().forEach(slot -> {
+            for (var slot : grid.getSlots().toList()) {
                 ImmutableRect2i area = slot.getArea();
-                if (area != null) {
-                    if (area.x() < minX[0]) minX[0] = area.x();
-                    if (area.y() < minY[0]) minY[0] = area.y();
-                    if (area.x() + area.width() > maxX[0]) maxX[0] = area.x() + area.width();
-                    if (area.y() + area.height() > maxY[0]) maxY[0] = area.y() + area.height();
-                }
-            });
-            if (minX[0] > maxX[0]) return false;
+                if (area == null) continue;
+                if (area.x() < minX) minX = area.x();
+                if (area.y() < minY) minY = area.y();
+                int rx = area.x() + area.width();
+                int ry = area.y() + area.height();
+                if (rx > maxX) maxX = rx;
+                if (ry > maxY) maxY = ry;
+            }
+            if (minX > maxX) return false;
 
-            cachedJeiMinX = minX[0]; cachedJeiMinY = minY[0];
-            cachedJeiMaxX = maxX[0]; cachedJeiMaxY = maxY[0];
-            cachedScreenW = sw; cachedScreenH = sh;
-
-            int padding = 30;
-            return mx >= minX[0] - padding && mx <= maxX[0] + padding
-                && my >= minY[0] - padding && my <= maxY[0] + padding;
+            int padding = 5;
+            return mx >= minX - padding && mx <= maxX + padding
+                && my >= minY - padding && my <= maxY + padding;
         } catch (Exception e) {
             return false;
         }
@@ -235,16 +266,6 @@ public final class JeiMarqueeSelector {
 
     /** Same as {@link #isOverJeiList} but for the bookmark panel on the left. */
     private static boolean isOverBookmarkList(int mx, int my) {
-        Minecraft mc = Minecraft.getInstance();
-        int sw = mc.getWindow().getGuiScaledWidth();
-        int sh = mc.getWindow().getGuiScaledHeight();
-
-        if (sw == cachedScreenW && sh == cachedScreenH && cachedBmMaxX > cachedBmMinX) {
-            int padding = 30;
-            return mx >= cachedBmMinX - padding && mx <= cachedBmMaxX + padding
-                && my >= cachedBmMinY - padding && my <= cachedBmMaxY + padding;
-        }
-
         probeReflection();
         if (bookmarkContentsField == null) return false;
         IJeiRuntime runtime = RSJeiPlugin.getRuntime();
@@ -256,27 +277,24 @@ public final class JeiMarqueeSelector {
             IngredientGridWithNavigation grid = (IngredientGridWithNavigation) bookmarkContentsField.get(bmOverlay);
             if (grid == null) return false;
 
-            int[] minX = {Integer.MAX_VALUE}, minY = {Integer.MAX_VALUE};
-            int[] maxX = {Integer.MIN_VALUE}, maxY = {Integer.MIN_VALUE};
+            int minX = Integer.MAX_VALUE, minY = Integer.MAX_VALUE;
+            int maxX = Integer.MIN_VALUE, maxY = Integer.MIN_VALUE;
 
-            grid.getSlots().forEach(slot -> {
+            for (var slot : grid.getSlots().toList()) {
                 ImmutableRect2i area = slot.getArea();
-                if (area != null) {
-                    if (area.x() < minX[0]) minX[0] = area.x();
-                    if (area.y() < minY[0]) minY[0] = area.y();
-                    if (area.x() + area.width() > maxX[0]) maxX[0] = area.x() + area.width();
-                    if (area.y() + area.height() > maxY[0]) maxY[0] = area.y() + area.height();
-                }
-            });
-            if (minX[0] > maxX[0]) return false;
+                if (area == null) continue;
+                if (area.x() < minX) minX = area.x();
+                if (area.y() < minY) minY = area.y();
+                int rx = area.x() + area.width();
+                int ry = area.y() + area.height();
+                if (rx > maxX) maxX = rx;
+                if (ry > maxY) maxY = ry;
+            }
+            if (minX > maxX) return false;
 
-            cachedBmMinX = minX[0]; cachedBmMinY = minY[0];
-            cachedBmMaxX = maxX[0]; cachedBmMaxY = maxY[0];
-            cachedScreenW = sw; cachedScreenH = sh;
-
-            int padding = 30;
-            return mx >= minX[0] - padding && mx <= maxX[0] + padding
-                && my >= minY[0] - padding && my <= maxY[0] + padding;
+            int padding = 5;
+            return mx >= minX - padding && mx <= maxX + padding
+                && my >= minY - padding && my <= maxY + padding;
         } catch (Exception e) {
             return false;
         }
@@ -412,7 +430,12 @@ public final class JeiMarqueeSelector {
         int key = event.getKeyCode();
         int scan = event.getScanCode();
 
-        if (selecting && !dragging) {
+        // Must check before shortcut dispatch: page keys and action keys
+        // (A/H/Escape) must never steal input from a focused text field.
+        Screen screen = event.getScreen();
+        boolean typingSafe = !isAnyEditBoxFocused(screen);
+
+        if (selecting && !dragging && typingSafe) {
             if (key == KEY_PAGE_UP || key == KEY_PAGE_DOWN
                     || key == KEY_HOME || key == KEY_END) {
                 clearSelection();
@@ -429,13 +452,13 @@ public final class JeiMarqueeSelector {
                 * (double) mc.getWindow().getGuiScaledHeight()
                 / (double) mc.getWindow().getScreenHeight());
 
-        if (dispatchShortcut(event.getScreen(), input,
+        if (dispatchShortcut(screen, input,
                 mx, my)) {
             event.setCanceled(true);
             return;
         }
 
-        if (selecting && !dragging) {
+        if (selecting && !dragging && typingSafe) {
             if (key == InputConstants.KEY_A) {
                 if (dragOnBookmarks) {
                     batchUnbookmark(cachedIngredients);

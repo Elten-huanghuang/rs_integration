@@ -72,6 +72,7 @@ public final class AsyncCraftChain {
     private int currentStepIdx;
     private IBatchDelegate currentDelegate;
     private int waitTicks;
+    private int stepRemaining;
     private State state = State.PENDING;
     private String abortReason = "";
     private Runnable onDoneCallback;
@@ -196,9 +197,14 @@ public final class AsyncCraftChain {
                     // Ledger was committed before placement in startModStep.
                     // Reset for the next step.
                     ledger.reset();
-                    currentStepIdx++;
-                    state = State.EXECUTING;
-                    RSIntegrationMod.LOGGER.debug(ctx.format("WAITING_MOD → EXECUTING"));
+                    stepRemaining -= machineCount;
+                    if (stepRemaining > 0) {
+                        state = State.EXECUTING;
+                    } else {
+                        currentStepIdx++;
+                        state = State.EXECUTING;
+                    }
+                    RSIntegrationMod.LOGGER.debug(ctx.format("WAITING_MOD → EXECUTING (remaining={})"), stepRemaining);
                 }
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.error(ctx.format("Error polling craft completion"), e);
@@ -226,6 +232,10 @@ public final class AsyncCraftChain {
             }
             ledger.reset();
         } else {
+            if (stepRemaining <= 0) {
+                stepRemaining = step.executions();
+                machineCount = 1;
+            }
             currentDelegate = startModStep(step, online);
             if (currentDelegate == null) {
                 abort("Failed to start multi-block craft: " + step.recipeId());
@@ -305,14 +315,27 @@ public final class AsyncCraftChain {
                 // just those slots on failure — avoids full-inventory snapshot copies.
                 Map<Integer, ItemStack> modifiedSlots = new HashMap<>();
 
-                for (Ingredient ing : cr.getIngredients()) {
+                // Capture the actual items consumed (with NBT) so assemble()
+                // can transfer input data to the output.  getResultItem()
+                // returns a bare template that discards backpack contents,
+                // blade stats, enchantments, etc.
+                List<Ingredient> ingredients = cr.getIngredients();
+                ItemStack[] consumed = new ItemStack[Math.min(ingredients.size(), 9)];
+
+                for (int ingIdx = 0; ingIdx < ingredients.size(); ingIdx++) {
+                    Ingredient ing = ingredients.get(ingIdx);
                     if (ing.isEmpty()) continue;
                     int stillNeeded = executions;
+                    boolean captured = false;
                     for (int i = 0; i < virtualInventory.size() && stillNeeded > 0; i++) {
                         ItemStack vi = virtualInventory.get(i);
                         if (vi.isEmpty()) continue;
                         if (ing.test(vi)) {
                             modifiedSlots.putIfAbsent(i, vi.copy());
+                            if (!captured && ingIdx < 9) {
+                                consumed[ingIdx] = vi.copyWithCount(1);
+                                captured = true;
+                            }
                             int take = Math.min(stillNeeded, vi.getCount());
                             vi.shrink(take);
                             stillNeeded -= take;
@@ -337,10 +360,13 @@ public final class AsyncCraftChain {
                             abort("Missing: " + describeIngredientSafe(ing));
                             return false;
                         }
+                        if (!captured && ingIdx < 9) {
+                            consumed[ingIdx] = reserved.copyWithCount(1);
+                        }
                     }
                 }
 
-                ItemStack result = cr.getResultItem(server.overworld().registryAccess());
+                ItemStack result = CraftPacketUtils.assembleCraftingOutput(cr, consumed, online);
                 if (!result.isEmpty()) {
                     addToVirtualInventory(result.copyWithCount(result.getCount() * executions));
                 }
@@ -451,9 +477,22 @@ public final class AsyncCraftChain {
         // Only parallelize when there are multiple executions to distribute;
         // a single-execution step would double the material requirement (one
         // set per child) and fail if the player only has enough for one craft.
-        if (!step.inferMode() && machines.size() >= 2 && step.executions() > 1) {
+        if (step.inferMode()) {
+            RSIntegrationMod.LOGGER.debug(ctx.format("[LB] skipped: inferMode=true"));
+        } else if (machines.size() < 2) {
+            RSIntegrationMod.LOGGER.debug(ctx.format("[LB] skipped: only {} bound machine(s)"), machines.size());
+        } else if (step.executions() <= 1) {
+            RSIntegrationMod.LOGGER.debug(ctx.format("[LB] skipped: executions={}"), step.executions());
+        } else {
+            RSIntegrationMod.LOGGER.debug(ctx.format("[LB] attempting parallel: {} machines, {} executions"),
+                    machines.size(), step.executions());
             IBatchDelegate parallel = tryStartParallel(machines, step, online);
-            if (parallel != null) return parallel;
+            if (parallel != null) {
+                RSIntegrationMod.LOGGER.debug(ctx.format("[LB] parallel dispatch OK: childCount={}"),
+                        parallel instanceof ParallelCraftGroup g ? g.getChildCount() : 1);
+                return parallel;
+            }
+            RSIntegrationMod.LOGGER.debug(ctx.format("[LB] parallel dispatch failed, falling back to single-machine"));
             // Fall through: single-machine path below
         }
 
@@ -548,7 +587,7 @@ public final class AsyncCraftChain {
                     try { delegate.onBatchFailed(online, "tryStartWithMaterials failed"); } catch (Exception fe) {
     RSIntegrationMod.LOGGER.error(ctx.format("onBatchFailed threw during tryStartWithMaterials cleanup"), fe);
 }
-                    ledger.refundCommitted(network, online);
+                    // abort() refunds the ledger, so we must NOT refund here
                     return null;
                 }
             } else {
@@ -611,7 +650,7 @@ public final class AsyncCraftChain {
                     try { delegate.onBatchFailed(online, "tryStartWithMaterials failed"); } catch (Exception fe) {
                         RSIntegrationMod.LOGGER.error(ctx.format("onBatchFailed threw during tryStartWithMaterials cleanup"), fe);
                     }
-                    ledger.refundCommitted(network, online);
+                    // abort() refunds the ledger, so we must NOT refund here
                     return null;
                 }
             } else {
@@ -654,13 +693,19 @@ public final class AsyncCraftChain {
 
         // Filter: chunk loaded, BE present, not busy (resolves per-machine dimension)
         List<BoundMachine> available = LoadBalancer.filterAvailable(machines, server);
-        if (available.size() < 2) return null;
+        if (available.size() < 2) {
+            RSIntegrationMod.LOGGER.debug(ctx.format("[LB] filterAvailable: {} machines → {} available (<2, abort)"),
+                    machines.size(), available.size());
+            return null;
+        }
+        RSIntegrationMod.LOGGER.debug(ctx.format("[LB] filterAvailable: {} machines → {} available"),
+                machines.size(), available.size());
 
-        // Cap children at step.executions() — the resolver may have set
-        // executions higher than the number of machines; ChainRepeatController
-        // handles the remainder.
-        if (available.size() > step.executions()) {
-            available = new ArrayList<>(available.subList(0, step.executions()));
+        // Cap children at remaining executions — don't start more
+        // machines than the number of crafts still needed.
+        int cap = Math.min(step.executions(), stepRemaining);
+        if (available.size() > cap) {
+            available = new ArrayList<>(available.subList(0, cap));
         }
 
         // Build a parallel group — constructor internally creates and validates
@@ -719,7 +764,7 @@ public final class AsyncCraftChain {
                     try { group.onBatchFailed(online, "tryStartWithMaterials failed"); } catch (Exception fe) {
                         RSIntegrationMod.LOGGER.error(ctx.format("onBatchFailed threw during parallel cleanup"), fe);
                     }
-                    ledger.refundCommitted(network, online);
+                    // abort() refunds the ledger, so we must NOT refund here
                     return null;
                 }
             } else {

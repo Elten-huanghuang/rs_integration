@@ -291,17 +291,9 @@ public final class RSSidePanelClickPacket {
 
             ItemStack serverCarried = player.containerMenu.getCarried();
 
-            // Recover from cursor desync: if the server thinks the cursor is empty but the
-            // client sent a non-empty item, trust the client's report. This prevents items
-            // from being permanently lost when a prior desync leaves the server cursor empty.
-            if (serverCarried.isEmpty() && !clientCarried.isEmpty()) {
-                RSIntegrationMod.LOGGER.debug("[RSI] Cursor desync recovery: server empty, client has {}x{}",
-                        clientCarried.getHoverName().getString(), clientCarried.getCount());
-                serverCarried = clientCarried.copy();
-                player.containerMenu.setCarried(serverCarried);
-            }
-
             if (serverCarried.isEmpty()) {
+                // Cursor desync: server has nothing, client claims to carry something.
+                // Do NOT trust the client — sync server state back and reject.
                 syncCursorSlot(player, ItemStack.EMPTY);
                 return;
             }

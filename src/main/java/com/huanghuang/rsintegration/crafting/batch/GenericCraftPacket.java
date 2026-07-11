@@ -387,36 +387,42 @@ public final class GenericCraftPacket {
                                           boolean inferMode, @Nullable ItemStack baseItem) {
         // Amplify mod-step executions by repeatCount so a single chain covers
         // all repeats and the parallel multi-machine path can trigger inside
-        // AsyncCraftChain.startModStep. ChainRepeatController handles any
-        // remainder when there are fewer machines than repeatCount.
+        // AsyncCraftChain.startModStep.
         List<ResolutionStep> chainSteps = steps;
+        boolean amplified = false;
         if (repeatCount > 1) {
             boolean hasMod = false;
             for (ResolutionStep s : steps) {
                 if (s.modType() != ModType.GENERIC) { hasMod = true; break; }
             }
             if (hasMod) {
-                List<ResolutionStep> amplified = new ArrayList<>(steps.size());
+                List<ResolutionStep> amplifiedList = new ArrayList<>(steps.size());
                 for (ResolutionStep s : steps) {
                     if (s.modType() != ModType.GENERIC) {
-                        amplified.add(new ResolutionStep(s.recipeId(), s.modType(), s.recipeTypeId(),
+                        amplifiedList.add(new ResolutionStep(s.recipeId(), s.modType(), s.recipeTypeId(),
                                 s.alternativeIds(), s.alternativeModTypes(), s.inferMode(),
                                 s.executions() * repeatCount));
                     } else {
-                        amplified.add(s);
+                        amplifiedList.add(s);
                     }
                 }
-                chainSteps = amplified;
+                chainSteps = amplifiedList;
+                amplified = true;
             }
         }
         AsyncCraftChain chain = new AsyncCraftChain(player.getUUID(), player.getServer(), network, chainSteps);
         final UUID capturedUuid = player.getUUID();
         final var capturedServer = player.getServer();
         AsyncCraftManager.getInstance().submit(chain);
+        // When amplification already baked repeatCount into step.executions(),
+        // the chain runs all repetitions internally — don't let ChainRepeatController
+        // schedule additional repeats.  Pass 1 so that next = 1 - machineCount <= 0
+        // and the repeat loop terminates immediately.
+        final int effectiveRepeat = amplified ? 1 : repeatCount;
         chain.onDone(() -> {
             AsyncCraftManager.getInstance().remove(chain);
             ChainRepeatController.scheduleNext(
-                    chain, capturedServer, capturedUuid, repeatCount, chain.getMachineCount(),
+                    chain, capturedServer, capturedUuid, effectiveRepeat, chain.getMachineCount(),
                     (p, rem) -> tryResolve(p, recipeId, forcedRecipes, dim, pos, rem, inferMode, baseItem));
         });
         player.sendSystemMessage(
@@ -602,24 +608,6 @@ public final class GenericCraftPacket {
                 return;
             }
 
-            // NBT-dependent recipes (e.g. SlashBlade) must go through
-            // executeCraftingSteps so assemble() is called instead of the
-            // legacy getResultItem() path which returns a bare, stat-less item.
-            if (CraftPacketUtils.isSlashBladeRecipe(cr2)) {
-                List<ResolutionStep> soloSteps = List.of(
-                        new ResolutionStep(recipeId, ModType.GENERIC,
-                                new ResourceLocation("minecraft:crafting")));
-                for (int r = 0; r < repeatCount; r++) {
-                    if (!CraftPacketUtils.executeCraftingSteps(player, soloSteps, network)) {
-                        RSIntegrationMod.LOGGER.warn("[RSI-Generic] SlashBlade solo executeCraftingSteps failed for {} (iteration {}/{})", recipeId, r + 1, repeatCount);
-                        player.sendSystemMessage(Component.translatable(
-                                "rsi.generic.error.craft_failed", "SlashBlade crafting failed"));
-                        return;
-                    }
-                }
-                return;
-            }
-
             RSIntegrationMod.LOGGER.debug("[RSI-Generic] Unified resolver: nothing to resolve for {}, falling through to direct extraction", recipeId);
         }
 
@@ -702,8 +690,20 @@ public final class GenericCraftPacket {
                     break;
                 }
 
-                // Craft the final recipe — materials were paid from RS, give the result
-                ItemStack result = RecipeIndex.tryGetResultItem(recipe, player.serverLevel().registryAccess());
+                // Craft the final recipe — use assemble() for CraftingRecipe
+                // so NBT from inputs (backpack contents, blade stats, etc.)
+                // carries forward to the output. getResultItem() returns a
+                // bare template that silently discards all stored data.
+                ItemStack result;
+                if (recipe instanceof CraftingRecipe cr) {
+                    ItemStack[] consumed = new ItemStack[allExtracted.size()];
+                    for (int i = 0; i < allExtracted.size(); i++) {
+                        consumed[i] = allExtracted.get(i);
+                    }
+                    result = CraftPacketUtils.assembleCraftingOutput(cr, consumed, player);
+                } else {
+                    result = RecipeIndex.tryGetResultItem(recipe, player.serverLevel().registryAccess());
+                }
                 if (result.isEmpty()) {
                     RSIntegrationMod.LOGGER.debug("[RSI-Generic] Result unavailable for {} ({})",
                             recipeId, recipe.getClass().getSimpleName());

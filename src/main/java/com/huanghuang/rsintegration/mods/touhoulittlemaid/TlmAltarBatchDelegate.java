@@ -251,8 +251,8 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
         clearSlotsFilled();
 
         // Verify the cached BlockEntity is still valid
-        if (myPos != null && player.serverLevel().isLoaded(myPos)) {
-            BlockEntity current = player.serverLevel().getBlockEntity(myPos);
+        if (myPos != null && resolveMachineLevel(player).isLoaded(myPos)) {
+            BlockEntity current = resolveMachineLevel(player).getBlockEntity(myPos);
             if (current == null || current.isRemoved()) {
                 player.sendSystemMessage(Component.translatable("rsi.error.machine_missing"));
                 if (ledger != null && ledger.isCommitted()) {
@@ -265,7 +265,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
         if (!checkAllHandlersEmpty(player)) return false;
         if (!checkPower(player)) return false;
 
-        ServerLevel level = player.serverLevel();
+        ServerLevel level = resolveMachineLevel(player);
         if (recipe == null) {
             RSIntegrationMod.LOGGER.debug("[RSI-Batch-TLM] tryStartSingleCraft: no recipe set");
             return false;
@@ -282,7 +282,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
             return false;
         }
 
-        // Phase 1: Reserve items via ledger
+        // Phase 1: Reserve items via ledger (template copies — not yet extracted from RS)
         List<ItemStack> templates = new ArrayList<>();
         for (int i = 0; i < ingredients.size(); i++) {
             Ingredient ing = ingredients.get(i);
@@ -295,7 +295,14 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
             templates.add(t);
         }
 
-        // Phase 2: Place items into storage block handlers.
+        // Phase 2: Commit BEFORE placing — commit failure means no items were
+        // physically extracted, so there is nothing to clean up from machine slots.
+        if (!ledger.commit(network, player)) {
+            RSIntegrationMod.LOGGER.error("[RSI-Batch-TLM] Ledger commit failed");
+            return false;
+        }
+
+        // Phase 3: Place REAL items (post-commit) into storage block handlers.
         try {
             int templateIdx = 0;
             for (int i = 0; i < ingredients.size(); i++) {
@@ -305,16 +312,13 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
                 if (storageBe == null) {
                     RSIntegrationMod.LOGGER.debug("[RSI-Batch-TLM] Storage block {} is null", i);
                     rollbackAll();
-                    ledger.rollback(player);
                     return false;
                 }
                 ItemStack placed = templates.get(templateIdx).copy();
                 ItemStackHandler handler = rsi$tlmsGetHandler(storageBe);
                 if (!level.isLoaded(storagePositions.get(i))) {
-                    RSIntegrationMod.LOGGER.warn("[RSI-Batch-TLM] Storage chunk unloaded at {} -- aborting placement", storagePositions.get(i));
-                    rollbackAll();
-                    ledger.rollback(player);
-                    return false;
+                    RSIntegrationMod.LOGGER.warn("[RSI-Batch-TLM] Storage chunk unloaded at {} — force-loading", storagePositions.get(i));
+                    com.huanghuang.rsintegration.util.ChunkUtils.loadChunk((ServerLevel) level, storagePositions.get(i));
                 }
                 handler.setStackInSlot(0, placed);
                 slotsFilled[i] = true;
@@ -325,21 +329,12 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.error("[RSI-Batch-TLM] Item placement into handlers failed:", e);
             rollbackAll();
-            ledger.rollback(player);
-            return false;
-        }
-
-        // Phase 3: Commit ledger first -- extract items from RS BEFORE starting craft
-        if (!ledger.commit(network, player)) {
-            RSIntegrationMod.LOGGER.error("[RSI-Batch-TLM] Ledger commit failed");
-            rollbackAll();
             return false;
         }
 
         // Phase 4: Trigger altarCraft AFTER committing ledger
         if (!invokeAltarCraft(level)) {
             rollbackAll();
-            ledger.refundCommitted(network, player);
             return false;
         }
 
@@ -349,7 +344,6 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
         if (!areAllHandlersEmpty()) {
             RSIntegrationMod.LOGGER.debug("[RSI-Batch-TLM] altarCraft did not consume items -- recipe mismatch?");
             rollbackAll();
-            ledger.refundCommitted(network, player);
             return false;
         }
         this.craftEverConfirmed = true;
@@ -368,8 +362,8 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
         clearSlotsFilled();
 
         // Verify the cached BlockEntity is still valid
-        if (myPos != null && player.serverLevel().isLoaded(myPos)) {
-            BlockEntity current = player.serverLevel().getBlockEntity(myPos);
+        if (myPos != null && resolveMachineLevel(player).isLoaded(myPos)) {
+            BlockEntity current = resolveMachineLevel(player).getBlockEntity(myPos);
             if (current == null || current.isRemoved()) {
                 player.sendSystemMessage(Component.translatable("rsi.error.machine_missing"));
                 if (ledger != null && ledger.isCommitted()) {
@@ -388,7 +382,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
             return false;
         }
 
-        ServerLevel level = player.serverLevel();
+        ServerLevel level = resolveMachineLevel(player);
         try {
             for (int i = 0; i < materials.size() && i < storageBlockEntities.size(); i++) {
                 ItemStack stack = materials.get(i);
@@ -401,9 +395,8 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
                 }
                 ItemStackHandler handler = rsi$tlmsGetHandler(storageBe);
                 if (!level.isLoaded(storagePositions.get(i))) {
-                    RSIntegrationMod.LOGGER.warn("[RSI-Batch-TLM] Storage chunk unloaded at {} -- aborting material placement", storagePositions.get(i));
-                    rollbackAll();
-                    return false;
+                    RSIntegrationMod.LOGGER.warn("[RSI-Batch-TLM] Storage chunk unloaded at {} — force-loading", storagePositions.get(i));
+                    com.huanghuang.rsintegration.util.ChunkUtils.loadChunk((ServerLevel) level, storagePositions.get(i));
                 }
                 handler.setStackInSlot(0, stack.copy());
                 slotsFilled[i] = true;
@@ -442,7 +435,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public ItemStack collectResult(ServerPlayer player) {
-        ServerLevel level = player.serverLevel();
+        ServerLevel level = resolveMachineLevel(player);
 
         // Primary: capture the spawned ItemEntity for full NBT fidelity
         // (copyInput recipes copy NBT from ingredients into the output entity).
@@ -624,7 +617,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
         if (usingSharedLedger) return;
         // Also clear any output entity near the altar (match expected output)
         try {
-            ServerLevel level = player != null ? player.serverLevel() : null;
+            ServerLevel level = player != null ? resolveMachineLevel(player) : null;
             if (level != null && myPos != null) {
                 ItemStack expected = ItemStack.EMPTY;
                 if (recipe != null && level != null) {
@@ -656,10 +649,12 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
         }
     }
 
-    /** Clear items from storage block handlers. When using shared committed
-     *  ledger, items are template copies -- clear slots without returning. */
+    /** Clear items from storage block handlers. When player is online,
+     *  abort() refunds the ledger — only refund physical items to RS
+     *  when the player is offline (abortSilently does NOT refund the ledger). */
     private void clearHandlers() {
         if (storageBlockEntities == null || slotsFilled == null) return;
+        boolean refundToRS = player == null;
         try {
             for (int i = 0; i < storageBlockEntities.size(); i++) {
                 if (!slotsFilled[i]) continue;
@@ -668,7 +663,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
                 ItemStackHandler handler = rsi$tlmsGetHandler(storageBe);
                 ItemStack stack = handler.getStackInSlot(0);
                 if (!stack.isEmpty()) {
-                    if (!usingSharedLedger) {
+                    if (!usingSharedLedger && refundToRS) {
                         if (network != null) {
                             ItemStack leftover = network.insertItem(stack, stack.getCount(),
                                     com.refinedmods.refinedstorage.api.util.Action.PERFORM);
@@ -679,7 +674,8 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
                             ItemHandlerHelper.giveItemToPlayer(player, stack);
                         }
                     }
-                    if (player.serverLevel().isLoaded(storagePositions.get(i))) {
+                    ServerLevel machineLevel = resolveMachineLevel(player);
+                    if (machineLevel != null && machineLevel.isLoaded(storagePositions.get(i))) {
                         handler.setStackInSlot(0, ItemStack.EMPTY);
                         Reflect.invoke(storageBe, "setChanged");
                         Reflect.invoke(storageBe, "refresh");

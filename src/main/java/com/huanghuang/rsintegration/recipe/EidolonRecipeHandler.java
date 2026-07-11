@@ -51,7 +51,8 @@ public final class EidolonRecipeHandler extends AbstractRecipeHandler {
                         }
                     } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
                 }
-                return result.isEmpty() ? null : result;
+                if (!result.isEmpty()) return result;
+                // Fall through — step matches may have been empty or unreadable
             }
         }
 
@@ -79,6 +80,16 @@ public final class EidolonRecipeHandler extends AbstractRecipeHandler {
                 }
                 try {
                     java.lang.reflect.Field f = ritualClass.getField("focusItems");
+                    @SuppressWarnings("unchecked")
+                    List<Ingredient> items = (List<Ingredient>) f.get(recipe);
+                    if (items != null)
+                        for (Ingredient ing : items)
+                            if (!ing.isEmpty()) result.add(new IngredientSpec(ing, 1));
+                } catch (Exception e) {
+                    RSIntegrationMod.LOGGER.debug("[RSI-Recipe] reflection probe failed", e);
+                }
+                try {
+                    java.lang.reflect.Field f = ritualClass.getField("invariantItems");
                     @SuppressWarnings("unchecked")
                     List<Ingredient> items = (List<Ingredient>) f.get(recipe);
                     if (items != null)

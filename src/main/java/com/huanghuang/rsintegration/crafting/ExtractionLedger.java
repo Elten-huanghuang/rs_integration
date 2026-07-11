@@ -822,6 +822,7 @@ public final class ExtractionLedger implements AutoCloseable {
                 case PLAYER_INVENTORY -> PlayerUtils.safeGiveToPlayer(player, refund, network);
             }
         }
+        transition(State.ROLLED_BACK);
     }
 
     public String describePending() {

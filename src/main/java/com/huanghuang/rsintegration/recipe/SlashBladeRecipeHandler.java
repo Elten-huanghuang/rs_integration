@@ -7,9 +7,11 @@ import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import net.minecraft.Util;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.TagParser;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.CraftingRecipe;
 import net.minecraft.world.item.crafting.Ingredient;
@@ -158,9 +160,11 @@ public final class SlashBladeRecipeHandler extends AbstractRecipeHandler {
             JsonObject req = obj.getAsJsonObject("request");
 
             if (req.has("name")) {
-                String required = req.get("name").getAsString();
-                if (!required.endsWith(":none")) {
+                String nameStr = req.get("name").getAsString();
+                if (!nameStr.endsWith(":none")) {
                     String actual = blade.getString("translationKey");
+                    // RequestDefinition.getTranslationKey() = Util.makeDescriptionId("item", name)
+                    String required = Util.makeDescriptionId("item", new ResourceLocation(nameStr));
                     if (!required.equals(actual)) return false;
                 }
             }
@@ -175,6 +179,29 @@ public final class SlashBladeRecipeHandler extends AbstractRecipeHandler {
 
             if (req.has("refine") && req.get("refine").getAsInt() > 0) {
                 if (blade.getInt("RepairCounter") < req.get("refine").getAsInt()) return false;
+            }
+
+            // enchantments — vanilla ItemStack enchantment list (not bladeState)
+            if (req.has("enchantments")) {
+                JsonArray reqEnchs = req.getAsJsonArray("enchantments");
+                net.minecraft.nbt.ListTag stackEnchs = fullTag.getList("Enchantments",
+                        net.minecraft.nbt.Tag.TAG_COMPOUND);
+                for (JsonElement e : reqEnchs) {
+                    if (!e.isJsonObject()) continue;
+                    JsonObject ench = e.getAsJsonObject();
+                    String enchId = ench.has("id") ? ench.get("id").getAsString() : null;
+                    int requiredLvl = ench.has("lvl") ? ench.get("lvl").getAsInt() : 1;
+                    if (enchId == null) continue;
+                    int actualLvl = 0;
+                    for (int i = 0; i < stackEnchs.size(); i++) {
+                        CompoundTag enchTag = stackEnchs.getCompound(i);
+                        if (enchId.equals(enchTag.getString("id"))) {
+                            actualLvl = enchTag.getShort("lvl");
+                            break;
+                        }
+                    }
+                    if (actualLvl < requiredLvl) return false;
+                }
             }
 
             return true;

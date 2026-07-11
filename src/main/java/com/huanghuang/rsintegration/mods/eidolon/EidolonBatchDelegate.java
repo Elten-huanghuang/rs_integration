@@ -236,8 +236,8 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
         }
 
         // Verify the cached BlockEntity is still valid
-        if (myPos != null && player.serverLevel().isLoaded(myPos)) {
-            BlockEntity current = player.serverLevel().getBlockEntity(myPos);
+        if (myPos != null && resolveMachineLevel(player).isLoaded(myPos)) {
+            BlockEntity current = resolveMachineLevel(player).getBlockEntity(myPos);
             if (current == null || current.isRemoved()) {
                 player.sendSystemMessage(Component.translatable("rsi.error.machine_missing"));
                 if (ledger != null && ledger.isCommitted()) {
@@ -349,6 +349,8 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
             crucible.getClass().getDeclaredField("hasWater").set(crucible, false);
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.error("[RSI-Eidolon] Crucible drain/clear failed", e);
+            refundAll();
+            ledger = null;
             return false;
         }
 
@@ -356,14 +358,15 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
             if (stepsField != null) stepsField.set(crucible, new ArrayList<>());
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.error("[RSI-Eidolon] Crucible drain/clear failed", e);
+            refundAll();
+            ledger = null;
             return false;
         }
 
         try {
             ((BlockEntity) crucible).setChanged();
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.error("[RSI-Eidolon] Crucible drain/clear failed", e);
-            return false;
+            RSIntegrationMod.LOGGER.error("[RSI-Eidolon] Crucible setChanged failed", e);
         }
 
         this.craftCompleted = true;
@@ -442,7 +445,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
     private boolean tryStartRitualCraft() {
         if (brazier == null || recipe == null) return false;
 
-        ServerLevel level = player.serverLevel();
+        ServerLevel level = resolveMachineLevel(player);
         if (myPos != null && level.isLoaded(myPos)) {
             BlockEntity current = level.getBlockEntity(myPos);
             if (current == null || current.isRemoved()
@@ -550,10 +553,22 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
         }
     }
 
+    private List<Ingredient> getRitualInvariantItems() {
+        try {
+            java.lang.reflect.Field f = EidolonReflection.ritualRecipeClass.getField("invariantItems");
+            @SuppressWarnings("unchecked")
+            List<Ingredient> items = (List<Ingredient>) f.get(recipe);
+            return items;
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Eidolon] Failed to read invariant items", e);
+            return null;
+        }
+    }
+
     private boolean tryStartRitualWithMaterials(ServerPlayer player, List<ItemStack> materials) {
         if (brazier == null || recipe == null || materials.isEmpty()) return false;
 
-        ServerLevel level = player.serverLevel();
+        ServerLevel level = resolveMachineLevel(player);
         if (myPos != null && level.isLoaded(myPos)) {
             BlockEntity current = level.getBlockEntity(myPos);
             if (current == null || current.isRemoved()
@@ -650,6 +665,11 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
                 for (Ingredient ing : focus)
                     if (!ing.isEmpty()) specs.add(new IngredientSpec(ing, 1));
             }
+            List<Ingredient> invariant = getRitualInvariantItems();
+            if (invariant != null) {
+                for (Ingredient ing : invariant)
+                    if (!ing.isEmpty()) specs.add(new IngredientSpec(ing, 1));
+            }
             return specs.isEmpty() ? null : specs;
         }
         if (isWorktable) {
@@ -724,8 +744,8 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
         }
 
         // Verify the cached BlockEntity is still valid
-        if (myPos != null && player.serverLevel().isLoaded(myPos)) {
-            BlockEntity current = player.serverLevel().getBlockEntity(myPos);
+        if (myPos != null && resolveMachineLevel(player).isLoaded(myPos)) {
+            BlockEntity current = resolveMachineLevel(player).getBlockEntity(myPos);
             if (current == null || current.isRemoved()) {
                 player.sendSystemMessage(Component.translatable("rsi.error.machine_missing"));
                 if (ledger != null && ledger.isCommitted()) {
@@ -876,7 +896,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
 
     private ItemStack collectRitualResult(ServerPlayer player) {
         // Priority 1: Collect ItemEntity above brazier
-        ServerLevel level = player.serverLevel();
+        ServerLevel level = resolveMachineLevel(player);
         if (myPos != null) {
             List<net.minecraft.world.entity.item.ItemEntity> entities =
                     level.getEntitiesOfClass(net.minecraft.world.entity.item.ItemEntity.class,

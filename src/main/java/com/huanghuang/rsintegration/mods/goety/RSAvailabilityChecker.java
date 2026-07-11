@@ -12,6 +12,7 @@ import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
@@ -56,11 +57,17 @@ public final class RSAvailabilityChecker {
             if (ingredients.isEmpty()) return null;
         }
 
+        ServerLevel altarLevel = altarDim != null
+                ? player.server.getLevel(ResourceKey.create(
+                        net.minecraft.core.registries.Registries.DIMENSION, altarDim))
+                : player.serverLevel();
+        if (altarLevel == null) return null;
+
         List<ItemStack> pedestalItems = new ArrayList<>();
         if (GoetyReflection.ritualRecipeClass != null && GoetyReflection.ritualRecipeClass.isInstance(recipe)) {
-            pedestalItems.addAll(rsi$collectGoetyPedestalItems(player, pos, recipe));
+            pedestalItems.addAll(rsi$collectGoetyPedestalItems(altarLevel, pos, recipe));
         } else if (MalumReflection.spiritInfusionRecipeClass != null && MalumReflection.spiritInfusionRecipeClass.isInstance(recipe)) {
-            pedestalItems.addAll(rsi$collectMalumPedestalItems(player, pos));
+            pedestalItems.addAll(rsi$collectMalumPedestalItems(altarLevel, pos));
         }
 
         boolean[] results = new boolean[ingredients.size()];
@@ -77,14 +84,13 @@ public final class RSAvailabilityChecker {
     }
 
     @SuppressWarnings("unchecked")
-    private static List<ItemStack> rsi$collectGoetyPedestalItems(ServerPlayer player, BlockPos altarPos,
+    private static List<ItemStack> rsi$collectGoetyPedestalItems(ServerLevel level, BlockPos altarPos,
                                                                  Recipe<?> recipe) {
         List<ItemStack> items = new ArrayList<>();
-        var level = player.level();
 
         // Use Goety's ritual.getPedestals() which respects configurable range (default 16)
         try {
-            Object ritual = Reflect.invoke(recipe, "getRitual").orElse(null);
+            Object ritual = Reflect.invoke(recipe, GoetyReflection.M_GET_RITUAL).orElse(null);
             if (ritual == null) return items;
             List<Object> pedestals = (List<Object>)
                     ritual.getClass().getMethod("getPedestals", Level.class, BlockPos.class)
@@ -126,12 +132,12 @@ public final class RSAvailabilityChecker {
         return items;
     }
 
-    private static List<ItemStack> rsi$collectMalumPedestalItems(ServerPlayer player, BlockPos altarPos) {
+    private static List<ItemStack> rsi$collectMalumPedestalItems(ServerLevel level, BlockPos altarPos) {
         List<ItemStack> items = new ArrayList<>();
         try {
             List<?> pedestals = (List<?>) MalumReflection.altarCraftingHelperClass
                     .getMethod("capturePedestals", Level.class, BlockPos.class)
-                    .invoke(null, player.level(), altarPos);
+                    .invoke(null, level, altarPos);
             for (Object ap : pedestals) {
                 try {
                     Object inv = ap.getClass().getMethod("getSuppliedInventory").invoke(ap);

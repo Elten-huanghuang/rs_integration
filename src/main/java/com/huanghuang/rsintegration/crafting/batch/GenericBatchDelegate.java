@@ -116,6 +116,18 @@ public final class GenericBatchDelegate extends AbstractBatchDelegate {
             return false; // ledger not committed — nothing lost
         }
 
+        // Recompute result via assemble() now that we have the actual consumed
+        // items.  getResultItem() (used in the Phase-1 pre-check above) returns
+        // a bare template — any NBT from inputs (backpack contents, blade stats,
+        // enchantments) would be silently discarded.
+        if (recipe instanceof net.minecraft.world.item.crafting.CraftingRecipe cr) {
+            ItemStack[] consumed = templates.toArray(new ItemStack[0]);
+            ItemStack assembled = CraftPacketUtils.assembleCraftingOutput(cr, consumed, player);
+            if (!assembled.isEmpty()) {
+                this.pendingResult = assembled;
+            }
+        }
+
         // Extracted items have been consumed — discard templates
         templates.clear();
 

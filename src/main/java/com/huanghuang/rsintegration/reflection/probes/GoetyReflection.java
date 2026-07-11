@@ -31,6 +31,28 @@ public final class GoetyReflection {
 
     public static boolean ready;
 
+    // ── Reflection field/method names (centralized so renames only touch one file) ──
+
+    // Fields
+    public static final String F_CURRENT_RITUAL_RECIPE = "currentRitualRecipe";
+    public static final String F_CURSED_CAGE_TILE = "cursedCageTile";
+    public static final String F_RECIPE = "recipe";
+    public static final String F_RECIPE_ID = "recipeId";
+    public static final String F_CURRENT_TIME = "currentTime";
+
+    // Methods
+    public static final String M_GET_RITUAL = "getRitual";
+    public static final String M_GET_SOUL_COST = "getSoulCost";
+    public static final String M_GET_ACTIVATION_ITEM = "getActivationItem";
+    public static final String M_GET_PEDESTALS = "getPedestals";
+    public static final String M_IS_EMPTY = "isEmpty";
+    public static final String M_GET_CONTAINER = "getContainer";
+    public static final String M_GET_CONTAINER_SIZE = "getContainerSize";
+    public static final String M_SET_ITEMS = "setItems";
+    public static final String M_ACTIVATE = "activate";
+    public static final String M_GET_SOULS = "getSouls";
+    public static final String M_GET_ENCHANTMENT = "getEnchantment";
+
     static {
         // Register contracts -- ContractValidation.validateAll() will verify and populate
         register("com.Polarice3.Goety.common.blocks.entities.DarkAltarBlockEntity", "darkAltarBEClass");

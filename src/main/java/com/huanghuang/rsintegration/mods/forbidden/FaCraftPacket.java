@@ -395,7 +395,6 @@ public final class FaCraftPacket {
                 if (callback.rejected) {
                     RSIntegrationMod.LOGGER.debug("[RSI-FA] tryStartRitual: ritual rejected by forge");
                     rollbackAll(player, be, filledPedestals, network);
-                    ledger.rollback(player);
                     FaRitualHelper.returnStarterToSource(starterStack, player, starterNetwork);
                     player.sendSystemMessage(Component.translatable("rsi.fa.warn.ritual_rejected"));
                     return;
@@ -404,14 +403,12 @@ public final class FaCraftPacket {
                 Throwable root = e.getCause() != null ? e.getCause() : e;
                 RSIntegrationMod.LOGGER.error("[RSI-FA] tryStartRitual failed — forge rejected", root);
                 rollbackAll(player, be, filledPedestals, network);
-                ledger.rollback(player);
                 FaRitualHelper.returnStarterToSource(starterStack, player, starterNetwork);
                 player.sendSystemMessage(Component.translatable("rsi.fa.error.craft_failed"));
                 return;
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.error("[RSI-FA] Failed to start ritual {}:", ritualId, e);
                 rollbackAll(player, be, filledPedestals, network);
-                ledger.rollback(player);
                 FaRitualHelper.returnStarterToSource(starterStack, player, starterNetwork);
                 player.sendSystemMessage(Component.translatable("rsi.fa.error.craft_failed"));
                 return;

@@ -212,9 +212,8 @@ extends AbstractBatchDelegate {
                 PedestalInfo pi = this.pedestals.get(i);
                 BlockPos bottomPos = pi.pos().below();
                 if (!this.level.isLoaded(bottomPos)) {
-                    RSIntegrationMod.LOGGER.warn("[RSI-Embers] Bottom pedestal chunk unloaded at {} \u2014 aborting", (Object)bottomPos);
-                    this.clearAllSlots();
-                    return false;
+                    RSIntegrationMod.LOGGER.warn("[RSI-Embers] Bottom pedestal chunk unloaded at {} \u2014 force-loading", (Object)bottomPos);
+                    ChunkUtils.loadChunk((ServerLevel) this.level, bottomPos);
                 }
                 BlockEntity bottomBE = this.level.getBlockEntity(bottomPos);
                 if (bottomBE != null && EmbersReflection.alchemyPedestalBEClass.isInstance(bottomBE)) {
