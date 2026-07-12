@@ -25,6 +25,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.CraftingRecipe;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
@@ -567,6 +568,25 @@ public final class CraftPacketUtils {
         // input (the Arcane Iterator has no separate crystal block).
         // Do NOT strip crystals — the delegate must extract and place them.
         if (className.endsWith("ArcaneIteratorRecipe")) {
+            // Enchantment recipes (vanilla `enchantment` or WR `arcane_enchantment`)
+            // declare NO center item in their JSON `ingredients` — the enchant
+            // target book is a HIDDEN input the block entity reads from the center
+            // pedestal (getPedestals().get(0)) and skips during recipe matching
+            // (matches(..., skip=true) ignores container slot 0). RS never sees
+            // this requirement, so the plan tree omits the book and the executor
+            // (which places ingredient[i] on pedestals.get(i)) leaves the center
+            // empty, aborting the craft. Prepend a plain minecraft:book at index 0
+            // so it (a) shows in the plan tree as a required material and (b) lands
+            // on the center pedestal, with the real materials shifting to the
+            // surrounding pedestals (indices 1+) exactly as the machine expects.
+            if (isArcaneIteratorEnchantRecipe(recipe)) {
+                List<Ingredient> withBook = new ArrayList<>(ingredients.size() + 1);
+                withBook.add(Ingredient.of(new ItemStack(Items.BOOK)));
+                withBook.addAll(ingredients);
+                RSIntegrationMod.LOGGER.debug("[RSI] filterWRCrystal: ArcaneIteratorRecipe enchant — prepended center book, {} → {} ingredients",
+                        ingredients.size(), withBook.size());
+                return withBook;
+            }
             RSIntegrationMod.LOGGER.debug("[RSI] filterWRCrystal: ArcaneIteratorRecipe — keeping all {} ingredients (crystal goes on pedestal)",
                     ingredients.size());
             return ingredients;
@@ -667,6 +687,28 @@ public final class CraftPacketUtils {
         RSIntegrationMod.LOGGER.debug("[RSI] filterWRCrystal: recipe={}, removed {} crystal ingredient(s), kept {} material ingredient(s)",
                 className, ingredients.size() - filtered.size(), filtered.size());
         return filtered;
+    }
+
+    /**
+     * True when the recipe is a WR ArcaneIteratorRecipe that enchants the center
+     * book (vanilla {@code enchantment} or WR {@code arcane_enchantment}). These
+     * recipes need an implicit {@code minecraft:book} center input; crystal-ritual
+     * and static-output iterator recipes ({@code arcanum_lens}, trims, tools) do
+     * not. Uses WR's own {@code hasEnchantment}/{@code hasArcaneEnchantment} — not
+     * vanilla methods — so it is safe under SRG remapping.
+     */
+    private static boolean isArcaneIteratorEnchantRecipe(Object recipe) {
+        try {
+            java.lang.reflect.Method hasEnch = Reflect.findMethod(
+                    recipe.getClass(), "hasEnchantment", new Class<?>[0]);
+            if (hasEnch != null && (boolean) hasEnch.invoke(recipe)) return true;
+            java.lang.reflect.Method hasArcane = Reflect.findMethod(
+                    recipe.getClass(), "hasArcaneEnchantment", new Class<?>[0]);
+            if (hasArcane != null && (boolean) hasArcane.invoke(recipe)) return true;
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI] ArcaneIterator enchant probe failed", e);
+        }
+        return false;
     }
 
     @Nullable

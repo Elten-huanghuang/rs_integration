@@ -22,6 +22,7 @@ public final class ModIds {
     public static final String IMMORTERS_DELIGHT = "immortalers_delight";
     public static final String FARMERSDELIGHT = "farmersdelight";
     public static final String FARMERSRESPITE = "farmersrespite";
+    public static final String MAJRUSZS_ACCESSORIES = "majruszsaccessories";
 
     // Dependencies
     public static final String REFINED_STORAGE = "refinedstorage";

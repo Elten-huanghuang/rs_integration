@@ -33,7 +33,7 @@ public abstract class AddonEventHandlerMixin {
             ),
             remap = false
     )
-    private static boolean rsi$redirectHasItem(Player player, Item item) {
+    private boolean rsi$redirectHasItem(Player player, Item item) {
         // 1. 走原版判定，如果原版背包有，直接返回 true，完美放行
         if (SuperpositionHandler.hasItem(player, item)) {
             return true;

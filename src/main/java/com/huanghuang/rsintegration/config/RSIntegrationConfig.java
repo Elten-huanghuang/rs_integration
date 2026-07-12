@@ -73,6 +73,7 @@ public final class RSIntegrationConfig {
 
     // ── per-mod tuning (server, per-world) ───────────────────────
     public static ForgeConfigSpec.ConfigValue<String> CROCKPOT_FILLER_ITEM;
+    public static ForgeConfigSpec.ConfigValue<List<? extends String>> CROCKPOT_FUEL_PRIORITY;
     public static ForgeConfigSpec.IntValue EMBERS_INFER_MAX_ATTEMPTS;
     public static ForgeConfigSpec.IntValue EMBERS_INFER_ZERO_BLACK_LIMIT;
     public static ForgeConfigSpec.IntValue EMBERS_LOCK_TIMEOUT_MINUTES;
@@ -279,7 +280,7 @@ public final class RSIntegrationConfig {
                 .comment("Required potion effect to use auto-eat. Format: \"modid:effect_id\".",
                         "Empty string = no requirement (always available).",
                         "Example: \"crockpot:gnaws_gift\" (requires CrockPot's Gnaw's Gift effect).")
-                .define("requiredEffect", "crockpot:gnaws_gift");
+                .define("requiredEffect", "");
         AUTO_EAT_COST_ITEM = c
                 .comment("Item consumed from RS network per auto-eat execution. Format: \"modid:item_id\".",
                         "\"minecraft:air\" = no item cost.",
@@ -346,6 +347,16 @@ public final class RSIntegrationConfig {
                         "is used to pad the remaining slots.",
                         "Format: \"modid:item_id\". Default: \"minecraft:stick\".")
                 .define("crockpotFillerItem", "minecraft:stick");
+        CROCKPOT_FUEL_PRIORITY = s
+                .comment("Preferred fuels for auto-refueling a Crock Pot, in priority order.",
+                        "The first item the RS network can supply is used. When none of these",
+                        "are available, the system falls back to any safe bulk fuel (never tools,",
+                        "bows, container fuels like lava buckets, or NBT/enchanted items).",
+                        "If the fuel slot already holds a valid fuel, nothing is inserted.",
+                        "Format: \"modid:item_id\" per line.")
+                .defineList("crockpotFuelPriority",
+                        List.of("minecraft:coal", "minecraft:charcoal", "minecraft:coal_block"),
+                        obj -> obj instanceof String str && ResourceLocation.tryParse(str) != null);
         EMBERS_INFER_MAX_ATTEMPTS = s
                 .comment("Maximum trial-and-error attempts for Embers Alchemy inference mode.",
                         "Each failed attempt consumes some materials (per Embers' failure mechanics).",

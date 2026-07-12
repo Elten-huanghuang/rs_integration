@@ -55,7 +55,7 @@ logoFile = ""
 
 [[dependencies.${mod_id}]]
     modId = "jei"
-    mandatory = false
+    mandatory = true
     versionRange = "[0,)"
     side = "CLIENT"
 

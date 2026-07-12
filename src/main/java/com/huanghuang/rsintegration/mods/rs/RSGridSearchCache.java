@@ -185,8 +185,8 @@ public final class RSGridSearchCache {
     }
 
     /**
-     * 辅助方法：同时追加原生小写字符串与拼音字符串
-     * 这样只要缓存建好，后续查字典时 O(1) 就能同时命中中文和拼音！
+     * 辅助方法：同时追加原生小写字符串、全拼、以及拼音首字母
+     * 这样缓存建好后，查字典 O(1) 就能同时命中中文、全拼(haimeichangguo)和首字母(hmcg)！
      */
     private static void appendWithPinyin(StringBuilder sb, String text) {
         if (text == null || text.isEmpty()) return;
@@ -196,6 +196,12 @@ public final class RSGridSearchCache {
             String pinyin = com.huanghuang.rsintegration.autoeat.client.PinyinUtil.toPinyin(text);
             if (pinyin != null && !pinyin.isEmpty()) {
                 sb.append(pinyin.toLowerCase()).append('\n');
+            }
+            String initials = com.huanghuang.rsintegration.autoeat.client.PinyinUtil.toPinyinInitials(text);
+            // 首字母与全拼相等时(纯英文/无中文)不重复追加，省缓存空间
+            if (initials != null && !initials.isEmpty()
+                    && !initials.equalsIgnoreCase(pinyin)) {
+                sb.append(initials.toLowerCase()).append('\n');
             }
         } catch (Throwable t) {
             // 优雅降级: 即使 jpinyin 缺库或报错也不影响原搜索，更不会崩端

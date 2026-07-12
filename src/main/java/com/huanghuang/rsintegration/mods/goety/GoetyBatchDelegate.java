@@ -81,6 +81,12 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         this.myDim = level.dimension();
         this.myPos = pos;
         this.player = player;
+        // Set machineDim NOW so resolveMachineLevel() resolves the machine's own
+        // dimension during validation (e.g. checkStructureRequirements). The chain
+        // otherwise calls setMachineDim only AFTER validateAndInit returns true, so
+        // cross-dimension crafts would read the structure in the player's dimension
+        // and spuriously fail with "ritual structure mismatch".
+        this.machineDim = level.dimension().location();
 
         if (!level.isLoaded(pos)) {
             RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] validateAndInit [2/9] chunk unloaded at {} — force-loading", pos);

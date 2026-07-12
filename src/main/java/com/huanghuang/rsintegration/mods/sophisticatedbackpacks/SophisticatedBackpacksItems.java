@@ -131,13 +131,15 @@ public final class SophisticatedBackpacksItems {
         UpgradeGuiManager.registerTab(RS_PICKUP_TYPE,
                 (ContentsFilteredUpgradeContainer<PickupUpgradeWrapper> container,
                  Position position, StorageScreenBase<?> screen) ->
-                        new RSPickupUpgradeTab(container, position, screen, 4,
+                        new RSPickupUpgradeTab(container, position, screen,
+                                Config.SERVER.advancedPickupUpgrade.slotsInRow.get(),
                                 net.p3pp3rf1y.sophisticatedbackpacks.client.gui.SBPButtonDefinitions.BACKPACK_CONTENTS_FILTER_TYPE));
 
         UpgradeGuiManager.registerTab(RS_MAGNET_TYPE,
                 (MagnetUpgradeContainer container, Position position,
                  StorageScreenBase<?> screen) ->
-                        new RSMagnetUpgradeTab(container, position, screen, 4,
+                        new RSMagnetUpgradeTab(container, position, screen,
+                                Config.SERVER.advancedMagnetUpgrade.slotsInRow.get(),
                                 net.p3pp3rf1y.sophisticatedbackpacks.client.gui.SBPButtonDefinitions.BACKPACK_CONTENTS_FILTER_TYPE));
 
         UpgradeGuiManager.registerTab(RS_REFILL_TYPE,

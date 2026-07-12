@@ -24,6 +24,14 @@ public final class CrockPotRecipeHandler extends AbstractRecipeHandler {
     private static final String RECIPE_CLASS = "com.sihenzhang.crockpot.recipe.cooking.CrockPotCookingRecipe";
     public static final int CAT_COUNT = 10;
 
+    // The Crock Pot block entity has a fixed 4 input slots (RangedWrapper(0,4)),
+    // plus 1 fuel + 1 output = 6 total. This holds for every pot block including
+    // the portable one — they all share CrockPotBlockEntity. The pot will not
+    // start cooking until ALL input slots are occupied, so the filler must pad up
+    // to this count, NOT to the recipe's potLevel (which is only the minimum
+    // pot-TIER gate: matches() checks wrapper.potLevel >= recipe.potLevel).
+    public static final int INPUT_SLOT_COUNT = 4;
+
     static {
         registerRecipePrefixes(CrockPotRecipeHandler.class, RECIPE_CLASS);
     }
@@ -55,6 +63,21 @@ public final class CrockPotRecipeHandler extends AbstractRecipeHandler {
      */
     @Nullable
     public static List<IngredientSpec> getSpecificIngredients(Recipe<?> recipe, boolean padWithFiller) {
+        return getSpecificIngredients(recipe, padWithFiller, INPUT_SLOT_COUNT);
+    }
+
+    /**
+     * Return ingredient specs for display or extraction, padding to a specific
+     * input-slot count.
+     * @param padWithFiller pad remaining slots with the config filler.
+     * @param targetSlots   the number of input slots to fill (the pot needs ALL
+     *                      of them occupied to cook). The batch delegate passes
+     *                      the block's real slot count; context-free callers pass
+     *                      {@link #INPUT_SLOT_COUNT}.
+     */
+    @Nullable
+    public static List<IngredientSpec> getSpecificIngredients(Recipe<?> recipe, boolean padWithFiller,
+                                                              int targetSlots) {
         try {
             Method getRequirements = recipe.getClass().getMethod("getRequirements");
             List<?> requirements = (List<?>) getRequirements.invoke(recipe);
@@ -66,8 +89,7 @@ public final class CrockPotRecipeHandler extends AbstractRecipeHandler {
             }
 
             if (padWithFiller) {
-                int potLevel = getPotLevel(recipe);
-                int remaining = potLevel - slotCount;
+                int remaining = targetSlots - slotCount;
                 if (remaining > 0) {
                     Ingredient filler = resolveFillerIngredient();
                     if (filler != null) {

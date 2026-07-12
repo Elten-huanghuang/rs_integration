@@ -1,4 +1,9 @@
 {
+  "itemGroup.rs_integration.main": "RS 集成",
+  "gui.sophisticatedcore.upgrades.rs_pickup": "次元拾取",
+  "gui.sophisticatedcore.upgrades.rs_pickup.tooltip": "次元拾取设置",
+  "gui.sophisticatedcore.upgrades.rs_magnet": "次元磁铁",
+  "gui.sophisticatedcore.upgrades.rs_magnet.tooltip": "次元磁铁设置",
   "item.rs_integration.rs_magnet_upgrade": "次元磁铁升级",
   "item.rs_integration.rs_pickup_upgrade": "次元拾取升级",
   "item.rs_integration.rs_feeding_upgrade": "次元喂食升级",
@@ -546,6 +551,7 @@
   "rsi.autoeat.btn.deselect": "取消选择",
   "rsi.autoeat.title.select": "选择食物: %s",
   "rsi.autoeat.btn.eat.tooltip": "点击食用",
+  "rsi.autoeat.btn.eat.hint": "§7部分功能需搭配暴食的赞赏等效果才能达成",
   "rsi.autoeat.btn.select.tooltip": "选择要吃的食物 / 管理黑名单",
   "rsi.autoeat.btn.blacklist.tooltip": "管理自动进食黑名单",
   "rsi.autoeat.btn.mode.tooltip": "切换自动进食模式",

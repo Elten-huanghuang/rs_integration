@@ -6,9 +6,13 @@ import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.util.Reflect;
 import net.minecraft.core.RegistryAccess;
+import net.minecraft.world.item.EnchantedBookItem;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
+import net.minecraft.world.item.enchantment.Enchantment;
+import net.minecraft.world.item.enchantment.EnchantmentInstance;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
@@ -33,6 +37,19 @@ public final class WRRecipeHandler extends AbstractRecipeHandler {
         // plan builder showing the machine block as the output.
         String className = recipe.getClass().getName();
         if (className.endsWith("CrystalRitualRecipe")) return ItemStack.EMPTY;
+
+        // ArcaneIteratorRecipe enchantment recipes declare no "output" in their
+        // JSON, so getResultItem()/assemble()/field-scan all return EMPTY. The
+        // enchanted book is built at runtime by the block entity from the
+        // recipe's `enchantment` field (new ENCHANTED_BOOK + addEnchantment at
+        // min level). Reconstruct it here so the plan builder doesn't reject the
+        // recipe as "unsupported machine" and the UI shows the real book icon.
+        if (className.endsWith("ArcaneIteratorRecipe")) {
+            ItemStack book = buildEnchantedBookOutput(recipe);
+            if (!book.isEmpty()) return book;
+            // Not an enchantment recipe (e.g. arcanum_lens declares a static
+            // "output") — fall through to the standard probe chain below.
+        }
 
         // Probe getResult/getOutput/getOutputCopy/getAssembledItem first —
         // these are the canonical output methods that don't delegate to
@@ -88,6 +105,63 @@ public final class WRRecipeHandler extends AbstractRecipeHandler {
             scan = scan.getSuperclass();
         }
         return ItemStack.EMPTY;
+    }
+
+    /**
+     * Reconstruct the enchanted-book output for an ArcaneIteratorRecipe whose
+     * JSON declares no static {@code output}. The block entity builds this at
+     * runtime as {@code new ItemStack(Items.ENCHANTED_BOOK)} enchanted with the
+     * recipe's {@code enchantment} at (canEnchantBook + 1); for a fresh book
+     * that lands on the enchantment's minimum level. Handles both vanilla
+     * {@link Enchantment} recipes and WR arcane-enchantment recipes (via WR's
+     * own {@code ArcaneEnchantmentUtil}, reflected because it is addon API).
+     *
+     * @return the enchanted book, or EMPTY if the recipe carries no enchantment
+     *         (e.g. arcanum_lens, which declares a static output instead).
+     */
+    private static ItemStack buildEnchantedBookOutput(Recipe<?> recipe) {
+        try {
+            // Vanilla enchantment path: matches the block entity's
+            // EnchantedBookItem.addEnchantment(book, EnchantmentInstance).
+            if (invokeBool(recipe, "hasEnchantment")) {
+                Object ench = invoke(recipe, "getEnchantment");
+                if (ench instanceof Enchantment enchantment) {
+                    ItemStack book = new ItemStack(Items.ENCHANTED_BOOK);
+                    EnchantedBookItem.addEnchantment(book,
+                            new EnchantmentInstance(enchantment, enchantment.getMinLevel()));
+                    return book;
+                }
+            }
+            // Arcane enchantment path: the block entity calls
+            // ArcaneEnchantmentUtil.addItemArcaneEnchantment(book, arcaneEnch).
+            if (invokeBool(recipe, "hasArcaneEnchantment")) {
+                Object arcaneEnch = invoke(recipe, "getArcaneEnchantment");
+                if (arcaneEnch != null) {
+                    ItemStack book = new ItemStack(Items.ENCHANTED_BOOK);
+                    Class<?> arcaneEnchClass = Class.forName(
+                            "mod.maxbogomol.wizards_reborn.api.arcaneenchantment.ArcaneEnchantment");
+                    Class<?> util = Class.forName(
+                            "mod.maxbogomol.wizards_reborn.api.arcaneenchantment.ArcaneEnchantmentUtil");
+                    util.getMethod("addItemArcaneEnchantment", ItemStack.class, arcaneEnchClass)
+                            .invoke(null, book, arcaneEnch);
+                    return book;
+                }
+            }
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-Recipe] Failed to build ArcaneIterator book output", e);
+        }
+        return ItemStack.EMPTY;
+    }
+
+    private static boolean invokeBool(Object target, String method) throws Exception {
+        java.lang.reflect.Method m = Reflect.findMethod(target.getClass(), method, new Class<?>[0]);
+        return m != null && (boolean) m.invoke(target);
+    }
+
+    @Nullable
+    private static Object invoke(Object target, String method) throws Exception {
+        java.lang.reflect.Method m = Reflect.findMethod(target.getClass(), method, new Class<?>[0]);
+        return m != null ? m.invoke(target) : null;
     }
 
     @Nullable

@@ -19,6 +19,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.Level;
@@ -378,7 +379,7 @@ public final class CrockPotBatchDelegate extends com.huanghuang.rsintegration.cr
         }
 
         int blockPotLevel = getBlockPotLevel(level, pos);
-        if (blockPotLevel <= 0) blockPotLevel = CrockPotRecipeHandler.getPotLevel(recipe);
+        if (blockPotLevel <= 0) blockPotLevel = CrockPotRecipeHandler.INPUT_SLOT_COUNT;
         int remaining = blockPotLevel - usedSlots;
         if (remaining <= 0) return result.isEmpty() ? null : result;
 
@@ -410,9 +411,13 @@ public final class CrockPotBatchDelegate extends com.huanghuang.rsintegration.cr
     private List<IngredientSpec> getIngredients() {
         // For category-constraint recipes, only extract the actual required
         // ingredients — remaining slots are filled by food-value selection.
-        // For non-category recipes, include filler items as usual.
+        // For non-category recipes, include filler items as usual, padding to
+        // the block's REAL input-slot count (this.potLevel, set from the block
+        // in validateAndInit) — the pot won't cook until every input slot is
+        // filled. Falls back to the fixed slot count if potLevel is unset.
         boolean pad = !hasCatConstraints;
-        return CrockPotRecipeHandler.getSpecificIngredients(recipe, pad);
+        int targetSlots = potLevel > 0 ? potLevel : CrockPotRecipeHandler.INPUT_SLOT_COUNT;
+        return CrockPotRecipeHandler.getSpecificIngredients(recipe, pad, targetSlots);
     }
 
     // ── plan warnings ────────────────────────────────────────────
@@ -433,7 +438,9 @@ public final class CrockPotBatchDelegate extends com.huanghuang.rsintegration.cr
         List<String> warnings = new ArrayList<>();
         net.minecraft.server.level.ServerLevel level = CraftPacketUtils.resolveLevel(player.server, dim, player);
         int blockPotLevel = getBlockPotLevel(level, pos);
-        if (blockPotLevel <= 0) blockPotLevel = CrockPotRecipeHandler.getPotLevel(recipe);
+        // Fall back to the fixed input-slot count (not the recipe's potLevel,
+        // which is only the pot-tier gate) when no specific machine is selected.
+        if (blockPotLevel <= 0) blockPotLevel = CrockPotRecipeHandler.INPUT_SLOT_COUNT;
         int slotReqs = CrockPotRecipeHandler.countSlotRequirements(recipe);
         int remaining = blockPotLevel - slotReqs;
 
@@ -542,18 +549,32 @@ public final class CrockPotBatchDelegate extends com.huanghuang.rsintegration.cr
     }
 
     private static ItemStack extractFuel(INetwork network, ServerPlayer player) {
+        // 1. Try the configured priority list in order — take the first one the
+        //    network can supply. Items resolve from RSIntegrationConfig.CROCKPOT_FUEL_PRIORITY.
+        for (String id : RSIntegrationConfig.CROCKPOT_FUEL_PRIORITY.get()) {
+            ResourceLocation rl = ResourceLocation.tryParse(id);
+            if (rl == null) continue;
+            Item pref = net.minecraftforge.registries.ForgeRegistries.ITEMS.getValue(rl);
+            if (pref == null || pref == Items.AIR) continue;
+            ItemStack probe = new ItemStack(pref);
+            if (!isFuel(probe)) continue; // datapack may have stripped burn time
+            ItemStack extracted = network.extractItem(probe, 1, Action.PERFORM);
+            if (!extracted.isEmpty()) return extracted;
+        }
+
+        // 2. Fallback: any burnable solid item, preferring the largest stack so we
+        //    drain bulk clutter first. Skip anything unsafe to burn (see isSafeBulkFuel):
+        //    tools/bows have burn time but are valuable; container fuels strand a
+        //    container in the single fuel slot; NBT items may be enchanted/named.
         ItemStack best = ItemStack.EMPTY;
-        int bestScore = 0;
+        int bestCount = 0;
         for (var entry : network.getItemStorageCache().getList().getStacks()) {
             ItemStack stack = entry.getStack();
             if (stack.isEmpty()) continue;
-            int burnTime = stack.getBurnTime(null);
-            if (burnTime <= 0) continue;
-            int score = stack.getCount();
-            ResourceLocation rl = net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(stack.getItem());
-            if (rl != null && "minecraft".equals(rl.getNamespace())) score += 64;
-            if (score > bestScore) {
-                bestScore = score;
+            if (stack.getBurnTime(null) <= 0) continue;
+            if (!isSafeBulkFuel(stack)) continue;
+            if (stack.getCount() > bestCount) {
+                bestCount = stack.getCount();
                 best = stack;
             }
         }
@@ -562,6 +583,24 @@ public final class CrockPotBatchDelegate extends com.huanghuang.rsintegration.cr
             if (!extracted.isEmpty()) return extracted;
         }
         return ItemStack.EMPTY;
+    }
+
+    /**
+     * Whether a burnable item is safe to auto-consume as bulk fuel. Excludes:
+     * <ul>
+     *   <li>Damageable items — bows, fishing rods, wooden tools all have burn time
+     *       but are gear a player never wants silently burned;</li>
+     *   <li>Container-return fuels (lava bucket, etc.) — the empty container would
+     *       be stranded in the single fuel slot;</li>
+     *   <li>Items carrying NBT — may be enchanted, renamed, or hold custom data.</li>
+     * </ul>
+     * The configured fuel-priority list bypasses this check, so coal/charcoal
+     * are always eligible.
+     */
+    private static boolean isSafeBulkFuel(ItemStack stack) {
+        if (stack.isDamageableItem()) return false;
+        if (!stack.getCraftingRemainingItem().isEmpty()) return false;
+        return !stack.hasTag();
     }
 
     private void clearMachineSlotsAndRefund() {

@@ -36,9 +36,15 @@ public final class CrockPotFoodValues {
     private static volatile Object[] categoryValues;   // FoodCategory.values()
     private static volatile Method getFoodValues;       // static FoodValuesDefinition.getFoodValues(ItemStack, Level)
     private static volatile Method fvGet;                // FoodValues.get(FoodCategory)
+    private static volatile Method fvIsEmpty;            // FoodValues.isEmpty()
 
     // Food values are static per-item data; a global cache survives across recipes and delegates.
     private static final Map<Item, float[]> CACHE = new ConcurrentHashMap<>();
+
+    // Sentinel cached for items with an EMPTY FoodValues (non-food). Lets us skip
+    // re-running reflection for the same item while still reporting "not food" (null)
+    // to callers. Compared by identity, never returned.
+    private static final float[] NON_FOOD = new float[0];
 
     /** One network item and how many are available for selection. */
     public record Candidate(ItemStack stack, int available) {}
@@ -60,6 +66,7 @@ public final class CrockPotFoodValues {
                     getFoodValues = CrockPotReflection.foodValuesDefinitionClass
                             .getMethod("getFoodValues", ItemStack.class, Level.class);
                     fvGet = CrockPotReflection.foodValuesClass.getMethod("get", CrockPotReflection.foodCategoryClass);
+                    fvIsEmpty = CrockPotReflection.foodValuesClass.getMethod("isEmpty");
                 }
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.warn("[RSI-CrockPot] Food-value reflection probe failed", e);
@@ -74,6 +81,7 @@ public final class CrockPotFoodValues {
         if (stack.isEmpty()) return null;
         Item item = stack.getItem();
         float[] cached = CACHE.get(item);
+        if (cached == NON_FOOD) return null;   // known non-food, skip reflection
         if (cached != null) return cached;
         ensureReflection();
         if (getFoodValues == null || fvGet == null || categoryValues == null) return null;
@@ -82,6 +90,15 @@ public final class CrockPotFoodValues {
             if (fv == null) {
                 RSIntegrationMod.LOGGER.debug("[RSI-CrockPot] getFoodValues returned null for {}",
                         stack.getHoverName().getString());
+                return null;
+            }
+            // Non-food items (no food_values recipe) get an EMPTY FoodValues object,
+            // not null — CrockPot uses FoodValues.isEmpty()/has() to reject them. We
+            // must mirror that: an all-zero FoodValues would otherwise be the most
+            // "neutral" filler and get auto-selected (e.g. an angler trophy accessory).
+            // Treat empty as non-food so select()'s null-checks skip it entirely.
+            if (fvIsEmpty != null && (boolean) fvIsEmpty.invoke(fv)) {
+                CACHE.put(item, NON_FOOD);
                 return null;
             }
             float[] result = new float[CAT];

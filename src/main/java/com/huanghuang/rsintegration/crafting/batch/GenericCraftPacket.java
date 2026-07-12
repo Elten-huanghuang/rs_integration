@@ -55,6 +55,7 @@ import net.minecraft.world.item.crafting.AbstractCookingRecipe;
 import net.minecraft.world.item.crafting.CraftingRecipe;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
+import net.minecraftforge.common.crafting.StrictNBTIngredient;
 import net.minecraft.world.item.crafting.SmithingTransformRecipe;
 import net.minecraft.world.item.crafting.SmithingTrimRecipe;
 import net.minecraft.world.item.crafting.StonecutterRecipe;
@@ -711,6 +712,13 @@ public final class GenericCraftPacket {
 
                 if (!result.isEmpty()) {
                     if (network != null) {
+                        // Stamp the storage tracker BEFORE inserting so the crafted
+                        // output surfaces at the top of RS's "recently modified" sort
+                        // (matches RS's own extract/insert flow). Without this the new
+                        // item has no timestamp and the player must hunt for it among
+                        // identical stacks.
+                        var tracker = network.getItemStorageTracker();
+                        if (tracker != null) tracker.changed(player, result.copy());
                         ItemStack leftover = network.insertItem(result.copy(), result.getCount(),
                                 com.refinedmods.refinedstorage.api.util.Action.PERFORM);
                         if (!leftover.isEmpty()) {
@@ -721,9 +729,33 @@ public final class GenericCraftPacket {
                     }
                     player.displayClientMessage(
                             Component.translatable("rsi.generic.info.resolved", result.getCount()), true);
-                    // Return CT catalyst items (e.g. .reuse(), .transformDamage()) to RS
+                    // Return crafting remainders (CT .reuse()/.transformDamage(),
+                    // and NBT-dependent remainders like Goety's Totem of Souls which
+                    // drains charge instead of being consumed). Must feed the ACTUAL
+                    // consumed stacks (with NBT) — the no-arg overload uses bare
+                    // template items, so a charged totem would come back as a spent
+                    // one and the player's charged totem would be silently eaten.
+                    //
+                    // allExtracted is grouped/deduped (e.g. [gold_block x8, totem x1]),
+                    // not slot-aligned. Rebuild a per-slot array of size ingredients()
+                    // so getRemainingItems() computes one remainder per real slot.
                     if (recipe instanceof CraftingRecipe cr && network != null) {
-                        for (ItemStack remainder : CraftPacketUtils.getRecipeRemainders(cr)) {
+                        List<Ingredient> ings = cr.getIngredients();
+                        ItemStack[] slotAligned = new ItemStack[ings.size()];
+                        List<ItemStack> pool = new ArrayList<>();
+                        for (ItemStack s : allExtracted) pool.add(s.copy());
+                        for (int i = 0; i < ings.size(); i++) {
+                            Ingredient ing = ings.get(i);
+                            if (ing.isEmpty()) continue;
+                            for (ItemStack p : pool) {
+                                if (!p.isEmpty() && ing.test(p)) {
+                                    slotAligned[i] = p.copyWithCount(1);
+                                    p.shrink(1);
+                                    break;
+                                }
+                            }
+                        }
+                        for (ItemStack remainder : CraftPacketUtils.getRecipeRemainders(cr, slotAligned)) {
                             if (!remainder.isEmpty()) {
                                 ItemStack leftover = network.insertItem(remainder.copy(),
                                         remainder.getCount(),
@@ -1518,7 +1550,14 @@ public final class GenericCraftPacket {
                 }
                 materials.put(displayItem, new PlanResponse.Availability(totalNeeded, totalHave));
             } else {
-                int have = itemAvailable.getOrDefault(displayItem, 0);
+                // NBT-strict ingredients (e.g. a charged Totem of Souls declared
+                // as .withTag({Souls:80000})) must count only stored items that
+                // actually carry the required NBT — the Item-keyed itemAvailable map
+                // drops NBT and would lump a bare, empty totem in as "available",
+                // falsely turning the plan green even though extraction can't use it.
+                int have = (source != null && isNbtStrict(source))
+                        ? countNbtMatching(source, available)
+                        : itemAvailable.getOrDefault(displayItem, 0);
                 materials.put(displayItem, new PlanResponse.Availability(needed, have));
             }
         }
@@ -1664,13 +1703,41 @@ public final class GenericCraftPacket {
     }
 
     /**
+     * True when an ingredient matches by strict NBT (Forge {@link StrictNBTIngredient}
+     * or every candidate carries NBT). Such ingredients — e.g. a charged Totem of Souls
+     * declared as {@code .withTag({Souls:80000})} — must not count a bare, NBT-less item
+     * as "available", or the plan falsely turns green.
+     */
+    private static boolean isNbtStrict(Ingredient ingredient) {
+        if (ingredient instanceof StrictNBTIngredient) return true;
+        ItemStack[] items = ingredient.getItems();
+        if (items.length == 0) return false;
+        for (ItemStack s : items) {
+            if (s.isEmpty() || !s.hasTag()) return false;
+        }
+        return true;
+    }
+
+    /**
+     * Count how many stored items actually satisfy an NBT-strict ingredient, using the
+     * NBT-carrying {@link StackKey} availability map instead of the Item-keyed one (which
+     * drops NBT and would lump charged + empty totems together).
+     */
+    private static int countNbtMatching(Ingredient ingredient, Map<StackKey, Integer> available) {
+        int total = 0;
+        for (var e : available.entrySet()) {
+            if (ingredient.test(e.getKey().toStack())) total += e.getValue();
+        }
+        return total;
+    }
+
+    /**
      * Returns the best ItemStack from {@code ingredient.getItems()} — the one with
      * the highest available count in player inventory + RS network.
      * Preserves NBT so TACZ/Applied Armorer items display with correct attachments.
      * Strips BlockEntityTag/BlockId to avoid purple-black block entity rendering.
      */
-    private static ItemStack matchBestAvailable(Ingredient ingredient, Map<Item, Integer> itemAvailable) {
-        ItemStack best = null;
+    private static ItemStack matchBestAvailable(Ingredient ingredient, Map<Item, Integer> itemAvailable) {        ItemStack best = null;
         int bestCount = -1;
         for (ItemStack stack : ingredient.getItems()) {
             if (stack.isEmpty()) continue;

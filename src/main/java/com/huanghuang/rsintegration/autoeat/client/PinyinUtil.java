@@ -18,7 +18,7 @@ public final class PinyinUtil {
     }
 
     /** Extract pinyin initials (e.g. "苹果" → "pg"). Non-Chinese chars pass through. */
-    static String toPinyinInitials(String text) {
+    public static String toPinyinInitials(String text) {
         if (text == null || text.isEmpty()) return "";
         try {
             return PinyinHelper.getShortPinyin(text).toLowerCase();

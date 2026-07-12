@@ -56,7 +56,9 @@ public final class AutoEatClientEvents {
         // Button 1 — Eat (one-shot)
         AutoEatButton eatBtn = new AutoEatButton(x, yBase, btnW, btnH,
                 Component.translatable("rsi.autoeat.btn.eat"),
-                Tooltip.create(Component.translatable("rsi.autoeat.btn.eat.tooltip")),
+                Tooltip.create(Component.translatable("rsi.autoeat.btn.eat.tooltip")
+                        .append("\n")
+                        .append(Component.translatable("rsi.autoeat.btn.eat.hint"))),
                 btn -> NetworkHandler.CHANNEL.sendToServer(
                         new AutoEatPacket(ClientState.currentMode, ClientState.selectedItem))
         );

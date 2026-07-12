@@ -47,7 +47,6 @@ import com.huanghuang.rsintegration.util.ModIds;
 import com.huanghuang.rsintegration.resonance.disk.ResonanceDiskFactory;
 import com.huanghuang.rsintegration.resonance.disk.ResonanceDiskWrapper;
 import com.huanghuang.rsintegration.resonance.passive.PassiveEffectEngine;
-import com.huanghuang.rsintegration.resonance.passive.PassiveRegistry;
 import com.refinedmods.refinedstorage.api.IRSAPI;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.apiimpl.API;
@@ -444,7 +443,6 @@ public final class RSIntegrationMod {
             ResonanceNetworkHandler.register();
             API.instance().getStorageDiskRegistry().add(
                     ResonanceDiskWrapper.FACTORY_ID, new ResonanceDiskFactory());
-            PassiveRegistry.scanAllItems();
             MinecraftForge.EVENT_BUS.register(PassiveEffectEngine.class);
         }
 

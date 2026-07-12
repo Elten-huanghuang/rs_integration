@@ -1,4 +1,9 @@
 {
+  "itemGroup.rs_integration.main": "RS Integration",
+  "gui.sophisticatedcore.upgrades.rs_pickup": "RS Pickup",
+  "gui.sophisticatedcore.upgrades.rs_pickup.tooltip": "RS Pickup Settings",
+  "gui.sophisticatedcore.upgrades.rs_magnet": "RS Magnet",
+  "gui.sophisticatedcore.upgrades.rs_magnet.tooltip": "RS Magnet Settings",
   "item.rs_integration.rs_magnet_upgrade": "RS Magnet Upgrade",
   "item.rs_integration.rs_pickup_upgrade": "RS Pickup Upgrade",
   "item.rs_integration.rs_feeding_upgrade": "RS Feeding Upgrade",
@@ -540,6 +545,7 @@
   "rsi.autoeat.btn.deselect": "Deselect",
   "rsi.autoeat.title.select": "Select Food: %s",
   "rsi.autoeat.btn.eat.tooltip": "Click to eat",
+  "rsi.autoeat.btn.eat.hint": "§7Some features require effects such as Gluttony's Appraisal to take effect",
   "rsi.autoeat.btn.select.tooltip": "Select food / Manage blacklist",
   "rsi.autoeat.btn.blacklist.tooltip": "Manage auto-eat blacklist",
   "rsi.autoeat.btn.mode.tooltip": "Switch auto-eat mode",

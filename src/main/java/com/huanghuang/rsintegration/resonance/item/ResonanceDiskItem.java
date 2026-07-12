@@ -32,7 +32,10 @@ public final class ResonanceDiskItem extends StorageDiskItem {
 
     @Override
     public void inventoryTick(ItemStack stack, Level level, Entity entity, int slot, boolean selected) {
-        if (level.isClientSide() || getId(stack) != null || !(entity instanceof Player player)) {
+        // isValid() checks hasTag() before reading the Id key, so it is null-safe
+        // for freshly-created disks (creative tab / give / datapack) that have no
+        // NBT yet. Calling getId() directly here would NPE inside RS's getTag().
+        if (level.isClientSide() || isValid(stack) || !(entity instanceof Player player)) {
             return;
         }
 

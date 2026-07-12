@@ -64,19 +64,23 @@ public final class MalumRecipeHandler extends AbstractRecipeHandler {
             countField.setAccessible(true);
             List<IngredientSpec> result = new ArrayList<>();
 
-            // Spirit/Focusing recipes: single "input" field (IngredientWithCount)
+            // Spirit/Focusing recipes: single "input" field. In older Malum this
+            // is an IngredientWithCount; in malum 1.6.6+ SpiritFocusingRecipe.input
+            // is a plain Ingredient (count 1). Handle both so the plan tree shows
+            // the catalyst material, not just the spirits.
             Reflect.findField(recipe.getClass(), "input").ifPresent(inputField -> {
-                if (iwcClass.get().isAssignableFrom(inputField.getType())) {
-                    inputField.setAccessible(true);
-                    try {
-                        Object iwc = inputField.get(recipe);
-                        if (iwc != null) {
-                            Ingredient ing = (Ingredient) ingField.get(iwc);
-                            int count = countField.getInt(iwc);
-                            if (ing != null && count > 0) result.add(new IngredientSpec(ing, count));
-                        }
-                    } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
-                }
+                inputField.setAccessible(true);
+                try {
+                    Object iwc = inputField.get(recipe);
+                    if (iwc == null) return;
+                    if (iwcClass.get().isInstance(iwc)) {
+                        Ingredient ing = (Ingredient) ingField.get(iwc);
+                        int count = countField.getInt(iwc);
+                        if (ing != null && count > 0) result.add(new IngredientSpec(ing, count));
+                    } else if (iwc instanceof Ingredient plain && !plain.isEmpty()) {
+                        result.add(new IngredientSpec(plain, 1));
+                    }
+                } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
             });
 
             // RunicWorkbenchRecipe: primaryInput + secondaryInput (IngredientWithCount)
