@@ -31,6 +31,14 @@ final class SyncHandler {
                 packet.getBindings());
     }
 
+    /** Clear the chunked-sync accumulator on client logout so a stale partial
+     *  sync from a previous server can't bleed into the next one. */
+    public static void clearOnLogout() {
+        chunkAccum.clear();
+        expectedChunks = 0;
+        lastChunkTime = 0;
+    }
+
     private static void handleChunked(RSSidePanelSyncPacket packet) {
         long now = System.currentTimeMillis();
         if (now - lastChunkTime > CHUNK_EXPIRY_MS) {

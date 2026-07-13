@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.crafting.plan;
 
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.crafting.tree.IngredientKey;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
@@ -66,8 +67,8 @@ public final class PlanResponsePacket {
         }
         // Materials
         buf.writeVarInt(plan.materials().size());
-        for (Map.Entry<Item, PlanResponse.Availability> e : plan.materials().entrySet()) {
-            buf.writeResourceLocation(net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(e.getKey()));
+        for (Map.Entry<IngredientKey, PlanResponse.Availability> e : plan.materials().entrySet()) {
+            e.getKey().write(buf);
             buf.writeVarInt(e.getValue().needed());
             buf.writeVarInt(e.getValue().available());
         }
@@ -115,10 +116,13 @@ public final class PlanResponsePacket {
         for (String mt : plan.boundMachineTypes()) buf.writeUtf(mt);
         // Leftovers (overproduction from integer batch rounding)
         buf.writeVarInt(plan.leftovers().size());
-        for (Map.Entry<Item, Integer> e : plan.leftovers().entrySet()) {
-            buf.writeResourceLocation(net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(e.getKey()));
+        for (Map.Entry<IngredientKey, Integer> e : plan.leftovers().entrySet()) {
+            e.getKey().write(buf);
             buf.writeVarInt(e.getValue());
         }
+        // Clicked ghost-output (NBT-variant target, e.g. WR leveled book) — tail-appended
+        buf.writeBoolean(plan.clickedOutput() != null);
+        if (plan.clickedOutput() != null) buf.writeItem(plan.clickedOutput());
     }
 
     public static PlanResponsePacket decode(FriendlyByteBuf buf) {
@@ -171,14 +175,10 @@ public final class PlanResponsePacket {
         }
         // Materials
         int matCount = buf.readVarInt();
-        Map<Item, PlanResponse.Availability> materials = new LinkedHashMap<>();
+        Map<IngredientKey, PlanResponse.Availability> materials = new LinkedHashMap<>();
         for (int i = 0; i < matCount; i++) {
-            Item item = net.minecraftforge.registries.ForgeRegistries.ITEMS.getValue(buf.readResourceLocation());
-            if (item != null) {
-                materials.put(item, new PlanResponse.Availability(buf.readVarInt(), buf.readVarInt()));
-            } else {
-                buf.readVarInt(); buf.readVarInt(); // skip counts for unknown item
-            }
+            IngredientKey key = IngredientKey.read(buf);
+            materials.put(key, new PlanResponse.Availability(buf.readVarInt(), buf.readVarInt()));
         }
         // Missing
         int missCount = buf.readVarInt();
@@ -227,18 +227,23 @@ public final class PlanResponsePacket {
         for (int i = 0; i < boundMtCount; i++) boundMachineTypes.add(buf.readUtf());
         // Leftovers (overproduction)
         int leftoverCount = buf.readVarInt();
-        Map<Item, Integer> leftovers = new LinkedHashMap<>();
+        Map<IngredientKey, Integer> leftovers = new LinkedHashMap<>();
         for (int i = 0; i < leftoverCount; i++) {
-            Item item = net.minecraftforge.registries.ForgeRegistries.ITEMS.getValue(buf.readResourceLocation());
-            int cnt = buf.readVarInt();
-            if (item != null) leftovers.put(item, cnt);
+            IngredientKey key = IngredientKey.read(buf);
+            leftovers.put(key, buf.readVarInt());
+        }
+        // Clicked ghost-output — tail-appended; guard readability so an older
+        // server's shorter buffer decodes cleanly to null instead of throwing.
+        ItemStack clickedOutput = null;
+        if (buf.isReadable() && buf.readBoolean()) {
+            clickedOutput = buf.readItem();
         }
         return new PlanResponsePacket(new PlanResponse(success, targetName, targetResult,
                 steps, materials, missing, recipeId,
                 execModType, execDim, execX, execY, execZ, modWarnings, repeatCount,
                 embersCode, embersAspectNames, embersInputNames, embersSeed, embersCanInfer,
                 embersCodeFromCache, executionMachineSupportsGui, baseItem, boundMachineTypes,
-                leftovers));
+                leftovers, clickedOutput));
     }
 
     @SuppressWarnings("resource")

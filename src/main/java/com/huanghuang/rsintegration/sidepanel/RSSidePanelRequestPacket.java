@@ -54,6 +54,13 @@ public final class RSSidePanelRequestPacket {
                 return;
             }
 
+            // Throttle the heavy refresh path (full cache + pattern scan +
+            // Curios reflection). Cleanup above is exempt so listeners always
+            // unregister. Dropped refresh is harmless — the client re-requests.
+            if (SidePanelRequestRateLimiter.isRateLimited(player.getUUID())) {
+                return;
+            }
+
             INetwork network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
             if (network == null) {
                 RSSidePanelNetworkHandler.unregisterListener(player.getUUID());

@@ -301,6 +301,13 @@ public final class MalumRunicWorkbenchBatchDelegate extends AbstractBatchDelegat
     @Override
     public BlockPos getMachinePos() { return myPos; }
 
+    @Override
+    public ItemStack getExpectedOutput() {
+        // Output normally lands in slot 0, but can pop into the world as an
+        // ItemEntity — expose it so the interceptor beats magnets in that case.
+        return (expectedOutput != null && !expectedOutput.isEmpty()) ? expectedOutput : null;
+    }
+
     // ── helpers ─────────────────────────────────────────────────────
 
     private static IItemHandler resolveHandler(BlockEntity be) {

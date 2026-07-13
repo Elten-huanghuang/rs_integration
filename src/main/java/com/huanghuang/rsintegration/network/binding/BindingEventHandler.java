@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.network.binding;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.mods.touhoulittlemaid.TlmAltarStructure;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
@@ -605,19 +606,9 @@ public final class BindingEventHandler {
      * across all clicks on the same multiblock.
      */
     private static BlockPos resolveTlmAltarCentre(BlockEntity be, BlockPos pos) {
-        try {
-            java.lang.reflect.Method getBlockPosList = be.getClass().getMethod("getBlockPosList");
-            Object posListData = getBlockPosList.invoke(be);
-            if (posListData == null) return null;
-
-            java.lang.reflect.Method getData = posListData.getClass().getMethod("getData");
-            Object data = getData.invoke(posListData);
-            if (!(data instanceof List<?> list) || list.isEmpty()) return null;
-
-            BlockPos canonical = (BlockPos) list.get(0);
-            if (!canonical.equals(pos)) return canonical;
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Bind] TLM altar centre resolution failed", e);
+        if (be.getLevel() instanceof net.minecraft.server.level.ServerLevel serverLevel) {
+            TlmAltarStructure.Resolved resolved = TlmAltarStructure.resolve(serverLevel, be);
+            if (resolved != null && !resolved.mainPos().equals(pos)) return resolved.mainPos();
         }
         return null;
     }

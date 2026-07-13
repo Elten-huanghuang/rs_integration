@@ -13,6 +13,7 @@ import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
 import com.huanghuang.rsintegration.crafting.plan.PlanResponse;
 import com.huanghuang.rsintegration.crafting.plan.PlanResponsePacket;
 import com.huanghuang.rsintegration.crafting.plan.PlanStep;
+import com.huanghuang.rsintegration.crafting.tree.IngredientKey;
 import com.huanghuang.rsintegration.crafting.tree.PlanTreeModel;
 import com.huanghuang.rsintegration.crafting.plan.PlanWarnings;
 import com.huanghuang.rsintegration.mods.crabbersdelight.CrabTrapRecipeResolver;
@@ -36,6 +37,7 @@ import com.huanghuang.rsintegration.crafting.PreviewRateLimiter;
 import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.recipe.CrockPotRecipeHandler;
+import com.huanghuang.rsintegration.recipe.WRRecipeHandler;
 import com.huanghuang.rsintegration.util.TextBuilder;
 import com.huanghuang.rsintegration.util.ModIds;
 import com.huanghuang.rsintegration.util.Reflect;
@@ -50,6 +52,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.item.Item;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.AbstractCookingRecipe;
 import net.minecraft.world.item.crafting.CraftingRecipe;
@@ -97,6 +100,13 @@ public final class GenericCraftPacket {
     private final boolean inferMode;
     /** JEI-provided base item for FA ApplyModifierRecipe prefill */
     private final ItemStack baseItem;
+    /**
+     * JEI-provided concrete output (ghost slot) the player clicked. Lets the
+     * server distinguish NBT-variant outputs that share one recipe id — e.g. WR
+     * arcane iterator "Curse II" vs "Curse I" both resolve to the same recipe.
+     * Null when the client didn't supply it (backward compatible).
+     */
+    private final ItemStack targetOutput;
 
     /** Preview mode: compute plan and send GUI to client. */
     public GenericCraftPacket(ResourceLocation recipeId, boolean preview) {
@@ -142,6 +152,17 @@ public final class GenericCraftPacket {
                               @Nullable net.minecraft.core.BlockPos pos,
                               int repeatCount, boolean inferMode,
                               @Nullable ItemStack baseItem) {
+        this(recipeId, preview, forcedRecipes, dim, pos, repeatCount, inferMode, baseItem, null);
+    }
+
+    /** Master constructor: adds the JEI ghost-output target for NBT-variant recipes. */
+    public GenericCraftPacket(ResourceLocation recipeId, boolean preview,
+                              Map<String, String> forcedRecipes,
+                              @Nullable ResourceLocation dim,
+                              @Nullable net.minecraft.core.BlockPos pos,
+                              int repeatCount, boolean inferMode,
+                              @Nullable ItemStack baseItem,
+                              @Nullable ItemStack targetOutput) {
         this.recipeId = recipeId;
         this.preview = preview;
         this.forcedRecipes = forcedRecipes != null ? forcedRecipes : Collections.emptyMap();
@@ -150,6 +171,7 @@ public final class GenericCraftPacket {
         this.repeatCount = Math.max(1, Math.min(repeatCount, RSIntegrationConfig.REPEAT_COUNT_MAX.get()));
         this.inferMode = inferMode;
         this.baseItem = baseItem != null ? baseItem.copy() : null;
+        this.targetOutput = targetOutput != null && !targetOutput.isEmpty() ? targetOutput.copy() : null;
     }
 
     /** Convenience: execute mode. */
@@ -173,6 +195,16 @@ public final class GenericCraftPacket {
         this(recipeId, preview, Collections.emptyMap(), dim, pos, repeatCount, inferMode, baseItem);
     }
 
+    /** JEI-initiated preview carrying the clicked ghost output (NBT-variant target). */
+    public GenericCraftPacket(ResourceLocation recipeId, boolean preview,
+                              @Nullable ResourceLocation dim,
+                              @Nullable net.minecraft.core.BlockPos pos,
+                              int repeatCount, boolean inferMode,
+                              @Nullable ItemStack baseItem,
+                              @Nullable ItemStack targetOutput) {
+        this(recipeId, preview, Collections.emptyMap(), dim, pos, repeatCount, inferMode, baseItem, targetOutput);
+    }
+
     public void encode(FriendlyByteBuf buf) {
         buf.writeResourceLocation(recipeId);
         buf.writeBoolean(preview);
@@ -189,12 +221,21 @@ public final class GenericCraftPacket {
         buf.writeBoolean(inferMode);
         buf.writeBoolean(baseItem != null);
         if (baseItem != null) buf.writeItem(baseItem);
+        buf.writeBoolean(targetOutput != null);
+        if (targetOutput != null) buf.writeItem(targetOutput);
     }
 
     public static GenericCraftPacket decode(FriendlyByteBuf buf) {
         ResourceLocation recipeId = buf.readResourceLocation();
         boolean preview = buf.readBoolean();
-        int forcedCount = Math.min(buf.readVarInt(), 128);
+        int forcedCount = buf.readVarInt();
+        // Reject rather than truncate: silently capping the loop at 128 would
+        // leave the remaining declared pairs in the buffer, desyncing every
+        // subsequent read (dim/pos) for a malicious or corrupt packet.
+        if (forcedCount < 0 || forcedCount > 128) {
+            throw new io.netty.handler.codec.DecoderException(
+                    "GenericCraftPacket forcedCount out of range: " + forcedCount);
+        }
         Map<String, String> forced = new HashMap<>();
         for (int i = 0; i < forcedCount; i++) {
             String key = buf.readUtf();
@@ -218,7 +259,13 @@ public final class GenericCraftPacket {
         int repeatCount = Math.max(1, Math.min(buf.readVarInt(), RSIntegrationConfig.REPEAT_COUNT_MAX.get()));
         boolean inferMode = buf.readBoolean();
         ItemStack baseItem = buf.readBoolean() ? buf.readItem() : null;
-        return new GenericCraftPacket(recipeId, preview, forced, dim, pos, repeatCount, inferMode, baseItem);
+        // targetOutput appended at tail; guard readability so a shorter buffer
+        // from an older client decodes cleanly to null instead of throwing.
+        ItemStack targetOutput = null;
+        if (buf.isReadable() && buf.readBoolean()) {
+            targetOutput = buf.readItem();
+        }
+        return new GenericCraftPacket(recipeId, preview, forced, dim, pos, repeatCount, inferMode, baseItem, targetOutput);
     }
 
     public static void handle(GenericCraftPacket packet, Supplier<NetworkEvent.Context> contextSupplier) {
@@ -252,7 +299,8 @@ public final class GenericCraftPacket {
         }
         if (packet.preview) {
             String cacheKey = player.getUUID() + ":" + packet.recipeId + ":"
-                    + packet.forcedRecipes.hashCode() + ":" + packet.repeatCount;
+                    + packet.forcedRecipes.hashCode() + ":" + packet.repeatCount + ":"
+                    + clickedOutputCacheToken(packet.targetOutput);
             CachedPlan cached = PLAN_CACHE.get(cacheKey);
             if (cached != null && System.nanoTime() - cached.createdNanos < PLAN_CACHE_TTL_NANOS) {
                 RSIntegrationMod.LOGGER.warn("[RSI-Generic] handle() CACHE HIT: replying with cached plan, recipeId={} player={} ageMs={}",
@@ -272,11 +320,11 @@ public final class GenericCraftPacket {
                 if (packet.preview) {
                     RSIntegrationMod.LOGGER.debug("[RSI-Generic] handle() → tryBuildPlan: recipeId={}", packet.recipeId);
                     tryBuildPlan(player, packet.recipeId, packet.forcedRecipes,
-                            packet.dim, packet.pos, packet.repeatCount, packet.baseItem);
+                            packet.dim, packet.pos, packet.repeatCount, packet.baseItem, packet.targetOutput);
                 } else {
                     RSIntegrationMod.LOGGER.debug("[RSI-Generic] handle() → tryResolve: recipeId={} forced={}", packet.recipeId, packet.forcedRecipes.size());
                     tryResolve(player, packet.recipeId, packet.forcedRecipes, packet.dim, packet.pos,
-                            packet.repeatCount, packet.inferMode, packet.baseItem);
+                            packet.repeatCount, packet.inferMode, packet.baseItem, packet.targetOutput);
                 }
             } catch (Throwable e) {
                 RSIntegrationMod.LOGGER.error("[RSI-Generic] Failed for {}:", packet.recipeId, e);
@@ -385,7 +433,8 @@ public final class GenericCraftPacket {
                                           Map<String, String> forcedRecipes,
                                           @Nullable ResourceLocation dim,
                                           @Nullable net.minecraft.core.BlockPos pos,
-                                          boolean inferMode, @Nullable ItemStack baseItem) {
+                                          boolean inferMode, @Nullable ItemStack baseItem,
+                                          @Nullable ItemStack targetOutput) {
         // Amplify mod-step executions by repeatCount so a single chain covers
         // all repeats and the parallel multi-machine path can trigger inside
         // AsyncCraftChain.startModStep.
@@ -402,7 +451,8 @@ public final class GenericCraftPacket {
                     if (s.modType() != ModType.GENERIC) {
                         amplifiedList.add(new ResolutionStep(s.recipeId(), s.modType(), s.recipeTypeId(),
                                 s.alternativeIds(), s.alternativeModTypes(), s.inferMode(),
-                                CraftPacketUtils.mulCount(s.executions(), repeatCount)));
+                                CraftPacketUtils.mulCount(s.executions(), repeatCount),
+                                s.syntheticInput(), s.syntheticOutput()));
                     } else {
                         amplifiedList.add(s);
                     }
@@ -412,6 +462,7 @@ public final class GenericCraftPacket {
             }
         }
         AsyncCraftChain chain = new AsyncCraftChain(player.getUUID(), player.getServer(), network, chainSteps);
+        chain.setTargetOutput(targetOutput);
         final UUID capturedUuid = player.getUUID();
         final var capturedServer = player.getServer();
         AsyncCraftManager.getInstance().submit(chain);
@@ -424,7 +475,7 @@ public final class GenericCraftPacket {
             AsyncCraftManager.getInstance().remove(chain);
             ChainRepeatController.scheduleNext(
                     chain, capturedServer, capturedUuid, effectiveRepeat, chain.getMachineCount(),
-                    (p, rem) -> tryResolve(p, recipeId, forcedRecipes, dim, pos, rem, inferMode, baseItem));
+                    (p, rem) -> tryResolve(p, recipeId, forcedRecipes, dim, pos, rem, inferMode, baseItem, targetOutput));
         });
         player.sendSystemMessage(
                 TextBuilder.translate("rsi.async.chain_started", chainSteps.size()).build());
@@ -450,7 +501,8 @@ public final class GenericCraftPacket {
                                    @Nullable ResourceLocation dim,
                                    @Nullable net.minecraft.core.BlockPos pos,
                                    int repeatCount, boolean inferMode,
-                                   @Nullable ItemStack baseItem) {
+                                   @Nullable ItemStack baseItem,
+                                   @Nullable ItemStack targetOutput) {
         // v3.4: convert forced recipe overrides for the resolver (same format as tryBuildPlan).
         Map<ResourceLocation, ResourceLocation> forcedOverrides = null;
         if (!forcedRecipes.isEmpty()) {
@@ -548,7 +600,7 @@ public final class GenericCraftPacket {
                 }
                 // Append the mod recipe itself as the final multi-block step
                 modSteps.add(new ResolutionStep(recipeId, modType, recipeId, inferMode));
-                launchAsyncChain(player, modSteps, network, repeatCount, recipeId, forcedRecipes, dim, pos, inferMode, baseItem);
+                launchAsyncChain(player, modSteps, network, repeatCount, recipeId, forcedRecipes, dim, pos, inferMode, baseItem, targetOutput);
                 return;
             }
         }
@@ -561,11 +613,12 @@ public final class GenericCraftPacket {
                 RSIntegrationMod.LOGGER.debug("[RSI-Generic] resolveIntermediateSteps returned null/empty for {}, falling through", recipeId);
             }
             if (allSteps != null && !allSteps.isEmpty()) {
-                if (allSteps.stream().anyMatch(s -> s.modType() != ModType.GENERIC)) {
+                if (allSteps.stream().anyMatch(s -> s.modType() != ModType.GENERIC
+                        || s.recipeId().equals(CraftingResolver.TAINT_EARTH_HEART_STEP))) {
                     // Multi-block intermediates → async chain
                     allSteps.add(new ResolutionStep(recipeId, ModType.GENERIC,
                             new ResourceLocation("minecraft:crafting")));
-                    launchAsyncChain(player, allSteps, network, repeatCount, recipeId, forcedRecipes, dim, pos, inferMode, baseItem);
+                    launchAsyncChain(player, allSteps, network, repeatCount, recipeId, forcedRecipes, dim, pos, inferMode, baseItem, targetOutput);
                     return;
                 }
                 // All GENERIC steps → execute sync chain
@@ -588,10 +641,11 @@ public final class GenericCraftPacket {
                     cr2.getIngredients(), avail, player.serverLevel(),
                     player, network, missingCheck, forcedOverrides);
             if (planSteps != null && !planSteps.isEmpty() && missingCheck.isEmpty()) {
-                if (planSteps.stream().anyMatch(s -> s.modType() != ModType.GENERIC)) {
+                if (planSteps.stream().anyMatch(s -> s.modType() != ModType.GENERIC
+                        || s.recipeId().equals(CraftingResolver.TAINT_EARTH_HEART_STEP))) {
                     planSteps.add(new ResolutionStep(recipeId, ModType.GENERIC,
                             new ResourceLocation("minecraft:crafting")));
-                    launchAsyncChain(player, planSteps, network, repeatCount, recipeId, forcedRecipes, dim, pos, inferMode, baseItem);
+                    launchAsyncChain(player, planSteps, network, repeatCount, recipeId, forcedRecipes, dim, pos, inferMode, baseItem, targetOutput);
                     return;
                 }
                 List<ResolutionStep> execSteps2 = new ArrayList<>(planSteps);
@@ -697,9 +751,28 @@ public final class GenericCraftPacket {
                 // bare template that silently discards all stored data.
                 ItemStack result;
                 if (recipe instanceof CraftingRecipe cr) {
-                    ItemStack[] consumed = new ItemStack[allExtracted.size()];
-                    for (int i = 0; i < allExtracted.size(); i++) {
-                        consumed[i] = allExtracted.get(i);
+                    // Reconstruct the actual crafting grid layout from the
+                    // extracted pool — allExtracted is grouped/deduped, not
+                    // slot-aligned. Build a pool copy and split(1) from it so
+                    // the 3×3 / 2×2 container matches the recipe pattern.
+                    List<ItemStack> pool = new ArrayList<>();
+                    for (ItemStack s : allExtracted) pool.add(s.copy());
+
+                    List<Ingredient> ingredients = cr.getIngredients();
+                    ItemStack[] consumed = new ItemStack[ingredients.size()];
+                    for (int i = 0; i < ingredients.size(); i++) {
+                        Ingredient ing = ingredients.get(i);
+                        if (ing.isEmpty()) {
+                            consumed[i] = ItemStack.EMPTY;
+                            continue;
+                        }
+                        consumed[i] = ItemStack.EMPTY;
+                        for (ItemStack p : pool) {
+                            if (!p.isEmpty() && ing.test(p)) {
+                                consumed[i] = p.split(1);
+                                break;
+                            }
+                        }
                     }
                     result = CraftPacketUtils.assembleCraftingOutput(cr, consumed, player);
                 } else {
@@ -834,12 +907,28 @@ public final class GenericCraftPacket {
 
     // ── preview: build plan and send to client ───────────────────
 
+    /**
+     * Cache-discriminator for the JEI-clicked output stack. The Arcane Iterator's
+     * per-level enchant recipes all share one recipeId but produce different books
+     * (Curse III vs V), so the clicked output's item+NBT must enter the plan cache
+     * key — otherwise previewing V then III returns the stale V tree. Item-only
+     * outputs collapse to "0" so non-WR recipes keep their prior cache behavior.
+     */
+    private static String clickedOutputCacheToken(@Nullable ItemStack clicked) {
+        if (clicked == null || clicked.isEmpty()) return "0";
+        String key = net.minecraft.core.registries.BuiltInRegistries.ITEM
+                .getKey(clicked.getItem()).toString();
+        CompoundTag tag = clicked.getTag();
+        return tag != null ? key + "#" + tag : key;
+    }
+
     private static void tryBuildPlan(ServerPlayer player, ResourceLocation recipeId,
                                       Map<String, String> forcedRecipes,
                                       @Nullable ResourceLocation dim,
                                       @Nullable net.minecraft.core.BlockPos pos,
                                       int repeatCount,
-                                      @Nullable ItemStack baseItem) {
+                                      @Nullable ItemStack baseItem,
+                                      @Nullable ItemStack clickedOutput) {
         Recipe<?> recipe = resolveRecipe(player.serverLevel(), recipeId);
         if (recipe == null) {
             sendPlanError(player, Component.translatable("rsi.generic.error.recipe_not_found", recipeId.toString()).getString());
@@ -865,6 +954,16 @@ public final class GenericCraftPacket {
         List<Ingredient> recipeIngredients;
         ItemStack targetOutput;
         ModType recipeModType = null;
+
+        // Arcane Iterator per-level chain: when the player clicks a level-N enchant
+        // book (N>=2), the machine reaches it by leveling a book one step per craft
+        // (plain → I → ... → N). levelBooks[k] holds the book at level k+1; a non-null
+        // array here drives the target-step block to emit N chained PlanSteps so the
+        // plan tree shows the full leveling chain. Null for every other recipe.
+        ItemStack[] levelBooks = null;
+        // Highest matching intermediate book already present in RS/player storage.
+        // Zero means the chain must start from a plain book.
+        int iteratorStartLevel = 0;
 
         // Un-expanded ingredients for PlanStep display (avoids 64× icon spam).
         List<Ingredient> displayIngredients;
@@ -988,6 +1087,36 @@ public final class GenericCraftPacket {
             }
         }
 
+        // ── Arcane Iterator per-level chain detection ──
+        // All levels of one enchant share this recipeId and declare no static output,
+        // so tryGetResultItem above returned the level-I book. If the player clicked a
+        // higher level (Curse V), rebuild targetOutput to that level and record the
+        // book at every level 1..N so the target-step block can emit N chained steps
+        // (each level-k book crafted from the level-(k-1) book + one side set). This
+        // makes PlanTreeModel auto-nest the full leveling chain. Guards: WR must be
+        // present (buildEnchantedBookOutput returns EMPTY otherwise), the clicked stack
+        // must resolve to N>=2, and the recipe must actually be an enchant recipe
+        // (arcanum_lens etc. return EMPTY at level 1 → no chain).
+        if (clickedOutput != null && !clickedOutput.isEmpty()
+                && recipe.getClass().getName().endsWith("ArcaneIteratorRecipe")) {
+            int targetLevel = WRRecipeHandler.inferTargetLevel(recipe, clickedOutput);
+            if (targetLevel >= 2) {
+                ItemStack[] books = new ItemStack[targetLevel];
+                boolean ok = true;
+                for (int lvl = 1; lvl <= targetLevel; lvl++) {
+                    ItemStack book = WRRecipeHandler.buildEnchantedBookOutput(recipe, lvl);
+                    if (book.isEmpty()) { ok = false; break; }
+                    books[lvl - 1] = book;
+                }
+                if (ok) {
+                    levelBooks = books;
+                    targetOutput = books[targetLevel - 1].copy();
+                    RSIntegrationMod.LOGGER.debug("[RSI-tryBuildPlan] ArcaneIterator per-level chain: recipeId={} targetLevel={}",
+                            recipeId, targetLevel);
+                }
+            }
+        }
+
         // Convert forced recipe overrides (itemRegKey → recipeId) for the resolver
         Map<ResourceLocation, ResourceLocation> forcedOverrides = null;
         if (!forcedRecipes.isEmpty()) {
@@ -1003,7 +1132,7 @@ public final class GenericCraftPacket {
 
         final String cacheKey = player.getUUID() + ":" + recipeId + ":"
                 + (forcedOverrides != null ? forcedOverrides.hashCode() : "0") + ":"
-                + repeatCount;
+                + repeatCount + ":" + clickedOutputCacheToken(clickedOutput);
         CachedPlan cached = PLAN_CACHE.get(cacheKey);
         if (cached != null && System.nanoTime() - cached.createdNanos < PLAN_CACHE_TTL_NANOS) {
             RSIntegrationMod.LOGGER.debug("[RSI-tryBuildPlan] Cache hit: recipeId={}", recipeId);
@@ -1022,6 +1151,25 @@ public final class GenericCraftPacket {
 
         // Build available items map (RS network + player inventory)
         Map<StackKey, Integer> available = MaterialSources.listAllAvailable(player, network);
+
+        // Arcane Iterator plans should start from the highest matching enchanted
+        // book the player already owns, rather than always rebuilding from a plain
+        // book. Use the NBT-aware availability snapshot so a different enchantment
+        // (or a different level) can never satisfy this shortcut.
+        if (levelBooks != null) {
+            for (int lvl = levelBooks.length - 1; lvl >= 1; lvl--) {
+                ItemStack wanted = levelBooks[lvl - 1];
+                int matchingCount = available.entrySet().stream()
+                        .filter(e -> ItemStack.isSameItemSameTags(e.getKey().toStack(), wanted))
+                        .mapToInt(Map.Entry::getValue).sum();
+                if (matchingCount >= repeatCount) {
+                    iteratorStartLevel = lvl;
+                    break;
+                }
+            }
+            RSIntegrationMod.LOGGER.debug("[RSI-tryBuildPlan] ArcaneIterator start level: {}/{}",
+                    iteratorStartLevel, levelBooks.length);
+        }
 
         // Build plan via CraftingResolver
         List<String> missing = new ArrayList<>();
@@ -1120,7 +1268,8 @@ public final class GenericCraftPacket {
 
         List<ResourceLocation> mergedStepIds = new ArrayList<>();
         List<Integer> mergedBatchCounts = new ArrayList<>();
-        Map<ResourceLocation, Integer> mergeIndex = new HashMap<>();
+        List<ResolutionStep> mergedRepresentatives = new ArrayList<>();
+        Map<String, Integer> mergeIndex = new HashMap<>();
         int mergeSrcCount = usedTypedResolver ? resolutionSteps.size() : stepIds.size();
         for (int mi = 0; mi < mergeSrcCount; mi++) {
             ResourceLocation id;
@@ -1133,19 +1282,34 @@ public final class GenericCraftPacket {
                 id = stepIds.get(mi);
                 runs = 1;
             }
-            Integer idx = mergeIndex.get(id);
+            ResolutionStep representative = usedTypedResolver ? resolutionSteps.get(mi) : null;
+            String mergeKey = id.toString();
+            if (representative != null && representative.syntheticInput() != null
+                    && representative.syntheticOutput() != null) {
+                mergeKey += "|" + IngredientKey.of(representative.syntheticInput()).hashCode()
+                        + "|" + IngredientKey.of(representative.syntheticOutput()).hashCode();
+            }
+            Integer idx = mergeIndex.get(mergeKey);
             if (idx != null) {
                 mergedBatchCounts.set(idx, mergedBatchCounts.get(idx) + runs);
             } else {
-                mergeIndex.put(id, mergedStepIds.size());
+                mergeIndex.put(mergeKey, mergedStepIds.size());
                 mergedStepIds.add(id);
                 mergedBatchCounts.add(runs);
+                mergedRepresentatives.add(representative);
             }
         }
 
         for (int si = 0; si < mergedStepIds.size(); si++) {
             ResourceLocation stepId = mergedStepIds.get(si);
             int batches = mergedBatchCounts.get(si);
+            ResolutionStep mergedRs = si < mergedRepresentatives.size() ? mergedRepresentatives.get(si) : null;
+            if (mergedRs != null && mergedRs.syntheticInput() != null && mergedRs.syntheticOutput() != null) {
+                steps.add(new PlanStep(stepId, mergedRs.syntheticOutput().copy(), batches,
+                        List.of(mergedRs.syntheticInput().copy()), Collections.emptyList(), mergedRs.modType(),
+                        0, false, 0, 0, Collections.emptyList(), Collections.emptyList()));
+                continue;
+            }
             Recipe<?> stepRecipe = resolveRecipe(player.serverLevel(), stepId);
             if (stepRecipe == null) {
                 RSIntegrationMod.LOGGER.warn("[RSI-Generic] Plan step recipe not found: {}",
@@ -1234,15 +1398,29 @@ public final class GenericCraftPacket {
                         altIngs = cr.getIngredients();
                     } else {
                         altIngs = CraftPacketUtils.extractIngredients(altRecipe);
-                    }
-                    boolean hasMats = altIngs != null && recipeHasSomeMaterials(altIngs, itemAvailable, recipeIndex);
-                    boolean hasMachine = true;
-                    if (hasMats && altMod != null) {
-                        ModType altType = ModType.byId(altMod);
-                        if (altType != null && altType != ModType.GENERIC) {
-                            hasMachine = AltarBindingRegistry.hasAnyBindingForType(player, altType);
+                        // Fallback: some recipes (e.g. BlastingRecipe) may have
+                        // their ingredients cached as null; retry via specs path.
+                        if (altIngs == null) {
+                            List<IngredientSpec> fallback = CraftPacketUtils.extractIngredientSpecs(altRecipe);
+                            if (fallback != null) {
+                                altIngs = new ArrayList<>();
+                                for (IngredientSpec spec : fallback) {
+                                    if (!spec.isEmpty()) altIngs.add(spec.ingredient());
+                                }
+                            }
                         }
                     }
+                    boolean hasMats = altIngs != null && recipeHasSomeMaterials(altIngs, itemAvailable, recipeIndex);
+                    // Machine gating must match the resolver's own candidate check
+                    // (CandidateEngine.isMachineAvailable → hasBindingForRecipe).
+                    // hasBindingForRecipe re-classifies the recipe, so vanilla
+                    // furnace/blast/smoker/stonecutter recipes — which classifyRecipe
+                    // treats as null/GENERIC — are always available and need no bound
+                    // machine. The old hasAnyBindingForType(vanilla_furnace) check
+                    // wrongly hid those alternatives (e.g. the blast-furnace path for
+                    // refined_beeswax_bar), leaving only the stonecutter step with no
+                    // switch button even though the resolver could use either.
+                    boolean hasMachine = hasMats && AltarBindingRegistry.hasBindingForRecipe(player, altRecipe);
                     RSIntegrationMod.LOGGER.debug("[RSI-OR]   alt {}: ingCount={} hasMaterials={} hasMachine={}",
                             altId, altIngs != null ? altIngs.size() : -1, hasMats, hasMachine);
                     if (hasMats && hasMachine) {
@@ -1406,7 +1584,13 @@ public final class GenericCraftPacket {
                     } else {
                         altIngs = CraftPacketUtils.extractIngredients(e.recipe());
                     }
-                    if (altIngs != null && recipeHasSomeMaterials(altIngs, itemAvailable, recipeIndex)) {
+                    // Gate by machine binding too — same rule the resolver and the
+                    // intermediate-step alternatives use (hasBindingForRecipe: vanilla
+                    // machines are always available, mod machines need a binding). Without
+                    // this the target offered recipes for unbound machines (cooking pot,
+                    // forge ritual, spirit crucible…) that the player can't actually run.
+                    if (altIngs != null && recipeHasSomeMaterials(altIngs, itemAvailable, recipeIndex)
+                            && AltarBindingRegistry.hasBindingForRecipe(player, e.recipe())) {
                         targetAlts.add(e.recipe().getId());
                         targetAltModTypes.add(e.modType().id());
                     }
@@ -1422,9 +1606,37 @@ public final class GenericCraftPacket {
                 modWarnings.addAll(PlanWarnings.collect(recipeModType.id(), player, recipe, dim, pos));
             }
 
+            // Arcane Iterator per-level chain: rewrite the target step's center
+            // input (index 0, the plain book prepended by filterWRCrystal) to the
+            // level-(N-1) book, and snapshot the side materials so the synthesized
+            // lower-level steps below reuse the identical side set.
+            List<ItemStack> iteratorSideDisplays = null;
+            if (levelBooks != null && !targetInputs.isEmpty()) {
+                iteratorSideDisplays = new ArrayList<>();
+                for (int i = 1; i < targetInputs.size(); i++) {
+                    iteratorSideDisplays.add(targetInputs.get(i).copy());
+                }
+                targetInputs.set(0, levelBooks[levelBooks.length - 2].copy());
+            }
+
             steps.add(new PlanStep(recipeId, targetOutput, repeatCount, targetInputs,
                     targetAlts, recipeModType, targetDepth, !targetAlts.isEmpty(),
                     targetW, targetH, targetAltModTypes, Collections.emptyList()));
+
+            // Emit only the still-required levels. If a matching level-S book is
+            // already available, it is a leaf input and the chain begins at S+1;
+            // otherwise S=0 and level I starts from a plain book.
+            if (levelBooks != null && iteratorSideDisplays != null) {
+                for (int k = levelBooks.length - 1; k > iteratorStartLevel; k--) {
+                    List<ItemStack> lvlInputs = new ArrayList<>();
+                    lvlInputs.add(k >= 2 ? levelBooks[k - 2].copy() : new ItemStack(Items.BOOK));
+                    for (ItemStack side : iteratorSideDisplays) lvlInputs.add(side.copy());
+                    steps.add(new PlanStep(recipeId, levelBooks[k - 1].copy(), repeatCount,
+                            lvlInputs, Collections.emptyList(), recipeModType,
+                            targetDepth + (levelBooks.length - k), false,
+                            0, 0, Collections.emptyList(), Collections.emptyList()));
+                }
+            }
 
             if (RSIntegrationMod.LOGGER.isDebugEnabled()) {
                 StringBuilder sb = new StringBuilder("[RSI-Generic] Target step: ")
@@ -1527,7 +1739,7 @@ public final class GenericCraftPacket {
                 recipeModType != null ? recipeModType.id() : null,
                 itemAvailable, itemSource, neededCounts, repeatCount);
 
-        Map<Item, PlanResponse.Availability> materials = new LinkedHashMap<>();
+        Map<IngredientKey, PlanResponse.Availability> materials = new LinkedHashMap<>();
         // Track tag-based ingredient groups so multiple slots of the same tag
         // (e.g. "2 × #logs") get merged into a single material entry instead of
         // showing separate per-item entries with double-counted availability.
@@ -1548,7 +1760,7 @@ public final class GenericCraftPacket {
                     totalNeeded += Math.max(0, neededCounts.getOrDefault(optItem, 0));
                     totalHave += itemAvailable.getOrDefault(optItem, 0);
                 }
-                materials.put(displayItem, new PlanResponse.Availability(totalNeeded, totalHave));
+                materials.put(IngredientKey.of(new ItemStack(displayItem)), new PlanResponse.Availability(totalNeeded, totalHave));
             } else {
                 // NBT-strict ingredients (e.g. a charged Totem of Souls declared
                 // as .withTag({Souls:80000})) must count only stored items that
@@ -1558,7 +1770,11 @@ public final class GenericCraftPacket {
                 int have = (source != null && isNbtStrict(source))
                         ? countNbtMatching(source, available)
                         : itemAvailable.getOrDefault(displayItem, 0);
-                materials.put(displayItem, new PlanResponse.Availability(needed, have));
+                ItemStack materialDisplay = new ItemStack(displayItem);
+                if (source != null && isNbtStrict(source) && source.getItems().length > 0) {
+                    materialDisplay = source.getItems()[0].copyWithCount(1);
+                }
+                materials.put(IngredientKey.of(materialDisplay), new PlanResponse.Availability(needed, have));
             }
         }
 
@@ -1567,11 +1783,11 @@ public final class GenericCraftPacket {
         // Overproduction from integer batch rounding — items produced beyond what
         // the plan consumes surface as negative neededCounts. The target output is
         // intentionally negative (it's the goal, not surplus) so it's excluded.
-        Map<Item, Integer> leftovers = new LinkedHashMap<>();
+        Map<IngredientKey, Integer> leftovers = new LinkedHashMap<>();
         for (var entry : neededCounts.entrySet()) {
             if (entry.getValue() >= 0) continue;
             if (entry.getKey() == targetOutput.getItem()) continue;
-            leftovers.put(entry.getKey(), -entry.getValue());
+            leftovers.put(IngredientKey.of(new ItemStack(entry.getKey())), -entry.getValue());
         }
 
         // 总需求条 = 树显示的毛需求（从零开始，忽略库存与 resolver 批次封顶）。上面的 neededCounts
@@ -1581,13 +1797,30 @@ public final class GenericCraftPacket {
         PlanResponse treeSource = new PlanResponse(true, "", targetOutput, steps,
                 Collections.emptyMap(), Collections.emptyList(), "",
                 null, null, 0, 0, 0, Collections.emptyList(), repeatCount);
-        Map<Item, Integer> grossDemand = PlanTreeModel.grossDemandByItem(PlanTreeModel.from(treeSource));
-        materials.replaceAll((item, avail) -> {
-            Integer gross = grossDemand.get(item);
-            return (gross != null && gross > 0)
-                    ? new PlanResponse.Availability(gross, avail.available())
-                    : avail;
-        });
+        Map<IngredientKey, Integer> grossDemand = PlanTreeModel.grossDemandByKey(PlanTreeModel.from(treeSource));
+        // Re-key the UI material bill from the NBT-aware tree, not merely replace
+        // counts on the old Item-keyed entries. This is what preserves an existing
+        // level-IV enchanted book as the leaf material for a level-V target.
+        Map<IngredientKey, PlanResponse.Availability> displayMaterials = new LinkedHashMap<>();
+        for (Map.Entry<IngredientKey, Integer> entry : grossDemand.entrySet()) {
+            IngredientKey key = entry.getKey();
+            ItemStack display = key.stack(1);
+            int have;
+            if (display.hasTag()) {
+                have = available.entrySet().stream()
+                        .filter(e -> ItemStack.isSameItemSameTags(e.getKey().toStack(), display))
+                        .mapToInt(Map.Entry::getValue).sum();
+            } else {
+                have = itemAvailable.getOrDefault(key.item(), 0);
+            }
+            displayMaterials.put(key, new PlanResponse.Availability(entry.getValue(), have));
+        }
+        // Keep non-tree requirements injected by machine integrations (fuel,
+        // catalysts, etc.); tree identities take precedence for recipe inputs.
+        for (Map.Entry<IngredientKey, PlanResponse.Availability> entry : materials.entrySet()) {
+            displayMaterials.putIfAbsent(entry.getKey(), entry.getValue());
+        }
+        materials = displayMaterials;
 
         if (RSIntegrationMod.LOGGER.isDebugEnabled()) {
             long shortageCount = materials.values().stream().filter(a -> !a.isEnough()).count();
@@ -1625,9 +1858,9 @@ public final class GenericCraftPacket {
                             Ingredient aspectIng = aspects.get(ci);
                             for (ItemStack opt : aspectIng.getItems()) {
                                 if (opt.isEmpty()) continue;
-                                Item key = opt.getItem();
+                                IngredientKey key = IngredientKey.of(opt);
                                 materials.merge(key,
-                                        new PlanResponse.Availability(1, itemAvailable.getOrDefault(key, 0)),
+                                        new PlanResponse.Availability(1, itemAvailable.getOrDefault(key.item(), 0)),
                                         (old, neu) -> new PlanResponse.Availability(
                                                 old.needed(), Math.max(old.available(), neu.available())));
                             }
@@ -1654,6 +1887,11 @@ public final class GenericCraftPacket {
 
         // v3.4 availability passport: collect modTypes the player has bound machines for.
         Set<String> boundMachineTypes = new java.util.LinkedHashSet<>();
+        // Vanilla furnace/blast/smoker/stonecutter recipes (all classified as
+        // vanilla_furnace, classifyRecipe → null) need no bound machine — they're
+        // always usable. Seed the passport so their alternatives render as normal
+        // selectable badges instead of grayed/locked in the tree dropdown.
+        boundMachineTypes.add("vanilla_furnace");
         for (ModType mt : ModType.values()) {
             if (AltarBindingRegistry.hasAnyBindingForType(player, mt)) {
                 boundMachineTypes.add(mt.id());
@@ -1684,7 +1922,8 @@ public final class GenericCraftPacket {
                 executionMachineSupportsGui,
                 baseItem,
                 boundMachineTypes,
-                leftovers
+                leftovers,
+                clickedOutput
         );
 
         PLAN_CACHE.put(cacheKey, new CachedPlan(plan, System.nanoTime()));
@@ -1726,7 +1965,7 @@ public final class GenericCraftPacket {
     private static int countNbtMatching(Ingredient ingredient, Map<StackKey, Integer> available) {
         int total = 0;
         for (var e : available.entrySet()) {
-            if (ingredient.test(e.getKey().toStack())) total += e.getValue();
+            if (com.huanghuang.rsintegration.crafting.IngredientMatcher.test(ingredient, e.getKey().toStack())) total += e.getValue();
         }
         return total;
     }

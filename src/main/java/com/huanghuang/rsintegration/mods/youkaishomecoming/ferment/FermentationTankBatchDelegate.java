@@ -306,16 +306,20 @@ public final class FermentationTankBatchDelegate extends AbstractBatchDelegate {
         if (handler != null) {
             for (int i = 0; i < handler.getContainerSize(); i++) {
                 ItemStack s = handler.getItem(i);
-                if (!s.isEmpty()) {
+                if (s.isEmpty()) continue;
+                // collectResult can only return ONE stack. Only remove a slot's
+                // items when we can actually deliver them: as the primary (first
+                // non-empty) or merged with an already-collected same-type stack.
+                // A DIFFERENT item type is left in the machine (not removed) so it
+                // is never physically destroyed — the player can retrieve it.
+                if (collected.isEmpty()) {
                     ItemStack extracted = handler.removeItem(i, s.getCount());
-                    if (!extracted.isEmpty()) {
-                        if (collected.isEmpty()) {
-                            collected = extracted;
-                        } else if (ItemStack.isSameItemSameTags(collected, extracted)) {
-                            collected.grow(extracted.getCount());
-                        }
-                    }
+                    if (!extracted.isEmpty()) collected = extracted;
+                } else if (ItemStack.isSameItemSameTags(collected, s)) {
+                    ItemStack extracted = handler.removeItem(i, s.getCount());
+                    if (!extracted.isEmpty()) collected.grow(extracted.getCount());
                 }
+                // else: leave the differing stack in the slot (do not remove).
             }
             notifyTile(be);
         }

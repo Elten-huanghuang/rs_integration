@@ -7,8 +7,10 @@ import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.reflection.probes.WRReflection;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.crafting.MaterialSources;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
+import com.huanghuang.rsintegration.recipe.WRRecipeHandler;
 import com.huanghuang.rsintegration.util.Reflect;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
@@ -74,6 +76,25 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
     private static final int MAX_WAIT_TICKS = 7200;
     private static final int STALL_THRESHOLD = 100; // 5 seconds
 
+    // ── Arcane Iterator per-level scheduler ──
+    // The iterator enchants the center-pedestal book +1 per machine run and
+    // re-places it on the center (NOT consumed), so reaching level N from a plain
+    // book takes N runs, each consuming one fresh side-material set + Wissen. We
+    // grind lazily: run once, then on completion re-supply the next side set and
+    // re-trigger, repeating until the target level is reached or materials/Wissen
+    // run out (graceful degradation — stop and collect the book achieved so far,
+    // never an error, never item loss). Verified against WR 0.2.9 bytecode:
+    // tick() reads getMainPedestal().m_8020_(0), enchant()s it +1, and writes it
+    // back via m_6836_(0, book); side pedestals are emptied one set per run.
+    private int iteratorTargetLevel = 1;
+    private int iteratorCompletedRuns;
+    private List<Ingredient> iteratorSideIngredients;
+    // Snapshot of the center-pedestal book captured just before each machine
+    // run is triggered. After the run we compare it to the current center book:
+    // if unchanged, the machine couldn't enchant further (e.g. target exceeds the
+    // enchantment's max level) → stop instead of wasting more side-material sets.
+    private ItemStack iteratorCenterBefore = ItemStack.EMPTY;
+
     @Override
     public boolean validateAndInit(ServerPlayer player, ResourceLocation recipeId,
                                    @Nullable ResourceLocation dim, BlockPos pos) {
@@ -93,6 +114,9 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         this.filledPedestals = null;
         this.placedInputs = null;
         this.placedPedestalItems = null;
+        this.iteratorTargetLevel = 1;
+        this.iteratorCompletedRuns = 0;
+        this.iteratorSideIngredients = null;
 
         ServerLevel level = CraftPacketUtils.resolveLevel(player.server, dim, player);
         if (level == null) {
@@ -553,7 +577,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
             syncBlockEntity(be);
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] wissenWandFunction invoke failed, rolling back", e);
-            clearFilledSlots();
+            clearFilledSlots(!usingSharedLedger);
 
             return false;
         }
@@ -572,11 +596,53 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         this.pedestalRefs = pedestals;
 
         if (pedestals.size() < ingredients.size()) return false;
+        if (ingredients.isEmpty()) return false;
 
-        // Phase 1: reserve all ingredients
+        // Determine the enchant level the player clicked. Levels I/II/III share
+        // one recipe id and declare no static output, so the level is inferred by
+        // matching the clicked output (captured as targetOutput) against books
+        // built at each candidate level. Non-enchant iterator recipes (e.g.
+        // arcanum_lens) infer level 1 → a single run, unchanged behavior.
+        // Reaching level N from a plain book requires N sequential machine runs
+        // (each +1 the center book, consuming one side-material set + Wissen);
+        // we grind them lazily via the poll loop (see supplyNextIteratorLevel /
+        // isMachineCraftFinished ARCANE_ITERATOR). Verified vs WR 0.2.9 bytecode.
+        this.iteratorTargetLevel = WRRecipeHandler.inferTargetLevel(recipe, getTargetOutput());
+        this.iteratorCompletedRuns = 0;
+
+        // Prefer the highest exact-NBT intermediate book already available. This
+        // turns (for example) an existing Curse IV + target V into one machine run
+        // instead of rebuilding I..IV. Search both RS and the same player/backpack
+        // sources ExtractionLedger can consume, then replace the synthetic plain-
+        // book requirement with that exact book ingredient.
+        List<Ingredient> effectiveIngredients = new ArrayList<>(ingredients);
+        if (iteratorTargetLevel >= 2 && !effectiveIngredients.isEmpty()) {
+            var available = MaterialSources.listAllAvailable(player, network);
+            for (int lvl = iteratorTargetLevel - 1; lvl >= 1; lvl--) {
+                ItemStack candidate = WRRecipeHandler.buildEnchantedBookOutput(recipe, lvl);
+                if (candidate.isEmpty()) break;
+                boolean present = available.entrySet().stream()
+                        .anyMatch(e -> e.getValue() > 0
+                                && ItemStack.isSameItemSameTags(e.getKey().toStack(), candidate));
+                if (present) {
+                    effectiveIngredients.set(0,
+                            net.minecraftforge.common.crafting.StrictNBTIngredient.of(candidate));
+                    this.iteratorCompletedRuns = lvl;
+                    break;
+                }
+            }
+        }
+        // Side ingredients = everything after the hidden center book (index 0,
+        // prepended by filterWRCrystal). These are re-supplied once per level.
+        this.iteratorSideIngredients = effectiveIngredients.size() > 1
+                ? new ArrayList<>(effectiveIngredients.subList(1, effectiveIngredients.size()))
+                : new ArrayList<>();
+
+        // Phase 1: reserve the selected center book + the first side set into
+        // the private ledger. reserve() does no physical extraction.
         List<ItemStack> templates = new ArrayList<>();
-        for (int i = 0; i < ingredients.size(); i++) {
-            Ingredient ing = ingredients.get(i);
+        for (int i = 0; i < effectiveIngredients.size(); i++) {
+            Ingredient ing = effectiveIngredients.get(i);
             if (ing.getItems().length == 0) {
                 templates.add(ItemStack.EMPTY);
                 continue;
@@ -586,18 +652,19 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
             templates.add(taken);
         }
 
-        // Phase 2: check wissen before extracting items from RS
+        // Phase 2: Wissen/XP/health gate for the first level.
         if (!checkWissen()) return false;
 
-        // Phase 3: commit
+        // Phase 3: commit (physical extraction of center book + first side set).
         if (!ledger.commit(network, player)) return false;
 
-        // Phase 4: place items
+        // Phase 4: place center book + first side set on their pedestals.
         this.placedPedestalItems = new java.util.HashMap<>();
+        this.filledPedestals = new ArrayList<>();
+        int placed = 0;
         for (int i = 0; i < templates.size(); i++) {
             ItemStack taken = templates.get(i);
-            if (taken.isEmpty()) continue;
-
+            if (taken.isEmpty()) { placed = i + 1; continue; }
             try {
                 Object ped = pedestals.get(i);
                 ItemStack existing = getContainerItem(ped, 0);
@@ -607,28 +674,183 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
                 setContainerItem(ped, 0, taken);
                 filledPedestals.add(ped);
                 placedPedestalItems.put(ped, taken.copy());
+                placed = i + 1;
                 syncBlockEntity(ped);
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] Failed to place item on ArcaneIterator pedestal {}: {}", i, e.getMessage());
-                clearFilledPedestals();
-
+                // Hard abort of the first level: physically recover placed pedestals
+                // + return the still-unplaced (already extracted) templates, then
+                // reset the ledger so its committed entries are not double-refunded.
+                clearFilledPedestals(!usingSharedLedger);
+                for (int k = placed; k < templates.size(); k++) {
+                    if (!templates.get(k).isEmpty()) returnItem(templates.get(k));
+                }
+                ledger.reset();
                 return false;
             }
         }
 
+        // The committed center book + first side set are now physically on the
+        // pedestals. Reset the private ledger to IDLE so (a) it can atomically
+        // extract the NEXT level's side set later and (b) its now-stale committed
+        // entries are never re-refunded — abort recovers items from the pedestals
+        // instead (the plain book "becomes" the output book in-place, so it must
+        // not be refunded separately).
+        ledger.reset();
+
         craftStarted = true;
         iteratorCraftProcessing = false;
+        iteratorCenterBefore = getContainerItem(pedestals.get(0), 0).copy();
         try {
             Reflect.getMethodOrThrow(be.getClass(), "wissenWandFunction", "wissenWandFunction").invoke(be);
             syncBlockEntity(be);
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] wissenWandFunction invoke failed, rolling back", e);
-            clearFilledPedestals();
-
+            clearFilledPedestals(!usingSharedLedger);
             return false;
         }
 
         return true;
+    }
+
+    /**
+     * Extract and place the next level's side-material set, then re-trigger the
+     * machine for another +1 enchant run. Called from the poll loop after a run
+     * completes when the target level has not yet been reached.
+     *
+     * <p>Uses the private ledger purely as a per-level atomic-extraction tool:
+     * reset → reserve → commit → place → reset. On any shortfall the ledger is
+     * reset (reservations are in-memory only, so nothing is half-extracted) and
+     * the method returns false, signalling graceful degradation — the caller
+     * stops and collects the enchant level reached so far. The evolved center
+     * book is always preserved for collection; only side materials are recovered.
+     *
+     * @return true if the next run was started; false on graceful stop.
+     */
+    private boolean supplyNextIteratorLevel() {
+        if (ledger == null || iteratorSideIngredients == null || pedestalRefs == null) return false;
+
+        // Re-fetch pedestals (positional cube scan is stable; reuse cache on miss).
+        List<?> pedestals = pedestalRefs;
+        try {
+            Object refetched = Reflect.getMethodOrThrow(be.getClass(), "getPedestals", "getPedestals").invoke(be);
+            if (refetched instanceof List<?> l && l.size() > iteratorSideIngredients.size()) {
+                pedestals = l;
+                this.pedestalRefs = l;
+            }
+        } catch (Exception e) { /* reuse cached refs */ }
+        if (pedestals.size() <= iteratorSideIngredients.size()) return false;
+
+        // Fresh atomic extraction: private ledger must be IDLE before reserving.
+        if (ledger.state() != ExtractionLedger.State.IDLE) ledger.reset();
+
+        // Wissen/XP/health gate for this level (sends a specific reason on failure).
+        if (!checkWissen()) return false;
+
+        // Reserve one fresh side set. A miss leaves only in-memory reservations
+        // that reset() discards — never a half-held physical set.
+        List<ItemStack> sideTemplates = new ArrayList<>();
+        for (Ingredient ing : iteratorSideIngredients) {
+            if (ing.getItems().length == 0) { sideTemplates.add(ItemStack.EMPTY); continue; }
+            ItemStack taken = CraftPacketUtils.ensureMaterialAvailable(player, myDim, myPos, ing, 1, ledger);
+            if (taken.isEmpty()) {
+                ledger.reset();
+                return false; // insufficient materials → graceful stop
+            }
+            sideTemplates.add(taken);
+        }
+
+        if (!ledger.commit(network, player)) {
+            return false; // lost an extraction race → graceful stop
+        }
+
+        // Place the side set on side pedestals (indices 1+). Rebuild filledPedestals
+        // as [center, ...placed sides] so abort physically recovers the evolved
+        // center book plus any side items this run hasn't consumed yet.
+        Object centerPed = pedestals.get(0);
+        List<Object> newFilled = new ArrayList<>();
+        newFilled.add(centerPed);
+        this.placedPedestalItems = new java.util.HashMap<>();
+        int placed = 0;
+        for (int i = 0; i < sideTemplates.size(); i++) {
+            ItemStack taken = sideTemplates.get(i);
+            if (taken.isEmpty()) { placed = i + 1; continue; }
+            Object ped = pedestals.get(i + 1);
+            try {
+                ItemStack existing = getContainerItem(ped, 0);
+                if (!existing.isEmpty()) ItemHandlerHelper.giveItemToPlayer(player, existing.copy());
+                setContainerItem(ped, 0, taken);
+                newFilled.add(ped);
+                placedPedestalItems.put(ped, taken.copy());
+                placed = i + 1;
+                syncBlockEntity(ped);
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] Failed to place side material for next iterator level: {}", e.getMessage());
+                // Graceful: recover this level's side items (placed → physical,
+                // unplaced → in-memory), preserve the evolved center book so
+                // collectResult still returns the level reached so far.
+                for (int k = 1; k < newFilled.size(); k++) {
+                    Object sp = newFilled.get(k);
+                    ItemStack s = getContainerItem(sp, 0);
+                    if (!s.isEmpty()) { returnItem(s); setContainerItem(sp, 0, ItemStack.EMPTY); syncBlockEntity(sp); }
+                }
+                for (int k = placed; k < sideTemplates.size(); k++) {
+                    if (!sideTemplates.get(k).isEmpty()) returnItem(sideTemplates.get(k));
+                }
+                ledger.reset();
+                this.filledPedestals = new ArrayList<>();
+                this.filledPedestals.add(centerPed);
+                return false;
+            }
+        }
+        this.filledPedestals = newFilled;
+
+        // Committed side set is now physically on the pedestals; reset ledger so
+        // stale committed entries are never re-refunded (physical recovery on abort).
+        ledger.reset();
+
+        iteratorCraftProcessing = false;
+        iteratorCenterBefore = getContainerItem(centerPed, 0).copy();
+        // Reset stall tracking so the previous run's final progress value can't
+        // trip a false stall on the fresh run (which restarts progress near 0).
+        // Also reset the delegate's per-run timeout window; the chain-level
+        // timeout (MULTIBLOCK_CRAFT_TIMEOUT_SECONDS) remains the global ceiling.
+        lastCraftProgress = -1;
+        stallTicks = 0;
+        waitTicks = 0;
+        try {
+            Reflect.getMethodOrThrow(be.getClass(), "wissenWandFunction", "wissenWandFunction").invoke(be);
+            syncBlockEntity(be);
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] wissenWandFunction re-trigger failed", e);
+            // Recover side items, preserve center book, graceful stop.
+            for (int k = 1; k < newFilled.size(); k++) {
+                Object sp = newFilled.get(k);
+                ItemStack s = getContainerItem(sp, 0);
+                if (!s.isEmpty()) { returnItem(s); setContainerItem(sp, 0, ItemStack.EMPTY); syncBlockEntity(sp); }
+            }
+            this.filledPedestals = new ArrayList<>();
+            this.filledPedestals.add(centerPed);
+            return false;
+        }
+        RSIntegrationMod.LOGGER.debug("[RSI-Batch-WR] ArcaneIterator leveling: started run {} of {}",
+                iteratorCompletedRuns + 1, iteratorTargetLevel);
+        return true;
+    }
+
+    /** Read the current center-pedestal book (index 0 of getPedestals / getMainPedestal). */
+    private ItemStack readIteratorCenterBook() {
+        try {
+            java.lang.reflect.Method getMain = Reflect.findMethod(be.getClass(), "getMainPedestal", new Class<?>[0]);
+            if (getMain != null) {
+                Object mainPed = getMain.invoke(be);
+                if (mainPed != null) return getContainerItem(mainPed, 0);
+            }
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] center book probe failed", e); }
+        if (pedestalRefs != null && !pedestalRefs.isEmpty()) {
+            try { return getContainerItem(pedestalRefs.get(0), 0); } catch (Exception e) { /* ignore */ }
+        }
+        return ItemStack.EMPTY;
     }
 
     private boolean tryStartArcaneWorkbench(ServerPlayer player, List<Ingredient> ingredients) {
@@ -685,7 +907,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
             syncBlockEntity(be);
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] wissenWandFunction invoke failed, rolling back", e);
-            clearFilledSlotsForHandler(itemHandler);
+            clearFilledSlotsForHandler(itemHandler, !usingSharedLedger);
 
             return false;
         }
@@ -776,7 +998,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
                 syncBlockEntity(ped);
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] Failed to place item on crystal pedestal {}: {}", i, e.getMessage());
-                clearFilledPedestals();
+                clearFilledPedestals(!usingSharedLedger);
 
                 return false;
             }
@@ -788,7 +1010,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
             syncBlockEntity(be);
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] Failed to invoke wissenWandFunction on crystal block", e);
-            clearFilledPedestals();
+            clearFilledPedestals(!usingSharedLedger);
 
             return false;
         }
@@ -800,6 +1022,13 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
     @Nullable
     public List<IngredientSpec> getRequiredMaterials() {
         if (recipe == null) return null;
+        // ARCANE_ITERATOR must self-manage extraction: leveled enchant books
+        // require N sequential machine runs (one side-material set + Wissen per
+        // run), and the chain's shared-ledger refundCommitted() would re-refund
+        // already-consumed sets on a level-≥2 abort (duplication). Returning null
+        // routes it to the private-ledger tryStartSingleCraft path where the
+        // per-level scheduler owns extraction and physical-recovery abort.
+        if (machineType == MachineType.ARCANE_ITERATOR) return null;
         List<Ingredient> ingredients = CraftPacketUtils.extractIngredients(recipe);
         if (ingredients == null || ingredients.isEmpty()) return null;
         List<IngredientSpec> specs = new ArrayList<>();
@@ -892,7 +1121,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
             syncBlockEntity(be);
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] wissenWandFunction invoke failed, rolling back", e);
-            clearFilledSlots();
+            clearFilledSlots(!usingSharedLedger);
             return false;
         }
         return true;
@@ -924,7 +1153,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
                 placedPedestalItems.put(ped, stack.copy());
                 syncBlockEntity(ped);
             } catch (Exception e) {
-                clearFilledPedestals();
+                clearFilledPedestals(!usingSharedLedger);
                 return false;
             }
         }
@@ -936,7 +1165,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
             syncBlockEntity(be);
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] wissenWandFunction invoke failed, rolling back", e);
-            clearFilledPedestals();
+            clearFilledPedestals(!usingSharedLedger);
             return false;
         }
         return true;
@@ -977,7 +1206,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
             syncBlockEntity(be);
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] wissenWandFunction invoke failed, rolling back", e);
-            clearFilledSlotsForHandler(itemHandler);
+            clearFilledSlotsForHandler(itemHandler, !usingSharedLedger);
             return false;
         }
         return true;
@@ -1038,7 +1267,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
                 placedPedestalItems.put(ped, stack.copy());
                 syncBlockEntity(ped);
             } catch (Exception e) {
-                clearFilledPedestals();
+                clearFilledPedestals(!usingSharedLedger);
                 return false;
             }
         }
@@ -1048,7 +1277,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
             Reflect.getMethodOrThrow(be.getClass(), "wissenWandFunction", "wissenWandFunction").invoke(be);
             syncBlockEntity(be);
         } catch (Exception e) {
-            clearFilledPedestals();
+            clearFilledPedestals(!usingSharedLedger);
             return false;
         }
         return true;
@@ -1092,21 +1321,22 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
                 return false;
 
             case ARCANE_ITERATOR:
-                // Arcane Iterator reads but does NOT consume input pedestal
-                // items. Output is placed on the main pedestal (index 0).
-                // Detect completion by watching startCraft/wissenInCraft.
+                // Arcane Iterator reads but does NOT consume the center-pedestal
+                // book — it enchants it +1 in place per run. Output = the evolved
+                // center book. To reach the clicked level N we drive N runs,
+                // re-supplying one side-material set + Wissen between each.
                 for (Object ped : filledPedestals) {
                     syncBlockEntity(ped);
                 }
                 if (isIteratorCraftRunning()) {
                     iteratorCraftProcessing = true;
                     // Stall detection: if progress freezes (wissen/XP/health
-                    // exhausted), abort early instead of waiting for timeout.
+                    // exhausted mid-run), stop and collect the level reached.
                     int progress = readIteratorProgress();
                     if (progress == lastCraftProgress) {
                         stallTicks++;
                         if (stallTicks > STALL_THRESHOLD) {
-                            warnOnce("iterator_stalled", "[RSI-Batch-WR] Arcane Iterator craft stalled (progress={}), aborting", progress);
+                            warnOnce("iterator_stalled", "[RSI-Batch-WR] Arcane Iterator craft stalled (progress={}), stopping", progress);
                             return true;
                         }
                     } else {
@@ -1115,10 +1345,36 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
                     }
                     return false;
                 }
-                // Not running. If it was processing, craft just finished.
-                if (iteratorCraftProcessing) return true;
-                // Never saw the craft actually process — wait a few ticks
-                // for wissenWandFunction to propagate, then timeout.
+                // Not running. If a run was in progress, it just finished.
+                if (iteratorCraftProcessing) {
+                    iteratorCompletedRuns++;
+                    // Guard: if the center book didn't change, the machine could
+                    // not enchant further (target exceeds the enchantment's max
+                    // level) → stop and collect what we have.
+                    ItemStack centerNow = readIteratorCenterBook();
+                    boolean advanced = !ItemStack.matches(centerNow, iteratorCenterBefore);
+                    if (!advanced) {
+                        warnOnce("iterator_capped", "[RSI-Batch-WR] Arcane Iterator center book unchanged after run {} — at max level, stopping", iteratorCompletedRuns);
+                        return true;
+                    }
+                    if (iteratorCompletedRuns >= iteratorTargetLevel) {
+                        return true; // reached target level
+                    }
+                    // More levels wanted: re-supply and re-trigger. If materials/
+                    // Wissen run out, supplyNextIteratorLevel returns false →
+                    // gracefully stop and collect the level achieved so far.
+                    if (iteratorTargetLevel >= 2) {
+                        player.sendSystemMessage(Component.translatable(
+                                "rsi.wr.info.iterator_leveling",
+                                iteratorCompletedRuns, iteratorTargetLevel));
+                    }
+                    if (supplyNextIteratorLevel()) {
+                        return false; // next run started; keep polling
+                    }
+                    return true; // graceful stop
+                }
+                // Never saw the run process yet — keep waiting for wissenWandFunction
+                // to propagate; MAX_WAIT_TICKS bounds the wait.
                 return false;
 
             case CRYSTAL_RITUAL:
@@ -1453,23 +1709,29 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     protected void clearMachineState(BlockEntity be, ServerPlayer player) {
-        // WR commits ledger before placement, so items are already
-        // extracted from RS. Always recover actual items from machine
-        // slots/pedestals before clearing.
+        // Abort path. WR commits the ledger BEFORE placement, so items are on
+        // the machine. In the shared-ledger (chain) path the chain's abort()
+        // already refunds them via ledger.refundCommitted() — so we must only
+        // VOID here, not return, or the item is duplicated. In the private-ledger
+        // path (usingSharedLedger=false) nothing else refunds → return.
+        // Read usingSharedLedger before resetState() clears it.
         this.player = player;
-        clearFilledSlots();
-        clearFilledPedestals();
+        boolean refund = !usingSharedLedger;
+        clearFilledSlots(refund);
+        clearFilledPedestals(refund);
         resetState();
         craftStarted = false;
     }
 
     @Override
     public void onBatchFinished(ServerPlayer player) {
-        // Items were consumed by the craft — slots/pedestals should
-        // already be empty. Clear is just a safety measure.
+        // Success path. The chain does ledger.reset() (no refund), so any item
+        // still on the machine is real and uncounted → always return it. Normally
+        // inputs were consumed and the output was already taken by collectResult,
+        // so this is just a safety net for stragglers.
         this.player = player;
-        clearFilledSlots();
-        clearFilledPedestals();
+        clearFilledSlots(true);
+        clearFilledPedestals(true);
         resetState();
         craftStarted = false;
     }
@@ -1480,14 +1742,22 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
     }
 
     //
-    // WR commits the ledger BEFORE placing items (unlike Goety), so
-    // every clear MUST recover the actual items back to RS/player.
-    // Failure to do so loses items that were already extracted from RS.
+    // WR commits the ledger BEFORE placing items (unlike Goety). Whether a
+    // clear must physically RETURN the machine contents to RS, or merely VOID
+    // them, depends on who else refunds the committed ledger:
+    //
+    //   • Success (onBatchFinished): the chain does ledger.reset() (no refund),
+    //     so any item still on the machine is real and uncounted → RETURN it.
+    //   • Abort, shared ledger (usingSharedLedger): the chain's abort() calls
+    //     ledger.refundCommitted(), which re-inserts every committed template.
+    //     Returning here too would DOUBLE-refund (item duplication) → VOID only.
+    //   • Abort, private ledger: nothing else refunds → RETURN it.
+    //
+    // Callers pass refund=true on success and refund=!usingSharedLedger on abort
+    // so the shared-ledger abort path never duplicates.
 
-    /** Recover items from Wissen Crystallizer / Arcane Workbench slots, then clear.
-     * Items are always returned — WR commits ledger BEFORE placement so
-     * every item in a machine slot/pedestal was already extracted from RS. */
-    private void clearFilledSlots() {
+    /** Recover (or void) items from Wissen Crystallizer / Arcane Workbench slots, then clear. */
+    private void clearFilledSlots(boolean refund) {
         if (filledSlotIndices == null) return;
         for (int idx : filledSlotIndices) {
             try {
@@ -1502,7 +1772,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
                         break;
                     }
                 }
-                if (!stack.isEmpty()) returnItem(stack);
+                if (refund && !stack.isEmpty()) returnItem(stack);
                 switch (machineType) {
                     case WISSEN_CRYSTALLIZER:
                         setContainerItem(be, idx, ItemStack.EMPTY);
@@ -1521,7 +1791,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
                 if (outHandler != null) {
                     ItemStack result = outHandler.getStackInSlot(0);
                     if (!result.isEmpty()) {
-                        returnItem(result);
+                        if (refund) returnItem(result);
                         outHandler.setStackInSlot(0, ItemStack.EMPTY);
                     }
                 }
@@ -1535,7 +1805,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
                     if (isInputSlot(i)) continue;
                     ItemStack stack = getContainerItem(be, i);
                     if (!stack.isEmpty()) {
-                        returnItem(stack);
+                        if (refund) returnItem(stack);
                         setContainerItem(be, i, ItemStack.EMPTY);
                     }
                 }
@@ -1543,23 +1813,23 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         }
     }
 
-    private void clearFilledSlotsForHandler(ItemStackHandler handler) {
+    private void clearFilledSlotsForHandler(ItemStackHandler handler, boolean refund) {
         if (filledSlotIndices == null) return;
         for (int idx : filledSlotIndices) {
             try {
                 ItemStack stack = handler.getStackInSlot(idx);
-                if (!stack.isEmpty()) returnItem(stack);
+                if (refund && !stack.isEmpty()) returnItem(stack);
                 handler.setStackInSlot(idx, ItemStack.EMPTY);
             } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
         }
     }
 
-    private void clearFilledPedestals() {
+    private void clearFilledPedestals(boolean refund) {
         if (filledPedestals == null) return;
         for (Object ped : filledPedestals) {
             try {
                 ItemStack stack = getContainerItem(ped, 0);
-                if (!stack.isEmpty()) returnItem(stack);
+                if (refund && !stack.isEmpty()) returnItem(stack);
                 setContainerItem(ped, 0, ItemStack.EMPTY);
                 syncBlockEntity(ped);
             } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }

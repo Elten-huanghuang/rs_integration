@@ -69,6 +69,10 @@ public final class PlanWarnings {
             case ModIds.CROCKPOT:
                 warnings.addAll(CrockPotBatchDelegate.getPlanWarnings(player, recipe, dim, pos));
                 break;
+            case ModIds.ID_FR_KETTLE:
+                warnings.addAll(com.huanghuang.rsintegration.mods.farmersrespite.kettle.FRKettleBatchDelegate
+                        .getPlanWarnings(player, recipe, dim, pos));
+                break;
             case ModIds.FARMINGFORBLOCKHEADS:
                 warnings.addAll(MarketBatchDelegate.getPlanWarnings(player, recipe, dim, pos));
                 break;

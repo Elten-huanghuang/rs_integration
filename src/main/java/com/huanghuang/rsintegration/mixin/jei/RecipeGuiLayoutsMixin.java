@@ -251,7 +251,19 @@ public class RecipeGuiLayoutsMixin {
             } else if (isSmithingFilter && !faSmithing) {
                 RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] Non-FA smithing filter matched, class={}", recipeClassName);
             }
-            Runnable handler = createHandler(recipe, recipeId, bindingDim, machinePos, filter, faSmithingBase);
+            // WR Arcane Iterator enchant recipes: levels I/II/III share one recipe
+            // id and declare no static output, so the server can't tell which level
+            // the player clicked from the id alone. Capture the OUTPUT ghost slot
+            // (the leveled enchanted book JEI renders) so the server can require the
+            // matching (N-1)-level center book and produce level N.
+            ItemStack wrTargetOutput = null;
+            if (ModIds.WIZARDS_REBORN.equals(recipeId.getNamespace())
+                    && recipeId.getPath().startsWith("arcane_iterator/")) {
+                wrTargetOutput = extractOutputStack(recipeLayout);
+                RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] WR arcane iterator output capture: recipeId={} output={}",
+                        recipeId, wrTargetOutput != null ? wrTargetOutput.getHoverName().getString() : "null");
+            }
+            Runnable handler = createHandler(recipe, recipeId, bindingDim, machinePos, filter, faSmithingBase, wrTargetOutput);
             if (handler == null) continue;
 
             ModType modType = computeModType(recipe);
@@ -931,7 +943,8 @@ public class RecipeGuiLayoutsMixin {
     @Unique
     private static Runnable createHandler(Object recipe, ResourceLocation recipeId,
                                            ResourceLocation dim, BlockPos machinePos, String filter,
-                                           @javax.annotation.Nullable ItemStack faSmithingBase) {
+                                           @javax.annotation.Nullable ItemStack faSmithingBase,
+                                           @javax.annotation.Nullable ItemStack targetOutput) {
         if (filter.equals("generic")) {
             return () -> {
                 GenericCraftPacket pkt;
@@ -976,10 +989,11 @@ public class RecipeGuiLayoutsMixin {
             }
         }
         final ItemStack finalCapturedBase = capturedBase;
+        final ItemStack finalTargetOutput = targetOutput;
         return () -> {
             GenericCraftPacket pkt;
             try {
-                pkt = new GenericCraftPacket(recipeId, true, dim, machinePos, 1, false, finalCapturedBase);
+                pkt = new GenericCraftPacket(recipeId, true, dim, machinePos, 1, false, finalCapturedBase, finalTargetOutput);
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.error("[RSI-JEI] Failed to create GenericCraftPacket: recipeId={} dim={} pos={}", recipeId, dim, machinePos, e);
                 return;
@@ -1000,6 +1014,27 @@ public class RecipeGuiLayoutsMixin {
      *       standard vanilla layout: template(0), <b>base(1)</b>, addition(2).</li>
      * </ul>
      */
+    /**
+     * Extracts the first OUTPUT slot's displayed stack from a JEI recipe layout.
+     * Used to capture NBT-variant outputs that share one recipe id — e.g. WR
+     * arcane iterator enchant recipes render the leveled book ("Curse II") in the
+     * output slot even though the recipe declares no static output.
+     */
+    @Unique
+    private static ItemStack extractOutputStack(IRecipeLayoutDrawable<?> recipeLayout) {
+        try {
+            IRecipeSlotsView slotsView = recipeLayout.getRecipeSlotsView();
+            var outputSlots = slotsView.getSlotViews(RecipeIngredientRole.OUTPUT);
+            for (IRecipeSlotView slot : outputSlots) {
+                ItemStack out = slot.getDisplayedItemStack().orElse(null);
+                if (out != null && !out.isEmpty()) return out.copy();
+            }
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-JEI-Mixin] Failed to extract output stack", e);
+        }
+        return null;
+    }
+
     @Unique
     private static ItemStack extractFaSmithingBaseItem(IRecipeLayoutDrawable<?> recipeLayout) {
         try {

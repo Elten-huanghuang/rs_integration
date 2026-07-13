@@ -398,8 +398,10 @@ public final class RSIntegrationMod {
             }
         });
         MinecraftForge.EVENT_BUS.addListener((PlayerEvent.PlayerLoggedOutEvent e) -> {
-            if (e.getEntity() instanceof ServerPlayer sp)
+            if (e.getEntity() instanceof ServerPlayer sp) {
                 AsyncCraftManager.getInstance().cancelAllForPlayer(sp.getUUID());
+                com.huanghuang.rsintegration.autoeat.AutoEatRateLimiter.onPlayerLogout(sp.getUUID());
+            }
         });
 
         // Cross-dimension: unpin the old dimension's IStorageCache listener
@@ -437,6 +439,10 @@ public final class RSIntegrationMod {
                 net.minecraftforge.common.MinecraftForge.EVENT_BUS.addListener(
                         (net.minecraftforge.client.event.ClientPlayerNetworkEvent.LoggingOut e) ->
                                 com.huanghuang.rsintegration.mods.goety.RSClientAvailabilityCache.clear()));
+        DistExecutor.safeRunWhenOn(Dist.CLIENT, () -> () ->
+                net.minecraftforge.common.MinecraftForge.EVENT_BUS.addListener(
+                        (net.minecraftforge.client.event.ClientPlayerNetworkEvent.LoggingOut e) ->
+                                com.huanghuang.rsintegration.sidepanel.RSSidePanelClient.clearOnLogout()));
 
         // Resonance disk factory — register with RS storage disk registry
         if (RSIntegrationConfig.ENABLE_RS_PASSIVE_EFFECTS.get()) {

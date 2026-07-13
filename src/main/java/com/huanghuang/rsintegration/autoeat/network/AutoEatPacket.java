@@ -34,6 +34,12 @@ public class AutoEatPacket {
         ctx.get().enqueueWork(() -> {
             var sender = ctx.get().getSender();
             if (sender != null && !(sender instanceof net.minecraftforge.common.util.FakePlayer)) {
+                // Throttle: each accepted eat clones the full network storage
+                // list + edibility scan. Dedicated limiter (not the GUI-open one)
+                // so eating never falsely throttles an unrelated GUI open.
+                if (com.huanghuang.rsintegration.autoeat.AutoEatRateLimiter.isRateLimited(sender.getUUID())) {
+                    return;
+                }
                 com.huanghuang.rsintegration.autoeat.AutoEatEngine.execute(sender, packet.mode, packet.selectedItem);
             }
         });
