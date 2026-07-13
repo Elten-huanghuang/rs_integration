@@ -365,6 +365,7 @@ IDLE → RESERVING → RESERVED → COMMITTING → COMMITTED
 | `new ExtractionLedger()` 不用 try-with-resources | 异常路径物品泄漏 | 三类模式（字段级 `close()` / 方法局部 try / 条件共享 `ownsLedger`），见第七节 |
 | 覆写 `isCraftComplete` / `onBatchFailed` 而非钩子 | 丢失区块保护 / 双倍退款 | 只覆写 `isMachineCraftFinished` / `clearMachineState`，模板方法是 `final` |
 | `commit()` 后用 `close()` 而非 `rollback(player)` | 物品静默消失 | `close()` 对 `COMMITTED` 是 no-op；必须显式 `rollback(player)` 才能退还物理物品 |
+| 配方产物是"放置型方块物品"却整块收走 | 玩家的锅/容器被吞进网络（如妖怪归家汤锅） | 判断产物 `BlockItem` 是否为可盛装方块（如 `PotFoodBlock`），盛成其可消耗形态（`asBowls()` → 食物×份数）并把碗计入必需材料，而非收走整块 |
 
 ---
 

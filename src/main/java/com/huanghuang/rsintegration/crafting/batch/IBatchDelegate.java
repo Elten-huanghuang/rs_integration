@@ -86,4 +86,29 @@ public interface IBatchDelegate {
     /** The machine position this delegate is operating on. */
     @Nonnull
     BlockPos getMachinePos();
+
+    /**
+     * The concrete output this craft produces, used by {@code CraftOutputInterceptor}
+     * to recognise the product the instant it drops as a world item entity.
+     * <p>
+     * Non-null only for delegates whose output spawns in the world (altar/crucible
+     * types) and therefore needs protecting from other mods' magnets. Machine-slot
+     * delegates leave this null and opt out of interception. Matching is by item
+     * type only, so a bare recipe result is fine even for dynamic-NBT outputs.
+     */
+    @Nullable
+    default ItemStack getExpectedOutput() {
+        return null;
+    }
+
+    /**
+     * The world box where {@link #getExpectedOutput} is expected to drop. Only
+     * consulted when {@code getExpectedOutput()} is non-null. {@code AbstractBatchDelegate}
+     * defaults it to a tight box around {@link #getMachinePos()}; delegates whose
+     * output spawns at an offset (e.g. above the block) should override.
+     */
+    @Nullable
+    default net.minecraft.world.phys.AABB getOutputCaptureRegion() {
+        return null;
+    }
 }

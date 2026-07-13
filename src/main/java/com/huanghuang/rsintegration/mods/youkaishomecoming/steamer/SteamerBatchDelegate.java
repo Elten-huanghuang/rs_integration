@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.crafting.RecipeIndex;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.reflection.probes.YHKReflection;
 import com.refinedmods.refinedstorage.api.network.INetwork;
@@ -252,7 +253,24 @@ public final class SteamerBatchDelegate extends AbstractBatchDelegate {
         }
 
         craftDone = true;
-        return recipe.getResultItem(myLevel.registryAccess()).copy();
+        // No physical output found and the interceptor captured nothing either.
+        // Do NOT fabricate recipe.getResultItem() — if the real output escaped to
+        // a magnet it is already in the player's inventory, so minting a copy
+        // duplicates it. Return EMPTY; getExpectedOutput() is non-null so the
+        // chain's missing-output path runs abortWithoutRefund (no dupe, no unfair
+        // refund). A genuine vanish becomes item loss — the project's accepted
+        // trade-off (loss >> dupe).
+        return ItemStack.EMPTY;
+    }
+
+    @Override
+    public ItemStack getExpectedOutput() {
+        // Non-null enables the chain's missing-output detection (see collectResult).
+        // Also lets CraftOutputInterceptor match by item type instead of grabbing
+        // any newborn entity in the capture box.
+        if (recipe == null || myLevel == null) return null;
+        ItemStack out = RecipeIndex.tryGetResultItem(recipe, myLevel.registryAccess());
+        return out.isEmpty() ? null : out;
     }
 
     @Override

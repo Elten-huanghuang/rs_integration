@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.crafting.plan;
 
+import com.huanghuang.rsintegration.crafting.tree.IngredientKey;
+
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.util.UIRenderer;
 import net.minecraft.client.gui.Font;
@@ -186,7 +188,7 @@ public final class PlanRenderEngine {
      */
     public int renderMaterialArea(GuiGraphics gfx, int left, int top,
                                    int contentW, int areaHeight,
-                                   Map<Item, PlanResponse.Availability> materials,
+                                   Map<IngredientKey, PlanResponse.Availability> materials,
                                    int mouseX, int mouseY, int scrollOffset,
                                    MaterialTooltipSink tooltipSink) {
         UIRenderer.roundedGradient(gfx, left, top, contentW, areaHeight, 6f,
@@ -242,8 +244,7 @@ public final class PlanRenderEngine {
                 int have = entry.getValue().available();
                 int border = have >= needed ? C_GREEN : (have > 0 ? C_ORANGE : C_RED);
 
-                Item item = entry.getKey();
-                ItemStack stack = new ItemStack(item);
+                ItemStack stack = entry.getKey().stack(1);
                 UIRenderer.slotBg(gfx, cx, cy, SLOT_SIZE, border);
                 gfx.renderItem(stack, cx + 1, cy + 1);
                 gfx.renderItemDecorations(font, stack, cx + 1, cy + 1);

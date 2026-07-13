@@ -111,7 +111,7 @@ public final class ModRecipeHandlers {
      */
     public static ItemStack tryGetResultItem(Recipe<?> recipe, RegistryAccess access) {
         if (recipe instanceof CraftingRecipe cr) {
-            return cr.getResultItem(access);
+            return cr.getResultItem(access).copy();
         }
         ResourceLocation id = recipe.getId();
         if (GLOBAL_EMPTY_CACHE.contains(id)) return ItemStack.EMPTY;
@@ -151,35 +151,31 @@ public final class ModRecipeHandlers {
                         DISPATCH_GUARD.remove();
                     }
                 }
-                // Handler exists and returned EMPTY — don't fall through.
-                // The reflection probe would call getResultItem(RegistryAccess)
-                // which delegates to deprecated 0-arg getResultItem() that many
-                // mods override to return the machine block icon.
+                // Handler exists but returned EMPTY — don't fall through to the
+                // reflection probe (it would hit the deprecated no-arg
+                // getResultItem(); see the probe loop below).
                 return ItemStack.EMPTY;
             }
         }
         Class<?> clazz = recipe.getClass();
 
-        // Check cache
         Method cached = RESULT_METHOD_CACHE.get(clazz);
         if (cached != null) {
             try {
                 Object r = cached.getParameterCount() == 1
                         ? cached.invoke(recipe, access)
                         : cached.invoke(recipe);
-                if (r instanceof ItemStack s && !s.isEmpty()) return s;
+                if (r instanceof ItemStack s && !s.isEmpty()) return s.copy();
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.debug("[RSI-Handler] cached getResultItem failed for {}", clazz.getName(), e);
             }
         }
 
-        // Probe known method names — prefer 1-param (RegistryAccess) overloads
-        // to avoid no-arg getResultItem() that returns a machine block icon.
-        // getResultItem — only try the canonical 1-param overload.  The no-arg
-        // version is deprecated and several mods (WR, Malum) override it to
-        // return a machine block instead of the recipe output.  In 1.20.1 the
-        // 1-param getResultItem(RegistryAccess) always exists on Recipe, so
-        // the no-arg probe is never needed for getResultItem specifically.
+        // Probe known method names, preferring 1-param (RegistryAccess)
+        // overloads.  The deprecated no-arg getResultItem() is skipped entirely:
+        // several mods (WR, Malum) override it to return a machine block icon
+        // instead of the recipe output.  In 1.20.1 getResultItem(RegistryAccess)
+        // always exists on Recipe, so the no-arg probe is never needed for it.
         for (String name : new String[]{"getResultItem", "getResult", "getOutput", "getOutputCopy", "getAssembledItem"}) {
             boolean isResultItem = "getResultItem".equals(name);
             // Try 1-param methods first
@@ -191,14 +187,13 @@ public final class ModRecipeHandlers {
                     Object r = m.invoke(recipe, access);
                     if (r instanceof ItemStack s && !s.isEmpty()) {
                         RESULT_METHOD_CACHE.put(clazz, m);
-                        return s;
+                        return s.copy();
                     }
                 } catch (Exception e) {
                     RSIntegrationMod.LOGGER.debug("[RSI-Handler] probe {} on {} failed", name, clazz.getName(), e);
                 }
             }
-            // Skip no-arg getResultItem() — the deprecated overload that mods
-            // abuse to return machine block icons.
+            // No-arg getResultItem() is the abused overload — skip it (see above).
             if (isResultItem) continue;
             // Fall back to no-arg methods (other method names)
             for (Method m : clazz.getMethods()) {
@@ -209,7 +204,7 @@ public final class ModRecipeHandlers {
                     Object r = m.invoke(recipe);
                     if (r instanceof ItemStack s && !s.isEmpty()) {
                         RESULT_METHOD_CACHE.put(clazz, m);
-                        return s;
+                        return s.copy();
                     }
                 } catch (Exception e) {
                     RSIntegrationMod.LOGGER.debug("[RSI-Handler] probe {} on {} failed", name, clazz.getName(), e);

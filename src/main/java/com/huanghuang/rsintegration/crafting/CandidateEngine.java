@@ -96,19 +96,6 @@ final class CandidateEngine {
                     itemsMs, loopMs, items.length, items.length, byId.size(), firstItems);
         }
 
-        // Phase 2: check output matching for each unique recipe.
-        // Critical ordering: vanilla CraftingRecipe entries are instant
-        // (cr.getResultItem is pre-computed), but mod recipes go through
-        // ModRecipeHandlers.tryGetResultItem() which does reflection and
-        // takes ~1s each.  For Tag ingredients like forge:glass_panes
-        // with 21 variants, 4+ mod glass-pane recipes each take 1s+,
-        // burning the 500ms deadline before the vanilla minecraft:glass_pane
-        // recipe is found.
-        //
-        // Solution: process vanilla (CraftingRecipe) entries first.  If at
-        // least one matches, return immediately — no need to probe mod
-        // recipes for the same output item.  Only fall through to mod
-        // recipes when no vanilla recipe produces this ingredient.
         boolean nbtStrict = ingredient instanceof StrictNBTIngredient;
         boolean ingredientAllNbt = !nbtStrict && allItemsHaveNbt(ingredient);
         Map<ResourceLocation, RecipeIndex.Entry> dedup = new LinkedHashMap<>();
@@ -251,7 +238,12 @@ final class CandidateEngine {
             if (isPreferred(entry, ctx)) {
                 score += PREFERRED_RECIPE_BONUS;
             }
-            if (output.getCount() > 1) {
+            // Only award the output-count bonus when this recipe's ingredients
+            // are actually present — otherwise decompression recipes (block→4 bars)
+            // outscore direct recipes (beeswax_block→1 bar) even when their
+            // input must itself be crafted from the output, creating a circular
+            // dependency that forces the resolver into a sub-optimal path.
+            if (output.getCount() > 1 && allIngredientsAvailable(entry, ctx, matchCache)) {
                 score += cappedOutputBonus(output.getCount());
             }
         }
@@ -281,7 +273,20 @@ final class CandidateEngine {
 
         ItemStack output = recipe.getResultItem(ctx.level.registryAccess());
         if (output.getCount() > 1) {
-            score += cappedOutputBonus(output.getCount());
+            // Gate output bonus behind ingredient availability for the same
+            // reason as the mod-recipe path: avoid over-ranking decompression
+            // recipes when their inputs are themselves craftable only via the
+            // output they produce.
+            boolean allAvail = true;
+            for (Ingredient ing : recipe.getIngredients()) {
+                if (!ing.isEmpty() && cachedCountMatching(ctx, ing, matchCache) <= 0) {
+                    allAvail = false;
+                    break;
+                }
+            }
+            if (allAvail) {
+                score += cappedOutputBonus(output.getCount());
+            }
         }
 
         return score;
@@ -299,6 +304,23 @@ final class CandidateEngine {
      *  bonus smaller than two ingredient-availability checks. */
     private static int cappedOutputBonus(int outputCount) {
         return Math.min((outputCount - 1) * 5, 15);
+    }
+
+    /** Returns true when every non-empty ingredient has at least one matching item available. */
+    private static boolean allIngredientsAvailable(RecipeIndex.Entry entry, ResolutionContext ctx,
+                                                    @javax.annotation.Nullable Map<Ingredient, Integer> matchCache) {
+        if (entry.recipe() instanceof CraftingRecipe cr) {
+            for (Ingredient ing : cr.getIngredients()) {
+                if (!ing.isEmpty() && cachedCountMatching(ctx, ing, matchCache) <= 0) return false;
+            }
+            return true;
+        }
+        List<IngredientSpec> specs = CraftPacketUtils.extractIngredientSpecs(entry.recipe());
+        if (specs == null) return false;
+        for (IngredientSpec spec : specs) {
+            if (!spec.isEmpty() && cachedCountMatching(ctx, spec.ingredient(), matchCache) <= 0) return false;
+        }
+        return true;
     }
 
     /** Count how many distinct ingredients of a recipe have matching items available. */

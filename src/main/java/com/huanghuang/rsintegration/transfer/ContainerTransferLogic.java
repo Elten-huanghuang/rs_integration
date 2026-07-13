@@ -89,7 +89,8 @@ final class ContainerTransferLogic {
             }
 
             int count = stack.getCount();
-            network.getItemStorageTracker().changed(player, stack.copy());
+            var tracker = network.getItemStorageTracker();
+            if (tracker != null) tracker.changed(player, stack.copy());
             ItemStack remaining = network.insertItem(stack.copy(), count, Action.PERFORM);
 
             if (remaining.isEmpty()) {

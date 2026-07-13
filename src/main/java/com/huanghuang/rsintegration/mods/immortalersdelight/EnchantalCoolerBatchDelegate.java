@@ -196,8 +196,55 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
             }
         }
 
+        // Phase 3: Insert container (e.g. bowl/cup) into CONTAINER_SLOT. Like FD's
+        // cooking pot, the cooler only moves the finished meal to the output slot
+        // when the meal's container is satisfied. Bowl/cup foods (maggot_9 etc.)
+        // declare no explicit recipe container, so derive it from the result
+        // item's crafting remainder — without it the meal stays stuck internally
+        // and is never recovered into RS.
+        ItemStack container = getContainerItem(recipe);
+        if (!container.isEmpty() && network != null) {
+            ItemStack existing = itemHandler.getStackInSlot(CONTAINER_SLOT);
+            if (existing.isEmpty()) {
+                ItemStack extracted = network.extractItem(container.copyWithCount(1), 1,
+                        com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                if (!extracted.isEmpty()) {
+                    itemHandler.insertItem(CONTAINER_SLOT, extracted, false);
+                    be.setChanged();
+                }
+            }
+        }
+
         RSIntegrationMod.LOGGER.debug("[RSI-Batch-Cooler] Materials inserted, cooling should start next tick");
         return true;
+    }
+
+    /** The container this recipe's meal needs: explicit recipe container, else
+     *  the result item's crafting remainder (bowl/cup food). EMPTY if none. */
+    private static ItemStack getContainerItem(Recipe<?> recipe) {
+        if (recipe == null) return ItemStack.EMPTY;
+        try {
+            java.lang.reflect.Method m = recipe.getClass().getMethod("getContainer");
+            Object r = m.invoke(recipe);
+            if (r instanceof ItemStack s && !s.isEmpty()) return s;
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-Cooler] getContainer failed", e); }
+        try {
+            java.lang.reflect.Field f = recipe.getClass().getDeclaredField("container");
+            f.setAccessible(true);
+            Object v = f.get(recipe);
+            if (v instanceof ItemStack s && !s.isEmpty()) return s;
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-Cooler] container field failed", e); }
+        // Fallback: meal item's own container (bowl/cup) via crafting remainder.
+        if (recipe instanceof net.minecraft.world.item.crafting.CraftingRecipe) return ItemStack.EMPTY;
+        try {
+            ItemStack result = com.huanghuang.rsintegration.crafting.RecipeIndex
+                    .tryGetResultItem(recipe, null);
+            if (!result.isEmpty() && result.hasCraftingRemainingItem()) {
+                ItemStack rem = result.getCraftingRemainingItem();
+                if (!rem.isEmpty()) return rem;
+            }
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-Cooler] meal-container fallback failed", e); }
+        return ItemStack.EMPTY;
     }
 
     @Override

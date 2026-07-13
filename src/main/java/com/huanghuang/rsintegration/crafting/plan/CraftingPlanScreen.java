@@ -466,7 +466,7 @@ public final class CraftingPlanScreen extends Screen {
         }
         BatchCraftNetworkHandler.CHANNEL.sendToServer(
                 new GenericCraftPacket(rid, preview, forced, execDim, execPos,
-                        repeatCount, inferMode, plan.baseItem()));
+                        repeatCount, inferMode, plan.baseItem(), plan.clickedOutput()));
     }
 
     /** Open JEI for a specific recipe id. No-op when JEI is unavailable. */
@@ -1054,7 +1054,7 @@ public final class CraftingPlanScreen extends Screen {
         }
 
         int avail = 0;
-        PlanResponse.Availability a = plan.materials().get(stack.getItem());
+        PlanResponse.Availability a = plan.availability(stack);
         if (a != null) avail = a.available();
 
         int border = avail >= needed ? C_GREEN : (avail > 0 ? C_ORANGE : C_RED);
@@ -1158,7 +1158,7 @@ public final class CraftingPlanScreen extends Screen {
     private void drawSlot(GuiGraphics gfx, Font font, int x, int y,
                            ItemStack stack, int needed, int displayCount, boolean isInput) {
         int avail = 0;
-        PlanResponse.Availability a = plan.materials().get(stack.getItem());
+        PlanResponse.Availability a = plan.availability(stack);
         if (a != null) avail = a.available();
 
         int border;
@@ -1520,8 +1520,8 @@ public final class CraftingPlanScreen extends Screen {
     private List<StripEntry> buildTotalEntries() {
         List<StripEntry> out = new ArrayList<>(plan.materials().size());
         for (var e : plan.materials().entrySet()) {
-            ItemStack st = new ItemStack(e.getKey());
-            out.add(new StripEntry(st, IngredientKey.of(st), e.getValue().needed(),
+            ItemStack st = e.getKey().stack(1);
+            out.add(new StripEntry(st, e.getKey(), e.getValue().needed(),
                     e.getValue().available(), e.getValue().isEnough()));
         }
         return out;
@@ -1530,8 +1530,8 @@ public final class CraftingPlanScreen extends Screen {
     private List<StripEntry> buildLeftoverEntries() {
         List<StripEntry> out = new ArrayList<>(plan.leftovers().size());
         for (var e : plan.leftovers().entrySet()) {
-            ItemStack st = new ItemStack(e.getKey());
-            out.add(new StripEntry(st, IngredientKey.of(st), e.getValue(), 0, true));
+            ItemStack st = e.getKey().stack(1);
+            out.add(new StripEntry(st, e.getKey(), e.getValue(), 0, true));
         }
         return out;
     }
@@ -1567,7 +1567,7 @@ public final class CraftingPlanScreen extends Screen {
                 hoveredItemForTooltip = e.display();
                 hoveredTooltipX = mouseX;
                 hoveredTooltipY = mouseY;
-                PlanResponse.Availability a = plan.materials().get(e.display().getItem());
+                PlanResponse.Availability a = plan.availability(e.key());
                 hoveredTooltipAvail = a != null ? a.available() : 0;
                 hoveredTooltipNeeded = e.count();
             }
@@ -2209,7 +2209,7 @@ public final class CraftingPlanScreen extends Screen {
         if (step == null || step.inputs().isEmpty()) return C_ACCENT_NEUTRAL;
         for (ItemStack in : step.inputs()) {
             if (in.isEmpty()) continue;
-            PlanResponse.Availability a = plan.materials().get(in.getItem());
+            PlanResponse.Availability a = plan.availability(in);
             int avail = a != null ? a.available() : 0;
             int need = in.getCount() * Math.max(1, batches);
             if (avail < need) return C_ACCENT_MISSING;
