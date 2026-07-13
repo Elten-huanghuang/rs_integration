@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
+import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
@@ -42,7 +43,6 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
     // FURNACE path state
     private AbstractFurnaceBlockEntity furnaceBE;
     private MachineKind kind;
-    private List<ItemStack> fuelStacks; // track fuel for refund decisions
 
     private enum MachineKind {
         FURNACE,
@@ -107,7 +107,6 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         this.pendingResult = ItemStack.EMPTY;
         this.craftDone = false;
         this.furnaceBE = null;
-        this.fuelStacks = null;
 
         ServerLevel level = CraftPacketUtils.resolveLevel(player.server, dim, player);
         if (level == null) {
@@ -253,7 +252,6 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
             this.network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
         }
         this.craftDone = false;
-        this.fuelStacks = null;
 
         if (kind == MachineKind.FURNACE) {
             return tryStartFurnace(player);
@@ -276,7 +274,6 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
             this.network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
         }
         this.craftDone = false;
-        this.fuelStacks = null;
 
         if (kind == MachineKind.FURNACE) {
             return tryStartFurnace(player);
@@ -307,7 +304,6 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
             this.network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
         }
         this.craftDone = false;
-        this.fuelStacks = null;
 
         if (kind == MachineKind.FURNACE) {
             return tryStartFurnaceWithMaterials(materials);
@@ -416,68 +412,53 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         if (!existing.isEmpty()) {
             int singleBurn = ForgeHooks.getBurnTime(existing, recipe.getType());
             if (singleBurn <= 0) return false; // non-fuel item blocking the slot
-            int needed = Math.max(1, (remainingCook + singleBurn - 1) / singleBurn);
+            int needed = VanillaFurnaceFuelPolicy.requiredAmount(remainingCook, singleBurn);
+            int slotLimit = Math.min(existing.getMaxStackSize(), furnaceBE.getMaxStackSize());
+            if (needed > slotLimit) return false;
             if (existing.getCount() >= needed) return true;
             if (network == null) return false; // can't top up — insufficient fuel
             int topUp = needed - existing.getCount();
-            ItemStack extra = network.extractItem(existing.copyWithCount(1), topUp,
-                    com.refinedmods.refinedstorage.api.util.Action.PERFORM);
-            if (extra.getCount() < topUp) {
-                // Not enough fuel available to finish the cook. Refund the partial
-                // extraction and fail cleanly rather than half-fueling and stalling.
-                if (!extra.isEmpty()) {
-                    network.insertItem(extra, extra.getCount(),
-                            com.refinedmods.refinedstorage.api.util.Action.PERFORM);
-                }
-                return false;
-            }
+            ItemStack extra = extractExactFuel(existing, topUp);
+            if (extra.isEmpty()) return false;
             ItemStack merged = existing.copy();
             merged.grow(extra.getCount());
             furnaceBE.setItem(1, merged);
             return true;
         }
 
-        // Slot empty: pick a single fuel type from RS that can cover the whole cook.
-        // Prefer a type with enough units; fall back to the type with the most total
-        // burn coverage so long crafts don't stall on the first (insufficient) type.
+        // Slot empty: apply the shared deterministic policy (configured fuels
+        // first, then other safe fuels, then the best safe partial coverage).
         if (network == null) return false;
-        this.fuelStacks = new ArrayList<>();
-        var stacks = new ArrayList<>(network.getItemStorageCache().getList().getStacks());
-
-        ItemStack bestPartial = ItemStack.EMPTY;
-        int bestPartialCoverage = 0;
-        for (var entry : stacks) {
-            ItemStack candidate = entry.getStack();
-            if (candidate.isEmpty()) continue;
-            int singleBurnTime = ForgeHooks.getBurnTime(candidate, recipe.getType());
-            if (singleBurnTime <= 0) continue;
-            int needed = Math.max(1, (remainingCook + singleBurnTime - 1) / singleBurnTime);
-
-            if (candidate.getCount() >= needed) {
-                if (supplyFuel(player, candidate, needed)) return true;
-            } else {
-                int coverage = candidate.getCount() * singleBurnTime;
-                if (coverage > bestPartialCoverage) {
-                    bestPartialCoverage = coverage;
-                    bestPartial = candidate;
-                }
-            }
+        List<ItemStack> candidates = new ArrayList<>();
+        for (var entry : network.getItemStorageCache().getList().getStacks()) {
+            candidates.add(entry.getStack());
         }
-
-        // No single type fully covers the cook — use the best partial available.
-        return !bestPartial.isEmpty() && supplyFuel(player, bestPartial, bestPartial.getCount());
+        VanillaFurnaceFuelPolicy.Selection selection = VanillaFurnaceFuelPolicy.select(
+                candidates, RSIntegrationConfig.VANILLA_FURNACE_FUEL_PRIORITY.get(),
+                recipe.getType(), remainingCook);
+        return selection != null && supplyFuel(player, selection.fuel(), selection.amount());
     }
 
     /** Extract {@code amount} of {@code fuelType} from RS into the fuel slot. */
     private boolean supplyFuel(ServerPlayer player, ItemStack fuelType, int amount) {
-        ItemStack extracted = network.extractItem(fuelType.copyWithCount(1), amount,
-                com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+        ItemStack extracted = extractExactFuel(fuelType, amount);
         if (extracted.isEmpty()) return false;
-        fuelStacks.add(extracted.copy());
         furnaceBE.setItem(1, extracted.copy());
         player.displayClientMessage(
                 Component.translatable("rsi.vanilla.info.fuel_supplied", extracted.getCount()), true);
         return true;
+    }
+
+    /** Extract exactly the requested count, refunding a concurrent partial result. */
+    private ItemStack extractExactFuel(ItemStack fuelType, int amount) {
+        ItemStack extracted = network.extractItem(fuelType.copyWithCount(1), amount,
+                com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+        if (extracted.getCount() == amount) return extracted;
+        if (!extracted.isEmpty()) {
+            network.insertItem(extracted, extracted.getCount(),
+                    com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+        }
+        return ItemStack.EMPTY;
     }
 
     /** Refund any whole (unburned) fuel items left in slot 1 back to RS. */
@@ -764,7 +745,6 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
 
         pendingResult = ItemStack.EMPTY;
         craftDone = false;
-        fuelStacks = null;
         resetState();
     }
 
@@ -778,7 +758,6 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         }
         pendingResult = ItemStack.EMPTY;
         craftDone = false;
-        fuelStacks = null;
         resetState();
     }
 

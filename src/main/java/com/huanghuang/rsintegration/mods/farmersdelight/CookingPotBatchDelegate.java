@@ -9,6 +9,7 @@ import com.huanghuang.rsintegration.reflection.probes.FarmersDelightReflection;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.RegistryAccess;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
@@ -154,14 +155,18 @@ public final class CookingPotBatchDelegate extends com.huanghuang.rsintegration.
             return false;
         }
 
+        long materialCount = materials.stream().filter(s -> !s.isEmpty()).count();
+        if (materialCount > INPUT_SLOTS) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Batch-CookingPot] Recipe {} has {} ingredients but only {} input slots",
+                    recipe.getId(), materialCount, INPUT_SLOTS);
+            forceChunkLoad(false);
+            return false;
+        }
+
         // Insert ingredients into input slots 0..5
         int slot = 0;
         for (ItemStack mat : materials) {
             if (mat.isEmpty()) continue;
-            if (slot >= INPUT_SLOTS) {
-                RSIntegrationMod.LOGGER.warn("[RSI-Batch-CookingPot] Too many ingredients for cooking pot");
-                break;
-            }
             ItemStack single = mat.copyWithCount(1);
             ItemStack remainder = itemHandler.insertItem(slot, single, false);
             if (!remainder.isEmpty()) {
@@ -180,18 +185,47 @@ public final class CookingPotBatchDelegate extends com.huanghuang.rsintegration.
         be.setChanged();
 
         // Insert container item (e.g. bowl) into slot 7
-        ItemStack container = getContainerItem(recipe);
+        ItemStack container = getContainerItem(recipe, myLevel.registryAccess());
         if (!container.isEmpty()) {
             this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
-            if (this.network != null) {
-                ItemStack existingContainer = itemHandler.getStackInSlot(CONTAINER_SLOT);
-                if (existingContainer.isEmpty()) {
-                    ItemStack extracted = network.extractItem(container.copyWithCount(1), 1, Action.PERFORM);
-                    if (!extracted.isEmpty()) {
-                        itemHandler.insertItem(CONTAINER_SLOT, extracted, false);
-                        be.setChanged();
-                    }
+            ItemStack existingContainer = itemHandler.getStackInSlot(CONTAINER_SLOT);
+            if (!existingContainer.isEmpty()
+                    && !ItemStack.isSameItemSameTags(existingContainer, container)) {
+                RSIntegrationMod.LOGGER.warn("[RSI-Batch-CookingPot] Recipe {} needs container {}, but slot contains {}",
+                        recipe.getId(), container, existingContainer);
+                rollbackInputs(itemHandler, slot);
+                be.setChanged();
+                return false;
+            }
+            if (existingContainer.isEmpty()) {
+                if (this.network == null) {
+                    rollbackInputs(itemHandler, slot);
+                    be.setChanged();
+                    return false;
                 }
+                ItemStack extracted = network.extractItem(container.copyWithCount(1), 1, Action.PERFORM);
+                if (extracted.isEmpty()) {
+                    RSIntegrationMod.LOGGER.warn("[RSI-Batch-CookingPot] Required container unavailable for recipe {}: {}",
+                            recipe.getId(), container);
+                    rollbackInputs(itemHandler, slot);
+                    be.setChanged();
+                    return false;
+                }
+                ItemStack simulated = itemHandler.insertItem(CONTAINER_SLOT, extracted, true);
+                if (!simulated.isEmpty()) {
+                    refundToRSNetwork(extracted);
+                    rollbackInputs(itemHandler, slot);
+                    be.setChanged();
+                    return false;
+                }
+                ItemStack remainder = itemHandler.insertItem(CONTAINER_SLOT, extracted, false);
+                if (!remainder.isEmpty()) {
+                    refundToRSNetwork(remainder);
+                    rollbackInputs(itemHandler, slot);
+                    be.setChanged();
+                    return false;
+                }
+                be.setChanged();
             }
         }
 
@@ -258,7 +292,7 @@ public final class CookingPotBatchDelegate extends com.huanghuang.rsintegration.
                                                 @Nullable ResourceLocation dim,
                                                 @Nullable BlockPos pos) {
         List<String> warnings = new ArrayList<>();
-        ItemStack container = getContainerItem(recipe);
+        ItemStack container = getContainerItem(recipe, player.level().registryAccess());
         if (!container.isEmpty()) {
             warnings.add(Component.translatable("rsi.farmersdelight.container_needed",
                     container.getHoverName().getString()).getString());
@@ -300,7 +334,7 @@ public final class CookingPotBatchDelegate extends com.huanghuang.rsintegration.
         }
     }
 
-    private static ItemStack getContainerItem(Recipe<?> recipe) {
+    private static ItemStack getContainerItem(Recipe<?> recipe, @Nullable RegistryAccess access) {
         try {
             Method m = recipe.getClass().getMethod("getOutputContainer");
             Object result = m.invoke(recipe);
@@ -321,7 +355,7 @@ public final class CookingPotBatchDelegate extends com.huanghuang.rsintegration.
         // — the product is silently never recovered into RS. Derive the required
         // container from the result item's crafting remainder.
         try {
-            ItemStack result = getRecipeResult(recipe);
+            ItemStack result = getRecipeResult(recipe, access);
             if (!result.isEmpty() && result.hasCraftingRemainingItem()) {
                 ItemStack rem = result.getCraftingRemainingItem();
                 if (!rem.isEmpty()) return rem;
@@ -330,20 +364,24 @@ public final class CookingPotBatchDelegate extends com.huanghuang.rsintegration.
         return ItemStack.EMPTY;
     }
 
-    /** SRG-safe recipe result (no-arg getResultItem on FD recipes returns the meal). */
-    private static ItemStack getRecipeResult(Recipe<?> recipe) {
-        // FD cooking recipes are never vanilla CraftingRecipe; guard so the
-        // null RegistryAccess below can never reach cr.getResultItem(null) (NPE).
+    /** SRG-safe recipe result using the active level's registry access. */
+    private static ItemStack getRecipeResult(Recipe<?> recipe, @Nullable RegistryAccess access) {
         if (recipe instanceof net.minecraft.world.item.crafting.CraftingRecipe) return ItemStack.EMPTY;
         try {
-            return com.huanghuang.rsintegration.crafting.RecipeIndex.tryGetResultItem(
-                    recipe, null);
+            return ModRecipeHandlers.tryGetResultItem(recipe, access);
         } catch (Exception e) {
             return ItemStack.EMPTY;
         }
     }
 
     // ── cleanup ──
+
+    private void rollbackInputs(IItemHandler handler, int insertedSlots) {
+        for (int back = 0; back < insertedSlots; back++) {
+            ItemStack refund = handler.extractItem(back, 64, false);
+            if (!refund.isEmpty() && !usingSharedLedger) refundToRSNetwork(refund);
+        }
+    }
 
     private void clearMachineSlotsAndRefund() {
         myLevel.getChunk(myPos);
@@ -362,7 +400,9 @@ public final class CookingPotBatchDelegate extends com.huanghuang.rsintegration.
         ItemStack container = handler.extractItem(CONTAINER_SLOT, 64, false);
         if (!container.isEmpty()) refundToRSNetwork(container);
         ItemStack out = handler.extractItem(OUTPUT_SLOT, 64, false);
-        if (!out.isEmpty() && !usingSharedLedger) refundToRSNetwork(out);
+        // Output is not part of the shared input ledger. If collection races with
+        // cleanup, never discard it merely because this delegate used that ledger.
+        if (!out.isEmpty()) refundToRSNetwork(out);
         be.setChanged();
     }
 
