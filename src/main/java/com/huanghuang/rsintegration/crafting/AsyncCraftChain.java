@@ -1141,15 +1141,19 @@ public final class AsyncCraftChain {
     // ── output capture (magnet protection) ───────────────────────
 
     /**
-     * Arm {@link CraftOutputInterceptor} for any delegate whose craft output
-     * could appear as a world ItemEntity (altars, rituals, crucibles, etc.).
-     * The interceptor now captures <i>any</i> non-player-thrown item that spawns
-     * inside the capture region — no item-type prediction needed — so this is
-     * safe to arm for every physical-machine delegate. Virtual delegates
-     * (e.g. {@code GenericBatchDelegate}) have a null machine position and
-     * are skipped naturally.
+     * Arm {@link CraftOutputInterceptor} only for delegates that explicitly
+     * declare a world-spawned output. Slot-based machines must be collected from
+     * their output slot and therefore leave {@link IBatchDelegate#getExpectedOutput()}
+     * null.
      */
     private void armOutputCapture(IBatchDelegate delegate, ServerPlayer online) {
+        // Slot-based machines expose no expected world output. Arming a broad
+        // position-only capture for them can consume unrelated newborn entities
+        // (for example an ingredient remainder ejected above the machine), then
+        // suppress collectResult() because the captured list is non-empty.
+        ItemStack expected = delegate.getExpectedOutput();
+        if (expected == null || expected.isEmpty()) return;
+
         AABB region = delegate.getOutputCaptureRegion();
         if (region == null) return;
         BlockPos pos = delegate.getMachinePos();
@@ -1160,7 +1164,6 @@ public final class AsyncCraftChain {
                 ? ResourceKey.create(net.minecraft.core.registries.Registries.DIMENSION, dimLoc)
                 : online.level().dimension();
 
-        ItemStack expected = delegate.getExpectedOutput();
         this.captureHandle = CraftOutputInterceptor.arm(dim, region, expected);
     }
 

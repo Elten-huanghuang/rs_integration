@@ -282,6 +282,8 @@ containerTransferKey = 70                   # 容器传输快捷键（默认 F =
 ```toml
 [integrations]
 crockpotFillerItem = "minecraft:stick"    # 锅釜空余格位的填充物
+crockpotFuelPriority = ["minecraft:coal", "minecraft:charcoal", "minecraft:coal_block"] # 锅釜燃料优先级
+vanillaFurnaceFuelPriority = ["minecraft:coal", "minecraft:charcoal"] # 熔炉/高炉/烟熏炉燃料优先级；其他安全燃料作为兜底
 embersInferMaxAttempts = 20               # 余烬炼金推断模式最大尝试次数
 embersInferZeroBlackLimit = 5             # 连续零黑针上限
 embersLockTimeoutMinutes = 10             # 炼金台锁定超时（分钟）

@@ -281,6 +281,8 @@ containerTransferKey = 70                   # Container transfer hotkey (default
 ```toml
 [integrations]
 crockpotFillerItem = "minecraft:stick"    # Filler item for empty Crock Pot slots
+crockpotFuelPriority = ["minecraft:coal", "minecraft:charcoal", "minecraft:coal_block"] # Crock Pot fuel order
+vanillaFurnaceFuelPriority = ["minecraft:coal", "minecraft:charcoal"] # Furnace/blast furnace/smoker fuel order; other safe fuels are fallback
 embersInferMaxAttempts = 20               # Embers infer mode max attempts
 embersInferZeroBlackLimit = 5             # Consecutive zero-black-pin abort limit
 embersLockTimeoutMinutes = 10             # Alchemy tablet lock timeout (minutes)
