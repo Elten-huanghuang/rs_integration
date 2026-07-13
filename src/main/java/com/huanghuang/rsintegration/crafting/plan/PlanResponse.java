@@ -1,6 +1,6 @@
 package com.huanghuang.rsintegration.crafting.plan;
 
-import net.minecraft.world.item.Item;
+import com.huanghuang.rsintegration.crafting.tree.IngredientKey;
 import net.minecraft.world.item.ItemStack;
 
 import javax.annotation.Nullable;
@@ -17,7 +17,7 @@ public record PlanResponse(
         String targetName,
         ItemStack targetResult,
         List<PlanStep> steps,
-        Map<Item, Availability> materials,
+        Map<IngredientKey, Availability> materials,
         List<String> missing,
         String recipeId,  // for confirm execution
         @Nullable String executionModTypeId,  // non-null → route to mod-specific handler on confirm
@@ -37,8 +37,17 @@ public record PlanResponse(
         boolean executionMachineSupportsGui,  // true when the bound execution machine supports remote GUI
         @Nullable ItemStack baseItem,         // JEI-provided base item for FA ApplyModifierRecipe prefill
         Set<String> boundMachineTypes,        // v3.4 availability passport: modType ids of machines the player has bound
-        Map<Item, Integer> leftovers          // overproduction from integer batch rounding: item → surplus count
+        Map<IngredientKey, Integer> leftovers, // overproduction keyed by exact item+NBT
+        @Nullable ItemStack clickedOutput     // JEI ghost-output the player clicked (NBT-variant target, e.g. WR leveled book)
 ) {
+    public Availability availability(ItemStack stack) {
+        return materials.get(IngredientKey.of(stack));
+    }
+
+    public Availability availability(IngredientKey key) {
+        return materials.get(key);
+    }
+
     public record Availability(int needed, int available) {
         public boolean isEnough() { return available >= needed; }
         public boolean isPartial() { return available > 0 && available < needed; }
@@ -46,17 +55,17 @@ public record PlanResponse(
 
     /** Backward-compat: no execution routing info (vanilla/generic path). */
     public PlanResponse(boolean success, String targetName, ItemStack targetResult,
-                        List<PlanStep> steps, Map<Item, Availability> materials,
+                        List<PlanStep> steps, Map<IngredientKey, Availability> materials,
                         List<String> missing, String recipeId) {
         this(success, targetName, targetResult, steps, materials, missing, recipeId,
                 null, null, 0, 0, 0, Collections.emptyList(), 1,
                 null, null, null, 0, false, false, false, null, Collections.emptySet(),
-                Collections.emptyMap());
+                Collections.emptyMap(), null);
     }
 
     /** Backward-compat: no mod warnings. */
     public PlanResponse(boolean success, String targetName, ItemStack targetResult,
-                        List<PlanStep> steps, Map<Item, Availability> materials,
+                        List<PlanStep> steps, Map<IngredientKey, Availability> materials,
                         List<String> missing, String recipeId,
                         @Nullable String executionModTypeId,
                         @Nullable String executionDim,
@@ -65,12 +74,12 @@ public record PlanResponse(
                 executionModTypeId, executionDim, executionPosX, executionPosY, executionPosZ,
                 Collections.emptyList(), 1,
                 null, null, null, 0, false, false, false, null, Collections.emptySet(),
-                Collections.emptyMap());
+                Collections.emptyMap(), null);
     }
 
     /** Backward-compat: no embers data. */
     public PlanResponse(boolean success, String targetName, ItemStack targetResult,
-                        List<PlanStep> steps, Map<Item, Availability> materials,
+                        List<PlanStep> steps, Map<IngredientKey, Availability> materials,
                         List<String> missing, String recipeId,
                         @Nullable String executionModTypeId,
                         @Nullable String executionDim,
@@ -80,6 +89,6 @@ public record PlanResponse(
                 executionModTypeId, executionDim, executionPosX, executionPosY, executionPosZ,
                 modWarnings, repeatCount,
                 null, null, null, 0, false, false, false, null, Collections.emptySet(),
-                Collections.emptyMap());
+                Collections.emptyMap(), null);
     }
 }

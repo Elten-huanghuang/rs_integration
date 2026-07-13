@@ -629,7 +629,29 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             return specs.isEmpty() ? null : specs;
         }
         if (ritualRecipe == null) return null;
-        List<IngredientSpec> specs = collectIngredients(ritualRecipe);
+        // Build the ritual's material list self-contained: raw ingredients plus
+        // the activation item. tryStartWithMaterials() consumes the activation
+        // (getActivationItem), so getRequiredMaterials() MUST reserve it too.
+        //
+        // We deliberately do NOT route through collectIngredients()/the recipe
+        // handler here: ModRecipeHandlers caches its dispatch decision per
+        // recipe *class*, but GoetyRecipeHandler.canHandle() filters per
+        // *instance* (Convert/Teleport/sacrifice rituals share RitualRecipe.class
+        // yet return false). A filtered ritual queried first poisons the cache to
+        // NO_HANDLER for the whole class, so the handler-appended activation would
+        // silently vanish here — leaving execution to fail with "missing
+        // activation" because the activation was never reserved. Reconstructing
+        // the list from the recipe directly makes this deterministic.
+        Recipe<?> r = (Recipe<?>) ritualRecipe;
+        List<IngredientSpec> specs = new ArrayList<>();
+        for (Ingredient ing : r.getIngredients()) {
+            if (!ing.isEmpty()) specs.add(new IngredientSpec(ing, 1));
+        }
+        Ingredient activationIng = Reflect.<Ingredient>invoke(ritualRecipe, GoetyReflection.M_GET_ACTIVATION_ITEM)
+                .orElse(Ingredient.EMPTY);
+        if (activationIng != null && !activationIng.isEmpty()) {
+            specs.add(new IngredientSpec(activationIng, 1));
+        }
         return specs.isEmpty() ? null : specs;
     }
 
@@ -953,8 +975,11 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
 
     @SuppressWarnings("unchecked")
     private ItemStack collectBrazierResult(ServerPlayer player) {
-        ItemStack expected = Reflect.<ItemStack>invoke(brazierRecipeObj, "getResultItem", player.serverLevel().registryAccess())
-                .orElse(ItemStack.EMPTY);
+        // Route through RecipeIndex (SRG-safe) rather than reflecting the vanilla
+        // Recipe#getResultItem by literal name — that method is remapped to
+        // m_8043_ at runtime, so the reflective lookup fails and the produced
+        // result would be silently lost after the brazier already consumed inputs.
+        ItemStack expected = RecipeIndex.tryGetResultItem((Recipe<?>) brazierRecipeObj, player.serverLevel().registryAccess());
         if (expected.isEmpty()) return ItemStack.EMPTY;
 
         // stopBrazier(true) drops the result at (x, y+1, z)

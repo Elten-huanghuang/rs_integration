@@ -393,7 +393,7 @@ public final class RecipeIndex {
 
     /**
      * Returns true if the recipe's output item matches EVERY non-empty input
-     * item type.  A true identity recipe (e.g. CraftTweater {@code .copy()})
+     * item type.  A true identity recipe (e.g. CraftTweaker {@code .copy()})
      * creates circular auto-crafting dependencies and must be skipped.
      *
      * <p>Recipes where the output matches only SOME inputs (e.g. smithing
@@ -452,15 +452,30 @@ public final class RecipeIndex {
         catch (NoSuchFieldException e) { throw new RuntimeException(e); }
     }
 
+    /**
+     * Re-entry guard. When a {@code ModRecipeHandler.getResultItem()} calls back
+     * into this method for the same recipe class (a latent StackOverflow trap —
+     * see the Malum recursion regression), skip handler dispatch and fall through
+     * to the reflection probe instead. Mirrors {@code ModRecipeHandlers.DISPATCH_GUARD}.
+     */
+    private static final ThreadLocal<Class<?>> DISPATCH_GUARD = new ThreadLocal<>();
+
     public static ItemStack tryGetResultItem(Recipe<?> recipe, RegistryAccess access) {
         if (recipe == null) return ItemStack.EMPTY;
         if (recipe instanceof CraftingRecipe cr) {
-            return cr.getResultItem(access);
+            return cr.getResultItem(access).copy();
         }
         var handler = ModRecipeHandlers.handlerFor(recipe);
-        if (handler != null) {
-            ItemStack result = handler.getResultItem(recipe, access);
-            if (!result.isEmpty()) return result;
+        if (handler != null && DISPATCH_GUARD.get() != recipe.getClass()) {
+            Class<?> prev = DISPATCH_GUARD.get();
+            DISPATCH_GUARD.set(recipe.getClass());
+            try {
+                ItemStack result = handler.getResultItem(recipe, access);
+                if (!result.isEmpty()) return result.copy();
+            } finally {
+                if (prev != null) DISPATCH_GUARD.set(prev);
+                else DISPATCH_GUARD.remove();
+            }
             // Handler exists and returned EMPTY — don't fall through
             // to the reflection probe (same reason as ModRecipeHandlers).
             return ItemStack.EMPTY;
@@ -475,7 +490,7 @@ public final class RecipeIndex {
                 } else {
                     result = m.invoke(recipe);
                 }
-                if (result instanceof ItemStack s && !s.isEmpty()) return s;
+                if (result instanceof ItemStack s && !s.isEmpty()) return s.copy();
             } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
         }
         for (String methodName : new String[]{"getResultItem", "getResult", "getOutput", "getOutputCopy", "getAssembledItem"}) {
@@ -488,7 +503,7 @@ public final class RecipeIndex {
                         Object result = method.invoke(recipe, access);
                         if (result instanceof ItemStack s && !s.isEmpty()) {
                             resultMethodCache.put(clazz, method);
-                            return s;
+                            return s.copy();
                         }
                     } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
                 }
@@ -504,7 +519,7 @@ public final class RecipeIndex {
                         Object result = method.invoke(recipe);
                         if (result instanceof ItemStack s && !s.isEmpty()) {
                             resultMethodCache.put(clazz, method);
-                            return s;
+                            return s.copy();
                         }
                     } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
                 }
@@ -522,7 +537,7 @@ public final class RecipeIndex {
             if (cached == NO_OUTPUT_FIELD) return ItemStack.EMPTY;
             try {
                 Object val = cached.get(recipe);
-                if (val instanceof ItemStack s && !s.isEmpty()) return s;
+                if (val instanceof ItemStack s && !s.isEmpty()) return s.copy();
             } catch (Exception e) { return ItemStack.EMPTY; }
             // Field was cached but now returns empty/null — still better
             // than re-scanning. Keep the cache entry.
@@ -539,7 +554,7 @@ public final class RecipeIndex {
                         Object val = field.get(recipe);
                         if (val instanceof ItemStack s && !s.isEmpty()) {
                             outputFieldCache.put(clazz, field);
-                            return s;
+                            return s.copy();
                         }
                     } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
                 }
@@ -592,17 +607,38 @@ public final class RecipeIndex {
         } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
         try {
             Object obj = recipe.getClass().getMethod("getOutputs").invoke(recipe);
+            // Unlike getRemainingItems/getByproducts/getRollResults (byproduct-
+            // specific), many mods' getOutputs() returns the FULL output list
+            // including the primary result. Since callers add the primary
+            // separately (tryGetResultItem), drop the first stack equal to the
+            // primary so it isn't duplicated into the RS network.
+            ItemStack primary = tryGetResultItem(recipe, access);
+            boolean primaryDropped = false;
+            List<ItemStack> fromGetOutputs = new ArrayList<>();
             if (obj instanceof List<?> list) {
                 for (Object e : list) {
-                    if (e instanceof ItemStack s && !s.isEmpty()) results.add(s.copy());
+                    if (e instanceof ItemStack s && !s.isEmpty()) fromGetOutputs.add(s.copy());
                 }
             } else if (obj instanceof ItemStack[] arr) {
                 for (ItemStack s : arr) {
-                    if (!s.isEmpty()) results.add(s.copy());
+                    if (!s.isEmpty()) fromGetOutputs.add(s.copy());
                 }
             }
+            for (ItemStack s : fromGetOutputs) {
+                if (!primaryDropped && !primary.isEmpty() && ItemStack.isSameItemSameTags(s, primary)) {
+                    primaryDropped = true; // skip exactly one copy of the primary
+                    continue;
+                }
+                results.add(s);
+            }
         } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
-        trySecondaryOutputFields(recipe, results);
+        // Only fall back to raw field scanning when no getter yielded anything.
+        // Otherwise a recipe whose getByproducts()/getRollResults() is backed by a
+        // same-named field (byproducts/rollResults/...) would have its secondaries
+        // collected twice — duplicating items into the RS network.
+        if (results.isEmpty()) {
+            trySecondaryOutputFields(recipe, results);
+        }
         return results;
     }
 

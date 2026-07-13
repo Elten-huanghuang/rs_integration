@@ -569,6 +569,13 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
         return myPos;
     }
 
+    @Override
+    public ItemStack getExpectedOutput() {
+        // Output drops as a world ItemEntity near the crucible — expose it so the
+        // interceptor can grab it before any magnet does.
+        return (expectedOutput != null && !expectedOutput.isEmpty()) ? expectedOutput : null;
+    }
+
     // ── helpers ───────────────────────────────────────────────────
 
     private static IItemHandler readHandler(Object be, String fieldName) {

@@ -29,24 +29,51 @@ public final class MalumRecipeHandler extends AbstractRecipeHandler {
 
     @Override
     public ItemStack getResultItem(Recipe<?> recipe, RegistryAccess access) {
-        for (String name : new String[]{"getResultItem", "getResult", "getOutput"}) {
-            try {
-                java.lang.reflect.Method m = recipe.getClass().getMethod(name);
+        // NOTE: must NOT call RecipeIndex.tryGetResultItem here — for Malum recipes
+        // that method dispatches straight back to this handler, causing infinite
+        // recursion / StackOverflowError. All resolution is done inline below.
+
+        // 1. Method probes. getDeclaredMethods() (not getMethod, which is no-arg
+        //    only) so we can find both no-arg and RegistryAccess-arg overloads,
+        //    including the vanilla getResultItem(m_8043_) override on mod recipes.
+        for (String name : new String[]{"getResultItem", "m_8043_", "getResult", "getOutput"}) {
+            for (java.lang.reflect.Method m : recipe.getClass().getMethods()) {
+                if (!m.getName().equals(name)) continue;
                 if (!ItemStack.class.isAssignableFrom(m.getReturnType())) continue;
-                Object r = m.getParameterCount() == 1 ? m.invoke(recipe, access) : m.invoke(recipe);
-                if (r instanceof ItemStack s && !s.isEmpty()) return s;
-            } catch (Exception e) {
-                RSIntegrationMod.LOGGER.debug("[RSI-Recipe] reflection probe failed", e);
+                try {
+                    Object r;
+                    if (m.getParameterCount() == 1
+                            && m.getParameterTypes()[0].isAssignableFrom(RegistryAccess.class)) {
+                        r = m.invoke(recipe, access);
+                    } else if (m.getParameterCount() == 0) {
+                        r = m.invoke(recipe);
+                    } else {
+                        continue;
+                    }
+                    if (r instanceof ItemStack s && !s.isEmpty()) return s;
+                } catch (Exception e) {
+                    RSIntegrationMod.LOGGER.debug("[RSI-Recipe] reflection probe failed", e);
+                }
             }
         }
-        // Fallback: direct field access (SpiritFocusingRecipe.output, etc.)
-        try {
-            java.lang.reflect.Field f = recipe.getClass().getDeclaredField("output");
-            f.setAccessible(true);
-            Object v = f.get(recipe);
-            if (v instanceof ItemStack s && !s.isEmpty()) return s;
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Recipe] reflection probe failed", e);
+        // 2. Field fallback: walk the hierarchy (output may live in a superclass)
+        //    and filter by name so an unrelated ItemStack field (icon/cached
+        //    input) isn't mis-read as the product.
+        Class<?> scan = recipe.getClass();
+        while (scan != null && scan != Object.class) {
+            for (java.lang.reflect.Field f : scan.getDeclaredFields()) {
+                if (!ItemStack.class.isAssignableFrom(f.getType())) continue;
+                String fn = f.getName().toLowerCase(java.util.Locale.ROOT);
+                if (!fn.contains("output") && !fn.contains("result") && !fn.contains("assembled")) continue;
+                try {
+                    f.setAccessible(true);
+                    Object v = f.get(recipe);
+                    if (v instanceof ItemStack s && !s.isEmpty()) return s;
+                } catch (Exception e) {
+                    RSIntegrationMod.LOGGER.debug("[RSI-Recipe] reflection probe failed", e);
+                }
+            }
+            scan = scan.getSuperclass();
         }
         return ItemStack.EMPTY;
     }

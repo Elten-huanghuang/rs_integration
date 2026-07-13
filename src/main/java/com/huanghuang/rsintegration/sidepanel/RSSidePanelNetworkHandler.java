@@ -568,6 +568,7 @@ public final class RSSidePanelNetworkHandler {
             RemoteGuiAuth.onPlayerLogout(pid);
             GuiOpenRateLimiter.onPlayerLogout(pid);
             com.huanghuang.rsintegration.crafting.PreviewRateLimiter.onPlayerLogout(pid);
+            SidePanelRequestRateLimiter.onPlayerLogout(pid);
         }
     }
 

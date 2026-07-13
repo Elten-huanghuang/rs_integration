@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting.tree;
 
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 
@@ -31,6 +32,12 @@ public final class IngredientKey {
     public static IngredientKey of(ItemStack stack) {
         return new IngredientKey(stack.getItem(), stack.getTag());
     }
+
+    public Item item() { return item; }
+
+    public void write(FriendlyByteBuf buf) { buf.writeItem(stack(1)); }
+
+    public static IngredientKey read(FriendlyByteBuf buf) { return of(buf.readItem()); }
 
     public ItemStack stack(int count) {
         ItemStack stack = new ItemStack(item, count);

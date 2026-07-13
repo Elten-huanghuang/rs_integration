@@ -45,6 +45,27 @@ public final class YoukaisHomecomingRecipeHandler implements com.huanghuang.rsin
 
     @Override
     public ItemStack getResultItem(Recipe<?> recipe, RegistryAccess access) {
+        // Cooking-pot soup recipes produce a pot_of_X BlockItem (PotFoodBlock).
+        // In-world it's served into bowls, so the true product is food*serve.
+        // Report that here so RS indexing / plan preview match what the
+        // delegate actually delivers (see CookingPotBatchDelegate.collectResult).
+        if (isPotCookingRecipe(recipe)) {
+            ItemStack bowls = potFoodServings(recipe, access);
+            if (!bowls.isEmpty()) return bowls;
+        }
+        // SteamingRecipe overrides the deprecated no-arg getResultItem() (SRG
+        // m_8042_) to return the steamer rack ICON — must never use that. But it
+        // does NOT override getResultItem(RegistryAccess) (SRG m_8043_), inherited
+        // from AbstractCookingRecipe, which returns the real result field.
+        // Call it directly (compile-bound → ForgeGradle remaps to m_8043_); do NOT
+        // reflect the "result" field by name — that deobf name is SRG-remapped to
+        // f_43751_ in production and the lookup fails, yielding EMPTY (the "无法获取"
+        // / unsupported-machine bug for youkaishomecoming:*_stewed_maggot etc.).
+        if (STEAMING_RECIPE.equals(recipe.getClass().getName())
+                && recipe instanceof AbstractCookingRecipe cooking) {
+            ItemStack out = cooking.getResultItem(access);
+            return out == null ? ItemStack.EMPTY : out.copy();
+        }
         // SimpleFermentationRecipe.getResultItem() returns EMPTY — extract from results field
         if (FERMENT_RECIPE.equals(recipe.getClass().getName())) {
             try {
@@ -96,6 +117,13 @@ public final class YoukaisHomecomingRecipeHandler implements com.huanghuang.rsin
                     for (Object obj : list) {
                         if (obj instanceof Ingredient ing && !ing.isEmpty())
                             specs.add(new IngredientSpec(ing, 1));
+                    }
+                    // Append serve-bowls so the plan preview shows them and the
+                    // resolver auto-crafts them if missing (matches the delegate's
+                    // required materials).
+                    ItemStack bowls = serveBowls(recipe);
+                    if (!bowls.isEmpty()) {
+                        specs.add(new IngredientSpec(Ingredient.of(bowls), bowls.getCount()));
                     }
                     return specs.isEmpty() ? null : specs;
                 }
@@ -150,6 +178,58 @@ public final class YoukaisHomecomingRecipeHandler implements com.huanghuang.rsin
     private static boolean isPotCookingRecipe(Recipe<?> recipe) {
         return recipe.getClass().getName().startsWith(
                 "dev.xkmc.youkaishomecoming.content.pot.cooking");
+    }
+
+    // PotFoodBlock (soup-pot result) helpers. A cooking-pot recipe's result is
+    // a pot_of_X BlockItem wrapping a PotFoodBlock; in-world it is served into
+    // bowls (food * serve, one bowl per serving). All reflection, so a
+    // missing/renamed class simply falls back to the raw recipe result.
+    private static volatile Class<?> potFoodBlockClass;
+    private static volatile java.lang.reflect.Method asBowlsMethod;
+    private static volatile boolean potFoodProbed;
+
+    private static void probePotFood() {
+        if (potFoodProbed) return;
+        potFoodProbed = true;
+        try {
+            potFoodBlockClass = Class.forName(
+                    "dev.xkmc.youkaishomecoming.content.block.food.PotFoodBlock");
+            asBowlsMethod = potFoodBlockClass.getMethod("asBowls");
+            asBowlsMethod.setAccessible(true);
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-YHK] PotFoodBlock probe unavailable", e);
+        }
+    }
+
+    /** The servings a pot-cooking recipe delivers ({@code food * serve}), or
+     *  EMPTY if the result is not a PotFoodBlock (plain-item recipe). */
+    private static ItemStack potFoodServings(Recipe<?> recipe, RegistryAccess access) {
+        probePotFood();
+        if (potFoodBlockClass == null || asBowlsMethod == null) return ItemStack.EMPTY;
+        ItemStack result = recipe.getResultItem(access);
+        if (result == null || result.isEmpty()
+                || !(result.getItem() instanceof net.minecraft.world.item.BlockItem bi))
+            return ItemStack.EMPTY;
+        if (!potFoodBlockClass.isInstance(bi.getBlock())) return ItemStack.EMPTY;
+        try {
+            Object r = asBowlsMethod.invoke(bi.getBlock());
+            if (r instanceof ItemStack s && !s.isEmpty()) return s;
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-YHK] asBowls() failed", e);
+        }
+        return ItemStack.EMPTY;
+    }
+
+    /** The bowls a pot-cooking recipe needs to serve its result
+     *  ({@code food.getCraftingRemainingItem() * serve}), or EMPTY. */
+    private static ItemStack serveBowls(Recipe<?> recipe) {
+        ItemStack servings = potFoodServings(recipe, RegistryAccess.EMPTY);
+        if (servings.isEmpty()) return ItemStack.EMPTY;
+        ItemStack unit = servings.copyWithCount(1);
+        if (!unit.hasCraftingRemainingItem()) return ItemStack.EMPTY;
+        net.minecraft.world.item.Item bowl = unit.getCraftingRemainingItem().getItem();
+        if (bowl == net.minecraft.world.item.Items.AIR) return ItemStack.EMPTY;
+        return new ItemStack(bowl, servings.getCount());
     }
 
     private static boolean isCuisineRecipe(Recipe<?> recipe) {

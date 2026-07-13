@@ -223,7 +223,12 @@ public final class ProtectionChecker {
             }
         } catch (Exception e) { RSIntegrationMod.LOGGER.debug("{} reflection probe failed", TAG, e); }
 
-        // Can't determine — default to not claimed (allow)
+        // Can't determine — default to not claimed (allow). This is a SILENT
+        // fail-open: if FTB renamed these methods, every claimed chunk becomes
+        // allowed. Log at warn so API drift is visible instead of silently
+        // disabling claim protection.
+        RSIntegrationMod.LOGGER.warn("{} FTB Chunks: all claim-detection probes failed "
+                + "(API may have changed) — treating chunk as UNCLAIMED (fail-open)", TAG);
         return false;
     }
 
@@ -439,6 +444,9 @@ public final class ProtectionChecker {
                         if (result instanceof Boolean) return false;
                     }
                 } catch (Exception e) { RSIntegrationMod.LOGGER.debug("{} reflection probe failed", TAG, e); }
+                // All Cadmus claim-detection probes failed — silent fail-open.
+                RSIntegrationMod.LOGGER.warn("{} Cadmus: all claim-detection probes failed "
+                        + "(API may have changed) — allowing interaction (fail-open)", TAG);
                 return true; // Can't determine claim — allow
             }
 

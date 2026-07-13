@@ -31,6 +31,8 @@ import net.minecraftforge.items.ItemHandlerHelper;
 import javax.annotation.Nullable;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -124,49 +126,43 @@ public final class CrockPotBatchDelegate extends com.huanghuang.rsintegration.cr
         try (ExtractionLedger ledger = new ExtractionLedger()) {
             List<ItemStack> materials = new ArrayList<>();
 
-            // Phase 1: reserve specific ingredients through ledger
-            List<IngredientSpec> specs = getIngredients();
-            if (specs != null) {
-                for (IngredientSpec spec : specs) {
+            if (hasCatConstraints) {
+                // Category recipes: resolve the requirement tree into a concrete
+                // placement plan via the SAME DNF term selection the plan preview
+                // uses, so both agree on which OR branch to satisfy and which items
+                // to place. Reserving fixed ingredients through ensureMaterialAvailable
+                // keeps auto-craft/inventory fallback; filler is always network-sourced.
+                CategoryPlan plan = resolveCategoryPlan(recipe, network, myLevel, potLevel);
+                if (plan == null) {
+                    player.sendSystemMessage(Component.translatable("rsi.crockpot.error.food_values"));
+                    String blocked = buildBlockedCategoriesMessage();
+                    if (!blocked.isEmpty()) {
+                        player.sendSystemMessage(Component.literal(blocked));
+                    }
+                    return false; // ledger auto-rollback via close()
+                }
+                for (IngredientSpec spec : plan.fixed()) {
                     if (spec.isEmpty()) continue;
                     ItemStack reserved = CraftPacketUtils.ensureMaterialAvailable(
                             player, myDim, myPos, spec.ingredient(), spec.count(), ledger);
                     if (reserved.isEmpty()) return false; // ledger auto-rollback via close()
                     materials.add(reserved.copy());
                 }
-            }
-
-            // Phase 2: reserve food-value filler items through ledger
-            if (hasCatConstraints) {
-                int usedSlots = materials.stream().mapToInt(ItemStack::getCount).sum();
-                int remaining = potLevel - usedSlots;
-                if (remaining > 0) {
-                    IItemHandler itemHandler = getItemHandlerAtPos();
-                    float[] currentFV = computeCombinedFoodValues(materials);
-
-                    if (!CrockPotFoodValues.isReady()) return false;
-                    List<CrockPotFoodValues.Candidate> candidates = new ArrayList<>();
-                    for (var entry : network.getItemStorageCache().getList().getStacks()) {
-                        ItemStack stack = entry.getStack();
-                        if (stack.isEmpty() || stack.getCount() <= 0) continue;
-                        if (itemHandler != null && !itemHandler.isItemValid(0, stack)) continue;
-                        candidates.add(new CrockPotFoodValues.Candidate(stack, stack.getCount()));
-                    }
-                    List<ItemStack> plan = CrockPotFoodValues.select(
-                            currentFV, catMins, catMaxs, remaining, candidates, myLevel);
-                    if (plan == null) {
-                        player.sendSystemMessage(Component.translatable("rsi.crockpot.error.food_values"));
-                        String blocked = buildBlockedCategoriesMessage();
-                        if (!blocked.isEmpty()) {
-                            player.sendSystemMessage(Component.literal(blocked));
-                        }
-                        return false; // ledger auto-rollback via close()
-                    }
-
-                    for (ItemStack want : plan) {
-                        ItemStack reserved = ledger.reserveFromNetwork(
-                                Ingredient.of(want.getItem()), 1, network);
-                        if (reserved.isEmpty()) return false; // network changed, auto-rollback
+                for (ItemStack want : plan.filler()) {
+                    ItemStack reserved = ledger.reserveFromNetwork(
+                            Ingredient.of(want.getItem()), 1, network);
+                    if (reserved.isEmpty()) return false; // network changed, auto-rollback
+                    materials.add(reserved.copy());
+                }
+            } else {
+                // Non-category recipes: fixed ingredients (padded with config filler).
+                List<IngredientSpec> specs = getIngredients();
+                if (specs != null) {
+                    for (IngredientSpec spec : specs) {
+                        if (spec.isEmpty()) continue;
+                        ItemStack reserved = CraftPacketUtils.ensureMaterialAvailable(
+                                player, myDim, myPos, spec.ingredient(), spec.count(), ledger);
+                        if (reserved.isEmpty()) return false; // ledger auto-rollback via close()
                         materials.add(reserved.copy());
                     }
                 }
@@ -344,12 +340,6 @@ public final class CrockPotBatchDelegate extends com.huanghuang.rsintegration.cr
         return "§7Blocked (max=0): " + sb;
     }
 
-    // ── food-value computation ───────────────────────────────────
-
-    private float[] computeCombinedFoodValues(List<ItemStack> items) {
-        return CrockPotFoodValues.combined(items, myLevel);
-    }
-
     /**
      * Plan-build helper for pure-category Crock Pot recipes, which carry no fixed ingredient list —
      * a match is decided by the summed food values of the pot's contents. Runs the same food-value
@@ -360,50 +350,106 @@ public final class CrockPotBatchDelegate extends com.huanghuang.rsintegration.cr
     public static List<IngredientSpec> buildCategoryPlanIngredients(Recipe<?> recipe,
                                                                     @Nullable INetwork network, Level level,
                                                                     @Nullable BlockPos pos) {
-        if (network == null || !CrockPotFoodValues.isReady()) return null;
-
-        List<IngredientSpec> result = new ArrayList<>();
-        List<ItemStack> fixedStacks = new ArrayList<>();
-        int usedSlots = 0;
-
-        // Fixed MustContain requirements first (empty for pure-category recipes).
-        List<IngredientSpec> fixed = CrockPotRecipeHandler.getSpecificIngredients(recipe, false);
-        if (fixed != null) {
-            for (IngredientSpec spec : fixed) {
-                if (spec.isEmpty()) continue;
-                result.add(spec);
-                usedSlots += spec.count();
-                ItemStack[] matches = spec.ingredient().getItems();
-                if (matches.length > 0) fixedStacks.add(matches[0].copyWithCount(spec.count()));
-            }
-        }
-
         int blockPotLevel = getBlockPotLevel(level, pos);
         if (blockPotLevel <= 0) blockPotLevel = CrockPotRecipeHandler.INPUT_SLOT_COUNT;
-        int remaining = blockPotLevel - usedSlots;
-        if (remaining <= 0) return result.isEmpty() ? null : result;
 
-        float[][] constraints = CrockPotRecipeHandler.parseCategoryConstraints(recipe);
-        float[] startFV = CrockPotFoodValues.combined(fixedStacks, level);
+        CategoryPlan plan = resolveCategoryPlan(recipe, network, level, blockPotLevel);
+        if (plan == null) return null;
 
-        List<CrockPotFoodValues.Candidate> candidates = new ArrayList<>();
-        for (var entry : network.getItemStorageCache().getList().getStacks()) {
-            ItemStack stack = entry.getStack();
-            if (stack.isEmpty() || stack.getCount() <= 0) continue;
-            candidates.add(new CrockPotFoodValues.Candidate(stack, stack.getCount()));
-        }
-
-        List<ItemStack> chosen = CrockPotFoodValues.select(
-                startFV, constraints[0], constraints[1], remaining, candidates, level);
-        if (chosen == null) return null;
-
+        List<IngredientSpec> result = new ArrayList<>(plan.fixed());
         // Merge selected filler by item into IngredientSpecs (e.g. "apple ×3").
         LinkedHashMap<Item, Integer> counts = new LinkedHashMap<>();
-        for (ItemStack st : chosen) counts.merge(st.getItem(), 1, Integer::sum);
+        for (ItemStack st : plan.filler()) counts.merge(st.getItem(), 1, Integer::sum);
         for (Map.Entry<Item, Integer> e : counts.entrySet()) {
             result.add(new IngredientSpec(Ingredient.of(new ItemStack(e.getKey())), e.getValue()));
         }
         return result.isEmpty() ? null : result;
+    }
+
+    /** A resolved DNF term: the fixed ingredients to reserve plus the filler items to place. */
+    public record CategoryPlan(List<IngredientSpec> fixed, List<ItemStack> filler) {}
+
+    /**
+     * Resolve a Crock Pot recipe's requirement tree into a concrete placement plan.
+     * <p>
+     * The requirement tree is expanded into DNF alternative {@link CrockPotRecipeHandler.Term}s
+     * (see {@code expandRequirements}); a recipe matches if ANY one term is satisfiable. This walks
+     * the terms in declaration order against a single read-only network snapshot and returns the
+     * first satisfiable one, so plan preview and craft execution — both calling this — always pick
+     * the identical term and place identical items. Returns null when no term can be satisfied.
+     */
+    @Nullable
+    public static CategoryPlan resolveCategoryPlan(Recipe<?> recipe, @Nullable INetwork network,
+                                                   Level level, int blockPotLevel) {
+        if (network == null || !CrockPotFoodValues.isReady()) return null;
+
+        // One network snapshot shared by every term trial and by both callers.
+        List<CrockPotFoodValues.Candidate> candidates = new ArrayList<>();
+        Map<Item, Integer> baseAvail = new HashMap<>();
+        for (var entry : network.getItemStorageCache().getList().getStacks()) {
+            ItemStack stack = entry.getStack();
+            if (stack.isEmpty() || stack.getCount() <= 0) continue;
+            candidates.add(new CrockPotFoodValues.Candidate(stack, stack.getCount()));
+            baseAvail.merge(stack.getItem(), stack.getCount(), Integer::sum);
+        }
+
+        for (CrockPotRecipeHandler.Term term : CrockPotRecipeHandler.expandRequirements(recipe)) {
+            CategoryPlan plan = tryResolveTerm(term, candidates, baseAvail, level, blockPotLevel);
+            if (plan != null) return plan;
+        }
+        return null;
+    }
+
+    /**
+     * Attempt to satisfy a single DNF term: reserve its fixed ingredients from the snapshot, then
+     * fill the remaining pot slots with food-value-aware filler under the term's category bounds.
+     * Uses a working copy of availability so fixed items are not re-picked as filler. Returns null
+     * (term not satisfiable) without mutating the shared snapshot.
+     */
+    @Nullable
+    private static CategoryPlan tryResolveTerm(CrockPotRecipeHandler.Term term,
+                                               List<CrockPotFoodValues.Candidate> candidates,
+                                               Map<Item, Integer> baseAvail,
+                                               Level level, int blockPotLevel) {
+        Map<Item, Integer> avail = new HashMap<>(baseAvail);
+        List<IngredientSpec> fixedSpecs = new ArrayList<>();
+        List<ItemStack> fixedStacks = new ArrayList<>();
+        int usedSlots = 0;
+
+        for (IngredientSpec spec : term.fixed()) {
+            if (spec.isEmpty()) continue;
+            ItemStack pick = ItemStack.EMPTY;
+            for (ItemStack opt : spec.ingredient().getItems()) {
+                if (opt.isEmpty()) continue;
+                if (avail.getOrDefault(opt.getItem(), 0) >= spec.count()) { pick = opt; break; }
+            }
+            if (pick.isEmpty()) return null; // fixed ingredient not available → term fails
+            avail.merge(pick.getItem(), -spec.count(), Integer::sum);
+            fixedSpecs.add(spec);
+            fixedStacks.add(pick.copyWithCount(spec.count()));
+            usedSlots += spec.count();
+        }
+
+        int remaining = blockPotLevel - usedSlots;
+        if (remaining < 0) return null; // more fixed items than the pot can hold
+
+        float[] startFV = CrockPotFoodValues.combined(fixedStacks, level);
+        if (remaining == 0) {
+            // Pot is full of fixed items; accept the term (recipe match verified in-game).
+            return new CategoryPlan(fixedSpecs, Collections.emptyList());
+        }
+
+        // Filler candidates draw from the decremented snapshot so fixed items aren't re-picked.
+        List<CrockPotFoodValues.Candidate> fillerCands = new ArrayList<>();
+        for (CrockPotFoodValues.Candidate c : candidates) {
+            int a = avail.getOrDefault(c.stack().getItem(), 0);
+            if (a > 0) fillerCands.add(new CrockPotFoodValues.Candidate(c.stack(), a));
+        }
+
+        List<ItemStack> filler = CrockPotFoodValues.select(
+                startFV, term.mins(), term.maxs(), remaining, fillerCands, level);
+        if (filler == null) return null;
+        return new CategoryPlan(fixedSpecs, filler);
     }
 
     // ── ingredient extraction (no filler for category recipes) ───
@@ -526,12 +572,6 @@ public final class CrockPotBatchDelegate extends com.huanghuang.rsintegration.cr
         }
         return be.getCapability(net.minecraftforge.common.capabilities.ForgeCapabilities.ITEM_HANDLER)
                 .resolve().orElse(null);
-    }
-
-    private IItemHandler getItemHandlerAtPos() {
-        BlockEntity be = myLevel.getBlockEntity(myPos);
-        if (be == null) return null;
-        return getItemHandler(be);
     }
 
     private static boolean isBurning(BlockEntity be) {

@@ -120,20 +120,43 @@ public final class WRRecipeHandler extends AbstractRecipeHandler {
      *         (e.g. arcanum_lens, which declares a static output instead).
      */
     private static ItemStack buildEnchantedBookOutput(Recipe<?> recipe) {
+        // The JEI/plan icon shows the recipe's minimum-level book. The block
+        // entity computes the real level at craft time (input level + 1), so
+        // the min-level book is the correct display for a fresh first craft.
+        return buildEnchantedBookOutput(recipe, -1);
+    }
+
+    /**
+     * Build the enchanted-book output for an ArcaneIteratorRecipe at a specific
+     * level. Handles vanilla {@link Enchantment} recipes and WR arcane-enchantment
+     * recipes (via WR's own {@code ArcaneEnchantmentUtil}, reflected because it is
+     * addon API).
+     *
+     * @param level the enchantment level to stamp, or a negative value to use the
+     *              enchantment's minimum level (vanilla) / level 1 (arcane) — i.e.
+     *              the level the machine produces from a fresh, unenchanted book.
+     * @return the enchanted book, or EMPTY if the recipe carries no enchantment
+     *         (e.g. arcanum_lens, which declares a static output instead).
+     */
+    public static ItemStack buildEnchantedBookOutput(Recipe<?> recipe, int level) {
         try {
             // Vanilla enchantment path: matches the block entity's
             // EnchantedBookItem.addEnchantment(book, EnchantmentInstance).
             if (invokeBool(recipe, "hasEnchantment")) {
                 Object ench = invoke(recipe, "getEnchantment");
                 if (ench instanceof Enchantment enchantment) {
+                    int lvl = level >= 1 ? level : enchantment.getMinLevel();
                     ItemStack book = new ItemStack(Items.ENCHANTED_BOOK);
                     EnchantedBookItem.addEnchantment(book,
-                            new EnchantmentInstance(enchantment, enchantment.getMinLevel()));
+                            new EnchantmentInstance(enchantment, lvl));
                     return book;
                 }
             }
             // Arcane enchantment path: the block entity calls
-            // ArcaneEnchantmentUtil.addItemArcaneEnchantment(book, arcaneEnch).
+            // ArcaneEnchantmentUtil.addItemArcaneEnchantment(book, arcaneEnch),
+            // which stamps (current level + 1) → level 1 for a fresh book.
+            // addArcaneEnchantment(book, ench, lvl) sets an exact level (the
+            // 3-arg variant writes the level straight into NBT, not additive).
             if (invokeBool(recipe, "hasArcaneEnchantment")) {
                 Object arcaneEnch = invoke(recipe, "getArcaneEnchantment");
                 if (arcaneEnch != null) {
@@ -142,8 +165,13 @@ public final class WRRecipeHandler extends AbstractRecipeHandler {
                             "mod.maxbogomol.wizards_reborn.api.arcaneenchantment.ArcaneEnchantment");
                     Class<?> util = Class.forName(
                             "mod.maxbogomol.wizards_reborn.api.arcaneenchantment.ArcaneEnchantmentUtil");
-                    util.getMethod("addItemArcaneEnchantment", ItemStack.class, arcaneEnchClass)
-                            .invoke(null, book, arcaneEnch);
+                    if (level >= 1) {
+                        util.getMethod("addArcaneEnchantment", ItemStack.class, arcaneEnchClass, int.class)
+                                .invoke(null, book, arcaneEnch, level);
+                    } else {
+                        util.getMethod("addItemArcaneEnchantment", ItemStack.class, arcaneEnchClass)
+                                .invoke(null, book, arcaneEnch);
+                    }
                     return book;
                 }
             }
@@ -151,6 +179,30 @@ public final class WRRecipeHandler extends AbstractRecipeHandler {
             RSIntegrationMod.LOGGER.debug("[RSI-Recipe] Failed to build ArcaneIterator book output", e);
         }
         return ItemStack.EMPTY;
+    }
+
+    /**
+     * Infer the target enchantment level the player clicked, given an
+     * ArcaneIteratorRecipe and the concrete output {@link ItemStack} JEI rendered
+     * in the recipe's output slot (e.g. "Curse of Withering II"). Because levels
+     * I/II/III share one recipe id and declare no static output, the level is only
+     * discoverable by comparing the clicked stack against books this handler builds
+     * at each candidate level — reusing the exact same construction path so there
+     * is no drift between what we require and what the machine produces.
+     *
+     * @return the matched level (>= 1), or 1 when no match is found (safe default:
+     *         plain-book center → level I, the pre-existing behavior).
+     */
+    public static int inferTargetLevel(Recipe<?> recipe, @Nullable ItemStack clicked) {
+        if (clicked == null || clicked.isEmpty()) return 1;
+        // WR enchant books cap well below this; 10 is a generous scan ceiling that
+        // covers every vanilla/arcane enchantment without risking a runaway loop.
+        for (int lvl = 1; lvl <= 10; lvl++) {
+            ItemStack candidate = buildEnchantedBookOutput(recipe, lvl);
+            if (candidate.isEmpty()) break; // not an enchant recipe → no leveling
+            if (ItemStack.isSameItemSameTags(candidate, clicked)) return lvl;
+        }
+        return 1;
     }
 
     private static boolean invokeBool(Object target, String method) throws Exception {

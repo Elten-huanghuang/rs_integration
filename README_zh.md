@@ -274,7 +274,7 @@ customGuiMachineMods = ["crabbersdelight", "metalbarrels", "pgp", "emxarms", "ap
 
 [advanced]
 diagnosticVerboseLogging = false
-containerTransferKey = 70                   # 容器传输快捷键（默认 G = 70）
+containerTransferKey = 70                   # 容器传输快捷键（默认 F = 70）
 ```
 
 ### 服务器配置（`saves/<世界名>/serverconfig/rs_integration-server.toml`）

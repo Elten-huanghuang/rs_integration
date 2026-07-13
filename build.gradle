@@ -89,9 +89,32 @@ dependencies {
     implementation(jarJar("io.github.llamalad7:mixinextras-forge:0.3.6")) {
         jarJar.ranged(it, "[0.3.6,)")
     }
+
+    // ── Unit tests ──────────────────────────────────────────────
+    // JUnit 5. Tests run against the deobf Minecraft on the compile
+    // classpath (ForgeGradle adds it to every source set), so layer-2
+    // tests can exercise real ItemStack/NBT after Bootstrap.bootStrap().
+    // Do NOT touch classes that reach RSIntegrationMod — the RS API is
+    // compileOnly and absent at test runtime (NoClassDefFoundError).
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+test {
+    useJUnitPlatform()
+    // ForgeGradle rewrites the run classpath; keep test output quiet but
+    // surface failures.
+    testLogging {
+        events 'passed', 'skipped', 'failed'
+        exceptionFormat 'full'
+    }
 }
 
 compileJava {
+    options.encoding = 'UTF-8'
+}
+
+compileTestJava {
     options.encoding = 'UTF-8'
 }
 

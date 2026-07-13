@@ -93,6 +93,8 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.IntValue SIDE_PANEL_EXTRACTION_TIMEOUT;
     public static ForgeConfigSpec.IntValue CRAFTING_MAX_DEPTH;
     public static ForgeConfigSpec.IntValue CRAFTING_MAX_STEPS;
+    public static ForgeConfigSpec.IntValue CRAFTING_RESOLVE_TIMEOUT_MS;
+    public static ForgeConfigSpec.IntValue CRAFTING_MAX_ENSURE_CALLS;
     public static ForgeConfigSpec.IntValue RECIPE_TREE_MAX_DEPTH;
     public static ForgeConfigSpec.IntValue RECIPE_TREE_MAX_NODES;
     public static ForgeConfigSpec.IntValue RECIPE_TREE_BATCH_DEBOUNCE_MS;
@@ -418,6 +420,18 @@ public final class RSIntegrationConfig {
                         "Prevents runaway plans from consuming excessive server resources.",
                         "Range: 256-16384.")
                 .defineInRange("craftingMaxSteps", 4096, 256, 16384);
+        CRAFTING_RESOLVE_TIMEOUT_MS = s
+                .comment("Maximum wall-clock time (ms) the crafting resolver may spend on one plan.",
+                        "Deep, interdependent modpack recipe trees (e.g. self-referential 'upgrade'",
+                        "recipes) can exhaust the default budget and falsely report a reachable",
+                        "ingredient as missing. Increase for such packs; the resolver runs on the",
+                        "server thread, so very large values can cause a brief hitch. Range: 200-10000.")
+                .defineInRange("craftingResolveTimeoutMs", 2000, 200, 10000);
+        CRAFTING_MAX_ENSURE_CALLS = s
+                .comment("Maximum recursive ingredient-resolution calls per plan.",
+                        "Companion cap to craftingResolveTimeoutMs guarding against runaway recursion.",
+                        "Increase alongside the timeout for deep recipe trees. Range: 1000-100000.")
+                .defineInRange("craftingMaxEnsureCalls", 10000, 1000, 100000);
         RECIPE_TREE_MAX_DEPTH = s
                 .comment("Maximum depth for the client-side recipe tree view.",
                         "Limits how many nested layers the tree renders.",

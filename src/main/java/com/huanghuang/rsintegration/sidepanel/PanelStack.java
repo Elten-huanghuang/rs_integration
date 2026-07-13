@@ -66,7 +66,10 @@ public final class PanelStack {
 
     public String getModId() {
         if (cachedModId == null) {
-            cachedModId = stack.getItem().getCreatorModId(stack);
+            // getCreatorModId may return null for some modded items; default to
+            // "minecraft" so downstream sort/search comparators never NPE.
+            String id = stack.getItem().getCreatorModId(stack);
+            cachedModId = id != null ? id : "minecraft";
         }
         return cachedModId;
     }

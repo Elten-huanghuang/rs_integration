@@ -24,7 +24,18 @@ import java.util.*;
  */
 final class ResolutionContext {
 
-    static final long MAX_RESOLVE_NANOS = 500_000_000L; // 500ms
+    static final long MAX_RESOLVE_NANOS = 500_000_000L; // 500ms — fallback if config unavailable
+
+    /** Resolve deadline from config (ms → ns), falling back to the 500ms default
+     *  if the config spec is not yet loaded (should not happen at runtime). */
+    private static long resolveDeadlineNanos() {
+        try {
+            return System.nanoTime()
+                    + RSIntegrationConfig.CRAFTING_RESOLVE_TIMEOUT_MS.get() * 1_000_000L;
+        } catch (Exception e) {
+            return System.nanoTime() + MAX_RESOLVE_NANOS;
+        }
+    }
 
     final Level level;
     final Map<Item, List<RecipeIndex.Entry>> index;
@@ -68,7 +79,7 @@ final class ResolutionContext {
         this.preferredRecipes = preferredRecipes;
         this.player = player;
         this.network = network;
-        this.deadlineNanos = System.nanoTime() + MAX_RESOLVE_NANOS;
+        this.deadlineNanos = resolveDeadlineNanos();
         this.bestEffort = false;
         this.missingOut = null;
         this.diagLog = Diagnostics.isEnabled() ? new ArrayList<>() : null;
@@ -93,7 +104,7 @@ final class ResolutionContext {
         this.preferredRecipes = preferredRecipes;
         this.player = player;
         this.network = network;
-        this.deadlineNanos = System.nanoTime() + MAX_RESOLVE_NANOS;
+        this.deadlineNanos = resolveDeadlineNanos();
         this.bestEffort = bestEffort;
         this.missingOut = missingOut;
         this.diagLog = Diagnostics.isEnabled() ? new ArrayList<>() : null;
@@ -148,8 +159,14 @@ final class ResolutionContext {
     }
 
     private void indexStack(CraftingResolver.StackKey key) {
-        inventoryIndex.computeIfAbsent(key.item(), k -> new ArrayList<>())
-                .add(new CachedStack(key));
+        List<CachedStack> stacks = inventoryIndex.computeIfAbsent(key.item(), k -> new ArrayList<>());
+        // A key removed during a speculative branch remains cached in this index.
+        // Re-adding it after rollback must not append a duplicate candidate, or
+        // countMatching would count the same physical stack more than once.
+        for (CachedStack cached : stacks) {
+            if (cached.key.equals(key)) return;
+        }
+        stacks.add(new CachedStack(key));
     }
 
     int countMatching(Ingredient ingredient) {
@@ -170,10 +187,32 @@ final class ResolutionContext {
 
             for (CachedStack candidate : candidates) {
                 // Use the pre-created ItemStack — zero allocation per call
-                if (ingredient.test(candidate.stack)
+                if (IngredientMatcher.test(ingredient, candidate.stack)
                         || SlashBladeRecipeHandler.matchesStackKey(ingredient, candidate.key)
                         || matchesSlashBladeFallback(ingredient, candidate.key)) {
                     total += counts.getOrDefault(candidate.key, 0);
+                }
+            }
+        }
+        // Some CraftTweaker ingredient wrappers do not expose a reliable display
+        // stack array even though test(actualStack) implements the real NBT rule.
+        // Fall back to the authoritative keyed inventory scan when the fast path
+        // had no item keys, or when every displayed option is NBT-constrained.
+        boolean constrained = checkedItems.isEmpty();
+        if (!constrained) {
+            constrained = true;
+            for (ItemStack template : ingredient.getItems()) {
+                if (!template.isEmpty() && !template.hasTag()) {
+                    constrained = false;
+                    break;
+                }
+            }
+        }
+        if (constrained) {
+            total = 0;
+            for (Map.Entry<CraftingResolver.StackKey, Integer> entry : counts.entrySet()) {
+                if (entry.getValue() > 0 && IngredientMatcher.test(ingredient, entry.getKey().toStack())) {
+                    total += entry.getValue();
                 }
             }
         }
@@ -202,7 +241,7 @@ final class ResolutionContext {
             if (remaining <= 0) return true;
             int available = counts.getOrDefault(key, 0);
             if (available <= 0) continue;
-            if (!ingredient.test(key.toStack()) && !SlashBladeRecipeHandler.matchesStackKey(ingredient, key)
+            if (!IngredientMatcher.test(ingredient, key.toStack()) && !SlashBladeRecipeHandler.matchesStackKey(ingredient, key)
                     && !matchesSlashBladeFallback(ingredient, key)) continue;
             int take = Math.min(available, remaining);
             decrement(key, take);

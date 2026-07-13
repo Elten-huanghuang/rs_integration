@@ -43,7 +43,7 @@ import java.util.List;
  */
 public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
 
-    // -- Shared class refs (now from TLMReflection probe) --
+    // ── Shared class refs (now from TLMReflection probe) ──
     private static volatile Object powerCapToken;
     private static volatile boolean powerCapProbed;
 
@@ -61,7 +61,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
         }
     }
 
-    // -- Instance state --
+    // ── Instance state ──
     private ServerPlayer player;
     private ResourceKey<Level> myDim;
     private BlockPos myPos;
@@ -70,6 +70,8 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
     // Computed in validateAndInit: output spawns at centrePos.above(2)
     @Nullable
     private BlockPos centrePos;
+    @Nullable
+    private net.minecraft.world.phys.AABB outputCaptureRegion;
     private Recipe<?> recipe;
     private boolean craftEverConfirmed;
 
@@ -78,7 +80,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
     private List<Object> storageBlockEntities; // TileEntityAltar for each position
     private boolean[] slotsFilled;            // tracks which slots we put items into
 
-    // -- IBatchDelegate impl --
+    // ── IBatchDelegate impl ──
 
     @Override
     public boolean validateAndInit(ServerPlayer player, ResourceLocation recipeId,
@@ -107,6 +109,17 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
             return false;
         }
         this.altar = be;
+        BlockPos boundPos = pos;
+        TlmAltarStructure.Resolved resolved = TlmAltarStructure.resolve(level, be);
+        if (resolved != null) {
+            this.myPos = resolved.mainPos();
+            this.altar = resolved.mainEntity();
+            this.outputCaptureRegion = resolved.bounds();
+            RSIntegrationMod.LOGGER.debug("[RSI-Batch-TLM] Resolved altar binding {} -> main {} (positions={}, capture={})",
+                    boundPos, myPos, resolved.allPositions().size(), outputCaptureRegion);
+        } else {
+            RSIntegrationMod.LOGGER.warn("[RSI-Batch-TLM] Could not resolve main altar from bound {}; using bound BE", boundPos);
+        }
 
         // Check multiblock formed
         try {
@@ -121,7 +134,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
             return false;
         }
 
-        BlockState state = level.getBlockState(pos);
+        BlockState state = level.getBlockState(myPos);
         this.blockAltar = state.getBlock();
 
         // Resolve recipe
@@ -160,28 +173,45 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
             List<BlockPos> allBlockPositions = Reflect.invokeExact(blockPosData, "getData",
                     new Class<?>[0]).map(l -> (List<BlockPos>) l).orElse(null);
             if (allBlockPositions != null && !allBlockPositions.isEmpty()) {
-                // Find the altar bottom Y (minimum Y in blockPosList).
-                // TLM's getCentrePos uses altarY-2 where altarY is the
-                // storage-layer Y (bottom + 2), so targetY = bottom.
-                int minY = Integer.MAX_VALUE;
-                for (BlockPos bp : allBlockPositions) {
-                    if (bp.getY() < minY) minY = bp.getY();
-                }
-                int targetY = minY;
+                int targetY = myPos.getY() - 2;
                 long sumX = 0, sumZ = 0;
                 int count = 0;
+                int minX = Integer.MAX_VALUE, minY = Integer.MAX_VALUE, minZ = Integer.MAX_VALUE;
+                int maxX = Integer.MIN_VALUE, maxY = Integer.MIN_VALUE, maxZ = Integer.MIN_VALUE;
                 for (BlockPos bp : allBlockPositions) {
+                    minX = Math.min(minX, bp.getX()); minY = Math.min(minY, bp.getY()); minZ = Math.min(minZ, bp.getZ());
+                    maxX = Math.max(maxX, bp.getX()); maxY = Math.max(maxY, bp.getY()); maxZ = Math.max(maxZ, bp.getZ());
                     if (bp.getY() == targetY) {
                         sumX += bp.getX();
                         sumZ += bp.getZ();
                         count++;
                     }
                 }
-                if (count > 0) {
-                    this.centrePos = new BlockPos((int)(sumX / count), targetY, (int)(sumZ / count));
-                    RSIntegrationMod.LOGGER.debug("[RSI-Batch-TLM] CentrePos computed: {} (altar: {})",
-                            centrePos, myPos);
+                if (count == 8) {
+                    // TLM 1.5.0 BlockAltar#getCentrePos always divides by the
+                    // eight base-layer structure positions, not the observed count.
+                    this.centrePos = new BlockPos((int) (sumX / 8L), targetY, (int) (sumZ / 8L));
+                    BlockPos spawnPos = centrePos.above(2);
+                    // Preserve the structure-wide region resolved above; only
+                    // fall back to locally-computed bounds if resolution failed.
+                    if (this.outputCaptureRegion == null) {
+                        this.outputCaptureRegion = new net.minecraft.world.phys.AABB(
+                                minX, Math.min(minY, spawnPos.getY()), minZ,
+                                maxX + 1, Math.max(maxY + 1, spawnPos.getY() + 1), maxZ + 1)
+                                .inflate(1.0);
+                    }
+                    if (count != 8) {
+                        RSIntegrationMod.LOGGER.warn("[RSI-Batch-TLM] Unexpected altar base count: {} (expected 8), altar={}",
+                                count, myPos);
+                    }
+                    RSIntegrationMod.LOGGER.debug("[RSI-Batch-TLM] CentrePos: altar={} targetY={} count={} sumX={} sumZ={} centre={} spawn={} capture={}",
+                            myPos, targetY, count, sumX, sumZ, centrePos, spawnPos, outputCaptureRegion);
+                } else {
+                    RSIntegrationMod.LOGGER.warn("[RSI-Batch-TLM] Unexpected altar base count: {} (expected 8), altar={} targetY={}",
+                            count, myPos, targetY);
                 }
+            } else {
+                RSIntegrationMod.LOGGER.warn("[RSI-Batch-TLM] blockPosList data unavailable/empty for altar {}", myPos);
             }
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.debug("[RSI-Batch-TLM] Failed to compute centrePos, falling back to myPos", e);
@@ -441,12 +471,16 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
         // (copyInput recipes copy NBT from ingredients into the output entity).
         BlockPos scanCenter = centrePos != null ? centrePos : myPos;
         BlockPos outputPos = scanCenter.above(2); // exactly where TLM spawns it
-        List<ItemEntity> entities = level.getEntitiesOfClass(ItemEntity.class,
-                new net.minecraft.world.phys.AABB(outputPos).inflate(2.0));
+        net.minecraft.world.phys.AABB scanRegion = outputCaptureRegion != null
+                ? outputCaptureRegion
+                : new net.minecraft.world.phys.AABB(outputPos).inflate(2.0);
+        ItemStack expected = getExpectedOutput();
+        if (expected == null || expected.isEmpty()) return ItemStack.EMPTY;
+        List<ItemEntity> entities = level.getEntitiesOfClass(ItemEntity.class, scanRegion);
         for (ItemEntity entity : entities) {
             if (!entity.isRemoved()) {
                 ItemStack stack = entity.getItem();
-                if (!stack.isEmpty()) {
+                if (!stack.isEmpty() && ItemStack.isSameItem(expected, stack)) {
                     entity.discard();
                     RSIntegrationMod.LOGGER.debug("[RSI-Batch-TLM] Collected ItemEntity: {} at {}",
                             stack, outputPos);
@@ -455,18 +489,10 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
             }
         }
 
-        // Fallback: read output directly from recipe (guaranteed correct for non-copyInput recipes).
-        if (recipe != null) {
-            ItemStack result = RecipeIndex.tryGetResultItem(recipe, level.registryAccess());
-            if (!result.isEmpty()) {
-                RSIntegrationMod.LOGGER.debug("[RSI-Batch-TLM] Falling back to recipe resultItem: {} (no ItemEntity found at {})",
-                        result, outputPos);
-                return result.copy();
-            }
-        }
-
-        RSIntegrationMod.LOGGER.warn("[RSI-Batch-TLM] No output: no ItemEntity at {} and no recipe resultItem",
-                outputPos);
+        // Never synthesize a result from the recipe here. Absence may mean a
+        // magnet or another pickup path already took the real entity; returning a
+        // template would then duplicate it (one in inventory, one delivered to RS).
+        RSIntegrationMod.LOGGER.warn("[RSI-Batch-TLM] No physical output ItemEntity found at {}", outputPos);
         return ItemStack.EMPTY;
     }
 
@@ -491,7 +517,24 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
         return myPos;
     }
 
-    // -- Helpers --
+    @Override
+    public ItemStack getExpectedOutput() {
+        // Altar spits the product into the world; expose its type so the
+        // interceptor can grab it before magnets. Matching is item-type only,
+        // so the bare recipe result is fine even for copy-input NBT recipes.
+        if (recipe == null || machineServer == null) return null;
+        ItemStack out = RecipeIndex.tryGetResultItem(recipe, machineServer.registryAccess());
+        return out.isEmpty() ? null : out;
+    }
+
+    @Override
+    public net.minecraft.world.phys.AABB getOutputCaptureRegion() {
+        if (outputCaptureRegion != null) return outputCaptureRegion;
+        BlockPos base = centrePos != null ? centrePos : myPos;
+        return base == null ? null : new net.minecraft.world.phys.AABB(base.above(2)).inflate(2.0);
+    }
+
+    // ── Helpers ──
 
     private boolean checkPower(ServerPlayer player) {
         probePowerCap();
@@ -695,7 +738,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
         }
     }
 
-    // -- Reflection helpers --
+    // ── Reflection helpers ──
 
     private static ItemStackHandler rsi$tlmsGetHandler(Object storageBe)
             throws NoSuchFieldException, IllegalAccessException {
@@ -704,7 +747,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
         return (ItemStackHandler) f.get(storageBe);
     }
 
-    // -- Plan warnings (static) --
+    // ── Plan warnings (static) ──
 
     /** Item that can be right-clicked to absorb into the player's P-Power capability. */
     private static final ResourceLocation PP_ID =

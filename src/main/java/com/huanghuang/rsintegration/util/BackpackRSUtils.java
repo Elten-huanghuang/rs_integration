@@ -157,9 +157,14 @@ public final class BackpackRSUtils {
 
     private static volatile FakePlayer cachedFakePlayer;
     private static volatile ServerLevel cachedFakePlayerLevel;
+    private static volatile UUID cachedFakePlayerBackpackUuid;
 
     private static Player getOrCreateFakePlayer(ServerLevel level, UUID backpackUuid) {
-        if (cachedFakePlayer != null && cachedFakePlayerLevel == level) {
+        // Cache key must include backpackUuid — otherwise the first backpack's
+        // FakePlayer (and its owner name) is reused for every other backpack,
+        // mis-attributing RS storage-tracker "last changed by" entries.
+        if (cachedFakePlayer != null && cachedFakePlayerLevel == level
+                && Objects.equals(cachedFakePlayerBackpackUuid, backpackUuid)) {
             return cachedFakePlayer;
         }
         String playerName = "Refined Storage";
@@ -175,6 +180,7 @@ public final class BackpackRSUtils {
         }
         cachedFakePlayer = new FakePlayer(level, new GameProfile(UUID.randomUUID(), playerName));
         cachedFakePlayerLevel = level;
+        cachedFakePlayerBackpackUuid = backpackUuid;
         return cachedFakePlayer;
     }
 }

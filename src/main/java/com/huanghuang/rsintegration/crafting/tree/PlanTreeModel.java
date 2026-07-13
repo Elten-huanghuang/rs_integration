@@ -46,7 +46,7 @@ public final class PlanTreeModel {
         PlanTreeNode root = new PlanTreeNode(
                 IngredientKey.of(target), target,
                 target.getCount() * Math.max(1, plan.repeatCount()), 0, null);
-        PlanResponse.Availability rootAvail = plan.materials().get(target.getItem());
+        PlanResponse.Availability rootAvail = plan.availability(target);
         if (rootAvail != null) {
             root.available = rootAvail.available();
             root.needed = rootAvail.needed();
@@ -67,14 +67,14 @@ public final class PlanTreeModel {
      * card material panel display exactly the numbers the tree renders, instead of the resolver's
      * net/capped batch counts which under- or over-report per branch.
      */
-    public static Map<Item, Integer> grossDemandByItem(PlanTreeModel model) {
-        Map<Item, Integer> out = new LinkedHashMap<>();
+    public static Map<IngredientKey, Integer> grossDemandByKey(PlanTreeModel model) {
+        Map<IngredientKey, Integer> out = new LinkedHashMap<>();
         for (PlanTreeNode child : model.root.children) accumulateDemand(child, out);
         return out;
     }
 
-    private static void accumulateDemand(PlanTreeNode node, Map<Item, Integer> out) {
-        out.merge(node.displayStack.getItem(), node.amount, Integer::sum);
+    private static void accumulateDemand(PlanTreeNode node, Map<IngredientKey, Integer> out) {
+        out.merge(node.key, node.amount, Integer::sum);
         for (PlanTreeNode child : node.children) accumulateDemand(child, out);
     }
 
@@ -138,7 +138,7 @@ public final class PlanTreeModel {
     }
 
     private static void applyAvailability(PlanTreeNode node, PlanResponse plan, ItemStack input) {
-        PlanResponse.Availability a = plan.materials().get(input.getItem());
+        PlanResponse.Availability a = plan.availability(input);
         if (a != null) {
             node.available = a.available();
             node.needed = a.needed();

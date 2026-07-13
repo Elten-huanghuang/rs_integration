@@ -10,6 +10,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.phys.AABB;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -48,6 +49,16 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
     /** Fallback server reference for dimension resolution when player is offline. */
     @Nullable
     protected net.minecraft.server.MinecraftServer machineServer;
+
+    /**
+     * The concrete output the player asked for, captured from the JEI ghost
+     * output slot at click time and threaded through the async chain. Non-null
+     * only when the client supplied it. Lets a delegate distinguish between
+     * outputs that share one recipe id but differ by NBT — e.g. WR arcane
+     * iterator "Curse II" vs "Curse I" both resolve to the same recipe.
+     */
+    @Nullable
+    protected net.minecraft.world.item.ItemStack targetOutput;
 
     private final Set<String> seenWarnStates = new HashSet<>();
 
@@ -175,6 +186,37 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
     }
 
     /**
+     * Default capture box for the output interceptor: a tight cube around the
+     * machine centre. The interceptor now uses position-only matching + newborn
+     * filtering ({@code tickCount == 0}), so false captures are naturally rare;
+     * the AABB just needs to cover the machine's typical output spawn point.
+     * Delegates whose output drops at a known offset (e.g. TLM altar 2 blocks
+     * up) should override this with a precise box.
+     * <p>
+     * Returns null for virtual delegates with no physical machine.
+     */
+    @Override
+    public AABB getOutputCaptureRegion() {
+        BlockPos pos = getMachinePos();
+        return pos == null ? null : new AABB(pos).inflate(1.5);
+    }
+
+    /**
+     * Set the concrete output the player asked for (from the JEI ghost slot).
+     * Called by the chain after {@link #validateAndInit} succeeds, mirroring
+     * {@link #setMachineDim}. Delegates that don't need it simply ignore it.
+     */
+    public void setTargetOutput(@Nullable net.minecraft.world.item.ItemStack target) {
+        this.targetOutput = target != null && !target.isEmpty() ? target.copy() : null;
+    }
+
+    /** The concrete output the player asked for, or null if none was supplied. */
+    @Nullable
+    public net.minecraft.world.item.ItemStack getTargetOutput() {
+        return targetOutput;
+    }
+
+    /**
      * Machine-specific cleanup. Called by {@link #onBatchFailed(ServerPlayer, String)}
      * after the shared-ledger and chunk-load guards.
      */
@@ -195,6 +237,7 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
         usingSharedLedger = false;
         machineDim = null;
         machineServer = null;
+        targetOutput = null;
         seenWarnStates.clear();
     }
 }

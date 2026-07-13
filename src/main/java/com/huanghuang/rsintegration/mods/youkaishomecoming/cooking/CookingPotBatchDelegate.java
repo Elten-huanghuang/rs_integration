@@ -61,6 +61,11 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
     private static volatile Method getResultMethod;    // PotCookingRecipe.getResult()
     private static volatile Method inProgressMethod;   // TimedRecipeBlockEntity.inProgress()
     private static volatile Method containerMethod;    // CookingBlockEntity.container()
+    // -- PotFoodBlock (soup-pot result block) reflection; all optional --
+    private static volatile Class<?> potFoodBlockClass;   // content.block.food.PotFoodBlock
+    private static volatile Method asBowlsMethod;         // PotFoodBlock.asBowls() -> food * serve
+    private static volatile Field potFoodFoodField;       // BowlBlock.food (ItemLike) — fallback
+    private static volatile Field potFoodServeField;      // PotFoodBlock.serve (int) — fallback
     private static volatile boolean reflectionProbed;
 
     @Override
@@ -96,7 +101,22 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
         for (Ingredient ing : ingredients) {
             if (!ing.isEmpty()) specs.add(new IngredientSpec(ing, 1));
         }
+        // Soup-pot recipes serve into bowls: reserve `serve` bowls so the
+        // resolver auto-crafts them if missing and the ledger accounts for them.
+        ItemStack bowls = computeServeBowls(recipe);
+        if (!bowls.isEmpty()) {
+            specs.add(new IngredientSpec(
+                    Ingredient.of(bowls), bowls.getCount()));
+        }
         return specs.isEmpty() ? null : specs;
+    }
+
+    /** Whether {@code stack} is the serve-bowl for this recipe (a required
+     *  material that must NOT be inserted into the pot). */
+    private boolean isServeBowl(ItemStack stack) {
+        if (stack.isEmpty()) return false;
+        ItemStack bowls = computeServeBowls(recipe);
+        return !bowls.isEmpty() && stack.getItem() == bowls.getItem();
     }
 
     @Override
@@ -180,6 +200,10 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
 
         for (ItemStack mat : materials) {
             if (mat.isEmpty()) continue;
+            // Serve-bowls are reserved as a required material but must not go
+            // into the pot — they're the containers the finished servings ship
+            // in (consumed at collectResult time).
+            if (isServeBowl(mat)) continue;
             ItemStack single = mat.copyWithCount(1);
             if (!tryAddItem(be, single)) {
                 RSIntegrationMod.LOGGER.warn("[RSI-CookPot] tryAddItem failed for {}",
@@ -237,6 +261,14 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
         ItemStack expected = getRecipeResult(recipe);
         BlockPos above = myPos.above();
 
+        // Case 0: Soup-pot result (PotFoodBlock). YHK's finishRecipe places a
+        // pot_of_X block at the pot position; the player is meant to scoop
+        // servings out with bowls (each serving consumes 1 bowl), NOT to pick
+        // up the whole pot. Serve it into bowls here instead of collecting the
+        // block item.
+        ItemStack served = tryServePotFood(player);
+        if (served != null) return served;
+
         // Case 1: Result block replaced the pot (BlockItem result).
         // finishRecipe() calls level.setBlock(getBlockPos(), state) for blocks.
         var stateAtPot = myLevel.getBlockState(myPos);
@@ -278,9 +310,108 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
             }
         }
 
-        // Last resort: return the expected recipe result directly
-        if (!expected.isEmpty()) return expected.copy();
+        // Last resort: do NOT fabricate expected.copy() — if the real result
+        // escaped to a magnet it is already with the player, so minting a copy
+        // duplicates it. Return EMPTY; getExpectedOutput() is non-null so the
+        // chain runs abortWithoutRefund (no dupe, no unfair refund). A genuine
+        // vanish becomes item loss — the accepted trade-off (loss >> dupe).
         return ItemStack.EMPTY;
+    }
+
+    @Override
+    public ItemStack getExpectedOutput() {
+        // Non-null enables the chain's missing-output detection (see collectResult)
+        // and lets CraftOutputInterceptor match by item type. Soup-pot recipes
+        // deliver served food (tryServePotFood returns non-empty before this
+        // matters), so the block-item expected value only gates the escape path.
+        if (recipe == null) return null;
+        ItemStack out = getRecipeResult(recipe);
+        return out.isEmpty() ? null : out;
+    }
+
+    /**
+     * If the pot position now holds a YHK soup-pot block ({@code PotFoodBlock}),
+     * serve it into bowls instead of collecting the whole block.
+     * <p>
+     * Mirrors manual play: each serving is one food item shipped in a bowl. The
+     * bowls were already consumed from the network at craft start (they are a
+     * required material — see {@link #getRequiredMaterials}), so here we only
+     * scoop the servings out and remove the emptied pot block. Returns:
+     * <ul>
+     *   <li>{@code food * serve} when a soup pot was served;</li>
+     *   <li>{@code null} when the pot position is not a PotFoodBlock (caller
+     *       falls back to the legacy block-collection path).</li>
+     * </ul>
+     */
+    @Nullable
+    private ItemStack tryServePotFood(ServerPlayer player) {
+        probeReflection();
+        if (potFoodBlockClass == null) return null;
+
+        var state = myLevel.getBlockState(myPos);
+        var block = state.getBlock();
+        if (!potFoodBlockClass.isInstance(block)) return null;
+
+        ItemStack bowls = readPotFoodBowls(block);
+        if (bowls.isEmpty()) {
+            RSIntegrationMod.LOGGER.warn("[RSI-CookPot] PotFoodBlock at {} produced no servings", myPos);
+            return null;
+        }
+        int serve = bowls.getCount();
+        ItemStack foodUnit = bowls.copyWithCount(1);
+
+        // Scoop the servings out and remove the emptied pot so it's never
+        // collected whole. (Bowls were already consumed at craft start.)
+        myLevel.removeBlock(myPos, false);
+        RSIntegrationMod.LOGGER.debug("[RSI-CookPot] Served soup pot at {}: {} x{}",
+                myPos, foodUnit.getHoverName().getString(), serve);
+        return foodUnit.copyWithCount(serve);
+    }
+
+    /** Read {@code food * serve} from a PotFoodBlock via asBowls(), with a
+     *  field-based fallback. Returns EMPTY if neither path works. */
+    private static ItemStack readPotFoodBowls(net.minecraft.world.level.block.Block block) {
+        if (asBowlsMethod != null) {
+            try {
+                Object r = asBowlsMethod.invoke(block);
+                if (r instanceof ItemStack s && !s.isEmpty()) return s;
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.debug("[RSI-CookPot] asBowls() failed, trying fields", e);
+            }
+        }
+        // Fallback: food (ItemLike) * serve (int)
+        if (potFoodFoodField != null && potFoodServeField != null) {
+            try {
+                Object food = potFoodFoodField.get(block);
+                int serve = potFoodServeField.getInt(block);
+                if (food instanceof net.minecraft.world.level.ItemLike il && serve > 0) {
+                    return new ItemStack(il.asItem(), serve);
+                }
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.debug("[RSI-CookPot] PotFoodBlock field read failed", e);
+            }
+        }
+        return ItemStack.EMPTY;
+    }
+
+    /** Compute the bowls a soup-pot recipe needs to serve its result:
+     *  {@code food.getCraftingRemainingItem() * serve}. Returns EMPTY when the
+     *  recipe result is not a PotFoodBlock (plain-item cooking recipe). */
+    private static ItemStack computeServeBowls(Recipe<?> recipe) {
+        probeReflection();
+        if (potFoodBlockClass == null) return ItemStack.EMPTY;
+        ItemStack result = getRecipeResult(recipe);
+        if (result.isEmpty() || !(result.getItem() instanceof net.minecraft.world.item.BlockItem bi))
+            return ItemStack.EMPTY;
+        if (!potFoodBlockClass.isInstance(bi.getBlock())) return ItemStack.EMPTY;
+        ItemStack bowls = readPotFoodBowls(bi.getBlock());
+        if (bowls.isEmpty()) return ItemStack.EMPTY;
+        int serve = bowls.getCount();
+        ItemStack foodUnit = bowls.copyWithCount(1);
+        if (!foodUnit.hasCraftingRemainingItem()) return ItemStack.EMPTY;
+        Item bowlItem = foodUnit.getCraftingRemainingItem().getItem();
+        if (bowlItem == net.minecraft.world.item.Items.AIR) return ItemStack.EMPTY;
+        return new ItemStack(bowlItem, serve);
     }
 
     @Override
@@ -317,6 +448,13 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
                                                 @Nullable BlockPos pos) {
         List<String> warnings = new ArrayList<>();
         warnings.add(Component.translatable("rsi.youkaishomecoming.cookpot_heat_warning").getString());
+        // Soup-pot recipes are served into bowls; surface the bowl cost so the
+        // player knows N bowls will be consumed (auto-crafted if missing).
+        ItemStack bowls = computeServeBowls(recipe);
+        if (!bowls.isEmpty()) {
+            warnings.add(Component.translatable("rsi.youkaishomecoming.cookpot_bowl_warning",
+                    bowls.getCount(), bowls.getHoverName()).getString());
+        }
         return warnings;
     }
 
@@ -412,6 +550,22 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
             // PotCookingRecipe.getInput() / getResult() -- public
             getInputMethod = YHKReflection.potCookingRecipeClass.getMethod("getInput");
             getResultMethod = YHKReflection.potCookingRecipeClass.getMethod("getResult");
+
+            // PotFoodBlock (soup-pot result) — optional; if any probe fails,
+            // collectResult falls back to the legacy block-collection path.
+            try {
+                potFoodBlockClass = Class.forName(
+                        "dev.xkmc.youkaishomecoming.content.block.food.PotFoodBlock");
+                asBowlsMethod = potFoodBlockClass.getMethod("asBowls");
+                asBowlsMethod.setAccessible(true);
+                potFoodServeField = potFoodBlockClass.getDeclaredField("serve");
+                potFoodServeField.setAccessible(true);
+                // food is declared on BowlBlock (superclass) — walk up
+                potFoodFoodField = findFieldInHierarchy(potFoodBlockClass, "food");
+                if (potFoodFoodField != null) potFoodFoodField.setAccessible(true);
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.debug("[RSI-CookPot] PotFoodBlock probe unavailable", e);
+            }
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-CookPot] Reflection probe failed", e);
         }
@@ -423,6 +577,18 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
             try {
                 return current.getDeclaredMethod(name, paramTypes);
             } catch (NoSuchMethodException e) {
+                current = current.getSuperclass();
+            }
+        }
+        return null;
+    }
+
+    private static Field findFieldInHierarchy(Class<?> clazz, String name) {
+        Class<?> current = clazz;
+        while (current != null && current != Object.class) {
+            try {
+                return current.getDeclaredField(name);
+            } catch (NoSuchFieldException e) {
                 current = current.getSuperclass();
             }
         }

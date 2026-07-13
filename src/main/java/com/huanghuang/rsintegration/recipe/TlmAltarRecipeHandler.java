@@ -63,6 +63,11 @@ public final class TlmAltarRecipeHandler extends AbstractRecipeHandler {
         while (scan != null && scan != Object.class) {
             for (java.lang.reflect.Field f : scan.getDeclaredFields()) {
                 if (!ItemStack.class.isAssignableFrom(f.getType())) continue;
+                // Only accept fields whose name looks like an output — otherwise an
+                // unrelated ItemStack field declared first (icon, cached input,
+                // container) would be mis-read as the recipe product.
+                String fn = f.getName().toLowerCase(java.util.Locale.ROOT);
+                if (!fn.contains("output") && !fn.contains("result") && !fn.contains("assembled")) continue;
                 f.setAccessible(true);
                 try {
                     ItemStack s = (ItemStack) f.get(recipe);

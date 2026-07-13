@@ -85,6 +85,19 @@ public final class RSSidePanelClient {
     static final Map<UUID, PendingExtraction> pendingExtractions = new HashMap<>();
     static final PanelDataModel dataModel = new PanelDataModel();
 
+    /** Clear per-server panel state on client logout so items/pending
+     *  extractions from a previous server don't briefly show after switching. */
+    public static void clearOnLogout() {
+        panels.clear();
+        idToIndex.clear();
+        displayList.clear();
+        pendingExtractions.clear();
+        displayDirty = true;
+        networkAvailable = false;
+        networkName = "";
+        SyncHandler.clearOnLogout();
+    }
+
     // ── Mouse/drag state ─────────────────────────────────────────
     static boolean movingPanel;
     static int moveStartMouseX, moveStartMouseY;
