@@ -148,14 +148,18 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
 
         forceChunkLoad(true);
 
+        long materialCount = materials.stream().filter(s -> !s.isEmpty()).count();
+        if (materialCount > INPUT_SLOTS) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Batch-Cooler] Recipe {} has {} ingredients but only {} input slots",
+                    recipe.getId(), materialCount, INPUT_SLOTS);
+            forceChunkLoad(false);
+            return false;
+        }
+
         // Phase 1: Insert ingredients into input slots 0..3
         int slot = 0;
         for (ItemStack mat : materials) {
             if (mat.isEmpty()) continue;
-            if (slot >= INPUT_SLOTS) {
-                RSIntegrationMod.LOGGER.warn("[RSI-Batch-Cooler] Too many ingredients for 4-slot cooler");
-                break;
-            }
             ItemStack single = mat.copyWithCount(1);
             ItemStack remainder = itemHandler.insertItem(slot, single, false);
             if (!remainder.isEmpty()) {
@@ -203,15 +207,45 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
         // item's crafting remainder — without it the meal stays stuck internally
         // and is never recovered into RS.
         ItemStack container = getContainerItem(recipe);
-        if (!container.isEmpty() && network != null) {
+        if (!container.isEmpty()) {
             ItemStack existing = itemHandler.getStackInSlot(CONTAINER_SLOT);
+            if (!existing.isEmpty() && !ItemStack.isSameItemSameTags(existing, container)) {
+                RSIntegrationMod.LOGGER.warn("[RSI-Batch-Cooler] Recipe {} needs container {}, but slot contains {}",
+                        recipe.getId(), container, existing);
+                rollbackInputs(itemHandler, slot);
+                be.setChanged();
+                return false;
+            }
             if (existing.isEmpty()) {
+                if (network == null) {
+                    rollbackInputs(itemHandler, slot);
+                    be.setChanged();
+                    return false;
+                }
                 ItemStack extracted = network.extractItem(container.copyWithCount(1), 1,
                         com.refinedmods.refinedstorage.api.util.Action.PERFORM);
-                if (!extracted.isEmpty()) {
-                    itemHandler.insertItem(CONTAINER_SLOT, extracted, false);
+                if (extracted.isEmpty()) {
+                    RSIntegrationMod.LOGGER.warn("[RSI-Batch-Cooler] Required container unavailable for recipe {}: {}",
+                            recipe.getId(), container);
+                    rollbackInputs(itemHandler, slot);
                     be.setChanged();
+                    return false;
                 }
+                ItemStack simulated = itemHandler.insertItem(CONTAINER_SLOT, extracted, true);
+                if (!simulated.isEmpty()) {
+                    refundToRSNetwork(extracted);
+                    rollbackInputs(itemHandler, slot);
+                    be.setChanged();
+                    return false;
+                }
+                ItemStack remainder = itemHandler.insertItem(CONTAINER_SLOT, extracted, false);
+                if (!remainder.isEmpty()) {
+                    refundToRSNetwork(remainder);
+                    rollbackInputs(itemHandler, slot);
+                    be.setChanged();
+                    return false;
+                }
+                be.setChanged();
             }
         }
 
@@ -219,8 +253,8 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
         return true;
     }
 
-    /** The container this recipe's meal needs: explicit recipe container, else
-     *  the result item's crafting remainder (bowl/cup food). EMPTY if none. */
+    /** The container explicitly declared by this recipe. EMPTY means the
+     *  cooler does not consume a container for the craft. */
     private static ItemStack getContainerItem(Recipe<?> recipe) {
         if (recipe == null) return ItemStack.EMPTY;
         try {
@@ -234,16 +268,6 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
             Object v = f.get(recipe);
             if (v instanceof ItemStack s && !s.isEmpty()) return s;
         } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-Cooler] container field failed", e); }
-        // Fallback: meal item's own container (bowl/cup) via crafting remainder.
-        if (recipe instanceof net.minecraft.world.item.crafting.CraftingRecipe) return ItemStack.EMPTY;
-        try {
-            ItemStack result = com.huanghuang.rsintegration.crafting.RecipeIndex
-                    .tryGetResultItem(recipe, null);
-            if (!result.isEmpty() && result.hasCraftingRemainingItem()) {
-                ItemStack rem = result.getCraftingRemainingItem();
-                if (!rem.isEmpty()) return rem;
-            }
-        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-Cooler] meal-container fallback failed", e); }
         return ItemStack.EMPTY;
     }
 
@@ -301,12 +325,23 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
             ItemStack s = handler.extractItem(slot, 64, false);
             if (!s.isEmpty() && !usingSharedLedger) refundToRSNetwork(s);
         }
+        // Container is out-of-band (not in shared ledger) — refund unconditionally
+        ItemStack container = handler.extractItem(CONTAINER_SLOT, 64, false);
+        if (!container.isEmpty()) refundToRSNetwork(container);
         ItemStack out = handler.extractItem(OUTPUT_SLOT, 64, false);
-        if (!out.isEmpty() && !usingSharedLedger) refundToRSNetwork(out);
+        // Output is not part of the shared input ledger; do not discard it during cleanup.
+        if (!out.isEmpty()) refundToRSNetwork(out);
         // Fuel is out-of-band (not in shared ledger) — refund unconditionally
         ItemStack fuel = handler.extractItem(FUEL_SLOT, 64, false);
         if (!fuel.isEmpty()) refundToRSNetwork(fuel);
         be.setChanged();
+    }
+
+    private void rollbackInputs(IItemHandler handler, int insertedSlots) {
+        for (int back = 0; back < insertedSlots; back++) {
+            ItemStack refund = handler.extractItem(back, 64, false);
+            if (!refund.isEmpty() && !usingSharedLedger) refundToRSNetwork(refund);
+        }
     }
 
     private void refundToRSNetwork(ItemStack stack) {
