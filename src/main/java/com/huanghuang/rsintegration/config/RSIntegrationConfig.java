@@ -74,6 +74,7 @@ public final class RSIntegrationConfig {
     // ── per-mod tuning (server, per-world) ───────────────────────
     public static ForgeConfigSpec.ConfigValue<String> CROCKPOT_FILLER_ITEM;
     public static ForgeConfigSpec.ConfigValue<List<? extends String>> CROCKPOT_FUEL_PRIORITY;
+    public static ForgeConfigSpec.ConfigValue<List<? extends String>> VANILLA_FURNACE_FUEL_PRIORITY;
     public static ForgeConfigSpec.IntValue EMBERS_INFER_MAX_ATTEMPTS;
     public static ForgeConfigSpec.IntValue EMBERS_INFER_ZERO_BLACK_LIMIT;
     public static ForgeConfigSpec.IntValue EMBERS_LOCK_TIMEOUT_MINUTES;
@@ -358,6 +359,15 @@ public final class RSIntegrationConfig {
                         "Format: \"modid:item_id\" per line.")
                 .defineList("crockpotFuelPriority",
                         List.of("minecraft:coal", "minecraft:charcoal", "minecraft:coal_block"),
+                        obj -> obj instanceof String str && ResourceLocation.tryParse(str) != null);
+        VANILLA_FURNACE_FUEL_PRIORITY = s
+                .comment("Preferred fuels for vanilla furnaces, blast furnaces, and smokers, in priority order.",
+                        "When the fuel slot is empty, coal is tried before charcoal, then other safe fuels.",
+                        "When the slot already contains fuel, only that same fuel type is topped up.",
+                        "Automatic selection skips tools, container-return fuels, and items with NBT.",
+                        "Format: \"modid:item_id\" per line.")
+                .defineList("vanillaFurnaceFuelPriority",
+                        List.of("minecraft:coal", "minecraft:charcoal"),
                         obj -> obj instanceof String str && ResourceLocation.tryParse(str) != null);
         EMBERS_INFER_MAX_ATTEMPTS = s
                 .comment("Maximum trial-and-error attempts for Embers Alchemy inference mode.",

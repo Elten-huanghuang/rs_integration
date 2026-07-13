@@ -7,6 +7,8 @@ import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.network.gui.BlockGuiRegistry;
 import com.huanghuang.rsintegration.network.gui.GuiOpenRateLimiter;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
+import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.mods.vanilla.VanillaFurnaceFuelPolicy;
 import com.huanghuang.rsintegration.util.ChunkUtils;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;
@@ -247,25 +249,17 @@ public final class OpenBoundMachineGuiPacket {
         }
 
         // ── auto-supply fuel into slot 1 ──
-        ItemStack existingFuel = furnace.getItem(1);
-        boolean hasFuel = false;
-        if (!existingFuel.isEmpty()) {
-            int burnTime = ForgeHooks.getBurnTime(existingFuel, recipe.getType());
-            if (burnTime > 0) hasFuel = true;
-        }
-        // Check litTime via cached field (dev + SRG fallback)
-        if (!hasFuel && LIT_TIME != null) {
+        int cookingTime = recipe instanceof AbstractCookingRecipe acr
+                ? acr.getCookingTime() : 200;
+        int litTime = 0;
+        if (LIT_TIME != null) {
             try {
-                if (LIT_TIME.getInt(furnace) > 0) hasFuel = true;
+                litTime = LIT_TIME.getInt(furnace);
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.debug("[RSI-SidePanel] litTime probe failed", e);
             }
         }
-        if (!hasFuel) {
-            int cookingTime = recipe instanceof AbstractCookingRecipe acr
-                    ? acr.getCookingTime() : 200;
-            supplyFuelFromRS(network, furnace, recipe, cookingTime, player);
-        }
+        supplyFuelFromRS(network, furnace, recipe, Math.max(0, cookingTime - litTime), player);
 
         furnace.setChanged();
         levelOpt.sendBlockUpdated(pos,
@@ -287,24 +281,44 @@ public final class OpenBoundMachineGuiPacket {
     }
 
     private static void supplyFuelFromRS(INetwork network, AbstractFurnaceBlockEntity furnace,
-                                          Recipe<?> recipe, int cookingTime, ServerPlayer player) {
-        var stacks = new ArrayList<>(network.getItemStorageCache().getList().getStacks());
-        for (var entry : stacks) {
-            ItemStack candidate = entry.getStack();
-            if (candidate.isEmpty()) continue;
-            int singleBurnTime = ForgeHooks.getBurnTime(candidate, recipe.getType());
-            if (singleBurnTime <= 0) continue;
-            int needed = Math.max(1, (cookingTime + singleBurnTime - 1) / singleBurnTime);
-            int available = Math.min(needed, candidate.getCount());
-
-            ItemStack extracted = network.extractItem(
-                    candidate.copyWithCount(1), available, Action.PERFORM);
-            if (!extracted.isEmpty()) {
-                furnace.setItem(1, extracted.copy());
-                player.displayClientMessage(
-                        Component.translatable("rsi.vanilla.info.fuel_supplied", extracted.getCount()), true);
+                                          Recipe<?> recipe, int remainingCook, ServerPlayer player) {
+        if (remainingCook <= 0) return;
+        ItemStack existing = furnace.getItem(1);
+        if (!existing.isEmpty()) {
+            int burn = ForgeHooks.getBurnTime(existing, recipe.getType());
+            int needed = VanillaFurnaceFuelPolicy.requiredAmount(remainingCook, burn);
+            if (burn <= 0 || needed > existing.getMaxStackSize()) return;
+            if (existing.getCount() >= needed) return;
+            int topUp = needed - existing.getCount();
+            ItemStack extra = network.extractItem(existing.copyWithCount(1), topUp, Action.PERFORM);
+            if (extra.getCount() < topUp) {
+                if (!extra.isEmpty()) network.insertItem(extra, extra.getCount(), Action.PERFORM);
                 return;
             }
+            ItemStack merged = existing.copy();
+            merged.grow(extra.getCount());
+            furnace.setItem(1, merged);
+            return;
+        }
+
+        List<ItemStack> candidates = new ArrayList<>();
+        for (var entry : network.getItemStorageCache().getList().getStacks()) {
+            candidates.add(entry.getStack());
+        }
+        VanillaFurnaceFuelPolicy.Selection selection = VanillaFurnaceFuelPolicy.select(
+                candidates, RSIntegrationConfig.VANILLA_FURNACE_FUEL_PRIORITY.get(),
+                recipe.getType(), remainingCook);
+        if (selection == null) return;
+        ItemStack extracted = network.extractItem(selection.fuel().copyWithCount(1),
+                selection.amount(), Action.PERFORM);
+        if (extracted.getCount() < selection.amount()) {
+            if (!extracted.isEmpty()) network.insertItem(extracted, extracted.getCount(), Action.PERFORM);
+            return;
+        }
+        if (!extracted.isEmpty()) {
+            furnace.setItem(1, extracted.copy());
+            player.displayClientMessage(
+                    Component.translatable("rsi.vanilla.info.fuel_supplied", extracted.getCount()), true);
         }
     }
 
