@@ -144,7 +144,14 @@ public abstract class RefillUpgradeWrapperMixin
             }
             if (missing <= 0) continue;
 
-            for (StackListEntry<ItemStack> cacheEntry : cache.getList().getStacks()) {
+            // Snapshot the RS storage cache's stack list before iterating.
+            // cache.getList().getStacks() returns a live view backed by RS's
+            // Guava ArrayListMultimap; the extractItem/insertItem calls below
+            // mutate that same multimap, so iterating the view directly throws
+            // ConcurrentModificationException (crash on the server tick thread).
+            java.util.List<StackListEntry<ItemStack>> cacheSnapshot =
+                    new java.util.ArrayList<>(cache.getList().getStacks());
+            for (StackListEntry<ItemStack> cacheEntry : cacheSnapshot) {
                 ItemStack rsStack = cacheEntry.getStack();
                 if (rsStack.isEmpty()) continue;
                 if (!ItemHandlerHelper.canItemStacksStack(rsStack, filterStack)) continue;

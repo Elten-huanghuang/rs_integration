@@ -312,7 +312,35 @@ public final class CookingPotBatchDelegate extends com.huanghuang.rsintegration.
             Object v = f.get(recipe);
             if (v instanceof ItemStack s && !s.isEmpty()) return s;
         } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-CookingPot] container field access failed", e); }
+        // Fallback: the recipe declares no explicit container, but the meal item
+        // may itself be a bowl/cup food (getCraftingRemainingItem() = the empty
+        // bowl). FD's moveMealToOutput() refuses to move the meal to the output
+        // slot when doesMealHaveContainer() is true (which includes
+        // meal.hasCraftingRemainingItem()), so without supplying that container
+        // the meal stays stuck in the display slot and never reaches OUTPUT_SLOT
+        // — the product is silently never recovered into RS. Derive the required
+        // container from the result item's crafting remainder.
+        try {
+            ItemStack result = getRecipeResult(recipe);
+            if (!result.isEmpty() && result.hasCraftingRemainingItem()) {
+                ItemStack rem = result.getCraftingRemainingItem();
+                if (!rem.isEmpty()) return rem;
+            }
+        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-CookingPot] meal-container fallback failed", e); }
         return ItemStack.EMPTY;
+    }
+
+    /** SRG-safe recipe result (no-arg getResultItem on FD recipes returns the meal). */
+    private static ItemStack getRecipeResult(Recipe<?> recipe) {
+        // FD cooking recipes are never vanilla CraftingRecipe; guard so the
+        // null RegistryAccess below can never reach cr.getResultItem(null) (NPE).
+        if (recipe instanceof net.minecraft.world.item.crafting.CraftingRecipe) return ItemStack.EMPTY;
+        try {
+            return com.huanghuang.rsintegration.crafting.RecipeIndex.tryGetResultItem(
+                    recipe, null);
+        } catch (Exception e) {
+            return ItemStack.EMPTY;
+        }
     }
 
     // ── cleanup ──

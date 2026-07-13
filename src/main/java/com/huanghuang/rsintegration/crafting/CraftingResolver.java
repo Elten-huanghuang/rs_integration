@@ -28,7 +28,23 @@ import java.util.stream.Collectors;
 
 public final class CraftingResolver {
 
-    private static final int MAX_ENSURE_CALLS = 2000;
+    /** Synthetic async step: let Enigmatic Legacy taint an Earth Heart in the
+     * player's inventory, then return that exact instance to the chain. */
+    public static final ResourceLocation TAINT_EARTH_HEART_STEP =
+            new ResourceLocation(RSIntegrationMod.MOD_ID, "internal/taint_earth_heart");
+    private static final ResourceLocation EARTH_HEART_ID =
+            new ResourceLocation("enigmaticlegacy", "earth_heart");
+
+    private static final int MAX_ENSURE_CALLS = 2000; // fallback if config unavailable
+
+    /** Per-plan recursion cap from config, falling back to the default. */
+    private static int maxEnsureCalls() {
+        try {
+            return RSIntegrationConfig.CRAFTING_MAX_ENSURE_CALLS.get();
+        } catch (Exception e) {
+            return MAX_ENSURE_CALLS;
+        }
+    }
 
     /** Cache for {@link #extractHiddenOutput(Recipe)} — avoids repeated
      *  reflection field-scanning in DFS candidate loops. */
@@ -289,11 +305,6 @@ public final class CraftingResolver {
     static boolean ensureIngredient(Ingredient ingredient, int count, ResolutionContext ctx, int depth,
                                      EdgeTracker edges) {
         if (count <= 0) return true;
-        if (ctx.timedOut()) {
-            PerformanceMonitor.recordResolveTimeout();
-            return false;
-        }
-        if (++ctx.ensureCalls > MAX_ENSURE_CALLS) return false;
 
         int minReserve = RSIntegrationConfig.getProtectedReserve(ingredient);
 
@@ -311,9 +322,40 @@ public final class CraftingResolver {
         ctx.rollback();
         edges.rollback();
 
+        // Budget guards gate only the expensive recursive candidate search below.
+        // An ingredient already present in inventory is consumed above, BEFORE these
+        // checks run — otherwise a large plan that exhausts the 500ms deadline (or the
+        // ensureCalls cap) would falsely mark a directly-available ingredient as
+        // missing purely because of its position in resolution order (e.g. Malum
+        // spirits resolve last, after costly base-material sub-crafts).
+        if (ctx.timedOut()) {
+            PerformanceMonitor.recordResolveTimeout();
+            return false;
+        }
+        if (++ctx.ensureCalls > maxEnsureCalls()) return false;
+
         int alreadyHave = ctx.countMatching(ingredient);
         long consumeMs = (System.nanoTime() - consumeStart) / 1_000_000;
         int remaining = count - alreadyHave;
+        if (remaining > 0 && isTaintedEarthHeartRequirement(ingredient)) {
+            Ingredient plainHeart = Ingredient.of(ForgeRegistries.ITEMS.getValue(EARTH_HEART_ID));
+            if (plainHeart.getItems().length > 0
+                    && ensureIngredient(plainHeart, remaining, ctx, depth + 1, edges)) {
+                ItemStack plainTemplate = plainHeart.getItems()[0].copyWithCount(1);
+                ItemStack taintedTemplate = ingredient.getItems().length > 0
+                        ? ingredient.getItems()[0].copyWithCount(1) : ItemStack.EMPTY;
+                if (taintedTemplate.isEmpty()) return false;
+                ctx.steps.add(new ResolutionStep(TAINT_EARTH_HEART_STEP, ModType.GENERIC,
+                        TAINT_EARTH_HEART_STEP, List.of(), List.of(), false, remaining,
+                        plainTemplate, taintedTemplate));
+                ItemStack tainted = taintedTemplate.copyWithCount(remaining);
+                // Runtime conversion uses IngredientMatcher/original ingredient;
+                // this synthetic stack models the converted state for planning.
+                ctx.add(tainted);
+                alreadyHave = ctx.countMatching(ingredient);
+                remaining = count - alreadyHave;
+            }
+        }
         if (minReserve > 0) {
             remaining += minReserve;
         }
@@ -702,6 +744,15 @@ public final class CraftingResolver {
         return nbtHint != null ? base + nbtHint : base;
     }
 
+    private static boolean isTaintedEarthHeartRequirement(Ingredient ingredient) {
+        for (ItemStack stack : ingredient.getItems()) {
+            ResourceLocation id = ForgeRegistries.ITEMS.getKey(stack.getItem());
+            if (EARTH_HEART_ID.equals(id) && stack.getTag() != null
+                    && stack.getTag().getBoolean("isTainted")) return true;
+        }
+        return false;
+    }
+
     public record ResolutionStep(
             ResourceLocation recipeId,
             ModType modType,
@@ -709,12 +760,25 @@ public final class CraftingResolver {
             List<ResourceLocation> alternativeIds,
             List<String> alternativeModTypes,
             boolean inferMode,
-            int executions
+            int executions,
+            @Nullable ItemStack syntheticInput,
+            @Nullable ItemStack syntheticOutput
     ) {
         public ResolutionStep {
             alternativeIds = List.copyOf(alternativeIds);
             alternativeModTypes = List.copyOf(alternativeModTypes);
             if (executions < 1) executions = 1;
+            syntheticInput = syntheticInput == null ? null : syntheticInput.copyWithCount(1);
+            syntheticOutput = syntheticOutput == null ? null : syntheticOutput.copyWithCount(1);
+        }
+        /** Backward-compatible: explicit executions. */
+        public ResolutionStep(ResourceLocation recipeId, ModType modType,
+                              @Nullable ResourceLocation recipeTypeId,
+                              List<ResourceLocation> alternativeIds,
+                              List<String> alternativeModTypes,
+                              boolean inferMode, int executions) {
+            this(recipeId, modType, recipeTypeId, alternativeIds, alternativeModTypes,
+                    inferMode, executions, null, null);
         }
         /** Backward-compatible: single execution. */
         public ResolutionStep(ResourceLocation recipeId, ModType modType,
@@ -722,22 +786,22 @@ public final class CraftingResolver {
                               List<ResourceLocation> alternativeIds,
                               List<String> alternativeModTypes,
                               boolean inferMode) {
-            this(recipeId, modType, recipeTypeId, alternativeIds, alternativeModTypes, inferMode, 1);
+            this(recipeId, modType, recipeTypeId, alternativeIds, alternativeModTypes, inferMode, 1, null, null);
         }
         public ResolutionStep(ResourceLocation recipeId, ModType modType,
                               @Nullable ResourceLocation recipeTypeId) {
-            this(recipeId, modType, recipeTypeId, List.of(), List.of(), false, 1);
+            this(recipeId, modType, recipeTypeId, List.of(), List.of(), false, 1, null, null);
         }
         public ResolutionStep(ResourceLocation recipeId, ModType modType,
                               @Nullable ResourceLocation recipeTypeId,
                               boolean inferMode) {
-            this(recipeId, modType, recipeTypeId, List.of(), List.of(), inferMode, 1);
+            this(recipeId, modType, recipeTypeId, List.of(), List.of(), inferMode, 1, null, null);
         }
         public ResolutionStep(ResourceLocation recipeId, ModType modType,
                               @Nullable ResourceLocation recipeTypeId,
                               List<ResourceLocation> alternativeIds,
                               List<String> alternativeModTypes) {
-            this(recipeId, modType, recipeTypeId, alternativeIds, alternativeModTypes, false, 1);
+            this(recipeId, modType, recipeTypeId, alternativeIds, alternativeModTypes, false, 1, null, null);
         }
     }
 

@@ -433,6 +433,20 @@ public final class AltarBindingRegistry {
     public static boolean hasBindingForRecipe(ServerPlayer player, net.minecraft.world.item.crafting.Recipe<?> recipe) {
         ModType type = ModType.classifyRecipe(recipe);
         if (type == null || type == ModType.GENERIC) return true;
+        // Prefer the recipe registry type for Aether machines. This remains
+        // stable when Aether renames Java recipe classes and prevents the broad
+        // parent `aether` fallback from hiding freezer/incubator/altar recipes.
+        ResourceLocation recipeType = recipe.getType() != null
+                ? net.minecraftforge.registries.ForgeRegistries.RECIPE_TYPES.getKey(recipe.getType()) : null;
+        if (recipeType != null && "aether".equals(recipeType.getNamespace())) {
+            String mapped = switch (recipeType.getPath()) {
+                case "freezing" -> "aether_freezer";
+                case "incubation" -> "aether_incubator";
+                case "enchanting", "repairing" -> "aether_altar";
+                default -> null;
+            };
+            if (mapped != null && ModType.byId(mapped) != null) type = ModType.byId(mapped);
+        }
 
         String recipePath = recipe.getId().getPath();
         String subType = null;
@@ -732,6 +746,14 @@ public final class AltarBindingRegistry {
             return null;
         }
         if (ModIds.GOETY.equals(type.id())) {
+            return null;
+        }
+        // farmersrespite_kettle is a leaf type — every KettleRecipe runs on the
+        // Kettle block.  The recipe path prefix is "brewing" (the recipe type /
+        // data directory), which is NOT a machine sub-type; the blockKey
+        // "farmersrespite_kettle||block.farmersrespite.kettle" does not contain
+        // "brewing", so filtering by it would drop the only correct binding.
+        if (ModIds.ID_FR_KETTLE.equals(type.id())) {
             return null;
         }
         // farmersdelight_skillet handles both skillet and campfire blocks —

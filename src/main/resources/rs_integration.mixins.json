@@ -2,6 +2,7 @@
   "required": true,
   "minVersion": "0.8",
   "priority": 2000,
+  "plugin": "com.huanghuang.rsintegration.mixin.plugin.RSIntegrationMixinPlugin",
   "package": "com.huanghuang.rsintegration.mixin",
   "compatibilityLevel": "JAVA_17",
   "refmap": "rs_integration.refmap.json",
@@ -10,11 +11,13 @@
     "minecraft.EntityMixin",
     "minecraft.FurnaceMenuMixin",
     "minecraft.InventoryAccessor",
+    "minecraft.ItemEntityAccessor",
     "minecraft.ServerPlayerTickMixin",
     "minecraft.ServerGamePacketListenerMixin",
     "minecraft.SmithingTransformRecipeAccessor",
     "minecraft.SmithingTrimRecipeAccessor",
     "refinedstorage.CraftingGridBehaviorMixin",
+    "refinedstorage.GridTransferMessageAccessor",
     "refinedstorage.IngredientTrackerMixin",
     "refinedstorage.MixinGridTransferMessage",
     "refinedstorage.NetworkItemUseMixin",
@@ -37,7 +40,8 @@
     "enigmaticlegacy.SuperpositionHandlerMixin",
     "enigmaticlegacy.AddonEventHandlerMixin",
     "malum.AbstractSpiritListMalumRecipeMixin",
-    "yuusha.YuushaNineSwordBooksMixin"
+    "yuusha.YuushaNineSwordBooksMixin",
+    "namelesstrinkets.SuperMagnetMixin"
   ],
   "client": [
     "jei.GuiIconToggleButtonAccessor",

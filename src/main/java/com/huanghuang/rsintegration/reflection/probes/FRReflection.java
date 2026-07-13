@@ -11,11 +11,13 @@ public final class FRReflection {
 
     public static Class<?> kettleBEClass;
     public static Class<?> kettleRecipeClass;
+    public static Class<?> kettlePouringRecipeClass;
 
 
     static {
         register("umpaz.farmersrespite.common.block.entity.KettleBlockEntity", "kettleBEClass");
         register("umpaz.farmersrespite.common.crafting.KettleRecipe", "kettleRecipeClass");
+        register("umpaz.farmersrespite.common.crafting.KettlePouringRecipe", "kettlePouringRecipeClass");
     }
 
     private static void register(String className, String fieldName) {

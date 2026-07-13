@@ -37,7 +37,9 @@ public final class CrockPotRecipeHandler extends AbstractRecipeHandler {
     }
 
     @Override
-    public ModType modType() { return ModType.byId("crockpot"); }
+    public ModType modType() {
+        return ModType.byId("crockpot");
+    }
 
     @Override
     public ItemStack getResultItem(Recipe<?> recipe, RegistryAccess access) {
@@ -56,6 +58,7 @@ public final class CrockPotRecipeHandler extends AbstractRecipeHandler {
 
     /**
      * Return ingredient specs for display or extraction.
+     *
      * @param padWithFiller if true, pad remaining slots with the config filler
      *                      for correct plan display; if false, return only the
      *                      actual recipe requirements (used by batch delegate
@@ -69,6 +72,7 @@ public final class CrockPotRecipeHandler extends AbstractRecipeHandler {
     /**
      * Return ingredient specs for display or extraction, padding to a specific
      * input-slot count.
+     *
      * @param padWithFiller pad remaining slots with the config filler.
      * @param targetSlots   the number of input slots to fill (the pot needs ALL
      *                      of them occupied to cook). The batch delegate passes
@@ -105,7 +109,9 @@ public final class CrockPotRecipeHandler extends AbstractRecipeHandler {
         }
     }
 
-    /** @return number of slots this requirement occupies */
+    /**
+     * @return number of slots this requirement occupies
+     */
     private static int collectIngredients(Object requirement, List<IngredientSpec> specs) {
         String className = requirement.getClass().getName();
         try {
@@ -261,9 +267,10 @@ public final class CrockPotRecipeHandler extends AbstractRecipeHandler {
 
     /**
      * Parse category constraints from a CrockPotCookingRecipe.
+     *
      * @return float[2][10] — [0]=mins, [1]=maxs.
-     *         mins[c] = minimum required value (0 = no min).
-     *         maxs[c] = maximum allowed value (Float.MAX_VALUE = no max).
+     * mins[c] = minimum required value (0 = no min).
+     * maxs[c] = maximum allowed value (Float.MAX_VALUE = no max).
      */
     public static float[][] parseCategoryConstraints(Recipe<?> recipe) {
         float[] mins = new float[CAT_COUNT];
@@ -312,5 +319,146 @@ public final class CrockPotRecipeHandler extends AbstractRecipeHandler {
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.debug("[RSI-CrockPot] Recipe reflection failed", e);
         }
+    }
+
+    // ── DNF (disjunctive-normal-form) requirement expansion ──────────
+    //
+    // A Crock Pot recipe is satisfied when its requirement tree evaluates true.
+    // COMBINATION_OR means "satisfy either branch"; the old flatten-both-branches
+    // logic (parseCategoryConstraints / collectIngredients) wrongly turned OR into
+    // AND, so recipes like turkey_dinner (VEGGIE-or-FRUIT) or hot_cocoa (4 cocoa OR
+    // 3 cocoa + dairy/sweetener) demanded every branch at once and never matched.
+    //
+    // Expanding the tree into DNF yields a list of alternative Terms; the recipe
+    // matches if ANY single term is satisfiable. Plan building and execution both
+    // walk the terms in the same order against the same network snapshot and use
+    // the first satisfiable one, so preview and craft always agree.
+
+    /**
+     * One DNF alternative: fixed ingredients that must be present plus per-category min/max bounds.
+     */
+    public record Term(List<IngredientSpec> fixed, float[] mins, float[] maxs) {
+    }
+
+    // Guard against pathological trees (deeply nested ORs) blowing up the cartesian
+    // product. Real recipes produce a handful of terms; 64 is a generous ceiling.
+    private static final int MAX_TERMS = 64;
+
+    /**
+     * Expand a recipe's requirement tree into DNF alternative terms. The top-level
+     * {@code requirements} list is an implicit AND of its elements. Always returns
+     * at least one term (an empty term = "no constraints", filled by neutral filler).
+     */
+    public static List<Term> expandRequirements(Recipe<?> recipe) {
+        try {
+            Method getRequirements = recipe.getClass().getMethod("getRequirements");
+            List<?> requirements = (List<?>) getRequirements.invoke(recipe);
+            List<Term> acc = new ArrayList<>();
+            acc.add(emptyTerm());
+            for (Object req : requirements) {
+                acc = crossAnd(acc, expandReq(req));
+                if (acc.size() >= MAX_TERMS) break; // safety cap — keep the terms built so far
+            }
+            return acc;
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-CrockPot] expandRequirements failed", e);
+            return List.of(emptyTerm());
+        }
+    }
+
+    private static List<Term> expandReq(Object req) {
+        String name = req.getClass().getSimpleName();
+        try {
+            switch (name) {
+                case "RequirementMustContainIngredient" -> {
+                    Ingredient ing = (Ingredient) req.getClass().getMethod("getIngredient").invoke(req);
+                    int qty = (int) req.getClass().getMethod("getQuantity").invoke(req);
+                    Term t = emptyTerm();
+                    if (!ing.isEmpty() && qty > 0) t.fixed().add(new IngredientSpec(ing, qty));
+                    return List.of(t);
+                }
+                case "RequirementMustContainIngredientLessThan" -> {
+                    // Upper bound ("less than N"); satisfied by placing 0. Ignored as a leaf.
+                    return List.of(emptyTerm());
+                }
+                case "RequirementCategoryMin" -> {
+                    Term t = emptyTerm();
+                    int cat = ((Enum<?>) req.getClass().getMethod("getCategory").invoke(req)).ordinal();
+                    t.mins()[cat] = (float) req.getClass().getMethod("getMin").invoke(req);
+                    return List.of(t);
+                }
+                case "RequirementCategoryMinExclusive" -> {
+                    Term t = emptyTerm();
+                    int cat = ((Enum<?>) req.getClass().getMethod("getCategory").invoke(req)).ordinal();
+                    t.mins()[cat] = (float) req.getClass().getMethod("getMin").invoke(req) + 0.01f;
+                    return List.of(t);
+                }
+                case "RequirementCategoryMax" -> {
+                    Term t = emptyTerm();
+                    int cat = ((Enum<?>) req.getClass().getMethod("getCategory").invoke(req)).ordinal();
+                    t.maxs()[cat] = (float) req.getClass().getMethod("getMax").invoke(req);
+                    return List.of(t);
+                }
+                case "RequirementCategoryMaxExclusive" -> {
+                    Term t = emptyTerm();
+                    int cat = ((Enum<?>) req.getClass().getMethod("getCategory").invoke(req)).ordinal();
+                    t.maxs()[cat] = (float) req.getClass().getMethod("getMax").invoke(req) - 0.01f;
+                    return List.of(t);
+                }
+                case "RequirementCombinationAnd" -> {
+                    Object first = req.getClass().getMethod("getFirst").invoke(req);
+                    Object second = req.getClass().getMethod("getSecond").invoke(req);
+                    return crossAnd(expandReq(first), expandReq(second));
+                }
+                case "RequirementCombinationOr" -> {
+                    Object first = req.getClass().getMethod("getFirst").invoke(req);
+                    Object second = req.getClass().getMethod("getSecond").invoke(req);
+                    List<Term> out = new ArrayList<>(expandReq(first));
+                    out.addAll(expandReq(second));
+                    return out;
+                }
+                default -> {
+                    return List.of(emptyTerm());
+                }
+            }
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-CrockPot] expandReq failed for {}", name, e);
+            return List.of(emptyTerm());
+        }
+    }
+
+    /**
+     * AND two term lists = cartesian product, merging each pair.
+     */
+    private static List<Term> crossAnd(List<Term> a, List<Term> b) {
+        List<Term> out = new ArrayList<>(Math.min(MAX_TERMS, a.size() * b.size()));
+        for (Term ta : a) {
+            for (Term tb : b) {
+                out.add(mergeTerm(ta, tb));
+                if (out.size() >= MAX_TERMS) return out;
+            }
+        }
+        return out;
+    }
+
+    /**
+     * Merge two AND-ed terms: concat fixed ingredients, take the tighter bound per category.
+     */
+    private static Term mergeTerm(Term a, Term b) {
+        List<IngredientSpec> fixed = new ArrayList<>(a.fixed());
+        fixed.addAll(b.fixed());
+        float[] mins = new float[CAT_COUNT];
+        float[] maxs = new float[CAT_COUNT];
+        for (int c = 0; c < CAT_COUNT; c++) {
+            mins[c] = Math.max(a.mins()[c], b.mins()[c]);
+            maxs[c] = Math.min(a.maxs()[c], b.maxs()[c]);
+        }
+        return new Term(fixed, mins, maxs);
+    }
+
+    private static Term emptyTerm() {
+        float[] maxs = new float[CAT_COUNT];
+        Arrays.fill(maxs, Float.MAX_VALUE);
+        return new Term(new ArrayList<>(), new float[CAT_COUNT], maxs);
     }
 }

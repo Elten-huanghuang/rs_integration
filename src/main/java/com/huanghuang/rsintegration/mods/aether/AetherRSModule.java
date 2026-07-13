@@ -32,13 +32,15 @@ public final class AetherRSModule implements IModIntegration {
     public void registerModType() {
         // ── Freezer ──
         ModType.register("aether_freezer",
-                new String[]{"com.aetherteam.aether.recipe.recipes.item.Freezable"},
+                new String[]{"com.aetherteam.aether.recipe.recipes.item.FreezingRecipe",
+                        "com.aetherteam.aether.recipe.recipes.item.Freezable"},
                 new String[]{"freezer"},
                 new String[]{"aether_freezer"},
                 AetherFurnaceBatchDelegate::new);
         ModType.configureJei("aether_freezer",
                 new String[][]{{"aether:freezing", "aether_freezer"}},
-                new String[][]{{"com.aetherteam.aether.recipe.recipes.item.Freezable", "aether_freezer"}},
+                new String[][]{{"com.aetherteam.aether.recipe.recipes.item.FreezingRecipe", "aether_freezer"},
+                        {"com.aetherteam.aether.recipe.recipes.item.Freezable", "aether_freezer"}},
                 "gui.rs_integration.jei.aether_freezer_craft");
 
         // ── Incubator ──

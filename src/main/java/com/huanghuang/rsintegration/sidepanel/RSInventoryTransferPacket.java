@@ -61,6 +61,10 @@ public final class RSInventoryTransferPacket {
             return;
         }
         context.enqueueWork(() -> {
+            // Throttle: this walks O(specs × cacheStacks) of the network cache.
+            if (SidePanelRequestRateLimiter.isRateLimited(player.getUUID())) {
+                return;
+            }
             try {
                 execute(player, packet.recipeId);
             } catch (Exception e) {

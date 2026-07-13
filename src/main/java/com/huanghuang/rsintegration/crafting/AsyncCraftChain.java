@@ -30,6 +30,8 @@ import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.crafting.RecipeManager;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.phys.AABB;
+import net.minecraftforge.registries.ForgeRegistries;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
@@ -56,6 +58,7 @@ public final class AsyncCraftChain {
         PENDING,        // Created, not yet started
         EXECUTING,      // Running vanilla or mod steps
         WAITING_MOD,    // Waiting for multi-block craft to complete
+        WAITING_PLAYER_TRANSFORMATION, // Waiting for inventory tick to taint Earth Heart
         COMPLETING,     // Final commit + flush in progress
         COMPLETED,      // Successfully finished
         ABORTED         // Failed
@@ -66,6 +69,16 @@ public final class AsyncCraftChain {
     private final INetwork network;
     private final List<CraftingResolver.ResolutionStep> steps;
     private final List<ItemStack> virtualInventory = new ArrayList<>();
+    /**
+     * Snapshot of {@link #virtualInventory} at the last <i>settled</i> commit
+     * boundary — i.e. the set of intermediate products whose backing inputs were
+     * already irreversibly consumed (a committed vanilla batch, a started mod
+     * step, or a completed mod step). On abort this is the exact set owed to the
+     * player: it excludes in-flight products from reservations that get rolled
+     * back, and excludes materials already locked into a physical machine, so
+     * flushing it never overlaps the ledger refund.
+     */
+    private final List<ItemStack> committedVirtual = new ArrayList<>();
     private final ExtractionLedger ledger = new ExtractionLedger();
     private final CraftLogContext ctx;
 
@@ -74,12 +87,28 @@ public final class AsyncCraftChain {
     private int waitTicks;
     private int stepRemaining;
     private State state = State.PENDING;
+    private int taintSlot = -1;
+    private int taintRemaining;
+    private int taintWaitTicks;
     private String abortReason = "";
     private Runnable onDoneCallback;
     private int machineCount = 1;
     private int dropsThisChain;
     private boolean dropThrottleTripped;
     private static final int MAX_DROPS_PER_CHAIN = 20;
+
+    /**
+     * The concrete output the player asked for, captured from the JEI ghost
+     * output slot. Applied to the delegate that produces the primary recipe
+     * (step 0) so it can distinguish NBT-variant outputs sharing one recipe id
+     * (e.g. WR arcane iterator "Curse II" vs "Curse I"). Null when unsupplied.
+     */
+    @Nullable
+    private ItemStack targetOutput;
+
+    /** Active one-shot output capture for the current physical-machine step. */
+    @Nullable
+    private CraftOutputInterceptor.CaptureHandle captureHandle;
 
     public AsyncCraftChain(UUID playerId, MinecraftServer server, INetwork network,
                            List<CraftingResolver.ResolutionStep> steps) {
@@ -103,6 +132,36 @@ public final class AsyncCraftChain {
         }
     }
 
+    /**
+     * Set the concrete output the player asked for (from the JEI ghost slot).
+     * Threaded to the delegate producing the primary recipe so it can pick the
+     * correct NBT variant among outputs that share one recipe id. Must be called
+     * before the chain starts ticking.
+     */
+    public void setTargetOutput(@Nullable ItemStack target) {
+        this.targetOutput = target != null && !target.isEmpty() ? target.copy() : null;
+    }
+
+    /**
+     * True for the step that produces the chain's primary (final) output — i.e.
+     * the last step, whose recipe matches the recipe id the player clicked.
+     * {@link #targetOutput} only applies to this step; intermediate steps craft
+     * their own generic outputs and must not inherit the final target.
+     */
+    private boolean isPrimaryStep(int stepIdx) {
+        return stepIdx == steps.size() - 1;
+    }
+
+    /**
+     * Apply {@link #targetOutput} to a delegate, but only for the
+     * {@linkplain #isPrimaryStep primary step}.
+     */
+    private void applyTargetOutput(AbstractBatchDelegate abd) {
+        if (targetOutput != null && isPrimaryStep(currentStepIdx)) {
+            abd.setTargetOutput(targetOutput);
+        }
+    }
+
     // ── player resolution ──────────────────────────────────────────
 
     /**
@@ -122,6 +181,15 @@ public final class AsyncCraftChain {
      */
     public boolean tick() {
         if (state == State.ABORTED || state == State.COMPLETED) return true;
+
+        if (state == State.WAITING_PLAYER_TRANSFORMATION) {
+            ServerPlayer online = resolvePlayer();
+            if (online == null) {
+                abortWithoutRefund("Player disconnected while Earth Heart was in inventory", Component.translatable("rsi.async.earth_heart.error.player_disconnected"));
+                return true;
+            }
+            return tickEarthHeartTaint(online);
+        }
 
         // First tick transition
         if (state == State.PENDING) {
@@ -153,9 +221,37 @@ public final class AsyncCraftChain {
             }
             try {
                 if (currentDelegate.isCraftComplete(online.serverLevel())) {
-                    ItemStack result = currentDelegate.collectResult(online);
+                    // Prefer output captured at spawn by the interceptor (already
+                    // safe from magnets). Only fall back to the delegate's world
+                    // scan / slot read when nothing was intercepted — otherwise a
+                    // delegate with a recipe-result fallback (e.g. TLM) would
+                    // double-count the captured product.
+                    List<ItemStack> captured = disarmOutputCapture();
+                    ItemStack result;
+                    if (!captured.isEmpty()) {
+                        for (ItemStack c : captured) addToVirtualInventory(c);
+                        result = ItemStack.EMPTY;
+                    } else {
+                        result = currentDelegate.collectResult(online);
+                    }
                     if (!result.isEmpty()) {
                         addToVirtualInventory(result);
+                    }
+                    // getExpectedOutput() is @Nullable — machine-slot delegates
+                    // return null and opt out of the "missing output" diagnostic.
+                    ItemStack expected = currentDelegate.getExpectedOutput();
+                    if (expected != null && !expected.isEmpty() && captured.isEmpty() && result.isEmpty()) {
+                        RSIntegrationMod.LOGGER.error(ctx.format(
+                                "Expected physical output missing: recipe={} delegate={} machine={} expected={}"),
+                                steps.get(currentStepIdx).recipeId(), currentDelegate.getClass().getSimpleName(),
+                                currentDelegate.getMachinePos(), expected);
+                        // The physical machine already confirmed input consumption.
+                        // Never use normal abort/refund here: an escaped output may
+                        // already be in the player's inventory (magnet/pickup).
+                        ledger.reset();
+                        abortWithoutRefund("Expected craft output was not captured: "
+                                + steps.get(currentStepIdx).recipeId());
+                        return true;
                     }
                     // Add secondary byproducts from multi-block recipes.
                     // GenericBatchDelegate captures secondaries internally and
@@ -204,6 +300,9 @@ public final class AsyncCraftChain {
                         currentStepIdx++;
                         state = State.EXECUTING;
                     }
+                    // Settled boundary: this step's inputs are consumed and its
+                    // product is now in virtualInventory. Owed on any later abort.
+                    snapshotCommittedVirtual();
                     RSIntegrationMod.LOGGER.debug(ctx.format("WAITING_MOD → EXECUTING (remaining={})"), stepRemaining);
                 }
             } catch (Exception e) {
@@ -223,6 +322,10 @@ public final class AsyncCraftChain {
 
         // Execute next step(s)
         CraftingResolver.ResolutionStep step = steps.get(currentStepIdx);
+        if (step.recipeId().equals(CraftingResolver.TAINT_EARTH_HEART_STEP)) {
+            if (!startEarthHeartTaint(online, step.executions())) return true;
+            return false;
+        }
         if (step.modType() == ModType.GENERIC) {
             currentStepIdx = executeVanillaBatch(currentStepIdx, online);
             if (state == State.ABORTED) return true;
@@ -231,6 +334,8 @@ public final class AsyncCraftChain {
                 return true;
             }
             ledger.reset();
+            // Settled boundary: batch inputs committed, products in virtualInventory.
+            snapshotCommittedVirtual();
         } else {
             if (stepRemaining <= 0) {
                 stepRemaining = step.executions();
@@ -242,6 +347,11 @@ public final class AsyncCraftChain {
                 return true;
             }
             state = State.WAITING_MOD;
+            // Settled boundary: step's inputs are committed and any materials
+            // pulled from virtualInventory have been removed by pre-reserve. If
+            // the physical craft later times out, the product isn't here yet, so
+            // rolling back to this baseline delivers only the truly-owed items.
+            snapshotCommittedVirtual();
             Diagnostics.record(Diagnostics.Category.CHAIN_STATE,
                     "EXECUTING→WAITING_MOD step=" + step.recipeId(),
                     step.recipeId(), step.modType());
@@ -267,6 +377,95 @@ public final class AsyncCraftChain {
         return this.playerId.equals(playerId);
     }
 
+    private boolean startEarthHeartTaint(ServerPlayer player, int count) {
+        if (!hasEquippedCursedRing(player)) {
+            abort("Earth Heart tainting requires an equipped Cursed Ring", Component.translatable("rsi.async.earth_heart.error.cursed_ring_required"));
+            return false;
+        }
+        int slot = player.getInventory().getFreeSlot();
+        if (slot < 0 || slot >= player.getInventory().items.size()) {
+            abort("Earth Heart tainting requires an empty main-inventory slot", Component.translatable("rsi.async.earth_heart.error.empty_slot_required"));
+            return false;
+        }
+        ResourceLocation heartId = new ResourceLocation("enigmaticlegacy", "earth_heart");
+        ItemStack heart = ItemStack.EMPTY;
+        for (ItemStack vi : virtualInventory) {
+            if (heartId.equals(ForgeRegistries.ITEMS.getKey(vi.getItem()))
+                    && (vi.getTag() == null || !vi.getTag().getBoolean("isTainted"))) {
+                heart = vi.split(1);
+                break;
+            }
+        }
+        if (heart.isEmpty()) {
+            abort("The crafted Earth Heart was not available for tainting", Component.translatable("rsi.async.earth_heart.error.source_missing"));
+            return false;
+        }
+        player.getInventory().items.set(slot, heart);
+        player.getInventory().setChanged();
+        this.taintSlot = slot;
+        this.taintRemaining = Math.max(1, count);
+        this.taintWaitTicks = 0;
+        this.state = State.WAITING_PLAYER_TRANSFORMATION;
+        // Heart is now physically in the player's slot, not virtualInventory —
+        // snapshot so an abort mid-taint doesn't re-mint it into the network
+        // while it also sits in the player's inventory.
+        snapshotCommittedVirtual();
+        player.sendSystemMessage(Component.translatable("rsi.async.earth_heart.info.waiting"));
+        return true;
+    }
+
+    private boolean tickEarthHeartTaint(ServerPlayer player) {
+        if (++taintWaitTicks > 100) {
+            abortWithoutRefund("Earth Heart tainting timed out; the heart remains in your inventory", Component.translatable("rsi.async.earth_heart.error.timeout"));
+            return true;
+        }
+        if (taintSlot < 0 || taintSlot >= player.getInventory().items.size()) {
+            abortWithoutRefund("Earth Heart taint slot became invalid", Component.translatable("rsi.async.earth_heart.error.slot_invalid"));
+            return true;
+        }
+        ItemStack stack = player.getInventory().items.get(taintSlot);
+        ResourceLocation id = ForgeRegistries.ITEMS.getKey(stack.getItem());
+        if (!new ResourceLocation("enigmaticlegacy", "earth_heart").equals(id)) {
+            abortWithoutRefund("Earth Heart was moved; it remains with the player", Component.translatable("rsi.async.earth_heart.error.moved"));
+            return true;
+        }
+        if (stack.getTag() == null || !stack.getTag().getBoolean("isTainted")) return false;
+
+        ItemStack recovered = stack.split(1);
+        if (stack.isEmpty()) player.getInventory().items.set(taintSlot, ItemStack.EMPTY);
+        player.getInventory().setChanged();
+        addToVirtualInventory(recovered);
+        taintRemaining--;
+        taintSlot = -1;
+        if (taintRemaining > 0) {
+            state = State.EXECUTING;
+            return !startEarthHeartTaint(player, taintRemaining);
+        }
+        currentStepIdx++;
+        state = State.EXECUTING;
+        // Tainted heart is back in virtualInventory and this taint step is done —
+        // settled boundary owed to the player on any later abort.
+        snapshotCommittedVirtual();
+        MaterialSources.invalidateFor(player);
+        return false;
+    }
+
+    private static boolean hasEquippedCursedRing(ServerPlayer player) {
+        try {
+            var optional = top.theillusivec4.curios.api.CuriosApi.getCuriosInventory(player).resolve();
+            if (optional.isEmpty()) return false;
+            var handler = optional.get().getEquippedCurios();
+            for (int i = 0; i < handler.getSlots(); i++) {
+                ItemStack stack = handler.getStackInSlot(i);
+                if (new ResourceLocation("enigmaticlegacy", "cursed_ring")
+                        .equals(ForgeRegistries.ITEMS.getKey(stack.getItem()))) return true;
+            }
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI] Failed to inspect Curios for Cursed Ring", e);
+        }
+        return false;
+    }
+
     // ── vanilla batch execution ──────────────────────────────────
 
     /**
@@ -276,7 +475,8 @@ public final class AsyncCraftChain {
     private int executeVanillaBatch(int startIdx, ServerPlayer online) {
         List<CraftingResolver.ResolutionStep> vanillaSteps = new ArrayList<>();
         int i = startIdx;
-        while (i < steps.size() && steps.get(i).modType() == ModType.GENERIC) {
+        while (i < steps.size() && steps.get(i).modType() == ModType.GENERIC
+                && !steps.get(i).recipeId().equals(CraftingResolver.TAINT_EARTH_HEART_STEP)) {
             vanillaSteps.add(steps.get(i));
             i++;
         }
@@ -463,7 +663,7 @@ public final class AsyncCraftChain {
             if (totalForMod > 0) {
                 // Machines of this mod ARE bound, but none match the sub-type filter
                 online.sendSystemMessage(Component.translatable(
-                        "rsi.async.error.wrong_machine_type", step.recipeId(), machines.size()));
+                        "rsi.async.error.wrong_machine_type", step.recipeId(), totalForMod));
             } else {
                 online.sendSystemMessage(Component.translatable(
                         "rsi.async.error.no_machine_bound", step.recipeId()));
@@ -503,6 +703,21 @@ public final class AsyncCraftChain {
                         parallel instanceof ParallelCraftGroup g ? g.getChildCount() : 1);
                 return parallel;
             }
+            // Parallel dispatch failed. If it already committed materials, we must
+            // NOT fall through to the single-machine path (that would pre-reserve
+            // and extract a second time). Return null so tick() aborts, which
+            // refunds the committed ledger and recovers virtualInventory. Only a
+            // clean pre-reservation failure is safe to retry single-machine.
+            if (ledger.isCommitted()) {
+                RSIntegrationMod.LOGGER.warn(ctx.format("[LB] parallel failed after commit — aborting instead of single-machine fallback"));
+                return null;
+            }
+            // Clean failure: undo any pre-reserve drain of virtualInventory and
+            // clear stale reservations before retrying via single-machine.
+            restoreVirtualFromCommitted();
+            if (ledger.state() != ExtractionLedger.State.IDLE) {
+                ledger.reset();
+            }
             RSIntegrationMod.LOGGER.debug(ctx.format("[LB] parallel dispatch failed, falling back to single-machine"));
             // Fall through: single-machine path below
         }
@@ -535,6 +750,7 @@ public final class AsyncCraftChain {
                     if (delegate instanceof AbstractBatchDelegate abd) {
                         abd.setMachineDim(m.dim());
                         abd.setMachineServer(server);
+                        applyTargetOutput(abd);
                     }
                     break;
                 }
@@ -590,7 +806,22 @@ public final class AsyncCraftChain {
 }
                     return null;
                 }
+                armOutputCapture(delegate, online);
                 if (!delegate.tryStartWithMaterials(online, materials, ledger)) {
+                    List<ItemStack> escaped = disarmOutputCapture();
+                    if (!escaped.isEmpty()) {
+                        RSIntegrationMod.LOGGER.error(ctx.format(
+                                "Delegate reported start failure after producing {} captured output(s); preserving output and suppressing input refund"),
+                                escaped.size());
+                        for (ItemStack stack : escaped) addToVirtualInventory(stack);
+                        ledger.reset();
+                        // The physical machine produced real output despite its start
+                        // method returning false. Treat the step as started so the
+                        // chain owns and delivers that output exactly once; aborting
+                        // here would clear virtualInventory and either lose it or
+                        // combine an input refund with an already-produced result.
+                        return delegate;
+                    }
                     RSIntegrationMod.LOGGER.warn(ctx.format("Delegate tryStartWithMaterials failed for {}"),
                             step.recipeId());
                     online.sendSystemMessage(Component.translatable(
@@ -602,7 +833,32 @@ public final class AsyncCraftChain {
                     return null;
                 }
             } else {
+                // Private-ledger path: tryStartSingleCraft's ensureMaterialAvailable
+                // only sees network + player inventory, NOT virtualInventory. In a
+                // multi-step chain, intermediate products from earlier steps live in
+                // virtualInventory and would be invisible here — the craft fails even
+                // though the material exists (e.g. CrockPot category filler / WR
+                // arcane iterator as a mid-chain step: works alone, fails as a
+                // dependency). Flush them into the network first so this step can
+                // consume them, then re-snapshot committedVirtual to empty: the
+                // products are now network-owned, so recoverCommittedVirtual must NOT
+                // re-deliver them on abort (that would duplicate). The ledger refund
+                // on abort returns whatever this step consumed back to the network.
+                if (network != null && !virtualInventory.isEmpty()) {
+                    flushVirtualInventory(online);
+                    snapshotCommittedVirtual(); // virtualInventory now empty → empty snapshot
+                }
+                armOutputCapture(delegate, online);
                 if (!delegate.tryStartSingleCraft(online, ledger)) {
+                    List<ItemStack> escaped = disarmOutputCapture();
+                    if (!escaped.isEmpty()) {
+                        RSIntegrationMod.LOGGER.error(ctx.format(
+                                "Delegate reported single-craft start failure after producing {} captured output(s); preserving output and suppressing input refund"),
+                                escaped.size());
+                        for (ItemStack stack : escaped) addToVirtualInventory(stack);
+                        ledger.reset();
+                        return delegate;
+                    }
                     RSIntegrationMod.LOGGER.warn(ctx.format("Delegate tryStartSingleCraft failed for {}"),
                             step.recipeId());
                     try { delegate.onBatchFailed(online, "tryStartSingleCraft failed"); } catch (Exception fe) {
@@ -612,6 +868,15 @@ public final class AsyncCraftChain {
                 }
             }
         } catch (Exception e) {
+            List<ItemStack> escaped = disarmOutputCapture();
+            if (!escaped.isEmpty()) {
+                RSIntegrationMod.LOGGER.error(ctx.format(
+                        "Delegate threw after producing {} captured output(s); preserving output and suppressing input refund"),
+                        escaped.size(), e);
+                for (ItemStack stack : escaped) addToVirtualInventory(stack);
+                ledger.reset();
+                return delegate;
+            }
             RSIntegrationMod.LOGGER.error(ctx.format("Error starting multi-block step"), e);
             try { delegate.onBatchFailed(online, "exception in startModStep"); } catch (Exception fe) {
     RSIntegrationMod.LOGGER.error(ctx.format("onBatchFailed threw during exception cleanup"), fe);
@@ -873,6 +1138,55 @@ public final class AsyncCraftChain {
         return materials;
     }
 
+    // ── output capture (magnet protection) ───────────────────────
+
+    /**
+     * Arm {@link CraftOutputInterceptor} for any delegate whose craft output
+     * could appear as a world ItemEntity (altars, rituals, crucibles, etc.).
+     * The interceptor now captures <i>any</i> non-player-thrown item that spawns
+     * inside the capture region — no item-type prediction needed — so this is
+     * safe to arm for every physical-machine delegate. Virtual delegates
+     * (e.g. {@code GenericBatchDelegate}) have a null machine position and
+     * are skipped naturally.
+     */
+    private void armOutputCapture(IBatchDelegate delegate, ServerPlayer online) {
+        AABB region = delegate.getOutputCaptureRegion();
+        if (region == null) return;
+        BlockPos pos = delegate.getMachinePos();
+        if (pos == null) return;
+
+        ResourceLocation dimLoc = (delegate instanceof AbstractBatchDelegate abd) ? abd.getMachineDim() : null;
+        ResourceKey<Level> dim = dimLoc != null
+                ? ResourceKey.create(net.minecraft.core.registries.Registries.DIMENSION, dimLoc)
+                : online.level().dimension();
+
+        ItemStack expected = delegate.getExpectedOutput();
+        this.captureHandle = CraftOutputInterceptor.arm(dim, region, expected);
+    }
+
+    /** Tear down the active capture zone and return whatever it grabbed. */
+    private List<ItemStack> disarmOutputCapture() {
+        CraftOutputInterceptor.CaptureHandle handle = captureHandle;
+        captureHandle = null;
+        return handle == null ? List.of() : handle.drainAndClose();
+    }
+
+    /**
+     * On abort, hand any already-captured product to the player / network rather
+     * than let the cancelled entity vanish. Rare (output usually means success),
+     * but avoids item loss in a timeout/spawn race.
+     */
+    private void recoverCapturedOutputs(ServerPlayer online) {
+        for (ItemStack s : disarmOutputCapture()) {
+            if (s.isEmpty()) continue;
+            if (online != null) {
+                safeGiveToPlayer(online, s);
+            } else {
+                insertOrDropAtSpawn(s);
+            }
+        }
+    }
+
     // ── virtual inventory ────────────────────────────────────────
 
     private void addToVirtualInventory(ItemStack stack) {
@@ -884,6 +1198,68 @@ public final class AsyncCraftChain {
             }
         }
         virtualInventory.add(stack.copy());
+    }
+
+    /**
+     * Restore {@link #virtualInventory} to the last settled baseline WITHOUT
+     * flushing — used to undo a failed attempt (e.g. parallel dispatch that
+     * pre-reserved from virtualInventory then failed) before retrying via a
+     * different path. Safe because the baseline equals virtualInventory at every
+     * step boundary, so nothing owed is dropped.
+     */
+    private void restoreVirtualFromCommitted() {
+        virtualInventory.clear();
+        for (ItemStack vi : committedVirtual) {
+            if (!vi.isEmpty()) virtualInventory.add(vi.copy());
+        }
+    }
+
+    /**
+     * Capture the current {@link #virtualInventory} as the settled-commit
+     * baseline. Call ONLY once a step's inputs are irreversibly committed and its
+     * products (if any) are already in {@code virtualInventory}, and any materials
+     * pulled from {@code virtualInventory} into a physical machine have already
+     * been removed. On abort we roll back to this baseline and flush it.
+     */
+    private void snapshotCommittedVirtual() {
+        committedVirtual.clear();
+        for (ItemStack vi : virtualInventory) {
+            if (!vi.isEmpty()) committedVirtual.add(vi.copy());
+        }
+    }
+
+    /**
+     * On abort, replace the (possibly polluted) live inventory with the settled
+     * baseline and deliver it. Products from rolled-back reservations are dropped;
+     * products owed to the player (backed by consumed inputs) are inserted into
+     * the network, given to the player, or dropped at spawn — never silently lost.
+     * Runs after the ledger refund and only once state is already ABORTED, so it
+     * cannot re-enter abort() other than via the drop-throttle guard.
+     */
+    private void recoverCommittedVirtual(@Nullable ServerPlayer online) {
+        virtualInventory.clear();
+        for (ItemStack owed : committedVirtual) {
+            if (owed.isEmpty()) continue;
+            if (online != null) {
+                ItemStack leftover = owed.copy();
+                if (network != null) {
+                    leftover = network.insertItem(owed.copy(), owed.getCount(),
+                            com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                    var tracker = network.getItemStorageTracker();
+                    if (tracker != null) tracker.changed(online, owed.copy());
+                }
+                if (!leftover.isEmpty()) safeGiveToPlayer(online, leftover);
+            } else if (!insertOrDropAtSpawn(owed.copy())) {
+                // Drop throttle tripped (network full/absent, player offline,
+                // >20 drops this chain). insertOrDropAtSpawn already logged the
+                // discard. Do NOT clear the rest silently — surface it as CRITICAL
+                // so the docstring's "never silently lost" promise isn't a lie.
+                RSIntegrationMod.LOGGER.error(ctx.format(
+                        "CRITICAL: drop throttle tripped during committed-product recovery; "
+                        + "remaining owed products cannot be delivered for player {}"), playerId);
+            }
+        }
+        committedVirtual.clear();
     }
 
     private void flushVirtualInventory(ServerPlayer online) {
@@ -1001,7 +1377,38 @@ public final class AsyncCraftChain {
         return machineCount;
     }
 
+    /** Abort after a physical machine consumed inputs but its output escaped.
+     * Refunding here would duplicate the escaped result. */
+    private void abortWithoutRefund(String reason) {
+        abortWithoutRefund(reason, Component.literal(reason));
+    }
+
+    private void abortWithoutRefund(String reason, Component userReason) {
+        if (state == State.ABORTED || state == State.COMPLETED) return;
+        ServerPlayer online = resolvePlayer();
+        state = State.ABORTED;
+        abortReason = reason;
+        if (currentDelegate != null) {
+            try { currentDelegate.onBatchFailed(online, reason); }
+            catch (Exception e) { RSIntegrationMod.LOGGER.error(ctx.format("Error in no-refund cleanup"), e); }
+            currentDelegate = null;
+        }
+        disarmOutputCapture();
+        // Recover only earlier settled products. The current step's inputs were
+        // consumed with its output escaped/lost — deliberately not refunded here
+        // to avoid duplicating an output that may already be in the player's
+        // inventory. committedVirtual excludes that in-flight step.
+        recoverCommittedVirtual(online);
+        ledger.close();
+        if (online != null) online.sendSystemMessage(Component.translatable("rsi.async.chain_aborted", userReason));
+        fireOnDone();
+    }
+
     public void abort(String reason) {
+        abort(reason, Component.literal(reason));
+    }
+
+    private void abort(String reason, Component userReason) {
         if (state == State.ABORTED || state == State.COMPLETED) return;
 
         ServerPlayer online = resolvePlayer();
@@ -1021,6 +1428,7 @@ public final class AsyncCraftChain {
             }
             currentDelegate = null;
         }
+        recoverCapturedOutputs(online);
 
         // Refund ledger: require live player for inventory operations
         if (online != null) {
@@ -1031,13 +1439,16 @@ public final class AsyncCraftChain {
             }
         }
 
-        // Do NOT flush virtualInventory on abort — the ledger refunded/rolled-back
-        // the inputs, so flushing intermediate products would duplicate items.
-        virtualInventory.clear();
+        // Deliver intermediate products whose backing inputs were already
+        // irreversibly consumed by earlier settled steps. committedVirtual is
+        // disjoint from both the ledger (this step's reserved inputs) and the
+        // captured outputs (this step's world drop), so this never duplicates.
+        // In-flight products from the rolled-back reservations are discarded.
+        recoverCommittedVirtual(online);
 
         // Only send message if player is still online
         if (online != null) {
-            online.sendSystemMessage(Component.translatable("rsi.async.chain_aborted", reason));
+            online.sendSystemMessage(Component.translatable("rsi.async.chain_aborted", userReason));
         }
         ledger.close();
         fireOnDone();
@@ -1061,9 +1472,7 @@ public final class AsyncCraftChain {
             }
             currentDelegate = null;
         }
-
-        // Do NOT flush virtualInventory on abort — see abort() for rationale.
-        virtualInventory.clear();
+        recoverCapturedOutputs(null);
 
         if (network != null) {
             try {
@@ -1072,6 +1481,10 @@ public final class AsyncCraftChain {
                 RSIntegrationMod.LOGGER.error(ctx.format("Failed to refund ledger on silent abort"), e);
             }
         }
+
+        // Deliver products owed from earlier settled steps (player offline →
+        // network insert / drop at spawn). Disjoint from the refunded ledger.
+        recoverCommittedVirtual(null);
 
         ledger.close();
         fireOnDone();

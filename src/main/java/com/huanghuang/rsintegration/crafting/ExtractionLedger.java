@@ -341,7 +341,13 @@ public final class ExtractionLedger implements AutoCloseable {
     @Override
     public void close() {
         if (state == State.COMMITTED || state == State.ROLLED_BACK) return;
-        RSIntegrationMod.LOGGER.warn(fmt("Ledger auto-rollback via close() — {} entries abandoned"), entries.size());
+        // An IDLE ledger with no live reservations has nothing to abandon — this
+        // is the normal resting state for delegates that reset() between phases
+        // (e.g. the WR Arcane Iterator per-level scheduler). Only warn when
+        // reservations are actually being discarded.
+        if (state != State.IDLE || !entries.isEmpty()) {
+            RSIntegrationMod.LOGGER.warn(fmt("Ledger auto-rollback via close() — {} entries abandoned"), entries.size());
+        }
         entries.clear();
         pendingNet.clear();
         pendingInv.clear();
@@ -427,7 +433,7 @@ public final class ExtractionLedger implements AutoCloseable {
         ItemStack extracted = ItemStack.EMPTY;
         int needed = entry.count;
         for (ItemStack stack : slots) {
-            if (entry.originalIngredient.test(stack)
+            if (IngredientMatcher.test(entry.originalIngredient, stack)
                     && ItemStack.isSameItemSameTags(stack, entry.template)
                     && stack.getCount() > 0) {
                 int take = Math.min(needed, stack.getCount());
@@ -448,7 +454,7 @@ public final class ExtractionLedger implements AutoCloseable {
         ItemStack extracted = ItemStack.EMPTY;
         int remaining = Math.min(limit, entry.count);
         for (ItemStack stack : slots) {
-            if (entry.originalIngredient.test(stack)
+            if (IngredientMatcher.test(entry.originalIngredient, stack)
                     && ItemStack.isSameItemSameTags(stack, entry.template)
                     && stack.getCount() > 0) {
                 int take = Math.min(remaining, stack.getCount());
@@ -482,7 +488,7 @@ public final class ExtractionLedger implements AutoCloseable {
 
             // Single-stack fast path: one stack has enough → track pendingNet here
             for (ItemStack stored : stacks) {
-                if (!ingredient.test(stored)) continue;
+                if (!IngredientMatcher.test(ingredient, stored)) continue;
                 int available = stored.getCount()
                         - pendingNet.getOrDefault(CraftingResolver.StackKey.of(stored, true), 0);
                 if (available <= 0) continue;
@@ -502,7 +508,7 @@ public final class ExtractionLedger implements AutoCloseable {
             int pass2Total = 0;
 
             for (ItemStack stored : stacks) {
-                if (!ingredient.test(stored)) continue;
+                if (!IngredientMatcher.test(ingredient, stored)) continue;
                 int available = stored.getCount()
                         - pendingNet.getOrDefault(CraftingResolver.StackKey.of(stored, true), 0);
                 if (available <= 0) continue;
@@ -540,7 +546,7 @@ public final class ExtractionLedger implements AutoCloseable {
             int remaining = needed;
             for (ItemStack stored : stacks) {
                 if (remaining <= 0) break;
-                if (!ingredient.test(stored)) continue;
+                if (!IngredientMatcher.test(ingredient, stored)) continue;
                 int available = stored.getCount()
                         - pendingNet.getOrDefault(CraftingResolver.StackKey.of(stored, true), 0);
                 if (available <= 0) continue;
@@ -559,7 +565,7 @@ public final class ExtractionLedger implements AutoCloseable {
     private ItemStack findAvailableInInventory(ServerPlayer player, Ingredient ingredient, int needed) {
         // Single-stack fast path: one stack has enough → track pendingInv here
         for (ItemStack stack : player.getInventory().items) {
-            if (!ingredient.test(stack)) continue;
+            if (!IngredientMatcher.test(ingredient, stack)) continue;
             int available = stack.getCount()
                     - pendingInv.getOrDefault(CraftingResolver.StackKey.of(stack, true), 0);
             if (available <= 0) continue;
@@ -576,7 +582,7 @@ public final class ExtractionLedger implements AutoCloseable {
         for (IItemHandler bp : findAllBackpackInventories(player)) {
             for (int s = 0; s < bp.getSlots(); s++) {
                 ItemStack stack = bp.getStackInSlot(s);
-                if (stack.isEmpty() || !ingredient.test(stack)) continue;
+                if (stack.isEmpty() || !IngredientMatcher.test(ingredient, stack)) continue;
                 int available = stack.getCount()
                         - pendingInv.getOrDefault(CraftingResolver.StackKey.of(stack, true), 0);
                 if (available <= 0) continue;
@@ -595,7 +601,7 @@ public final class ExtractionLedger implements AutoCloseable {
         int pass2Total = 0;
 
         for (ItemStack stack : player.getInventory().items) {
-            if (!ingredient.test(stack)) continue;
+            if (!IngredientMatcher.test(ingredient, stack)) continue;
             int available = stack.getCount()
                     - pendingInv.getOrDefault(CraftingResolver.StackKey.of(stack, true), 0);
             if (available <= 0) continue;
@@ -619,7 +625,7 @@ public final class ExtractionLedger implements AutoCloseable {
         for (IItemHandler bp : findAllBackpackInventories(player)) {
             for (int s = 0; s < bp.getSlots(); s++) {
                 ItemStack stack = bp.getStackInSlot(s);
-                if (stack.isEmpty() || !ingredient.test(stack)) continue;
+                if (stack.isEmpty() || !IngredientMatcher.test(ingredient, stack)) continue;
                 int available = stack.getCount()
                         - pendingInv.getOrDefault(CraftingResolver.StackKey.of(stack, true), 0);
                 if (available <= 0) continue;
@@ -653,7 +659,7 @@ public final class ExtractionLedger implements AutoCloseable {
         int remaining = needed;
         for (ItemStack stack : player.getInventory().items) {
             if (remaining <= 0) break;
-            if (!ingredient.test(stack)) continue;
+            if (!IngredientMatcher.test(ingredient, stack)) continue;
             int available = stack.getCount()
                     - pendingInv.getOrDefault(CraftingResolver.StackKey.of(stack, true), 0);
             if (available <= 0) continue;
@@ -668,7 +674,7 @@ public final class ExtractionLedger implements AutoCloseable {
             for (int s = 0; s < bp.getSlots(); s++) {
                 if (remaining <= 0) break;
                 ItemStack stack = bp.getStackInSlot(s);
-                if (stack.isEmpty() || !ingredient.test(stack)) continue;
+                if (stack.isEmpty() || !IngredientMatcher.test(ingredient, stack)) continue;
                 int available = stack.getCount()
                         - pendingInv.getOrDefault(CraftingResolver.StackKey.of(stack, true), 0);
                 if (available <= 0) continue;
@@ -766,7 +772,7 @@ public final class ExtractionLedger implements AutoCloseable {
         for (IItemHandler bp : findAllBackpackInventories(player)) {
             for (int s = 0; s < bp.getSlots() && remaining > 0; s++) {
                 ItemStack inSlot = bp.getStackInSlot(s);
-                if (inSlot.isEmpty() || !entry.originalIngredient.test(inSlot)
+                if (inSlot.isEmpty() || !IngredientMatcher.test(entry.originalIngredient, inSlot)
                         || !ItemStack.isSameItemSameTags(inSlot, entry.template)) continue;
                 int take = Math.min(remaining, inSlot.getCount());
                 ItemStack taken = bp.extractItem(s, take, false);

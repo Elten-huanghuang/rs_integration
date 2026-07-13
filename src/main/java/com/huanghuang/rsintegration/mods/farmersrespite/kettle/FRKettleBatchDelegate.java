@@ -6,7 +6,6 @@ import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.reflection.probes.FRReflection;
-import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
@@ -16,7 +15,6 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.Level;
@@ -34,14 +32,19 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Delegate for the Farmer's Respite Kettle (farmersrespite:kettle).
+ * Delegate for the Farmer's Respite Kettle (farmersrespite:brewing).
  * <p>
- * The FR kettle brews solid ingredients with an input fluid to produce
- * an output fluid.  Both fluids use standard Forge fluid handling.
+ * The kettle brews solid ingredients with an input fluid to produce an output
+ * fluid ({@code KettleRecipe}). The output fluid is then bottled into an item
+ * via the matching {@code KettlePouringRecipe} (container item + N mB → output).
  * <p>
- * Inventory layout (5 slots):
- *   0-1: input ingredients  2: drink display
- *   3: container slot        4: output slot
+ * The input fluid (water) is treated as free: it is filled directly into the
+ * kettle's tank, so the player is not required to supply a water container from
+ * RS. Only the solid ingredients and the pouring containers (e.g. glass bottles)
+ * are drawn from the network.
+ * <p>
+ * Kettle inventory (5 slots): 0-1 input ingredients, 2 drink display,
+ * 3 container slot, 4 output slot.
  */
 public final class FRKettleBatchDelegate extends AbstractBatchDelegate {
 
@@ -54,12 +57,30 @@ public final class FRKettleBatchDelegate extends AbstractBatchDelegate {
     private FluidStack recipeFluidOut;
     private boolean craftDone;
 
+    // ── pouring descriptor (fluid → bottled item) ──
+    // The kettle brews to a FluidStack; RS can only carry ItemStacks, so the
+    // output fluid is converted to a bottled item via the matching
+    // KettlePouringRecipe (container item + `amount` mB fluid → output item).
+    private ItemStack pourContainer = ItemStack.EMPTY; // e.g. glass bottle
+    private ItemStack pourOutput = ItemStack.EMPTY;     // e.g. black tea bottle
+    private int pourAmount;                             // mB drained per bottle
+    private int bottlesPerCraft;                        // fluidOut.amount / pourAmount
+    // Number of pouring containers reserved this craft (held for bottling).
+    private int heldContainerCount;
+    // Solid input slots we actually wrote this craft (for precise rollback).
+    private final List<Integer> filledInputSlots = new ArrayList<>();
+
     // ── reflection cache ──
     private static volatile Method getInventoryMethod;
     private static volatile Method isHeatedMethod;
     private static volatile Method getFluidInMethod;
     private static volatile Method getFluidOutMethod;
     private static volatile Method getBrewTimeMethod;
+    // KettlePouringRecipe accessors
+    private static volatile Method pourGetFluidMethod;
+    private static volatile Method pourGetAmountMethod;
+    private static volatile Method pourGetContainerMethod;
+    private static volatile Method pourGetOutputMethod;
     private static volatile boolean reflectionProbed;
 
     @Override
@@ -87,26 +108,59 @@ public final class FRKettleBatchDelegate extends AbstractBatchDelegate {
         if (recipeFluidIn == null) recipeFluidIn = FluidStack.EMPTY;
         if (recipeFluidOut == null) recipeFluidOut = FluidStack.EMPTY;
         this.craftDone = false;
+        this.filledInputSlots.clear();
+
+        // Resolve the pouring recipe that bottles this output fluid.
+        resolvePouring(level);
         return true;
+    }
+
+    /** Find a KettlePouringRecipe whose fluid matches this recipe's output. */
+    private void resolvePouring(ServerLevel level) {
+        this.pourContainer = ItemStack.EMPTY;
+        this.pourOutput = ItemStack.EMPTY;
+        this.pourAmount = 0;
+        this.bottlesPerCraft = 0;
+        if (recipeFluidOut.isEmpty() || FRReflection.kettlePouringRecipeClass == null) return;
+        probeReflection();
+        if (pourGetFluidMethod == null) return;
+
+        for (Recipe<?> r : level.getRecipeManager().getRecipes()) {
+            if (!FRReflection.kettlePouringRecipeClass.isInstance(r)) continue;
+            try {
+                Object fluid = pourGetFluidMethod.invoke(r);
+                if (fluid != recipeFluidOut.getFluid()) continue;
+                int amount = (int) pourGetAmountMethod.invoke(r);
+                ItemStack container = (ItemStack) pourGetContainerMethod.invoke(r);
+                ItemStack output = (ItemStack) pourGetOutputMethod.invoke(r);
+                if (amount <= 0 || output == null || output.isEmpty()) continue;
+                this.pourAmount = amount;
+                this.pourContainer = container == null ? ItemStack.EMPTY : container.copy();
+                this.pourOutput = output.copy();
+                this.bottlesPerCraft = Math.max(1, recipeFluidOut.getAmount() / amount);
+                return;
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.debug("[RSI-FRKettle] pouring recipe probe failed", e);
+            }
+        }
+        RSIntegrationMod.LOGGER.warn("[RSI-FRKettle] No KettlePouringRecipe found for output fluid {}",
+                recipeFluidOut.getFluid().getFluidType().getDescriptionId());
     }
 
     @Nullable
     @Override
     public List<IngredientSpec> getRequiredMaterials() {
         List<Ingredient> ingredients = recipe.getIngredients();
-        if (ingredients.isEmpty() && recipeFluidIn.isEmpty()) return null;
 
         List<IngredientSpec> specs = new ArrayList<>();
         for (Ingredient ing : ingredients) {
             if (!ing.isEmpty()) specs.add(new IngredientSpec(ing, 1));
         }
 
-        // Include the input fluid as a bucket/bottle ingredient
-        if (!recipeFluidIn.isEmpty()) {
-            Item bucket = recipeFluidIn.getFluid().getBucket();
-            if (bucket != null && bucket != Items.AIR) {
-                specs.add(new IngredientSpec(Ingredient.of(bucket), 1));
-            }
+        // Input fluid (water) is free — no container drawn from RS. Only the
+        // pouring container(s) needed to bottle the output are required.
+        if (!pourContainer.isEmpty() && bottlesPerCraft > 0) {
+            specs.add(new IngredientSpec(Ingredient.of(pourContainer), bottlesPerCraft));
         }
 
         return specs.isEmpty() ? null : specs;
@@ -151,6 +205,7 @@ public final class FRKettleBatchDelegate extends AbstractBatchDelegate {
                                          ExtractionLedger sharedLedger) {
         this.player = player;
         this.craftDone = false;
+        this.filledInputSlots.clear();
 
         forceChunkLoad(true);
         myLevel.getChunk(myPos);
@@ -186,84 +241,80 @@ public final class FRKettleBatchDelegate extends AbstractBatchDelegate {
             return false;
         }
 
-        // Drain any leftover fluid from a previous craft
+        // ── Pre-validation: verify solid input slots are free before mutating ──
+        List<ItemStack> solidMats = new ArrayList<>();
+        List<ItemStack> containerMats = new ArrayList<>();
+        for (ItemStack mat : materials) {
+            if (mat.isEmpty()) continue;
+            if (!pourContainer.isEmpty() && ItemStack.isSameItem(mat, pourContainer)) {
+                containerMats.add(mat);
+            } else {
+                solidMats.add(mat);
+            }
+        }
+        if (solidMats.size() > 2) {
+            RSIntegrationMod.LOGGER.warn("[RSI-FRKettle] Too many solid ingredients: {}", solidMats.size());
+            refundAll(materials);
+            forceChunkLoad(false);
+            return false;
+        }
+        for (int i = 0; i < solidMats.size(); i++) {
+            if (!inventory.getStackInSlot(i).isEmpty()) {
+                RSIntegrationMod.LOGGER.warn("[RSI-FRKettle] Input slot {} already occupied", i);
+                refundAll(materials);
+                forceChunkLoad(false);
+                return false;
+            }
+        }
+
+        // Drain any leftover fluid from a previous craft.
         FluidStack tankFluid = fluidHandler.getFluidInTank(0);
         if (!tankFluid.isEmpty()) {
             fluidHandler.drain(tankFluid, IFluidHandler.FluidAction.EXECUTE);
         }
 
-        // Separate solid ingredients from fluid buckets
-        List<ItemStack> solidMats = new ArrayList<>();
-        ItemStack fluidBucket = ItemStack.EMPTY;
-
-        for (ItemStack mat : materials) {
-            if (mat.isEmpty()) continue;
-            // Detect fluid containers by checking if the item can hold/deliver fluid
-            var fluidCap = mat.getCapability(
-                    net.minecraftforge.common.capabilities.ForgeCapabilities.FLUID_HANDLER_ITEM)
-                    .resolve().orElse(null);
-            if (fluidCap != null && !recipeFluidIn.isEmpty()) {
-                // Try to drain the input fluid from this container into the tank
-                FluidStack toFill = recipeFluidIn.copy();
-                int filled = fluidHandler.fill(toFill, IFluidHandler.FluidAction.EXECUTE);
-                if (filled > 0) {
-                    // Drain the filled amount from the fluid container item
-                    FluidStack drainedFromItem = fluidCap.drain(
-                            new FluidStack(recipeFluidIn.getFluid(), filled),
-                            IFluidHandler.FluidAction.EXECUTE);
-                    // Return the empty container (bucket -> empty bucket)
-                    ItemStack container = fluidCap.getContainer();
-                    if (!container.isEmpty() && !usingSharedLedger && network != null) {
-                        network.insertItem(container.copy(), container.getCount(), Action.PERFORM);
-                    }
-                    RSIntegrationMod.LOGGER.debug("[RSI-FRKettle] Filled {}mb of {} into tank",
-                            filled, recipeFluidIn.getFluid().getFluidType().getDescriptionId());
-                    continue;
-                }
+        // Input fluid is FREE **only when it is water** (the kettle's default,
+        // player-fillable-from-any-water-source input). Recipes whose input is a
+        // non-water fluid (milk, etc.) must NOT get it for free — that would let
+        // the player conjure arbitrary fluids. For those we fail with a clear
+        // message rather than silently gifting the fluid.
+        if (!recipeFluidIn.isEmpty()) {
+            boolean isWater = recipeFluidIn.getFluid() == net.minecraft.world.level.material.Fluids.WATER
+                    || recipeFluidIn.getFluid() == net.minecraft.world.level.material.Fluids.FLOWING_WATER;
+            if (!isWater) {
+                RSIntegrationMod.LOGGER.warn("[RSI-FRKettle] Non-water input fluid {} is not free; aborting",
+                        recipeFluidIn.getFluid());
+                player.sendSystemMessage(Component.translatable("rsi.farmersrespite.kettle.non_water_input"));
+                refundAll(materials);
+                forceChunkLoad(false);
+                return false;
             }
-            solidMats.add(mat);
-        }
-
-        // If no fluid container was found among materials but we need fluid, try to fill directly
-        if (fluidHandler.getFluidInTank(0).isEmpty() && !recipeFluidIn.isEmpty()) {
             int filled = fluidHandler.fill(recipeFluidIn.copy(), IFluidHandler.FluidAction.EXECUTE);
-            if (filled > 0) {
-                RSIntegrationMod.LOGGER.debug("[RSI-FRKettle] Direct filled {}mb into tank", filled);
-            }
-        }
-
-        // Verify tank has the required fluid
-        tankFluid = fluidHandler.getFluidInTank(0);
-        if (tankFluid.isEmpty() || tankFluid.getFluid() != recipeFluidIn.getFluid()) {
-            RSIntegrationMod.LOGGER.warn("[RSI-FRKettle] Tank fluid mismatch: expected {}, got {}",
-                    recipeFluidIn.getFluid().getFluidType().getDescriptionId(),
-                    tankFluid.isEmpty() ? "empty" : tankFluid.getFluid().getFluidType().getDescriptionId());
-            player.sendSystemMessage(Component.translatable("rsi.farmersdelight.container_needed",
-                    Component.translatable(recipeFluidIn.getFluid().getFluidType().getDescriptionId()).getString()));
-            clearAndRefund(inventory, be);
-            forceChunkLoad(false);
-            return false;
-        }
-
-        // Place solid ingredients in input slots 0, 1
-        int slot = 0;
-        for (ItemStack mat : solidMats) {
-            if (mat.isEmpty()) continue;
-            if (slot >= 2) {
-                RSIntegrationMod.LOGGER.warn("[RSI-FRKettle] Too many ingredients for input slots");
-                clearAndRefund(inventory, be);
+            if (filled < recipeFluidIn.getAmount()) {
+                RSIntegrationMod.LOGGER.warn("[RSI-FRKettle] Tank rejected free input fluid: filled {} of {}",
+                        filled, recipeFluidIn.getAmount());
+                if (filled > 0) {
+                    fluidHandler.drain(new FluidStack(recipeFluidIn.getFluid(), filled),
+                            IFluidHandler.FluidAction.EXECUTE);
+                }
+                refundAll(materials);
                 forceChunkLoad(false);
                 return false;
             }
-            if (!inventory.getStackInSlot(slot).isEmpty()) {
-                RSIntegrationMod.LOGGER.warn("[RSI-FRKettle] Input slot {} already occupied", slot);
-                clearAndRefund(inventory, be);
-                forceChunkLoad(false);
-                return false;
-            }
-            inventory.setStackInSlot(slot, mat.copyWithCount(1));
-            slot++;
         }
+
+        // Place solid ingredients in input slots 0, 1.
+        for (int i = 0; i < solidMats.size(); i++) {
+            inventory.setStackInSlot(i, solidMats.get(i).copyWithCount(1));
+            filledInputSlots.add(i);
+        }
+
+        // Pouring containers are held (not placed in the kettle) and consumed at
+        // collectResult, when the output fluid is bottled. Any surplus is refunded
+        // by the caller / onBatchFinished, so nothing is lost. We keep them out of
+        // the machine so they can't be drained by the kettle's own pouring logic.
+        this.heldContainerCount = 0;
+        for (ItemStack c : containerMats) this.heldContainerCount += c.getCount();
 
         be.setChanged();
         return true;
@@ -273,13 +324,14 @@ public final class FRKettleBatchDelegate extends AbstractBatchDelegate {
     protected boolean isMachineCraftFinished(ServerLevel level, BlockEntity be) {
         if (!isFRKettleBE(be)) return false;
 
-        // Check if output fluid has appeared in the tank
         IFluidHandler fluidHandler = getFluidHandler(be);
         if (fluidHandler == null) return false;
         FluidStack tankFluid = fluidHandler.getFluidInTank(0);
 
         if (tankFluid.isEmpty() || recipeFluidOut.isEmpty()) return false;
-        return tankFluid.getFluid() == recipeFluidOut.getFluid();
+        // Wait until at least one full pour worth of output fluid exists.
+        int need = pourAmount > 0 ? pourAmount : recipeFluidOut.getAmount();
+        return tankFluid.getFluid() == recipeFluidOut.getFluid() && tankFluid.getAmount() >= need;
     }
 
     @Override
@@ -289,36 +341,42 @@ public final class FRKettleBatchDelegate extends AbstractBatchDelegate {
 
         IFluidHandler fluidHandler = getFluidHandler(be);
         if (fluidHandler == null || recipeFluidOut.isEmpty()) return ItemStack.EMPTY;
+        if (pourOutput.isEmpty() || pourAmount <= 0) {
+            RSIntegrationMod.LOGGER.warn("[RSI-FRKettle] No pouring recipe resolved; cannot bottle output");
+            return ItemStack.EMPTY;
+        }
 
-        // Drain the output fluid
-        FluidStack drained = fluidHandler.drain(recipeFluidOut.copy(), IFluidHandler.FluidAction.EXECUTE);
+        FluidStack tankFluid = fluidHandler.getFluidInTank(0);
+        if (tankFluid.isEmpty() || tankFluid.getFluid() != recipeFluidOut.getFluid()) return ItemStack.EMPTY;
+
+        // Bottle as many full pours as the tank supports, capped by held containers.
+        int byFluid = tankFluid.getAmount() / pourAmount;
+        int cap = heldContainerCount > 0 ? heldContainerCount : byFluid;
+        int complete = Math.min(byFluid, cap);
+        if (complete <= 0) return ItemStack.EMPTY;
+
+        int drainAmount = complete * pourAmount;
+        FluidStack drained = fluidHandler.drain(
+                new FluidStack(recipeFluidOut.getFluid(), drainAmount),
+                IFluidHandler.FluidAction.EXECUTE);
         be.setChanged();
         craftDone = true;
 
-        if (drained.isEmpty()) return ItemStack.EMPTY;
+        int bottled = drained.getAmount() / pourAmount;
+        if (bottled <= 0) return ItemStack.EMPTY;
 
-        Item bucketItem = drained.getFluid().getBucket();
-        if (bucketItem != null && bucketItem != Items.AIR) {
-            return new ItemStack(bucketItem);
-        }
-
-        ItemStack filled = net.minecraftforge.fluids.FluidUtil.getFilledBucket(
-                new FluidStack(drained.getFluid(), 1000));
-        if (!filled.isEmpty()) return filled;
-
-        RSIntegrationMod.LOGGER.warn("[RSI-FRKettle] Fluid {} has no bucket item, result lost",
-                drained.getFluid().getFluidType().getDescriptionId());
-        return ItemStack.EMPTY;
+        heldContainerCount = Math.max(0, heldContainerCount - bottled);
+        return pourOutput.copyWithCount(pourOutput.getCount() * bottled);
     }
 
     @Override
     protected void clearMachineState(BlockEntity be, ServerPlayer player) {
         if (isFRKettleBE(be)) {
             IFluidHandler fluidHandler = getFluidHandler(be);
-            if (fluidHandler != null) {
+            if (fluidHandler != null && !pourOutput.isEmpty() && pourAmount > 0) {
                 FluidStack tankFluid = fluidHandler.getFluidInTank(0);
-                if (!tankFluid.isEmpty() && !recipeFluidOut.isEmpty()
-                        && tankFluid.getFluid() == recipeFluidOut.getFluid()) {
+                if (!tankFluid.isEmpty() && tankFluid.getFluid() == recipeFluidOut.getFluid()
+                        && tankFluid.getAmount() >= pourAmount) {
                     ItemStack result = collectResult(player);
                     if (!result.isEmpty()) {
                         if (network == null)
@@ -337,14 +395,13 @@ public final class FRKettleBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public void onBatchFinished(ServerPlayer player) {
-        ItemStackHandler inventory = null;
         BlockEntity be = myLevel.getBlockEntity(myPos);
-        if (be != null && isFRKettleBE(be)) {
-            inventory = getInventory(be);
-        }
+        ItemStackHandler inventory = (be != null && isFRKettleBE(be)) ? getInventory(be) : null;
         if (inventory != null) clearAndRefund(inventory, be);
         forceChunkLoad(false);
         craftDone = false;
+        heldContainerCount = 0;
+        filledInputSlots.clear();
         network = null;
     }
 
@@ -363,7 +420,8 @@ public final class FRKettleBatchDelegate extends AbstractBatchDelegate {
                                                 @Nullable ResourceLocation dim,
                                                 @Nullable BlockPos pos) {
         List<String> warnings = new ArrayList<>();
-        warnings.add(Component.translatable("rsi.youkaishomecoming.heat_warning").getString());
+        warnings.add(Component.translatable("rsi.farmersrespite.kettle.heat_warning").getString());
+        warnings.add(Component.translatable("rsi.farmersrespite.kettle.container_warning").getString());
         return warnings;
     }
 
@@ -379,6 +437,13 @@ public final class FRKettleBatchDelegate extends AbstractBatchDelegate {
             getFluidInMethod = FRReflection.kettleRecipeClass.getMethod("getFluidIn");
             getFluidOutMethod = FRReflection.kettleRecipeClass.getMethod("getFluidOut");
             getBrewTimeMethod = FRReflection.kettleRecipeClass.getMethod("getBrewTime");
+
+            if (FRReflection.kettlePouringRecipeClass != null) {
+                pourGetFluidMethod = FRReflection.kettlePouringRecipeClass.getMethod("getFluid");
+                pourGetAmountMethod = FRReflection.kettlePouringRecipeClass.getMethod("getAmount");
+                pourGetContainerMethod = FRReflection.kettlePouringRecipeClass.getMethod("getContainer");
+                pourGetOutputMethod = FRReflection.kettlePouringRecipeClass.getMethod("getOutput");
+            }
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-FRKettle] Reflection probe failed", e);
         }
@@ -436,6 +501,14 @@ public final class FRKettleBatchDelegate extends AbstractBatchDelegate {
 
     // ── cleanup ──
 
+    /** Refund an entire material list (used on start failure). */
+    private void refundAll(List<ItemStack> materials) {
+        if (usingSharedLedger) return; // shared ledger refunds on abort
+        for (ItemStack mat : materials) {
+            if (!mat.isEmpty()) refund(mat);
+        }
+    }
+
     private void clearAndRefund(ItemStackHandler inventory, BlockEntity be) {
         for (int i = 0; i < 2; i++) {
             ItemStack s = inventory.getStackInSlot(i);
@@ -444,6 +517,11 @@ public final class FRKettleBatchDelegate extends AbstractBatchDelegate {
                 if (!usingSharedLedger) refund(s);
             }
         }
+        // Refund any pouring containers we reserved but never bottled.
+        if (!usingSharedLedger && heldContainerCount > 0 && !pourContainer.isEmpty()) {
+            refund(pourContainer.copyWithCount(heldContainerCount));
+        }
+        heldContainerCount = 0;
         be.setChanged();
     }
 

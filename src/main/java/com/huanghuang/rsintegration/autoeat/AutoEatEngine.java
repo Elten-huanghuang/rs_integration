@@ -362,6 +362,14 @@ public final class AutoEatEngine {
         int count = extracted.getCount();
         int eaten = 0;
         for (int i = 0; i < count; i++) {
+            // Stop force-feeding once hunger is full. STACK mode's only goal is
+            // topping up hunger, so eating past full just destroys the surplus
+            // (saturation clamps). Respect always-edible foods (golden apple).
+            net.minecraft.world.food.FoodProperties fp = extracted.getFoodProperties(player);
+            boolean alwaysEat = fp != null && fp.canAlwaysEat();
+            if (!player.canEat(alwaysEat)) {
+                break; // untouched `extracted` is reinserted below
+            }
             if (!payCost(network, player, AutoEatMode.STACK)) {
                 if (!extracted.isEmpty()) {
                     network.insertItem(extracted, extracted.getCount(), Action.PERFORM);
