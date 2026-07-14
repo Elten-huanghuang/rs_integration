@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.reflection.contract.ContractValidation;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.sidepanel.client.RSIKeyBindings;
 import com.huanghuang.rsintegration.crafting.AsyncCraftManager;
+import com.huanghuang.rsintegration.crafting.CraftProgressClientEvents;
 import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
 import com.huanghuang.rsintegration.mods.IModIntegration;
 import com.huanghuang.rsintegration.mods.aether.AetherRSModule;
@@ -440,6 +441,12 @@ public final class RSIntegrationMod {
         DistExecutor.safeRunWhenOn(Dist.CLIENT, () -> () ->
                 net.minecraftforge.common.MinecraftForge.EVENT_BUS.register(
                         com.huanghuang.rsintegration.autoeat.client.AutoEatClientEvents.class));
+        DistExecutor.safeRunWhenOn(Dist.CLIENT, () -> () -> {
+            net.minecraftforge.common.MinecraftForge.EVENT_BUS.addListener(
+                    CraftProgressClientEvents::onClientLogin);
+            net.minecraftforge.common.MinecraftForge.EVENT_BUS.addListener(
+                    CraftProgressClientEvents::onClientLogout);
+        });
         DistExecutor.safeRunWhenOn(Dist.CLIENT, () -> () ->
                 net.minecraftforge.common.MinecraftForge.EVENT_BUS.addListener(
                         (net.minecraftforge.client.event.ClientPlayerNetworkEvent.LoggingOut e) ->
