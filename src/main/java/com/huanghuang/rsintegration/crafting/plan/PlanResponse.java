@@ -38,7 +38,8 @@ public record PlanResponse(
         @Nullable ItemStack baseItem,         // JEI-provided base item for FA ApplyModifierRecipe prefill
         Set<String> boundMachineTypes,        // v3.4 availability passport: modType ids of machines the player has bound
         Map<IngredientKey, Integer> leftovers, // overproduction keyed by exact item+NBT
-        @Nullable ItemStack clickedOutput     // JEI ghost-output the player clicked (NBT-variant target, e.g. WR leveled book)
+        @Nullable ItemStack clickedOutput,    // JEI ghost-output the player clicked (NBT-variant target, e.g. WR leveled book)
+        @Nullable PlanGraphView graph          // server-authored DAG view; null on legacy/fallback plans
 ) {
     public Availability availability(ItemStack stack) {
         return materials.get(IngredientKey.of(stack));
@@ -60,7 +61,7 @@ public record PlanResponse(
         this(success, targetName, targetResult, steps, materials, missing, recipeId,
                 null, null, 0, 0, 0, Collections.emptyList(), 1,
                 null, null, null, 0, false, false, false, null, Collections.emptySet(),
-                Collections.emptyMap(), null);
+                Collections.emptyMap(), null, null);
     }
 
     /** Backward-compat: no mod warnings. */
@@ -74,7 +75,7 @@ public record PlanResponse(
                 executionModTypeId, executionDim, executionPosX, executionPosY, executionPosZ,
                 Collections.emptyList(), 1,
                 null, null, null, 0, false, false, false, null, Collections.emptySet(),
-                Collections.emptyMap(), null);
+                Collections.emptyMap(), null, null);
     }
 
     /** Backward-compat: no embers data. */
@@ -89,6 +90,6 @@ public record PlanResponse(
                 executionModTypeId, executionDim, executionPosX, executionPosY, executionPosZ,
                 modWarnings, repeatCount,
                 null, null, null, 0, false, false, false, null, Collections.emptySet(),
-                Collections.emptyMap(), null);
+                Collections.emptyMap(), null, null);
     }
 }
