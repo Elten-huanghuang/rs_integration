@@ -59,8 +59,11 @@ public final class CraftProgressOverlay {
         boolean terminal = snap.isTerminal() || snap.failedStep() != null
                 || snap.chainState() == CraftProgressSnapshot.STATE_STOPPING;
         boolean hasCancel = !terminal;
+        String nodeSummary = buildNodeSummary(snap);
+        boolean hasNodeSummary = !nodeSummary.isEmpty();
 
-        int totalH = 8 + rowH + 6 + BAR_H + 6 + rowH + (hasCancel ? 8 + BTN_H : 0) + 8;
+        int totalH = 8 + rowH + 6 + BAR_H + 6 + rowH
+                + (hasNodeSummary ? rowH : 0) + (hasCancel ? 8 + BTN_H : 0) + 8;
         RenderSystem.enableBlend();
         gfx.fill(x, y, x + PANEL_WIDTH, y + totalH, BG_COLOR);
         gfx.renderOutline(x, y, PANEL_WIDTH, totalH, 0xFF555555);
@@ -87,7 +90,10 @@ public final class CraftProgressOverlay {
 
         // Detail line
         String detail;
-        if (terminal && snap.failedStep() != null) {
+        String nodeFailure = failedNodeDetail(snap);
+        if (terminal && !nodeFailure.isEmpty()) {
+            detail = nodeFailure;
+        } else if (terminal && snap.failedStep() != null) {
             detail = snap.failedStep();
         } else if (terminal) {
             detail = snap.completedNodes() + "/" + snap.totalNodes() + " nodes — done";
@@ -95,8 +101,12 @@ public final class CraftProgressOverlay {
             detail = snap.completedNodes() + "/" + snap.totalNodes() + " nodes";
             if (snap.runningNodes() > 0) detail += "  " + snap.runningNodes() + " running";
         }
-        gfx.drawString(font, detail, x + 6, cy, TEXT_COLOR);
+        gfx.drawString(font, fitLine(font, detail), x + 6, cy, TEXT_COLOR);
         cy += rowH;
+        if (hasNodeSummary) {
+            gfx.drawString(font, fitLine(font, nodeSummary), x + 6, cy, TEXT_COLOR);
+            cy += rowH;
+        }
 
         // Cancel button (only when not terminal)
         if (hasCancel) {
@@ -120,6 +130,50 @@ public final class CraftProgressOverlay {
         }
 
         RenderSystem.disableBlend();
+    }
+
+    private static String fitLine(Font font, String text) {
+        int maxWidth = PANEL_WIDTH - 12;
+        if (font.width(text) <= maxWidth) return text;
+        String suffix = "...";
+        return font.plainSubstrByWidth(text, Math.max(0, maxWidth - font.width(suffix))) + suffix;
+    }
+
+    private static String failedNodeDetail(CraftProgressSnapshot snapshot) {
+        for (CraftProgressSnapshot.NodeProgress node : snapshot.nodes()) {
+            if (node.state() == CraftProgressSnapshot.NodeState.FAILED && !node.detail().isEmpty()) {
+                return node.detail();
+            }
+        }
+        return "";
+    }
+
+    private static String buildNodeSummary(CraftProgressSnapshot snapshot) {
+        if (snapshot.nodes().isEmpty()) return "";
+        int blocked = 0;
+        int ready = 0;
+        int running = 0;
+        int draining = 0;
+        int completedOperations = 0;
+        int totalOperations = 0;
+        for (CraftProgressSnapshot.NodeProgress node : snapshot.nodes()) {
+            switch (node.state()) {
+                case BLOCKED -> blocked++;
+                case READY -> ready++;
+                case RUNNING -> running++;
+                default -> { }
+            }
+            if (node.draining()) draining++;
+            completedOperations += node.completedOperations();
+            totalOperations += node.totalOperations();
+        }
+        StringBuilder summary = new StringBuilder();
+        if (blocked > 0) summary.append("B:").append(blocked).append(' ');
+        if (ready > 0) summary.append("R:").append(ready).append(' ');
+        if (running > 0) summary.append("Run:").append(running).append(' ');
+        if (draining > 0) summary.append("Drain:").append(draining).append(' ');
+        summary.append("Ops ").append(completedOperations).append('/').append(totalOperations);
+        return summary.toString();
     }
 
     @SubscribeEvent

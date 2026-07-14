@@ -147,6 +147,10 @@ public final class DagScheduler {
         return states.get(nodeId);
     }
 
+    public Map<NodeId, NodeState> stateSnapshot() {
+        return Map.copyOf(states);
+    }
+
     public boolean isStopping() {
         return stopping;
     }
