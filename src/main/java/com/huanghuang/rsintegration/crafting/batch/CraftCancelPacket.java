@@ -9,6 +9,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.network.NetworkEvent;
 
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 
 /**
@@ -31,10 +32,17 @@ public final class CraftCancelPacket {
         return new CraftCancelPacket(buf.readUUID());
     }
 
+    private static final ConcurrentHashMap<UUID, Long> CANCEL_COOLDOWN = new ConcurrentHashMap<>();
+    private static final long CANCEL_COOLDOWN_MS = 500;
+
     public static void handle(CraftCancelPacket packet, Supplier<NetworkEvent.Context> ctx) {
         ctx.get().enqueueWork(() -> {
             ServerPlayer player = ctx.get().getSender();
             if (player == null) return;
+            Long lastCancel = CANCEL_COOLDOWN.get(player.getUUID());
+            long now = System.currentTimeMillis();
+            if (lastCancel != null && now - lastCancel < CANCEL_COOLDOWN_MS) return;
+            CANCEL_COOLDOWN.put(player.getUUID(), now);
             AsyncCraftManager mgr = AsyncCraftManager.getInstance();
             AsyncCraftChain chain = mgr.getCraft(packet.craftId);
             if (chain == null) {
