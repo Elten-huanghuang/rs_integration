@@ -5,6 +5,8 @@ import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.graph.CraftNode;
 import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
 import com.huanghuang.rsintegration.crafting.graph.CraftPlanValidator;
+import com.huanghuang.rsintegration.crafting.graph.DagScheduler;
+import com.huanghuang.rsintegration.crafting.graph.NodeId;
 import com.huanghuang.rsintegration.crafting.batch.GenericBatchDelegate;
 import com.huanghuang.rsintegration.ModVersionDelegateRegistry;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
@@ -116,6 +118,14 @@ public final class AsyncCraftChain {
     @Nullable
     private CraftOutputInterceptor.CaptureHandle captureHandle;
 
+    @Nullable
+    private final CraftPlanGraph graph;
+    @Nullable
+    private final DagScheduler graphScheduler;
+    private final boolean useGraphExecution;
+    @Nullable
+    private NodeId currentGraphNode;
+
     public AsyncCraftChain(UUID playerId, MinecraftServer server, INetwork network,
                            List<CraftingResolver.ResolutionStep> steps) {
         this(UUID.randomUUID(), playerId, server, network, steps, null);
@@ -155,6 +165,15 @@ public final class AsyncCraftChain {
         this.terminalListeners = new TerminalListeners(
                 error -> RSIntegrationMod.LOGGER.error(ctx.format("onDone callback threw"), error));
         this.ledger.setLogContext(ctx);
+        if (graph != null) {
+            this.graph = graph;
+            this.graphScheduler = new DagScheduler(graph);
+            this.useGraphExecution = true;
+        } else {
+            this.graph = null;
+            this.graphScheduler = null;
+            this.useGraphExecution = false;
+        }
         RSIntegrationMod.LOGGER.debug(ctx.format("Chain created: {} steps"), steps.size());
         if (RSIntegrationMod.LOGGER.isDebugEnabled()) {
             StringBuilder sb = new StringBuilder(ctx.format("Steps: ["));
@@ -268,15 +287,28 @@ public final class AsyncCraftChain {
             return tickEarthHeartTaint(online);
         }
 
+        // Dynamic player lookup — null means player disconnected
+        ServerPlayer online = resolvePlayer();
+
+        // Use graph scheduler when available — serial mode by default
+        if (useGraphExecution) {
+            if (online == null) {
+                abortSilently("Player disconnected");
+                return true;
+            }
+            if (network != null && !network.canRun()) {
+                abortSilently("RS controller removed or network invalidated");
+                return true;
+            }
+            return tickGraph(online);
+        }
+
         // First tick transition
         if (state == State.PENDING) {
             RSIntegrationMod.LOGGER.debug(ctx.format("PENDING → EXECUTING"));
             state = State.EXECUTING;
             Diagnostics.record(Diagnostics.Category.CHAIN_STATE, "PENDING→EXECUTING steps=" + steps.size());
         }
-
-        // Dynamic player lookup — null means player disconnected
-        ServerPlayer online = resolvePlayer();
         if (online == null) {
             abortSilently("Player disconnected");
             return true;
@@ -474,6 +506,213 @@ public final class AsyncCraftChain {
             waitTicks = 0;
         }
         return false;
+    }
+
+    // ── graph-backed tick (serial mode) ───────────────────────────
+
+    private boolean tickGraph(ServerPlayer online) {
+        if (graphScheduler == null) {
+            abort("Graph scheduler is null");
+            return true;
+        }
+
+        // First tick
+        if (state == State.PENDING) {
+            RSIntegrationMod.LOGGER.debug(ctx.format("PENDING → EXECUTING (graph, {} nodes)"),
+                    graph.topologicalOrder().size());
+            state = State.EXECUTING;
+            Diagnostics.record(Diagnostics.Category.CHAIN_STATE,
+                    "PENDING→EXECUTING graph nodes=" + graph.topologicalOrder().size());
+        }
+
+        // Observe running delegate
+        if (currentDelegate != null && currentGraphNode != null) {
+            waitTicks++;
+            try {
+                if (currentDelegate instanceof ParallelCraftGroup group && group.isDraining()) {
+                    drainingTicks++;
+                } else {
+                    drainingTicks = 0;
+                }
+
+                if (currentDelegate instanceof ParallelCraftGroup group) {
+                    List<ItemStack> settled = group.drainSettledResults();
+                    if (!settled.isEmpty()) {
+                        for (ItemStack result : settled) addToVirtualInventory(result);
+                        snapshotCommittedVirtual();
+                        waitTicks = 0;
+                    }
+                    List<ItemStack> queued = group.drainQueuedMaterialsForRecovery();
+                    if (!queued.isEmpty()) {
+                        for (ItemStack m : queued) addToVirtualInventory(m);
+                        snapshotCommittedVirtual();
+                    }
+                }
+
+                IBatchDelegate.CraftObservation observation = currentDelegate.observeCraft(online.serverLevel());
+                if (observation.phase() == IBatchDelegate.CraftPhase.FAILED) {
+                    abort("Machine craft failed: " + observation.detail());
+                    return true;
+                }
+
+                if (observation.phase() == IBatchDelegate.CraftPhase.DONE) {
+                    // Collect results
+                    List<ItemStack> actual = new ArrayList<>(disarmOutputCapture());
+                    actual.addAll(currentDelegate.collectAllResults(online));
+                    actual.removeIf(s -> s == null || s.isEmpty());
+                    for (ItemStack result : actual) addToVirtualInventory(result);
+
+                    // External extraction check
+                    IBatchDelegate.ExpectedProduction expected = currentDelegate.getExpectedProduction();
+                    int actualCount = countMatchingProduction(actual, expected);
+                    if (expected != null && expected.count() > actualCount) {
+                        snapshotCommittedVirtual();
+                        ledger.reset();
+                        abortWithoutRefund("Craft output was externally extracted");
+                        return true;
+                    }
+                    ItemStack expectedWorld = currentDelegate.getExpectedOutput();
+                    if (expected == null && expectedWorld != null && !expectedWorld.isEmpty()
+                            && actual.isEmpty()) {
+                        snapshotCommittedVirtual();
+                        ledger.reset();
+                        abortWithoutRefund("Expected craft output was not captured");
+                        return true;
+                    }
+
+                    // Secondary outputs
+                    if (!(currentDelegate instanceof ParallelCraftGroup)
+                            && !currentDelegate.collectsPhysicalSecondaryOutputs()) {
+                        ServerLevel overworld = server.overworld();
+                        if (overworld != null) {
+                            Recipe<?> mbRecipe = overworld.getRecipeManager()
+                                    .byKey(steps.get(stepIndex(currentGraphNode)).recipeId()).orElse(null);
+                            if (mbRecipe != null) {
+                                for (ItemStack s : ModRecipeHandlers.tryGetSecondaryOutputs(
+                                        mbRecipe, overworld.registryAccess())) {
+                                    addToVirtualInventory(s.copy());
+                                }
+                            }
+                        }
+                    }
+
+                    try { currentDelegate.onBatchFinished(online); }
+                    catch (Exception fe) {
+                        RSIntegrationMod.LOGGER.error(ctx.format("onBatchFinished error"), fe);
+                    }
+
+                    // Settle node in scheduler
+                    graphScheduler.succeed(currentGraphNode);
+                    currentDelegate = null;
+                    currentGraphNode = null;
+                    waitTicks = 0;
+                    ledger.reset();
+                    stepRemaining = 0;
+                    snapshotCommittedVirtual();
+                    RSIntegrationMod.LOGGER.debug(ctx.format("Graph node succeeded: {}"), currentGraphNode);
+                } else {
+                    // Timeout
+                    int timeoutTicks = RSIntegrationConfig.MULTIBLOCK_CRAFT_TIMEOUT_SECONDS.get() * 20;
+                    if (waitTicks > timeoutTicks) {
+                        if (currentDelegate instanceof ParallelCraftGroup group && group.isDraining()) {
+                            int drainLimit = Math.max(timeoutTicks * 4, 20 * 60);
+                            if (drainingTicks > drainLimit) {
+                                abort("Timeout draining in-flight parallel crafts");
+                                return true;
+                            }
+                            waitTicks = 0;
+                            return false;
+                        }
+                        abort("Timeout waiting for craft completion");
+                        return true;
+                    }
+                }
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.error(ctx.format("Error polling craft completion"), e);
+                abort("Internal error during craft polling");
+                return true;
+            }
+            return false;
+        }
+
+        // All nodes completed?
+        if (graphScheduler.allSucceeded()) {
+            state = State.COMPLETING;
+            finish(online);
+            return true;
+        }
+
+        // Claim next ready node
+        currentGraphNode = claimNextReadyNode();
+        if (currentGraphNode == null) {
+            if (graphScheduler.isStopping()) {
+                abort("Graph scheduler stopped — no ready nodes available");
+                return true;
+            }
+            // No ready nodes but not stopping — waiting for graph consistency
+            return false;
+        }
+
+        // Execute the claimed node
+        int idx = stepIndex(currentGraphNode);
+        currentStepIdx = idx;
+        CraftingResolver.ResolutionStep step = steps.get(idx);
+
+        if (step.recipeId().equals(CraftingResolver.TAINT_EARTH_HEART_STEP)) {
+            if (!startEarthHeartTaint(online, step.executions())) return true;
+            graphScheduler.succeed(currentGraphNode);
+            currentGraphNode = null;
+            return false;
+        }
+
+        if (step.modType() == ModType.GENERIC) {
+            int nextIdx = executeVanillaBatch(idx, online);
+            if (state == State.ABORTED) return true;
+            if (!ledger.isCommitted() && !ledger.commit(network, online)) {
+                abort("Commit failed after vanilla batch");
+                return true;
+            }
+            ledger.reset();
+            snapshotCommittedVirtual();
+            // Settle all vanilla nodes that were processed
+            for (int i = idx; i < nextIdx; i++) {
+                graphScheduler.succeed(graph.topologicalOrder().get(i));
+            }
+            currentGraphNode = null;
+            currentStepIdx = nextIdx;
+        } else {
+            if (stepRemaining <= 0) {
+                stepRemaining = step.executions();
+                machineCount = 1;
+            }
+            currentDelegate = startModStep(step, online);
+            if (currentDelegate == null) {
+                abort("Failed to start multi-block craft: " + step.recipeId());
+                return true;
+            }
+            state = State.WAITING_MOD;
+            snapshotCommittedVirtual();
+            Diagnostics.record(Diagnostics.Category.CHAIN_STATE,
+                    "EXECUTING→WAITING_MOD step=" + step.recipeId(),
+                    step.recipeId(), step.modType());
+            RSIntegrationMod.LOGGER.debug(ctx.format("EXECUTING → WAITING_MOD (graph) for step {}"),
+                    step.recipeId());
+            waitTicks = 0;
+        }
+        return false;
+    }
+
+    @Nullable
+    private NodeId claimNextReadyNode() {
+        java.util.List<NodeId> ready = graphScheduler.claimReady(1);
+        return ready.isEmpty() ? null : ready.get(0);
+    }
+
+    private int stepIndex(NodeId nodeId) {
+        for (int i = 0; i < graph.topologicalOrder().size(); i++) {
+            if (graph.topologicalOrder().get(i).equals(nodeId)) return i;
+        }
+        throw new IllegalArgumentException("Unknown graph node " + nodeId);
     }
 
     public boolean isDone() { return state == State.COMPLETED || state == State.ABORTED; }
