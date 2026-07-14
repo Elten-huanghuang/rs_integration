@@ -24,6 +24,7 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.BooleanValue ENABLE_MULTIBLOCK_AUTO_CRAFTING;
     public static ForgeConfigSpec.ConfigValue<List<? extends String>> PREFERRED_RECIPES;
     public static ForgeConfigSpec.IntValue MULTIBLOCK_CRAFT_TIMEOUT_SECONDS;
+    public static ForgeConfigSpec.IntValue CRAFTING_CHAIN_GLOBAL_TIMEOUT_SECONDS;
     public static ForgeConfigSpec.ConfigValue<List<? extends String>> MULTIBLOCK_RECIPE_BLACKLIST;
     public static ForgeConfigSpec.ConfigValue<List<? extends String>> MULTIBLOCK_RECIPE_ALLOWLIST;
 
@@ -405,6 +406,14 @@ public final class RSIntegrationConfig {
                         "If exceeded, the crafting chain is aborted and items are refunded.",
                         "Range: 10-600.")
                 .defineInRange("multiblockCraftTimeoutSeconds", 300, 10, 600);
+        CRAFTING_CHAIN_GLOBAL_TIMEOUT_SECONDS = s
+                .comment("Maximum total time (in seconds) for an entire graph crafting chain.",
+                        "This is a whole-chain ceiling on top of the per-node timeout: even if",
+                        "individual nodes keep making progress, the chain is aborted once this",
+                        "elapses, so a wedged or livelocked chain cannot run forever.",
+                        "Materials already dispatched into a machine are NOT refunded (never duped);",
+                        "only undispatched/settled materials are returned. Range: 60-3600.")
+                .defineInRange("craftingChainGlobalTimeoutSeconds", 900, 60, 3600);
         MULTIBLOCK_RECIPE_BLACKLIST = s
                 .comment("Multi-block recipe IDs that should NEVER be used for auto-crafting.",
                         "Format: \"modid:recipe_id\".")
