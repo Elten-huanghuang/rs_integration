@@ -33,6 +33,10 @@ public final class DagScheduler {
     public int epoch() { return epoch; }
     private NodeId failedNode;
 
+    public long countSucceeded() {
+        return states.values().stream().filter(s -> s == NodeState.SUCCEEDED).count();
+    }
+
     public DagScheduler(CraftPlanGraph graph) {
         this.graph = Objects.requireNonNull(graph, "graph");
         CraftPlanValidator.validate(graph);

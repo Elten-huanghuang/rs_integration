@@ -166,6 +166,11 @@ public final class RSIntegrationMod {
                 () -> RSSidePanelClient::registerKeyMappings);
         DistExecutor.safeRunWhenOn(Dist.CLIENT,
                 () -> RSIKeyBindings::registerKeyMappings);
+        DistExecutor.safeRunWhenOn(Dist.CLIENT,
+                () -> () -> {
+                    com.huanghuang.rsintegration.crafting.CraftProgressKeybind.register();
+                    MinecraftForge.EVENT_BUS.register(com.huanghuang.rsintegration.crafting.CraftProgressOverlay.class);
+                });
         MOD_BUS.addListener(this::onClientSetup);
 
         FMLJavaModLoadingContext.get().getModEventBus().addListener(this::onCommonSetup);

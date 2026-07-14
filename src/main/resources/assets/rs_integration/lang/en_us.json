@@ -310,6 +310,7 @@
   "key.categories.rsi": "RS Integration",
   "key.rsi.store_all": "Transfer to RS",
   "key.rsi.toggle_mode": "Toggle Transfer Mode",
+  "key.rsi.toggle_progress": "Toggle Craft Progress",
   "rsi.transfer.no_network": "§cNo RS network found — bind a machine or carry a network item",
   "rsi.transfer.disabled": "§cContainer transfer is disabled in config",
   "rsi.transfer.success": "§aTransferred %s item(s) across %s stack(s) to RS network",
