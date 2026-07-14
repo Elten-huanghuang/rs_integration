@@ -27,6 +27,7 @@ import net.minecraft.world.level.material.Fluids;
 import net.minecraftforge.fluids.FluidStack;
 import net.minecraftforge.fluids.capability.IFluidHandler;
 import net.minecraftforge.items.ItemHandlerHelper;
+import org.jetbrains.annotations.NotNull;
 
 import javax.annotation.Nullable;
 import java.lang.reflect.Field;
@@ -371,7 +372,7 @@ public final class KettleBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public void onBatchFinished(ServerPlayer player) {
+    public void onBatchFinished(@NotNull ServerPlayer player) {
         clearAndRefund();
         forceChunkLoad(false);
         craftDone = false;

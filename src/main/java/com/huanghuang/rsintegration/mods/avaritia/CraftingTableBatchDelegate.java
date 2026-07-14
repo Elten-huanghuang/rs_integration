@@ -21,6 +21,7 @@ import net.minecraftforge.common.world.ForgeChunkManager;
 import net.minecraftforge.items.IItemHandler;
 import net.minecraftforge.items.ItemHandlerHelper;
 import net.minecraftforge.items.ItemStackHandler;
+import org.jetbrains.annotations.NotNull;
 
 import javax.annotation.Nullable;
 import java.lang.reflect.Method;
@@ -219,7 +220,7 @@ public final class CraftingTableBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public void onBatchFinished(ServerPlayer player) {
+    public void onBatchFinished(@NotNull ServerPlayer player) {
         forceChunkLoad(false);
         cachedResult = ItemStack.EMPTY;
         craftDone = false;

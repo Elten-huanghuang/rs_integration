@@ -1,251 +1,223 @@
 package com.huanghuang.rsintegration.crafting.loadbalancer;
 
-import com.huanghuang.rsintegration.ModVersionDelegateRegistry;
 import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.ModVersionDelegateRegistry;
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.crafting.CraftOutputInterceptor;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry.BoundMachine;
+import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.crafting.Recipe;
+import net.minecraft.world.level.Level;
+import org.jetbrains.annotations.NotNull;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Wraps multiple {@link IBatchDelegate} instances (one per machine) so the
- * chain treats them as a single delegate.  Each child runs one craft on its
- * assigned machine; the group is "complete" when every child has finished.
- *
- * <p>Unlike single-machine delegates, this does NOT extend
- * {@code AbstractBatchDelegate} — the template-method guards
- * ({@code isCraftComplete} checks one machine's chunk) don't apply
- * when managing N independent machines.</p>
- *
- * <p>Material extraction: each child uses its own independent ledger.
- * A child that fails to extract materials refunds itself without affecting
- * siblings.</p>
+ * A dynamic pool of physical machines executing one recipe operation at a time.
+ * A worker that finishes immediately collects its output and claims the next
+ * operation without waiting for slower siblings.
  */
 public final class ParallelCraftGroup implements IBatchDelegate {
 
-    private final List<ChildSlot> children = new ArrayList<>();
-    private final List<ChildSlot> failedChildren = new ArrayList<>();
+    private final List<WorkerSlot> workers = new ArrayList<>();
+    private final List<ItemStack> settledResults = new ArrayList<>();
     private final ModType modType;
     private final ResourceLocation recipeId;
+    private final OperationQueue operations;
+    private final boolean[] safelyRecoverableVirtual;
     private BlockPos representativePos = BlockPos.ZERO;
-    private boolean started;
+    private MinecraftServer machineServer;
+    private ServerPlayer player;
     private ExtractionLedger sharedLedger;
-    private boolean usingSharedLedger;
+    private List<List<ItemStack>> operationMaterials = List.of();
+    private List<List<ItemStack>> virtualDebits = List.of();
+    private List<ExtractionLedger.ReservationToken> reservationTokens = List.of();
+    private List<IngredientSpec> baseSpecs;
+    private ItemStack targetOutput;
+    private boolean sharedMaterialMode;
+    private boolean started;
+    private boolean draining;
+    private boolean queuedMaterialsRecovered;
+    private String failureDetail = "";
 
-    private record ChildSlot(IBatchDelegate delegate, BlockPos pos) {}
+    private static final class WorkerSlot {
+        final int id;
+        final BoundMachine machine;
+        IBatchDelegate delegate;
+        CraftOutputInterceptor.CaptureHandle captureHandle;
+        int operationId = -1;
+        boolean pristineDelegate = true;
+        boolean needsFailureCleanup;
 
-    // ── construction ───────────────────────────────────────────────
-
-    /**
-     * Create a group from bound machines.  Constructor internally creates
-     * and validates one delegate per machine; machines that fail validation
-     * are skipped.
-     */
-    public ParallelCraftGroup(List<BoundMachine> machines, ModType modType,
-                              ResourceLocation recipeId, ServerPlayer player) {
-        this.modType = modType;
-        this.recipeId = recipeId;
-        for (BoundMachine m : machines) {
-            IBatchDelegate child = createChildDelegate(modType);
-            if (child == null) continue;
-            try {
-                if (child.validateAndInit(player, recipeId, m.dim(), m.pos())) {
-                    if (child instanceof AbstractBatchDelegate abd) {
-                        abd.setMachineDim(m.dim());
-                    }
-                    children.add(new ChildSlot(child, m.pos()));
-                    if (this.representativePos.equals(BlockPos.ZERO))
-                        this.representativePos = m.pos();
-                }
-            } catch (Exception e) {
-                RSIntegrationMod.LOGGER.warn("[RSI-ParallelGroup] Child validateAndInit threw at {}: {}",
-                        m.pos(), e.getMessage(), e);
-            }
+        WorkerSlot(int id, BoundMachine machine, IBatchDelegate delegate) {
+            this.id = id;
+            this.machine = machine;
+            this.delegate = delegate;
         }
-        RSIntegrationMod.LOGGER.debug("[RSI-ParallelGroup] Created with {}/{} children for {}",
-                children.size(), machines.size(), recipeId);
+
+        boolean running() {
+            return operationId >= 0;
+        }
     }
 
-    // ── IBatchDelegate ─────────────────────────────────────────────
+    public ParallelCraftGroup(List<BoundMachine> machines, ModType modType,
+                              ResourceLocation recipeId, ServerPlayer player,
+                              int totalOperations) {
+        this.modType = modType;
+        this.recipeId = recipeId;
+        this.player = player;
+        this.operations = new OperationQueue(totalOperations);
+        this.safelyRecoverableVirtual = new boolean[totalOperations];
+        java.util.Arrays.fill(this.safelyRecoverableVirtual, true);
+        int workerId = 0;
+        for (BoundMachine machine : machines) {
+            IBatchDelegate delegate = createAndValidateDelegate(machine, player);
+            if (delegate == null) continue;
+            workers.add(new WorkerSlot(workerId++, machine, delegate));
+            if (representativePos.equals(BlockPos.ZERO)) representativePos = machine.pos();
+        }
+        if (!workers.isEmpty()) baseSpecs = workers.get(0).delegate.getRequiredMaterials();
+        RSIntegrationMod.LOGGER.debug("[RSI-ParallelGroup] Created {}/{} workers for {} operations of {}",
+                workers.size(), machines.size(), totalOperations, recipeId);
+    }
 
     @Override
     public boolean validateAndInit(ServerPlayer player, ResourceLocation recipeId,
                                    @Nullable ResourceLocation dim, BlockPos pos) {
-        return !children.isEmpty();
+        return workers.size() >= 2;
     }
 
     @Nullable
     @Override
     public List<IngredientSpec> getRequiredMaterials() {
-        if (children.isEmpty()) return null;
-        // Aggregate: each child needs the same materials, multiplied by child count.
-        // This lets the chain pre-reserve from virtualInventory (feed-forward) instead
-        // of each child independently extracting from the RS network.
-        IBatchDelegate first = children.get(0).delegate;
-        List<IngredientSpec> base = null;
-        if (first instanceof AbstractBatchDelegate abd) {
-            base = abd.getRequiredMaterials();
-        }
-        if (base == null || base.isEmpty()) return null;
-        List<IngredientSpec> aggregated = new ArrayList<>();
-        for (int i = 0; i < children.size(); i++) {
-            aggregated.addAll(base);
-        }
-        return aggregated;
+        if (baseSpecs == null || baseSpecs.isEmpty()) return null;
+        List<IngredientSpec> all = new ArrayList<>(baseSpecs.size() * operations.totalOperations());
+        for (int i = 0; i < operations.totalOperations(); i++) all.addAll(baseSpecs);
+        return all;
+    }
+
+    @Nullable
+    public List<IngredientSpec> getOperationMaterials() {
+        return baseSpecs == null ? null : List.copyOf(baseSpecs);
+    }
+
+    public void setReservationTokens(List<ExtractionLedger.ReservationToken> tokens) {
+        this.reservationTokens = List.copyOf(tokens);
+    }
+
+    public void setVirtualDebits(List<List<ItemStack>> debits) {
+        List<List<ItemStack>> copies = new ArrayList<>(debits.size());
+        for (List<ItemStack> debit : debits) copies.add(List.copyOf(copyStacks(debit)));
+        this.virtualDebits = List.copyOf(copies);
     }
 
     @Override
-    public boolean tryStartWithMaterials(ServerPlayer player,
-                                         List<ItemStack> materials,
+    public boolean tryStartWithMaterials(ServerPlayer player, List<ItemStack> materials,
                                          ExtractionLedger sharedLedger) {
-        if (children.isEmpty() || materials.isEmpty()) return false;
-        IBatchDelegate first = children.get(0).delegate;
-        List<IngredientSpec> base = null;
-        if (first instanceof AbstractBatchDelegate abd) {
-            base = abd.getRequiredMaterials();
-        }
-        if (base == null) return false;
-        int perChild = base.size();
-        if (perChild == 0) return false;
-
-        int startedCount = 0;
-        List<ChildSlot> failed = null;
-        List<ItemStack> orphanedMats = null;
-        for (int i = 0; i < children.size(); i++) {
-            int from = i * perChild;
-            int to = from + perChild;
-            if (to > materials.size()) break;
-            // Deep-copy each slice so a child mutating its stacks (shrink/split/NBT)
-            // cannot corrupt the pristine copies we refund on failure. childMats goes
-            // to the child; pristineMats is the untouched reference for the refund.
-            List<ItemStack> childMats = new ArrayList<>(to - from);
-            List<ItemStack> pristineMats = new ArrayList<>(to - from);
-            for (int j = from; j < to; j++) {
-                ItemStack src = materials.get(j);
-                childMats.add(src.copy());
-                pristineMats.add(src.copy());
-            }
-            ChildSlot child = children.get(i);
-            if (child.delegate instanceof AbstractBatchDelegate abd) {
-                abd.useSharedLedger(sharedLedger);
-            }
-            try {
-                if (child.delegate.tryStartWithMaterials(player, childMats, sharedLedger)) {
-                    startedCount++;
-                } else {
-                    RSIntegrationMod.LOGGER.warn("[RSI-ParallelGroup] Child tryStartWithMaterials failed at {}",
-                            child.pos);
-                    if (failed == null) failed = new ArrayList<>();
-                    failed.add(child);
-                    if (orphanedMats == null) orphanedMats = new ArrayList<>();
-                    orphanedMats.addAll(pristineMats);
-                }
-            } catch (Exception e) {
-                RSIntegrationMod.LOGGER.warn("[RSI-ParallelGroup] Child tryStartWithMaterials threw at {}: {}",
-                        child.pos, e.getMessage(), e);
-                if (failed == null) failed = new ArrayList<>();
-                failed.add(child);
-                if (orphanedMats == null) orphanedMats = new ArrayList<>();
-                orphanedMats.addAll(pristineMats);
-            }
-        }
-
-        if (failed != null && !failed.isEmpty()) {
-            failedChildren.addAll(failed);
-            children.removeAll(failed);
-            RSIntegrationMod.LOGGER.warn("[RSI-ParallelGroup] Removed {} failed children for {}",
-                    failed.size(), recipeId);
-        }
-
-        if (startedCount == 0) {
-            // Whole group failed → return false so the chain aborts and the
-            // shared ledger's refundCommitted() refunds ALL committed materials
-            // (including the orphaned slices). Refunding here too would double-refund.
-            RSIntegrationMod.LOGGER.warn("[RSI-ParallelGroup] No children started with materials for {}", recipeId);
+        if (baseSpecs == null || baseSpecs.isEmpty()) return false;
+        int perOperation = baseSpecs.size();
+        if (materials.size() != perOperation * operations.totalOperations()
+                || reservationTokens.size() != operations.totalOperations()
+                || virtualDebits.size() != operations.totalOperations()) {
             return false;
         }
-
-        // Partial success keeps the master ledger committed until the whole group
-        // settles. Remove failed slices from that ledger before returning them, so a
-        // later sibling abort cannot refund the same materials a second time.
-        if (orphanedMats != null && !orphanedMats.isEmpty()) {
-            sharedLedger.releaseCommittedEntries(orphanedMats);
-            refundChildMaterials(player, orphanedMats);
+        List<List<ItemStack>> slices = new ArrayList<>(operations.totalOperations());
+        for (int operation = 0; operation < operations.totalOperations(); operation++) {
+            List<ItemStack> slice = new ArrayList<>(perOperation);
+            int offset = operation * perOperation;
+            for (int i = 0; i < perOperation; i++) {
+                ItemStack material = materials.get(offset + i);
+                slice.add(material == null || material.isEmpty() ? ItemStack.EMPTY : material.copy());
+            }
+            slices.add(List.copyOf(slice));
         }
-
-        this.usingSharedLedger = true;
+        this.operationMaterials = List.copyOf(slices);
         this.sharedLedger = sharedLedger;
-        started = true;
-        RSIntegrationMod.LOGGER.debug("[RSI-ParallelGroup] Started {}/{} children with materials for {}",
-                startedCount, children.size(), recipeId);
-        return true;
+        this.sharedMaterialMode = true;
+        this.player = player;
+        return startInitialWorkers();
     }
 
     @Override
     public boolean tryStartSingleCraft(ServerPlayer player) {
-        if (children.isEmpty()) return false;
-
-        int startedCount = 0;
-        List<ChildSlot> failed = null;
-        for (ChildSlot child : children) {
-            try {
-                if (child.delegate.tryStartSingleCraft(player)) {
-                    startedCount++;
-                } else {
-                    if (failed == null) failed = new ArrayList<>();
-                    failed.add(child);
-                }
-            } catch (Exception e) {
-                RSIntegrationMod.LOGGER.warn("[RSI-ParallelGroup] Child startCraft failed at {}: {}",
-                        child.pos, e.getMessage(), e);
-                if (failed == null) failed = new ArrayList<>();
-                failed.add(child);
-            }
-        }
-
-        if (failed != null && !failed.isEmpty()) {
-            failedChildren.addAll(failed);
-            children.removeAll(failed);
-            RSIntegrationMod.LOGGER.warn("[RSI-ParallelGroup] Removed {} failed children for {}",
-                    failed.size(), recipeId);
-        }
-
-        if (startedCount == 0) {
-            RSIntegrationMod.LOGGER.warn("[RSI-ParallelGroup] No children started for {}", recipeId);
-            return false;
-        }
-
-        started = true;
-        RSIntegrationMod.LOGGER.debug("[RSI-ParallelGroup] Started {}/{} children for {}",
-                startedCount, children.size(), recipeId);
-        return true;
+        this.player = player;
+        this.sharedMaterialMode = false;
+        return startInitialWorkers();
     }
 
     @Override
     public boolean tryStartSingleCraft(ServerPlayer player, ExtractionLedger sharedLedger) {
-        // Pre-reserve path: aggregate materials, let chain extract from virtualInventory
-        // first, then distribute to children via tryStartWithMaterials.
-        // Fall back to per-child self-extraction when children don't expose specs.
-        List<IngredientSpec> specs = getRequiredMaterials();
-        if (specs != null && !specs.isEmpty()) {
-            // Signal to the chain that we support the pre-reserve flow.
-            // The chain will call tryStartWithMaterials after pre-reserving.
-            return tryStartSingleCraft(player);
-        }
-        // Legacy: each child self-extracts (no virtualInventory visibility)
         return tryStartSingleCraft(player);
+    }
+
+    private boolean startInitialWorkers() {
+        int startedCount = 0;
+        for (WorkerSlot worker : workers) {
+            if (startNext(worker)) startedCount++;
+            if (operations.queuedOperations() == 0) break;
+        }
+        started = startedCount > 0;
+        if (!started) beginDraining("no workers accepted an operation");
+        return started;
+    }
+
+    private boolean startNext(WorkerSlot worker) {
+        int operationId = operations.claim(worker.id);
+        if (operationId < 0) return false;
+
+        IBatchDelegate delegate = worker.pristineDelegate
+                ? worker.delegate : createAndValidateDelegate(worker.machine, player);
+        worker.pristineDelegate = false;
+        if (delegate == null) {
+            operations.abandon(worker.id);
+            worker.operationId = -1;
+            beginDraining("worker validation failed at " + worker.machine.pos());
+            return false;
+        }
+        worker.delegate = delegate;
+        worker.operationId = operationId;
+        // Once start is attempted, the delegate may already have moved this
+        // operation's virtual inputs into the physical machine. Never synthesize
+        // those inputs back unless the operation was never dispatched.
+        safelyRecoverableVirtual[operationId] = false;
+        worker.needsFailureCleanup = false;
+        armCapture(worker);
+        try {
+            boolean accepted;
+            if (sharedMaterialMode) {
+                if (delegate instanceof AbstractBatchDelegate abstractDelegate) {
+                    abstractDelegate.useSharedLedger(sharedLedger);
+                }
+                accepted = delegate.tryStartWithMaterials(player,
+                        copyStacksKeepingEmpty(operationMaterials.get(operationId)), sharedLedger);
+            } else {
+                accepted = delegate.tryStartSingleCraft(player);
+            }
+            if (!accepted) {
+                handleFailedStart(worker, "worker start failed at " + worker.machine.pos());
+                return false;
+            }
+            return true;
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-ParallelGroup] Worker start threw at {}",
+                    worker.machine.pos(), e);
+            handleFailedStart(worker, "worker start threw at " + worker.machine.pos());
+            return false;
+        }
     }
 
     @Override
@@ -255,28 +227,143 @@ public final class ParallelCraftGroup implements IBatchDelegate {
 
     @Override
     public CraftObservation observeCraft(ServerLevel level) {
-        if (!started || children.isEmpty()) return new CraftObservation(CraftPhase.WAITING_FOR_START);
-        boolean allDone = true;
-        boolean anyWorking = false;
-        for (ChildSlot child : children) {
+        if (!started && !draining) return new CraftObservation(CraftPhase.WAITING_FOR_START);
+
+        for (WorkerSlot worker : workers) {
+            if (!worker.running()) continue;
+            CraftObservation observation;
             try {
-                CraftObservation observation = child.delegate.observeCraft(level);
-                if (observation.phase() == CraftPhase.FAILED) {
-                    return new CraftObservation(CraftPhase.FAILED,
-                            child.pos + ": " + observation.detail());
-                }
-                allDone &= observation.phase() == CraftPhase.DONE;
-                anyWorking |= observation.phase() == CraftPhase.WORKING
-                        || observation.phase() == CraftPhase.DONE;
+                observation = worker.delegate.observeCraft(level);
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.warn("[RSI-ParallelGroup] Child observation failed at {}",
-                        child.pos, e);
-                return new CraftObservation(CraftPhase.FAILED,
-                        "child observation failed at " + child.pos);
+                RSIntegrationMod.LOGGER.warn("[RSI-ParallelGroup] Worker observation threw at {}",
+                        worker.machine.pos(), e);
+                // This worker can no longer be observed to natural completion. Its
+                // reservation stays unsettled and onBatchFailed recovers its machine.
+                operations.abandon(worker.id);
+                worker.operationId = -1;
+                worker.needsFailureCleanup = true;
+                beginDraining("worker observation failed at " + worker.machine.pos());
+                continue;
+            }
+            if (observation.phase() == CraftPhase.FAILED) {
+                operations.abandon(worker.id);
+                worker.operationId = -1;
+                worker.needsFailureCleanup = true;
+                beginDraining(worker.machine.pos() + ": " + observation.detail());
+                continue;
+            }
+            if (observation.phase() == CraftPhase.DONE) {
+                settleCompletedOperation(worker);
             }
         }
-        if (allDone) return new CraftObservation(CraftPhase.DONE);
-        return new CraftObservation(anyWorking ? CraftPhase.WORKING : CraftPhase.WAITING_FOR_START);
+
+        if (draining && operations.isDrained()) {
+            return new CraftObservation(CraftPhase.FAILED, failureDetail);
+        }
+        if (operations.isComplete()) return new CraftObservation(CraftPhase.DONE);
+        return new CraftObservation(CraftPhase.WORKING);
+    }
+
+    private boolean settleCompletedOperation(WorkerSlot worker) {
+        int operationId = worker.operationId;
+        List<ItemStack> actual = new ArrayList<>(drainCapture(worker));
+        try {
+            actual.addAll(worker.delegate.collectAllResults(player));
+        } catch (Exception e) {
+            operations.abandon(worker.id);
+            worker.operationId = -1;
+            worker.needsFailureCleanup = true;
+            beginDraining("worker result collection failed at " + worker.machine.pos());
+            return false;
+        }
+        actual.removeIf(stack -> stack == null || stack.isEmpty());
+
+        ExpectedProduction expected = worker.delegate.getExpectedProduction();
+        if (expected != null && countMatching(actual, expected) < expected.count()) {
+            // DONE proves the inputs were consumed. Preserve the residual output and
+            // settle this token so an externally extracted result cannot pair with a refund.
+            settledResults.addAll(copyStacks(actual));
+            settleReservation(operationId);
+            operations.abandon(worker.id);
+            worker.operationId = -1;
+            worker.needsFailureCleanup = true;
+            beginDraining("worker output was externally extracted at " + worker.machine.pos());
+            return false;
+        }
+        ItemStack expectedWorld = worker.delegate.getExpectedOutput();
+        if (expected == null && expectedWorld != null && !expectedWorld.isEmpty() && actual.isEmpty()) {
+            settleReservation(operationId);
+            operations.abandon(worker.id);
+            worker.operationId = -1;
+            worker.needsFailureCleanup = true;
+            beginDraining("expected world output was not captured at " + worker.machine.pos());
+            return false;
+        }
+
+        // Output ownership is already proven at this point. Commit the operation
+        // before cleanup so a cleanup exception cannot pair real output with an input refund.
+        settleReservation(operationId);
+        settledResults.addAll(copyStacks(actual));
+        addSecondaryOutputs(worker.delegate);
+        try {
+            worker.delegate.onBatchFinished(player);
+        } catch (Exception e) {
+            operations.abandon(worker.id);
+            worker.operationId = -1;
+            worker.needsFailureCleanup = true;
+            beginDraining("worker finish cleanup failed at " + worker.machine.pos());
+            return false;
+        }
+        operations.complete(worker.id);
+        worker.operationId = -1;
+
+        if (!draining && operations.queuedOperations() > 0) startNext(worker);
+        return !draining;
+    }
+
+    private void addSecondaryOutputs(IBatchDelegate delegate) {
+        if (delegate.collectsPhysicalSecondaryOutputs() || machineServer == null) return;
+        ServerLevel overworld = machineServer.overworld();
+        if (overworld == null) return;
+        Recipe<?> recipe = overworld.getRecipeManager().byKey(recipeId).orElse(null);
+        if (recipe == null) return;
+        for (ItemStack secondary : ModRecipeHandlers.tryGetSecondaryOutputs(
+                recipe, overworld.registryAccess())) {
+            if (secondary != null && !secondary.isEmpty()) settledResults.add(secondary.copy());
+        }
+    }
+
+    /** Drain newly settled outputs without waiting for the entire group. */
+    public List<ItemStack> drainSettledResults() {
+        if (settledResults.isEmpty()) return List.of();
+        List<ItemStack> drained = copyStacks(settledResults);
+        settledResults.clear();
+        return List.copyOf(drained);
+    }
+
+    /** Virtual inputs for operations that were never dispatched to a machine. */
+    public List<ItemStack> drainQueuedMaterialsForRecovery() {
+        if (!draining || !sharedMaterialMode || queuedMaterialsRecovered) return List.of();
+        queuedMaterialsRecovered = true;
+        List<ItemStack> recovery = new ArrayList<>();
+        for (int operation = 0; operation < virtualDebits.size(); operation++) {
+            if (safelyRecoverableVirtual[operation]) {
+                recovery.addAll(copyStacks(virtualDebits.get(operation)));
+            }
+        }
+        return List.copyOf(recovery);
+    }
+
+    public boolean isDraining() {
+        return draining;
+    }
+
+    public int getCompletedOperations() {
+        return operations.completedOperations();
+    }
+
+    public int getTotalOperations() {
+        return operations.totalOperations();
     }
 
     @Override
@@ -287,75 +374,46 @@ public final class ParallelCraftGroup implements IBatchDelegate {
 
     @Override
     public List<ItemStack> collectAllResults(ServerPlayer player) {
-        List<ItemStack> results = new ArrayList<>();
-        for (ChildSlot child : children) {
-            try {
-                for (ItemStack result : child.delegate.collectAllResults(player)) {
-                    if (result != null && !result.isEmpty()) results.add(result);
-                }
-            } catch (Exception e) {
-                RSIntegrationMod.LOGGER.warn("[RSI-ParallelGroup] Child collectResult failed at {}",
-                        child.pos, e);
-            }
-        }
-        return List.copyOf(results);
+        return drainSettledResults();
     }
 
     @Nullable
     @Override
     public ExpectedProduction getExpectedProduction() {
-        ItemStack expectedItem = ItemStack.EMPTY;
-        int expectedCount = 0;
-        for (ChildSlot child : children) {
-            ExpectedProduction expected = child.delegate.getExpectedProduction();
-            if (expected == null) return null;
-            if (expectedItem.isEmpty()) expectedItem = expected.item();
-            else if (!ItemStack.isSameItemSameTags(expectedItem, expected.item())) return null;
-            expectedCount = expectedCount > Integer.MAX_VALUE - expected.count()
-                    ? Integer.MAX_VALUE : expectedCount + expected.count();
-        }
-        return expectedItem.isEmpty() ? null : new ExpectedProduction(expectedItem, expectedCount);
+        return null;
+    }
+
+    @Nullable
+    @Override
+    public ItemStack getExpectedOutput() {
+        return null;
     }
 
     @Override
     public void onBatchFailed(ServerPlayer player, String reason) {
-        // Always let children clear physical machine state. Shared-ledger children
-        // suppress their own material refund; the chain refunds the master ledger.
-        cleanupChildren(children, player, reason);
-        cleanupChildren(failedChildren, player, reason);
-        children.clear();
-        failedChildren.clear();
-        started = false;
-        sharedLedger = null;
-        usingSharedLedger = false;
-    }
-
-    private static void cleanupChildren(List<ChildSlot> slots, ServerPlayer player, String reason) {
-        for (ChildSlot child : slots) {
-            try {
-                child.delegate.onBatchFailed(player, reason);
-            } catch (Exception e) {
-                RSIntegrationMod.LOGGER.debug("[RSI-ParallelGroup] Child onBatchFailed error at {}: {}",
-                        child.pos, e.getMessage(), e);
+        beginDraining(reason);
+        for (WorkerSlot worker : workers) {
+            // Unconfirmed capture belongs to an unsettled operation. Cleanup may
+            // return its inputs, so exporting that capture here could duplicate it.
+            drainCapture(worker);
+            if (worker.delegate != null && (worker.running() || worker.needsFailureCleanup)) {
+                try {
+                    worker.delegate.onBatchFailed(player, reason);
+                } catch (Exception e) {
+                    RSIntegrationMod.LOGGER.debug("[RSI-ParallelGroup] Worker cleanup failed at {}",
+                            worker.machine.pos(), e);
+                }
             }
+            worker.operationId = -1;
+            worker.needsFailureCleanup = false;
         }
+        started = false;
     }
 
     @Override
-    public void onBatchFinished(ServerPlayer player) {
-        for (ChildSlot child : children) {
-            try {
-                child.delegate.onBatchFinished(player);
-            } catch (Exception e) {
-                RSIntegrationMod.LOGGER.debug("[RSI-ParallelGroup] Child onBatchFinished error at {}: {}",
-                        child.pos, e.getMessage(), e);
-            }
-        }
-        children.clear();
-        failedChildren.clear();
+    public void onBatchFinished(@NotNull ServerPlayer player) {
         started = false;
-        sharedLedger = null;
-        usingSharedLedger = false;
+        for (WorkerSlot worker : workers) drainCapture(worker);
     }
 
     @Override
@@ -363,35 +421,108 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         return representativePos;
     }
 
-    /** Number of child delegates that successfully validated. */
     public int getChildCount() {
-        return children.size();
+        return workers.size();
     }
 
-    /** Propagate server reference to all child delegates for offline cleanup. */
-    public void setMachineServer(net.minecraft.server.MinecraftServer server) {
-        for (ChildSlot child : children) {
-            if (child.delegate instanceof AbstractBatchDelegate abd) {
-                abd.setMachineServer(server);
-            }
+    public void setMachineServer(MinecraftServer server) {
+        this.machineServer = server;
+        for (WorkerSlot worker : workers) configureDelegate(worker.delegate, worker.machine);
+    }
+
+    public void setTargetOutput(@Nullable ItemStack targetOutput) {
+        this.targetOutput = targetOutput == null || targetOutput.isEmpty() ? null : targetOutput.copy();
+        for (WorkerSlot worker : workers) configureDelegate(worker.delegate, worker.machine);
+    }
+
+    private IBatchDelegate createAndValidateDelegate(BoundMachine machine, ServerPlayer player) {
+        IBatchDelegate delegate = createChildDelegate(modType);
+        if (delegate == null) return null;
+        try {
+            if (!delegate.validateAndInit(player, recipeId, machine.dim(), machine.pos())) return null;
+            configureDelegate(delegate, machine);
+            return delegate;
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-ParallelGroup] Worker validation failed at {}",
+                    machine.pos(), e);
+            return null;
         }
     }
 
-    // ── helpers ────────────────────────────────────────────────────
+    private void configureDelegate(IBatchDelegate delegate, BoundMachine machine) {
+        if (!(delegate instanceof AbstractBatchDelegate abstractDelegate)) return;
+        abstractDelegate.setMachineDim(machine.dim());
+        if (machineServer != null) abstractDelegate.setMachineServer(machineServer);
+        if (targetOutput != null) abstractDelegate.setTargetOutput(targetOutput);
+    }
 
-    /**
-     * Return a failed child's material slice to the player. These items were
-     * committed from the shared ledger by the chain but the child placed them
-     * nowhere, so without this they would be lost. Mirrors the stranded-result
-     * handling in {@link #collectResult}.
-     */
-    private static void refundChildMaterials(ServerPlayer player, List<ItemStack> childMats) {
-        if (player == null) return;
-        for (ItemStack mat : childMats) {
-            if (mat != null && !mat.isEmpty()) {
-                net.minecraftforge.items.ItemHandlerHelper.giveItemToPlayer(player, mat.copy());
-            }
+    private void armCapture(WorkerSlot worker) {
+        ItemStack expected = worker.delegate.getExpectedOutput();
+        if (expected == null || expected.isEmpty()) return;
+        var region = worker.delegate.getOutputCaptureRegion();
+        if (region == null) return;
+        ResourceKey<Level> dimension = ResourceKey.create(Registries.DIMENSION, worker.machine.dim());
+        worker.captureHandle = CraftOutputInterceptor.arm(dimension, region, expected);
+    }
+
+    private static List<ItemStack> drainCapture(WorkerSlot worker) {
+        CraftOutputInterceptor.CaptureHandle handle = worker.captureHandle;
+        worker.captureHandle = null;
+        return handle == null ? List.of() : handle.drainAndClose();
+    }
+
+    private void settleReservation(int operationId) {
+        if (sharedMaterialMode) {
+            sharedLedger.settleCommitted(reservationTokens.get(operationId));
         }
+    }
+
+    private void handleFailedStart(WorkerSlot worker, String detail) {
+        List<ItemStack> captured = drainCapture(worker);
+        if (!captured.isEmpty()) {
+            int operationId = worker.operationId;
+            settleReservation(operationId);
+            settledResults.addAll(copyStacks(captured));
+        }
+        abandonUnstarted(worker);
+        beginDraining(detail);
+    }
+
+    private void abandonUnstarted(WorkerSlot worker) {
+        if (!worker.running()) return;
+        operations.abandon(worker.id);
+        worker.operationId = -1;
+        worker.needsFailureCleanup = true;
+    }
+
+    private void beginDraining(String detail) {
+        if (!draining) failureDetail = detail;
+        draining = true;
+        operations.stopDispatch();
+    }
+
+    private static int countMatching(List<ItemStack> stacks, ExpectedProduction expected) {
+        int count = 0;
+        for (ItemStack stack : stacks) {
+            if (ItemStack.isSameItem(expected.item(), stack)) count += stack.getCount();
+        }
+        return count;
+    }
+
+    private static List<ItemStack> copyStacksKeepingEmpty(List<ItemStack> stacks) {
+        List<ItemStack> copies = new ArrayList<>(stacks.size());
+        for (ItemStack stack : stacks) {
+            copies.add(stack == null || stack.isEmpty() ? ItemStack.EMPTY : stack.copy());
+        }
+        return copies;
+    }
+
+    private static List<ItemStack> copyStacks(List<ItemStack> stacks) {
+        List<ItemStack> copies = new ArrayList<>(stacks.size());
+        for (ItemStack stack : stacks) {
+            if (stack != null && !stack.isEmpty()) copies.add(stack.copy());
+        }
+        return copies;
     }
 
     private static IBatchDelegate createChildDelegate(ModType type) {

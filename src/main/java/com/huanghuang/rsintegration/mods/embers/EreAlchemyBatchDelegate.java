@@ -35,6 +35,7 @@ import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraftforge.items.ItemHandlerHelper;
+import org.jetbrains.annotations.NotNull;
 
 /** Batch delegate for Embers Alchemy Tablet (deterministic mode). */
 public final class EreAlchemyBatchDelegate
@@ -338,7 +339,7 @@ extends AbstractBatchDelegate {
         this.clearAllSlots();
     }
 
-    public void onBatchFinished(ServerPlayer player) {
+    public void onBatchFinished(@NotNull ServerPlayer player) {
     }
 
     public BlockPos getMachinePos() {

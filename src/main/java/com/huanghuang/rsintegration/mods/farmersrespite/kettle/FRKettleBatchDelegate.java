@@ -24,6 +24,7 @@ import net.minecraftforge.fluids.FluidStack;
 import net.minecraftforge.fluids.capability.IFluidHandler;
 import net.minecraftforge.items.ItemHandlerHelper;
 import net.minecraftforge.items.ItemStackHandler;
+import org.jetbrains.annotations.NotNull;
 
 import javax.annotation.Nullable;
 import java.lang.reflect.Method;
@@ -394,7 +395,7 @@ public final class FRKettleBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public void onBatchFinished(ServerPlayer player) {
+    public void onBatchFinished(@NotNull ServerPlayer player) {
         BlockEntity be = myLevel.getBlockEntity(myPos);
         ItemStackHandler inventory = (be != null && isFRKettleBE(be)) ? getInventory(be) : null;
         if (inventory != null) clearAndRefund(inventory, be);

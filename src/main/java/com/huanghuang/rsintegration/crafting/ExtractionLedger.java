@@ -34,6 +34,7 @@ public final class ExtractionLedger implements AutoCloseable {
     }
 
     private final List<Entry> entries = new ArrayList<>();
+    private final Map<Integer, Entry> entriesById = new HashMap<>();
     private final Map<CraftingResolver.StackKey, Integer> pendingNet = new HashMap<>();
     private final Map<CraftingResolver.StackKey, Integer> pendingInv = new HashMap<>();
     private State state = State.IDLE;
@@ -76,6 +77,7 @@ public final class ExtractionLedger implements AutoCloseable {
         Diagnostics.record(Diagnostics.Category.LEDGER_RESERVE,
                 "reserve item=" + itemId + " count=" + e.count + " src=" + e.source);
         entries.add(e);
+        entriesById.put(e.id, e);
     }
 
     // ── reservations ─────────────────────────────────────────────
@@ -324,8 +326,51 @@ public final class ExtractionLedger implements AutoCloseable {
     public boolean isCommitted() { return state == State.COMMITTED; }
     public State state() { return state; }
 
+    /** Opaque ownership token for entries reserved by one craft operation. */
+    public record ReservationToken(List<Integer> entryIds) {
+        public ReservationToken {
+            entryIds = List.copyOf(entryIds);
+        }
+    }
+
+    /** Mark the current end of the reservation list before reserving one operation. */
+    public int reservationMark() {
+        requireState(State.IDLE, State.RESERVING);
+        return entries.size();
+    }
+
+    /** Capture exact entry identities added since {@link #reservationMark()}. */
+    public ReservationToken tokenSince(int mark) {
+        if (mark < 0 || mark > entries.size()) {
+            throw new IllegalArgumentException("invalid reservation mark: " + mark);
+        }
+        List<Integer> ids = new ArrayList<>(entries.size() - mark);
+        for (int i = mark; i < entries.size(); i++) ids.add(entries.get(i).id);
+        return new ReservationToken(ids);
+    }
+
+    /**
+     * Settle a successfully completed operation. Settled entries are removed from
+     * the committed ledger so a later group abort refunds only unfinished work.
+     */
+    public void settleCommitted(ReservationToken token) {
+        requireState(State.COMMITTED);
+        if (token == null || token.entryIds().isEmpty()) return;
+        List<Entry> owned = new ArrayList<>(token.entryIds().size());
+        for (Integer id : token.entryIds()) {
+            Entry entry = entriesById.get(id);
+            if (entry == null) {
+                throw new IllegalStateException("reservation token already settled or unknown: " + id);
+            }
+            owned.add(entry);
+        }
+        entries.removeAll(owned);
+        for (Entry entry : owned) entriesById.remove(entry.id);
+    }
+
     public void reset() {
         entries.clear();
+        entriesById.clear();
         pendingNet.clear();
         pendingInv.clear();
         networkEntryCache.clear();
@@ -349,6 +394,7 @@ public final class ExtractionLedger implements AutoCloseable {
             RSIntegrationMod.LOGGER.warn(fmt("Ledger auto-rollback via close() — {} entries abandoned"), entries.size());
         }
         entries.clear();
+        entriesById.clear();
         pendingNet.clear();
         pendingInv.clear();
         networkEntryCache.clear();
@@ -904,6 +950,7 @@ public final class ExtractionLedger implements AutoCloseable {
     public void cancelLastReservation() {
         if (entries.isEmpty()) return;
         Entry last = entries.remove(entries.size() - 1);
+        entriesById.remove(last.id);
         CraftingResolver.StackKey key = CraftingResolver.StackKey.of(last.template, true);
         pendingNet.computeIfPresent(key, (k, v) -> {
             int nv = v - last.count;
@@ -962,7 +1009,8 @@ public final class ExtractionLedger implements AutoCloseable {
         // Remove matched entries by id (in reverse to avoid index shifting issues).
         for (int i = entries.size() - 1; i >= 0; i--) {
             if (idsToRemove.contains(entries.get(i).id)) {
-                entries.remove(i);
+                Entry removed = entries.remove(i);
+                entriesById.remove(removed.id);
             }
         }
     }

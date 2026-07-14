@@ -24,6 +24,7 @@ import net.minecraft.world.phys.AABB;
 import net.minecraftforge.common.util.LazyOptional;
 import net.minecraftforge.items.IItemHandler;
 import net.minecraftforge.items.ItemHandlerHelper;
+import org.jetbrains.annotations.NotNull;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
@@ -285,7 +286,7 @@ public final class MalumRunicWorkbenchBatchDelegate extends AbstractBatchDelegat
     }
 
     @Override
-    public void onBatchFinished(ServerPlayer player) {
+    public void onBatchFinished(@NotNull ServerPlayer player) {
         // Clear any leftover from slot 0
         BlockEntity be = myLevel.getBlockEntity(myPos);
         if (be != null && !be.isRemoved()) {

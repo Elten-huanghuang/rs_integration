@@ -25,6 +25,8 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 
 import net.minecraftforge.fluids.capability.IFluidHandler;
 import net.minecraftforge.items.ItemHandlerHelper;
+import org.jetbrains.annotations.NotNull;
+
 import javax.annotation.Nullable;
 import java.lang.reflect.Constructor;
 import java.util.ArrayList;
@@ -934,7 +936,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public void onBatchFinished(ServerPlayer player) {
+    public void onBatchFinished(@NotNull ServerPlayer player) {
         if (isRitual) cleanupBrazier();
         pendingResult = ItemStack.EMPTY;
         craftCompleted = false;

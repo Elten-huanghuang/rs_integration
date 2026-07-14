@@ -14,6 +14,12 @@ import java.util.List;
 
 public interface IBatchDelegate {
 
+    /**
+     * A delegate instance owns exactly one recipe operation. After either
+     * {@link #onBatchFinished} or {@link #onBatchFailed}, callers must discard it
+     * and create a new instance before starting another operation.
+     */
+
     enum CraftPhase {
         WAITING_FOR_START,
         WORKING,
