@@ -98,6 +98,26 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
 
     String failureReason() { return failureReason; }
 
+    int completedOperations() {
+        return delegate instanceof ParallelCraftGroup group
+                ? group.getCompletedOperations() : terminal && failureReason == null ? 1 : 0;
+    }
+
+    int totalOperations() {
+        return delegate instanceof ParallelCraftGroup group ? group.getTotalOperations() : 1;
+    }
+
+    int runningOperations() {
+        if (delegate instanceof ParallelCraftGroup group) return group.getRunningOperations();
+        return terminal ? 0 : 1;
+    }
+
+    String machineLabel() {
+        if (machineLease == null) return "";
+        var machine = machineLease.machine();
+        return machine.dimension() + "@" + machine.position().toShortString();
+    }
+
     // ── Worker ──────────────────────────────────────────────────
 
     @Override

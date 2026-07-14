@@ -366,6 +366,10 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         return operations.totalOperations();
     }
 
+    public int getRunningOperations() {
+        return operations.runningOperations();
+    }
+
     @Override
     public ItemStack collectResult(ServerPlayer player) {
         List<ItemStack> results = collectAllResults(player);

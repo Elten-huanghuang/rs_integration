@@ -142,6 +142,7 @@ public final class AsyncCraftChain {
     @Nullable
     private ConcurrentNodeExecutor graphExecutor;
     private final Map<NodeId, CraftNodeRuntime> nodeRuntimes = new HashMap<>();
+    private final Map<NodeId, String> graphFailureDetails = new HashMap<>();
     @Nullable
     private final MaterialBroker graphMaterials;
     @Nullable
@@ -1009,6 +1010,10 @@ public final class AsyncCraftChain {
      * a status snapshot also numbered 0 would correctly be rejected as stale.
      */
     public CraftProgressSnapshot nextStatusSnapshot() {
+        return buildProgressSnapshot(isDone());
+    }
+
+    private CraftProgressSnapshot buildProgressSnapshot(boolean terminal) {
         int total = useGraphExecution && graph != null
                 ? graph.topologicalOrder().size() : steps.size();
         int completed = useGraphExecution && graphScheduler != null
@@ -1017,9 +1022,48 @@ public final class AsyncCraftChain {
                 : (currentDelegate != null ? 1 : 0);
         byte chainStateByte = graphScheduler != null && graphScheduler.isStopping()
                 ? CraftProgressSnapshot.STATE_STOPPING : CraftProgressSnapshot.STATE_EXECUTING;
-        int sequence = isDone() ? CraftProgressSnapshot.TERMINAL_SEQUENCE : ++progressSequence;
+        int sequence = terminal ? CraftProgressSnapshot.TERMINAL_SEQUENCE : ++progressSequence;
         return new CraftProgressSnapshot(craftId, sequence, chainStateByte,
-                completed, total, running, abortReason.isEmpty() ? null : abortReason);
+                completed, total, running, abortReason.isEmpty() ? null : abortReason,
+                buildNodeProgress());
+    }
+
+    private List<CraftProgressSnapshot.NodeProgress> buildNodeProgress() {
+        if (!useGraphExecution || graph == null || graphScheduler == null) return List.of();
+        List<CraftProgressSnapshot.NodeProgress> result = new ArrayList<>(graph.topologicalOrder().size());
+        for (NodeId nodeId : graph.topologicalOrder()) {
+            CraftNode node = graphNodes.get(nodeId);
+            DagScheduler.NodeState schedulerState = graphScheduler.state(nodeId);
+            CraftNodeRuntime runtime = nodeRuntimes.get(nodeId);
+            int totalOps = runtime != null ? runtime.totalOperations()
+                    : node != null ? Math.max(1, node.executions()) : 1;
+            int completedOps = runtime != null ? runtime.completedOperations()
+                    : schedulerState == DagScheduler.NodeState.SUCCEEDED ? totalOps : 0;
+            int runningOps = runtime != null ? runtime.runningOperations() : 0;
+            String detail = runtime != null && runtime.failureReason() != null
+                    ? runtime.failureReason() : graphFailureDetails.getOrDefault(nodeId, "");
+            result.add(new CraftProgressSnapshot.NodeProgress(nodeId.value(),
+                    progressNodeState(schedulerState),
+                    node != null ? node.recipeId().toString() : "",
+                    node != null ? node.modTypeId() : "",
+                    completedOps, totalOps, runningOps,
+                    runtime != null ? runtime.machineLabel() : "",
+                    detail, runtime != null && runtime.isDraining()));
+        }
+        return List.copyOf(result);
+    }
+
+    private static CraftProgressSnapshot.NodeState progressNodeState(
+            DagScheduler.NodeState state) {
+        if (state == null) return CraftProgressSnapshot.NodeState.UNKNOWN;
+        return switch (state) {
+            case BLOCKED -> CraftProgressSnapshot.NodeState.BLOCKED;
+            case READY -> CraftProgressSnapshot.NodeState.READY;
+            case RUNNING -> CraftProgressSnapshot.NodeState.RUNNING;
+            case SUCCEEDED -> CraftProgressSnapshot.NodeState.SUCCEEDED;
+            case FAILED -> CraftProgressSnapshot.NodeState.FAILED;
+            case CANCELLED -> CraftProgressSnapshot.NodeState.CANCELLED;
+        };
     }
 
     public ExtractionLedger ledger() { return ledger; }
@@ -2281,6 +2325,9 @@ public final class AsyncCraftChain {
         }
         for (CraftNodeRuntime runtime : List.copyOf(nodeRuntimes.values())) {
             try {
+                if (runtime.failureReason() != null && !runtime.failureReason().isEmpty()) {
+                    graphFailureDetails.put(runtime.nodeId(), runtime.failureReason());
+                }
                 runtime.stopDispatch();
                 List<ItemStack> settled = runtime.drainSettledResults();
                 for (ItemStack s : settled) addToVirtualInventory(s);
@@ -2342,18 +2389,8 @@ public final class AsyncCraftChain {
     private void maybeSendProgress(ServerPlayer online, boolean terminal) {
         progressTickCounter++;
         if (!terminal && progressTickCounter % 20 != 0) return;
-        int total = useGraphExecution && graph != null
-                ? graph.topologicalOrder().size() : steps.size();
-        int completed = useGraphExecution && graphScheduler != null
-                ? (int) graphScheduler.countSucceeded() : currentStepIdx;
-        int running = graphExecutor != null ? graphExecutor.runningCount() : (currentDelegate != null ? 1 : 0);
-        byte chainStateByte = graphScheduler != null && graphScheduler.isStopping()
-                ? CraftProgressSnapshot.STATE_STOPPING : CraftProgressSnapshot.STATE_EXECUTING;
-        int sequence = terminal ? CraftProgressSnapshot.TERMINAL_SEQUENCE : ++progressSequence;
-        CraftProgressSnapshot snap = new CraftProgressSnapshot(craftId, sequence, chainStateByte,
-                completed, total, running, abortReason.isEmpty() ? null : abortReason);
         BatchCraftNetworkHandler.CHANNEL.sendTo(
-                new CraftProgressPacket(snap),
+                new CraftProgressPacket(buildProgressSnapshot(terminal)),
                 online.connection.connection,
                 net.minecraftforge.network.NetworkDirection.PLAY_TO_CLIENT);
     }

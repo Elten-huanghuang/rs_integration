@@ -9,9 +9,11 @@ import net.minecraft.world.item.crafting.Ingredient;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class DagSchedulerTest extends BootstrapTest {
@@ -57,6 +59,28 @@ class DagSchedulerTest extends BootstrapTest {
 
         assertEquals(DagScheduler.NodeState.READY, scheduler.state(leaf));
         assertEquals(2, scheduler.readyCount());
+    }
+
+    @Test
+    void stateSnapshotTracksLifecycleAndCannotMutateScheduler() {
+        DagScheduler scheduler = new DagScheduler(forkJoinGraph());
+        assertEquals(Map.of(
+                new NodeId(0), DagScheduler.NodeState.READY,
+                new NodeId(1), DagScheduler.NodeState.READY,
+                new NodeId(2), DagScheduler.NodeState.BLOCKED), scheduler.stateSnapshot());
+
+        NodeId left = scheduler.claimReady(1).get(0);
+        assertEquals(DagScheduler.NodeState.RUNNING, scheduler.stateSnapshot().get(left));
+        assertThrows(UnsupportedOperationException.class,
+                () -> scheduler.stateSnapshot().put(left, DagScheduler.NodeState.FAILED));
+
+        scheduler.succeed(left);
+        NodeId right = scheduler.claimReady(1).get(0);
+        scheduler.fail(right);
+
+        assertEquals(DagScheduler.NodeState.SUCCEEDED, scheduler.state(new NodeId(0)));
+        assertEquals(DagScheduler.NodeState.FAILED, scheduler.state(new NodeId(1)));
+        assertEquals(DagScheduler.NodeState.CANCELLED, scheduler.state(new NodeId(2)));
     }
 
     private static CraftPlanGraph forkJoinGraph() {
