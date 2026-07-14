@@ -98,6 +98,9 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.IntValue CRAFTING_RESOLVE_TIMEOUT_MS;
     public static ForgeConfigSpec.IntValue CRAFTING_MAX_ENSURE_CALLS;
     public static ForgeConfigSpec.IntValue CRAFTING_MAX_CONCURRENT_GRAPH_NODES;
+    public static ForgeConfigSpec.IntValue CRAFTING_GRAPH_DISPATCH_PER_TICK;
+    public static ForgeConfigSpec.IntValue CRAFTING_GRAPH_DISPATCH_PER_CRAFT;
+    public static ForgeConfigSpec.ConfigValue<List<? extends String>> CRAFTING_PARALLEL_DISABLED_MODS;
     public static ForgeConfigSpec.IntValue RECIPE_TREE_MAX_DEPTH;
     public static ForgeConfigSpec.IntValue RECIPE_TREE_MAX_NODES;
     public static ForgeConfigSpec.IntValue RECIPE_TREE_BATCH_DEBOUNCE_MS;
@@ -458,6 +461,21 @@ public final class RSIntegrationConfig {
                         "Only nodes with no material/machine/capture conflicts are dispatched.",
                         "Range: 1-16.")
                 .defineInRange("craftingMaxConcurrentGraphNodes", 1, 1, 16);
+        CRAFTING_GRAPH_DISPATCH_PER_TICK = s
+                .comment("Maximum number of new graph nodes one craft may dispatch in a single tick.",
+                        "Admission retries do not consume this budget. Range: 1-16.")
+                .defineInRange("craftingGraphDispatchPerTick", 2, 1, 16);
+        CRAFTING_GRAPH_DISPATCH_PER_CRAFT = s
+                .comment("Maximum total graph-node dispatches in one craft run.",
+                        "Prevents retry/callback bugs from dispatching an unbounded number of operations.",
+                        "Set above craftingMaxSteps for normal large plans. Range: 16-32768.")
+                .defineInRange("craftingGraphDispatchPerCraft", 8192, 16, 32768);
+        CRAFTING_PARALLEL_DISABLED_MODS = s
+                .comment("Mod/delegate type IDs that must always run as exclusive graph nodes.",
+                        "This denylist overrides a delegate's concurrency capability declaration.",
+                        "Example: [\"malum\", \"goety\"].")
+                .defineList("craftingParallelDisabledMods", List.of(),
+                        obj -> obj instanceof String str && ResourceLocation.tryParse(str + ":dummy") != null);
         RECIPE_TREE_MAX_DEPTH = s
                 .comment("Maximum depth for the client-side recipe tree view.",
                         "Limits how many nested layers the tree renders.",

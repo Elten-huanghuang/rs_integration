@@ -88,45 +88,62 @@ public final class ConcurrentNodeExecutor {
     private final CompletionHandler completions;
     private final ExclusivityOracle exclusivity;
     private final int maxConcurrentNodes;
-    private final Map<NodeId, Worker> running = new LinkedHashMap<>();
+    private final int maxDispatchPerTick;
+    private final int maxDispatchPerCraft;
+    private int dispatchedThisCraft;
+    private final Map<NodeId, RunningWorker> running = new LinkedHashMap<>();
 
     /** Legacy constructor: every node is treated as concurrency-safe. */
     public ConcurrentNodeExecutor(DagScheduler scheduler, WorkerFactory workers,
                                   int maxConcurrentNodes) {
         this(scheduler, adapt(workers), maxConcurrentNodes, nodeId -> false,
-                (nodeId, worker) -> CompletionStatus.SUCCEEDED);
+                (nodeId, worker) -> CompletionStatus.SUCCEEDED,
+                maxConcurrentNodes, Integer.MAX_VALUE);
     }
 
     public ConcurrentNodeExecutor(DagScheduler scheduler, WorkerFactory workers,
                                   int maxConcurrentNodes, ExclusivityOracle exclusivity) {
         this(scheduler, adapt(workers), maxConcurrentNodes, exclusivity,
-                (nodeId, worker) -> CompletionStatus.SUCCEEDED);
+                (nodeId, worker) -> CompletionStatus.SUCCEEDED,
+                maxConcurrentNodes, Integer.MAX_VALUE);
     }
 
     public ConcurrentNodeExecutor(DagScheduler scheduler, AdmissionWorkerFactory workers,
                                   int maxConcurrentNodes, ExclusivityOracle exclusivity) {
         this(scheduler, workers, maxConcurrentNodes, exclusivity,
-                (nodeId, worker) -> CompletionStatus.SUCCEEDED);
+                (nodeId, worker) -> CompletionStatus.SUCCEEDED,
+                maxConcurrentNodes, Integer.MAX_VALUE);
     }
 
     public ConcurrentNodeExecutor(DagScheduler scheduler, AdmissionWorkerFactory workers,
                                   int maxConcurrentNodes, ExclusivityOracle exclusivity,
                                   CompletionHandler completions) {
+        this(scheduler, workers, maxConcurrentNodes, exclusivity, completions,
+                maxConcurrentNodes, Integer.MAX_VALUE);
+    }
+
+    public ConcurrentNodeExecutor(DagScheduler scheduler, AdmissionWorkerFactory workers,
+                                  int maxConcurrentNodes, ExclusivityOracle exclusivity,
+                                  CompletionHandler completions, int maxDispatchPerTick,
+                                  int maxDispatchPerCraft) {
         this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
         this.workers = Objects.requireNonNull(workers, "workers");
         this.completions = Objects.requireNonNull(completions, "completions");
         this.exclusivity = Objects.requireNonNull(exclusivity, "exclusivity");
-        if (maxConcurrentNodes < 1) {
-            throw new IllegalArgumentException("maxConcurrentNodes must be positive");
+        if (maxConcurrentNodes < 1 || maxDispatchPerTick < 1 || maxDispatchPerCraft < 1) {
+            throw new IllegalArgumentException("executor limits must be positive");
         }
         this.maxConcurrentNodes = maxConcurrentNodes;
+        this.maxDispatchPerTick = maxDispatchPerTick;
+        this.maxDispatchPerCraft = maxDispatchPerCraft;
     }
 
     public void tick() {
+        int tickBudget = maxDispatchPerTick;
         List<Result> observations = observeAll();
         boolean failed = observations.stream().anyMatch(result -> result.observation == Observation.FAILED);
         if (failed && !scheduler.isStopping()) {
-            for (Worker worker : running.values()) worker.stopDispatch();
+            for (RunningWorker runningWorker : running.values()) runningWorker.worker().stopDispatch();
         }
 
         for (Result result : observations) {
@@ -141,8 +158,13 @@ public final class ConcurrentNodeExecutor {
                     } catch (RuntimeException exception) {
                         completion = CompletionStatus.FAILED;
                     }
-                    if (completion == CompletionStatus.SUCCEEDED) {
+                    if (completion == CompletionStatus.SUCCEEDED
+                            && result.epoch == scheduler.epoch() && !scheduler.isStopping()) {
                         scheduler.succeed(result.nodeId);
+                    } else if (completion == CompletionStatus.SUCCEEDED && scheduler.isStopping()) {
+                        // Stale/in-flight completions may settle resources in the handler,
+                        // but cannot unlock dependents after the epoch advances.
+                        scheduler.cancelRunningDuringStop(result.nodeId);
                     } else {
                         result.worker.cleanupFailure();
                         if (!scheduler.isStopping()) scheduler.fail(result.nodeId);
@@ -161,12 +183,12 @@ public final class ConcurrentNodeExecutor {
             }
         }
 
-        if (!scheduler.isStopping()) dispatchAvailable();
+        if (!scheduler.isStopping()) dispatchAvailable(maxDispatchPerTick);
     }
 
     public void stopScheduling() {
         scheduler.stopScheduling();
-        for (Worker worker : running.values()) worker.stopDispatch();
+        for (RunningWorker runningWorker : running.values()) runningWorker.worker().stopDispatch();
     }
 
     public boolean isTerminal() {
@@ -187,23 +209,26 @@ public final class ConcurrentNodeExecutor {
 
     private List<Result> observeAll() {
         List<Result> results = new ArrayList<>(running.size());
-        for (Map.Entry<NodeId, Worker> entry : List.copyOf(running.entrySet())) {
+        for (Map.Entry<NodeId, RunningWorker> entry : List.copyOf(running.entrySet())) {
             Observation observation;
             try {
-                observation = Objects.requireNonNull(entry.getValue().observe(), "worker observation");
+                observation = Objects.requireNonNull(entry.getValue().worker().observe(), "worker observation");
             } catch (RuntimeException exception) {
                 observation = Observation.FAILED;
             }
-            results.add(new Result(entry.getKey(), entry.getValue(), observation));
+            results.add(new Result(entry.getKey(), entry.getValue().worker(),
+                    entry.getValue().epoch(), observation));
         }
         return results;
     }
 
-    private void dispatchAvailable() {
+    private void dispatchAvailable(int tickBudget) {
         // An exclusive node already running blocks all further dispatch.
         if (running.keySet().stream().anyMatch(exclusivity::isExclusive)) return;
 
-        int capacity = maxConcurrentNodes - running.size();
+        int remainingCraftBudget = maxDispatchPerCraft - dispatchedThisCraft;
+        int capacity = Math.min(maxConcurrentNodes - running.size(),
+                Math.min(tickBudget, remainingCraftBudget));
         if (capacity <= 0) return;
 
         for (NodeId nodeId : scheduler.peekReady(capacity)) {
@@ -221,9 +246,13 @@ public final class ConcurrentNodeExecutor {
                 start = StartResult.failed();
             }
             switch (start.status()) {
-                case STARTED -> running.put(nodeId, start.worker());
+                case STARTED -> {
+                    running.put(nodeId, new RunningWorker(start.worker(), scheduler.epoch()));
+                    dispatchedThisCraft++;
+                }
                 case RETRY -> scheduler.releaseClaim(nodeId);
                 case COMPLETED -> {
+                    dispatchedThisCraft++;
                     if (scheduler.state(nodeId) == DagScheduler.NodeState.RUNNING) {
                         scheduler.succeed(nodeId);
                     }
@@ -243,5 +272,6 @@ public final class ConcurrentNodeExecutor {
         }
     }
 
-    private record Result(NodeId nodeId, Worker worker, Observation observation) {}
+    private record RunningWorker(Worker worker, int epoch) {}
+    private record Result(NodeId nodeId, Worker worker, int epoch, Observation observation) {}
 }
