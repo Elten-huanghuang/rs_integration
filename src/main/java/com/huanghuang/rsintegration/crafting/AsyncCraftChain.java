@@ -638,6 +638,7 @@ public final class AsyncCraftChain {
             graphScheduler.succeed(nodeId);
             CraftNodeRuntime synthetic = new CraftNodeRuntime(nodeId,
                     step.recipeId().toString(), null, null, null);
+            synthetic.setChainContext(virtualInventory, online);
             nodeRuntimes.put(nodeId, synthetic);
             return null; // already succeeded
         }
@@ -656,6 +657,7 @@ public final class AsyncCraftChain {
 
         CraftNodeRuntime runtime = new CraftNodeRuntime(nodeId,
                 step.recipeId().toString(), delegate, ledger, null);
+        runtime.setChainContext(virtualInventory, online);
         nodeRuntimes.put(nodeId, runtime);
 
         Diagnostics.record(Diagnostics.Category.CHAIN_STATE,
@@ -2041,6 +2043,35 @@ public final class AsyncCraftChain {
         return machineCount;
     }
 
+    /**
+     * Settlement policy for {@link #terminate}. Captures the three orthogonal
+     * dimensions that distinguished the old {@code abort*} variants:
+     * whether to refund the ledger, whether to deliver captured outputs, and
+     * whether the player is treated as offline (no chat message).
+     */
+    private enum SettlementPolicy {
+        /** Normal failure/cancel: refund ledger, deliver captured outputs, notify online player. */
+        REFUND_AND_DELIVER(true, true, false),
+        /** Player already offline: refund ledger (via network/spawn), deliver captured, no chat message. */
+        SILENT_REFUND(true, true, true),
+        /**
+         * A physical machine consumed inputs but its output escaped. Refunding
+         * would duplicate the escaped result, so do NOT refund and discard the
+         * (unconfirmed) captured outputs. Earlier settled products are still owed.
+         */
+        NO_REFUND(false, false, false);
+
+        final boolean refundLedger;
+        final boolean deliverCaptured;
+        final boolean silent;
+
+        SettlementPolicy(boolean refundLedger, boolean deliverCaptured, boolean silent) {
+            this.refundLedger = refundLedger;
+            this.deliverCaptured = deliverCaptured;
+            this.silent = silent;
+        }
+    }
+
     /** Abort after a physical machine consumed inputs but its output escaped.
      * Refunding here would duplicate the escaped result. */
     private void abortWithoutRefund(String reason) {
@@ -2048,35 +2079,7 @@ public final class AsyncCraftChain {
     }
 
     private void abortWithoutRefund(String reason, Component userReason) {
-        if (state == State.ABORTED || state == State.COMPLETED) return;
-        ServerPlayer online = resolvePlayer();
-        state = State.ABORTED;
-        abortReason = reason;
-        if (currentDelegate != null) {
-            try {
-                currentDelegate.onBatchFailed(online, reason);
-                if (currentDelegate instanceof ParallelCraftGroup group) {
-                    for (ItemStack result : group.drainSettledResults()) addToVirtualInventory(result);
-                    for (ItemStack material : group.drainQueuedMaterialsForRecovery()) {
-                        addToVirtualInventory(material);
-                    }
-                    snapshotCommittedVirtual();
-                }
-            } catch (Exception e) {
-                RSIntegrationMod.LOGGER.error(ctx.format("Error in no-refund cleanup"), e);
-            }
-            currentDelegate = null;
-        }
-        disarmOutputCapture();
-        cleanupGraphNodes(online, reason);
-        // Recover only earlier settled products. The current step's inputs were
-        // consumed with its output escaped/lost — deliberately not refunded here
-        // to avoid duplicating an output that may already be in the player's
-        // inventory. committedVirtual excludes that in-flight step.
-        recoverCommittedVirtual(online);
-        ledger.close();
-        if (online != null) online.sendSystemMessage(Component.translatable("rsi.async.chain_aborted", userReason));
-        fireOnDone();
+        terminate(reason, userReason, SettlementPolicy.NO_REFUND);
     }
 
     public void abort(String reason) {
@@ -2084,13 +2087,34 @@ public final class AsyncCraftChain {
     }
 
     private void abort(String reason, Component userReason) {
+        terminate(reason, userReason, SettlementPolicy.REFUND_AND_DELIVER);
+    }
+
+    private void abortSilently(String reason) {
+        terminate(reason, Component.literal(reason), SettlementPolicy.SILENT_REFUND);
+    }
+
+    /**
+     * Unified terminal-abort skeleton. All three former {@code abort*} variants
+     * funnel through here; {@code policy} selects the refund/delivery/silence
+     * behaviour. Idempotent: a chain already in a terminal state is a no-op.
+     *
+     * <p>Fixed order (identical to the pre-merge variants): delegate cleanup →
+     * captured outputs → graph-node cleanup → ledger refund/rollback → recover
+     * earlier settled products → close ledger → notify → fire terminal listeners.
+     * {@code committedVirtual} is disjoint from both the ledger (this step's
+     * reserved inputs) and the captured outputs (this step's world drop), so
+     * recovery never duplicates; in-flight products from rolled-back
+     * reservations are discarded.
+     */
+    private void terminate(String reason, Component userReason, SettlementPolicy policy) {
         if (state == State.ABORTED || state == State.COMPLETED) return;
 
-        ServerPlayer online = resolvePlayer();
-        RSIntegrationMod.LOGGER.warn(ctx.format("Aborting chain (state={}) for {}: {}"),
-                state, online != null ? online.getName().getString() : playerId, reason);
+        ServerPlayer online = policy.silent ? null : resolvePlayer();
+        RSIntegrationMod.LOGGER.warn(ctx.format("Aborting chain (state={}, policy={}) for {}: {}"),
+                state, policy, online != null ? online.getName().getString() : playerId, reason);
         Diagnostics.record(Diagnostics.Category.CHAIN_STATE,
-                "→ABORTED reason=" + reason + " atStep=" + currentStepIdx + "/" + steps.size());
+                "→ABORTED policy=" + policy + " reason=" + reason + " atStep=" + currentStepIdx + "/" + steps.size());
         state = State.ABORTED;
         abortReason = reason;
 
@@ -2110,25 +2134,32 @@ public final class AsyncCraftChain {
             }
             currentDelegate = null;
         }
-        recoverCapturedOutputs(online);
+
+        // Captured outputs: deliver them, or discard when a refund would
+        // duplicate an output that already escaped to the player.
+        if (policy.deliverCaptured) {
+            recoverCapturedOutputs(online);
+        } else {
+            disarmOutputCapture();
+        }
 
         // Graph path: stop executor and clean up all running node runtimes
         cleanupGraphNodes(online, reason);
 
-        refundOrRollbackLedger(online);
+        if (policy.refundLedger) {
+            refundOrRollbackLedger(online);
+        }
 
         // Deliver intermediate products whose backing inputs were already
-        // irreversibly consumed by earlier settled steps. committedVirtual is
-        // disjoint from both the ledger (this step's reserved inputs) and the
-        // captured outputs (this step's world drop), so this never duplicates.
-        // In-flight products from the rolled-back reservations are discarded.
+        // irreversibly consumed by earlier settled steps.
         recoverCommittedVirtual(online);
 
-        // Only send message if player is still online
-        if (online != null) {
+        ledger.close();
+
+        // Only notify when the player is still online (never under a silent policy).
+        if (!policy.silent && online != null) {
             online.sendSystemMessage(Component.translatable("rsi.async.chain_aborted", userReason));
         }
-        ledger.close();
         fireOnDone();
     }
 
@@ -2205,45 +2236,6 @@ public final class AsyncCraftChain {
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.error(ctx.format("Failed to refund or roll back ledger"), e);
         }
-    }
-
-    private void abortSilently(String reason) {
-        if (state == State.ABORTED || state == State.COMPLETED) return;
-
-        RSIntegrationMod.LOGGER.warn(ctx.format("Aborting silently (state={}) for {}: {}"),
-                state, playerId, reason);
-        Diagnostics.record(Diagnostics.Category.CHAIN_STATE,
-                "→ABORTED_SILENT reason=" + reason + " atStep=" + currentStepIdx + "/" + steps.size());
-        state = State.ABORTED;
-        abortReason = reason;
-
-        if (currentDelegate != null) {
-            try {
-                currentDelegate.onBatchFailed(null, reason);
-                if (currentDelegate instanceof ParallelCraftGroup group) {
-                    for (ItemStack result : group.drainSettledResults()) addToVirtualInventory(result);
-                    for (ItemStack material : group.drainQueuedMaterialsForRecovery()) {
-                        addToVirtualInventory(material);
-                    }
-                    snapshotCommittedVirtual();
-                }
-            } catch (Exception e) {
-                RSIntegrationMod.LOGGER.error(ctx.format("Error in silent delegate cleanup"), e);
-            }
-            currentDelegate = null;
-        }
-        recoverCapturedOutputs(null);
-
-        cleanupGraphNodes(null, reason);
-
-        refundOrRollbackLedger(null);
-
-        // Deliver products owed from earlier settled steps (player offline →
-        // network insert / drop at spawn). Disjoint from the refunded ledger.
-        recoverCommittedVirtual(null);
-
-        ledger.close();
-        fireOnDone();
     }
 
     // ── delegate factory ─────────────────────────────────────────
