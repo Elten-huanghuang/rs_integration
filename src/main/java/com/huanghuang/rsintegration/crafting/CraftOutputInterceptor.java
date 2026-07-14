@@ -66,6 +66,13 @@ public final class CraftOutputInterceptor {
             if (dimZones.isEmpty()) ZONES.remove(dimension, dimZones);
             return zone == null ? List.of() : new ArrayList<>(zone.buffer);
         }
+
+        /** True once an output entity has been claimed by this craft. */
+        public boolean hasCaptured() {
+            Map<UUID, ActiveZone> dimZones = ZONES.get(dimension);
+            ActiveZone zone = dimZones == null ? null : dimZones.get(id);
+            return zone != null && !zone.buffer.isEmpty();
+        }
     }
 
     private static final Map<ResourceKey<Level>, Map<UUID, ActiveZone>> ZONES =

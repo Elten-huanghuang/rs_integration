@@ -187,6 +187,8 @@ public final class CrockPotBatchDelegate extends com.huanghuang.rsintegration.cr
     public boolean tryStartWithMaterials(ServerPlayer player, List<ItemStack> materials,
                                          ExtractionLedger sharedLedger) {
         this.player = player;
+        this.sharedLedger = sharedLedger;
+        this.usingSharedLedger = true;
         this.craftDone = false;
 
         myLevel.getChunk(myPos);
@@ -206,6 +208,10 @@ public final class CrockPotBatchDelegate extends com.huanghuang.rsintegration.cr
         if (itemHandler == null || itemHandler.getSlots() < expectedSlots) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-CrockPot] Item handler too small: {} < {}",
                     itemHandler != null ? itemHandler.getSlots() : 0, expectedSlots);
+            return false;
+        }
+        if (!itemHandler.getStackInSlot(potLevel + 1).isEmpty()) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Batch-CrockPot] Output slot occupied at {}", myPos);
             return false;
         }
 
@@ -241,12 +247,12 @@ public final class CrockPotBatchDelegate extends com.huanghuang.rsintegration.cr
 
         // Handle fuel
         this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
-        ItemStack fuelSlot = itemHandler.getStackInSlot(4);
+        ItemStack fuelSlot = itemHandler.getStackInSlot(potLevel);
         if (fuelSlot.isEmpty() || !isFuel(fuelSlot)) {
             if (network != null) {
                 ItemStack fuel = extractFuel(network, player);
                 if (!fuel.isEmpty()) {
-                    ItemStack fuelRemainder = itemHandler.insertItem(4, fuel, false);
+                    ItemStack fuelRemainder = itemHandler.insertItem(potLevel, fuel, false);
                     if (!fuelRemainder.isEmpty() && network != null) {
                         network.insertItem(fuelRemainder, fuelRemainder.getCount(), Action.PERFORM);
                     }
@@ -256,11 +262,11 @@ public final class CrockPotBatchDelegate extends com.huanghuang.rsintegration.cr
         }
 
         if (!isBurning(be)) {
-            ItemStack fuelNow = itemHandler.getStackInSlot(4);
+            ItemStack fuelNow = itemHandler.getStackInSlot(potLevel);
             if (!isFuel(fuelNow) && network != null) {
                 ItemStack fuel = extractFuel(network, player);
                 if (!fuel.isEmpty()) {
-                    ItemStack fuelRemainder = itemHandler.insertItem(4, fuel, false);
+                    ItemStack fuelRemainder = itemHandler.insertItem(potLevel, fuel, false);
                     if (!fuelRemainder.isEmpty() && network != null) {
                         network.insertItem(fuelRemainder, fuelRemainder.getCount(), Action.PERFORM);
                     }
@@ -289,8 +295,13 @@ public final class CrockPotBatchDelegate extends com.huanghuang.rsintegration.cr
         IItemHandler itemHandler = getItemHandler(be);
         if (itemHandler == null) return false;
 
-        ItemStack output = itemHandler.getStackInSlot(5);
-        return !output.isEmpty();
+        int outputSlot = potLevel + 1;
+        ItemStack output = itemHandler.getStackInSlot(outputSlot);
+        boolean inputsEmpty = true;
+        for (int slot = 0; slot < potLevel; slot++) {
+            inputsEmpty &= itemHandler.getStackInSlot(slot).isEmpty();
+        }
+        return !output.isEmpty() || inputsEmpty;
     }
 
     @Override
@@ -301,7 +312,7 @@ public final class CrockPotBatchDelegate extends com.huanghuang.rsintegration.cr
         IItemHandler itemHandler = getItemHandler(be);
         if (itemHandler == null) return ItemStack.EMPTY;
 
-        ItemStack result = itemHandler.extractItem(5, 64, false);
+        ItemStack result = itemHandler.extractItem(potLevel + 1, 64, false);
         be.setChanged();
         craftDone = true;
         return result;
@@ -324,6 +335,14 @@ public final class CrockPotBatchDelegate extends com.huanghuang.rsintegration.cr
 
     @Override
     public BlockPos getMachinePos() { return myPos; }
+
+    @Nullable
+    @Override
+    public ExpectedProduction getExpectedProduction() {
+        ItemStack result = recipe == null || myLevel == null ? ItemStack.EMPTY
+                : ModRecipeHandlers.tryGetResultItem(recipe, myLevel.registryAccess());
+        return result.isEmpty() ? null : new ExpectedProduction(result, result.getCount());
+    }
 
     /** Build a message listing categories whose max=0 block all available items. */
     private String buildBlockedCategoriesMessage() {
@@ -657,7 +676,7 @@ public final class CrockPotBatchDelegate extends com.huanghuang.rsintegration.cr
             ItemStack s = handler.extractItem(slot, 64, false);
             if (!s.isEmpty() && !usingSharedLedger) refundToRSNetwork(s);
         }
-        ItemStack out = handler.extractItem(5, 64, false);
+        ItemStack out = handler.extractItem(potLevel + 1, 64, false);
         if (!out.isEmpty() && !usingSharedLedger) refundToRSNetwork(out);
         be.setChanged();
     }

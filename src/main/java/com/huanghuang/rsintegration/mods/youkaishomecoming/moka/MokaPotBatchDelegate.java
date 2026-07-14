@@ -130,7 +130,8 @@ public final class MokaPotBatchDelegate extends AbstractBatchDelegate {
     public boolean tryStartWithMaterials(ServerPlayer player, List<ItemStack> materials,
                                          ExtractionLedger sharedLedger) {
         this.player = player;
-        // usingSharedLedger already set by caller — don't overwrite
+        this.sharedLedger = sharedLedger;
+        this.usingSharedLedger = true;
         this.craftDone = false;
 
         forceChunkLoad(true);
@@ -164,6 +165,11 @@ public final class MokaPotBatchDelegate extends AbstractBatchDelegate {
             RSIntegrationMod.LOGGER.warn("[RSI-Moka] Inventory not found or too small: handler={} slots={}",
                     handler != null ? handler.getClass().getName() : "null",
                     handler != null ? handler.getSlots() : -1);
+            forceChunkLoad(false);
+            return false;
+        }
+        if (!handler.getStackInSlot(OUTPUT_SLOT).isEmpty()) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Moka] Output slot occupied at {}", myPos);
             forceChunkLoad(false);
             return false;
         }
@@ -216,7 +222,11 @@ public final class MokaPotBatchDelegate extends AbstractBatchDelegate {
         IItemHandler handler = getInventory(be);
         if (handler == null) return false;
 
-        return !handler.getStackInSlot(OUTPUT_SLOT).isEmpty();
+        boolean inputsEmpty = true;
+        for (int slot = 0; slot < INPUT_SLOTS; slot++) {
+            inputsEmpty &= handler.getStackInSlot(slot).isEmpty();
+        }
+        return !handler.getStackInSlot(OUTPUT_SLOT).isEmpty() || inputsEmpty;
     }
 
     @Override
@@ -251,6 +261,15 @@ public final class MokaPotBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public BlockPos getMachinePos() { return myPos; }
+
+    @Nullable
+    @Override
+    public ExpectedProduction getExpectedProduction() {
+        ItemStack result = recipe == null || myLevel == null ? ItemStack.EMPTY
+                : com.huanghuang.rsintegration.recipe.ModRecipeHandlers.tryGetResultItem(
+                        recipe, myLevel.registryAccess());
+        return result.isEmpty() ? null : new ExpectedProduction(result, result.getCount());
+    }
 
     // -- plan helpers --
 

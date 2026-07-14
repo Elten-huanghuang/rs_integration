@@ -54,6 +54,14 @@ public final class FermentationTankBatchDelegate extends AbstractBatchDelegate {
 
     private int insertedCount;
     private ItemStack insertedSample = ItemStack.EMPTY;
+    private final List<ItemStack> placedInputs = new ArrayList<>();
+    @Nullable
+    private ExpectedProduction expectedProduction;
+    private boolean sawSealedCraft;
+    private boolean progressStarted;
+    private int maxObservedProgress;
+    private boolean completionLatched;
+    private boolean previousLidOpen;
 
     private static volatile Field itemsField;
     private static volatile Method notifyTileMethod;
@@ -92,6 +100,13 @@ public final class FermentationTankBatchDelegate extends AbstractBatchDelegate {
         }
         this.recipe = found;
         this.craftDone = false;
+        this.expectedProduction = null;
+        this.sawSealedCraft = false;
+        this.progressStarted = false;
+        this.maxObservedProgress = 0;
+        this.completionLatched = false;
+        this.previousLidOpen = true;
+        this.placedInputs.clear();
         probeReflection();
         this.requiredWater = readRecipeWater(found);
         this.recipeTime = readRecipeTime(found);
@@ -151,7 +166,7 @@ public final class FermentationTankBatchDelegate extends AbstractBatchDelegate {
     public boolean tryStartWithMaterials(ServerPlayer player, List<ItemStack> materials,
                                          ExtractionLedger sharedLedger) {
         this.player = player;
-        // usingSharedLedger already set by caller — don't overwrite
+        this.sharedLedger = sharedLedger;
         this.craftDone = false;
 
         forceChunkLoad(true);
@@ -182,38 +197,24 @@ public final class FermentationTankBatchDelegate extends AbstractBatchDelegate {
             setLidOpen(true);
         }
 
-        // ── Auto-clean: refund any leftover items / non-water fluid ──
-        // If the player manually put stuff in or a previous craft left debris,
-        // clear it so the new recipe can start without slot conflicts.
-        boolean hasLeftoverItems = false;
+        // The chain owns only an empty fermentation inventory. Existing contents
+        // cannot be distinguished from this craft's later physical results.
         for (int i = 0; i < itemHandler.getContainerSize(); i++) {
-            if (!itemHandler.getItem(i).isEmpty()) { hasLeftoverItems = true; break; }
+            if (!itemHandler.getItem(i).isEmpty()) {
+                player.sendSystemMessage(Component.translatable("rsi.generic.error.machine_valid_failed", recipe.getId()));
+                forceChunkLoad(false);
+                return false;
+            }
         }
         IFluidHandler fluidHandler = getFluidHandler(be);
-        boolean hasNonWaterFluid = false;
         if (fluidHandler != null) {
             FluidStack tf = fluidHandler.getFluidInTank(0);
             if (!tf.isEmpty() && tf.getFluid() != Fluids.WATER
                     && tf.getFluid() != net.minecraft.world.level.material.Fluids.EMPTY) {
-                hasNonWaterFluid = true;
-            }
-        }
-        if (hasLeftoverItems || hasNonWaterFluid) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Ferment] Auto-cleaning machine before craft: items={} nonWaterFluid={}",
-                    hasLeftoverItems, hasNonWaterFluid);
-            // Temporarily allow refund; restore after cleaning
-            boolean saved = this.usingSharedLedger;
-            this.usingSharedLedger = false;
-            clearAndRefund();
-            this.usingSharedLedger = saved;
-            // Re-fetch handler after clearAndRefund (BE may have changed)
-            itemHandler = getItemHandler(be);
-            if (itemHandler == null) {
-                player.sendSystemMessage(Component.translatable("rsi.generic.error.machine_not_found"));
+                player.sendSystemMessage(Component.translatable("rsi.generic.error.machine_valid_failed", recipe.getId()));
                 forceChunkLoad(false);
                 return false;
             }
-            fluidHandler = getFluidHandler(be);
         }
 
         // ── Ensure water is filled ──
@@ -236,6 +237,7 @@ public final class FermentationTankBatchDelegate extends AbstractBatchDelegate {
 
         insertedCount = 0;
         insertedSample = ItemStack.EMPTY;
+        placedInputs.clear();
         for (ItemStack mat : materials) {
             if (mat.isEmpty()) continue;
             ItemStack single = mat.copyWithCount(1);
@@ -256,80 +258,133 @@ public final class FermentationTankBatchDelegate extends AbstractBatchDelegate {
                 return false;
             }
             insertedCount++;
+            placedInputs.add(single.copy());
             if (insertedSample.isEmpty()) insertedSample = single.copy();
         }
+        FermentationRecipeOutputs.Production production = FermentationRecipeOutputs.fromRecipe(
+                recipe, placedInputs.size());
+        expectedProduction = !production.secondary().isEmpty() || production.primary().isEmpty()
+                ? null
+                : new ExpectedProduction(production.primary(), production.primary().getCount());
+        if (expectedProduction == null) {
+            for (int i = 0; i < snapshot.length; i++) itemHandler.setItem(i, snapshot[i]);
+            notifyTile(be);
+            player.sendSystemMessage(Component.translatable(
+                    "rsi.youkaishomecoming.ferment_unsafe_output", recipe.getId()));
+            forceChunkLoad(false);
+            return false;
+        }
         setLidOpen(false); // close lid to start fermentation
+        previousLidOpen = isLidOpen();
+        sawSealedCraft = !previousLidOpen;
+        progressStarted = false;
+        maxObservedProgress = 0;
+        completionLatched = false;
+        markCraftStarted();
         notifyTile(be);
+        RSIntegrationMod.LOGGER.debug("[RSI-Ferment] Started: recipe={} lidOpen={} inputs={} expected={}x{} time={}",
+                recipe.getId(), previousLidOpen, describeStacks(placedInputs),
+                expectedProduction.item().getHoverName().getString(), expectedProduction.count(), recipeTime);
         return true;
     }
 
     @Override
     protected boolean isMachineCraftFinished(ServerLevel level, BlockEntity be) {
-        if (!isFermentationBE(be)) return false;
+        return observeMachineCraft(level, be).phase() == CraftPhase.DONE;
+    }
 
-        // Check progress using the recipe field or BE field
+    @Override
+    protected CraftObservation observeMachineCraft(ServerLevel level, BlockEntity be) {
+        if (completionLatched) return doneObservation();
+        if (!isFermentationBE(be)) return failObservation("wrong fermentation block entity");
+        SimpleContainer handler = getItemHandler(be);
+        if (handler == null) return failObservation("fermentation inventory unavailable");
+
+        boolean lidOpen = isLidOpen();
+        if (!lidOpen) sawSealedCraft = true;
+
         int total = recipeTime > 0 ? recipeTime
                 : Reflect.<Integer>getField(be, "totalTime").orElse(-1);
         int progress = Reflect.<Integer>getField(be, "recipeProgress").orElse(-1);
-        if (total > 0 && progress >= total) return true;
-
-        // Fallback: check if result item is present
-        SimpleContainer handler = getItemHandler(be);
-        if (handler == null) return false;
-
-        ItemStack expected = getExpectedResult();
-        if (!expected.isEmpty()) {
-            for (int i = 0; i < handler.getContainerSize(); i++) {
-                ItemStack s = handler.getItem(i);
-                if (!s.isEmpty() && ItemStack.isSameItem(s, expected)) return true;
-            }
+        if (progress > 0) {
+            progressStarted = true;
+            maxObservedProgress = Math.max(maxObservedProgress, progress);
         }
-        return false;
+
+        boolean inputsRemain = containsPlacedInputs(handler, placedInputs);
+        boolean completeOutputPresent = hasCompleteExpectedOutput(handler)
+                || hasExpectedOutputFluid(be);
+        boolean reachedTotal = total > 0 && progress >= total;
+        boolean resetAfterFullRun = progressStarted && total > 0
+                && maxObservedProgress >= Math.max(1, total - 1)
+                && progress == 0 && !inputsRemain;
+        boolean transformedWhileRunning = progressStarted && !inputsRemain
+                && completeOutputPresent;
+        boolean openedWithCompleteTransform = sawSealedCraft && !previousLidOpen
+                && lidOpen && !inputsRemain && completeOutputPresent;
+
+        if (shouldLatchCompletion(reachedTotal, resetAfterFullRun,
+                transformedWhileRunning, openedWithCompleteTransform)) {
+            completionLatched = true;
+            String reason = reachedTotal ? "progress-total"
+                    : resetAfterFullRun ? "progress-reset"
+                    : transformedWhileRunning ? "running-transform"
+                    : "sealed-opened-transform";
+            RSIntegrationMod.LOGGER.debug(
+                    "[RSI-Ferment] Completion latched: recipe={} reason={} lidOpen={} progress={}/{} max={} slots={}",
+                    recipe.getId(), reason, lidOpen, progress, total, maxObservedProgress,
+                    describeContainer(handler));
+            previousLidOpen = lidOpen;
+            return doneObservation();
+        }
+
+        previousLidOpen = lidOpen;
+        return workingObservation();
     }
 
     @Override
     public ItemStack collectResult(ServerPlayer player) {
-        BlockEntity be = myLevel.getBlockEntity(myPos);
-        if (be == null) return ItemStack.EMPTY;
+        List<ItemStack> all = collectPhysicalResults();
+        if (all.isEmpty()) return ItemStack.EMPTY;
+        for (int i = 1; i < all.size(); i++) refund(all.get(i));
+        return all.get(0);
+    }
 
-        ItemStack collected = ItemStack.EMPTY;
+    @Override
+    public List<ItemStack> collectAllResults(ServerPlayer player) {
+        return collectPhysicalResults();
+    }
 
-        // ── Collect fluid output (e.g. mead, sake) ──
-        ItemStack fluidResult = collectFluidOutput(be);
-        if (!fluidResult.isEmpty()) {
-            collected = fluidResult;
-            notifyTile(be);
+    @Override
+    public boolean collectsPhysicalSecondaryOutputs() {
+        return true;
+    }
+
+    private List<ItemStack> collectPhysicalResults() {
+        if (!completionLatched) {
+            RSIntegrationMod.LOGGER.error("[RSI-Ferment] Refusing to collect before completion: recipe={}",
+                    recipe != null ? recipe.getId() : "unknown");
+            return List.of();
         }
+        BlockEntity be = myLevel.getBlockEntity(myPos);
+        if (be == null) return List.of();
+        List<ItemStack> collected = new ArrayList<>();
 
-        // ── Collect item output from handler slots ──
+        ItemStack fluidResult = collectFluidOutput(be);
+        if (!fluidResult.isEmpty()) collected.add(fluidResult);
+
         SimpleContainer handler = getItemHandler(be);
         if (handler != null) {
             for (int i = 0; i < handler.getContainerSize(); i++) {
-                ItemStack s = handler.getItem(i);
-                if (s.isEmpty()) continue;
-                // collectResult can only return ONE stack. Only remove a slot's
-                // items when we can actually deliver them: as the primary (first
-                // non-empty) or merged with an already-collected same-type stack.
-                // A DIFFERENT item type is left in the machine (not removed) so it
-                // is never physically destroyed — the player can retrieve it.
-                if (collected.isEmpty()) {
-                    ItemStack extracted = handler.removeItem(i, s.getCount());
-                    if (!extracted.isEmpty()) collected = extracted;
-                } else if (ItemStack.isSameItemSameTags(collected, s)) {
-                    ItemStack extracted = handler.removeItem(i, s.getCount());
-                    if (!extracted.isEmpty()) collected.grow(extracted.getCount());
-                }
-                // else: leave the differing stack in the slot (do not remove).
+                ItemStack stack = handler.getItem(i);
+                if (stack.isEmpty()) continue;
+                ItemStack extracted = handler.removeItem(i, stack.getCount());
+                if (!extracted.isEmpty()) collected.add(extracted);
             }
-            notifyTile(be);
         }
-
+        notifyTile(be);
         craftDone = true;
-        if (collected.isEmpty()) {
-            ItemStack expected = getExpectedResult();
-            if (!expected.isEmpty()) return expected.copy();
-        }
-        return collected;
+        return List.copyOf(collected);
     }
 
     /**
@@ -363,18 +418,24 @@ public final class FermentationTankBatchDelegate extends AbstractBatchDelegate {
 
             int perBottle = holderAmountMethod != null
                     ? (int) holderAmountMethod.invoke(typeHolder) : 250;
+            if (perBottle <= 0) return ItemStack.EMPTY;
             int totalAmount = tankFluid.getAmount();
             int bottles = totalAmount / perBottle;
             if (bottles <= 0) return ItemStack.EMPTY;
 
+            ItemStack result = (ItemStack) holderAsStackMethod.invoke(typeHolder, bottles);
+            if (result == null || result.isEmpty()) return ItemStack.EMPTY;
+
             int drainAmount = bottles * perBottle;
+            FluidStack simulated = fh.drain(new FluidStack(tankFluid.getFluid(), drainAmount),
+                    IFluidHandler.FluidAction.SIMULATE);
+            if (simulated.isEmpty() || simulated.getAmount() != drainAmount
+                    || simulated.getFluid() != tankFluid.getFluid()) return ItemStack.EMPTY;
             FluidStack drained = fh.drain(new FluidStack(tankFluid.getFluid(), drainAmount),
                     IFluidHandler.FluidAction.EXECUTE);
-            if (drained.isEmpty() || drained.getAmount() < perBottle) return ItemStack.EMPTY;
+            if (drained.isEmpty() || drained.getAmount() != drainAmount) return ItemStack.EMPTY;
 
             be.setChanged();
-            ItemStack result = (ItemStack) holderAsStackMethod.invoke(typeHolder,
-                    drained.getAmount() / perBottle);
             RSIntegrationMod.LOGGER.debug("[RSI-Ferment] Collected fluid output: {}mb → {}",
                     drained.getAmount(), result.getHoverName().getString());
             return result;
@@ -400,15 +461,28 @@ public final class FermentationTankBatchDelegate extends AbstractBatchDelegate {
 
     private void resetFermentState() {
         craftDone = false;
-        network = null;
         insertedCount = 0;
         insertedSample = ItemStack.EMPTY;
+        placedInputs.clear();
+        expectedProduction = null;
+        sawSealedCraft = false;
+        progressStarted = false;
+        maxObservedProgress = 0;
+        completionLatched = false;
+        previousLidOpen = true;
         requiredWater = 0;
         recipeTime = 0;
+        resetState();
     }
 
     @Override
     public BlockPos getMachinePos() { return myPos; }
+
+    @Nullable
+    @Override
+    public ExpectedProduction getExpectedProduction() {
+        return expectedProduction;
+    }
 
     // -- plan helpers --
 
@@ -454,25 +528,94 @@ public final class FermentationTankBatchDelegate extends AbstractBatchDelegate {
         return List.of();
     }
 
-    @SuppressWarnings("unchecked")
-    private ItemStack getExpectedResult() {
+    private boolean hasRecipeOutputFluid() {
+        if (recipeOutputFluidField == null || recipe == null) return false;
         try {
-            Field f = findFieldInHierarchy(recipe.getClass(), "results");
-            if (f != null) {
-                f.setAccessible(true);
-                Object val = f.get(recipe);
-                if (val instanceof List<?> list && !list.isEmpty()) {
-                    if (list.get(0) instanceof ItemStack s && !s.isEmpty())
-                        return s.copy();
+            Object value = recipeOutputFluidField.get(recipe);
+            return value instanceof FluidStack fluid && !fluid.isEmpty();
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    static boolean shouldLatchCompletion(boolean reachedTotal, boolean resetAfterFullRun,
+                                         boolean transformedWhileRunning,
+                                         boolean openedWithCompleteTransform) {
+        return reachedTotal || resetAfterFullRun || transformedWhileRunning
+                || openedWithCompleteTransform;
+    }
+
+    static boolean hasCompleteExpectedOutput(SimpleContainer handler,
+                                             ExpectedProduction expectedProduction) {
+        if (handler == null || expectedProduction == null) return false;
+        int count = 0;
+        for (int i = 0; i < handler.getContainerSize(); i++) {
+            ItemStack stack = handler.getItem(i);
+            if (!stack.isEmpty() && ItemStack.isSameItem(stack, expectedProduction.item())) {
+                count += stack.getCount();
+                if (count >= expectedProduction.count()) return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean hasCompleteExpectedOutput(SimpleContainer handler) {
+        return hasCompleteExpectedOutput(handler, expectedProduction);
+    }
+
+    private static String describeStacks(List<ItemStack> stacks) {
+        List<String> parts = new ArrayList<>();
+        for (ItemStack stack : stacks) {
+            if (stack != null && !stack.isEmpty()) {
+                parts.add(stack.getHoverName().getString() + "x" + stack.getCount());
+            }
+        }
+        return parts.toString();
+    }
+
+    private static String describeContainer(SimpleContainer handler) {
+        List<ItemStack> stacks = new ArrayList<>();
+        for (int i = 0; i < handler.getContainerSize(); i++) {
+            ItemStack stack = handler.getItem(i);
+            if (!stack.isEmpty()) stacks.add(stack.copy());
+        }
+        return describeStacks(stacks);
+    }
+
+    private boolean hasExpectedOutputFluid(BlockEntity be) {
+        if (!hasRecipeOutputFluid()) return false;
+        IFluidHandler handler = getFluidHandler(be);
+        if (handler == null) return false;
+        FluidStack actual = handler.getFluidInTank(0);
+        try {
+            FluidStack expected = (FluidStack) recipeOutputFluidField.get(recipe);
+            return expected != null && !expected.isEmpty() && !actual.isEmpty()
+                    && actual.getFluid() == expected.getFluid();
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    static boolean containsPlacedInputs(SimpleContainer handler, List<ItemStack> placedInputs) {
+        if (handler == null || placedInputs == null || placedInputs.isEmpty()) return false;
+        List<ItemStack> remaining = new ArrayList<>();
+        for (int i = 0; i < handler.getContainerSize(); i++) {
+            ItemStack stack = handler.getItem(i);
+            if (!stack.isEmpty()) remaining.add(stack.copy());
+        }
+        for (ItemStack placed : placedInputs) {
+            boolean matched = false;
+            for (int i = 0; i < remaining.size(); i++) {
+                ItemStack current = remaining.get(i);
+                if (ItemStack.isSameItemSameTags(placed, current)) {
+                    remaining.remove(i);
+                    matched = true;
+                    break;
                 }
             }
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Ferment] Expected result reflection failed", e);
+            if (!matched) return false;
         }
-        // For fluid-output recipes, create bottled result from outputFluid
-        ItemStack fluidResult = buildFluidOutputItem();
-        if (!fluidResult.isEmpty()) return fluidResult;
-        return ItemStack.EMPTY;
+        return true;
     }
 
     /** If the recipe has an outputFluid field, convert it to the bottled item form. */

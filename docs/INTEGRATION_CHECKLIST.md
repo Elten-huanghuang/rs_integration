@@ -27,7 +27,8 @@ src/main/java/com/huanghuang/rsintegration/
 │   ├── batch/              #   IBatchDelegate 接口 + 链式调度
 │   ├── plan/               #   合成计划生成
 │   ├── loadbalancer/       #   负载均衡（ParallelCraftGroup + LoadBalancer）
-│   └── ExtractionLedger    #   事务账本（AutoCloseable）
+│   ├── ExtractionLedger    #   事务账本（AutoCloseable）
+│   └── CraftOutputInterceptor        # 世界掉落产物捕获（防磁铁/拾取抢走）
 ├── mixin/                  # Mixin 注入
 │   ├── minecraft/          #   原版
 │   ├── refinedstorage/     #   RS
@@ -110,6 +111,7 @@ public final class MalumRecipeHandler extends AbstractRecipeHandler {
 | `tryStartWithMaterials(player, materials, sharedLedger)` | 链式路径：材料已预扣，直接填机器 |
 | `isMachineCraftFinished(level, be)` | tick 轮询：合成是否完成（`level` + `be` 已由模板保证非空且区块已加载） |
 | `collectResult(player)` | 提取产物，返回 `ItemStack` |
+| `getExpectedOutput()` / `getOutputCaptureRegion()` | 世界掉落型机器声明预期产物及生成范围，供 `CraftOutputInterceptor` 抢在磁铁前捕获 |
 | `clearMachineState(be, player)` | 清退机器内残留材料 |
 | `onBatchFinished(player)` | 批次结束清理（覆写时须调用 `resetState()`） |
 | `resetState()` | 重置 ledger / network / sharedLedger / `usingSharedLedger` / `seenWarnStates`（基类提供，`onBatchFinished` 和 `clearMachineState` 末尾必须调用） |
@@ -131,6 +133,15 @@ public final class MalumRecipeHandler extends AbstractRecipeHandler {
 | **世界交互（即时型）** | 手持物品右键即完成，无进度 | `false` | Runic Workbench |
 
 即时型必须在 `MachineInteractType.fromBlockKey()` 中添加关键词，否则会错误尝试打开 GUI。
+
+### 3.6 物理产物收取
+
+- 世界 `ItemEntity` 产物由 Delegate 通过 `getExpectedOutput()` 和 `getOutputCaptureRegion()` 声明，交给 `CraftOutputInterceptor` 在实体加入世界时捕获。
+- 机器槽位产物允许漏斗、管道等外部自动化提取；`collectResult()` 只能收取调用时真实存在于输出槽中的内容，槽位为空时不得用预期配方结果补发。
+- 异步 Delegate 必须通过 `observeCraft()` 明确报告 `WAITING_FOR_START → WORKING → DONE`；机器消失报告失败，不能当作成功。只有进入 `WORKING` 后，输入消耗或真实输出出现才能进入 `DONE`。
+- 可计数的物品输出实现 `getExpectedProduction()`；链会汇总 `collectAllResults()` 的真实数量。少于预期表示部分外流：当前步骤输入不退，但更早步骤仍持有的中间产物会恢复。
+- 同一机器可能产生多个物品栈、crafting remainder 或可容器化流体时，必须覆写 `collectAllResults()` 并返回全部实际移出的栈；若这些物理副产物已包含在结果中，应禁止链再按 recipe metadata 补发。
+- 流体转物品必须先验证容器转换结果并执行 `SIMULATE` drain，确认可精确排出后才 `EXECUTE`；转换失败时流体保留在 tank 中。
 
 ---
 
@@ -210,6 +221,13 @@ javap -c -p -cp <mod>.jar com.example.YourBlockEntity
 ### 5.4 创建 BatchDelegate
 
 `mods/<mod>/XXBatchDelegate.java`，继承 `AbstractBatchDelegate`，覆写钩子方法（`isMachineCraftFinished`、`clearMachineState` 等）。
+
+产物保护必须在实现阶段一并确认：
+
+- 结果生成 `ItemEntity`：实现 `getExpectedOutput()` 和精确的 `getOutputCaptureRegion()`；`collectResult()` 找不到真实实体时返回 `EMPTY`，禁止返回 recipe template。
+- 结果写入机器槽：只收取调用时真实存在于输出槽中的内容；允许外部自动化提取，槽位为空时返回 `EMPTY`。
+- 结果来自缓存、直接 assemble、流体 tank 或虚拟计算：不要错误声明世界捕获或物品输出槽。
+- 若机器有动态输出位置/槽位，必须返回真实位置（例如基座/下方容器），不能只返回主机代表坐标。
 
 ### 5.5 注册 ModType + JEI
 
@@ -367,6 +385,8 @@ IDLE → RESERVING → RESERVED → COMMITTING → COMMITTED
 | `commit()` 后用 `close()` 而非 `rollback(player)` | 物品静默消失 | `close()` 对 `COMMITTED` 是 no-op；必须显式 `rollback(player)` 才能退还物理物品 |
 | 配方产物是"放置型方块物品"却整块收走 | 玩家的锅/容器被吞进网络（如妖怪归家汤锅） | 判断产物 `BlockItem` 是否为可盛装方块（如 `PotFoodBlock`），盛成其可消耗形态（`asBowls()` → 食物×份数）并把碗计入必需材料，而非收走整块 |
 | 同一机器的 Delegate 与 GUI 预填各写一套资源选择策略 | 自动合成与远程 GUI 的燃料/材料选择不一致 | 抽取无网络依赖的共享策略（如原版炉子的 `VanillaFurnaceFuelPolicy`），两个入口只保留提取与写槽动作 |
+| 世界掉落产物缺失时直接返回 recipe result | 磁铁/玩家已拿到真实产物，RS 又收到模板产物，形成复制 | 世界掉落型实现捕获声明；交付只认捕获或实际取走的实体/槽位，缺失时 fail closed |
+| 槽位产物被外部自动化提前提取 | `collectResult()` 时槽位为空 | 允许外部提取；只收真实槽内容，禁止用预期配方结果补发 |
 
 ---
 

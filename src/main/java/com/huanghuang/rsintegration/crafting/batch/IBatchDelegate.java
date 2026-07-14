@@ -14,6 +14,26 @@ import java.util.List;
 
 public interface IBatchDelegate {
 
+    enum CraftPhase {
+        WAITING_FOR_START,
+        WORKING,
+        DONE,
+        FAILED
+    }
+
+    record CraftObservation(CraftPhase phase, String detail) {
+        public CraftObservation(CraftPhase phase) {
+            this(phase, "");
+        }
+    }
+
+    record ExpectedProduction(ItemStack item, int count) {
+        public ExpectedProduction {
+            item = item == null ? ItemStack.EMPTY : item.copyWithCount(1);
+            count = Math.max(0, count);
+        }
+    }
+
     boolean validateAndInit(@Nonnull ServerPlayer player, @Nonnull ResourceLocation recipeId,
                             @Nullable ResourceLocation dim, @Nonnull BlockPos pos);
 
@@ -71,11 +91,42 @@ public interface IBatchDelegate {
     boolean isCraftComplete(@Nonnull ServerLevel level);
 
     /**
+     * Observe the physical craft lifecycle. Legacy delegates are considered
+     * working after start and map their old completion predicate to DONE.
+     */
+    @Nonnull
+    default CraftObservation observeCraft(@Nonnull ServerLevel level) {
+        return new CraftObservation(isCraftComplete(level) ? CraftPhase.DONE : CraftPhase.WORKING);
+    }
+
+    /**
      * Collect the result item from the machine after craft completes.
      * @return the result ItemStack, or ItemStack.EMPTY if not yet available
      */
     @Nonnull
     ItemStack collectResult(@Nonnull ServerPlayer player);
+
+    /** Collect every real stack still owned by this craft. */
+    @Nonnull
+    default List<ItemStack> collectAllResults(@Nonnull ServerPlayer player) {
+        ItemStack result = collectResult(player);
+        return result.isEmpty() ? List.of() : List.of(result);
+    }
+
+    /** True when {@link #collectAllResults} already includes physical remainders/byproducts. */
+    default boolean collectsPhysicalSecondaryOutputs() {
+        return false;
+    }
+
+    /**
+     * Expected item production for external-extraction detection. Return null
+     * for entity, fluid, dynamic, or synchronous outputs that cannot be counted safely.
+     * Counts are matched by item type; physical output keeps its real runtime NBT.
+     */
+    @Nullable
+    default ExpectedProduction getExpectedProduction() {
+        return null;
+    }
 
     /** Cleanup and refund on batch failure. */
     void onBatchFailed(@Nonnull ServerPlayer player, @Nonnull String reason);

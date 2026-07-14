@@ -29,6 +29,8 @@ import com.huanghuang.rsintegration.sidepanel.client.SidePanelRenderer;
 import com.huanghuang.rsintegration.sidepanel.model.PanelDataModel;
 import java.util.*;
 
+import static com.huanghuang.rsintegration.RSIntegrationMod.*;
+
 @OnlyIn(Dist.CLIENT)
 public final class RSSidePanelClient {
 
@@ -48,7 +50,7 @@ public final class RSSidePanelClient {
     public static final ResourceLocation RS_GRID_TEX =
             new ResourceLocation("refinedstorage", "textures/gui/grid.png");
     public static final ResourceLocation RS_ICONS_TEX =
-            new ResourceLocation(RSIntegrationMod.MOD_ID, "textures/gui/icons.png");
+            new ResourceLocation(MOD_ID, "textures/gui/icons.png");
 
     static final Set<String> RS_SCREEN_CLASSES = Set.of(
             "com.refinedmods.refinedstorage.screen.grid.GridScreen",
@@ -164,7 +166,7 @@ public final class RSSidePanelClient {
                 "key.categories.rsi"
         );
 
-        com.huanghuang.rsintegration.RSIntegrationMod.MOD_BUS.addListener(
+        MOD_BUS.addListener(
                 (RegisterKeyMappingsEvent e) -> e.register(KEY_TOGGLE_PANEL));
     }
 
@@ -191,7 +193,7 @@ public final class RSSidePanelClient {
         // Cancel foreign tooltips that land inside the side panel area
         bus.addListener(EventPriority.HIGHEST, RSSidePanelClient::onRenderTooltipPre);
 
-        RSIntegrationMod.LOGGER.info("[RSI] SidePanel client initialized.");
+        LOGGER.info("[RSI] SidePanel client initialized.");
     }
 
     // ── Save ─────────────────────────────────────────────────────
@@ -413,7 +415,7 @@ public final class RSSidePanelClient {
         long now = System.currentTimeMillis();
         if (now - lastScreenDiagLogTime > 5000) {
             lastScreenDiagLogTime = now;
-            RSIntegrationMod.LOGGER.debug("[RSI-SidePanel] Active screen: {}", screenName);
+            LOGGER.debug("[RSI-SidePanel] Active screen: {}", screenName);
         }
 
         if (RS_SCREEN_CLASSES.contains(screenName)) return;

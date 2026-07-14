@@ -41,6 +41,7 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
     protected ExtractionLedger sharedLedger;
     protected INetwork network;
     protected boolean usingSharedLedger;
+    protected CraftPhase phase = CraftPhase.WAITING_FOR_START;
 
     /** The dimension the target machine lives in. Set by {@link #validateAndInit}. */
     @Nullable
@@ -96,8 +97,60 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
             level.getChunk(pos);
         }
         BlockEntity be = level.getBlockEntity(pos);
-        if (be == null || be.isRemoved()) return true; // machine gone → treat as done
+        if (be == null || be.isRemoved()) return false;
         return isMachineCraftFinished(level, be);
+    }
+
+    @Nonnull
+    @Override
+    public final CraftObservation observeCraft(@Nonnull ServerLevel playerLevel) {
+        BlockPos pos = getMachinePos();
+        if (pos == null) {
+            if (isMachineCraftFinished(null, null)) phase = CraftPhase.DONE;
+            else if (phase == CraftPhase.WAITING_FOR_START) phase = CraftPhase.WORKING;
+            return new CraftObservation(phase);
+        }
+        ServerLevel level = resolveMachineLevel(playerLevel);
+        if (level == null) return failObservation("machine dimension unavailable");
+        if (!level.isLoaded(pos)) level.getChunk(pos);
+        BlockEntity be = level.getBlockEntity(pos);
+        if (be == null || be.isRemoved()) return failObservation("machine block entity missing");
+        CraftObservation observed = observeMachineCraft(level, be);
+        if (observed != null) phase = observed.phase();
+        return observed != null ? observed : new CraftObservation(phase);
+    }
+
+    /** Machine-specific phase observation. New slot delegates should override. */
+    @Nonnull
+    protected CraftObservation observeMachineCraft(@Nonnull ServerLevel level, @Nonnull BlockEntity be) {
+        // The first observation only establishes that the machine was seen after
+        // placement. This prevents a pre-existing output or an already-empty input
+        // slot from completing a craft before it has entered WORKING.
+        if (phase == CraftPhase.WAITING_FOR_START) {
+            phase = CraftPhase.WORKING;
+            return new CraftObservation(phase);
+        }
+        if (isMachineCraftFinished(level, be)) phase = CraftPhase.DONE;
+        return new CraftObservation(phase);
+    }
+
+    protected final void markCraftStarted() {
+        phase = CraftPhase.WAITING_FOR_START;
+    }
+
+    protected final CraftObservation workingObservation() {
+        phase = CraftPhase.WORKING;
+        return new CraftObservation(phase);
+    }
+
+    protected final CraftObservation doneObservation() {
+        phase = CraftPhase.DONE;
+        return new CraftObservation(phase);
+    }
+
+    protected final CraftObservation failObservation(String detail) {
+        phase = CraftPhase.FAILED;
+        return new CraftObservation(phase, detail);
     }
 
     /**
@@ -175,6 +228,12 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
         return machineDim;
     }
 
+    /** Mark this delegate as using the chain-owned committed ledger. */
+    public final void useSharedLedger(@Nonnull ExtractionLedger sharedLedger) {
+        this.sharedLedger = sharedLedger;
+        this.usingSharedLedger = true;
+    }
+
     /** Called by the chain after {@link #validateAndInit} succeeds. */
     public void setMachineDim(@Nonnull ResourceLocation dim) {
         this.machineDim = dim;
@@ -238,6 +297,7 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
         machineDim = null;
         machineServer = null;
         targetOutput = null;
+        phase = CraftPhase.WAITING_FOR_START;
         seenWarnStates.clear();
     }
 }

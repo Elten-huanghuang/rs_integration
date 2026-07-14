@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.mods.youkaishomecoming;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.mods.youkaishomecoming.ferment.FermentationRecipeOutputs;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
@@ -10,6 +11,7 @@ import net.minecraft.world.item.crafting.AbstractCookingRecipe;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
 
+import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
@@ -66,23 +68,26 @@ public final class YoukaisHomecomingRecipeHandler implements com.huanghuang.rsin
             ItemStack out = cooking.getResultItem(access);
             return out == null ? ItemStack.EMPTY : out.copy();
         }
-        // SimpleFermentationRecipe.getResultItem() returns EMPTY — extract from results field
+        // SimpleFermentationRecipe.getResultItem() returns EMPTY. Report the
+        // machine's real per-execution production so resolver batch counts match
+        // what the fermentation tank actually emits.
         if (FERMENT_RECIPE.equals(recipe.getClass().getName())) {
-            try {
-                java.lang.reflect.Field f = findFieldUp(recipe.getClass(), "results");
-                if (f == null) return ItemStack.EMPTY;
-                f.setAccessible(true);
-                Object val = f.get(recipe);
-                if (val instanceof java.util.List<?> list && !list.isEmpty()) {
-                    Object first = list.get(0);
-                    if (first instanceof ItemStack s && !s.isEmpty()) return s.copy();
-                }
-            } catch (Exception e) {
-                RSIntegrationMod.LOGGER.warn("[RSI-YHK] Recipe result reflection failed", e);
-            }
-            return ItemStack.EMPTY;
+            int inputs = FermentationRecipeOutputs.effectiveIngredientCount(recipe);
+            ItemStack output = FermentationRecipeOutputs.fromRecipe(recipe, inputs).primary();
+            RSIntegrationMod.LOGGER.debug("[RSI-YHK] Ferment production: recipe={} simple={} inputs={} output={}x{}",
+                    recipe.getId(), FermentationRecipeOutputs.isSimple(recipe), inputs,
+                    output.isEmpty() ? "EMPTY" : output.getHoverName().getString(), output.getCount());
+            return output;
         }
         return com.huanghuang.rsintegration.recipe.ModRecipeHandlers.tryGetResultItem(recipe, access);
+    }
+
+    @Nonnull
+    @Override
+    public List<ItemStack> getSecondaryOutputs(Recipe<?> recipe, RegistryAccess access) {
+        if (!FERMENT_RECIPE.equals(recipe.getClass().getName())) return List.of();
+        int inputs = FermentationRecipeOutputs.effectiveIngredientCount(recipe);
+        return FermentationRecipeOutputs.fromRecipe(recipe, inputs).secondary();
     }
 
     @Nullable

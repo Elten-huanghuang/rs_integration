@@ -109,6 +109,9 @@ public final class CompressorBatchDelegate extends AbstractBatchDelegate {
     @Override
     public boolean tryStartWithMaterials(ServerPlayer player, List<ItemStack> materials,
                                          ExtractionLedger sharedLedger) {
+        this.sharedLedger = sharedLedger;
+        this.usingSharedLedger = true;
+        this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
         myLevel.getChunk(myPos);
 
         BlockEntity be = myLevel.getBlockEntity(myPos);
@@ -124,11 +127,12 @@ public final class CompressorBatchDelegate extends AbstractBatchDelegate {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-Comp] No IItemHandler at {}", myPos);
             return false;
         }
+        if (!handler.getStackInSlot(0).isEmpty()) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Batch-Comp] Output slot occupied at {}", myPos);
+            return false;
+        }
 
         forceChunkLoad(true);
-
-        // Clear any leftover output
-        handler.extractItem(0, 64, false);
 
         // Insert into slot 1 (input). Materials may be N items of the same ingredient.
         // CompressorRecipe has getInputCount() → total count needed
@@ -156,7 +160,8 @@ public final class CompressorBatchDelegate extends AbstractBatchDelegate {
     protected boolean isMachineCraftFinished(ServerLevel level, BlockEntity be) {
         IItemHandler handler = getHandler(be);
         if (handler == null) return false;
-        return !handler.getStackInSlot(0).isEmpty();
+        return !handler.getStackInSlot(0).isEmpty()
+                || handler.getStackInSlot(1).isEmpty();
     }
 
     @Override
@@ -194,6 +199,14 @@ public final class CompressorBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public BlockPos getMachinePos() { return myPos; }
+
+    @Nullable
+    @Override
+    public ExpectedProduction getExpectedProduction() {
+        ItemStack result = recipe == null || myLevel == null ? ItemStack.EMPTY
+                : ModRecipeHandlers.tryGetResultItem(recipe, myLevel.registryAccess());
+        return result.isEmpty() ? null : new ExpectedProduction(result, result.getCount());
+    }
 
     // ── helpers ──
 

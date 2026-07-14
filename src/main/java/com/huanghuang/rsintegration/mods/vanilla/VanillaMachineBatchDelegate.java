@@ -189,7 +189,13 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
                 }
             }
 
-            // Check furnace is idle
+            // The chain owns only an idle machine. Existing output cannot be
+            // distinguished from this craft's product after automation starts.
+            if (!fbe.getItem(2).isEmpty()) {
+                player.sendSystemMessage(Component.translatable("rsi.vanilla.error.furnace_occupied"));
+                return false;
+            }
+
             ItemStack slot0 = fbe.getItem(0);
             if (!slot0.isEmpty()) {
                 List<Ingredient> ingredients = recipe.getIngredients();
@@ -680,9 +686,10 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
 
         if (furnaceBE == null) return true;
 
-        // Check result slot has output
         ItemStack result = furnaceBE.getItem(2);
-        return !result.isEmpty();
+        // Once AbstractBatchDelegate has observed WORKING, consumed input is
+        // sufficient proof of completion even if automation already took output.
+        return !result.isEmpty() || furnaceBE.getItem(0).isEmpty();
     }
 
     @Override
@@ -764,6 +771,27 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
     @Override
     public BlockPos getMachinePos() {
         return myPos;
+    }
+
+    @Nullable
+    @Override
+    public ExpectedProduction getExpectedProduction() {
+        if (kind != MachineKind.FURNACE) return null;
+        ItemStack result = computeResult();
+        return result.isEmpty() ? null : new ExpectedProduction(result, result.getCount());
+    }
+
+    @Nullable
+    @Override
+    public ItemStack getExpectedOutput() {
+        return kind == MachineKind.CAMPFIRE ? computeResult() : null;
+    }
+
+    @Nullable
+    @Override
+    public net.minecraft.world.phys.AABB getOutputCaptureRegion() {
+        return kind == MachineKind.CAMPFIRE && myPos != null
+                ? new net.minecraft.world.phys.AABB(myPos).inflate(2.0) : null;
     }
 
     // ── helpers ───────────────────────────────────────────────────

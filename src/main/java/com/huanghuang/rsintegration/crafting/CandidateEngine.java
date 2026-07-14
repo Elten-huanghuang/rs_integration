@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
@@ -91,7 +92,7 @@ final class CandidateEngine {
 
         // Diagnostic: log Tag ingredient candidate search summary
         if (isTag) {
-            com.huanghuang.rsintegration.RSIntegrationMod.LOGGER.debug(
+            RSIntegrationMod.LOGGER.debug(
                     "[RSI-Candidate] Phase1: getItems={}ms, loop={}ms, {} items, {} recipes, {} unique candidates, first items: {}",
                     itemsMs, loopMs, items.length, items.length, byId.size(), firstItems);
         }
@@ -130,7 +131,7 @@ final class CandidateEngine {
         long phase2Elapsed = System.nanoTime() - phase2Start;
 
         if (isTag) {
-            com.huanghuang.rsintegration.RSIntegrationMod.LOGGER.debug(
+            RSIntegrationMod.LOGGER.debug(
                     "[RSI-Candidate] Phase2: {} vanilla + {} mod recipes in {}ms, dedup={}",
                     vanillaCount, modCount, phase2Elapsed / 1_000_000, dedup.size());
         }
@@ -172,7 +173,7 @@ final class CandidateEngine {
 
         if (isTag) {
             long sortElapsed = System.nanoTime() - sortStart;
-            com.huanghuang.rsintegration.RSIntegrationMod.LOGGER.debug(
+            RSIntegrationMod.LOGGER.debug(
                     "[RSI-Candidate] Phase2 sort: {} entries in {}ms",
                     result.size(), sortElapsed / 1_000_000);
         }

@@ -289,6 +289,7 @@
   "rsi.async.error.wrong_machine_type": "§cRecipe %s requires a different machine type (%s machine(s) bound but none match) — bind the correct machine type",
   "rsi.async.error.no_machine_bound": "§cRecipe %s requires a bound machine — bind an item to the target machine first (Shift+Right Click)",
   "rsi.async.error.machine_valid_failed": "§cRecipe %s machine validation failed — a machine is bound but is not ready. See the error message above for details",
+  "rsi.async.error.output_extracted": "§cCraft output was externally extracted: expected %s, collected %s. The chain was stopped; recovered intermediates were preserved.",
 
   "rsi.goety.warn.altar_busy": "§cDark Altar is already performing a ritual, please wait",
   "rsi.goety.error.insufficient_souls": "§cNot enough soul energy (need %s, have %s)",
@@ -502,6 +503,7 @@
   "rsi.batch.mod.youkaishomecoming_cooking_pot": "Cooking Pot",
   "rsi.youkaishomecoming.lid_open": "§cThe fermentation tank lid is open. Close the lid before starting fermentation.",
   "rsi.youkaishomecoming.ferment_lid_warning": "§7Fermentation tank lid must be closed during operation. Ensure the lid is closed before crafting.",
+  "rsi.youkaishomecoming.ferment_unsafe_output": "§cFermentation recipe %s has an output type or amount that cannot be verified safely; automatic crafting was refused.",
   "rsi.youkaishomecoming.ferment_water_needed": "§7Requires %s water bottle(s) (%s mB total). Ensure water bottles or buckets are in the RS network.",
   "rsi.youkaishomecoming.ferment_water_needed_mb": "§7Requires %s mB of water. Ensure water bottles or buckets are in the RS network.",
   "rsi.youkaishomecoming.ferment_water_warning": "§cNo water bottles or buckets found in RS network! Please store water bottles or buckets first.",
