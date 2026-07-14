@@ -543,7 +543,8 @@ public final class AsyncCraftChain {
             Diagnostics.record(Diagnostics.Category.CHAIN_STATE,
                     "PENDING→EXECUTING graph nodes=" + graph.topologicalOrder().size());
             graphExecutor = new ConcurrentNodeExecutor(graphScheduler,
-                    nodeId -> startGraphNode(nodeId, online), graphRunningNodeCap);
+                    nodeId -> startGraphNode(nodeId, online), graphRunningNodeCap,
+                    this::isNodeExclusive);
             sendStartedPacket(online);
         }
 
@@ -621,6 +622,28 @@ public final class AsyncCraftChain {
         }
         graphScheduler.releaseClaim(candidate);
         return null;
+    }
+
+    /**
+     * Decide, WITHOUT starting a craft, whether a node must run exclusively.
+     * A node is exclusive unless its delegate provably supports concurrent
+     * execution ({@link IBatchDelegate#supportsConcurrentNodeExecution()}).
+     * This is the pre-dispatch enforcement behind the capability gate: the
+     * probe only instantiates a throwaway delegate (no {@code validateAndInit},
+     * no material extraction), so it has no side effects. Synchronous nodes
+     * (vanilla GENERIC, Earth Heart) settle outside the executor and never
+     * reach this oracle.
+     */
+    private boolean isNodeExclusive(NodeId nodeId) {
+        int idx = stepIndex(nodeId);
+        CraftingResolver.ResolutionStep step = steps.get(idx);
+        if (step.recipeId().equals(CraftingResolver.TAINT_EARTH_HEART_STEP)) return true;
+        IBatchDelegate probe = step.inferMode()
+                ? step.modType().createInferDelegate()
+                : createDelegate(step.modType());
+        // GenericBatchDelegate and a null delegate are conservatively exclusive.
+        if (probe == null) return true;
+        return !probe.supportsConcurrentNodeExecution();
     }
 
     /** Create a {@link CraftNodeRuntime} worker for one ready mod node. */
@@ -707,17 +730,6 @@ public final class AsyncCraftChain {
                 ? step.modType().createInferDelegate()
                 : createDelegate(step.modType());
         if (delegate == null) return null;
-
-        // Capability gate: when more than one node may run concurrently, require
-        // the delegate to opt in. In serial mode (cap=1) all delegates are allowed.
-        if (graphRunningNodeCap > 1 && !delegate.supportsConcurrentNodeExecution()
-                && !(delegate instanceof GenericBatchDelegate)) {
-            RSIntegrationMod.LOGGER.warn(ctx.format("Delegate {} does not support concurrent execution; "
-                    + "reducing effective parallelism. Set cap=1 to avoid this warning."),
-                    delegate.getClass().getSimpleName());
-            // Do not fail the node — it will still start, but the cap gate means
-            // other nodes will wait if this one is running.
-        }
 
         if (delegate instanceof GenericBatchDelegate) {
             if (!delegate.validateAndInit(online, step.recipeId(), null, null)) return null;
