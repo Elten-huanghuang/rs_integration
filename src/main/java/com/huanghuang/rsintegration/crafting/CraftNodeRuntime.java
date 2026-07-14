@@ -33,6 +33,9 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
     private boolean stopRequested;
     private String failureReason;
     private boolean terminal;
+    private List<ItemStack> virtualInventory;
+    @Nullable
+    private ServerPlayer player;
 
     CraftNodeRuntime(NodeId nodeId, String nodeLabel, IBatchDelegate delegate,
                      @Nullable ExtractionLedger nodeLedger,
@@ -46,6 +49,11 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
 
     void attachCapture(CraftOutputInterceptor.CaptureHandle handle) {
         this.capture = handle;
+    }
+
+    void setChainContext(List<ItemStack> virtualInventory, @Nullable ServerPlayer player) {
+        this.virtualInventory = virtualInventory;
+        this.player = player;
     }
 
     NodeId nodeId() { return nodeId; }
@@ -82,6 +90,7 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
                 return ConcurrentNodeExecutor.Observation.FAILED;
             }
             if (observation.phase() == IBatchDelegate.CraftPhase.DONE) {
+                doSucceed();
                 return ConcurrentNodeExecutor.Observation.SUCCEEDED;
             }
         } catch (Exception e) {
@@ -130,18 +139,6 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
         disarmCapture();
     }
 
-    void succeed(@Nullable ServerPlayer player) {
-        if (terminal) return;
-        terminal = true;
-        if (delegate != null) {
-            try {
-                delegate.onBatchFinished(player);
-            } catch (Exception ignored) {
-                // Best-effort
-            }
-        }
-    }
-
     List<ItemStack> drainSettledResults() {
         if (delegate instanceof ParallelCraftGroup group) {
             return group.drainSettledResults();
@@ -154,6 +151,44 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
             return group.drainQueuedMaterialsForRecovery();
         }
         return List.of();
+    }
+
+    private void doSucceed() {
+        if (terminal) return;
+        terminal = true;
+        // Drain settled results and capture before calling onBatchFinished
+        drainSettledIntoVirtual();
+        List<ItemStack> captured = disarmCapture();
+        if (virtualInventory != null) {
+            for (ItemStack s : captured) {
+                if (s != null && !s.isEmpty()) virtualInventory.add(s.copy());
+            }
+        }
+        List<ItemStack> results = collectResults(player);
+        if (virtualInventory != null) {
+            for (ItemStack s : results) {
+                if (s != null && !s.isEmpty()) virtualInventory.add(s.copy());
+            }
+        }
+        if (delegate != null) {
+            try {
+                delegate.onBatchFinished(player);
+            } catch (Exception ignored) {
+                // Best-effort
+            }
+        }
+    }
+
+    private void drainSettledIntoVirtual() {
+        if (virtualInventory == null) return;
+        List<ItemStack> settled = drainSettledResults();
+        for (ItemStack s : settled) {
+            if (s != null && !s.isEmpty()) virtualInventory.add(s.copy());
+        }
+        List<ItemStack> queued = drainQueuedMaterials();
+        for (ItemStack s : queued) {
+            if (s != null && !s.isEmpty()) virtualInventory.add(s.copy());
+        }
     }
 
     List<ItemStack> collectResults(ServerPlayer player) {
