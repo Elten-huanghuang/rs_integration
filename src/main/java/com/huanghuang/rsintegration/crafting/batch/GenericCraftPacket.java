@@ -1193,12 +1193,23 @@ public final class GenericCraftPacket {
         List<String> missing = new ArrayList<>();
 
         List<ResolutionStep> resolutionSteps = null;
+        CraftPlanGraph planGraph = null;
         List<ResourceLocation> stepIds;
 
         if (RSIntegrationConfig.ENABLE_MULTIBLOCK_AUTO_CRAFTING.get() && network != null) {
-            resolutionSteps = CraftingResolver.resolveStepsForIngredientsWithTypes(
-                    recipeIngredients, available, player.serverLevel(),
+            planGraph = CraftingResolver.resolveGraphForSpecsWithTypes(
+                    recipeIngredients.stream().map(ingredient -> new IngredientSpec(ingredient, 1)).toList(),
+                    available, player.serverLevel(),
                     player, network, missing, forcedOverrides, true);
+            Map<com.huanghuang.rsintegration.crafting.graph.NodeId,
+                    com.huanghuang.rsintegration.crafting.graph.CraftNode> graphNodes = planGraph.nodesById();
+            resolutionSteps = planGraph.topologicalOrder().stream()
+                    .map(graphNodes::get)
+                    .filter(Objects::nonNull)
+                    .map(node -> new ResolutionStep(node.recipeId(), ModType.byId(node.modTypeId()),
+                            node.recipeTypeId(), node.alternativeIds(), node.alternativeModTypeIds(),
+                            node.inferMode(), node.executions(), node.syntheticInput(), node.syntheticOutput()))
+                    .toList();
         }
         boolean usedTypedResolver = resolutionSteps != null && !resolutionSteps.isEmpty();
 
@@ -1941,7 +1952,8 @@ public final class GenericCraftPacket {
                 baseItem,
                 boundMachineTypes,
                 leftovers,
-                clickedOutput
+                clickedOutput,
+                planGraph != null ? com.huanghuang.rsintegration.crafting.plan.PlanGraphView.from(planGraph) : null
         );
 
         PLAN_CACHE.put(cacheKey, new CachedPlan(plan, System.nanoTime()));

@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.crafting.plan;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.tree.IngredientKey;
+import io.netty.handler.codec.DecoderException;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
@@ -37,11 +38,15 @@ public final class PlanResponsePacket {
     private static int readBoundedCount(FriendlyByteBuf buf) {
         int raw = buf.readVarInt();
         if (raw < 0 || raw > MAX_DECODE_COUNT) {
-            RSIntegrationMod.LOGGER.warn("[RSI-PlanPkt] decode count {} out of bounds; clamping to [0,{}]",
-                    raw, MAX_DECODE_COUNT);
-            return Math.max(0, Math.min(raw, MAX_DECODE_COUNT));
+            throw new DecoderException("PlanResponsePacket count out of bounds: " + raw);
         }
         return raw;
+    }
+
+    private static int readNonNegativeVarInt(FriendlyByteBuf buf, String field) {
+        int value = buf.readVarInt();
+        if (value < 0) throw new DecoderException(field + " must be non-negative: " + value);
+        return value;
     }
 
     public PlanResponsePacket(PlanResponse plan) {
@@ -49,8 +54,6 @@ public final class PlanResponsePacket {
     }
 
     public void encode(FriendlyByteBuf buf) {
-        RSIntegrationMod.LOGGER.debug("[RSI-PlanPkt] encode() called: recipeId={} success={} steps={}",
-                plan.recipeId(), plan.success(), plan.steps().size());
         buf.writeBoolean(plan.success());
         buf.writeUtf(plan.recipeId() != null ? plan.recipeId() : "");
         // Always send full plan data — even infeasible plans need the recipe
@@ -145,10 +148,12 @@ public final class PlanResponsePacket {
         // Clicked ghost-output (NBT-variant target, e.g. WR leveled book) — tail-appended
         buf.writeBoolean(plan.clickedOutput() != null);
         if (plan.clickedOutput() != null) buf.writeItem(plan.clickedOutput());
+        // Server-authored DAG view — protocol v8 tail
+        buf.writeBoolean(plan.graph() != null);
+        if (plan.graph() != null) writeGraph(buf, plan.graph());
     }
 
     public static PlanResponsePacket decode(FriendlyByteBuf buf) {
-        RSIntegrationMod.LOGGER.debug("[RSI-PlanPkt] decode() called");
         boolean success = buf.readBoolean();
         String recipeId = buf.readUtf();
         // Always read full plan data — the server sends the recipe chain
@@ -254,18 +259,154 @@ public final class PlanResponsePacket {
             IngredientKey key = IngredientKey.read(buf);
             leftovers.put(key, buf.readVarInt());
         }
-        // Clicked ghost-output — tail-appended; guard readability so an older
-        // server's shorter buffer decodes cleanly to null instead of throwing.
+        // Clicked ghost-output — protocol v7 tail
         ItemStack clickedOutput = null;
         if (buf.isReadable() && buf.readBoolean()) {
             clickedOutput = buf.readItem();
+        }
+        // Server-authored DAG view — protocol v8 tail
+        PlanGraphView graph = null;
+        if (buf.isReadable() && buf.readBoolean()) {
+            graph = readGraph(buf);
         }
         return new PlanResponsePacket(new PlanResponse(success, targetName, targetResult,
                 steps, materials, missing, recipeId,
                 execModType, execDim, execX, execY, execZ, modWarnings, repeatCount,
                 embersCode, embersAspectNames, embersInputNames, embersSeed, embersCanInfer,
                 embersCodeFromCache, executionMachineSupportsGui, baseItem, boundMachineTypes,
-                leftovers, clickedOutput));
+                leftovers, clickedOutput, graph));
+    }
+
+    private static void writeGraph(FriendlyByteBuf buf, PlanGraphView graph) {
+        buf.writeVarInt(graph.version());
+        buf.writeVarInt(graph.nodes().size());
+        for (PlanGraphView.NodeView node : graph.nodes()) {
+            buf.writeVarInt(node.nodeId());
+            buf.writeResourceLocation(node.recipeId());
+            buf.writeUtf(node.modTypeId(), 128);
+            buf.writeVarInt(node.executions());
+            buf.writeItem(node.primaryOutput());
+            buf.writeVarInt(node.inputs().size());
+            for (PlanGraphView.InputView input : node.inputs()) {
+                buf.writeVarInt(input.portIndex());
+                buf.writeItem(input.display());
+                buf.writeVarInt(input.quantity());
+                buf.writeVarInt(input.roleOrdinal());
+            }
+            buf.writeVarInt(node.outputs().size());
+            for (PlanGraphView.OutputView output : node.outputs()) {
+                buf.writeVarInt(output.portIndex());
+                buf.writeItem(output.display());
+                buf.writeVarInt(output.quantity());
+                buf.writeVarInt(output.kindOrdinal());
+            }
+        }
+        buf.writeVarInt(graph.edges().size());
+        for (PlanGraphView.EdgeView edge : graph.edges()) {
+            buf.writeVarInt(edge.consumerNodeId());
+            buf.writeVarInt(edge.consumerPortIndex());
+            writeSource(buf, edge.source());
+            buf.writeItem(edge.material());
+            buf.writeVarInt(edge.quantity());
+        }
+        buf.writeVarInt(graph.roots().size());
+        for (PlanGraphView.RootView root : graph.roots()) {
+            buf.writeItem(root.display());
+            buf.writeVarInt(root.quantity());
+            buf.writeVarInt(root.unresolvedQuantity());
+            buf.writeVarInt(root.allocations().size());
+            for (PlanGraphView.RootEdgeView allocation : root.allocations()) {
+                writeSource(buf, allocation.source());
+                buf.writeItem(allocation.material());
+                buf.writeVarInt(allocation.quantity());
+            }
+        }
+        buf.writeVarInt(graph.unresolved().size());
+        for (PlanGraphView.UnresolvedView unresolved : graph.unresolved()) {
+            buf.writeVarInt(unresolved.consumerNodeId());
+            buf.writeVarInt(unresolved.consumerPortIndex());
+            buf.writeItem(unresolved.display());
+            buf.writeVarInt(unresolved.quantity());
+        }
+        buf.writeVarInt(graph.topologicalOrder().size());
+        for (int nodeId : graph.topologicalOrder()) buf.writeVarInt(nodeId);
+    }
+
+    private static PlanGraphView readGraph(FriendlyByteBuf buf) {
+        int version = buf.readVarInt();
+        List<PlanGraphView.NodeView> nodes = new ArrayList<>();
+        for (int i = 0, n = readBoundedCount(buf); i < n; i++) {
+            int nodeId = readNonNegativeVarInt(buf, "graph node id");
+            ResourceLocation recipe = buf.readResourceLocation();
+            String modType = buf.readUtf(128);
+            int executions = readNonNegativeVarInt(buf, "graph executions");
+            ItemStack primary = buf.readItem();
+            List<PlanGraphView.InputView> inputs = new ArrayList<>();
+            for (int j = 0, m = readBoundedCount(buf); j < m; j++) {
+                inputs.add(new PlanGraphView.InputView(readNonNegativeVarInt(buf, "input port"), buf.readItem(),
+                        readNonNegativeVarInt(buf, "input quantity"), buf.readVarInt()));
+            }
+            List<PlanGraphView.OutputView> outputs = new ArrayList<>();
+            for (int j = 0, m = readBoundedCount(buf); j < m; j++) {
+                outputs.add(new PlanGraphView.OutputView(readNonNegativeVarInt(buf, "output port"), buf.readItem(),
+                        readNonNegativeVarInt(buf, "output quantity"), buf.readVarInt()));
+            }
+            nodes.add(new PlanGraphView.NodeView(nodeId, recipe, modType, executions,
+                    primary, inputs, outputs));
+        }
+        List<PlanGraphView.EdgeView> edges = new ArrayList<>();
+        for (int i = 0, n = readBoundedCount(buf); i < n; i++) {
+            edges.add(new PlanGraphView.EdgeView(readNonNegativeVarInt(buf, "edge consumer node"),
+                    readNonNegativeVarInt(buf, "edge consumer port"), readSource(buf), buf.readItem(),
+                    readNonNegativeVarInt(buf, "edge quantity")));
+        }
+        List<PlanGraphView.RootView> roots = new ArrayList<>();
+        for (int i = 0, n = readBoundedCount(buf); i < n; i++) {
+            ItemStack display = buf.readItem();
+            int quantity = readNonNegativeVarInt(buf, "root quantity");
+            int unresolvedQuantity = readNonNegativeVarInt(buf, "root unresolved quantity");
+            if (unresolvedQuantity > quantity) {
+                throw new DecoderException("root unresolved quantity exceeds root quantity");
+            }
+            List<PlanGraphView.RootEdgeView> allocations = new ArrayList<>();
+            for (int j = 0, m = readBoundedCount(buf); j < m; j++) {
+                allocations.add(new PlanGraphView.RootEdgeView(readSource(buf),
+                        buf.readItem(), readNonNegativeVarInt(buf, "root allocation quantity")));
+            }
+            roots.add(new PlanGraphView.RootView(display, quantity, unresolvedQuantity, allocations));
+        }
+        List<PlanGraphView.UnresolvedView> unresolved = new ArrayList<>();
+        for (int i = 0, n = readBoundedCount(buf); i < n; i++) {
+            unresolved.add(new PlanGraphView.UnresolvedView(
+                    readNonNegativeVarInt(buf, "unresolved consumer node"),
+                    readNonNegativeVarInt(buf, "unresolved consumer port"), buf.readItem(),
+                    readNonNegativeVarInt(buf, "unresolved quantity")));
+        }
+        List<Integer> topological = new ArrayList<>();
+        for (int i = 0, n = readBoundedCount(buf); i < n; i++) {
+            topological.add(readNonNegativeVarInt(buf, "topological node id"));
+        }
+        return new PlanGraphView(version, nodes, edges, roots, unresolved, topological);
+    }
+
+    private static void writeSource(FriendlyByteBuf buf, PlanGraphView.SourceView source) {
+        buf.writeBoolean(source.initial());
+        if (!source.initial()) {
+            buf.writeVarInt(source.producerNodeId());
+            buf.writeVarInt(source.producerPortIndex());
+        }
+    }
+
+    private static PlanGraphView.SourceView readSource(FriendlyByteBuf buf) {
+        return buf.readBoolean()
+                ? new PlanGraphView.SourceView(true, -1, -1)
+                : new PlanGraphView.SourceView(false,
+                readNonNegativeVarInt(buf, "source producer node"),
+                readNonNegativeVarInt(buf, "source producer port"));
+    }
+
+    public PlanResponse plan() {
+        return plan;
     }
 
     @SuppressWarnings("resource")

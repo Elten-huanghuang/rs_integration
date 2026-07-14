@@ -285,7 +285,7 @@ public final class CraftingPlanScreen extends Screen {
      * server-chosen recipe ({@link SelectedPath#initDefaults}).
      */
     private void rebuildTreeModel(boolean firstBuild) {
-        Set<IngredientKey> collapsed = new LinkedHashSet<>();
+        Set<PlanTreeModel.CollapseKey> collapsed = new LinkedHashSet<>();
         if (treeModel != null) {
             PlanTreeModel.collectCollapsedNodes(treeModel.root, collapsed);
         }
