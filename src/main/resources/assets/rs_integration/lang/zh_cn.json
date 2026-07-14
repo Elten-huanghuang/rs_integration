@@ -293,6 +293,7 @@
   "rsi.async.error.wrong_machine_type": "§c配方 %s 需要其他类型的机器（已绑定 %s 台同模组机器但类型不匹配），请绑定正确的机器类型",
   "rsi.async.error.no_machine_bound": "§c配方 %s 需要绑定对应模组机器才能执行 — 请手持绑定物品 Shift+右键目标机器",
   "rsi.async.error.machine_valid_failed": "§c配方 %s 的机器验证失败（机器已绑定但当前状态不可用），请检查上方具体错误信息",
+  "rsi.async.error.output_extracted": "§c合成产物已被外部抽取：应有 %s 个，实际收取 %s 个。合成链已中止，仍持有的中间产物已恢复。",
 
   "rsi.goety.warn.altar_busy": "§c黑暗祭坛正在执行仪式，请稍后再试",
   "rsi.goety.error.insufficient_souls": "§c灵魂能量不足 (需要 %s，当前 %s)",
@@ -511,6 +512,7 @@
   "rsi.batch.mod.youkaishomecoming_cooking_pot": "煮锅",
   "rsi.youkaishomecoming.lid_open": "§c发酵罐的盖子现在是打开的，请先盖上盖子再开始发酵。",
   "rsi.youkaishomecoming.ferment_lid_warning": "§7发酵罐在运行过程中盖子需要保持关闭状态，请在开始前确认盖子已盖好。",
+  "rsi.youkaishomecoming.ferment_unsafe_output": "§c发酵配方 %s 的产物种类或数量无法安全确认，已拒绝自动制作。",
   "rsi.youkaishomecoming.ferment_water_needed": "§7需要 %s 瓶水（共 %s mB），请确保RS网络中有水瓶或水桶。",
   "rsi.youkaishomecoming.ferment_water_needed_mb": "§7需要 %s mB 水，请确保RS网络中有水瓶或水桶。",
   "rsi.youkaishomecoming.ferment_water_warning": "§cRS网络中找不到水瓶或水桶！请先存入水瓶或水桶后再试。",

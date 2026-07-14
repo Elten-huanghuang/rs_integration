@@ -145,6 +145,10 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-Cooler] Cannot access item handler");
             return false;
         }
+        if (!itemHandler.getStackInSlot(OUTPUT_SLOT).isEmpty()) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Batch-Cooler] Output slot occupied at {}", myPos);
+            return false;
+        }
 
         forceChunkLoad(true);
 
@@ -279,7 +283,11 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
         if (itemHandler == null) return false;
 
         ItemStack output = itemHandler.getStackInSlot(OUTPUT_SLOT);
-        return !output.isEmpty();
+        boolean inputsEmpty = true;
+        for (int slot = 0; slot < INPUT_SLOTS; slot++) {
+            inputsEmpty &= itemHandler.getStackInSlot(slot).isEmpty();
+        }
+        return !output.isEmpty() || inputsEmpty;
     }
 
     @Override
@@ -358,6 +366,14 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public BlockPos getMachinePos() { return myPos; }
+
+    @Nullable
+    @Override
+    public ExpectedProduction getExpectedProduction() {
+        ItemStack result = recipe == null || myLevel == null ? ItemStack.EMPTY
+                : ModRecipeHandlers.tryGetResultItem(recipe, myLevel.registryAccess());
+        return result.isEmpty() ? null : new ExpectedProduction(result, result.getCount());
+    }
 
     // ── plan helpers ──
 

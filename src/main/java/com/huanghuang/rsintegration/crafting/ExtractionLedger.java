@@ -916,27 +916,43 @@ public final class ExtractionLedger implements AutoCloseable {
     }
 
     public void releaseReservations(List<ItemStack> stacks) {
+        removeMatchingEntries(stacks, true);
+    }
+
+    /**
+     * Remove committed entries that have already been returned independently.
+     * Used by partial parallel start failure so a later group abort cannot refund
+     * the same material slice twice.
+     */
+    public void releaseCommittedEntries(List<ItemStack> stacks) {
+        requireState(State.COMMITTED);
+        removeMatchingEntries(stacks, false);
+    }
+
+    private void removeMatchingEntries(List<ItemStack> stacks, boolean updatePending) {
         // Collect entry ids to remove upfront so we match by identity, not by
         // (item, count) which can collide across entries.
         Set<Integer> idsToRemove = new HashSet<>();
         for (ItemStack stack : stacks) {
             if (stack.isEmpty()) continue;
-            CraftingResolver.StackKey key = CraftingResolver.StackKey.of(stack, true);
-            int count = stack.getCount();
-            pendingNet.computeIfPresent(key, (k, v) -> {
-                int nv = v - count;
-                return nv <= 0 ? null : nv;
-            });
-            pendingInv.computeIfPresent(key, (k, v) -> {
-                int nv = v - count;
-                return nv <= 0 ? null : nv;
-            });
+            if (updatePending) {
+                CraftingResolver.StackKey key = CraftingResolver.StackKey.of(stack, true);
+                int count = stack.getCount();
+                pendingNet.computeIfPresent(key, (k, v) -> {
+                    int nv = v - count;
+                    return nv <= 0 ? null : nv;
+                });
+                pendingInv.computeIfPresent(key, (k, v) -> {
+                    int nv = v - count;
+                    return nv <= 0 ? null : nv;
+                });
+            }
             // Find the matching entry by (template item, count) and record its id.
             // Search in reverse so we match the most recently added entry first.
             for (int i = entries.size() - 1; i >= 0; i--) {
                 Entry e = entries.get(i);
                 if (!idsToRemove.contains(e.id)
-                        && ItemStack.isSameItem(e.template, stack)
+                        && ItemStack.isSameItemSameTags(e.template, stack)
                         && e.count == stack.getCount()) {
                     idsToRemove.add(e.id);
                     break;

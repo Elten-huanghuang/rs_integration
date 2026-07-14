@@ -172,6 +172,10 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-Aether] No IItemHandler at {}", myPos);
             return false;
         }
+        if (!isIncubator && !handler.getStackInSlot(2).isEmpty()) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Batch-Aether] Output slot occupied at {}", myPos);
+            return false;
+        }
 
         forceChunkLoad(true);
 
@@ -208,8 +212,8 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
     @Override
     protected boolean isMachineCraftFinished(ServerLevel level, BlockEntity be) {
         if (be instanceof AbstractFurnaceBlockEntity furnace) {
-            // Freezer/Altar: check output slot
-            return !furnace.getItem(2).isEmpty();
+            // Output may already have been extracted after the input was consumed.
+            return !furnace.getItem(2).isEmpty() || furnace.getItem(0).isEmpty();
         }
 
         // Incubator: no output slot; completion is detected by cooking progress
@@ -296,6 +300,14 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public BlockPos getMachinePos() { return myPos; }
+
+    @Nullable
+    @Override
+    public ExpectedProduction getExpectedProduction() {
+        if (isIncubator || recipe == null || myLevel == null) return null;
+        ItemStack result = ModRecipeHandlers.tryGetResultItem(recipe, myLevel.registryAccess());
+        return result.isEmpty() ? null : new ExpectedProduction(result, result.getCount());
+    }
 
     // ── plan warnings ──
 

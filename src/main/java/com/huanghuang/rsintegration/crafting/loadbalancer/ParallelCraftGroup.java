@@ -36,6 +36,7 @@ import java.util.List;
 public final class ParallelCraftGroup implements IBatchDelegate {
 
     private final List<ChildSlot> children = new ArrayList<>();
+    private final List<ChildSlot> failedChildren = new ArrayList<>();
     private final ModType modType;
     private final ResourceLocation recipeId;
     private BlockPos representativePos = BlockPos.ZERO;
@@ -136,28 +137,33 @@ public final class ParallelCraftGroup implements IBatchDelegate {
                 childMats.add(src.copy());
                 pristineMats.add(src.copy());
             }
+            ChildSlot child = children.get(i);
+            if (child.delegate instanceof AbstractBatchDelegate abd) {
+                abd.useSharedLedger(sharedLedger);
+            }
             try {
-                if (children.get(i).delegate.tryStartWithMaterials(player, childMats, sharedLedger)) {
+                if (child.delegate.tryStartWithMaterials(player, childMats, sharedLedger)) {
                     startedCount++;
                 } else {
                     RSIntegrationMod.LOGGER.warn("[RSI-ParallelGroup] Child tryStartWithMaterials failed at {}",
-                            children.get(i).pos);
+                            child.pos);
                     if (failed == null) failed = new ArrayList<>();
-                    failed.add(children.get(i));
+                    failed.add(child);
                     if (orphanedMats == null) orphanedMats = new ArrayList<>();
                     orphanedMats.addAll(pristineMats);
                 }
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.warn("[RSI-ParallelGroup] Child tryStartWithMaterials threw at {}: {}",
-                        children.get(i).pos, e.getMessage(), e);
+                        child.pos, e.getMessage(), e);
                 if (failed == null) failed = new ArrayList<>();
-                failed.add(children.get(i));
+                failed.add(child);
                 if (orphanedMats == null) orphanedMats = new ArrayList<>();
                 orphanedMats.addAll(pristineMats);
             }
         }
 
         if (failed != null && !failed.isEmpty()) {
+            failedChildren.addAll(failed);
             children.removeAll(failed);
             RSIntegrationMod.LOGGER.warn("[RSI-ParallelGroup] Removed {} failed children for {}",
                     failed.size(), recipeId);
@@ -171,11 +177,11 @@ public final class ParallelCraftGroup implements IBatchDelegate {
             return false;
         }
 
-        // Partial success: we return true, so the chain will NOT abort and the
-        // shared ledger will NOT be refunded. The failed children's material
-        // slices were already committed (physically extracted) but placed
-        // nowhere — refund them here or they are permanently lost.
+        // Partial success keeps the master ledger committed until the whole group
+        // settles. Remove failed slices from that ledger before returning them, so a
+        // later sibling abort cannot refund the same materials a second time.
         if (orphanedMats != null && !orphanedMats.isEmpty()) {
+            sharedLedger.releaseCommittedEntries(orphanedMats);
             refundChildMaterials(player, orphanedMats);
         }
 
@@ -210,6 +216,7 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         }
 
         if (failed != null && !failed.isEmpty()) {
+            failedChildren.addAll(failed);
             children.removeAll(failed);
             RSIntegrationMod.LOGGER.warn("[RSI-ParallelGroup] Removed {} failed children for {}",
                     failed.size(), recipeId);
@@ -243,61 +250,88 @@ public final class ParallelCraftGroup implements IBatchDelegate {
 
     @Override
     public boolean isCraftComplete(ServerLevel level) {
-        if (!started || children.isEmpty()) return false;
+        return observeCraft(level).phase() == CraftPhase.DONE;
+    }
 
-        int done = 0;
+    @Override
+    public CraftObservation observeCraft(ServerLevel level) {
+        if (!started || children.isEmpty()) return new CraftObservation(CraftPhase.WAITING_FOR_START);
+        boolean allDone = true;
+        boolean anyWorking = false;
         for (ChildSlot child : children) {
             try {
-                if (child.delegate.isCraftComplete(level)) {
-                    done++;
+                CraftObservation observation = child.delegate.observeCraft(level);
+                if (observation.phase() == CraftPhase.FAILED) {
+                    return new CraftObservation(CraftPhase.FAILED,
+                            child.pos + ": " + observation.detail());
                 }
+                allDone &= observation.phase() == CraftPhase.DONE;
+                anyWorking |= observation.phase() == CraftPhase.WORKING
+                        || observation.phase() == CraftPhase.DONE;
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.warn("[RSI-ParallelGroup] Child complete check failed at {}: {}",
-                        child.pos, e.getMessage(), e);
-                done++; // treat crashed as done
+                RSIntegrationMod.LOGGER.warn("[RSI-ParallelGroup] Child observation failed at {}",
+                        child.pos, e);
+                return new CraftObservation(CraftPhase.FAILED,
+                        "child observation failed at " + child.pos);
             }
         }
-        return done >= children.size();
+        if (allDone) return new CraftObservation(CraftPhase.DONE);
+        return new CraftObservation(anyWorking ? CraftPhase.WORKING : CraftPhase.WAITING_FOR_START);
     }
 
     @Override
     public ItemStack collectResult(ServerPlayer player) {
-        if (children.isEmpty()) return ItemStack.EMPTY;
+        List<ItemStack> results = collectAllResults(player);
+        return results.isEmpty() ? ItemStack.EMPTY : results.get(0);
+    }
 
-        ItemStack primary = ItemStack.EMPTY;
-        int collected = 0;
+    @Override
+    public List<ItemStack> collectAllResults(ServerPlayer player) {
+        List<ItemStack> results = new ArrayList<>();
         for (ChildSlot child : children) {
             try {
-                ItemStack result = child.delegate.collectResult(player);
-                if (!result.isEmpty()) {
-                    collected++;
-                    if (primary.isEmpty()) {
-                        primary = result;
-                    } else {
-                        // Extra results to player
-                        net.minecraftforge.items.ItemHandlerHelper.giveItemToPlayer(player, result);
-                    }
+                for (ItemStack result : child.delegate.collectAllResults(player)) {
+                    if (result != null && !result.isEmpty()) results.add(result);
                 }
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.warn("[RSI-ParallelGroup] Child collectResult failed at {}: {}",
-                        child.pos, e.getMessage(), e);
+                RSIntegrationMod.LOGGER.warn("[RSI-ParallelGroup] Child collectResult failed at {}",
+                        child.pos, e);
             }
         }
-        RSIntegrationMod.LOGGER.info("[RSI-ParallelGroup] Parallel craft done: {}/{} children produced output, recipe={}",
-                collected, children.size(), recipeId);
-        return primary;
+        return List.copyOf(results);
+    }
+
+    @Nullable
+    @Override
+    public ExpectedProduction getExpectedProduction() {
+        ItemStack expectedItem = ItemStack.EMPTY;
+        int expectedCount = 0;
+        for (ChildSlot child : children) {
+            ExpectedProduction expected = child.delegate.getExpectedProduction();
+            if (expected == null) return null;
+            if (expectedItem.isEmpty()) expectedItem = expected.item();
+            else if (!ItemStack.isSameItemSameTags(expectedItem, expected.item())) return null;
+            expectedCount = expectedCount > Integer.MAX_VALUE - expected.count()
+                    ? Integer.MAX_VALUE : expectedCount + expected.count();
+        }
+        return expectedItem.isEmpty() ? null : new ExpectedProduction(expectedItem, expectedCount);
     }
 
     @Override
     public void onBatchFailed(ServerPlayer player, String reason) {
-        if (usingSharedLedger) {
-            children.clear();
-            started = false;
-            sharedLedger = null;
-            usingSharedLedger = false;
-            return;
-        }
-        for (ChildSlot child : children) {
+        // Always let children clear physical machine state. Shared-ledger children
+        // suppress their own material refund; the chain refunds the master ledger.
+        cleanupChildren(children, player, reason);
+        cleanupChildren(failedChildren, player, reason);
+        children.clear();
+        failedChildren.clear();
+        started = false;
+        sharedLedger = null;
+        usingSharedLedger = false;
+    }
+
+    private static void cleanupChildren(List<ChildSlot> slots, ServerPlayer player, String reason) {
+        for (ChildSlot child : slots) {
             try {
                 child.delegate.onBatchFailed(player, reason);
             } catch (Exception e) {
@@ -305,8 +339,6 @@ public final class ParallelCraftGroup implements IBatchDelegate {
                         child.pos, e.getMessage(), e);
             }
         }
-        children.clear();
-        started = false;
     }
 
     @Override
@@ -320,6 +352,7 @@ public final class ParallelCraftGroup implements IBatchDelegate {
             }
         }
         children.clear();
+        failedChildren.clear();
         started = false;
         sharedLedger = null;
         usingSharedLedger = false;

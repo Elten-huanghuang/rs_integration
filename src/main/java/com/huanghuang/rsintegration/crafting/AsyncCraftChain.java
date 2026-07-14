@@ -214,74 +214,73 @@ public final class AsyncCraftChain {
         // Waiting on an async multi-block craft
         if (currentDelegate != null) {
             waitTicks++;
-            int timeoutTicks = RSIntegrationConfig.MULTIBLOCK_CRAFT_TIMEOUT_SECONDS.get() * 20;
-            if (waitTicks > timeoutTicks) {
-                abort("Timeout waiting for craft completion");
-                return true;
-            }
             try {
-                if (currentDelegate.isCraftComplete(online.serverLevel())) {
-                    // Prefer output captured at spawn by the interceptor (already
-                    // safe from magnets). Only fall back to the delegate's world
-                    // scan / slot read when nothing was intercepted — otherwise a
-                    // delegate with a recipe-result fallback (e.g. TLM) would
-                    // double-count the captured product.
-                    List<ItemStack> captured = disarmOutputCapture();
-                    ItemStack result;
-                    if (!captured.isEmpty()) {
-                        for (ItemStack c : captured) addToVirtualInventory(c);
-                        result = ItemStack.EMPTY;
-                    } else {
-                        result = currentDelegate.collectResult(online);
-                    }
-                    if (!result.isEmpty()) {
-                        addToVirtualInventory(result);
-                    }
-                    // getExpectedOutput() is @Nullable — machine-slot delegates
-                    // return null and opt out of the "missing output" diagnostic.
-                    ItemStack expected = currentDelegate.getExpectedOutput();
-                    if (expected != null && !expected.isEmpty() && captured.isEmpty() && result.isEmpty()) {
-                        RSIntegrationMod.LOGGER.error(ctx.format(
-                                "Expected physical output missing: recipe={} delegate={} machine={} expected={}"),
+                // Capture and observation are processed before timeout so an output
+                // produced on the deadline tick is never collected and then refunded.
+                boolean capturedOutput = captureHandle != null && captureHandle.hasCaptured();
+                IBatchDelegate.CraftObservation observation = currentDelegate.observeCraft(online.serverLevel());
+                if (observation.phase() == IBatchDelegate.CraftPhase.FAILED) {
+                    abort("Machine craft failed: " + observation.detail());
+                    return true;
+                }
+                if (observation.phase() == IBatchDelegate.CraftPhase.DONE) {
+                    List<ItemStack> actualResults = new ArrayList<>(disarmOutputCapture());
+                    actualResults.addAll(currentDelegate.collectAllResults(online));
+                    actualResults.removeIf(stack -> stack == null || stack.isEmpty());
+                    for (ItemStack result : actualResults) addToVirtualInventory(result);
+
+                    IBatchDelegate.ExpectedProduction expected = currentDelegate.getExpectedProduction();
+                    int actualCount = countMatchingProduction(actualResults, expected);
+                    if (expected != null && expected.count() > actualCount) {
+                        RSIntegrationMod.LOGGER.warn(ctx.format(
+                                "Craft output partially extracted: recipe={} delegate={} expected={} actual={}"),
                                 steps.get(currentStepIdx).recipeId(), currentDelegate.getClass().getSimpleName(),
-                                currentDelegate.getMachinePos(), expected);
-                        // The physical machine already confirmed input consumption.
-                        // Never use normal abort/refund here: an escaped output may
-                        // already be in the player's inventory (magnet/pickup).
+                                expected.count(), actualCount);
+                        // Current inputs were consumed. Preserve real residual output
+                        // plus earlier settled intermediates, but never refund this step.
+                        snapshotCommittedVirtual();
                         ledger.reset();
-                        abortWithoutRefund("Expected craft output was not captured: "
-                                + steps.get(currentStepIdx).recipeId());
+                        abortWithoutRefund("Craft output was externally extracted (expected "
+                                + expected.count() + ", collected " + actualCount + ")",
+                                Component.translatable("rsi.async.error.output_extracted",
+                                        expected.count(), actualCount));
                         return true;
                     }
-                    // Add secondary byproducts from multi-block recipes.
-                    // GenericBatchDelegate captures secondaries internally and
-                    // exposes them via getPendingSecondary() to avoid voiding
-                    // remainders (empty buckets, etc.) that the recipe-level
-                    // lookup below would miss for non-CraftingRecipe types.
+
+                    // World-output delegates use a separate capture declaration and
+                    // may opt out of count comparison while still failing closed.
+                    ItemStack expectedWorld = currentDelegate.getExpectedOutput();
+                    if (expected == null && expectedWorld != null && !expectedWorld.isEmpty()
+                            && actualResults.isEmpty()) {
+                        snapshotCommittedVirtual();
+                        ledger.reset();
+                        abortWithoutRefund("Expected craft output was not captured: "
+                                + steps.get(currentStepIdx).recipeId(),
+                                Component.translatable("rsi.async.error.output_extracted", 1, 0));
+                        return true;
+                    }
+
                     if (currentDelegate instanceof GenericBatchDelegate gbd) {
-                        for (ItemStack secondary : gbd.getPendingSecondary()) {
-                            addToVirtualInventory(secondary);
-                        }
-                    } else {
+                        for (ItemStack secondary : gbd.getPendingSecondary()) addToVirtualInventory(secondary);
+                    } else if (!currentDelegate.collectsPhysicalSecondaryOutputs()) {
                         ServerLevel overworld = server.overworld();
                         if (overworld == null) return true;
                         Recipe<?> mbRecipe = overworld.getRecipeManager()
                                 .byKey(steps.get(currentStepIdx).recipeId()).orElse(null);
                         if (mbRecipe != null) {
-                            for (ItemStack secondary : ModRecipeHandlers.tryGetSecondaryOutputs(mbRecipe, overworld.registryAccess())) {
-                                addToVirtualInventory(secondary);
+                            int executions = currentDelegate instanceof ParallelCraftGroup group
+                                    ? group.getChildCount() : 1;
+                            for (ItemStack secondary : ModRecipeHandlers.tryGetSecondaryOutputs(
+                                    mbRecipe, overworld.registryAccess())) {
+                                ItemStack total = secondary.copy();
+                                long count = (long) secondary.getCount() * executions;
+                                total.setCount((int) Math.min(Integer.MAX_VALUE, count));
+                                addToVirtualInventory(total);
                             }
                         }
                     }
-                    // Update machineCount to reflect actual successes, not
-                    // the pre-allocation count (failed machines were removed).
                     if (currentDelegate instanceof ParallelCraftGroup group) {
-                        int actual = group.getChildCount();
-                        if (actual != this.machineCount) {
-                            RSIntegrationMod.LOGGER.debug(ctx.format("machineCount corrected: {} → {}"),
-                                    this.machineCount, actual);
-                            this.machineCount = actual;
-                        }
+                        machineCount = group.getChildCount();
                     }
                     try {
                         currentDelegate.onBatchFinished(online);
@@ -290,27 +289,26 @@ public final class AsyncCraftChain {
                     }
                     currentDelegate = null;
                     waitTicks = 0;
-                    // Ledger was committed before placement in startModStep.
-                    // Reset for the next step.
                     ledger.reset();
                     stepRemaining -= machineCount;
-                    if (stepRemaining > 0) {
-                        state = State.EXECUTING;
-                    } else {
-                        currentStepIdx++;
-                        state = State.EXECUTING;
-                    }
-                    // Settled boundary: this step's inputs are consumed and its
-                    // product is now in virtualInventory. Owed on any later abort.
+                    if (stepRemaining <= 0) currentStepIdx++;
+                    state = State.EXECUTING;
                     snapshotCommittedVirtual();
                     RSIntegrationMod.LOGGER.debug(ctx.format("WAITING_MOD → EXECUTING (remaining={})"), stepRemaining);
+                    return false;
+                }
+
+                int timeoutTicks = RSIntegrationConfig.MULTIBLOCK_CRAFT_TIMEOUT_SECONDS.get() * 20;
+                if (waitTicks > timeoutTicks) {
+                    abort("Timeout waiting for craft completion");
+                    return true;
                 }
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.error(ctx.format("Error polling craft completion"), e);
                 abort("Internal error during craft polling");
                 return true;
             }
-            return false; // still waiting
+            return false;
         }
 
         // All done
@@ -806,6 +804,9 @@ public final class AsyncCraftChain {
 }
                     return null;
                 }
+                if (delegate instanceof AbstractBatchDelegate abd) {
+                    abd.useSharedLedger(ledger);
+                }
                 armOutputCapture(delegate, online);
                 if (!delegate.tryStartWithMaterials(online, materials, ledger)) {
                     List<ItemStack> escaped = disarmOutputCapture();
@@ -917,6 +918,9 @@ public final class AsyncCraftChain {
                         RSIntegrationMod.LOGGER.error(ctx.format("onBatchFailed threw during commit cleanup"), fe);
                     }
                     return null;
+                }
+                if (delegate instanceof AbstractBatchDelegate abd) {
+                    abd.useSharedLedger(ledger);
                 }
                 if (!delegate.tryStartWithMaterials(online, materials, ledger)) {
                     RSIntegrationMod.LOGGER.warn(ctx.format("tryStartWithMaterials failed for generic step {}"),
@@ -1188,6 +1192,20 @@ public final class AsyncCraftChain {
                 insertOrDropAtSpawn(s);
             }
         }
+    }
+
+    static int countMatchingProduction(List<ItemStack> results,
+                                       @Nullable IBatchDelegate.ExpectedProduction expected) {
+        if (expected == null || expected.count() <= 0) return 0;
+        int count = 0;
+        for (ItemStack stack : results) {
+            if (stack != null && !stack.isEmpty()
+                    && ItemStack.isSameItem(stack, expected.item())) {
+                count = count > Integer.MAX_VALUE - stack.getCount()
+                        ? Integer.MAX_VALUE : count + stack.getCount();
+            }
+        }
+        return count;
     }
 
     // ── virtual inventory ────────────────────────────────────────

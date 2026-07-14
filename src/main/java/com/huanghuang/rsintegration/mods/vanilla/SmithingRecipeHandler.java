@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.mods.vanilla;
 
 import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 import net.minecraft.core.RegistryAccess;
@@ -42,7 +43,7 @@ public final class SmithingRecipeHandler implements ModRecipeHandler {
                     try {
                         Ingredient ing = (Ingredient) f.get(recipe);
                         if (ing != null && !ing.isEmpty()) ingredients.add(ing);
-                    } catch (Exception e) { com.huanghuang.rsintegration.RSIntegrationMod.LOGGER.debug("[RSI-Smithing] field access failed", e); }
+                    } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Smithing] field access failed", e); }
                 }
             }
             clazz = clazz.getSuperclass();
