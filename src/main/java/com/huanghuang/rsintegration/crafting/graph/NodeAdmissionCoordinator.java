@@ -75,6 +75,21 @@ public final class NodeAdmissionCoordinator {
         this.captures = Objects.requireNonNull(captures, "captures");
     }
 
+    /**
+     * Admit one node that the caller has already claimed RUNNING. A null result
+     * means a transient material/lease conflict; the caller may release the claim
+     * and retry on a later tick.
+     */
+    public Admission tryAdmitClaimed(Candidate candidate) {
+        Objects.requireNonNull(candidate, "candidate");
+        if (scheduler.isStopping()) return null;
+        if (scheduler.state(candidate.nodeId()) != DagScheduler.NodeState.RUNNING) {
+            throw new IllegalStateException("candidate must be claimed before admission: "
+                    + candidate.nodeId());
+        }
+        return tryAdmit(candidate);
+    }
+
     public List<Admission> admit(List<Candidate> candidates, int limit) {
         if (limit <= 0 || scheduler.isStopping()) return List.of();
         List<NodeId> claimed = scheduler.claimReady(Math.min(limit, candidates.size()));
@@ -102,20 +117,32 @@ public final class NodeAdmissionCoordinator {
     }
 
     public void releaseBeforeDispatch(Admission admission) {
-        materials.release(admission.materialToken());
-        releaseLeases(admission);
+        releaseResourcesBeforeDispatch(admission);
         scheduler.releaseClaim(admission.nodeId());
     }
 
-    public void succeed(Admission admission) {
+    public void releaseResourcesBeforeDispatch(Admission admission) {
+        materials.release(admission.materialToken());
+        releaseLeases(admission);
+    }
+
+    public void settleResources(Admission admission) {
         materials.settle(admission.materialToken());
         releaseLeases(admission);
+    }
+
+    public void refundCommittedResources(Admission admission) {
+        materials.refund(admission.materialToken());
+        releaseLeases(admission);
+    }
+
+    public void succeed(Admission admission) {
+        settleResources(admission);
         scheduler.succeed(admission.nodeId());
     }
 
     public void failAfterCommit(Admission admission) {
-        materials.refund(admission.materialToken());
-        releaseLeases(admission);
+        refundCommittedResources(admission);
         scheduler.fail(admission.nodeId());
     }
 
@@ -156,7 +183,7 @@ public final class NodeAdmissionCoordinator {
         materials.release(materialToken);
     }
 
-    private void releaseLeases(Admission admission) {
+    public void releaseLeases(Admission admission) {
         for (CaptureLeaseRegistry.Lease lease : admission.captureLeases()) captures.release(lease);
         for (MachineLeaseRegistry.Lease lease : admission.machineLeases()) machines.release(lease);
     }

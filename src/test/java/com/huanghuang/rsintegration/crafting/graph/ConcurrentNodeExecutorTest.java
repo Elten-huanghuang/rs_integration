@@ -126,6 +126,28 @@ class ConcurrentNodeExecutorTest extends BootstrapTest {
     }
 
     @Test
+    void transientAdmissionConflictReturnsNodeToReady() {
+        DagScheduler scheduler = new DagScheduler(forkJoinGraph());
+        AtomicInteger starts = new AtomicInteger();
+        ConcurrentNodeExecutor.AdmissionWorkerFactory factory = nodeId -> {
+            if (nodeId.equals(new NodeId(0)) && starts.getAndIncrement() == 0) {
+                return ConcurrentNodeExecutor.StartResult.retry();
+            }
+            return ConcurrentNodeExecutor.StartResult.started(
+                    new FakeWorker(ConcurrentNodeExecutor.Observation.WORKING));
+        };
+        ConcurrentNodeExecutor executor = new ConcurrentNodeExecutor(
+                scheduler, factory, 1, nodeId -> false);
+
+        executor.tick();
+        assertEquals(DagScheduler.NodeState.READY, scheduler.state(new NodeId(0)));
+        assertEquals(0, executor.runningCount());
+        executor.tick();
+        assertEquals(DagScheduler.NodeState.RUNNING, scheduler.state(new NodeId(1)));
+        assertEquals(1, executor.runningCount());
+    }
+
+    @Test
     void legacyConstructorTreatsEveryNodeAsConcurrencySafe() {
         DagScheduler scheduler = new DagScheduler(forkJoinGraph());
         Map<NodeId, FakeWorker> workers = new HashMap<>();

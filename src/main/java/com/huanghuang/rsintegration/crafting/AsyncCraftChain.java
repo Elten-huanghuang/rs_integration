@@ -11,6 +11,14 @@ import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
 import com.huanghuang.rsintegration.crafting.graph.ConcurrentNodeExecutor;
 import com.huanghuang.rsintegration.crafting.graph.CraftPlanValidator;
 import com.huanghuang.rsintegration.crafting.graph.DagScheduler;
+import com.huanghuang.rsintegration.crafting.graph.MaterialAllocation;
+import com.huanghuang.rsintegration.crafting.graph.MaterialBroker;
+import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
+import com.huanghuang.rsintegration.crafting.graph.MaterialSource;
+import com.huanghuang.rsintegration.crafting.graph.MachineLeaseRegistry;
+import com.huanghuang.rsintegration.crafting.graph.CaptureLeaseRegistry;
+import com.huanghuang.rsintegration.crafting.graph.NodeAdmissionCoordinator;
+import com.huanghuang.rsintegration.crafting.graph.OutputDeclaration;
 import com.huanghuang.rsintegration.crafting.graph.NodeId;
 import com.huanghuang.rsintegration.crafting.batch.GenericBatchDelegate;
 import com.huanghuang.rsintegration.ModVersionDelegateRegistry;
@@ -133,7 +141,16 @@ public final class AsyncCraftChain {
     @Nullable
     private ConcurrentNodeExecutor graphExecutor;
     private final Map<NodeId, CraftNodeRuntime> nodeRuntimes = new HashMap<>();
-    private int graphEpoch;
+    @Nullable
+    private final MaterialBroker graphMaterials;
+    @Nullable
+    private final MachineLeaseRegistry graphMachineLeases;
+    @Nullable
+    private final CaptureLeaseRegistry graphCaptureLeases;
+    @Nullable
+    private final NodeAdmissionCoordinator graphAdmissions;
+    private final Map<NodeId, List<MaterialBroker.Request>> graphRequests = new HashMap<>();
+    private final Map<NodeId, CraftNode> graphNodes = new HashMap<>();
     private int graphTotalTicks;
     private final int graphGlobalTimeoutTicks;
     private final int graphRunningNodeCap;
@@ -190,10 +207,20 @@ public final class AsyncCraftChain {
         if (graph != null) {
             this.graph = graph;
             this.graphScheduler = new DagScheduler(graph);
+            this.graphMaterials = new MaterialBroker();
+            this.graphMachineLeases = new MachineLeaseRegistry();
+            this.graphCaptureLeases = new CaptureLeaseRegistry();
+            this.graphAdmissions = new NodeAdmissionCoordinator(craftId, graphScheduler,
+                    graphMaterials, graphMachineLeases, graphCaptureLeases);
+            initialiseGraphMaterialFlow(graph);
             this.useGraphExecution = true;
         } else {
             this.graph = null;
             this.graphScheduler = null;
+            this.graphMaterials = null;
+            this.graphMachineLeases = null;
+            this.graphCaptureLeases = null;
+            this.graphAdmissions = null;
             this.useGraphExecution = false;
         }
         RSIntegrationMod.LOGGER.debug(ctx.format("Chain created: {} steps"), steps.size());
@@ -207,6 +234,27 @@ public final class AsyncCraftChain {
                 RSIntegrationMod.LOGGER.debug(sb.toString());
         }
     }
+
+    private void initialiseGraphMaterialFlow(CraftPlanGraph plan) {
+        for (CraftNode node : plan.nodes()) graphNodes.put(node.id(), node);
+        Map<InitialLotKey, Integer> initial = new java.util.LinkedHashMap<>();
+        for (MaterialAllocation allocation : plan.allocations()) {
+            graphRequests.computeIfAbsent(allocation.consumer().nodeId(), ignored -> new ArrayList<>())
+                    .add(new MaterialBroker.Request(allocation.source(), allocation.material(),
+                            allocation.quantity()));
+            if (allocation.source() instanceof MaterialSource.InitialPool source) {
+                initial.merge(new InitialLotKey(source, allocation.material()),
+                        allocation.quantity(), Integer::sum);
+            }
+        }
+        if (graphMaterials != null) {
+            for (Map.Entry<InitialLotKey, Integer> entry : initial.entrySet()) {
+                graphMaterials.publish(entry.getKey().source(), entry.getKey().material(), entry.getValue());
+            }
+        }
+    }
+
+    private record InitialLotKey(MaterialSource.InitialPool source, MaterialKey material) {}
 
     private static List<CraftingResolver.ResolutionStep> projectSteps(CraftPlanGraph graph) {
         Objects.requireNonNull(graph, "graph");
@@ -548,9 +596,11 @@ public final class AsyncCraftChain {
             state = State.EXECUTING;
             Diagnostics.record(Diagnostics.Category.CHAIN_STATE,
                     "PENDING→EXECUTING graph nodes=" + graph.topologicalOrder().size());
+            ConcurrentNodeExecutor.AdmissionWorkerFactory graphWorkers =
+                    nodeId -> startAdmittedGraphNode(nodeId, online);
             graphExecutor = new ConcurrentNodeExecutor(graphScheduler,
-                    nodeId -> startGraphNode(nodeId, online), graphRunningNodeCap,
-                    this::isNodeExclusive);
+                    graphWorkers, graphRunningNodeCap, this::isNodeExclusive,
+                    this::completeGraphNode);
             sendStartedPacket(online);
         }
 
@@ -605,27 +655,45 @@ public final class AsyncCraftChain {
         return false;
     }
 
-    /** Execute all ready GENERIC nodes synchronously and settle them immediately. */
+    /** Execute ready GENERIC nodes synchronously, one graph node at a time. */
     private void settleReadyVanillaNodes(ServerPlayer online) {
         while (true) {
             NodeId vanillaNode = findReadyVanillaNode();
             if (vanillaNode == null) break;
+            if (graphAdmissions == null) {
+                graphScheduler.fail(vanillaNode);
+                return;
+            }
+            NodeAdmissionCoordinator.Candidate candidate = new NodeAdmissionCoordinator.Candidate(
+                    vanillaNode, graphRequests.getOrDefault(vanillaNode, List.of()), List.of(), List.of());
+            NodeAdmissionCoordinator.Admission admission = graphAdmissions.tryAdmitClaimed(candidate);
+            if (admission == null) {
+                graphScheduler.releaseClaim(vanillaNode);
+                break;
+            }
 
             int idx = stepIndex(vanillaNode);
             currentStepIdx = idx;
-            int nextIdx = executeVanillaBatch(idx, online);
-            if (state == State.ABORTED) return;
-
-            if (!ledger.isCommitted() && !ledger.commit(network, online)) {
-                abort("Commit failed after vanilla batch");
+            boolean executed = executeVanillaStepsInline(List.of(steps.get(idx)), online);
+            if (!executed || state == State.ABORTED) {
+                graphAdmissions.releaseResourcesBeforeDispatch(admission);
+                if (graphScheduler.state(vanillaNode) == DagScheduler.NodeState.RUNNING) {
+                    graphScheduler.fail(vanillaNode);
+                }
                 return;
             }
-            ledger.reset();
-            snapshotCommittedVirtual();
-            for (int i = idx; i < nextIdx; i++) {
-                graphScheduler.succeed(graph.topologicalOrder().get(i));
+            if (!ledger.isCommitted() && !ledger.commit(network, online)) {
+                graphAdmissions.releaseResourcesBeforeDispatch(admission);
+                abort("Commit failed after vanilla graph node");
+                return;
             }
-            currentStepIdx = nextIdx;
+            graphAdmissions.commit(admission);
+            ledger.reset();
+            graphAdmissions.settleResources(admission);
+            publishDeclaredNodeOutputs(vanillaNode);
+            snapshotCommittedVirtual();
+            graphScheduler.succeed(vanillaNode);
+            currentStepIdx = idx + 1;
         }
     }
 
@@ -665,264 +733,240 @@ public final class AsyncCraftChain {
         return !probe.supportsConcurrentNodeExecution();
     }
 
-    /** Create a {@link CraftNodeRuntime} worker for one ready mod node. */
-    @Nullable
-    private ConcurrentNodeExecutor.Worker startGraphNode(NodeId nodeId, ServerPlayer online) {
+    private record PreparedGraphNode(CraftingResolver.ResolutionStep step,
+                                     IBatchDelegate delegate,
+                                     BoundMachine machine) {}
+
+    private ConcurrentNodeExecutor.StartResult startAdmittedGraphNode(
+            NodeId nodeId, ServerPlayer online) {
+        if (graphAdmissions == null) return ConcurrentNodeExecutor.StartResult.failed();
         int idx = stepIndex(nodeId);
         CraftingResolver.ResolutionStep step = steps.get(idx);
 
-        // Earth Heart taint — synchronous, no delegate needed
+        // Earth Heart is synchronous and owns no machine/capture resources.
         if (step.recipeId().equals(CraftingResolver.TAINT_EARTH_HEART_STEP)) {
+            NodeAdmissionCoordinator.Candidate candidate = new NodeAdmissionCoordinator.Candidate(
+                    nodeId, graphRequests.getOrDefault(nodeId, List.of()), List.of(), List.of());
+            NodeAdmissionCoordinator.Admission admission = graphAdmissions.tryAdmitClaimed(candidate);
+            if (admission == null) return ConcurrentNodeExecutor.StartResult.retry();
             if (!startEarthHeartTaint(online, step.executions())) {
-                graphScheduler.fail(nodeId);
-                return null;
+                graphAdmissions.releaseResourcesBeforeDispatch(admission);
+                return ConcurrentNodeExecutor.StartResult.failed();
             }
-            graphScheduler.succeed(nodeId);
-            CraftNodeRuntime synthetic = new CraftNodeRuntime(nodeId,
-                    step.recipeId().toString(), null, null, null);
-            synthetic.setChainContext(virtualInventory, online);
-            nodeRuntimes.put(nodeId, synthetic);
-            return null; // already succeeded
+            graphAdmissions.commit(admission);
+            graphAdmissions.settleResources(admission);
+            publishDeclaredNodeOutputs(nodeId);
+            return ConcurrentNodeExecutor.StartResult.completed();
         }
 
-        // Create per-node ledger
-        ExtractionLedger ledger = new ExtractionLedger();
-        ledger.setLogContext(ctx);
+        PreparedGraphNode prepared = prepareGraphNode(step, online);
+        if (prepared == null) return ConcurrentNodeExecutor.StartResult.failed();
+        NodeAdmissionCoordinator.Candidate candidate = graphCandidate(nodeId, prepared, online);
+        NodeAdmissionCoordinator.Admission admission = graphAdmissions.tryAdmitClaimed(candidate);
+        if (admission == null) return ConcurrentNodeExecutor.StartResult.retry();
 
-        // Start the delegate using the chain's existing infrastructure,
-        // but with the node-local ledger.
-        IBatchDelegate delegate = startNodeDelegate(step, online, ledger);
-        if (delegate == null) {
-            graphScheduler.fail(nodeId);
-            return null;
+        ConcurrentNodeExecutor.Worker worker = dispatchPreparedGraphNode(
+                nodeId, prepared, online, admission);
+        if (worker == null) {
+            graphAdmissions.releaseResourcesBeforeDispatch(admission);
+            return ConcurrentNodeExecutor.StartResult.failed();
         }
-
-        CraftNodeRuntime runtime = new CraftNodeRuntime(nodeId,
-                step.recipeId().toString(), delegate, ledger, null);
-        runtime.setChainContext(virtualInventory, online);
-        nodeRuntimes.put(nodeId, runtime);
-
-        Diagnostics.record(Diagnostics.Category.CHAIN_STATE,
-                "GRAPH-DISPATCH step=" + step.recipeId() + " node=" + nodeId,
-                step.recipeId(), step.modType());
-        RSIntegrationMod.LOGGER.debug(ctx.format("Graph node dispatched: {} (step {})"),
-                nodeId, step.recipeId());
-        return runtime;
+        graphAdmissions.commit(admission);
+        if (worker instanceof CraftNodeRuntime runtime) runtime.markDispatched();
+        return ConcurrentNodeExecutor.StartResult.started(worker);
     }
 
-    /** Like {@link #startModStep} but writes into a node-local ledger. */
     @Nullable
-    private IBatchDelegate startNodeDelegate(CraftingResolver.ResolutionStep step,
-                                              ServerPlayer online,
-                                              ExtractionLedger ledger) {
+    private PreparedGraphNode prepareGraphNode(CraftingResolver.ResolutionStep step,
+                                               ServerPlayer online) {
         String path = step.recipeId().getPath();
         int slash = path.indexOf('/');
         String subTypeHint = slash > 0 ? path.substring(0, slash).toLowerCase() : null;
-
-        List<BoundMachine> machines = AltarBindingRegistry.getBoundMachinesForType(
-                online, step.modType(), subTypeHint);
-        if (machines.isEmpty()) {
-            int totalForMod = AltarBindingRegistry.getBoundMachinesForType(
-                    online, step.modType()).size();
-            RSIntegrationMod.LOGGER.warn(ctx.format("No bound machine for graph node {}: mod={} subType={} (total={})"),
-                    step.recipeId(), step.modType(), subTypeHint, totalForMod);
-            return null;
-        }
-        machines = deduplicateMachines(machines);
+        List<BoundMachine> machines = deduplicateMachines(AltarBindingRegistry.getBoundMachinesForType(
+                online, step.modType(), subTypeHint));
         machines.sort((a, b) -> {
             ResourceLocation playerDim = online.level().dimension().location();
             boolean aSame = a.dim().equals(playerDim);
             boolean bSame = b.dim().equals(playerDim);
-            if (aSame == bSame) return 0;
-            return aSame ? -1 : 1;
+            return aSame == bSame ? 0 : aSame ? -1 : 1;
         });
-
-        // Parallel group when multiple machines, enough executions, and not infer mode
-        if (!step.inferMode() && machines.size() >= 2 && step.executions() > 1) {
-            IBatchDelegate parallel = tryStartParallel(machines, step, online);
-            if (parallel != null) return parallel;
-            if (ledger.isCommitted()) return null; // partial commit — must abort
-            ledger.reset();
-        }
-
         IBatchDelegate delegate = step.inferMode()
-                ? step.modType().createInferDelegate()
-                : createDelegate(step.modType());
+                ? step.modType().createInferDelegate() : createDelegate(step.modType());
         if (delegate == null) return null;
-
-        if (delegate instanceof GenericBatchDelegate) {
-            if (!delegate.validateAndInit(online, step.recipeId(), null, null)) return null;
-            if (delegate instanceof AbstractBatchDelegate abd) abd.setMachineServer(server);
-            return startGenericStep(delegate, step, online);
-        }
-
-        BoundMachine matched = null;
-        for (BoundMachine m : machines) {
+        for (BoundMachine machine : machines) {
             try {
-                if (delegate.validateAndInit(online, step.recipeId(), m.dim(), m.pos())) {
-                    matched = m;
+                if (delegate.validateAndInit(online, step.recipeId(), machine.dim(), machine.pos())) {
                     if (delegate instanceof AbstractBatchDelegate abd) {
-                        abd.setMachineDim(m.dim());
+                        abd.setMachineDim(machine.dim());
                         abd.setMachineServer(server);
-                        if (targetOutput != null && stepIndexForNode(step) == steps.size() - 1) {
-                            abd.setTargetOutput(targetOutput);
-                        }
                     }
-                    break;
+                    return new PreparedGraphNode(step, delegate, machine);
                 }
-            } catch (Exception ex) {
-                RSIntegrationMod.LOGGER.debug(ctx.format("validateAndInit failed for {}"), m.pos(), ex);
+            } catch (RuntimeException exception) {
+                RSIntegrationMod.LOGGER.debug(ctx.format("Graph node probe failed for {}"),
+                        machine.pos(), exception);
             }
         }
-        if (matched == null) return null;
+        return null;
+    }
 
-        try {
-            var dimKey = ResourceKey.create(
-                    net.minecraft.core.registries.Registries.DIMENSION, matched.dim());
-            ServerLevel machineLevel = server.getLevel(dimKey);
-            if (machineLevel != null
-                    && !ProtectionChecker.canInteract(online, machineLevel, matched.pos())) {
-                return null;
-            }
-        } catch (Exception ex) {
-            RSIntegrationMod.LOGGER.warn(ctx.format("Protection check failed"), ex);
+    private NodeAdmissionCoordinator.Candidate graphCandidate(
+            NodeId nodeId, PreparedGraphNode prepared, ServerPlayer online) {
+        BoundMachine machine = prepared.machine();
+        MachineLeaseRegistry.MachineKey machineKey = new MachineLeaseRegistry.MachineKey(
+                machine.dim(), machine.pos(), prepared.step().modType().id());
+        List<NodeAdmissionCoordinator.CaptureRequest> captures = List.of();
+        ItemStack expected = prepared.delegate().getExpectedOutput();
+        AABB region = prepared.delegate().getOutputCaptureRegion();
+        if (expected != null && !expected.isEmpty() && region != null) {
+            captures = List.of(new NodeAdmissionCoordinator.CaptureRequest(machine.dim(), region,
+                    MaterialKey.of(expected), 0));
         }
+        return new NodeAdmissionCoordinator.Candidate(nodeId,
+                graphRequests.getOrDefault(nodeId, List.of()),
+                List.of(new NodeAdmissionCoordinator.MachineRequest(machineKey, 0)), captures);
+    }
 
+    @Nullable
+    private ConcurrentNodeExecutor.Worker dispatchPreparedGraphNode(
+            NodeId nodeId, PreparedGraphNode prepared, ServerPlayer online,
+            NodeAdmissionCoordinator.Admission admission) {
+        ExtractionLedger nodeLedger = new ExtractionLedger();
+        nodeLedger.setLogContext(ctx);
+        IBatchDelegate delegate = prepared.delegate();
         try {
             List<IngredientSpec> specs = delegate.getRequiredMaterials();
-            if (specs != null && !specs.isEmpty()) {
-                List<ItemStack> materials = preReserveForNode(specs, online, ledger);
-                if (materials == null) {
-                    try { delegate.onBatchFailed(online, "pre-reserve failed"); }
-                    catch (Exception fe) { RSIntegrationMod.LOGGER.error(ctx.format("onBatchFailed in pre-reserve"), fe); }
-                    return null;
-                }
-                if (!ledger.commit(network, online)) {
-                    try { delegate.onBatchFailed(online, "commit failed"); }
-                    catch (Exception fe) { RSIntegrationMod.LOGGER.error(ctx.format("onBatchFailed in commit"), fe); }
-                    return null;
-                }
-                if (delegate instanceof AbstractBatchDelegate abd) abd.useSharedLedger(ledger);
-                if (armNodeCapture(delegate, online) == null && delegate.getExpectedOutput() != null) {
-                    try { delegate.onBatchFailed(online, "capture zone overlap"); }
-                    catch (Exception fe) { RSIntegrationMod.LOGGER.error(ctx.format("onBatchFailed in capture"), fe); }
-                    return null;
-                }
-                if (!delegate.tryStartWithMaterials(online, materials, ledger)) {
-                    List<ItemStack> escaped = disarmNodeCapture(delegate);
-                    if (!escaped.isEmpty()) {
-                        for (ItemStack s : escaped) addToVirtualInventory(s);
-                        ledger.reset();
-                        return delegate;
-                    }
-                    try { delegate.onBatchFailed(online, "tryStartWithMaterials failed"); }
-                    catch (Exception fe) { RSIntegrationMod.LOGGER.error(ctx.format("onBatchFailed in start"), fe); }
-                    return null;
-                }
-            } else {
-                if (network != null && !virtualInventory.isEmpty()) {
-                    flushVirtualInventory(online);
-                    snapshotCommittedVirtual();
-                }
-                if (armNodeCapture(delegate, online) == null && delegate.getExpectedOutput() != null) {
-                    try { delegate.onBatchFailed(online, "capture zone overlap"); }
-                    catch (Exception fe) { RSIntegrationMod.LOGGER.error(ctx.format("onBatchFailed in capture"), fe); }
-                    return null;
-                }
-                if (!delegate.tryStartSingleCraft(online, ledger)) {
-                    List<ItemStack> escaped = disarmNodeCapture(delegate);
-                    if (!escaped.isEmpty()) {
-                        for (ItemStack s : escaped) addToVirtualInventory(s);
-                        ledger.reset();
-                        return delegate;
-                    }
-                    try { delegate.onBatchFailed(online, "tryStartSingleCraft failed"); }
-                    catch (Exception fe) { RSIntegrationMod.LOGGER.error(ctx.format("onBatchFailed in single"), fe); }
-                    return null;
-                }
+            if (specs == null || specs.isEmpty()) return null;
+            List<ItemStack> materials = reserveInitialMaterialsForNode(
+                    nodeId, specs, online, nodeLedger);
+            if (materials == null || !nodeLedger.commit(network, online)) return null;
+            if (delegate instanceof AbstractBatchDelegate abd) abd.useSharedLedger(nodeLedger);
+
+            MachineLeaseRegistry.Lease machineLease = admission.machineLeases().isEmpty()
+                    ? null : admission.machineLeases().get(0);
+            CraftNodeRuntime runtime = new CraftNodeRuntime(nodeId,
+                    prepared.step().recipeId().toString(), delegate, nodeLedger,
+                    machineLease, admission);
+            runtime.setChainContext(virtualInventory, online);
+            ItemStack expected = delegate.getExpectedOutput();
+            AABB region = delegate.getOutputCaptureRegion();
+            if (expected != null && !expected.isEmpty() && region != null) {
+                ResourceKey<Level> dim = ResourceKey.create(
+                        net.minecraft.core.registries.Registries.DIMENSION, prepared.machine().dim());
+                CraftOutputInterceptor.CaptureHandle handle = CraftOutputInterceptor.arm(dim, region, expected);
+                if (handle == null) return null;
+                runtime.attachCapture(handle);
             }
-        } catch (Exception e) {
-            List<ItemStack> escaped = disarmNodeCapture(delegate);
-            if (!escaped.isEmpty()) {
-                for (ItemStack s : escaped) addToVirtualInventory(s);
-                ledger.reset();
-                return delegate;
+            if (!delegate.tryStartWithMaterials(online, materials, nodeLedger)) {
+                runtime.disarmCapture();
+                return null;
             }
-            try { delegate.onBatchFailed(online, "exception in startNodeDelegate"); }
-            catch (Exception fe) { RSIntegrationMod.LOGGER.error(ctx.format("onBatchFailed in exception"), fe); }
+            nodeRuntimes.put(nodeId, runtime);
+            return runtime;
+        } catch (RuntimeException exception) {
+            try { delegate.onBatchFailed(online, "graph dispatch failed"); }
+            catch (RuntimeException ignored) { }
             return null;
         }
-        return delegate;
     }
 
-    /** Pre-reserve materials into a node-local ledger. */
-    @Nullable
-    private List<ItemStack> preReserveForNode(List<IngredientSpec> specs, ServerPlayer online,
-                                               ExtractionLedger ledger) {
-        List<ItemStack> materials = new ArrayList<>(specs.size());
-        for (IngredientSpec spec : specs) {
-            if (spec.isEmpty()) { materials.add(ItemStack.EMPTY); continue; }
-            int needed = spec.count();
-            // Consume from virtualInventory first (intermediate outputs of earlier nodes)
-            List<ItemStack> fromVirtual = new ArrayList<>();
-            int remaining = needed;
-            for (int i = virtualInventory.size() - 1; i >= 0 && remaining > 0; i--) {
-                ItemStack vi = virtualInventory.get(i);
-                if (IngredientMatcher.test(spec.ingredient(), vi) && vi.getCount() > 0) {
-                    int take = Math.min(remaining, vi.getCount());
-                    ItemStack taken = vi.split(take);
-                    fromVirtual.add(taken.copy());
-                    remaining -= take;
-                    if (vi.isEmpty()) virtualInventory.remove(i);
-                }
+    private ConcurrentNodeExecutor.CompletionStatus completeGraphNode(
+            NodeId nodeId, ConcurrentNodeExecutor.Worker worker) {
+        if (!(worker instanceof CraftNodeRuntime runtime) || graphAdmissions == null
+                || graphMaterials == null) {
+            return ConcurrentNodeExecutor.CompletionStatus.SUCCEEDED;
+        }
+        try {
+            NodeAdmissionCoordinator.Admission admission = runtime.admission();
+            if (admission != null && runtime.markResourcesClosed()) {
+                graphAdmissions.settleResources(admission);
             }
-            if (remaining > 0) {
-                ItemStack fromLedger = ledger.reserve(spec.ingredient(), remaining,
-                        network, online, null, null);
-                if (fromLedger.isEmpty()) {
-                    // Refund taken virtual items
-                    for (ItemStack s : fromVirtual) addToVirtualInventory(s);
-                    return null;
-                }
-                materials.add(fromLedger.copyWithCount(remaining));
-            } else if (!fromVirtual.isEmpty()) {
-                ItemStack merged = fromVirtual.get(0).copy();
-                for (int i = 1; i < fromVirtual.size(); i++) merged.grow(fromVirtual.get(i).getCount());
-                materials.add(merged);
-            } else {
-                materials.add(ItemStack.EMPTY);
+            publishNodeOutputs(nodeId, runtime.confirmedOutputs());
+            nodeRuntimes.remove(nodeId);
+            snapshotCommittedVirtual();
+            return ConcurrentNodeExecutor.CompletionStatus.SUCCEEDED;
+        } catch (RuntimeException exception) {
+            RSIntegrationMod.LOGGER.error(ctx.format("Failed to settle graph node {}"), nodeId, exception);
+            return ConcurrentNodeExecutor.CompletionStatus.FAILED;
+        }
+    }
+
+    private void publishNodeOutputs(NodeId nodeId, List<ItemStack> actualOutputs) {
+        CraftNode node = graphNodes.get(nodeId);
+        if (node == null || graphMaterials == null) return;
+        List<ItemStack> remaining = copyStacks(actualOutputs);
+        for (OutputDeclaration output : node.outputs()) {
+            int confirmed = removeMatchingCount(remaining, output.material(), output.quantity());
+            if (confirmed <= 0) continue;
+            MaterialSource source = new MaterialSource.ProducerOutput(output.id());
+            graphMaterials.publish(source, output.material(), confirmed);
+            addToVirtualInventory(output.material().toStack(confirmed));
+        }
+        for (ItemStack extra : remaining) {
+            if (!extra.isEmpty()) addToVirtualInventory(extra);
+        }
+    }
+
+    /** Vanilla execution has already placed declared results in virtualInventory. */
+    private void publishDeclaredNodeOutputs(NodeId nodeId) {
+        CraftNode node = graphNodes.get(nodeId);
+        if (node == null || graphMaterials == null) return;
+        for (OutputDeclaration output : node.outputs()) {
+            graphMaterials.publish(new MaterialSource.ProducerOutput(output.id()),
+                    output.material(), output.quantity());
+        }
+    }
+
+    private static int removeMatchingCount(List<ItemStack> stacks, MaterialKey material, int limit) {
+        int remaining = limit;
+        for (ItemStack stack : stacks) {
+            if (remaining <= 0) break;
+            if (stack.isEmpty() || !MaterialKey.of(stack).equals(material)) continue;
+            int take = Math.min(remaining, stack.getCount());
+            stack.shrink(take);
+            remaining -= take;
+        }
+        return limit - remaining;
+    }
+
+    /** Reserve only initial-pool allocations physically; producer lots are already chain-owned. */
+    @Nullable
+    private List<ItemStack> reserveInitialMaterialsForNode(
+            NodeId nodeId, List<IngredientSpec> specs, ServerPlayer online,
+            ExtractionLedger ledger) {
+        List<ItemStack> producerPool = new ArrayList<>();
+        for (MaterialBroker.Request request : graphRequests.getOrDefault(nodeId, List.of())) {
+            if (request.source() instanceof MaterialSource.ProducerOutput) {
+                producerPool.add(request.material().toStack(request.quantity()));
             }
         }
+        List<ItemStack> materials = new ArrayList<>(specs.size());
+        for (IngredientSpec spec : specs) {
+            if (spec.isEmpty()) {
+                materials.add(ItemStack.EMPTY);
+                continue;
+            }
+            int remaining = spec.count();
+            ItemStack combined = ItemStack.EMPTY;
+            for (ItemStack produced : producerPool) {
+                if (remaining <= 0) break;
+                if (produced.isEmpty() || !IngredientMatcher.test(spec.ingredient(), produced)) continue;
+                int take = Math.min(remaining, produced.getCount());
+                if (combined.isEmpty()) combined = produced.copyWithCount(take);
+                else combined.grow(take);
+                produced.shrink(take);
+                remaining -= take;
+            }
+            if (remaining > 0) {
+                ItemStack initial = ledger.reserve(spec.ingredient(), remaining,
+                        network, online, null, null);
+                if (initial.isEmpty()) return null;
+                if (combined.isEmpty()) combined = initial.copyWithCount(remaining);
+                else combined.grow(remaining);
+            }
+            materials.add(combined);
+        }
         return materials;
-    }
-
-    @Nullable
-    private CraftOutputInterceptor.CaptureHandle armNodeCapture(IBatchDelegate delegate, ServerPlayer online) {
-        ItemStack expected = delegate.getExpectedOutput();
-        if (expected == null || expected.isEmpty()) return null;
-        var region = delegate.getOutputCaptureRegion();
-        if (region == null) return null;
-        ResourceLocation dimLoc = delegate instanceof AbstractBatchDelegate abd ? abd.getMachineDim() : null;
-        ResourceKey<Level> dim = dimLoc != null
-                ? ResourceKey.create(net.minecraft.core.registries.Registries.DIMENSION, dimLoc)
-                : online.level().dimension();
-        CraftOutputInterceptor.CaptureHandle handle = CraftOutputInterceptor.arm(dim, region, expected);
-        if (handle != null) this.captureHandle = handle;
-        return handle;
-    }
-
-    private List<ItemStack> disarmNodeCapture(IBatchDelegate delegate) {
-        return disarmOutputCapture(); // single capture for now
-    }
-
-    private int stepIndexForNode(CraftingResolver.ResolutionStep step) {
-        return steps.indexOf(step);
-    }
-
-    @Nullable
-    private NodeId claimNextReadyNode() {
-        java.util.List<NodeId> ready = graphScheduler.claimReady(1);
-        return ready.isEmpty() ? null : ready.get(0);
     }
 
     private int stepIndex(NodeId nodeId) {
@@ -2243,11 +2287,41 @@ public final class AsyncCraftChain {
                 }
                 ExtractionLedger nodeLedger = runtime.nodeLedger();
                 if (nodeLedger != null) nodeLedger.close();
+                closeGraphRuntimeResources(runtime);
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.error(ctx.format("Error cleaning up graph node {}"), runtime.describe(), e);
             }
         }
         nodeRuntimes.clear();
+        if (graphMachineLeases != null && graphMachineLeases.size() != 0) {
+            RSIntegrationMod.LOGGER.error(ctx.format("Leaked {} graph machine leases during cleanup"),
+                    graphMachineLeases.size());
+            graphMachineLeases.clear();
+        }
+        if (graphCaptureLeases != null && graphCaptureLeases.size() != 0) {
+            RSIntegrationMod.LOGGER.error(ctx.format("Leaked {} graph capture leases during cleanup"),
+                    graphCaptureLeases.size());
+            graphCaptureLeases.clear();
+        }
+    }
+
+    private void closeGraphRuntimeResources(CraftNodeRuntime runtime) {
+        if (graphAdmissions == null || !runtime.markResourcesClosed()) return;
+        NodeAdmissionCoordinator.Admission admission = runtime.admission();
+        if (admission == null) return;
+        MaterialBroker.ReservationState state = graphMaterials != null
+                ? graphMaterials.state(admission.materialToken()) : null;
+        if (state == MaterialBroker.ReservationState.RESERVED) {
+            graphAdmissions.releaseResourcesBeforeDispatch(admission);
+        } else if (state == MaterialBroker.ReservationState.COMMITTED) {
+            if (runtime.wasDispatched()) {
+                graphAdmissions.releaseLeases(admission);
+            } else {
+                graphAdmissions.refundCommittedResources(admission);
+            }
+        } else {
+            graphAdmissions.releaseLeases(admission);
+        }
     }
 
     // ── progress packets ─────────────────────────────────────────
