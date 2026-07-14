@@ -85,6 +85,7 @@ public final class AsyncCraftChain {
     private int currentStepIdx;
     private IBatchDelegate currentDelegate;
     private int waitTicks;
+    private int drainingTicks;
     private int stepRemaining;
     private State state = State.PENDING;
     private int taintSlot = -1;
@@ -219,6 +220,24 @@ public final class AsyncCraftChain {
                 // produced on the deadline tick is never collected and then refunded.
                 boolean capturedOutput = captureHandle != null && captureHandle.hasCaptured();
                 IBatchDelegate.CraftObservation observation = currentDelegate.observeCraft(online.serverLevel());
+                if (currentDelegate instanceof ParallelCraftGroup group && group.isDraining()) {
+                    drainingTicks++;
+                } else {
+                    drainingTicks = 0;
+                }
+                if (currentDelegate instanceof ParallelCraftGroup group) {
+                    List<ItemStack> settled = group.drainSettledResults();
+                    if (!settled.isEmpty()) {
+                        for (ItemStack result : settled) addToVirtualInventory(result);
+                        snapshotCommittedVirtual();
+                        waitTicks = 0;
+                    }
+                    List<ItemStack> queuedMaterials = group.drainQueuedMaterialsForRecovery();
+                    if (!queuedMaterials.isEmpty()) {
+                        for (ItemStack material : queuedMaterials) addToVirtualInventory(material);
+                        snapshotCommittedVirtual();
+                    }
+                }
                 if (observation.phase() == IBatchDelegate.CraftPhase.FAILED) {
                     abort("Machine craft failed: " + observation.detail());
                     return true;
@@ -262,24 +281,26 @@ public final class AsyncCraftChain {
 
                     if (currentDelegate instanceof GenericBatchDelegate gbd) {
                         for (ItemStack secondary : gbd.getPendingSecondary()) addToVirtualInventory(secondary);
-                    } else if (!currentDelegate.collectsPhysicalSecondaryOutputs()) {
+                    } else if (!currentDelegate.collectsPhysicalSecondaryOutputs()
+                            && !(currentDelegate instanceof ParallelCraftGroup)) {
                         ServerLevel overworld = server.overworld();
                         if (overworld == null) return true;
                         Recipe<?> mbRecipe = overworld.getRecipeManager()
                                 .byKey(steps.get(currentStepIdx).recipeId()).orElse(null);
                         if (mbRecipe != null) {
-                            int executions = currentDelegate instanceof ParallelCraftGroup group
-                                    ? group.getChildCount() : 1;
                             for (ItemStack secondary : ModRecipeHandlers.tryGetSecondaryOutputs(
                                     mbRecipe, overworld.registryAccess())) {
-                                ItemStack total = secondary.copy();
-                                long count = (long) secondary.getCount() * executions;
-                                total.setCount((int) Math.min(Integer.MAX_VALUE, count));
-                                addToVirtualInventory(total);
+                                addToVirtualInventory(secondary.copy());
                             }
                         }
                     }
-                    if (currentDelegate instanceof ParallelCraftGroup group) {
+                    boolean parallelGroup = currentDelegate instanceof ParallelCraftGroup;
+                    if (parallelGroup) {
+                        ParallelCraftGroup group = (ParallelCraftGroup) currentDelegate;
+                        if (group.getCompletedOperations() != group.getTotalOperations()) {
+                            abort("Parallel group completed with missing operations");
+                            return true;
+                        }
                         machineCount = group.getChildCount();
                     }
                     try {
@@ -290,7 +311,11 @@ public final class AsyncCraftChain {
                     currentDelegate = null;
                     waitTicks = 0;
                     ledger.reset();
-                    stepRemaining -= machineCount;
+                    if (parallelGroup) {
+                        stepRemaining = 0;
+                    } else {
+                        stepRemaining -= machineCount;
+                    }
                     if (stepRemaining <= 0) currentStepIdx++;
                     state = State.EXECUTING;
                     snapshotCommittedVirtual();
@@ -300,6 +325,21 @@ public final class AsyncCraftChain {
 
                 int timeoutTicks = RSIntegrationConfig.MULTIBLOCK_CRAFT_TIMEOUT_SECONDS.get() * 20;
                 if (waitTicks > timeoutTicks) {
+                    if (currentDelegate instanceof ParallelCraftGroup group && group.isDraining()) {
+                        // Keep draining beyond the normal no-progress timeout, but retain
+                        // a hard upper bound so a permanently stuck machine cannot pin
+                        // the chain and its reservations forever.
+                        int drainLimit = Math.max(timeoutTicks * 4, 20 * 60);
+                        if (drainingTicks > drainLimit) {
+                            abort("Timeout draining in-flight parallel crafts");
+                            return true;
+                        }
+                        RSIntegrationMod.LOGGER.warn(ctx.format(
+                                "Parallel group still draining after {} ticks (hard limit {})"),
+                                drainingTicks, drainLimit);
+                        waitTicks = 0;
+                        return false;
+                    }
                     abort("Timeout waiting for craft completion");
                     return true;
                 }
@@ -640,6 +680,18 @@ public final class AsyncCraftChain {
 
     // ── multi-block step execution ───────────────────────────────
 
+    private record MachineIdentity(ResourceLocation dimension, long packedPos, ModType modType) {}
+
+    static List<BoundMachine> deduplicateMachines(List<BoundMachine> machines) {
+        java.util.LinkedHashMap<MachineIdentity, BoundMachine> distinct = new java.util.LinkedHashMap<>();
+        for (BoundMachine machine : machines) {
+            MachineIdentity identity = new MachineIdentity(
+                    machine.dim(), machine.pos().asLong(), machine.type());
+            distinct.putIfAbsent(identity, machine);
+        }
+        return new ArrayList<>(distinct.values());
+    }
+
     private IBatchDelegate startModStep(CraftingResolver.ResolutionStep step, ServerPlayer online) {
         // Extract machine sub-type from recipe ID (e.g. "wissen_crystallizer"
         // from "wizards_reborn:wissen_crystallizer/earth_crystal_seed") so we
@@ -668,6 +720,9 @@ public final class AsyncCraftChain {
             }
             return null;
         }
+
+        // Duplicate bindings must never create multiple workers for one logical machine.
+        machines = deduplicateMachines(machines);
 
         // ── Same-dimension priority ──
         // Prefer machines in the player's current dimension so cross-dimension
@@ -981,8 +1036,26 @@ public final class AsyncCraftChain {
         RSIntegrationMod.LOGGER.debug(ctx.format("[LB] filterAvailable: {} machines → {} available"),
                 machines.size(), available.size());
 
-        // Cap children at remaining executions — don't start more
-        // machines than the number of crafts still needed.
+        // Apply the same interaction protection gate as the single-machine path.
+        List<BoundMachine> permitted = new ArrayList<>();
+        for (BoundMachine machine : available) {
+            try {
+                ResourceKey<Level> dimKey = ResourceKey.create(
+                        net.minecraft.core.registries.Registries.DIMENSION, machine.dim());
+                ServerLevel machineLevel = server.getLevel(dimKey);
+                if (machineLevel != null
+                        && ProtectionChecker.canInteract(online, machineLevel, machine.pos())) {
+                    permitted.add(machine);
+                }
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.warn(ctx.format("Parallel protection check failed at {}"),
+                        machine.pos(), e);
+            }
+        }
+        available = permitted;
+        if (available.size() < 2) return null;
+
+        // Do not start more workers than remaining operations.
         int cap = Math.min(step.executions(), stepRemaining);
         if (available.size() > cap) {
             available = new ArrayList<>(available.subList(0, cap));
@@ -991,7 +1064,7 @@ public final class AsyncCraftChain {
         // Build a parallel group — constructor internally creates and validates
         // one delegate per machine
         ParallelCraftGroup group = new ParallelCraftGroup(available, step.modType(),
-                step.recipeId(), online);
+                step.recipeId(), online, stepRemaining);
         if (!group.validateAndInit(online, step.recipeId(), null, BlockPos.ZERO)) {
             RSIntegrationMod.LOGGER.debug(ctx.format("Parallel group empty — all children failed validateAndInit"));
             return null;
@@ -999,6 +1072,9 @@ public final class AsyncCraftChain {
 
         this.machineCount = group.getChildCount();
         group.setMachineServer(server);
+        if (targetOutput != null && isPrimaryStep(currentStepIdx)) {
+            group.setTargetOutput(targetOutput);
+        }
         RSIntegrationMod.LOGGER.info(ctx.format("Load-balanced: {} machines for recipe {}"),
                 group.getChildCount(), step.recipeId());
 
@@ -1013,9 +1089,32 @@ public final class AsyncCraftChain {
         try {
             // Mirror the single-machine path: pre-reserve from virtualInventory
             // first so intermediate outputs from prior steps are visible to all children.
-            List<IngredientSpec> specs = group.getRequiredMaterials();
+            List<IngredientSpec> operationSpecs = group instanceof ParallelCraftGroup parallel
+                    ? parallel.getOperationMaterials() : null;
+            List<IngredientSpec> specs = operationSpecs != null ? operationSpecs : group.getRequiredMaterials();
             if (specs != null && !specs.isEmpty()) {
-                List<ItemStack> materials = preReserveStepMaterials(specs, online);
+                List<ItemStack> materials;
+                if (operationSpecs != null && !operationSpecs.isEmpty()
+                        && group instanceof ParallelCraftGroup parallel) {
+                    List<ReservedOperation> reserved = preReserveParallelOperations(
+                            operationSpecs, stepRemaining, online);
+                    if (reserved == null) {
+                        materials = null;
+                    } else {
+                        materials = new ArrayList<>();
+                        List<ExtractionLedger.ReservationToken> tokens = new ArrayList<>();
+                        List<List<ItemStack>> virtualDebits = new ArrayList<>();
+                        for (ReservedOperation operation : reserved) {
+                            materials.addAll(copyStacksKeepingEmpty(operation.materials()));
+                            tokens.add(operation.token());
+                            virtualDebits.add(copyStacks(operation.virtualDebits()));
+                        }
+                        parallel.setReservationTokens(tokens);
+                        parallel.setVirtualDebits(virtualDebits);
+                    }
+                } else {
+                    materials = preReserveStepMaterials(specs, online);
+                }
                 if (materials == null) {
                     RSIntegrationMod.LOGGER.warn(ctx.format("Failed to pre-reserve for parallel step {}"),
                             step.recipeId());
@@ -1072,7 +1171,56 @@ public final class AsyncCraftChain {
         return group;
     }
 
+    private record ReservedOperation(List<ItemStack> materials,
+                                     ExtractionLedger.ReservationToken token,
+                                     List<ItemStack> virtualDebits) {}
+
+    private List<ReservedOperation> preReserveParallelOperations(
+            List<IngredientSpec> specs, int operationCount, ServerPlayer online) {
+        List<ItemStack> virtualSnapshot = copyStacks(virtualInventory);
+        List<ReservedOperation> reservations = new ArrayList<>();
+        for (int operation = 0; operation < operationCount; operation++) {
+            int mark = ledger.reservationMark();
+            List<ItemStack> virtualDebits = new ArrayList<>();
+            List<ItemStack> materials = preReserveStepMaterials(specs, online, virtualDebits);
+            if (materials == null) {
+                ledger.reset();
+                restoreVirtualSnapshot(virtualSnapshot);
+                return null;
+            }
+            ExtractionLedger.ReservationToken token = ledger.tokenSince(mark);
+            reservations.add(new ReservedOperation(materials, token, List.copyOf(virtualDebits)));
+        }
+        return List.copyOf(reservations);
+    }
+
+    private static List<ItemStack> copyStacksKeepingEmpty(List<ItemStack> stacks) {
+        List<ItemStack> copies = new ArrayList<>(stacks.size());
+        for (ItemStack stack : stacks) {
+            copies.add(stack == null || stack.isEmpty() ? ItemStack.EMPTY : stack.copy());
+        }
+        return copies;
+    }
+
+    private static List<ItemStack> copyStacks(List<ItemStack> stacks) {
+        List<ItemStack> copies = new ArrayList<>(stacks.size());
+        for (ItemStack stack : stacks) {
+            if (stack != null && !stack.isEmpty()) copies.add(stack.copy());
+        }
+        return copies;
+    }
+
+    private void restoreVirtualSnapshot(List<ItemStack> snapshot) {
+        virtualInventory.clear();
+        virtualInventory.addAll(copyStacks(snapshot));
+    }
+
     private List<ItemStack> preReserveStepMaterials(List<IngredientSpec> specs, ServerPlayer online) {
+        return preReserveStepMaterials(specs, online, null);
+    }
+
+    private List<ItemStack> preReserveStepMaterials(List<IngredientSpec> specs, ServerPlayer online,
+                                                    @Nullable List<ItemStack> virtualDebits) {
         List<ItemStack> materials = new ArrayList<>();
         List<ItemStack> virtualSnapshot = new ArrayList<>();
         for (ItemStack vi : virtualInventory) {
@@ -1093,6 +1241,7 @@ public final class AsyncCraftChain {
                     int take = Math.min(needed, vi.getCount());
                     ItemStack taken = vi.split(take);
                     if (vi.isEmpty()) iter.remove();
+                    if (virtualDebits != null) virtualDebits.add(taken.copy());
                     if (material.isEmpty()) {
                         material = taken;
                     } else {
@@ -1410,8 +1559,18 @@ public final class AsyncCraftChain {
         state = State.ABORTED;
         abortReason = reason;
         if (currentDelegate != null) {
-            try { currentDelegate.onBatchFailed(online, reason); }
-            catch (Exception e) { RSIntegrationMod.LOGGER.error(ctx.format("Error in no-refund cleanup"), e); }
+            try {
+                currentDelegate.onBatchFailed(online, reason);
+                if (currentDelegate instanceof ParallelCraftGroup group) {
+                    for (ItemStack result : group.drainSettledResults()) addToVirtualInventory(result);
+                    for (ItemStack material : group.drainQueuedMaterialsForRecovery()) {
+                        addToVirtualInventory(material);
+                    }
+                    snapshotCommittedVirtual();
+                }
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.error(ctx.format("Error in no-refund cleanup"), e);
+            }
             currentDelegate = null;
         }
         disarmOutputCapture();
@@ -1444,6 +1603,13 @@ public final class AsyncCraftChain {
         if (currentDelegate != null) {
             try {
                 currentDelegate.onBatchFailed(online, reason);
+                if (currentDelegate instanceof ParallelCraftGroup group) {
+                    for (ItemStack result : group.drainSettledResults()) addToVirtualInventory(result);
+                    for (ItemStack material : group.drainQueuedMaterialsForRecovery()) {
+                        addToVirtualInventory(material);
+                    }
+                    snapshotCommittedVirtual();
+                }
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.error(ctx.format("Error in onBatchFailed"), e);
             }
@@ -1488,6 +1654,13 @@ public final class AsyncCraftChain {
         if (currentDelegate != null) {
             try {
                 currentDelegate.onBatchFailed(null, reason);
+                if (currentDelegate instanceof ParallelCraftGroup group) {
+                    for (ItemStack result : group.drainSettledResults()) addToVirtualInventory(result);
+                    for (ItemStack material : group.drainQueuedMaterialsForRecovery()) {
+                        addToVirtualInventory(material);
+                    }
+                    snapshotCommittedVirtual();
+                }
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.error(ctx.format("Error in silent delegate cleanup"), e);
             }

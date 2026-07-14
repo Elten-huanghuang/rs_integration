@@ -43,6 +43,7 @@ import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraftforge.items.ItemHandlerHelper;
+import org.jetbrains.annotations.NotNull;
 
 public final class EreAlchemyInferDelegate
 extends AbstractBatchDelegate {
@@ -470,7 +471,7 @@ extends AbstractBatchDelegate {
         this.clearAndRefundSurvivors();
     }
 
-    public void onBatchFinished(ServerPlayer player) {
+    public void onBatchFinished(@NotNull ServerPlayer player) {
     }
 
     public BlockPos getMachinePos() {
