@@ -2,6 +2,9 @@ package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
+import com.huanghuang.rsintegration.crafting.graph.CraftNode;
+import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
+import com.huanghuang.rsintegration.crafting.graph.CraftPlanValidator;
 import com.huanghuang.rsintegration.crafting.batch.GenericBatchDelegate;
 import com.huanghuang.rsintegration.ModVersionDelegateRegistry;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
@@ -38,6 +41,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 
 /**
@@ -64,6 +68,7 @@ public final class AsyncCraftChain {
         ABORTED         // Failed
     }
 
+    private final UUID craftId;
     private final UUID playerId;
     private final MinecraftServer server;
     private final INetwork network;
@@ -92,7 +97,7 @@ public final class AsyncCraftChain {
     private int taintRemaining;
     private int taintWaitTicks;
     private String abortReason = "";
-    private Runnable onDoneCallback;
+    private final TerminalListeners terminalListeners;
     private int machineCount = 1;
     private int dropsThisChain;
     private boolean dropThrottleTripped;
@@ -113,13 +118,42 @@ public final class AsyncCraftChain {
 
     public AsyncCraftChain(UUID playerId, MinecraftServer server, INetwork network,
                            List<CraftingResolver.ResolutionStep> steps) {
+        this(UUID.randomUUID(), playerId, server, network, steps, null);
+    }
+
+    public AsyncCraftChain(UUID playerId, MinecraftServer server, INetwork network,
+                           CraftPlanGraph graph) {
+        this(UUID.randomUUID(), playerId, server, network, projectSteps(graph), graph);
+    }
+
+    public AsyncCraftChain(UUID playerId, MinecraftServer server, INetwork network,
+                           CraftPlanGraph graph, CraftingResolver.ResolutionStep terminalStep,
+                           int repeatCount) {
+        this(UUID.randomUUID(), playerId, server, network,
+                amplifyModSteps(appendTerminalStep(projectSteps(graph), terminalStep), repeatCount), graph);
+    }
+
+    AsyncCraftChain(UUID craftId, UUID playerId, MinecraftServer server, INetwork network,
+                    List<CraftingResolver.ResolutionStep> steps) {
+        this(craftId, playerId, server, network, steps, null);
+    }
+
+    private AsyncCraftChain(UUID craftId, UUID playerId, MinecraftServer server, INetwork network,
+                            List<CraftingResolver.ResolutionStep> steps,
+                            @Nullable CraftPlanGraph graph) {
+        this.craftId = Objects.requireNonNull(craftId, "craftId");
         this.playerId = playerId;
         this.server = server;
         this.network = network;
-        this.steps = steps;
+        this.steps = List.copyOf(steps);
+        if (graph != null) {
+            CraftPlanValidator.validate(graph);
+        }
         ResourceLocation primaryRecipe = steps.isEmpty() ? new ResourceLocation("rsintegration", "empty_chain")
                 : steps.get(0).recipeId();
         this.ctx = CraftLogContext.create(playerId, primaryRecipe);
+        this.terminalListeners = new TerminalListeners(
+                error -> RSIntegrationMod.LOGGER.error(ctx.format("onDone callback threw"), error));
         this.ledger.setLogContext(ctx);
         RSIntegrationMod.LOGGER.debug(ctx.format("Chain created: {} steps"), steps.size());
         if (RSIntegrationMod.LOGGER.isDebugEnabled()) {
@@ -131,6 +165,48 @@ public final class AsyncCraftChain {
                 sb.append("]");
                 RSIntegrationMod.LOGGER.debug(sb.toString());
         }
+    }
+
+    private static List<CraftingResolver.ResolutionStep> projectSteps(CraftPlanGraph graph) {
+        Objects.requireNonNull(graph, "graph");
+        Map<com.huanghuang.rsintegration.crafting.graph.NodeId, CraftNode> nodes = graph.nodesById();
+        List<CraftingResolver.ResolutionStep> projected = new ArrayList<>(graph.topologicalOrder().size());
+        for (com.huanghuang.rsintegration.crafting.graph.NodeId nodeId : graph.topologicalOrder()) {
+            CraftNode node = nodes.get(nodeId);
+            if (node == null) throw new IllegalArgumentException("missing graph node " + nodeId);
+            ModType modType = ModType.byId(node.modTypeId());
+            if (modType == null) throw new IllegalArgumentException("unknown graph mod type " + node.modTypeId());
+            projected.add(new CraftingResolver.ResolutionStep(node.recipeId(), modType,
+                    node.recipeTypeId(), node.alternativeIds(), node.alternativeModTypeIds(),
+                    node.inferMode(), node.executions(), node.syntheticInput(), node.syntheticOutput()));
+        }
+        return List.copyOf(projected);
+    }
+
+    private static List<CraftingResolver.ResolutionStep> appendTerminalStep(
+            List<CraftingResolver.ResolutionStep> projected,
+            CraftingResolver.ResolutionStep terminalStep) {
+        List<CraftingResolver.ResolutionStep> result = new ArrayList<>(projected.size() + 1);
+        result.addAll(projected);
+        result.add(Objects.requireNonNull(terminalStep, "terminalStep"));
+        return List.copyOf(result);
+    }
+
+    private static List<CraftingResolver.ResolutionStep> amplifyModSteps(
+            List<CraftingResolver.ResolutionStep> source, int repeatCount) {
+        if (repeatCount <= 1) return source;
+        List<CraftingResolver.ResolutionStep> result = new ArrayList<>(source.size());
+        for (CraftingResolver.ResolutionStep step : source) {
+            if (step.modType() == ModType.GENERIC) {
+                result.add(step);
+            } else {
+                result.add(new CraftingResolver.ResolutionStep(step.recipeId(), step.modType(),
+                        step.recipeTypeId(), step.alternativeIds(), step.alternativeModTypes(),
+                        step.inferMode(), StepExecutor.mulCount(step.executions(), repeatCount),
+                        step.syntheticInput(), step.syntheticOutput()));
+            }
+        }
+        return List.copyOf(result);
     }
 
     /**
@@ -404,6 +480,8 @@ public final class AsyncCraftChain {
     public boolean isAborted() { return state == State.ABORTED; }
     public State state() { return state; }
     public String abortReason() { return abortReason; }
+    /** @return the stable identity of this craft run */
+    public UUID getCraftId() { return craftId; }
     /** @return the player's UUID (migration from stale ServerPlayer reference) */
     public UUID getPlayerId() { return playerId; }
     public int currentStep() { return currentStepIdx; }
@@ -1531,15 +1609,12 @@ public final class AsyncCraftChain {
     }
 
     private void fireOnDone() {
-        if (onDoneCallback != null) {
-            try { onDoneCallback.run(); } catch (Exception e) {
-                RSIntegrationMod.LOGGER.error(ctx.format("onDone callback threw"), e);
-            }
-        }
+        terminalListeners.fireOnce();
     }
 
+    /** Register an additive completion listener. Late listeners run immediately. */
     public void onDone(@Nullable Runnable callback) {
-        this.onDoneCallback = callback;
+        terminalListeners.add(callback);
     }
 
     /** How many machines produced output this chain run (1 for single machine, N for parallel). */
@@ -1617,14 +1692,7 @@ public final class AsyncCraftChain {
         }
         recoverCapturedOutputs(online);
 
-        // Refund ledger: require live player for inventory operations
-        if (online != null) {
-            if (ledger.isCommitted()) {
-                ledger.refundCommitted(network, online);
-            } else {
-                ledger.rollback(online);
-            }
-        }
+        refundOrRollbackLedger(online);
 
         // Deliver intermediate products whose backing inputs were already
         // irreversibly consumed by earlier settled steps. committedVirtual is
@@ -1639,6 +1707,18 @@ public final class AsyncCraftChain {
         }
         ledger.close();
         fireOnDone();
+    }
+
+    private void refundOrRollbackLedger(@Nullable ServerPlayer player) {
+        try {
+            if (ledger.isCommitted()) {
+                ledger.refundCommitted(network, player);
+            } else {
+                ledger.rollback(player);
+            }
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.error(ctx.format("Failed to refund or roll back ledger"), e);
+        }
     }
 
     private void abortSilently(String reason) {
@@ -1668,13 +1748,7 @@ public final class AsyncCraftChain {
         }
         recoverCapturedOutputs(null);
 
-        if (network != null) {
-            try {
-                ledger.refundCommitted(network, null);
-            } catch (Exception e) {
-                RSIntegrationMod.LOGGER.error(ctx.format("Failed to refund ledger on silent abort"), e);
-            }
-        }
+        refundOrRollbackLedger(null);
 
         // Deliver products owed from earlier settled steps (player offline →
         // network insert / drop at spawn). Disjoint from the refunded ledger.

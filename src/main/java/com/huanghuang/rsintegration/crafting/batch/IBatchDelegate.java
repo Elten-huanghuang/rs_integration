@@ -73,6 +73,15 @@ public interface IBatchDelegate {
     }
 
     /**
+     * Whether this delegate may run concurrently with an independent DAG node.
+     * Implementations must use shared pre-reserved materials, support offline
+     * failure cleanup, and expose unambiguous machine/output ownership.
+     */
+    default boolean supportsConcurrentNodeExecution() {
+        return false;
+    }
+
+    /**
      * Accept pre-reserved materials from the chain and start the craft.
      * Materials are in the order returned by {@link #getRequiredMaterials()}.
      * The delegate must place each stack in the correct machine slot and then

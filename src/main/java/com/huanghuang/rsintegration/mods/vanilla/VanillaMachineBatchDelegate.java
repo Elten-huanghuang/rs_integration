@@ -300,6 +300,11 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
+    public boolean supportsConcurrentNodeExecution() {
+        return true;
+    }
+
+    @Override
     public boolean tryStartWithMaterials(ServerPlayer player,
                                          List<ItemStack> materials,
                                          ExtractionLedger sharedLedger) {
