@@ -39,7 +39,7 @@ public final class PlanTreeModel {
     public static PlanTreeModel from(PlanResponse plan) {
         Map<IngredientKey, PlanStep> producerByOutput = new LinkedHashMap<>();
         for (PlanStep step : plan.steps()) {
-            producerByOutput.put(IngredientKey.of(step.output()), step);
+            producerByOutput.putIfAbsent(IngredientKey.of(step.output()), step);
         }
 
         ItemStack target = plan.targetResult();
