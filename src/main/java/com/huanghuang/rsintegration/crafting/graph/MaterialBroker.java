@@ -151,6 +151,31 @@ public final class MaterialBroker {
         return total;
     }
 
+    /**
+     * Remove currently unclaimed units from a source. Reserved, committed, and
+     * settled units are never returned, so downstream-owned producer output
+     * cannot also be delivered as surplus.
+     */
+    public int takeAvailable(MaterialSource source, MaterialKey material, int quantity) {
+        Objects.requireNonNull(source, "source");
+        Objects.requireNonNull(material, "material");
+        if (quantity <= 0) throw new IllegalArgumentException("take quantity must be positive");
+        int remaining = quantity;
+        for (AssetLot lot : lots.values()) {
+            if (remaining <= 0) break;
+            if (!lot.source.equals(source) || !lot.material.equals(material)) continue;
+            int take = Math.min(lot.available, remaining);
+            lot.available -= take;
+            lot.delivered += take;
+            remaining -= take;
+        }
+        return quantity - remaining;
+    }
+
+    public int totalAvailable() {
+        return lots.values().stream().mapToInt(lot -> lot.available).sum();
+    }
+
     private Reservation require(ReservationToken token, ReservationState expected) {
         Objects.requireNonNull(token, "token");
         Reservation reservation = reservations.get(token);
@@ -170,6 +195,7 @@ public final class MaterialBroker {
         int reserved;
         int committed;
         int settled;
+        int delivered;
 
         AssetLot(long id, MaterialSource source, MaterialKey material, int available) {
             this.id = id;

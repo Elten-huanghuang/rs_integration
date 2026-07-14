@@ -26,6 +26,45 @@ public final class ConcurrentNodeExecutor {
         default void cleanupFailure() {}
     }
 
+    public enum StartStatus {
+        STARTED,
+        RETRY,
+        COMPLETED,
+        FAILED
+    }
+
+    public enum CompletionStatus {
+        SUCCEEDED,
+        FAILED
+    }
+
+    @FunctionalInterface
+    public interface CompletionHandler {
+        CompletionStatus complete(NodeId nodeId, Worker worker);
+    }
+
+    public record StartResult(StartStatus status, Worker worker) {
+        public StartResult {
+            Objects.requireNonNull(status, "status");
+            if ((status == StartStatus.STARTED) != (worker != null)) {
+                throw new IllegalArgumentException("only STARTED may carry a worker");
+            }
+        }
+
+        public static StartResult started(Worker worker) {
+            return new StartResult(StartStatus.STARTED, Objects.requireNonNull(worker, "worker"));
+        }
+
+        public static StartResult retry() { return new StartResult(StartStatus.RETRY, null); }
+        public static StartResult completed() { return new StartResult(StartStatus.COMPLETED, null); }
+        public static StartResult failed() { return new StartResult(StartStatus.FAILED, null); }
+    }
+
+    @FunctionalInterface
+    public interface AdmissionWorkerFactory {
+        StartResult start(NodeId nodeId);
+    }
+
     @FunctionalInterface
     public interface WorkerFactory {
         Worker start(NodeId nodeId);
@@ -45,7 +84,8 @@ public final class ConcurrentNodeExecutor {
     }
 
     private final DagScheduler scheduler;
-    private final WorkerFactory workers;
+    private final AdmissionWorkerFactory workers;
+    private final CompletionHandler completions;
     private final ExclusivityOracle exclusivity;
     private final int maxConcurrentNodes;
     private final Map<NodeId, Worker> running = new LinkedHashMap<>();
@@ -53,13 +93,28 @@ public final class ConcurrentNodeExecutor {
     /** Legacy constructor: every node is treated as concurrency-safe. */
     public ConcurrentNodeExecutor(DagScheduler scheduler, WorkerFactory workers,
                                   int maxConcurrentNodes) {
-        this(scheduler, workers, maxConcurrentNodes, nodeId -> false);
+        this(scheduler, adapt(workers), maxConcurrentNodes, nodeId -> false,
+                (nodeId, worker) -> CompletionStatus.SUCCEEDED);
     }
 
     public ConcurrentNodeExecutor(DagScheduler scheduler, WorkerFactory workers,
                                   int maxConcurrentNodes, ExclusivityOracle exclusivity) {
+        this(scheduler, adapt(workers), maxConcurrentNodes, exclusivity,
+                (nodeId, worker) -> CompletionStatus.SUCCEEDED);
+    }
+
+    public ConcurrentNodeExecutor(DagScheduler scheduler, AdmissionWorkerFactory workers,
+                                  int maxConcurrentNodes, ExclusivityOracle exclusivity) {
+        this(scheduler, workers, maxConcurrentNodes, exclusivity,
+                (nodeId, worker) -> CompletionStatus.SUCCEEDED);
+    }
+
+    public ConcurrentNodeExecutor(DagScheduler scheduler, AdmissionWorkerFactory workers,
+                                  int maxConcurrentNodes, ExclusivityOracle exclusivity,
+                                  CompletionHandler completions) {
         this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
         this.workers = Objects.requireNonNull(workers, "workers");
+        this.completions = Objects.requireNonNull(completions, "completions");
         this.exclusivity = Objects.requireNonNull(exclusivity, "exclusivity");
         if (maxConcurrentNodes < 1) {
             throw new IllegalArgumentException("maxConcurrentNodes must be positive");
@@ -79,7 +134,20 @@ public final class ConcurrentNodeExecutor {
                 case WORKING -> { }
                 case SUCCEEDED -> {
                     running.remove(result.nodeId);
-                    scheduler.succeed(result.nodeId);
+                    CompletionStatus completion;
+                    try {
+                        completion = Objects.requireNonNull(
+                                completions.complete(result.nodeId, result.worker), "completion status");
+                    } catch (RuntimeException exception) {
+                        completion = CompletionStatus.FAILED;
+                    }
+                    if (completion == CompletionStatus.SUCCEEDED) {
+                        scheduler.succeed(result.nodeId);
+                    } else {
+                        result.worker.cleanupFailure();
+                        if (!scheduler.isStopping()) scheduler.fail(result.nodeId);
+                        else scheduler.failRunningDuringStop(result.nodeId);
+                    }
                 }
                 case FAILED -> {
                     running.remove(result.nodeId);
@@ -107,6 +175,14 @@ public final class ConcurrentNodeExecutor {
 
     public int runningCount() {
         return running.size();
+    }
+
+    private static AdmissionWorkerFactory adapt(WorkerFactory factory) {
+        Objects.requireNonNull(factory, "factory");
+        return nodeId -> {
+            Worker worker = factory.start(nodeId);
+            return worker == null ? StartResult.completed() : StartResult.started(worker);
+        };
     }
 
     private List<Result> observeAll() {
@@ -138,20 +214,29 @@ public final class ConcurrentNodeExecutor {
             if (nodeExclusive && !running.isEmpty()) return;
 
             scheduler.claim(nodeId);
-            Worker worker;
+            StartResult start;
             try {
-                worker = workers.start(nodeId);
+                start = Objects.requireNonNull(workers.start(nodeId), "worker start result");
             } catch (RuntimeException exception) {
-                worker = null;
+                start = StartResult.failed();
             }
-            if (worker == null) {
-                if (scheduler.state(nodeId) == DagScheduler.NodeState.RUNNING) {
-                    scheduler.releaseClaim(nodeId);
+            switch (start.status()) {
+                case STARTED -> running.put(nodeId, start.worker());
+                case RETRY -> scheduler.releaseClaim(nodeId);
+                case COMPLETED -> {
+                    if (scheduler.state(nodeId) == DagScheduler.NodeState.RUNNING) {
+                        scheduler.succeed(nodeId);
+                    }
                 }
-                // else: factory already transitioned the node (e.g. Earth Heart synchronous)
-            } else {
-                running.put(nodeId, worker);
+                case FAILED -> {
+                    if (scheduler.state(nodeId) == DagScheduler.NodeState.RUNNING) {
+                        scheduler.fail(nodeId);
+                    }
+                }
             }
+
+            if (start.status() == StartStatus.RETRY) continue;
+            if (scheduler.isStopping()) return;
 
             // A freshly started exclusive node must run alone — stop dispatching.
             if (nodeExclusive) return;

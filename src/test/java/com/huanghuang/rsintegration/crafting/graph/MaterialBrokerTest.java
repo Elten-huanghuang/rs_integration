@@ -78,6 +78,21 @@ class MaterialBrokerTest extends BootstrapTest {
     }
 
     @Test
+    void deliveredSurplusExcludesUnitsCommittedByDownstream() {
+        MaterialBroker broker = brokerWithDiamonds(3);
+        MaterialKey diamond = MaterialKey.of(new ItemStack(Items.DIAMOND));
+        MaterialSource source = new MaterialSource.InitialPool(diamond);
+        MaterialBroker.ReservationToken token = broker.reserve(new NodeId(0),
+                List.of(new MaterialBroker.Request(source, diamond, 2)));
+        broker.commit(token);
+
+        assertEquals(1, broker.takeAvailable(source, diamond, 3));
+        assertEquals(0, broker.available(source, diamond));
+        broker.settle(token);
+        assertEquals(0, broker.takeAvailable(source, diamond, 1));
+    }
+
+    @Test
     void multiRequestReservationIsAtomic() {
         MaterialBroker broker = new MaterialBroker();
         MaterialKey iron = MaterialKey.of(new ItemStack(Items.IRON_INGOT));

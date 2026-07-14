@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class NodeAdmissionCoordinatorTest extends BootstrapTest {
@@ -46,6 +47,39 @@ class NodeAdmissionCoordinatorTest extends BootstrapTest {
         assertEquals(1, broker.available(source, iron));
         assertEquals(0, broker.heldBy(firstId));
         assertTrue(machines.release(external));
+    }
+
+    @Test
+    void claimedNodeCanRetryAfterTransientMachineConflict() {
+        NodeId firstId = new NodeId(0);
+        NodeId secondId = new NodeId(1);
+        DagScheduler scheduler = new DagScheduler(independentGraph(firstId, secondId));
+        MaterialBroker broker = new MaterialBroker();
+        MachineLeaseRegistry machines = new MachineLeaseRegistry();
+        CaptureLeaseRegistry captures = new CaptureLeaseRegistry();
+        MaterialKey iron = MaterialKey.of(new ItemStack(Items.IRON_INGOT));
+        MaterialSource source = new MaterialSource.InitialPool(iron);
+        broker.publish(source, iron, 1);
+        MachineLeaseRegistry.MachineKey machine = new MachineLeaseRegistry.MachineKey(
+                new ResourceLocation("minecraft", "overworld"), new BlockPos(2, 64, 2), "furnace");
+        MachineLeaseRegistry.Lease blocker = machines.tryAcquire(machine,
+                new MachineLeaseRegistry.Owner(UUID.randomUUID(), new NodeId(9), 0));
+        NodeAdmissionCoordinator coordinator = new NodeAdmissionCoordinator(
+                UUID.randomUUID(), scheduler, broker, machines, captures);
+        NodeAdmissionCoordinator.Candidate candidate = candidate(firstId, source, iron, machine);
+
+        scheduler.claim(firstId);
+        assertNull(coordinator.tryAdmitClaimed(candidate));
+        scheduler.releaseClaim(firstId);
+        assertTrue(machines.release(blocker));
+        scheduler.claim(firstId);
+        NodeAdmissionCoordinator.Admission retry = coordinator.tryAdmitClaimed(candidate);
+
+        assertTrue(retry != null);
+        coordinator.releaseBeforeDispatch(retry);
+        assertEquals(DagScheduler.NodeState.READY, scheduler.state(firstId));
+        assertEquals(1, broker.available(source, iron));
+        assertEquals(0, machines.size());
     }
 
     @Test

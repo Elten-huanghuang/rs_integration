@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.graph.ConcurrentNodeExecutor;
 import com.huanghuang.rsintegration.crafting.graph.MachineLeaseRegistry;
+import com.huanghuang.rsintegration.crafting.graph.NodeAdmissionCoordinator;
 import com.huanghuang.rsintegration.crafting.graph.NodeId;
 import com.huanghuang.rsintegration.crafting.loadbalancer.ParallelCraftGroup;
 import net.minecraft.server.level.ServerPlayer;
@@ -27,7 +28,12 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
     @Nullable
     private final MachineLeaseRegistry.Lease machineLease;
     @Nullable
+    private final NodeAdmissionCoordinator.Admission admission;
+    @Nullable
     private CraftOutputInterceptor.CaptureHandle capture;
+    private boolean dispatched;
+    private boolean resourcesClosed;
+    private List<ItemStack> confirmedOutputs = List.of();
     private int waitTicks;
     private int drainingTicks;
     private boolean stopRequested;
@@ -40,11 +46,19 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
     CraftNodeRuntime(NodeId nodeId, String nodeLabel, IBatchDelegate delegate,
                      @Nullable ExtractionLedger nodeLedger,
                      @Nullable MachineLeaseRegistry.Lease machineLease) {
+        this(nodeId, nodeLabel, delegate, nodeLedger, machineLease, null);
+    }
+
+    CraftNodeRuntime(NodeId nodeId, String nodeLabel, IBatchDelegate delegate,
+                     @Nullable ExtractionLedger nodeLedger,
+                     @Nullable MachineLeaseRegistry.Lease machineLease,
+                     @Nullable NodeAdmissionCoordinator.Admission admission) {
         this.nodeId = nodeId;
         this.nodeLabel = nodeLabel;
         this.delegate = delegate;
         this.nodeLedger = nodeLedger;
         this.machineLease = machineLease;
+        this.admission = admission;
     }
 
     void attachCapture(CraftOutputInterceptor.CaptureHandle handle) {
@@ -63,6 +77,20 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
     IBatchDelegate delegate() { return delegate; }
 
     @Nullable ExtractionLedger nodeLedger() { return nodeLedger; }
+
+    @Nullable NodeAdmissionCoordinator.Admission admission() { return admission; }
+
+    void markDispatched() { dispatched = true; }
+
+    boolean wasDispatched() { return dispatched; }
+
+    boolean markResourcesClosed() {
+        if (resourcesClosed) return false;
+        resourcesClosed = true;
+        return true;
+    }
+
+    List<ItemStack> confirmedOutputs() { return confirmedOutputs; }
 
     @Nullable MachineLeaseRegistry.Lease machineLease() { return machineLease; }
 
@@ -156,20 +184,22 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
     private void doSucceed() {
         if (terminal) return;
         terminal = true;
-        // Drain settled results and capture before calling onBatchFinished
-        drainSettledIntoVirtual();
+        List<ItemStack> outputs = new java.util.ArrayList<>();
+        for (ItemStack s : drainSettledResults()) {
+            if (s != null && !s.isEmpty()) outputs.add(s.copy());
+        }
+        for (ItemStack s : drainQueuedMaterials()) {
+            if (s != null && !s.isEmpty()) outputs.add(s.copy());
+        }
         List<ItemStack> captured = disarmCapture();
-        if (virtualInventory != null) {
-            for (ItemStack s : captured) {
-                if (s != null && !s.isEmpty()) virtualInventory.add(s.copy());
-            }
+        for (ItemStack s : captured) {
+            if (s != null && !s.isEmpty()) outputs.add(s.copy());
         }
         List<ItemStack> results = collectResults(player);
-        if (virtualInventory != null) {
-            for (ItemStack s : results) {
-                if (s != null && !s.isEmpty()) virtualInventory.add(s.copy());
-            }
+        for (ItemStack s : results) {
+            if (s != null && !s.isEmpty()) outputs.add(s.copy());
         }
+        confirmedOutputs = List.copyOf(outputs);
         if (delegate != null) {
             try {
                 delegate.onBatchFinished(player);
