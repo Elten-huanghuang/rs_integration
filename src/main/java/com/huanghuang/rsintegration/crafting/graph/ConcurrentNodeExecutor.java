@@ -31,15 +31,36 @@ public final class ConcurrentNodeExecutor {
         Worker start(NodeId nodeId);
     }
 
+    /**
+     * Tells the executor whether a node must run exclusively (no other node may
+     * be running alongside it). A node is exclusive when its delegate has not
+     * proven it is safe to overlap — the conservative default. This is the
+     * enforcement behind {@code IBatchDelegate.supportsConcurrentNodeExecution()}:
+     * unopted delegates degrade to serial execution instead of silently
+     * overlapping physical crafts.
+     */
+    @FunctionalInterface
+    public interface ExclusivityOracle {
+        boolean isExclusive(NodeId nodeId);
+    }
+
     private final DagScheduler scheduler;
     private final WorkerFactory workers;
+    private final ExclusivityOracle exclusivity;
     private final int maxConcurrentNodes;
     private final Map<NodeId, Worker> running = new LinkedHashMap<>();
 
+    /** Legacy constructor: every node is treated as concurrency-safe. */
     public ConcurrentNodeExecutor(DagScheduler scheduler, WorkerFactory workers,
                                   int maxConcurrentNodes) {
+        this(scheduler, workers, maxConcurrentNodes, nodeId -> false);
+    }
+
+    public ConcurrentNodeExecutor(DagScheduler scheduler, WorkerFactory workers,
+                                  int maxConcurrentNodes, ExclusivityOracle exclusivity) {
         this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
         this.workers = Objects.requireNonNull(workers, "workers");
+        this.exclusivity = Objects.requireNonNull(exclusivity, "exclusivity");
         if (maxConcurrentNodes < 1) {
             throw new IllegalArgumentException("maxConcurrentNodes must be positive");
         }
@@ -103,9 +124,20 @@ public final class ConcurrentNodeExecutor {
     }
 
     private void dispatchAvailable() {
+        // An exclusive node already running blocks all further dispatch.
+        if (running.keySet().stream().anyMatch(exclusivity::isExclusive)) return;
+
         int capacity = maxConcurrentNodes - running.size();
         if (capacity <= 0) return;
-        for (NodeId nodeId : scheduler.claimReady(capacity)) {
+
+        for (NodeId nodeId : scheduler.peekReady(capacity)) {
+            boolean nodeExclusive = exclusivity.isExclusive(nodeId);
+            // An exclusive node may only start on an empty field; a non-exclusive
+            // node may not start once an exclusive one is running. Either way, stop
+            // here so the exclusive node runs alone.
+            if (nodeExclusive && !running.isEmpty()) return;
+
+            scheduler.claim(nodeId);
             Worker worker;
             try {
                 worker = workers.start(nodeId);
@@ -120,6 +152,9 @@ public final class ConcurrentNodeExecutor {
             } else {
                 running.put(nodeId, worker);
             }
+
+            // A freshly started exclusive node must run alone — stop dispatching.
+            if (nodeExclusive) return;
         }
     }
 

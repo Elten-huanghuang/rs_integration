@@ -65,6 +65,29 @@ public final class DagScheduler {
         return List.copyOf(claimed);
     }
 
+    /**
+     * Return up to {@code limit} ready nodes in claim order WITHOUT transitioning
+     * them. Lets a caller inspect candidates (e.g. for an exclusivity decision)
+     * before committing to {@link #claim(NodeId)}.
+     */
+    public List<NodeId> peekReady(int limit) {
+        if (stopping || limit <= 0) return List.of();
+        List<NodeId> peeked = new ArrayList<>(Math.min(limit, ready.size()));
+        var iterator = ready.iterator();
+        while (iterator.hasNext() && peeked.size() < limit) {
+            peeked.add(iterator.next());
+        }
+        return List.copyOf(peeked);
+    }
+
+    /** Claim one specific ready node, transitioning it READY → RUNNING. */
+    public void claim(NodeId nodeId) {
+        if (stopping) throw new IllegalStateException("cannot claim while stopping: " + nodeId);
+        requireState(nodeId, NodeState.READY);
+        ready.remove(nodeId);
+        states.put(nodeId, NodeState.RUNNING);
+    }
+
     public void releaseClaim(NodeId nodeId) {
         requireState(nodeId, NodeState.RUNNING);
         if (stopping) {

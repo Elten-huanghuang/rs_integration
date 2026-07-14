@@ -63,6 +63,81 @@ class ConcurrentNodeExecutorTest extends BootstrapTest {
         assertEquals(1, failing.cleanupCalls.get());
     }
 
+    @Test
+    void exclusiveNodeRunsAloneEvenWhenCapacityAllowsMore() {
+        DagScheduler scheduler = new DagScheduler(forkJoinGraph());
+        Map<NodeId, FakeWorker> workers = new HashMap<>();
+        workers.put(new NodeId(0), new FakeWorker(ConcurrentNodeExecutor.Observation.WORKING,
+                ConcurrentNodeExecutor.Observation.SUCCEEDED));
+        workers.put(new NodeId(1), new FakeWorker(ConcurrentNodeExecutor.Observation.WORKING,
+                ConcurrentNodeExecutor.Observation.SUCCEEDED));
+        // Node 0 is exclusive; node 1 is not. cap=2 would normally start both.
+        ConcurrentNodeExecutor executor = new ConcurrentNodeExecutor(scheduler, workers::get, 2,
+                nodeId -> nodeId.equals(new NodeId(0)));
+
+        executor.tick();
+        // Only the exclusive leaf started; the sibling must wait.
+        assertEquals(1, executor.runningCount());
+        assertEquals(DagScheduler.NodeState.RUNNING, scheduler.state(new NodeId(0)));
+        assertEquals(DagScheduler.NodeState.READY, scheduler.state(new NodeId(1)));
+    }
+
+    @Test
+    void nonExclusiveNodeWaitsWhileExclusiveNodeRuns() {
+        DagScheduler scheduler = new DagScheduler(forkJoinGraph());
+        Map<NodeId, FakeWorker> workers = new HashMap<>();
+        // Node 0 exclusive & long-running; node 1 non-exclusive.
+        workers.put(new NodeId(0), new FakeWorker(ConcurrentNodeExecutor.Observation.WORKING,
+                ConcurrentNodeExecutor.Observation.SUCCEEDED));
+        workers.put(new NodeId(1), new FakeWorker(ConcurrentNodeExecutor.Observation.WORKING,
+                ConcurrentNodeExecutor.Observation.SUCCEEDED));
+        ConcurrentNodeExecutor executor = new ConcurrentNodeExecutor(scheduler, workers::get, 2,
+                nodeId -> nodeId.equals(new NodeId(0)));
+
+        executor.tick(); // start node 0 alone
+        assertEquals(1, executor.runningCount());
+        executor.tick(); // node 0 still working — node 1 must NOT be dispatched alongside
+        assertEquals(1, executor.runningCount());
+        assertEquals(DagScheduler.NodeState.READY, scheduler.state(new NodeId(1)));
+        executor.tick(); // node 0 succeeds this tick, then node 1 dispatches
+        assertEquals(DagScheduler.NodeState.SUCCEEDED, scheduler.state(new NodeId(0)));
+        assertEquals(DagScheduler.NodeState.RUNNING, scheduler.state(new NodeId(1)));
+    }
+
+    @Test
+    void allExclusiveNodesDegradeToSerialUnderHighCap() {
+        DagScheduler scheduler = new DagScheduler(forkJoinGraph());
+        Map<NodeId, FakeWorker> workers = new HashMap<>();
+        workers.put(new NodeId(0), new FakeWorker(ConcurrentNodeExecutor.Observation.SUCCEEDED));
+        workers.put(new NodeId(1), new FakeWorker(ConcurrentNodeExecutor.Observation.SUCCEEDED));
+        workers.put(new NodeId(2), new FakeWorker(ConcurrentNodeExecutor.Observation.SUCCEEDED));
+        // Everything exclusive; cap=2 must still never overlap.
+        ConcurrentNodeExecutor executor = new ConcurrentNodeExecutor(scheduler, workers::get, 2,
+                nodeId -> true);
+
+        executor.tick();
+        assertEquals(1, executor.runningCount());
+        executor.tick();
+        assertEquals(1, executor.runningCount());
+        executor.tick();
+        assertEquals(1, executor.runningCount());
+        executor.tick();
+        assertTrue(executor.isTerminal());
+    }
+
+    @Test
+    void legacyConstructorTreatsEveryNodeAsConcurrencySafe() {
+        DagScheduler scheduler = new DagScheduler(forkJoinGraph());
+        Map<NodeId, FakeWorker> workers = new HashMap<>();
+        workers.put(new NodeId(0), new FakeWorker(ConcurrentNodeExecutor.Observation.WORKING));
+        workers.put(new NodeId(1), new FakeWorker(ConcurrentNodeExecutor.Observation.WORKING));
+        ConcurrentNodeExecutor executor = new ConcurrentNodeExecutor(scheduler, workers::get, 2);
+
+        executor.tick();
+        // Both independent leaves run together — the pre-exclusivity behaviour.
+        assertEquals(2, executor.runningCount());
+    }
+
     private static final class FakeWorker implements ConcurrentNodeExecutor.Worker {
         final Queue<ConcurrentNodeExecutor.Observation> observations = new ArrayDeque<>();
         final AtomicInteger stopCalls = new AtomicInteger();
