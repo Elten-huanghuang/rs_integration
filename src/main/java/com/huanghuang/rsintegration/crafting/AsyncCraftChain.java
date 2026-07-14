@@ -18,6 +18,7 @@ import com.huanghuang.rsintegration.crafting.graph.MaterialSource;
 import com.huanghuang.rsintegration.crafting.graph.MachineLeaseRegistry;
 import com.huanghuang.rsintegration.crafting.graph.CaptureLeaseRegistry;
 import com.huanghuang.rsintegration.crafting.graph.NodeAdmissionCoordinator;
+import com.huanghuang.rsintegration.crafting.graph.GraphConcurrencyPolicy;
 import com.huanghuang.rsintegration.crafting.graph.OutputDeclaration;
 import com.huanghuang.rsintegration.crafting.graph.NodeId;
 import com.huanghuang.rsintegration.crafting.batch.GenericBatchDelegate;
@@ -154,6 +155,8 @@ public final class AsyncCraftChain {
     private int graphTotalTicks;
     private final int graphGlobalTimeoutTicks;
     private final int graphRunningNodeCap;
+    private final int graphDispatchPerTick;
+    private final int graphDispatchPerCraft;
     private int progressTickCounter;
     private int progressSequence;
 
@@ -200,6 +203,17 @@ public final class AsyncCraftChain {
         try { cap = RSIntegrationConfig.CRAFTING_MAX_CONCURRENT_GRAPH_NODES.get(); }
         catch (Exception e) { cap = 1; }
         this.graphRunningNodeCap = Math.max(1, cap);
+        int dispatchPerTick;
+        int dispatchPerCraft;
+        try {
+            dispatchPerTick = RSIntegrationConfig.CRAFTING_GRAPH_DISPATCH_PER_TICK.get();
+            dispatchPerCraft = RSIntegrationConfig.CRAFTING_GRAPH_DISPATCH_PER_CRAFT.get();
+        } catch (Exception e) {
+            dispatchPerTick = 2;
+            dispatchPerCraft = 8192;
+        }
+        this.graphDispatchPerTick = Math.max(1, dispatchPerTick);
+        this.graphDispatchPerCraft = Math.max(1, dispatchPerCraft);
         int globalTimeoutSeconds;
         try { globalTimeoutSeconds = RSIntegrationConfig.CRAFTING_CHAIN_GLOBAL_TIMEOUT_SECONDS.get(); }
         catch (Exception e) { globalTimeoutSeconds = 900; }
@@ -600,7 +614,7 @@ public final class AsyncCraftChain {
                     nodeId -> startAdmittedGraphNode(nodeId, online);
             graphExecutor = new ConcurrentNodeExecutor(graphScheduler,
                     graphWorkers, graphRunningNodeCap, this::isNodeExclusive,
-                    this::completeGraphNode);
+                    this::completeGraphNode, graphDispatchPerTick, graphDispatchPerCraft);
             sendStartedPacket(online);
         }
 
@@ -728,9 +742,8 @@ public final class AsyncCraftChain {
         IBatchDelegate probe = step.inferMode()
                 ? step.modType().createInferDelegate()
                 : createDelegate(step.modType());
-        // GenericBatchDelegate and a null delegate are conservatively exclusive.
-        if (probe == null) return true;
-        return !probe.supportsConcurrentNodeExecution();
+        // Unknown delegates and explicitly disabled mod types are conservative.
+        return GraphConcurrencyPolicy.isExclusive(step.modType().id(), probe);
     }
 
     private record PreparedGraphNode(CraftingResolver.ResolutionStep step,

@@ -148,6 +148,64 @@ class ConcurrentNodeExecutorTest extends BootstrapTest {
     }
 
     @Test
+    void perTickDispatchBudgetSpreadsReadyNodesAcrossTicks() {
+        DagScheduler scheduler = new DagScheduler(forkJoinGraph());
+        Map<NodeId, FakeWorker> workers = new HashMap<>();
+        workers.put(new NodeId(0), new FakeWorker(ConcurrentNodeExecutor.Observation.WORKING));
+        workers.put(new NodeId(1), new FakeWorker(ConcurrentNodeExecutor.Observation.WORKING));
+        ConcurrentNodeExecutor.AdmissionWorkerFactory factory = nodeId ->
+                ConcurrentNodeExecutor.StartResult.started(workers.get(nodeId));
+        ConcurrentNodeExecutor executor = new ConcurrentNodeExecutor(scheduler, factory, 2,
+                nodeId -> false, (nodeId, worker) -> ConcurrentNodeExecutor.CompletionStatus.SUCCEEDED,
+                1, 10);
+
+        executor.tick();
+        assertEquals(1, executor.runningCount());
+        executor.tick();
+        assertEquals(2, executor.runningCount());
+    }
+
+    @Test
+    void perCraftDispatchBudgetStopsAdditionalStarts() {
+        DagScheduler scheduler = new DagScheduler(forkJoinGraph());
+        ConcurrentNodeExecutor.AdmissionWorkerFactory factory = nodeId ->
+                ConcurrentNodeExecutor.StartResult.completed();
+        ConcurrentNodeExecutor executor = new ConcurrentNodeExecutor(scheduler, factory, 2,
+                nodeId -> false, (nodeId, worker) -> ConcurrentNodeExecutor.CompletionStatus.SUCCEEDED,
+                2, 1);
+
+        executor.tick();
+        assertEquals(1, scheduler.countSucceeded());
+        assertEquals(1, scheduler.readyCount());
+        executor.tick();
+        assertEquals(1, scheduler.countSucceeded());
+    }
+
+    @Test
+    void staleCompletionSettlesButCannotUnlockAfterStopEpoch() {
+        DagScheduler scheduler = new DagScheduler(forkJoinGraph());
+        FakeWorker worker = new FakeWorker(ConcurrentNodeExecutor.Observation.SUCCEEDED);
+        AtomicInteger completions = new AtomicInteger();
+        ConcurrentNodeExecutor executor = new ConcurrentNodeExecutor(scheduler,
+                (ConcurrentNodeExecutor.AdmissionWorkerFactory) nodeId ->
+                        ConcurrentNodeExecutor.StartResult.started(worker),
+                1, nodeId -> false,
+                (nodeId, completedWorker) -> {
+                    completions.incrementAndGet();
+                    return ConcurrentNodeExecutor.CompletionStatus.SUCCEEDED;
+                });
+
+        executor.tick();
+        executor.stopScheduling();
+        executor.tick();
+
+        assertEquals(1, completions.get());
+        assertEquals(DagScheduler.NodeState.CANCELLED, scheduler.state(new NodeId(0)));
+        assertEquals(DagScheduler.NodeState.CANCELLED, scheduler.state(new NodeId(2)));
+        assertEquals(0, scheduler.readyCount());
+    }
+
+    @Test
     void legacyConstructorTreatsEveryNodeAsConcurrencySafe() {
         DagScheduler scheduler = new DagScheduler(forkJoinGraph());
         Map<NodeId, FakeWorker> workers = new HashMap<>();

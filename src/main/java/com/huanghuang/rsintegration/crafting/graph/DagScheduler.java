@@ -126,6 +126,11 @@ public final class DagScheduler {
         if (failedNode == null) failedNode = nodeId;
     }
 
+    void cancelRunningDuringStop(NodeId nodeId) {
+        requireState(nodeId, NodeState.RUNNING);
+        states.put(nodeId, NodeState.CANCELLED);
+    }
+
     public void stopScheduling() {
         if (stopping) return;
         stopping = true;
