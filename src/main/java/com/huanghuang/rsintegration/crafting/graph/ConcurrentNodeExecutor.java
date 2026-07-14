@@ -113,7 +113,10 @@ public final class ConcurrentNodeExecutor {
                 worker = null;
             }
             if (worker == null) {
-                scheduler.releaseClaim(nodeId);
+                if (scheduler.state(nodeId) == DagScheduler.NodeState.RUNNING) {
+                    scheduler.releaseClaim(nodeId);
+                }
+                // else: factory already transitioned the node (e.g. Earth Heart synchronous)
             } else {
                 running.put(nodeId, worker);
             }
