@@ -314,6 +314,7 @@
   "key.categories.rsi": "RS Integration",
   "key.rsi.store_all": "一键存入RS",
   "key.rsi.toggle_mode": "切换传输模式",
+  "key.rsi.toggle_progress": "切换制作进度显示",
   "rsi.transfer.no_network": "§c未找到RS网络 — 请绑定机器或持有网络物品",
   "rsi.transfer.disabled": "§c容器转移功能已在配置中禁用",
   "rsi.transfer.success": "§a已转移 %s 个物品 (共 %s 组) 到 RS 网络",

@@ -1,6 +1,10 @@
 package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
+import com.huanghuang.rsintegration.crafting.batch.CraftProgressPacket;
+import com.huanghuang.rsintegration.crafting.batch.CraftStartedPacket;
+import net.minecraftforge.network.NetworkDirection;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.graph.CraftNode;
 import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
@@ -131,6 +135,8 @@ public final class AsyncCraftChain {
     private final Map<NodeId, CraftNodeRuntime> nodeRuntimes = new HashMap<>();
     private int graphEpoch;
     private final int graphRunningNodeCap;
+    private int progressTickCounter;
+    private int progressSequence;
 
     public AsyncCraftChain(UUID playerId, MinecraftServer server, INetwork network,
                            List<CraftingResolver.ResolutionStep> steps) {
@@ -318,6 +324,7 @@ public final class AsyncCraftChain {
             RSIntegrationMod.LOGGER.debug(ctx.format("PENDING → EXECUTING"));
             state = State.EXECUTING;
             Diagnostics.record(Diagnostics.Category.CHAIN_STATE, "PENDING→EXECUTING steps=" + steps.size());
+            sendStartedPacket(online);
         }
         if (online == null) {
             abortSilently("Player disconnected");
@@ -472,6 +479,7 @@ public final class AsyncCraftChain {
         // All done
         if (currentStepIdx >= steps.size()) {
             state = State.COMPLETING;
+            maybeSendProgress(online, true);
             finish(online);
             return true;
         }
@@ -515,6 +523,7 @@ public final class AsyncCraftChain {
                     step.recipeId());
             waitTicks = 0;
         }
+        maybeSendProgress(online, false);
         return false;
     }
 
@@ -535,6 +544,7 @@ public final class AsyncCraftChain {
                     "PENDING→EXECUTING graph nodes=" + graph.topologicalOrder().size());
             graphExecutor = new ConcurrentNodeExecutor(graphScheduler,
                     nodeId -> startGraphNode(nodeId, online), graphRunningNodeCap);
+            sendStartedPacket(online);
         }
 
         if (graphExecutor == null) {
@@ -566,10 +576,12 @@ public final class AsyncCraftChain {
         // All nodes succeeded — deliver
         if (graphScheduler.allSucceeded()) {
             state = State.COMPLETING;
+            maybeSendProgress(online, true);
             finish(online);
             return true;
         }
 
+        maybeSendProgress(online, false);
         return false;
     }
 
@@ -2151,6 +2163,36 @@ public final class AsyncCraftChain {
             }
         }
         nodeRuntimes.clear();
+    }
+
+    // ── progress packets ─────────────────────────────────────────
+
+    private void maybeSendProgress(ServerPlayer online, boolean terminal) {
+        progressTickCounter++;
+        if (!terminal && progressTickCounter % 20 != 0) return;
+        int total = useGraphExecution && graph != null
+                ? graph.topologicalOrder().size() : steps.size();
+        int completed = useGraphExecution && graphScheduler != null
+                ? (int) graphScheduler.countSucceeded() : currentStepIdx;
+        int running = graphExecutor != null ? graphExecutor.runningCount() : (currentDelegate != null ? 1 : 0);
+        byte chainStateByte = graphScheduler != null && graphScheduler.isStopping()
+                ? CraftProgressSnapshot.STATE_STOPPING : CraftProgressSnapshot.STATE_EXECUTING;
+        int sequence = terminal ? CraftProgressSnapshot.TERMINAL_SEQUENCE : ++progressSequence;
+        CraftProgressSnapshot snap = new CraftProgressSnapshot(craftId, sequence, chainStateByte,
+                completed, total, running, abortReason.isEmpty() ? null : abortReason);
+        BatchCraftNetworkHandler.CHANNEL.sendTo(
+                new CraftProgressPacket(snap),
+                online.connection.connection,
+                net.minecraftforge.network.NetworkDirection.PLAY_TO_CLIENT);
+    }
+
+    private void sendStartedPacket(ServerPlayer online) {
+        int total = useGraphExecution && graph != null
+                ? graph.topologicalOrder().size() : steps.size();
+        BatchCraftNetworkHandler.CHANNEL.sendTo(
+                new CraftStartedPacket(craftId, total, useGraphExecution),
+                online.connection.connection,
+                net.minecraftforge.network.NetworkDirection.PLAY_TO_CLIENT);
     }
 
     private void refundOrRollbackLedger(@Nullable ServerPlayer player) {
