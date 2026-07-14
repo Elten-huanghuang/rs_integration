@@ -96,6 +96,7 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.IntValue CRAFTING_MAX_STEPS;
     public static ForgeConfigSpec.IntValue CRAFTING_RESOLVE_TIMEOUT_MS;
     public static ForgeConfigSpec.IntValue CRAFTING_MAX_ENSURE_CALLS;
+    public static ForgeConfigSpec.IntValue CRAFTING_MAX_CONCURRENT_GRAPH_NODES;
     public static ForgeConfigSpec.IntValue RECIPE_TREE_MAX_DEPTH;
     public static ForgeConfigSpec.IntValue RECIPE_TREE_MAX_NODES;
     public static ForgeConfigSpec.IntValue RECIPE_TREE_BATCH_DEBOUNCE_MS;
@@ -442,6 +443,12 @@ public final class RSIntegrationConfig {
                         "Companion cap to craftingResolveTimeoutMs guarding against runaway recursion.",
                         "Increase alongside the timeout for deep recipe trees. Range: 1000-100000.")
                 .defineInRange("craftingMaxEnsureCalls", 10000, 1000, 100000);
+        CRAFTING_MAX_CONCURRENT_GRAPH_NODES = s
+                .comment("Maximum number of independent DAG recipe nodes that may run in parallel.",
+                        "Set to 1 for serial execution (safest); increase for multi-machine speedup.",
+                        "Only nodes with no material/machine/capture conflicts are dispatched.",
+                        "Range: 1-16.")
+                .defineInRange("craftingMaxConcurrentGraphNodes", 1, 1, 16);
         RECIPE_TREE_MAX_DEPTH = s
                 .comment("Maximum depth for the client-side recipe tree view.",
                         "Limits how many nested layers the tree renders.",

@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.graph.CraftNode;
 import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
+import com.huanghuang.rsintegration.crafting.graph.ConcurrentNodeExecutor;
 import com.huanghuang.rsintegration.crafting.graph.CraftPlanValidator;
 import com.huanghuang.rsintegration.crafting.graph.DagScheduler;
 import com.huanghuang.rsintegration.crafting.graph.NodeId;
@@ -125,6 +126,11 @@ public final class AsyncCraftChain {
     private final boolean useGraphExecution;
     @Nullable
     private NodeId currentGraphNode;
+    @Nullable
+    private ConcurrentNodeExecutor graphExecutor;
+    private final Map<NodeId, CraftNodeRuntime> nodeRuntimes = new HashMap<>();
+    private int graphEpoch;
+    private final int graphRunningNodeCap;
 
     public AsyncCraftChain(UUID playerId, MinecraftServer server, INetwork network,
                            List<CraftingResolver.ResolutionStep> steps) {
@@ -165,6 +171,10 @@ public final class AsyncCraftChain {
         this.terminalListeners = new TerminalListeners(
                 error -> RSIntegrationMod.LOGGER.error(ctx.format("onDone callback threw"), error));
         this.ledger.setLogContext(ctx);
+        int cap;
+        try { cap = RSIntegrationConfig.CRAFTING_MAX_CONCURRENT_GRAPH_NODES.get(); }
+        catch (Exception e) { cap = 1; }
+        this.graphRunningNodeCap = Math.max(1, cap);
         if (graph != null) {
             this.graph = graph;
             this.graphScheduler = new DagScheduler(graph);
@@ -508,7 +518,7 @@ public final class AsyncCraftChain {
         return false;
     }
 
-    // ── graph-backed tick (serial mode) ───────────────────────────
+    // ── graph-backed tick (multi-node parallel) ──────────────────
 
     private boolean tickGraph(ServerPlayer online) {
         if (graphScheduler == null) {
@@ -516,190 +526,352 @@ public final class AsyncCraftChain {
             return true;
         }
 
-        // First tick
+        // First tick — initialise executor
         if (state == State.PENDING) {
-            RSIntegrationMod.LOGGER.debug(ctx.format("PENDING → EXECUTING (graph, {} nodes)"),
-                    graph.topologicalOrder().size());
+            RSIntegrationMod.LOGGER.debug(ctx.format("PENDING → EXECUTING (graph, {} nodes, cap={})"),
+                    graph.topologicalOrder().size(), graphRunningNodeCap);
             state = State.EXECUTING;
             Diagnostics.record(Diagnostics.Category.CHAIN_STATE,
                     "PENDING→EXECUTING graph nodes=" + graph.topologicalOrder().size());
+            graphExecutor = new ConcurrentNodeExecutor(graphScheduler,
+                    nodeId -> startGraphNode(nodeId, online), graphRunningNodeCap);
         }
 
-        // Observe running delegate
-        if (currentDelegate != null && currentGraphNode != null) {
-            waitTicks++;
-            try {
-                if (currentDelegate instanceof ParallelCraftGroup group && group.isDraining()) {
-                    drainingTicks++;
-                } else {
-                    drainingTicks = 0;
-                }
+        if (graphExecutor == null) {
+            abort("Graph executor not initialised");
+            return true;
+        }
 
-                if (currentDelegate instanceof ParallelCraftGroup group) {
-                    List<ItemStack> settled = group.drainSettledResults();
-                    if (!settled.isEmpty()) {
-                        for (ItemStack result : settled) addToVirtualInventory(result);
-                        snapshotCommittedVirtual();
-                        waitTicks = 0;
-                    }
-                    List<ItemStack> queued = group.drainQueuedMaterialsForRecovery();
-                    if (!queued.isEmpty()) {
-                        for (ItemStack m : queued) addToVirtualInventory(m);
-                        snapshotCommittedVirtual();
-                    }
-                }
+        // Process synchronous GENERIC nodes outside the executor.
+        // They complete immediately and don't wait for observation ticks.
+        settleReadyVanillaNodes(online);
 
-                IBatchDelegate.CraftObservation observation = currentDelegate.observeCraft(online.serverLevel());
-                if (observation.phase() == IBatchDelegate.CraftPhase.FAILED) {
-                    abort("Machine craft failed: " + observation.detail());
-                    return true;
-                }
+        // Drive the executor: observe all running, settle completed, dispatch new.
+        try {
+            graphExecutor.tick();
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.error(ctx.format("Graph executor tick error"), e);
+            abort("Graph executor error: " + e.getMessage());
+            return true;
+        }
 
-                if (observation.phase() == IBatchDelegate.CraftPhase.DONE) {
-                    // Collect results
-                    List<ItemStack> actual = new ArrayList<>(disarmOutputCapture());
-                    actual.addAll(currentDelegate.collectAllResults(online));
-                    actual.removeIf(s -> s == null || s.isEmpty());
-                    for (ItemStack result : actual) addToVirtualInventory(result);
-
-                    // External extraction check
-                    IBatchDelegate.ExpectedProduction expected = currentDelegate.getExpectedProduction();
-                    int actualCount = countMatchingProduction(actual, expected);
-                    if (expected != null && expected.count() > actualCount) {
-                        snapshotCommittedVirtual();
-                        ledger.reset();
-                        abortWithoutRefund("Craft output was externally extracted");
-                        return true;
-                    }
-                    ItemStack expectedWorld = currentDelegate.getExpectedOutput();
-                    if (expected == null && expectedWorld != null && !expectedWorld.isEmpty()
-                            && actual.isEmpty()) {
-                        snapshotCommittedVirtual();
-                        ledger.reset();
-                        abortWithoutRefund("Expected craft output was not captured");
-                        return true;
-                    }
-
-                    // Secondary outputs
-                    if (!(currentDelegate instanceof ParallelCraftGroup)
-                            && !currentDelegate.collectsPhysicalSecondaryOutputs()) {
-                        ServerLevel overworld = server.overworld();
-                        if (overworld != null) {
-                            Recipe<?> mbRecipe = overworld.getRecipeManager()
-                                    .byKey(steps.get(stepIndex(currentGraphNode)).recipeId()).orElse(null);
-                            if (mbRecipe != null) {
-                                for (ItemStack s : ModRecipeHandlers.tryGetSecondaryOutputs(
-                                        mbRecipe, overworld.registryAccess())) {
-                                    addToVirtualInventory(s.copy());
-                                }
-                            }
-                        }
-                    }
-
-                    try { currentDelegate.onBatchFinished(online); }
-                    catch (Exception fe) {
-                        RSIntegrationMod.LOGGER.error(ctx.format("onBatchFinished error"), fe);
-                    }
-
-                    // Settle node in scheduler
-                    graphScheduler.succeed(currentGraphNode);
-                    currentDelegate = null;
-                    currentGraphNode = null;
-                    waitTicks = 0;
-                    ledger.reset();
-                    stepRemaining = 0;
-                    snapshotCommittedVirtual();
-                    RSIntegrationMod.LOGGER.debug(ctx.format("Graph node succeeded: {}"), currentGraphNode);
-                } else {
-                    // Timeout
-                    int timeoutTicks = RSIntegrationConfig.MULTIBLOCK_CRAFT_TIMEOUT_SECONDS.get() * 20;
-                    if (waitTicks > timeoutTicks) {
-                        if (currentDelegate instanceof ParallelCraftGroup group && group.isDraining()) {
-                            int drainLimit = Math.max(timeoutTicks * 4, 20 * 60);
-                            if (drainingTicks > drainLimit) {
-                                abort("Timeout draining in-flight parallel crafts");
-                                return true;
-                            }
-                            waitTicks = 0;
-                            return false;
-                        }
-                        abort("Timeout waiting for craft completion");
-                        return true;
-                    }
-                }
-            } catch (Exception e) {
-                RSIntegrationMod.LOGGER.error(ctx.format("Error polling craft completion"), e);
-                abort("Internal error during craft polling");
+        // Check for failures
+        if (graphScheduler.isStopping() && !graphScheduler.allSucceeded()) {
+            if (graphExecutor.runningCount() == 0) {
+                abort("Graph execution failed — no running nodes remain");
                 return true;
             }
-            return false;
         }
 
-        // All nodes completed?
+        // All nodes succeeded — deliver
         if (graphScheduler.allSucceeded()) {
             state = State.COMPLETING;
             finish(online);
             return true;
         }
 
-        // Claim next ready node
-        currentGraphNode = claimNextReadyNode();
-        if (currentGraphNode == null) {
-            if (graphScheduler.isStopping()) {
-                abort("Graph scheduler stopped — no ready nodes available");
-                return true;
-            }
-            // No ready nodes but not stopping — waiting for graph consistency
-            return false;
-        }
+        return false;
+    }
 
-        // Execute the claimed node
-        int idx = stepIndex(currentGraphNode);
-        currentStepIdx = idx;
-        CraftingResolver.ResolutionStep step = steps.get(idx);
+    /** Execute all ready GENERIC nodes synchronously and settle them immediately. */
+    private void settleReadyVanillaNodes(ServerPlayer online) {
+        while (true) {
+            NodeId vanillaNode = findReadyVanillaNode();
+            if (vanillaNode == null) break;
 
-        if (step.recipeId().equals(CraftingResolver.TAINT_EARTH_HEART_STEP)) {
-            if (!startEarthHeartTaint(online, step.executions())) return true;
-            graphScheduler.succeed(currentGraphNode);
-            currentGraphNode = null;
-            return false;
-        }
-
-        if (step.modType() == ModType.GENERIC) {
+            int idx = stepIndex(vanillaNode);
+            currentStepIdx = idx;
             int nextIdx = executeVanillaBatch(idx, online);
-            if (state == State.ABORTED) return true;
+            if (state == State.ABORTED) return;
+
             if (!ledger.isCommitted() && !ledger.commit(network, online)) {
                 abort("Commit failed after vanilla batch");
-                return true;
+                return;
             }
             ledger.reset();
             snapshotCommittedVirtual();
-            // Settle all vanilla nodes that were processed
             for (int i = idx; i < nextIdx; i++) {
                 graphScheduler.succeed(graph.topologicalOrder().get(i));
             }
-            currentGraphNode = null;
             currentStepIdx = nextIdx;
-        } else {
-            if (stepRemaining <= 0) {
-                stepRemaining = step.executions();
-                machineCount = 1;
-            }
-            currentDelegate = startModStep(step, online);
-            if (currentDelegate == null) {
-                abort("Failed to start multi-block craft: " + step.recipeId());
-                return true;
-            }
-            state = State.WAITING_MOD;
-            snapshotCommittedVirtual();
-            Diagnostics.record(Diagnostics.Category.CHAIN_STATE,
-                    "EXECUTING→WAITING_MOD step=" + step.recipeId(),
-                    step.recipeId(), step.modType());
-            RSIntegrationMod.LOGGER.debug(ctx.format("EXECUTING → WAITING_MOD (graph) for step {}"),
-                    step.recipeId());
-            waitTicks = 0;
         }
-        return false;
+    }
+
+    @Nullable
+    private NodeId findReadyVanillaNode() {
+        List<NodeId> ready = graphScheduler.claimReady(1);
+        if (ready.isEmpty()) return null;
+        NodeId candidate = ready.get(0);
+        CraftingResolver.ResolutionStep step = steps.get(stepIndex(candidate));
+        if (step.modType() == ModType.GENERIC
+                && !step.recipeId().equals(CraftingResolver.TAINT_EARTH_HEART_STEP)) {
+            return candidate;
+        }
+        graphScheduler.releaseClaim(candidate);
+        return null;
+    }
+
+    /** Create a {@link CraftNodeRuntime} worker for one ready mod node. */
+    @Nullable
+    private ConcurrentNodeExecutor.Worker startGraphNode(NodeId nodeId, ServerPlayer online) {
+        int idx = stepIndex(nodeId);
+        CraftingResolver.ResolutionStep step = steps.get(idx);
+
+        // Earth Heart taint — synchronous, no delegate needed
+        if (step.recipeId().equals(CraftingResolver.TAINT_EARTH_HEART_STEP)) {
+            if (!startEarthHeartTaint(online, step.executions())) {
+                graphScheduler.fail(nodeId);
+                return null;
+            }
+            graphScheduler.succeed(nodeId);
+            CraftNodeRuntime synthetic = new CraftNodeRuntime(nodeId,
+                    step.recipeId().toString(), null, null, null);
+            nodeRuntimes.put(nodeId, synthetic);
+            return null; // already succeeded
+        }
+
+        // Create per-node ledger
+        ExtractionLedger ledger = new ExtractionLedger();
+        ledger.setLogContext(ctx);
+
+        // Start the delegate using the chain's existing infrastructure,
+        // but with the node-local ledger.
+        IBatchDelegate delegate = startNodeDelegate(step, online, ledger);
+        if (delegate == null) {
+            graphScheduler.fail(nodeId);
+            return null;
+        }
+
+        CraftNodeRuntime runtime = new CraftNodeRuntime(nodeId,
+                step.recipeId().toString(), delegate, ledger, null);
+        nodeRuntimes.put(nodeId, runtime);
+
+        Diagnostics.record(Diagnostics.Category.CHAIN_STATE,
+                "GRAPH-DISPATCH step=" + step.recipeId() + " node=" + nodeId,
+                step.recipeId(), step.modType());
+        RSIntegrationMod.LOGGER.debug(ctx.format("Graph node dispatched: {} (step {})"),
+                nodeId, step.recipeId());
+        return runtime;
+    }
+
+    /** Like {@link #startModStep} but writes into a node-local ledger. */
+    @Nullable
+    private IBatchDelegate startNodeDelegate(CraftingResolver.ResolutionStep step,
+                                              ServerPlayer online,
+                                              ExtractionLedger ledger) {
+        String path = step.recipeId().getPath();
+        int slash = path.indexOf('/');
+        String subTypeHint = slash > 0 ? path.substring(0, slash).toLowerCase() : null;
+
+        List<BoundMachine> machines = AltarBindingRegistry.getBoundMachinesForType(
+                online, step.modType(), subTypeHint);
+        if (machines.isEmpty()) {
+            int totalForMod = AltarBindingRegistry.getBoundMachinesForType(
+                    online, step.modType()).size();
+            RSIntegrationMod.LOGGER.warn(ctx.format("No bound machine for graph node {}: mod={} subType={} (total={})"),
+                    step.recipeId(), step.modType(), subTypeHint, totalForMod);
+            return null;
+        }
+        machines = deduplicateMachines(machines);
+        machines.sort((a, b) -> {
+            ResourceLocation playerDim = online.level().dimension().location();
+            boolean aSame = a.dim().equals(playerDim);
+            boolean bSame = b.dim().equals(playerDim);
+            if (aSame == bSame) return 0;
+            return aSame ? -1 : 1;
+        });
+
+        // Parallel group when multiple machines, enough executions, and not infer mode
+        if (!step.inferMode() && machines.size() >= 2 && step.executions() > 1) {
+            IBatchDelegate parallel = tryStartParallel(machines, step, online);
+            if (parallel != null) return parallel;
+            if (ledger.isCommitted()) return null; // partial commit — must abort
+            ledger.reset();
+        }
+
+        IBatchDelegate delegate = step.inferMode()
+                ? step.modType().createInferDelegate()
+                : createDelegate(step.modType());
+        if (delegate == null) return null;
+
+        // Capability gate: when more than one node may run concurrently, require
+        // the delegate to opt in. In serial mode (cap=1) all delegates are allowed.
+        if (graphRunningNodeCap > 1 && !delegate.supportsConcurrentNodeExecution()
+                && !(delegate instanceof GenericBatchDelegate)) {
+            RSIntegrationMod.LOGGER.warn(ctx.format("Delegate {} does not support concurrent execution; "
+                    + "reducing effective parallelism. Set cap=1 to avoid this warning."),
+                    delegate.getClass().getSimpleName());
+            // Do not fail the node — it will still start, but the cap gate means
+            // other nodes will wait if this one is running.
+        }
+
+        if (delegate instanceof GenericBatchDelegate) {
+            if (!delegate.validateAndInit(online, step.recipeId(), null, null)) return null;
+            if (delegate instanceof AbstractBatchDelegate abd) abd.setMachineServer(server);
+            return startGenericStep(delegate, step, online);
+        }
+
+        BoundMachine matched = null;
+        for (BoundMachine m : machines) {
+            try {
+                if (delegate.validateAndInit(online, step.recipeId(), m.dim(), m.pos())) {
+                    matched = m;
+                    if (delegate instanceof AbstractBatchDelegate abd) {
+                        abd.setMachineDim(m.dim());
+                        abd.setMachineServer(server);
+                        if (targetOutput != null && stepIndexForNode(step) == steps.size() - 1) {
+                            abd.setTargetOutput(targetOutput);
+                        }
+                    }
+                    break;
+                }
+            } catch (Exception ex) {
+                RSIntegrationMod.LOGGER.debug(ctx.format("validateAndInit failed for {}"), m.pos(), ex);
+            }
+        }
+        if (matched == null) return null;
+
+        try {
+            var dimKey = ResourceKey.create(
+                    net.minecraft.core.registries.Registries.DIMENSION, matched.dim());
+            ServerLevel machineLevel = server.getLevel(dimKey);
+            if (machineLevel != null
+                    && !ProtectionChecker.canInteract(online, machineLevel, matched.pos())) {
+                return null;
+            }
+        } catch (Exception ex) {
+            RSIntegrationMod.LOGGER.warn(ctx.format("Protection check failed"), ex);
+        }
+
+        try {
+            List<IngredientSpec> specs = delegate.getRequiredMaterials();
+            if (specs != null && !specs.isEmpty()) {
+                List<ItemStack> materials = preReserveForNode(specs, online, ledger);
+                if (materials == null) {
+                    try { delegate.onBatchFailed(online, "pre-reserve failed"); }
+                    catch (Exception fe) { RSIntegrationMod.LOGGER.error(ctx.format("onBatchFailed in pre-reserve"), fe); }
+                    return null;
+                }
+                if (!ledger.commit(network, online)) {
+                    try { delegate.onBatchFailed(online, "commit failed"); }
+                    catch (Exception fe) { RSIntegrationMod.LOGGER.error(ctx.format("onBatchFailed in commit"), fe); }
+                    return null;
+                }
+                if (delegate instanceof AbstractBatchDelegate abd) abd.useSharedLedger(ledger);
+                if (armNodeCapture(delegate, online) == null && delegate.getExpectedOutput() != null) {
+                    try { delegate.onBatchFailed(online, "capture zone overlap"); }
+                    catch (Exception fe) { RSIntegrationMod.LOGGER.error(ctx.format("onBatchFailed in capture"), fe); }
+                    return null;
+                }
+                if (!delegate.tryStartWithMaterials(online, materials, ledger)) {
+                    List<ItemStack> escaped = disarmNodeCapture(delegate);
+                    if (!escaped.isEmpty()) {
+                        for (ItemStack s : escaped) addToVirtualInventory(s);
+                        ledger.reset();
+                        return delegate;
+                    }
+                    try { delegate.onBatchFailed(online, "tryStartWithMaterials failed"); }
+                    catch (Exception fe) { RSIntegrationMod.LOGGER.error(ctx.format("onBatchFailed in start"), fe); }
+                    return null;
+                }
+            } else {
+                if (network != null && !virtualInventory.isEmpty()) {
+                    flushVirtualInventory(online);
+                    snapshotCommittedVirtual();
+                }
+                if (armNodeCapture(delegate, online) == null && delegate.getExpectedOutput() != null) {
+                    try { delegate.onBatchFailed(online, "capture zone overlap"); }
+                    catch (Exception fe) { RSIntegrationMod.LOGGER.error(ctx.format("onBatchFailed in capture"), fe); }
+                    return null;
+                }
+                if (!delegate.tryStartSingleCraft(online, ledger)) {
+                    List<ItemStack> escaped = disarmNodeCapture(delegate);
+                    if (!escaped.isEmpty()) {
+                        for (ItemStack s : escaped) addToVirtualInventory(s);
+                        ledger.reset();
+                        return delegate;
+                    }
+                    try { delegate.onBatchFailed(online, "tryStartSingleCraft failed"); }
+                    catch (Exception fe) { RSIntegrationMod.LOGGER.error(ctx.format("onBatchFailed in single"), fe); }
+                    return null;
+                }
+            }
+        } catch (Exception e) {
+            List<ItemStack> escaped = disarmNodeCapture(delegate);
+            if (!escaped.isEmpty()) {
+                for (ItemStack s : escaped) addToVirtualInventory(s);
+                ledger.reset();
+                return delegate;
+            }
+            try { delegate.onBatchFailed(online, "exception in startNodeDelegate"); }
+            catch (Exception fe) { RSIntegrationMod.LOGGER.error(ctx.format("onBatchFailed in exception"), fe); }
+            return null;
+        }
+        return delegate;
+    }
+
+    /** Pre-reserve materials into a node-local ledger. */
+    @Nullable
+    private List<ItemStack> preReserveForNode(List<IngredientSpec> specs, ServerPlayer online,
+                                               ExtractionLedger ledger) {
+        List<ItemStack> materials = new ArrayList<>(specs.size());
+        for (IngredientSpec spec : specs) {
+            if (spec.isEmpty()) { materials.add(ItemStack.EMPTY); continue; }
+            int needed = spec.count();
+            // Consume from virtualInventory first (intermediate outputs of earlier nodes)
+            List<ItemStack> fromVirtual = new ArrayList<>();
+            int remaining = needed;
+            for (int i = virtualInventory.size() - 1; i >= 0 && remaining > 0; i--) {
+                ItemStack vi = virtualInventory.get(i);
+                if (IngredientMatcher.test(spec.ingredient(), vi) && vi.getCount() > 0) {
+                    int take = Math.min(remaining, vi.getCount());
+                    ItemStack taken = vi.split(take);
+                    fromVirtual.add(taken.copy());
+                    remaining -= take;
+                    if (vi.isEmpty()) virtualInventory.remove(i);
+                }
+            }
+            if (remaining > 0) {
+                ItemStack fromLedger = ledger.reserve(spec.ingredient(), remaining,
+                        network, online, null, null);
+                if (fromLedger.isEmpty()) {
+                    // Refund taken virtual items
+                    for (ItemStack s : fromVirtual) addToVirtualInventory(s);
+                    return null;
+                }
+                materials.add(fromLedger.copyWithCount(remaining));
+            } else if (!fromVirtual.isEmpty()) {
+                ItemStack merged = fromVirtual.get(0).copy();
+                for (int i = 1; i < fromVirtual.size(); i++) merged.grow(fromVirtual.get(i).getCount());
+                materials.add(merged);
+            } else {
+                materials.add(ItemStack.EMPTY);
+            }
+        }
+        return materials;
+    }
+
+    @Nullable
+    private CraftOutputInterceptor.CaptureHandle armNodeCapture(IBatchDelegate delegate, ServerPlayer online) {
+        ItemStack expected = delegate.getExpectedOutput();
+        if (expected == null || expected.isEmpty()) return null;
+        var region = delegate.getOutputCaptureRegion();
+        if (region == null) return null;
+        ResourceLocation dimLoc = delegate instanceof AbstractBatchDelegate abd ? abd.getMachineDim() : null;
+        ResourceKey<Level> dim = dimLoc != null
+                ? ResourceKey.create(net.minecraft.core.registries.Registries.DIMENSION, dimLoc)
+                : online.level().dimension();
+        CraftOutputInterceptor.CaptureHandle handle = CraftOutputInterceptor.arm(dim, region, expected);
+        if (handle != null) this.captureHandle = handle;
+        return handle;
+    }
+
+    private List<ItemStack> disarmNodeCapture(IBatchDelegate delegate) {
+        return disarmOutputCapture(); // single capture for now
+    }
+
+    private int stepIndexForNode(CraftingResolver.ResolutionStep step) {
+        return steps.indexOf(step);
     }
 
     @Nullable
@@ -1302,13 +1474,9 @@ public final class AsyncCraftChain {
                     try { delegate.onBatchFailed(online, "tryStartWithMaterials failed"); } catch (Exception fe) {
                         RSIntegrationMod.LOGGER.error(ctx.format("onBatchFailed threw during tryStartWithMaterials cleanup"), fe);
                     }
-                    // abort() refunds the ledger, so we must NOT refund here
                     return null;
                 }
             } else {
-                // Fallback: delegate handles extraction on its own (legacy path).
-                // Note: this does NOT see virtualInventory; new delegates should
-                // implement getRequiredMaterials() + tryStartWithMaterials().
                 if (!delegate.tryStartSingleCraft(online, ledger)) {
                     RSIntegrationMod.LOGGER.warn(ctx.format("tryStartSingleCraft failed for generic step {}"),
                             step.recipeId());
@@ -1888,6 +2056,7 @@ public final class AsyncCraftChain {
             currentDelegate = null;
         }
         disarmOutputCapture();
+        cleanupGraphNodes(online, reason);
         // Recover only earlier settled products. The current step's inputs were
         // consumed with its output escaped/lost — deliberately not refunded here
         // to avoid duplicating an output that may already be in the player's
@@ -1931,6 +2100,9 @@ public final class AsyncCraftChain {
         }
         recoverCapturedOutputs(online);
 
+        // Graph path: stop executor and clean up all running node runtimes
+        cleanupGraphNodes(online, reason);
+
         refundOrRollbackLedger(online);
 
         // Deliver intermediate products whose backing inputs were already
@@ -1946,6 +2118,39 @@ public final class AsyncCraftChain {
         }
         ledger.close();
         fireOnDone();
+    }
+
+    /** Stop graph executor and clean up every running node runtime. */
+    private void cleanupGraphNodes(@Nullable ServerPlayer player, String reason) {
+        if (graphExecutor != null) {
+            graphExecutor.stopScheduling();
+        }
+        for (CraftNodeRuntime runtime : List.copyOf(nodeRuntimes.values())) {
+            try {
+                runtime.stopDispatch();
+                List<ItemStack> settled = runtime.drainSettledResults();
+                for (ItemStack s : settled) addToVirtualInventory(s);
+                List<ItemStack> queued = runtime.drainQueuedMaterials();
+                for (ItemStack s : queued) addToVirtualInventory(s);
+                List<ItemStack> captured = runtime.disarmCapture();
+                for (ItemStack s : captured) {
+                    if (player != null) safeGiveToPlayer(player, s);
+                    else insertOrDropAtSpawn(s);
+                }
+                if (runtime.hasDelegate()) {
+                    try {
+                        runtime.delegate().onBatchFailed(player, reason);
+                    } catch (Exception fe) {
+                        RSIntegrationMod.LOGGER.error(ctx.format("Error in graph node cleanup"), fe);
+                    }
+                }
+                ExtractionLedger nodeLedger = runtime.nodeLedger();
+                if (nodeLedger != null) nodeLedger.close();
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.error(ctx.format("Error cleaning up graph node {}"), runtime.describe(), e);
+            }
+        }
+        nodeRuntimes.clear();
     }
 
     private void refundOrRollbackLedger(@Nullable ServerPlayer player) {
@@ -1986,6 +2191,8 @@ public final class AsyncCraftChain {
             currentDelegate = null;
         }
         recoverCapturedOutputs(null);
+
+        cleanupGraphNodes(null, reason);
 
         refundOrRollbackLedger(null);
 
