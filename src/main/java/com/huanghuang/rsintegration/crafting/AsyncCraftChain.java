@@ -942,6 +942,29 @@ public final class AsyncCraftChain {
     public UUID getPlayerId() { return playerId; }
     public int currentStep() { return currentStepIdx; }
     public int stepsCount() { return steps.size(); }
+    public boolean isGraphExecution() { return useGraphExecution; }
+
+    /**
+     * Build the current server-authoritative progress view for a status request.
+     * A status response is an outgoing progress event, so it advances the same
+     * monotonic sequence used by periodic updates. This matters on a freshly
+     * started craft: the preceding CraftStartedPacket installs sequence 0, and
+     * a status snapshot also numbered 0 would correctly be rejected as stale.
+     */
+    public CraftProgressSnapshot nextStatusSnapshot() {
+        int total = useGraphExecution && graph != null
+                ? graph.topologicalOrder().size() : steps.size();
+        int completed = useGraphExecution && graphScheduler != null
+                ? (int) graphScheduler.countSucceeded() : currentStepIdx;
+        int running = graphExecutor != null ? graphExecutor.runningCount()
+                : (currentDelegate != null ? 1 : 0);
+        byte chainStateByte = graphScheduler != null && graphScheduler.isStopping()
+                ? CraftProgressSnapshot.STATE_STOPPING : CraftProgressSnapshot.STATE_EXECUTING;
+        int sequence = isDone() ? CraftProgressSnapshot.TERMINAL_SEQUENCE : ++progressSequence;
+        return new CraftProgressSnapshot(craftId, sequence, chainStateByte,
+                completed, total, running, abortReason.isEmpty() ? null : abortReason);
+    }
+
     public ExtractionLedger ledger() { return ledger; }
     public List<ItemStack> virtualInventory() { return virtualInventory; }
 

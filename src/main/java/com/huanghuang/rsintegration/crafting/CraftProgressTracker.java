@@ -25,7 +25,7 @@ public final class CraftProgressTracker {
     private CraftProgressTracker() {}
 
     public static void onStarted(CraftStartedPacket packet) {
-        ACTIVE.put(packet.craftId(),
+        ACTIVE.putIfAbsent(packet.craftId(),
                 new CraftProgressSnapshot(packet.craftId(), 0, (byte) 0, 0,
                         packet.totalNodes(), 0, null));
     }
@@ -65,6 +65,13 @@ public final class CraftProgressTracker {
     public static void remove(UUID craftId) {
         ACTIVE.remove(craftId);
         TERMINAL_SINCE.remove(craftId);
+    }
+
+    /** Clear all client-only state on disconnect before joining another server. */
+    public static void clear() {
+        ACTIVE.clear();
+        TERMINAL_SINCE.clear();
+        visible = true;
     }
 
     public static boolean hasActive() {

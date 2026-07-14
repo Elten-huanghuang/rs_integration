@@ -31,6 +31,9 @@ public final class BatchCraftNetworkHandler {
         ch.registerMessage(NetworkPacketIds.CRAFT_CANCEL, CraftCancelPacket.class,
                 CraftCancelPacket::encode, CraftCancelPacket::decode, CraftCancelPacket::handle,
                 java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_SERVER));
+        ch.registerMessage(NetworkPacketIds.CRAFT_STATUS_REQUEST, CraftStatusRequestPacket.class,
+                CraftStatusRequestPacket::encode, CraftStatusRequestPacket::decode, CraftStatusRequestPacket::handle,
+                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_SERVER));
         registered = true;
     }
 }

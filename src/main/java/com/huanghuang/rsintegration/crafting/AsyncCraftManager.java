@@ -65,6 +65,15 @@ public final class AsyncCraftManager {
         return activeChains.get(craftId);
     }
 
+    /** Immutable active-craft snapshot for status synchronization. */
+    public List<AsyncCraftChain> activeCraftsFor(UUID playerId) {
+        List<AsyncCraftChain> result = new ArrayList<>();
+        for (AsyncCraftChain chain : activeChains.snapshot()) {
+            if (chain.belongsTo(playerId) && !chain.isDone()) result.add(chain);
+        }
+        return List.copyOf(result);
+    }
+
     @Nullable
     public AsyncCraftChain getChain(ServerPlayer player) {
         return getChain(player.getUUID());
