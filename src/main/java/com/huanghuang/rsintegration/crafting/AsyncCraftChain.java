@@ -134,6 +134,8 @@ public final class AsyncCraftChain {
     private ConcurrentNodeExecutor graphExecutor;
     private final Map<NodeId, CraftNodeRuntime> nodeRuntimes = new HashMap<>();
     private int graphEpoch;
+    private int graphTotalTicks;
+    private final int graphGlobalTimeoutTicks;
     private final int graphRunningNodeCap;
     private int progressTickCounter;
     private int progressSequence;
@@ -181,6 +183,10 @@ public final class AsyncCraftChain {
         try { cap = RSIntegrationConfig.CRAFTING_MAX_CONCURRENT_GRAPH_NODES.get(); }
         catch (Exception e) { cap = 1; }
         this.graphRunningNodeCap = Math.max(1, cap);
+        int globalTimeoutSeconds;
+        try { globalTimeoutSeconds = RSIntegrationConfig.CRAFTING_CHAIN_GLOBAL_TIMEOUT_SECONDS.get(); }
+        catch (Exception e) { globalTimeoutSeconds = 900; }
+        this.graphGlobalTimeoutTicks = Math.max(1, globalTimeoutSeconds) * 20;
         if (graph != null) {
             this.graph = graph;
             this.graphScheduler = new DagScheduler(graph);
@@ -550,6 +556,19 @@ public final class AsyncCraftChain {
 
         if (graphExecutor == null) {
             abort("Graph executor not initialised");
+            return true;
+        }
+
+        // Chain-global watchdog: a whole-chain ceiling on top of per-node
+        // timeouts. Even if individual nodes keep making progress (or the
+        // scheduler wedges with ready nodes but nothing running), the chain
+        // cannot run forever. abort() is REFUND_AND_DELIVER, and conservation
+        // is already correct: materials dispatched into a machine live in each
+        // node's committed ledger, whose close() is a no-op (never refunded, so
+        // never duped); only settled/undispatched materials are returned.
+        if (++graphTotalTicks > graphGlobalTimeoutTicks) {
+            abort("Crafting chain exceeded global timeout ("
+                    + (graphGlobalTimeoutTicks / 20) + "s)");
             return true;
         }
 
