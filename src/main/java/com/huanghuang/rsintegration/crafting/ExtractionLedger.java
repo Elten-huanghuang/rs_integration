@@ -190,14 +190,14 @@ public final class ExtractionLedger implements AutoCloseable {
                             entry.id, entry.count, item.getCount());
                     // Include the partial extract so rollback can return already-split items
                     if (!item.isEmpty()) {
-                        extracted.add(new ExtractRecord(entry.source, item,
+                        extracted.add(new ExtractRecord(entry.id, entry.source, item.copy(),
                                 entry.altarDim, entry.altarPos, entry.sourceNetwork));
                     }
                     rollbackExtractedPhases(extracted, player);
                     transition(State.ROLLED_BACK);
                     return false;
                 }
-                extracted.add(new ExtractRecord(entry.source, item.copy(),
+                extracted.add(new ExtractRecord(entry.id, entry.source, item.copy(),
                         entry.altarDim, entry.altarPos, entry.sourceNetwork));
             }
         } catch (Exception e) {
@@ -215,6 +215,15 @@ public final class ExtractionLedger implements AutoCloseable {
         }
 
         // ── Phase 3: Confirm ────────────────────────────────────
+        for (ExtractRecord record : extracted) {
+            Entry entry = entriesById.get(record.entryId);
+            if (entry == null) {
+                rollbackExtractedPhases(extracted, player);
+                transition(State.ROLLED_BACK);
+                return false;
+            }
+            entry.confirmExtracted(record.stack);
+        }
         MaterialSources.invalidateFor(player);
         pendingNet.clear();
         pendingInv.clear();
@@ -297,13 +306,13 @@ public final class ExtractionLedger implements AutoCloseable {
     }
 
     /** Lightweight record for extracted items during commit rollback. */
-    private record ExtractRecord(Source source, ItemStack stack,
+    private record ExtractRecord(int entryId, Source source, ItemStack stack,
                                   @Nullable ResourceKey<Level> altarDim,
                                   @Nullable BlockPos altarPos,
                                   @Nullable INetwork sourceNetwork) {}
 
     /** Explicitly roll back all reservations without committing. */
-    public void rollback(@Nonnull ServerPlayer player) {
+    public void rollback(@Nullable ServerPlayer player) {
         if (state == State.IDLE || state == State.ROLLED_BACK) return;
         if (state == State.COMMITTED) {
             refundCommitted(null, player);
@@ -314,7 +323,7 @@ public final class ExtractionLedger implements AutoCloseable {
         transition(State.ROLLED_BACK);
     }
 
-    private void releaseReservations(ServerPlayer player) {
+    private void releaseReservations(@Nullable ServerPlayer player) {
         // Pending reservations were never physically extracted — just clear the
         // tracking maps so future reservations see accurate counts.
         pendingNet.clear();
@@ -415,6 +424,7 @@ public final class ExtractionLedger implements AutoCloseable {
         @Nullable final ResourceKey<Level> altarDim;
         @Nullable final BlockPos altarPos;
         @Nullable final INetwork sourceNetwork;
+        ItemStack extracted = ItemStack.EMPTY;
 
         Entry(Source source, Ingredient originalIngredient, ItemStack template, @Nullable ItemStack preExtracted,
               @Nullable ResourceKey<Level> altarDim, @Nullable BlockPos altarPos,
@@ -428,6 +438,14 @@ public final class ExtractionLedger implements AutoCloseable {
             this.altarDim = altarDim;
             this.altarPos = altarPos;
             this.sourceNetwork = sourceNetwork;
+        }
+
+        void confirmExtracted(ItemStack stack) {
+            this.extracted = stack.copy();
+        }
+
+        ItemStack refundableStack() {
+            return extracted.isEmpty() ? ItemStack.EMPTY : extracted.copy();
         }
     }
 
@@ -858,8 +876,11 @@ public final class ExtractionLedger implements AutoCloseable {
     public void refundCommitted(@Nullable INetwork network, @Nullable ServerPlayer player) {
         if (state != State.COMMITTED) return;
         for (Entry e : entries) {
-            if (e.template.isEmpty()) continue;
-            ItemStack refund = e.template.copyWithCount(e.count);
+            ItemStack refund = e.refundableStack();
+            if (refund.isEmpty()) {
+                RSIntegrationMod.LOGGER.error("[RSI-Ledger] Committed entry {} has no recorded extracted fragment", e.id);
+                continue;
+            }
             switch (e.source) {
                 case NETWORK, ALTAR_BINDING -> {
                     INetwork net = e.sourceNetwork != null ? e.sourceNetwork : network;

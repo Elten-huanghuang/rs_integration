@@ -78,13 +78,23 @@ public final class CraftOutputInterceptor {
     private static final Map<ResourceKey<Level>, Map<UUID, ActiveZone>> ZONES =
             new ConcurrentHashMap<>();
 
-    /** Arm a uniquely-owned zone. Expected output is matched by item type only. */
+    /** Arm a uniquely-owned zone, rejecting ambiguous overlapping captures. */
     public static CaptureHandle arm(ResourceKey<Level> dim, AABB region, ItemStack expectedOutput) {
         if (dim == null || region == null) return null;
+        Map<UUID, ActiveZone> dimZones = ZONES.computeIfAbsent(dim, k -> new ConcurrentHashMap<>());
+        for (ActiveZone active : dimZones.values()) {
+            if (active.region.intersects(region) && outputsMayOverlap(active.expectedOutput, expectedOutput)) {
+                return null;
+            }
+        }
         UUID id = UUID.randomUUID();
-        ZONES.computeIfAbsent(dim, k -> new ConcurrentHashMap<>())
-                .put(id, new ActiveZone(region, expectedOutput));
+        dimZones.put(id, new ActiveZone(region, expectedOutput));
         return new CaptureHandle(dim, id);
+    }
+
+    private static boolean outputsMayOverlap(ItemStack first, ItemStack second) {
+        if (first == null || first.isEmpty() || second == null || second.isEmpty()) return true;
+        return ItemStack.isSameItem(first, second);
     }
 
     /** Used by optional magnet mixins to leave protected entities untouched. */

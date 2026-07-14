@@ -1,6 +1,8 @@
 package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.crafting.graph.CaptureLeaseRegistry;
+import com.huanghuang.rsintegration.crafting.graph.MachineLeaseRegistry;
 import com.huanghuang.rsintegration.command.PerformanceMonitor;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
@@ -11,7 +13,6 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
  * Drives all active {@link AsyncCraftChain} instances every server tick
@@ -20,7 +21,9 @@ import java.util.concurrent.CopyOnWriteArrayList;
 public final class AsyncCraftManager {
 
     private static final AsyncCraftManager INSTANCE = new AsyncCraftManager();
-    private final List<AsyncCraftChain> activeChains = new CopyOnWriteArrayList<>();
+    private final ActiveCraftRegistry<UUID, AsyncCraftChain> activeChains = new ActiveCraftRegistry<>();
+    private final MachineLeaseRegistry machineLeases = new MachineLeaseRegistry();
+    private final CaptureLeaseRegistry captureLeases = new CaptureLeaseRegistry();
 
     private AsyncCraftManager() {}
 
@@ -28,15 +31,17 @@ public final class AsyncCraftManager {
 
     public void submit(AsyncCraftChain chain) {
         UUID playerId = chain.getPlayerId();
-        activeChains.add(chain);
-        final UUID capturedId = playerId;
+        UUID craftId = chain.getCraftId();
+        if (!activeChains.add(craftId, chain)) {
+            throw new IllegalStateException("Duplicate async craft id: " + craftId);
+        }
         chain.onDone(() -> {
-            activeChains.remove(chain);
-            RSIntegrationMod.LOGGER.debug("[RSI-AsyncMgr] Chain removed via callback: player={} state={}",
-                    capturedId, chain.state());
+            activeChains.remove(craftId);
+            RSIntegrationMod.LOGGER.debug("[RSI-AsyncMgr] Chain removed via callback: craft={} player={} state={}",
+                    craftId, playerId, chain.state());
         });
-        RSIntegrationMod.LOGGER.debug("[RSI-AsyncMgr] Chain submitted: player={} steps={}",
-                playerId, chain.stepsCount());
+        RSIntegrationMod.LOGGER.debug("[RSI-AsyncMgr] Chain submitted: craft={} player={} steps={}",
+                craftId, playerId, chain.stepsCount());
     }
 
     public boolean hasActiveChainFor(UUID playerId) {
@@ -47,6 +52,19 @@ public final class AsyncCraftManager {
         return activeChains.size();
     }
 
+    MachineLeaseRegistry machineLeases() {
+        return machineLeases;
+    }
+
+    CaptureLeaseRegistry captureLeases() {
+        return captureLeases;
+    }
+
+    @Nullable
+    public AsyncCraftChain getCraft(UUID craftId) {
+        return activeChains.get(craftId);
+    }
+
     @Nullable
     public AsyncCraftChain getChain(ServerPlayer player) {
         return getChain(player.getUUID());
@@ -54,14 +72,14 @@ public final class AsyncCraftManager {
 
     @Nullable
     public AsyncCraftChain getChain(UUID playerId) {
-        for (AsyncCraftChain chain : activeChains) {
+        for (AsyncCraftChain chain : activeChains.snapshot()) {
             if (chain.belongsTo(playerId)) return chain;
         }
         return null;
     }
 
     public void remove(AsyncCraftChain chain) {
-        activeChains.remove(chain);
+        activeChains.remove(chain.getCraftId());
     }
 
     /**
@@ -70,10 +88,9 @@ public final class AsyncCraftManager {
      * may already be partially torn down by the time this runs.
      */
     public static void abortAll() {
-        // Runs on the server thread; CopyOnWriteArrayList makes the snapshot+clear
-        // safe without external locking.
-        List<AsyncCraftChain> snapshot = new ArrayList<>(INSTANCE.activeChains);
-        INSTANCE.activeChains.clear();
+        // Keep entries registered until each chain reaches its terminal callback.
+        // This preserves visibility when cleanup throws during shutdown.
+        List<AsyncCraftChain> snapshot = INSTANCE.activeChains.snapshot();
         for (AsyncCraftChain chain : snapshot) {
             try {
                 chain.abort("Server stopping");
@@ -82,6 +99,8 @@ public final class AsyncCraftManager {
                         chain.getPlayerId(), e);
             }
         }
+        INSTANCE.machineLeases.clear();
+        INSTANCE.captureLeases.clear();
     }
 
     public void cancelAllForPlayer(UUID playerId) {
@@ -90,7 +109,7 @@ public final class AsyncCraftManager {
 
     public void cancelAllForPlayer(UUID playerId, String reason) {
         List<AsyncCraftChain> toAbort = new ArrayList<>();
-        for (AsyncCraftChain chain : activeChains) {
+        for (AsyncCraftChain chain : activeChains.snapshot()) {
             if (chain.belongsTo(playerId)) toAbort.add(chain);
         }
         for (AsyncCraftChain chain : toAbort) {
@@ -107,14 +126,14 @@ public final class AsyncCraftManager {
 
         long tickStart = System.nanoTime();
 
-        for (AsyncCraftChain chain : activeChains) {
+        for (AsyncCraftChain chain : activeChains.snapshot()) {
             try {
                 chain.tick();
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.error("[RSI-AsyncMgr] Chain tick error", e);
                 String msg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
                 chain.abort("Internal error: " + msg);
-                activeChains.remove(chain);
+                activeChains.remove(chain.getCraftId());
             }
         }
         PerformanceMonitor.recordTick(

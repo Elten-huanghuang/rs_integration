@@ -3,6 +3,16 @@ package com.huanghuang.rsintegration.crafting;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.crafting.graph.CraftNode;
+import com.huanghuang.rsintegration.crafting.graph.DemandRole;
+import com.huanghuang.rsintegration.crafting.graph.InputDemand;
+import com.huanghuang.rsintegration.crafting.graph.InputPortId;
+import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
+import com.huanghuang.rsintegration.crafting.graph.MaterialSource;
+import com.huanghuang.rsintegration.crafting.graph.NodeId;
+import com.huanghuang.rsintegration.crafting.graph.OutputDeclaration;
+import com.huanghuang.rsintegration.crafting.graph.OutputKind;
+import com.huanghuang.rsintegration.crafting.graph.OutputPortId;
 import com.huanghuang.rsintegration.command.PerformanceMonitor;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import net.minecraft.resources.ResourceLocation;
@@ -12,10 +22,7 @@ import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraftforge.registries.ForgeRegistries;
 
 import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 
 /**
  * Executes recipe steps: material planning and result registration.
@@ -49,26 +56,34 @@ final class StepExecutor {
 
         ctx.beginUndo();
         edges.beginUndo();
+        NodeId graphNodeId = ctx.allocateNodeId();
 
-        if (!planRecipeIngredients(recipe, ctx, depth + 1, edges, batches)) {
+        List<InputDemand> graphInputs = planRecipeIngredientsForGraph(
+                recipe.getIngredients(), graphNodeId, ctx, depth + 1, edges, batches);
+        if (graphInputs == null) {
             ctx.rollback();
             edges.rollback();
             return false;
         }
 
+        List<OutputDeclaration> graphOutputs = new ArrayList<>();
         for (ItemStack remainder : CraftPacketUtils.getRecipeRemainders(recipe)) {
-            ctx.add(remainder.copyWithCount(mulCount(remainder.getCount(), batches)));
+            registerGraphOutput(remainder, batches, OutputKind.REMAINDER,
+                    graphNodeId, graphOutputs, ctx);
         }
 
         ItemStack result = recipe.getResultItem(ctx.level.registryAccess());
-        ctx.add(result.copyWithCount(mulCount(result.getCount(), batches)));
+        registerGraphOutput(result, batches, OutputKind.PRIMARY, graphNodeId, graphOutputs, ctx);
 
         for (ItemStack secondary : ModRecipeHandlers.tryGetSecondaryOutputs(recipe, ctx.level.registryAccess())) {
-            ctx.add(secondary.copyWithCount(mulCount(secondary.getCount(), batches)));
+            registerGraphOutput(secondary, batches, OutputKind.SECONDARY,
+                    graphNodeId, graphOutputs, ctx);
         }
 
-        ctx.steps.add(new CraftingResolver.ResolutionStep(recipe.getId(), ModType.GENERIC,
-                new ResourceLocation("minecraft:crafting"), altIds, altModTypes, false, batches));
+        CraftingResolver.ResolutionStep step = new CraftingResolver.ResolutionStep(recipe.getId(), ModType.GENERIC,
+                new ResourceLocation("minecraft:crafting"), altIds, altModTypes, false, batches);
+        ctx.steps.add(step);
+        ctx.addGraphNode(toGraphNode(graphNodeId, step, graphInputs, graphOutputs));
 
         ctx.commitUndo();
         edges.commitUndo();
@@ -91,6 +106,7 @@ final class StepExecutor {
 
         ctx.beginUndo();
         edges.beginUndo();
+        NodeId graphNodeId = ctx.allocateNodeId();
 
         List<IngredientSpec> specs = CraftPacketUtils.extractIngredientSpecs(entry.recipe());
 
@@ -130,20 +146,25 @@ final class StepExecutor {
             return false;
         }
 
-        if (!planRecipeIngredients(specs, ctx, depth + 1, edges, batches)) {
+        List<InputDemand> graphInputs = planRecipeSpecsForGraph(
+                specs, graphNodeId, ctx, depth + 1, edges, batches);
+        if (graphInputs == null) {
             ctx.rollback();
             edges.rollback();
             return false;
         }
 
+        List<OutputDeclaration> graphOutputs = new ArrayList<>();
         if (entry.recipe() instanceof CraftingRecipe cr) {
             for (ItemStack remainder : CraftPacketUtils.getRecipeRemainders(cr)) {
-                ctx.add(remainder.copyWithCount(mulCount(remainder.getCount(), batches)));
+                registerGraphOutput(remainder, batches, OutputKind.REMAINDER,
+                        graphNodeId, graphOutputs, ctx);
             }
         } else {
             for (IngredientSpec spec : specs) {
                 if (spec.isEmpty()) continue;
-                addCraftingRemainder(spec.ingredient(), mulCount(spec.count(), batches), ctx);
+                registerGraphRemainder(spec.ingredient(), mulCount(spec.count(), batches),
+                        graphNodeId, graphOutputs, ctx);
             }
         }
 
@@ -167,103 +188,104 @@ final class StepExecutor {
                 result = hidden;
             }
         }
-        ctx.add(result.copyWithCount(mulCount(result.getCount(), batches)));
+        registerGraphOutput(result, batches, OutputKind.PRIMARY, graphNodeId, graphOutputs, ctx);
 
         if (handler != null) {
             for (ItemStack secondary : handler.getSecondaryOutputs(entry.recipe(), ctx.level.registryAccess())) {
-                ctx.add(secondary.copyWithCount(mulCount(secondary.getCount(), batches)));
+                registerGraphOutput(secondary, batches, OutputKind.SECONDARY,
+                        graphNodeId, graphOutputs, ctx);
             }
         } else {
             for (ItemStack secondary : ModRecipeHandlers.tryGetSecondaryOutputs(entry.recipe(), ctx.level.registryAccess())) {
-                ctx.add(secondary.copyWithCount(mulCount(secondary.getCount(), batches)));
+                registerGraphOutput(secondary, batches, OutputKind.SECONDARY,
+                        graphNodeId, graphOutputs, ctx);
             }
         }
 
-        ctx.steps.add(new CraftingResolver.ResolutionStep(entry.recipe().getId(), entry.modType(),
-                entry.recipeTypeId(), altIds, altModTypes, false, batches));
+        CraftingResolver.ResolutionStep step = new CraftingResolver.ResolutionStep(entry.recipe().getId(), entry.modType(),
+                entry.recipeTypeId(), altIds, altModTypes, false, batches);
+        ctx.steps.add(step);
+        ctx.addGraphNode(toGraphNode(graphNodeId, step, graphInputs, graphOutputs));
 
         ctx.commitUndo();
         edges.commitUndo();
         return true;
     }
 
-    static boolean planRecipeIngredients(CraftingRecipe recipe, ResolutionContext ctx, int depth,
-                                         CraftingResolver.EdgeTracker edges, int batches) {
-        if (depth > maxDepth()) return false;
-        if (ctx.steps.size() + 1 > maxSteps()) return false;
-
-        ctx.beginUndo();
-        edges.beginUndo();
-
-        Map<CraftingResolver.StackKey, Integer> grouped = new LinkedHashMap<>();
-        Map<CraftingResolver.StackKey, Ingredient> representatives = new HashMap<>();
-
-        for (Ingredient ing : recipe.getIngredients()) {
-            if (ing.isEmpty()) continue;
-            ItemStack[] items = ing.getItems();
-            if (items.length == 0) continue;
-
-            CraftingResolver.StackKey key = CraftingResolver.StackKey.of(items[0], items[0].hasTag());
-            grouped.merge(key, 1, Integer::sum);
-            representatives.merge(key, ing, (prev, next) ->
-                    next.getItems().length >= prev.getItems().length ? next : prev);
-        }
-
-        for (Map.Entry<CraftingResolver.StackKey, Integer> entry : grouped.entrySet()) {
-            Ingredient ing = representatives.get(entry.getKey());
-            if (!CraftingResolver.ensureIngredient(ing, mulCount(entry.getValue(), batches), ctx, depth + 1, edges)) {
-                ctx.rollback();
-                edges.rollback();
-                return false;
+    private static List<InputDemand> planRecipeIngredientsForGraph(
+            List<Ingredient> ingredients, NodeId nodeId, ResolutionContext ctx, int depth,
+            CraftingResolver.EdgeTracker edges, int batches) {
+        if (depth > maxDepth() || ctx.steps.size() + 1 > maxSteps()) return null;
+        List<InputDemand> inputs = new ArrayList<>();
+        int index = 0;
+        for (Ingredient ingredient : ingredients) {
+            if (ingredient.isEmpty()) continue;
+            int quantity = mulCount(1, batches);
+            InputPortId port = new InputPortId(nodeId, index++);
+            if (!CraftingResolver.ensureIngredient(ingredient, quantity, ctx, depth + 1, edges, port, null)) {
+                return null;
             }
+            inputs.add(new InputDemand(port, ingredient, quantity, demandRole(ingredient), firstDisplay(ingredient)));
         }
-        ctx.commitUndo();
-        edges.commitUndo();
-        return true;
+        return inputs;
     }
 
-    static boolean planRecipeIngredients(List<IngredientSpec> specs, ResolutionContext ctx, int depth,
-                                         CraftingResolver.EdgeTracker edges, int batches) {
-        if (depth > maxDepth()) return false;
-        if (ctx.steps.size() + 1 > maxSteps()) return false;
-
-        ctx.beginUndo();
-        edges.beginUndo();
-
-        Map<CraftingResolver.StackKey, Integer> grouped = new LinkedHashMap<>();
-        Map<CraftingResolver.StackKey, Ingredient> representatives = new HashMap<>();
-
+    private static List<InputDemand> planRecipeSpecsForGraph(
+            List<IngredientSpec> specs, NodeId nodeId, ResolutionContext ctx, int depth,
+            CraftingResolver.EdgeTracker edges, int batches) {
+        if (depth > maxDepth() || ctx.steps.size() + 1 > maxSteps()) return null;
+        List<InputDemand> inputs = new ArrayList<>();
+        int index = 0;
         for (IngredientSpec spec : specs) {
             if (spec.isEmpty()) continue;
-            ItemStack[] items = spec.ingredient().getItems();
-            if (items.length == 0) continue;
-
-            CraftingResolver.StackKey key = CraftingResolver.StackKey.of(items[0], items[0].hasTag());
-            grouped.merge(key, spec.count(), Integer::sum);
-            representatives.merge(key, spec.ingredient(), (prev, next) ->
-                    next.getItems().length >= prev.getItems().length ? next : prev);
-        }
-
-        for (Map.Entry<CraftingResolver.StackKey, Integer> entry : grouped.entrySet()) {
-            Ingredient ing = representatives.get(entry.getKey());
-            if (!CraftingResolver.ensureIngredient(ing, mulCount(entry.getValue(), batches), ctx, depth + 1, edges)) {
-                ctx.rollback();
-                edges.rollback();
-                return false;
+            int quantity = mulCount(spec.count(), batches);
+            InputPortId port = new InputPortId(nodeId, index++);
+            if (!CraftingResolver.ensureIngredient(spec.ingredient(), quantity,
+                    ctx, depth + 1, edges, port, null)) {
+                return null;
             }
+            inputs.add(new InputDemand(port, spec.ingredient(), quantity,
+                    demandRole(spec.ingredient()), firstDisplay(spec.ingredient())));
         }
-        ctx.commitUndo();
-        edges.commitUndo();
-        return true;
+        return inputs;
     }
 
-    static void addCraftingRemainder(Ingredient ingredient, int count, ResolutionContext ctx) {
+    private static DemandRole demandRole(Ingredient ingredient) {
+        for (ItemStack stack : ingredient.getItems()) {
+            if (stack.isEmpty()) continue;
+            try {
+                if (!stack.getCraftingRemainingItem().isEmpty()) return DemandRole.CONTAINER_RETURNING;
+            } catch (Exception ignored) {
+                // Broken remainder implementations are treated as consumed.
+            }
+        }
+        return DemandRole.CONSUMED;
+    }
+
+    private static ItemStack firstDisplay(Ingredient ingredient) {
+        ItemStack[] items = ingredient.getItems();
+        return items.length == 0 ? ItemStack.EMPTY : items[0].copyWithCount(1);
+    }
+
+    private static void registerGraphOutput(ItemStack stack, int batches, OutputKind kind,
+                                            NodeId nodeId, List<OutputDeclaration> outputs,
+                                            ResolutionContext ctx) {
+        if (stack == null || stack.isEmpty() || stack.getCount() <= 0) return;
+        ItemStack produced = stack.copyWithCount(mulCount(stack.getCount(), batches));
+        OutputPortId port = new OutputPortId(nodeId, outputs.size());
+        outputs.add(new OutputDeclaration(port, MaterialKey.of(produced), produced.getCount(), kind));
+        ctx.addProduced(produced, new MaterialSource.ProducerOutput(port));
+    }
+
+    private static void registerGraphRemainder(Ingredient ingredient, int count, NodeId nodeId,
+                                               List<OutputDeclaration> outputs, ResolutionContext ctx) {
         for (ItemStack stack : ingredient.getItems()) {
             if (stack.isEmpty()) continue;
             try {
                 ItemStack remainder = stack.getCraftingRemainingItem();
                 if (!remainder.isEmpty()) {
-                    ctx.add(remainder.copyWithCount(count));
+                    registerGraphOutput(remainder.copyWithCount(1), count, OutputKind.REMAINDER,
+                            nodeId, outputs, ctx);
                     return;
                 }
             } catch (Exception e) {
@@ -271,4 +293,12 @@ final class StepExecutor {
             }
         }
     }
+
+    private static CraftNode toGraphNode(NodeId nodeId, CraftingResolver.ResolutionStep step,
+                                         List<InputDemand> inputs, List<OutputDeclaration> outputs) {
+        return new CraftNode(nodeId, step.recipeId(), step.modType().id(), step.recipeTypeId(),
+                step.executions(), step.alternativeIds(), step.alternativeModTypes(), step.inferMode(),
+                step.syntheticInput(), step.syntheticOutput(), inputs, outputs);
+    }
+
 }
