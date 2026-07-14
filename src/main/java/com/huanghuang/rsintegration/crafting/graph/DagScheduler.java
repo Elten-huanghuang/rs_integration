@@ -28,6 +28,9 @@ public final class DagScheduler {
     private final Map<NodeId, Set<NodeId>> dependents = new HashMap<>();
     private final LinkedHashSet<NodeId> ready = new LinkedHashSet<>();
     private boolean stopping;
+    private int epoch;
+
+    public int epoch() { return epoch; }
     private NodeId failedNode;
 
     public DagScheduler(CraftPlanGraph graph) {
@@ -99,6 +102,7 @@ public final class DagScheduler {
     public void stopScheduling() {
         if (stopping) return;
         stopping = true;
+        epoch++;
         ready.clear();
         for (Map.Entry<NodeId, NodeState> entry : states.entrySet()) {
             if (entry.getValue() == NodeState.READY || entry.getValue() == NodeState.BLOCKED) {
