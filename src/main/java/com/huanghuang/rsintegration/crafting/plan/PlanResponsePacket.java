@@ -22,6 +22,28 @@ public final class PlanResponsePacket {
 
     private final PlanResponse plan;
 
+    /**
+     * Upper bound on any decoded collection/array length. Far above any real
+     * plan (deepest recipe trees are dozens of steps), but caps a malformed or
+     * malicious packet's preallocation so a bogus count cannot OOM the client.
+     */
+    private static final int MAX_DECODE_COUNT = 4096;
+
+    /**
+     * Read a VarInt count and clamp it to {@code [0, MAX_DECODE_COUNT]} before it
+     * is used to size a collection. A negative or oversized value is treated as
+     * corrupt input and clamped rather than trusted.
+     */
+    private static int readBoundedCount(FriendlyByteBuf buf) {
+        int raw = buf.readVarInt();
+        if (raw < 0 || raw > MAX_DECODE_COUNT) {
+            RSIntegrationMod.LOGGER.warn("[RSI-PlanPkt] decode count {} out of bounds; clamping to [0,{}]",
+                    raw, MAX_DECODE_COUNT);
+            return Math.max(0, Math.min(raw, MAX_DECODE_COUNT));
+        }
+        return raw;
+    }
+
     public PlanResponsePacket(PlanResponse plan) {
         this.plan = plan;
     }
@@ -135,18 +157,18 @@ public final class PlanResponsePacket {
         String targetName = buf.readUtf();
         ItemStack targetResult = buf.readItem();
         // Steps
-        int stepCount = buf.readVarInt();
+        int stepCount = readBoundedCount(buf);
         List<PlanStep> steps = new ArrayList<>(stepCount);
         for (int i = 0; i < stepCount; i++) {
             var rid = buf.readResourceLocation();
             ItemStack output = buf.readItem();
             int batches = buf.readVarInt();
-            int inCount = buf.readVarInt();
+            int inCount = readBoundedCount(buf);
             List<ItemStack> inputs = new ArrayList<>(inCount);
             for (int j = 0; j < inCount; j++) {
                 inputs.add(buf.readItem());
             }
-            int altCount = buf.readVarInt();
+            int altCount = readBoundedCount(buf);
             List<ResourceLocation> alternatives = new ArrayList<>(altCount);
             for (int j = 0; j < altCount; j++) {
                 alternatives.add(buf.readResourceLocation());
@@ -159,12 +181,12 @@ public final class PlanResponsePacket {
             boolean hasOrSiblings = buf.readBoolean();
             int recipeWidth = buf.readVarInt();
             int recipeHeight = buf.readVarInt();
-            int altModCount = buf.readVarInt();
+            int altModCount = readBoundedCount(buf);
             List<String> alternativeModTypes = new ArrayList<>(altModCount);
             for (int j = 0; j < altModCount; j++) {
                 alternativeModTypes.add(buf.readUtf());
             }
-            int warnCount = buf.readVarInt();
+            int warnCount = readBoundedCount(buf);
             List<String> warnings = new ArrayList<>(warnCount);
             for (int j = 0; j < warnCount; j++) {
                 warnings.add(buf.readUtf());
@@ -174,14 +196,14 @@ public final class PlanResponsePacket {
                     warnings));
         }
         // Materials
-        int matCount = buf.readVarInt();
+        int matCount = readBoundedCount(buf);
         Map<IngredientKey, PlanResponse.Availability> materials = new LinkedHashMap<>();
         for (int i = 0; i < matCount; i++) {
             IngredientKey key = IngredientKey.read(buf);
             materials.put(key, new PlanResponse.Availability(buf.readVarInt(), buf.readVarInt()));
         }
         // Missing
-        int missCount = buf.readVarInt();
+        int missCount = readBoundedCount(buf);
         List<String> missing = new ArrayList<>(missCount);
         for (int i = 0; i < missCount; i++) {
             missing.add(buf.readUtf());
@@ -193,26 +215,26 @@ public final class PlanResponsePacket {
         int execY = buf.readVarInt();
         int execZ = buf.readVarInt();
         // Mod warnings
-        int modWarnCount = buf.readVarInt();
+        int modWarnCount = readBoundedCount(buf);
         List<String> modWarnings = new ArrayList<>(modWarnCount);
         for (int i = 0; i < modWarnCount; i++) modWarnings.add(buf.readUtf());
         int repeatCount = buf.readVarInt();
         // Embers alchemy pedestal data
         int[] embersCode = null;
         if (buf.readBoolean()) {
-            int len = buf.readVarInt();
+            int len = readBoundedCount(buf);
             embersCode = new int[len];
             for (int i = 0; i < len; i++) embersCode[i] = buf.readVarInt();
         }
         String[] embersAspectNames = null;
         if (buf.readBoolean()) {
-            int len = buf.readVarInt();
+            int len = readBoundedCount(buf);
             embersAspectNames = new String[len];
             for (int i = 0; i < len; i++) embersAspectNames[i] = buf.readUtf();
         }
         String[] embersInputNames = null;
         if (buf.readBoolean()) {
-            int len = buf.readVarInt();
+            int len = readBoundedCount(buf);
             embersInputNames = new String[len];
             for (int i = 0; i < len; i++) embersInputNames[i] = buf.readUtf();
         }
@@ -222,11 +244,11 @@ public final class PlanResponsePacket {
         boolean executionMachineSupportsGui = buf.readBoolean();
         ItemStack baseItem = buf.readBoolean() ? buf.readItem() : null;
         // boundMachineTypes availability passport
-        int boundMtCount = buf.readVarInt();
+        int boundMtCount = readBoundedCount(buf);
         Set<String> boundMachineTypes = new LinkedHashSet<>();
         for (int i = 0; i < boundMtCount; i++) boundMachineTypes.add(buf.readUtf());
         // Leftovers (overproduction)
-        int leftoverCount = buf.readVarInt();
+        int leftoverCount = readBoundedCount(buf);
         Map<IngredientKey, Integer> leftovers = new LinkedHashMap<>();
         for (int i = 0; i < leftoverCount; i++) {
             IngredientKey key = IngredientKey.read(buf);
