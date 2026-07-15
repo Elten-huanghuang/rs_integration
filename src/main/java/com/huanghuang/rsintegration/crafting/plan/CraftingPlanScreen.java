@@ -285,7 +285,7 @@ public final class CraftingPlanScreen extends Screen {
      * server-chosen recipe ({@link SelectedPath#initDefaults}).
      */
     private void rebuildTreeModel(boolean firstBuild) {
-        Set<IngredientKey> collapsed = new LinkedHashSet<>();
+        Set<PlanTreeModel.CollapseKey> collapsed = new LinkedHashSet<>();
         if (treeModel != null) {
             PlanTreeModel.collectCollapsedNodes(treeModel.root, collapsed);
         }
@@ -437,20 +437,26 @@ public final class CraftingPlanScreen extends Screen {
     private void onConfirm() {
         String recipeId = plan.recipeId();
         if (recipeId != null && !recipeId.isEmpty()) {
-            Map<String, String> forced = Collections.emptyMap();
-            // When the user modified branch selections, include them in the confirm packet.
-            if (selectedPath.isDirty()) {
-                forced = new LinkedHashMap<>();
-                for (Map.Entry<IngredientKey, ResourceLocation> e : selectedPath.exportSelections().entrySet()) {
-                    forced.put(e.getKey().stack(1).getItem().builtInRegistryHolder().key().location().toString(),
-                            e.getValue().toString());
-                }
-            }
+            Map<String, String> forced = exportForcedSelections();
             sendCraftPacket(ResourceLocation.tryParse(recipeId), false, forced,
                     Math.max(1, Math.min(currentRepeat, 64)),
                     plan.embersCode() != null && embersInferMode);
         }
         onClose();
+    }
+
+    private Map<String, String> exportForcedSelections() {
+        Map<String, String> forced = new LinkedHashMap<>();
+        for (Map.Entry<IngredientKey, ResourceLocation> entry : selectedPath.exportSelections().entrySet()) {
+            forced.put(entry.getKey().stack(1).getItem().builtInRegistryHolder().key().location().toString(),
+                    entry.getValue().toString());
+        }
+        return forced;
+    }
+
+    static ItemStack executionTarget(ItemStack clickedOutput, ItemStack targetResult) {
+        if (clickedOutput != null && !clickedOutput.isEmpty()) return clickedOutput.copy();
+        return targetResult == null ? ItemStack.EMPTY : targetResult.copy();
     }
 
     /** Build the execution target from the current plan and send a craft/preview packet. */
@@ -466,7 +472,8 @@ public final class CraftingPlanScreen extends Screen {
         }
         BatchCraftNetworkHandler.CHANNEL.sendToServer(
                 new GenericCraftPacket(rid, preview, forced, execDim, execPos,
-                        repeatCount, inferMode, plan.baseItem(), plan.clickedOutput()));
+                        repeatCount, inferMode, plan.baseItem(),
+                        executionTarget(plan.clickedOutput(), plan.targetResult())));
     }
 
     /** Open JEI for a specific recipe id. No-op when JEI is unavailable. */
@@ -1093,62 +1100,45 @@ public final class CraftingPlanScreen extends Screen {
     private void selectAlternative(String itemKey, int index) {
         List<AltChoice> choices = altChoices.get(itemKey);
         if (choices == null || index < 0 || index >= choices.size()) return;
-        int oldIdx = altSelection.getOrDefault(itemKey, 0);
-        String persisted = LAST_FORCED.get(itemKey);
-        if (persisted != null && oldIdx == 0) {
-            for (int i = 0; i < choices.size(); i++) {
-                if (choices.get(i).recipeId.toString().equals(persisted)) {
-                    oldIdx = i;
-                    break;
-                }
-            }
-        }
-        RSIntegrationMod.LOGGER.debug("[RSI-OR-UI] selectAlternative itemKey={} index={} oldIdx={} choices=[{}]",
-                itemKey, index, oldIdx,
-                choices.stream().map(c -> c.recipeId.toString() + ":" + c.modTypeId)
-                        .reduce((a, b) -> a + ", " + b).orElse(""));
-        if (oldIdx == index) {
-            if (index != 0) {
-                altSelection.put(itemKey, 0);
-                RSIntegrationMod.LOGGER.debug("[RSI-OR-UI]   reverting to default");
-            } else {
-                RSIntegrationMod.LOGGER.debug("[RSI-OR-UI]   already default, no-op");
-                return;
-            }
-        } else {
-            altSelection.put(itemKey, index);
-        }
+        IngredientKey selectionKey = findTreeKey(itemKey);
+        if (selectionKey == null) return;
+        int oldIdx = selectedPath.selectedIndex(selectionKey);
+        if (oldIdx < 0) oldIdx = 0;
+        int selected = oldIdx == index && index != 0 ? 0 : index;
+        altSelection.put(itemKey, selected);
+        selectedPath.selectBranch(selectionKey, selected, choices.get(selected).recipeId);
 
-        Map<String, String> forced = new HashMap<>();
-        for (var e : altSelection.entrySet()) {
-            if (e.getValue() == 0) continue;
-            List<AltChoice> cl = altChoices.get(e.getKey());
-            if (cl != null && e.getValue() < cl.size()) {
-                forced.put(e.getKey(), cl.get(e.getValue()).recipeId.toString());
-            }
+        Map<String, String> forced = exportForcedSelections();
+        boolean isTarget = plan.targetResult() != null
+                && itemKey.equals(BuiltInRegistries.ITEM.getKey(plan.targetResult().getItem()).toString());
+        ResourceLocation rid = ResourceLocation.tryParse(plan.recipeId());
+        if (isTarget && selected != 0) {
+            rid = choices.get(selected).recipeId;
+            forced.remove(itemKey);
         }
         LAST_FORCED.clear();
         LAST_FORCED.putAll(forced);
-        RSIntegrationMod.LOGGER.debug("[RSI-OR-UI]   sending forced={}", forced);
-
-        // If the user clicked an OR badge on the target step (the top-level
-        // recipe output), send the alternative recipe ID as the new root so
-        // the server resolves different ingredients.  Forced overrides only
-        // affect intermediate steps — the target output is never resolved as
-        // an ingredient, so a forced override for it is silently ignored.
-        boolean isTarget = plan.targetResult() != null
-                && itemKey.equals(BuiltInRegistries.ITEM.getKey(plan.targetResult().getItem()).toString());
-        int newIdx = altSelection.getOrDefault(itemKey, 0);
-        ResourceLocation rid;
-        if (isTarget && newIdx != 0 && choices != null && newIdx < choices.size()) {
-            rid = choices.get(newIdx).recipeId;
-            forced.remove(itemKey);
-            RSIntegrationMod.LOGGER.debug("[RSI-OR-UI]   target switch → root recipe={}", rid);
-        } else {
-            rid = ResourceLocation.tryParse(plan.recipeId());
-        }
-
+        RSIntegrationMod.LOGGER.debug("[RSI-OR-UI] selectAlternative itemKey={} index={} forced={} root={}",
+                itemKey, selected, forced, rid);
         sendCraftPacket(rid, true, forced, currentRepeat, false);
+    }
+
+    @Nullable
+    private IngredientKey findTreeKey(String itemKey) {
+        if (treeModel == null) return null;
+        return findTreeKey(treeModel.root, itemKey);
+    }
+
+    @Nullable
+    private IngredientKey findTreeKey(PlanTreeNode node, String itemKey) {
+        if (BuiltInRegistries.ITEM.getKey(node.displayStack.getItem()).toString().equals(itemKey)) {
+            return node.key;
+        }
+        for (PlanTreeNode child : node.children) {
+            IngredientKey key = findTreeKey(child, itemKey);
+            if (key != null) return key;
+        }
+        return null;
     }
 
     // ── Slot drawing ──────────────────────────────────────────────
@@ -1606,11 +1596,13 @@ public final class CraftingPlanScreen extends Screen {
         int idx = Math.max(0, node.step.alternatives().indexOf(recipeId));
         selectedPath.selectBranch(node.key, idx, recipeId);
 
-        Map<String, String> forced = new HashMap<>(LAST_FORCED);
+        Map<String, String> forced = exportForcedSelections();
         ResourceLocation rootRid = ResourceLocation.tryParse(plan.recipeId());
         String itemKey = BuiltInRegistries.ITEM.getKey(node.displayStack.getItem()).toString();
 
-        if (node == treeModel.root) {
+        boolean isTarget = plan.targetResult() != null
+                && node.displayStack.getItem() == plan.targetResult().getItem();
+        if (isTarget) {
             rootRid = recipeId;
             forced.remove(itemKey);
         } else {
@@ -1619,7 +1611,6 @@ public final class CraftingPlanScreen extends Screen {
 
         LAST_FORCED.clear();
         LAST_FORCED.putAll(forced);
-
         sendCraftPacket(rootRid, true, forced, currentRepeat, false);
     }
 

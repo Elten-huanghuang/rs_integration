@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.crafting.plan;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.tree.IngredientKey;
+import io.netty.handler.codec.DecoderException;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
@@ -22,19 +23,45 @@ public final class PlanResponsePacket {
 
     private final PlanResponse plan;
 
+    /**
+     * Upper bound on any decoded collection/array length. Far above any real
+     * plan (deepest recipe trees are dozens of steps), but caps a malformed or
+     * malicious packet's preallocation so a bogus count cannot OOM the client.
+     */
+    private static final int MAX_DECODE_COUNT = 4096;
+    private static final int MAX_RECIPE_ID_LENGTH = 256;
+    private static final int MAX_TARGET_NAME_LENGTH = 256;
+    private static final int MAX_MOD_TYPE_LENGTH = 128;
+    private static final int MAX_DIMENSION_LENGTH = 128;
+    private static final int MAX_MESSAGE_LENGTH = 2048;
+    private static final int MAX_DISPLAY_NAME_LENGTH = 256;
+
+    /** Reject corrupt counts before allocation or field decoding. */
+    private static int readBoundedCount(FriendlyByteBuf buf) {
+        int raw = buf.readVarInt();
+        if (raw < 0 || raw > MAX_DECODE_COUNT) {
+            throw new DecoderException("PlanResponsePacket count out of bounds: " + raw);
+        }
+        return raw;
+    }
+
+    private static int readNonNegativeVarInt(FriendlyByteBuf buf, String field) {
+        int value = buf.readVarInt();
+        if (value < 0) throw new DecoderException(field + " must be non-negative: " + value);
+        return value;
+    }
+
     public PlanResponsePacket(PlanResponse plan) {
         this.plan = plan;
     }
 
     public void encode(FriendlyByteBuf buf) {
-        RSIntegrationMod.LOGGER.debug("[RSI-PlanPkt] encode() called: recipeId={} success={} steps={}",
-                plan.recipeId(), plan.success(), plan.steps().size());
         buf.writeBoolean(plan.success());
-        buf.writeUtf(plan.recipeId() != null ? plan.recipeId() : "");
+        buf.writeUtf(plan.recipeId() != null ? plan.recipeId() : "", MAX_RECIPE_ID_LENGTH);
         // Always send full plan data — even infeasible plans need the recipe
         // chain structure so the player can see what intermediate steps are
         // required and which leaf materials are missing.
-        buf.writeUtf(plan.targetName());
+        buf.writeUtf(plan.targetName(), MAX_TARGET_NAME_LENGTH);
         buf.writeItem(plan.targetResult());
         // Steps
         buf.writeVarInt(plan.steps().size());
@@ -51,18 +78,18 @@ public final class PlanResponsePacket {
                 buf.writeResourceLocation(alt);
             }
             buf.writeBoolean(step.modType() != null);
-            if (step.modType() != null) buf.writeUtf(step.modType().id());
+            if (step.modType() != null) buf.writeUtf(step.modType().id(), MAX_MOD_TYPE_LENGTH);
             buf.writeVarInt(step.depth());
             buf.writeBoolean(step.hasOrSiblings());
             buf.writeVarInt(step.recipeWidth());
             buf.writeVarInt(step.recipeHeight());
             buf.writeVarInt(step.alternativeModTypes().size());
             for (String mt : step.alternativeModTypes()) {
-                buf.writeUtf(mt);
+                buf.writeUtf(mt, MAX_MOD_TYPE_LENGTH);
             }
             buf.writeVarInt(step.warnings().size());
             for (String w : step.warnings()) {
-                buf.writeUtf(w);
+                buf.writeUtf(w, MAX_MESSAGE_LENGTH);
             }
         }
         // Materials
@@ -75,19 +102,19 @@ public final class PlanResponsePacket {
         // Missing
         buf.writeVarInt(plan.missing().size());
         for (String m : plan.missing()) {
-            buf.writeUtf(m);
+            buf.writeUtf(m, MAX_MESSAGE_LENGTH);
         }
         // Execution routing
         buf.writeBoolean(plan.executionModTypeId() != null);
-        if (plan.executionModTypeId() != null) buf.writeUtf(plan.executionModTypeId());
+        if (plan.executionModTypeId() != null) buf.writeUtf(plan.executionModTypeId(), MAX_MOD_TYPE_LENGTH);
         buf.writeBoolean(plan.executionDim() != null);
-        if (plan.executionDim() != null) buf.writeUtf(plan.executionDim());
+        if (plan.executionDim() != null) buf.writeUtf(plan.executionDim(), MAX_DIMENSION_LENGTH);
         buf.writeVarInt(plan.executionPosX());
         buf.writeVarInt(plan.executionPosY());
         buf.writeVarInt(plan.executionPosZ());
         // Mod warnings (Goety research/structure, FA essences)
         buf.writeVarInt(plan.modWarnings().size());
-        for (String w : plan.modWarnings()) buf.writeUtf(w);
+        for (String w : plan.modWarnings()) buf.writeUtf(w, MAX_MESSAGE_LENGTH);
         buf.writeVarInt(plan.repeatCount());
         // Embers alchemy pedestal data
         buf.writeBoolean(plan.embersCode() != null);
@@ -98,12 +125,12 @@ public final class PlanResponsePacket {
         buf.writeBoolean(plan.embersAspectNames() != null);
         if (plan.embersAspectNames() != null) {
             buf.writeVarInt(plan.embersAspectNames().length);
-            for (String s : plan.embersAspectNames()) buf.writeUtf(s);
+            for (String s : plan.embersAspectNames()) buf.writeUtf(s, MAX_DISPLAY_NAME_LENGTH);
         }
         buf.writeBoolean(plan.embersInputNames() != null);
         if (plan.embersInputNames() != null) {
             buf.writeVarInt(plan.embersInputNames().length);
-            for (String s : plan.embersInputNames()) buf.writeUtf(s);
+            for (String s : plan.embersInputNames()) buf.writeUtf(s, MAX_DISPLAY_NAME_LENGTH);
         }
         buf.writeVarLong(plan.embersSeed());
         buf.writeBoolean(plan.embersCanInfer());
@@ -113,7 +140,7 @@ public final class PlanResponsePacket {
         if (plan.baseItem() != null) buf.writeItem(plan.baseItem());
         // boundMachineTypes availability passport
         buf.writeVarInt(plan.boundMachineTypes().size());
-        for (String mt : plan.boundMachineTypes()) buf.writeUtf(mt);
+        for (String mt : plan.boundMachineTypes()) buf.writeUtf(mt, MAX_MOD_TYPE_LENGTH);
         // Leftovers (overproduction from integer batch rounding)
         buf.writeVarInt(plan.leftovers().size());
         for (Map.Entry<IngredientKey, Integer> e : plan.leftovers().entrySet()) {
@@ -123,98 +150,100 @@ public final class PlanResponsePacket {
         // Clicked ghost-output (NBT-variant target, e.g. WR leveled book) — tail-appended
         buf.writeBoolean(plan.clickedOutput() != null);
         if (plan.clickedOutput() != null) buf.writeItem(plan.clickedOutput());
+        // Server-authored DAG view — protocol v8 tail
+        buf.writeBoolean(plan.graph() != null);
+        if (plan.graph() != null) writeGraph(buf, plan.graph());
     }
 
     public static PlanResponsePacket decode(FriendlyByteBuf buf) {
-        RSIntegrationMod.LOGGER.debug("[RSI-PlanPkt] decode() called");
         boolean success = buf.readBoolean();
-        String recipeId = buf.readUtf();
+        String recipeId = buf.readUtf(MAX_RECIPE_ID_LENGTH);
         // Always read full plan data — the server sends the recipe chain
         // structure even for infeasible plans so the client can render
         // intermediate steps and material shortages.
-        String targetName = buf.readUtf();
+        String targetName = buf.readUtf(MAX_TARGET_NAME_LENGTH);
         ItemStack targetResult = buf.readItem();
         // Steps
-        int stepCount = buf.readVarInt();
+        int stepCount = readBoundedCount(buf);
         List<PlanStep> steps = new ArrayList<>(stepCount);
         for (int i = 0; i < stepCount; i++) {
             var rid = buf.readResourceLocation();
             ItemStack output = buf.readItem();
             int batches = buf.readVarInt();
-            int inCount = buf.readVarInt();
+            int inCount = readBoundedCount(buf);
             List<ItemStack> inputs = new ArrayList<>(inCount);
             for (int j = 0; j < inCount; j++) {
                 inputs.add(buf.readItem());
             }
-            int altCount = buf.readVarInt();
+            int altCount = readBoundedCount(buf);
             List<ResourceLocation> alternatives = new ArrayList<>(altCount);
             for (int j = 0; j < altCount; j++) {
                 alternatives.add(buf.readResourceLocation());
             }
             ModType modType = null;
             if (buf.readBoolean()) {
-                modType = ModType.byId(buf.readUtf());
+                modType = ModType.byId(buf.readUtf(MAX_MOD_TYPE_LENGTH));
             }
             int depth = buf.readVarInt();
             boolean hasOrSiblings = buf.readBoolean();
             int recipeWidth = buf.readVarInt();
             int recipeHeight = buf.readVarInt();
-            int altModCount = buf.readVarInt();
+            int altModCount = readBoundedCount(buf);
             List<String> alternativeModTypes = new ArrayList<>(altModCount);
             for (int j = 0; j < altModCount; j++) {
-                alternativeModTypes.add(buf.readUtf());
+                alternativeModTypes.add(buf.readUtf(MAX_MOD_TYPE_LENGTH));
             }
-            int warnCount = buf.readVarInt();
+            int warnCount = readBoundedCount(buf);
             List<String> warnings = new ArrayList<>(warnCount);
             for (int j = 0; j < warnCount; j++) {
-                warnings.add(buf.readUtf());
+                warnings.add(buf.readUtf(MAX_MESSAGE_LENGTH));
             }
             steps.add(new PlanStep(rid, output, batches, inputs, alternatives, modType,
                     depth, hasOrSiblings, recipeWidth, recipeHeight, alternativeModTypes,
                     warnings));
         }
         // Materials
-        int matCount = buf.readVarInt();
+        int matCount = readBoundedCount(buf);
         Map<IngredientKey, PlanResponse.Availability> materials = new LinkedHashMap<>();
         for (int i = 0; i < matCount; i++) {
             IngredientKey key = IngredientKey.read(buf);
             materials.put(key, new PlanResponse.Availability(buf.readVarInt(), buf.readVarInt()));
         }
         // Missing
-        int missCount = buf.readVarInt();
+        int missCount = readBoundedCount(buf);
         List<String> missing = new ArrayList<>(missCount);
         for (int i = 0; i < missCount; i++) {
-            missing.add(buf.readUtf());
+            missing.add(buf.readUtf(MAX_MESSAGE_LENGTH));
         }
         // Execution routing
-        String execModType = buf.readBoolean() ? buf.readUtf() : null;
-        String execDim = buf.readBoolean() ? buf.readUtf() : null;
+        String execModType = buf.readBoolean() ? buf.readUtf(MAX_MOD_TYPE_LENGTH) : null;
+        String execDim = buf.readBoolean() ? buf.readUtf(MAX_DIMENSION_LENGTH) : null;
         int execX = buf.readVarInt();
         int execY = buf.readVarInt();
         int execZ = buf.readVarInt();
         // Mod warnings
-        int modWarnCount = buf.readVarInt();
+        int modWarnCount = readBoundedCount(buf);
         List<String> modWarnings = new ArrayList<>(modWarnCount);
-        for (int i = 0; i < modWarnCount; i++) modWarnings.add(buf.readUtf());
+        for (int i = 0; i < modWarnCount; i++) modWarnings.add(buf.readUtf(MAX_MESSAGE_LENGTH));
         int repeatCount = buf.readVarInt();
         // Embers alchemy pedestal data
         int[] embersCode = null;
         if (buf.readBoolean()) {
-            int len = buf.readVarInt();
+            int len = readBoundedCount(buf);
             embersCode = new int[len];
             for (int i = 0; i < len; i++) embersCode[i] = buf.readVarInt();
         }
         String[] embersAspectNames = null;
         if (buf.readBoolean()) {
-            int len = buf.readVarInt();
+            int len = readBoundedCount(buf);
             embersAspectNames = new String[len];
-            for (int i = 0; i < len; i++) embersAspectNames[i] = buf.readUtf();
+            for (int i = 0; i < len; i++) embersAspectNames[i] = buf.readUtf(MAX_DISPLAY_NAME_LENGTH);
         }
         String[] embersInputNames = null;
         if (buf.readBoolean()) {
-            int len = buf.readVarInt();
+            int len = readBoundedCount(buf);
             embersInputNames = new String[len];
-            for (int i = 0; i < len; i++) embersInputNames[i] = buf.readUtf();
+            for (int i = 0; i < len; i++) embersInputNames[i] = buf.readUtf(MAX_DISPLAY_NAME_LENGTH);
         }
         long embersSeed = buf.readVarLong();
         boolean embersCanInfer = buf.readBoolean();
@@ -222,28 +251,180 @@ public final class PlanResponsePacket {
         boolean executionMachineSupportsGui = buf.readBoolean();
         ItemStack baseItem = buf.readBoolean() ? buf.readItem() : null;
         // boundMachineTypes availability passport
-        int boundMtCount = buf.readVarInt();
+        int boundMtCount = readBoundedCount(buf);
         Set<String> boundMachineTypes = new LinkedHashSet<>();
-        for (int i = 0; i < boundMtCount; i++) boundMachineTypes.add(buf.readUtf());
+        for (int i = 0; i < boundMtCount; i++) boundMachineTypes.add(buf.readUtf(MAX_MOD_TYPE_LENGTH));
         // Leftovers (overproduction)
-        int leftoverCount = buf.readVarInt();
+        int leftoverCount = readBoundedCount(buf);
         Map<IngredientKey, Integer> leftovers = new LinkedHashMap<>();
         for (int i = 0; i < leftoverCount; i++) {
             IngredientKey key = IngredientKey.read(buf);
             leftovers.put(key, buf.readVarInt());
         }
-        // Clicked ghost-output — tail-appended; guard readability so an older
-        // server's shorter buffer decodes cleanly to null instead of throwing.
+        // Clicked ghost-output — protocol v7 tail
         ItemStack clickedOutput = null;
         if (buf.isReadable() && buf.readBoolean()) {
             clickedOutput = buf.readItem();
+        }
+        // Server-authored DAG view — protocol v8 tail
+        PlanGraphView graph = null;
+        if (buf.isReadable() && buf.readBoolean()) {
+            graph = readGraph(buf);
         }
         return new PlanResponsePacket(new PlanResponse(success, targetName, targetResult,
                 steps, materials, missing, recipeId,
                 execModType, execDim, execX, execY, execZ, modWarnings, repeatCount,
                 embersCode, embersAspectNames, embersInputNames, embersSeed, embersCanInfer,
                 embersCodeFromCache, executionMachineSupportsGui, baseItem, boundMachineTypes,
-                leftovers, clickedOutput));
+                leftovers, clickedOutput, graph));
+    }
+
+    private static void writeGraph(FriendlyByteBuf buf, PlanGraphView graph) {
+        buf.writeVarInt(graph.version());
+        buf.writeVarInt(graph.nodes().size());
+        for (PlanGraphView.NodeView node : graph.nodes()) {
+            buf.writeVarInt(node.nodeId());
+            buf.writeResourceLocation(node.recipeId());
+            buf.writeUtf(node.modTypeId(), MAX_MOD_TYPE_LENGTH);
+            buf.writeVarInt(node.executions());
+            buf.writeItem(node.primaryOutput());
+            buf.writeVarInt(node.alternativeIds().size());
+            for (ResourceLocation alternative : node.alternativeIds()) {
+                buf.writeResourceLocation(alternative);
+            }
+            buf.writeVarInt(node.alternativeModTypeIds().size());
+            for (String alternativeModType : node.alternativeModTypeIds()) {
+                buf.writeUtf(alternativeModType, MAX_MOD_TYPE_LENGTH);
+            }
+            buf.writeVarInt(node.inputs().size());
+            for (PlanGraphView.InputView input : node.inputs()) {
+                buf.writeVarInt(input.portIndex());
+                buf.writeItem(input.display());
+                buf.writeVarInt(input.quantity());
+                buf.writeVarInt(input.roleOrdinal());
+            }
+            buf.writeVarInt(node.outputs().size());
+            for (PlanGraphView.OutputView output : node.outputs()) {
+                buf.writeVarInt(output.portIndex());
+                buf.writeItem(output.display());
+                buf.writeVarInt(output.quantity());
+                buf.writeVarInt(output.kindOrdinal());
+            }
+        }
+        buf.writeVarInt(graph.edges().size());
+        for (PlanGraphView.EdgeView edge : graph.edges()) {
+            buf.writeVarInt(edge.consumerNodeId());
+            buf.writeVarInt(edge.consumerPortIndex());
+            writeSource(buf, edge.source());
+            buf.writeItem(edge.material());
+            buf.writeVarInt(edge.quantity());
+        }
+        buf.writeVarInt(graph.roots().size());
+        for (PlanGraphView.RootView root : graph.roots()) {
+            buf.writeItem(root.display());
+            buf.writeVarInt(root.quantity());
+            buf.writeVarInt(root.unresolvedQuantity());
+            buf.writeVarInt(root.allocations().size());
+            for (PlanGraphView.RootEdgeView allocation : root.allocations()) {
+                writeSource(buf, allocation.source());
+                buf.writeItem(allocation.material());
+                buf.writeVarInt(allocation.quantity());
+            }
+        }
+        buf.writeVarInt(graph.unresolved().size());
+        for (PlanGraphView.UnresolvedView unresolved : graph.unresolved()) {
+            buf.writeVarInt(unresolved.consumerNodeId());
+            buf.writeVarInt(unresolved.consumerPortIndex());
+            buf.writeItem(unresolved.display());
+            buf.writeVarInt(unresolved.quantity());
+        }
+        buf.writeVarInt(graph.topologicalOrder().size());
+        for (int nodeId : graph.topologicalOrder()) buf.writeVarInt(nodeId);
+    }
+
+    static PlanGraphView readGraph(FriendlyByteBuf buf) {
+        int version = buf.readVarInt();
+        List<PlanGraphView.NodeView> nodes = new ArrayList<>();
+        for (int i = 0, n = readBoundedCount(buf); i < n; i++) {
+            int nodeId = readNonNegativeVarInt(buf, "graph node id");
+            ResourceLocation recipe = buf.readResourceLocation();
+            String modType = buf.readUtf(MAX_MOD_TYPE_LENGTH);
+            int executions = readNonNegativeVarInt(buf, "graph executions");
+            ItemStack primary = buf.readItem();
+            List<ResourceLocation> alternativeIds = new ArrayList<>();
+            for (int j = 0, m = readBoundedCount(buf); j < m; j++) {
+                alternativeIds.add(buf.readResourceLocation());
+            }
+            List<String> alternativeModTypes = new ArrayList<>();
+            for (int j = 0, m = readBoundedCount(buf); j < m; j++) {
+                alternativeModTypes.add(buf.readUtf(MAX_MOD_TYPE_LENGTH));
+            }
+            List<PlanGraphView.InputView> inputs = new ArrayList<>();
+            for (int j = 0, m = readBoundedCount(buf); j < m; j++) {
+                inputs.add(new PlanGraphView.InputView(readNonNegativeVarInt(buf, "input port"), buf.readItem(),
+                        readNonNegativeVarInt(buf, "input quantity"), buf.readVarInt()));
+            }
+            List<PlanGraphView.OutputView> outputs = new ArrayList<>();
+            for (int j = 0, m = readBoundedCount(buf); j < m; j++) {
+                outputs.add(new PlanGraphView.OutputView(readNonNegativeVarInt(buf, "output port"), buf.readItem(),
+                        readNonNegativeVarInt(buf, "output quantity"), buf.readVarInt()));
+            }
+            nodes.add(new PlanGraphView.NodeView(nodeId, recipe, modType, executions,
+                    primary, alternativeIds, alternativeModTypes, inputs, outputs));
+        }
+        List<PlanGraphView.EdgeView> edges = new ArrayList<>();
+        for (int i = 0, n = readBoundedCount(buf); i < n; i++) {
+            edges.add(new PlanGraphView.EdgeView(readNonNegativeVarInt(buf, "edge consumer node"),
+                    readNonNegativeVarInt(buf, "edge consumer port"), readSource(buf), buf.readItem(),
+                    readNonNegativeVarInt(buf, "edge quantity")));
+        }
+        List<PlanGraphView.RootView> roots = new ArrayList<>();
+        for (int i = 0, n = readBoundedCount(buf); i < n; i++) {
+            ItemStack display = buf.readItem();
+            int quantity = readNonNegativeVarInt(buf, "root quantity");
+            int unresolvedQuantity = readNonNegativeVarInt(buf, "root unresolved quantity");
+            if (unresolvedQuantity > quantity) {
+                throw new DecoderException("root unresolved quantity exceeds root quantity");
+            }
+            List<PlanGraphView.RootEdgeView> allocations = new ArrayList<>();
+            for (int j = 0, m = readBoundedCount(buf); j < m; j++) {
+                allocations.add(new PlanGraphView.RootEdgeView(readSource(buf),
+                        buf.readItem(), readNonNegativeVarInt(buf, "root allocation quantity")));
+            }
+            roots.add(new PlanGraphView.RootView(display, quantity, unresolvedQuantity, allocations));
+        }
+        List<PlanGraphView.UnresolvedView> unresolved = new ArrayList<>();
+        for (int i = 0, n = readBoundedCount(buf); i < n; i++) {
+            unresolved.add(new PlanGraphView.UnresolvedView(
+                    readNonNegativeVarInt(buf, "unresolved consumer node"),
+                    readNonNegativeVarInt(buf, "unresolved consumer port"), buf.readItem(),
+                    readNonNegativeVarInt(buf, "unresolved quantity")));
+        }
+        List<Integer> topological = new ArrayList<>();
+        for (int i = 0, n = readBoundedCount(buf); i < n; i++) {
+            topological.add(readNonNegativeVarInt(buf, "topological node id"));
+        }
+        return new PlanGraphView(version, nodes, edges, roots, unresolved, topological);
+    }
+
+    private static void writeSource(FriendlyByteBuf buf, PlanGraphView.SourceView source) {
+        buf.writeBoolean(source.initial());
+        if (!source.initial()) {
+            buf.writeVarInt(source.producerNodeId());
+            buf.writeVarInt(source.producerPortIndex());
+        }
+    }
+
+    private static PlanGraphView.SourceView readSource(FriendlyByteBuf buf) {
+        return buf.readBoolean()
+                ? new PlanGraphView.SourceView(true, -1, -1)
+                : new PlanGraphView.SourceView(false,
+                readNonNegativeVarInt(buf, "source producer node"),
+                readNonNegativeVarInt(buf, "source producer port"));
+    }
+
+    public PlanResponse plan() {
+        return plan;
     }
 
     @SuppressWarnings("resource")

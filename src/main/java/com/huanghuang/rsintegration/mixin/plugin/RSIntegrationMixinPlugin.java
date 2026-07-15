@@ -33,6 +33,11 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
         // @Mixin TARGET class is absent; a body reference to another absent mod
         // class would instead NoClassDefFoundError at apply/runtime. Probe that
         // second class here so the whole mixin is skipped when it is missing.
+        if (mixinClassName.contains("InventoryHelperExternalItemMixin")) {
+            return isClassPresent("dev.ftb.mods.ftbquests.quest.ServerQuestFile")
+                    && isClassPresent("dev.ftb.mods.ftbquests.quest.TeamData")
+                    && isClassPresent("dev.ftb.mods.ftbquests.quest.task.ItemTask");
+        }
         if (mixinClassName.contains("namelesstrinkets")) {
             return isClassPresent("com.cozary.nameless_trinkets.items.trinkets.SuperMagnet");
         }

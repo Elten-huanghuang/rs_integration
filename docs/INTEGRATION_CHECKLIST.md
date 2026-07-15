@@ -105,6 +105,7 @@ public final class MalumRecipeHandler extends AbstractRecipeHandler {
 |------|------|
 | `validateAndInit(player, recipeId, dim, pos)` | 验证机器存在、空闲、配方可执行 |
 | `getRequiredMaterials()` | 返回合成所需全部材料 |
+| `concurrencyCapabilities()` | 声明跨 DAG 节点并发所需的材料、输出、cleanup、副作用和机器 scope 契约；未知或不完整时保持 exclusive |
 | `getMachinePos()` | 返回绑定的机器坐标（`abstract`，每个子类必须实现） |
 | `tryStartSingleCraft(player)` | 独立路径：从网络提取材料 → 填入机器 → 触发合成 |
 | `tryStartSingleCraft(player, sharedLedger)` | 链式路径重载：材料已由链调度预扣（`default` 方法，按需覆写） |
@@ -386,6 +387,10 @@ IDLE → RESERVING → RESERVED → COMMITTING → COMMITTED
 | 配方产物是"放置型方块物品"却整块收走 | 玩家的锅/容器被吞进网络（如妖怪归家汤锅） | 判断产物 `BlockItem` 是否为可盛装方块（如 `PotFoodBlock`），盛成其可消耗形态（`asBowls()` → 食物×份数）并把碗计入必需材料，而非收走整块 |
 | 同一机器的 Delegate 与 GUI 预填各写一套资源选择策略 | 自动合成与远程 GUI 的燃料/材料选择不一致 | 抽取无网络依赖的共享策略（如原版炉子的 `VanillaFurnaceFuelPolicy`），两个入口只保留提取与写槽动作 |
 | 世界掉落产物缺失时直接返回 recipe result | 磁铁/玩家已拿到真实产物，RS 又收到模板产物，形成复制 | 世界掉落型实现捕获声明；交付只认捕获或实际取走的实体/槽位，缺失时 fail closed |
+| 只把 `supportsConcurrentNodeExecution()` 改成 `true` | 未声明材料、输出、cleanup 或副作用所有权的机器被错误并发，导致串料/刷物 | 实现完整 `BatchConcurrencyCapabilities`；混合 delegate 再按实际 recipe subtype 走 `GraphConcurrencyEligibility` |
+| queued operation 先 claim 再拿机器/capture lease | 资源冲突时队列项持有半套状态并可能永久卡住 | 先原子获取 budget + machine/support + capture 完整 scope，再 claim operation |
+| 仪式只锁主方块 | 两个邻近祭坛共享 pedestal/邻接资源并同时写入 | 将所有 support positions 纳入原子 machine scope；范围不确定时保持 exclusive |
+| infer group child 创建 normal delegate | 每个 worker 执行错误算法或共享错误状态 | 透传 `inferMode`，每个 worker 调 `createInferDelegate()` |
 | 槽位产物被外部自动化提前提取 | `collectResult()` 时槽位为空 | 允许外部提取；只收真实槽内容，禁止用预期配方结果补发 |
 
 ---
@@ -474,3 +479,143 @@ src/main/java/com/huanghuang/rsintegration/resonance/
 4. **必要时模式 B**：针对特定 call site 写独立的 `@Redirect` / `@Inject`。
 5. **ThreadLocal 注意**：若需在多个方法间传递信息（如 HEAD→ModifyVariable），用 `@Unique ThreadLocal`，并在 RETURN 时 `remove()` 防止泄漏。
 6. **诊断日志**：前 5 次触发用计数器和 `LOGGER.info` 输出诊断信息，确认 Mixin 正确命中。
+
+---
+
+## 十一、DAG 合成规划与执行
+
+当前自动合成同时包含 legacy `PlanStep` 视图和图驱动路径。DAG 是服务端权威的物料流模型，客户端只渲染 `PlanGraphView`，分支选择仍通过服务端重新解析完成。
+
+### 11.1 核心模型
+
+| 模型 | 职责 | 关键约束 |
+|------|------|----------|
+| `CraftPlanGraph` | 节点、输入端口、输出端口、物料分配和 root demand | 必须通过 `CraftPlanValidator` |
+| `CraftNode` | 单个配方执行节点 | `executions`、alternatives、inputs、outputs 必须自洽 |
+| `MaterialBroker` | 节点间物料预留、提交、结算和退款 | 不允许绕过 source/material/quantity 进行隐式扣料 |
+| `DagScheduler` / `NodeAdmissionCoordinator` | DAG 调度、能力门控和并发准入 | dispatch 前必须完成无副作用能力探针 |
+| `PlanGraphView` | 发给客户端的只读 DTO | 不携带 Ingredient predicate，只传显示栈、端口和数量 |
+
+### 11.2 物料守恒规则
+
+- `InputDemand.quantity` 是该节点实际需要的物料数量；`OutputDeclaration.quantity` 是该输出端口在所有 `executions` 完成后发布的总数量。
+- `MaterialAllocation.quantity` 必须同时满足消费者输入端口和生产者输出端口的容量，不能超配。
+- root demand 必须满足：`allocations 总量 + unresolvedQuantity = quantity`。
+- `PlanTreeNode.amount` 表示当前树引用的需求/边分配量，不能改成配方产出量；多产出配方的单次产量属于独立的显示信息。
+- `abort` 后，已提交的物理物品只能由链级看门狗/显式退款流程处理；不要依赖 `ExtractionLedger.close()` 退还 `COMMITTED` 物品。
+- DAG 中的同一生产节点可以被多个消费者引用；不能因为树上出现多个视图节点就重复执行或重复统计生产量。
+
+### 11.3 解析器与候选配方
+
+- 直接库存已有材料时，必须先尝试无副作用的直接消耗，再执行超时/次数预算检查；否则复杂计划后面的材料会被误报为缺失。
+- `COMBINATION_OR` 等 OR 需求树必须先展开为 DNF，再按每个可行组合解析；禁止将 OR 分支 flatten 成 AND。
+- 候选配方的 alternatives 必须从 `CraftNode` 传到 `PlanGraphView.NodeView`、`PlanResponsePacket` 和 `PlanStep`，否则 DAG 配方树不会显示切换控件。
+- 产出数量必须来自真实 recipe output stack。不要在 handler、graph output 或树 DTO 的转换阶段提前 `copyWithCount(1)`；只有显示模板/物料键需要单位栈时才单位化。
+- NBT 敏感产物必须使用 `ItemStack.isSameItemSameTags` 判断候选是否匹配，不能只按 `Item` 合并。
+
+### 11.4 Delegate 输出契约
+
+- `collectResult()` 只返回调用时真实提取到的产物；不能在槽位为空或世界掉落丢失时用 recipe template 补发。
+- 多产物配方必须实现 `collectAllResults()`，包含主产物、副产物、remainder 和可容器化流体转换后的真实物品。
+- `tryGetSecondaryOutputs` 的字段扫描必须限制在明确的副产物字段，不能把主产物字段再次计入。
+- 产物提取要使用明确的 handler/delegate 契约；不要用“扫描第一个 `ItemStack` 字段”猜测产物。
+- Malum、Ferment、TLM、Malum Spirit Crucible 等特殊配方必须用 fixture 或集成环境确认输出字段和多产物行为。
+
+### 11.5 网络与客户端视图
+
+- 修改 `PlanResponsePacket`、graph DTO 或任何已有包的 wire layout 时，必须递增 `NetworkHandler.PROTOCOL_VERSION`，并同步更新 encode/decode 和 bounds 测试。
+- 网络包处理世界状态必须在 `context.enqueueWork(...)` 内完成。
+- graph DTO 的集合使用现有 bounded count；字符串使用明确的最大长度，拒绝截断/恶意大分配。
+- 客户端不能把 `PlanGraphView` 当成执行权威；用户切换候选后必须让服务端重新解析并返回新计划。
+- DAG 和 legacy 视图的数量语义必须一致：需求量用于材料统计，recipe output count 用于产出展示。
+
+### 11.6 跨节点并发与资源所有权
+
+DAG 并发采用 fail-closed capability 模型。`supportsConcurrentNodeExecution()` 仅为兼容旧实现保留，单独返回 `true` 不会获得并发资格。中央决策由 `GraphConcurrencyPolicy` 和 `GraphConcurrencyEligibility` 完成，并同时考虑 `ModType`、实际 recipe 类和 `inferMode`。
+
+`BatchConcurrencyCapabilities` 必须完整声明：
+
+- `materials = CHAIN_RESERVED`：所有 recipe 材料来自链级预留，delegate 不得在启动时再次从 RS 自提取；
+- `outputOwnership`：只能是明确的机器槽、delegate result 或 `OWNED_WORLD_CAPTURE`；entity/ambiguous 默认拒绝；
+- `cleanup = SEPARABLE_OFFLINE`：cancel、failure、玩家离线和 server stop 都能清理物理状态，且不与 shared ledger 重复退款；
+- `sideEffects`：机器局部、已纳入 support scope 的邻接机器或明确的 infer；全局世界状态、玩家变换和未知副作用保持 exclusive；
+- `preparation`：READY/RETRY/FATAL 分类可信；
+- `supportOffsets`：祭坛、基座、pedestal 等邻接资源必须纳入原子 machine scope。
+
+资源获取顺序固定为：operation budget → 完整 machine/support scope → capture lease → commit → start。任何冲突都整体 `RETRY`，不得让 queued operation 持有部分 lease。`ParallelCraftGroup` 必须先获得完整 scope，再 claim operation ID；capability-parallel delegate 不允许退回 `armCaptureLegacy`。
+
+当前 recipe-aware allowlist：
+
+| 类别 | 已允许 | 仍明确排除 |
+|------|--------|------------|
+| Malum | Spirit Altar、Spirit Crucible、Runic Workbench | 未知 fallback |
+| Goety | Dark Altar ritual、Necro Brazier | delegate 验证拒绝的 convert/teleport 等 ritual |
+| Forbidden & Arcanus | Hephaestus Forge ritual | `ApplyModifierRecipe` |
+| TLM | Altar | 未知 subtype |
+| YH | Steamer、small/short/large Cooking Pot；另有 Fermentation Tank 机器槽并发 | Moka、Kettle、Cuisine、fallback |
+| Farmer's Delight | Skillet/campfire binding | Cooking Pot、fallback |
+| Vanilla | 仅 `vanilla_campfire` | furnace、blast furnace、smoker、stonecutter、anvil、smithing 等 |
+| Aether | Altar | Freezer、Incubator、fallback |
+| Eidolon | `ItemRitualRecipe`、`GenericRitualRecipe`、Crucible/Brazier subtype | `WorktableRecipe` 和未知 subtype |
+| Wizards Reborn | 仅 `CrystalRitualRecipe` | `CrystalInfusionRecipe`、`ArcaneIteratorRecipe`、Crystallizer、Workbench |
+| Embers | 普通 alchemy tablet；infer 仅 `EreAlchemyInferDelegate` | 其他 infer/fallback |
+| 机器槽/明确结果 | Avaritia Crafting Table、Farmer's Respite Kettle | capability 未完成的 Compressor、Cooler、Crab Trap 等 |
+
+world-output delegate 只有声明 `OWNED_WORLD_CAPTURE` 才能创建 capture request。`CaptureLeaseRegistry` 按维度、区域和输出 material 防止冲突；缺少预期输出或 capture 获取失败时必须 fail closed，不能补发 recipe template。
+
+仪式/祭坛目前将主机器周围水平 3 格纳入 support scope。新增机器若真实结构更大或包含垂直 support，应声明精确 offsets，不能依赖该默认范围掩盖资源所有权缺口。
+
+Embers infer 的每个并行 worker 必须通过 `ModType.createInferDelegate()` 创建独立实例，并由 `ParallelCraftGroup` 透传 `inferMode`；禁止使用 normal delegate 替代。
+
+配置项：
+
+- `craftingMaxConcurrentGraphNodes`：独立 DAG 节点总并发上限，默认 `1`；
+- `craftingMaxConcurrentOperations`：物理 operation 总并发上限；
+- `craftingParallelDisabledMods`：mod/type 强制 exclusive denylist；
+- `craftingParallelDelegatePolicies`：`id=AUTO|OFF|FORCE_WITH_GUARDS`，delegate 类名比 mod type ID 更具体；`FORCE_WITH_GUARDS` 不能绕过安全 guard。
+
+并发日志必须包含 `nodeId`、`modType`、delegate、parallel/exclusive 决策及具体 reason。人工验收时至少将 `craftingMaxConcurrentGraphNodes` 调为 `2`，验证两台不同机器同时 RUNNING、同一机器或重叠 capture 保持 RETRY，并确认 cancel/failure/server stop 后 machine、support、capture 和 budget 全部清零。
+
+### 11.7 新增或修改 DAG 功能的验收清单
+
+- [ ] `CraftPlanValidator` 覆盖输入、输出、root、unresolved 和拓扑顺序。
+- [ ] 同一生产节点被多个消费者引用时，分配总量和执行次数仍正确。
+- [ ] 多产出、remainder、NBT 产物均有独立测试。
+- [ ] alternatives 完整经过 `CraftNode → PlanGraphView → packet → client PlanStep`。
+- [ ] `PlanTreeNode.amount` 未被改写为产出数量。
+- [ ] 协议变更已更新版本号、编码、解码和边界测试。
+- [ ] 直接材料、超时预算、OR 配方和 abort 路径各有回归测试。
+- [ ] capability 完整/缺失、recipe subtype allow/deny、同 key 冲突、support scope 原子回滚和 capture 冲突均有测试。
+- [ ] `craftingMaxConcurrentGraphNodes = 2` 时不同机器可同时 RUNNING；同机器、重叠 capture、failure/cancel/terminal 后资源状态符合预期。
+- [ ] 目标配方在实际整合包中验证：配方树数量、候选切换、材料总需求和实际收取结果一致。
+
+---
+
+## 十二、测试与发布前检查
+
+### 12.1 推荐测试命令
+
+```bash
+# 编译主代码
+./gradlew compileJava
+
+# 运行单个逻辑测试类
+./gradlew test --tests "*CraftPlanValidatorTest"
+./gradlew test --tests "*MaterialBrokerTest"
+./gradlew test --tests "*PlanGraphViewTest"
+./gradlew test --tests "*PlanTreeModelGraphTest"
+
+# 完整测试
+./gradlew test
+```
+
+Windows 环境使用 `gradlew.bat`。若 Gradle 报告无法删除 `build/test-results`，先停止占用测试输出的 Gradle daemon/IDE 测试进程，再重新运行；不要把失败测试结果误判为代码测试通过。
+
+### 12.2 发布前最小验收
+
+- [ ] `compileJava` 成功，且没有新增编译错误。
+- [ ] 关键 ledger、resolver、graph、packet 测试通过。
+- [ ] 至少用一个真实整合模组配方完成从计划生成到产物回收的闭环。
+- [ ] 验证机器卸载、玩家断线、服务器重启/重载、外部管道提前取走产物等失败路径。
+- [ ] 检查中文和英文语言键同步，网络协议版本与客户端/服务端构建一致。
+- [ ] 检查 `git diff`，确认未误改用户已有工作区变更，并在提交前记录未能运行的测试及原因。

@@ -38,6 +38,7 @@ public final class CookingPotBatchDelegate extends com.huanghuang.rsintegration.
 
     // Slot layout matching CookingPotBlockEntity
     private static final int INPUT_SLOTS = 6;   // 0..5
+    private static final int MEAL_DISPLAY_SLOT = 6;
     private static final int CONTAINER_SLOT = 7;
     private static final int OUTPUT_SLOT = 8;
 
@@ -82,10 +83,17 @@ public final class CookingPotBatchDelegate extends com.huanghuang.rsintegration.
     @Override
     public List<IngredientSpec> getRequiredMaterials() {
         var handler = ModRecipeHandlers.handlerFor(recipe);
-        if (handler != null) {
-            return handler.getIngredients(recipe);
+        List<IngredientSpec> specs = handler != null
+                ? handler.getIngredients(recipe)
+                : CraftPacketUtils.extractIngredientSpecs(recipe);
+        if (specs == null) specs = new ArrayList<>();
+        else specs = new ArrayList<>(specs);
+
+        ItemStack container = getContainerItem(recipe, myLevel != null ? myLevel.registryAccess() : null);
+        if (!container.isEmpty()) {
+            specs.add(new IngredientSpec(Ingredient.of(container), 1));
         }
-        return CraftPacketUtils.extractIngredientSpecs(recipe);
+        return specs.isEmpty() ? null : specs;
     }
 
     @Override
@@ -160,7 +168,28 @@ public final class CookingPotBatchDelegate extends com.huanghuang.rsintegration.
             return false;
         }
 
-        long materialCount = materials.stream().filter(s -> !s.isEmpty()).count();
+        ItemStack requiredContainer = getContainerItem(recipe, myLevel.registryAccess());
+        List<ItemStack> inputMaterials = new ArrayList<>();
+        ItemStack containerMaterial = ItemStack.EMPTY;
+        for (ItemStack material : materials) {
+            if (material.isEmpty()) continue;
+            if (containerMaterial.isEmpty() && !requiredContainer.isEmpty()
+                    && ItemStack.isSameItemSameTags(material, requiredContainer)) {
+                containerMaterial = material.copyWithCount(1);
+                if (material.getCount() > 1) {
+                    inputMaterials.add(material.copyWithCount(material.getCount() - 1));
+                }
+            } else {
+                inputMaterials.add(material);
+            }
+        }
+        if (!requiredContainer.isEmpty() && containerMaterial.isEmpty()) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Batch-CookingPot] Planned container missing for recipe {}: {}",
+                    recipe.getId(), requiredContainer);
+            return false;
+        }
+
+        long materialCount = inputMaterials.stream().filter(s -> !s.isEmpty()).count();
         if (materialCount > INPUT_SLOTS) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-CookingPot] Recipe {} has {} ingredients but only {} input slots",
                     recipe.getId(), materialCount, INPUT_SLOTS);
@@ -170,7 +199,7 @@ public final class CookingPotBatchDelegate extends com.huanghuang.rsintegration.
 
         // Insert ingredients into input slots 0..5
         int slot = 0;
-        for (ItemStack mat : materials) {
+        for (ItemStack mat : inputMaterials) {
             if (mat.isEmpty()) continue;
             ItemStack single = mat.copyWithCount(1);
             ItemStack remainder = itemHandler.insertItem(slot, single, false);
@@ -189,49 +218,29 @@ public final class CookingPotBatchDelegate extends com.huanghuang.rsintegration.
         }
         be.setChanged();
 
-        // Insert container item (e.g. bowl) into slot 7
-        ItemStack container = getContainerItem(recipe, myLevel.registryAccess());
-        if (!container.isEmpty()) {
-            this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+        // Insert the container that was reserved by the same shared ledger as the
+        // ingredients. Never extract it from RS out-of-band after commit.
+        if (!requiredContainer.isEmpty()) {
             ItemStack existingContainer = itemHandler.getStackInSlot(CONTAINER_SLOT);
-            if (!existingContainer.isEmpty()
-                    && !ItemStack.isSameItemSameTags(existingContainer, container)) {
-                RSIntegrationMod.LOGGER.warn("[RSI-Batch-CookingPot] Recipe {} needs container {}, but slot contains {}",
-                        recipe.getId(), container, existingContainer);
+            if (!existingContainer.isEmpty()) {
+                RSIntegrationMod.LOGGER.warn("[RSI-Batch-CookingPot] Container slot occupied at {}", myPos);
                 rollbackInputs(itemHandler, slot);
                 be.setChanged();
                 return false;
             }
-            if (existingContainer.isEmpty()) {
-                if (this.network == null) {
-                    rollbackInputs(itemHandler, slot);
-                    be.setChanged();
-                    return false;
-                }
-                ItemStack extracted = network.extractItem(container.copyWithCount(1), 1, Action.PERFORM);
-                if (extracted.isEmpty()) {
-                    RSIntegrationMod.LOGGER.warn("[RSI-Batch-CookingPot] Required container unavailable for recipe {}: {}",
-                            recipe.getId(), container);
-                    rollbackInputs(itemHandler, slot);
-                    be.setChanged();
-                    return false;
-                }
-                ItemStack simulated = itemHandler.insertItem(CONTAINER_SLOT, extracted, true);
-                if (!simulated.isEmpty()) {
-                    refundToRSNetwork(extracted);
-                    rollbackInputs(itemHandler, slot);
-                    be.setChanged();
-                    return false;
-                }
-                ItemStack remainder = itemHandler.insertItem(CONTAINER_SLOT, extracted, false);
-                if (!remainder.isEmpty()) {
-                    refundToRSNetwork(remainder);
-                    rollbackInputs(itemHandler, slot);
-                    be.setChanged();
-                    return false;
-                }
+            ItemStack simulated = itemHandler.insertItem(CONTAINER_SLOT, containerMaterial, true);
+            if (!simulated.isEmpty()) {
+                rollbackInputs(itemHandler, slot);
                 be.setChanged();
+                return false;
             }
+            ItemStack remainder = itemHandler.insertItem(CONTAINER_SLOT, containerMaterial, false);
+            if (!remainder.isEmpty()) {
+                rollbackInputs(itemHandler, slot);
+                be.setChanged();
+                return false;
+            }
+            be.setChanged();
         }
 
         RSIntegrationMod.LOGGER.debug("[RSI-Batch-CookingPot] Materials inserted, cooking should start next tick");
@@ -246,11 +255,7 @@ public final class CookingPotBatchDelegate extends com.huanghuang.rsintegration.
         if (itemHandler == null) return false;
 
         ItemStack output = itemHandler.getStackInSlot(OUTPUT_SLOT);
-        boolean inputsEmpty = true;
-        for (int slot = 0; slot < INPUT_SLOTS; slot++) {
-            inputsEmpty &= itemHandler.getStackInSlot(slot).isEmpty();
-        }
-        return !output.isEmpty() || inputsEmpty;
+        return !output.isEmpty();
     }
 
     @Override
@@ -412,9 +417,10 @@ public final class CookingPotBatchDelegate extends com.huanghuang.rsintegration.
             ItemStack s = handler.extractItem(slot, 64, false);
             if (!s.isEmpty() && !usingSharedLedger) refundToRSNetwork(s);
         }
-        // Container is out-of-band (not in shared ledger) — refund unconditionally
+        ItemStack meal = handler.extractItem(MEAL_DISPLAY_SLOT, 64, false);
+        if (!meal.isEmpty()) refundToRSNetwork(meal);
         ItemStack container = handler.extractItem(CONTAINER_SLOT, 64, false);
-        if (!container.isEmpty()) refundToRSNetwork(container);
+        if (!container.isEmpty() && !usingSharedLedger) refundToRSNetwork(container);
         ItemStack out = handler.extractItem(OUTPUT_SLOT, 64, false);
         // Output is not part of the shared input ledger. If collection races with
         // cleanup, never discard it merely because this delegate used that ledger.

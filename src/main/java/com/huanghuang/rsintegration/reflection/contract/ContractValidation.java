@@ -120,14 +120,16 @@ public final class ContractValidation {
                         c.modId(), c.description());
                 ok++;
             } catch (Exception e) {
-                failed++;
                 String msg = "[RSI-Contract] {} 反射契约失败: {} — {}";
                 if (c.required()) {
+                    failed++;
                     RSIntegrationMod.LOGGER.error(msg, c.modId(), c.description(),
                             c.className(), e);
                 } else {
-                    RSIntegrationMod.LOGGER.warn(msg, c.modId(), c.description(),
-                            c.className(), e);
+                    skipped++;
+                    RSIntegrationMod.LOGGER.debug(
+                            "[RSI-Contract] Optional contract unavailable: {} — {} ({})",
+                            c.modId(), c.description(), c.className());
                 }
             }
         }

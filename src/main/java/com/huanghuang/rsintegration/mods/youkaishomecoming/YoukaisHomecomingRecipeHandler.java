@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.mods.youkaishomecoming.ferment.FermentationRecipeOutputs;
+import dev.xkmc.youkaishomecoming.content.block.food.PotFoodBlock;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
@@ -185,44 +186,20 @@ public final class YoukaisHomecomingRecipeHandler implements com.huanghuang.rsin
                 "dev.xkmc.youkaishomecoming.content.pot.cooking");
     }
 
-    // PotFoodBlock (soup-pot result) helpers. A cooking-pot recipe's result is
-    // a pot_of_X BlockItem wrapping a PotFoodBlock; in-world it is served into
-    // bowls (food * serve, one bowl per serving). All reflection, so a
-    // missing/renamed class simply falls back to the raw recipe result.
-    private static volatile Class<?> potFoodBlockClass;
-    private static volatile java.lang.reflect.Method asBowlsMethod;
-    private static volatile boolean potFoodProbed;
-
-    private static void probePotFood() {
-        if (potFoodProbed) return;
-        potFoodProbed = true;
-        try {
-            potFoodBlockClass = Class.forName(
-                    "dev.xkmc.youkaishomecoming.content.block.food.PotFoodBlock");
-            asBowlsMethod = potFoodBlockClass.getMethod("asBowls");
-            asBowlsMethod.setAccessible(true);
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-YHK] PotFoodBlock probe unavailable", e);
-        }
-    }
+    // PotFoodBlock helpers use the public YHK API so recipe planning and runtime
+    // serving share the same result/count contract.
 
     /** The servings a pot-cooking recipe delivers ({@code food * serve}), or
      *  EMPTY if the result is not a PotFoodBlock (plain-item recipe). */
     private static ItemStack potFoodServings(Recipe<?> recipe, RegistryAccess access) {
-        probePotFood();
-        if (potFoodBlockClass == null || asBowlsMethod == null) return ItemStack.EMPTY;
         ItemStack result = recipe.getResultItem(access);
         if (result == null || result.isEmpty()
-                || !(result.getItem() instanceof net.minecraft.world.item.BlockItem bi))
+                || !(result.getItem() instanceof net.minecraft.world.item.BlockItem blockItem)
+                || !(blockItem.getBlock() instanceof PotFoodBlock potFood)) {
             return ItemStack.EMPTY;
-        if (!potFoodBlockClass.isInstance(bi.getBlock())) return ItemStack.EMPTY;
-        try {
-            Object r = asBowlsMethod.invoke(bi.getBlock());
-            if (r instanceof ItemStack s && !s.isEmpty()) return s;
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-YHK] asBowls() failed", e);
         }
-        return ItemStack.EMPTY;
+        ItemStack servings = potFood.asBowls();
+        return servings.isEmpty() ? ItemStack.EMPTY : servings.copy();
     }
 
     /** The bowls a pot-cooking recipe needs to serve its result

@@ -200,7 +200,8 @@ public final class Reflect {
                 scan = scan.getSuperclass();
             }
         }
-        LOG.warn("{} Field not found in hierarchy: {}.{}", TAG, clazz.getName(), name);
+        fieldCache.put(key, Optional.empty());
+        LOG.debug("{} Field not found in hierarchy: {}.{}", TAG, clazz.getName(), name);
         return Optional.empty();
     }
 
@@ -249,7 +250,8 @@ public final class Reflect {
             return found;
         }
 
-        LOG.warn("{} Method not found in hierarchy: {}.{}({})",
+        methodCache.put(key, Optional.empty());
+        LOG.debug("{} Method not found in hierarchy: {}.{}({})",
                 TAG, clazz.getName(), name, paramTypes.length);
         return null;
     }

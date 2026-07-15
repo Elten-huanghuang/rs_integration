@@ -3,6 +3,20 @@ package com.huanghuang.rsintegration.crafting;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.crafting.graph.CraftNode;
+import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
+import com.huanghuang.rsintegration.crafting.graph.CraftPlanValidator;
+import com.huanghuang.rsintegration.crafting.graph.DemandRole;
+import com.huanghuang.rsintegration.crafting.graph.InputDemand;
+import com.huanghuang.rsintegration.crafting.graph.InputPortId;
+import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
+import com.huanghuang.rsintegration.crafting.graph.MaterialSource;
+import com.huanghuang.rsintegration.crafting.graph.NodeId;
+import com.huanghuang.rsintegration.crafting.graph.OutputDeclaration;
+import com.huanghuang.rsintegration.crafting.graph.OutputKind;
+import com.huanghuang.rsintegration.crafting.graph.OutputPortId;
+import com.huanghuang.rsintegration.crafting.graph.RootAllocation;
+import com.huanghuang.rsintegration.crafting.graph.RootDemand;
 import com.huanghuang.rsintegration.command.PerformanceMonitor;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
@@ -265,6 +279,50 @@ public final class CraftingResolver {
         return new ArrayList<>(ctx.steps);
     }
 
+    public static CraftPlanGraph resolveGraphForSpecsWithTypes(
+            List<IngredientSpec> needed,
+            Map<StackKey, Integer> availableKeyed,
+            Level level,
+            @Nullable ServerPlayer player,
+            @Nullable INetwork network,
+            @Nullable List<String> missingOut,
+            @Nullable Map<ResourceLocation, ResourceLocation> forcedOverrides,
+            boolean bestEffort) {
+        Map<ResourceLocation, ResourceLocation> prefs = mergeForcedOverrides(level, forcedOverrides);
+        ResolutionContext ctx = new ResolutionContext(level, RecipeIndex.get(level), availableKeyed,
+                prefs, player, network, bestEffort, missingOut);
+        EdgeTracker edges = new EdgeTracker();
+        List<RootDemand> roots = new ArrayList<>();
+
+        for (int rootIndex = 0; rootIndex < needed.size(); rootIndex++) {
+            IngredientSpec spec = needed.get(rootIndex);
+            if (spec.isEmpty()) continue;
+            List<ResolutionContext.SupplySlice> consumed = new ArrayList<>();
+            boolean resolved = ensureIngredient(spec.ingredient(), spec.count(), ctx, 0, edges, null, consumed);
+            List<RootAllocation> allocations = new ArrayList<>(consumed.size());
+            for (ResolutionContext.SupplySlice slice : consumed) {
+                allocations.add(new RootAllocation(slice.source(), slice.material(), slice.quantity()));
+            }
+            int supplied = consumed.stream().mapToInt(ResolutionContext.SupplySlice::quantity).sum();
+            int missing = Math.max(0, spec.count() - supplied);
+            if (!resolved && missingOut != null) missingOut.add(describeFirstItem(spec.ingredient()));
+            roots.add(new RootDemand(spec.ingredient(), spec.count(), missing,
+                    firstDisplayStack(spec.ingredient()), allocations));
+            if (!resolved && !bestEffort) break;
+        }
+
+        CraftPlanGraph graph = new CraftPlanGraph(CraftPlanGraph.CURRENT_VERSION,
+                ctx.graphNodes, ctx.graphAllocations, roots, ctx.graphUnresolved,
+                ctx.graphNodes.stream().map(com.huanghuang.rsintegration.crafting.graph.CraftNode::id).toList());
+        CraftPlanValidator.validate(graph);
+        return graph;
+    }
+
+    private static ItemStack firstDisplayStack(Ingredient ingredient) {
+        ItemStack[] display = ingredient.getItems();
+        return display.length == 0 ? ItemStack.EMPTY : display[0].copyWithCount(1);
+    }
+
     /** Vanilla-only variant that returns flat recipe-id list. */
     public static List<ResourceLocation> resolveStepsForSpecs(
             List<IngredientSpec> needed,
@@ -304,6 +362,12 @@ public final class CraftingResolver {
 
     static boolean ensureIngredient(Ingredient ingredient, int count, ResolutionContext ctx, int depth,
                                      EdgeTracker edges) {
+        return ensureIngredient(ingredient, count, ctx, depth, edges, null, null);
+    }
+
+    static boolean ensureIngredient(Ingredient ingredient, int count, ResolutionContext ctx, int depth,
+                                     EdgeTracker edges, @Nullable InputPortId consumer,
+                                     @Nullable List<ResolutionContext.SupplySlice> consumedOut) {
         if (count <= 0) return true;
 
         int minReserve = RSIntegrationConfig.getProtectedReserve(ingredient);
@@ -314,10 +378,14 @@ public final class CraftingResolver {
         long consumeStart = System.nanoTime();
         boolean mayConsumeDirect = minReserve <= 0
                 || ctx.countMatching(ingredient) >= count + minReserve;
-        if (mayConsumeDirect && ctx.consumeMatching(ingredient, count)) {
-            ctx.commitUndo();
-            edges.commitUndo();
-            return true;
+        if (mayConsumeDirect) {
+            ResolutionContext.SupplyConsumption direct = ctx.consumeMatchingDetailed(ingredient, count);
+            if (direct.complete()) {
+                recordSupplyConsumption(ctx, consumer, consumedOut, direct);
+                ctx.commitUndo();
+                edges.commitUndo();
+                return true;
+            }
         }
         ctx.rollback();
         edges.rollback();
@@ -339,19 +407,29 @@ public final class CraftingResolver {
         int remaining = count - alreadyHave;
         if (remaining > 0 && isTaintedEarthHeartRequirement(ingredient)) {
             Ingredient plainHeart = Ingredient.of(ForgeRegistries.ITEMS.getValue(EARTH_HEART_ID));
+            NodeId nodeId = ctx.allocateNodeId();
+            InputPortId inputPort = new InputPortId(nodeId, 0);
             if (plainHeart.getItems().length > 0
-                    && ensureIngredient(plainHeart, remaining, ctx, depth + 1, edges)) {
+                    && ensureIngredient(plainHeart, remaining, ctx, depth + 1, edges, inputPort, null)) {
                 ItemStack plainTemplate = plainHeart.getItems()[0].copyWithCount(1);
                 ItemStack taintedTemplate = ingredient.getItems().length > 0
                         ? ingredient.getItems()[0].copyWithCount(1) : ItemStack.EMPTY;
                 if (taintedTemplate.isEmpty()) return false;
-                ctx.steps.add(new ResolutionStep(TAINT_EARTH_HEART_STEP, ModType.GENERIC,
+                ResolutionStep step = new ResolutionStep(TAINT_EARTH_HEART_STEP, ModType.GENERIC,
                         TAINT_EARTH_HEART_STEP, List.of(), List.of(), false, remaining,
-                        plainTemplate, taintedTemplate));
+                        plainTemplate, taintedTemplate);
+                ctx.steps.add(step);
+
                 ItemStack tainted = taintedTemplate.copyWithCount(remaining);
-                // Runtime conversion uses IngredientMatcher/original ingredient;
-                // this synthetic stack models the converted state for planning.
-                ctx.add(tainted);
+                OutputPortId outputPort = new OutputPortId(nodeId, 0);
+                ctx.addProduced(tainted, new MaterialSource.ProducerOutput(outputPort));
+                ctx.addGraphNode(new CraftNode(nodeId, step.recipeId(), step.modType().id(),
+                        step.recipeTypeId(), step.executions(), step.alternativeIds(),
+                        step.alternativeModTypes(), step.inferMode(), step.syntheticInput(),
+                        step.syntheticOutput(), List.of(new InputDemand(inputPort, plainHeart,
+                        remaining, DemandRole.TRANSFORMED, plainTemplate)),
+                        List.of(new OutputDeclaration(outputPort, MaterialKey.of(tainted),
+                                remaining, OutputKind.SYNTHETIC))));
                 alreadyHave = ctx.countMatching(ingredient);
                 remaining = count - alreadyHave;
             }
@@ -361,7 +439,9 @@ public final class CraftingResolver {
         }
 
         if (remaining <= 0) {
-            return ctx.consumeMatching(ingredient, count);
+            ResolutionContext.SupplyConsumption existing = ctx.consumeMatchingDetailed(ingredient, count);
+            if (existing.complete()) recordSupplyConsumption(ctx, consumer, consumedOut, existing);
+            return existing.complete();
         }
 
         long candStart = System.nanoTime();
@@ -373,7 +453,7 @@ public final class CraftingResolver {
         if (candidates.isEmpty()) {
             ctx.diag("ensureIngredient FAILED: no candidates for " + describeFirstItem(ingredient));
             if (ctx.bestEffort && ctx.missingOut != null) {
-                ctx.missingOut.add(describeFirstItem(ingredient));
+                recordUnresolved(ctx, consumer, ingredient, count);
                 return true;
             }
             return false;
@@ -417,7 +497,7 @@ public final class CraftingResolver {
             RSIntegrationMod.LOGGER.debug("[RSI-ensure] no viable candidates for {} ({} total candidates rejected, alive-building took {}ms)",
                     describeFirstItem(ingredient), candidates.size(), aliveMs);
             if (ctx.bestEffort && ctx.missingOut != null) {
-                ctx.missingOut.add(describeFirstItem(ingredient));
+                recordUnresolved(ctx, consumer, ingredient, count);
                 return true;
             }
             return false;
@@ -502,7 +582,9 @@ public final class CraftingResolver {
                 continue;
             }
 
-            if (ctx.consumeMatching(ingredient, count)) {
+            ResolutionContext.SupplyConsumption crafted = ctx.consumeMatchingDetailed(ingredient, count);
+            if (crafted.complete()) {
+                recordSupplyConsumption(ctx, consumer, consumedOut, crafted);
                 ctx.diag("ensureIngredient OK " + a.entry.recipe().getId());
                 ctx.commitUndo();
                 edges.commitUndo();
@@ -529,6 +611,24 @@ public final class CraftingResolver {
             return true;
         }
         return false;
+    }
+
+    private static void recordUnresolved(ResolutionContext ctx, @Nullable InputPortId consumer,
+                                         Ingredient ingredient, int quantity) {
+        ctx.missingOut.add(describeFirstItem(ingredient));
+        if (consumer != null) ctx.addUnresolved(consumer, ingredient, quantity);
+    }
+
+    private static void recordSupplyConsumption(ResolutionContext ctx,
+                                                @Nullable InputPortId consumer,
+                                                @Nullable List<ResolutionContext.SupplySlice> consumedOut,
+                                                ResolutionContext.SupplyConsumption consumption) {
+        if (consumer != null) {
+            for (ResolutionContext.SupplySlice slice : consumption.slices()) {
+                ctx.addAllocation(consumer, slice);
+            }
+        }
+        if (consumedOut != null) consumedOut.addAll(consumption.slices());
     }
 
     private static Set<StackKey> getRecipeInputKeys(Recipe<?> recipe) {

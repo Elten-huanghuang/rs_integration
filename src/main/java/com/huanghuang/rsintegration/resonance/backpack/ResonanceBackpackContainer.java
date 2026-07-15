@@ -45,7 +45,7 @@ public class ResonanceBackpackContainer extends AbstractContainerMenu {
             for (int col = 0; col < 9; col++) {
                 if (serverSide && disk != null) {
                     this.addSlot(new ResonanceSlot(diskInventory,
-                            row * 9 + col, startX + col * 18, y, disk));
+                            row * 9 + col, startX + col * 18, y));
                 } else {
                     this.addSlot(new Slot(diskInventory,
                             row * 9 + col, startX + col * 18, y));
@@ -57,7 +57,7 @@ public class ResonanceBackpackContainer extends AbstractContainerMenu {
         for (int col = 0; col < 9; col++) {
             if (serverSide && disk != null) {
                 this.addSlot(new ResonanceSlot(diskInventory,
-                        27 + col, startX + col * 18, bpHotY, disk));
+                        27 + col, startX + col * 18, bpHotY));
             } else {
                 this.addSlot(new Slot(diskInventory,
                         27 + col, startX + col * 18, bpHotY));

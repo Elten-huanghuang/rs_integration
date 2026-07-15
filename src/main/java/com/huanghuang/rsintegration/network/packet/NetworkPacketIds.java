@@ -21,6 +21,11 @@ public final class NetworkPacketIds {
     // ── Batch crafting (0-9) ───────────────────────────────────────
     public static final int GENERIC_CRAFT = 0;
     public static final int PLAN_RESPONSE = 1;
+    public static final int CRAFT_STARTED = 2;
+    public static final int CRAFT_PROGRESS = 3;
+    public static final int CRAFT_CANCEL = 4;
+    public static final int CRAFT_STATUS_REQUEST = 5;
+    public static final int CRAFT_STATUS_SYNC = 6;
 
     // ── Container transfer (10-19) ─────────────────────────────────
     public static final int STORE_ALL = 10;
