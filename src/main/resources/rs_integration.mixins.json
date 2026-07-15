@@ -24,6 +24,7 @@
     "refinedstorage.StackUtilsMixin",
     "minecraft.AbstractFurnaceAccessor",
     "sophisticatedbackpacks.InventoryInteractionHelperMixin",
+    "sophisticatedbackpacks.InventoryHelperExternalItemMixin",
     "sophisticatedbackpacks.MagnetUpgradeWrapperMixin",
     "sophisticatedbackpacks.PickupUpgradeWrapperMixin",
     "sophisticatedbackpacks.RestockUpgradeWrapperMixin",

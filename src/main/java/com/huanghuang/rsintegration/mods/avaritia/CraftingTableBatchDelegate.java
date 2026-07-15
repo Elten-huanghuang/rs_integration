@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
@@ -84,6 +85,11 @@ public final class CraftingTableBatchDelegate extends AbstractBatchDelegate {
             return handler.getIngredients(recipe);
         }
         return CraftPacketUtils.extractIngredientSpecs(recipe);
+    }
+
+    @Override
+    public BatchConcurrencyCapabilities concurrencyCapabilities() {
+        return BatchConcurrencyCapabilities.delegateResult();
     }
 
     @Override

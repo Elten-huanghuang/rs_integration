@@ -34,10 +34,9 @@ public final class ResonanceDiskWrapper implements IStorageDisk<ItemStack> {
 
     @Override
     public ItemStack insert(ItemStack stack, int size, Action action) {
-        return stack; // reject all auto-routing
+        return stack;
     }
 
-    /** Manual insert from backpack UI — accepts everything, tags with slot. */
     public ItemStack manualInsert(int slot, ItemStack stack, int size, Action action) {
         ItemStack tagged = stack.copy();
         tagged.getOrCreateTag().putInt(RSI_SLOT_TAG, slot);
@@ -49,10 +48,6 @@ public final class ResonanceDiskWrapper implements IStorageDisk<ItemStack> {
         return FACTORY_ID;
     }
 
-    /**
-     * Returns stacks sorted by slot index, with the slot tag stripped.
-     * Used by the backpack UI to restore slot positions.
-     */
     @Override
     public Collection<ItemStack> getStacks() {
         List<ItemStack> raw = new ArrayList<>();
@@ -63,16 +58,11 @@ public final class ResonanceDiskWrapper implements IStorageDisk<ItemStack> {
         return raw;
     }
 
-    /** Block RS auto-extraction — only the backpack UI and passive effects may extract. */
     @Override
     public ItemStack extract(ItemStack stack, int size, int flags, Action action) {
         return ItemStack.EMPTY;
     }
 
-    /**
-     * Extract from a known backpack slot. Reconstructs the RSISlot tag on the
-     * template so the NBT-exact delegate.extract can find the tagged item.
-     */
     public ItemStack manualExtract(int slot, ItemStack template, int size, int flags, Action action) {
         ItemStack tagged = template.copy();
         tagged.getOrCreateTag().putInt(RSI_SLOT_TAG, slot);
@@ -81,14 +71,115 @@ public final class ResonanceDiskWrapper implements IStorageDisk<ItemStack> {
         return result;
     }
 
-    /**
-     * Extract using an already-tagged stack (e.g. from delegate().getStacks()).
-     * The template's NBT must exactly match what is stored in the delegate.
-     */
     public ItemStack manualExtractExact(ItemStack exactTaggedStack, int size, int flags, Action action) {
         ItemStack result = delegate.extract(exactTaggedStack, size, flags, action);
         if (!result.isEmpty()) rsi$stripSlotTag(result);
         return result;
+    }
+
+    public enum SlotMutationResult {
+        SUCCESS,
+        REJECTED,
+        RECOVERY_FAILED
+    }
+
+    /** Atomically reconcile one logical backpack slot against the disk delegate. */
+    public SlotMutationResult reconcileSlot(int slot, ItemStack previous, ItemStack requested) {
+        ItemStack oldStack = sanitized(previous);
+        ItemStack newStack = sanitized(requested);
+        if (sameStack(oldStack, newStack)) return SlotMutationResult.SUCCESS;
+
+        if (!oldStack.isEmpty() && !newStack.isEmpty()
+                && ItemStack.isSameItemSameTags(oldStack, newStack)) {
+            int delta = newStack.getCount() - oldStack.getCount();
+            return delta > 0
+                    ? insertExact(slot, newStack, delta)
+                    : extractExact(slot, oldStack, -delta);
+        }
+
+        if (!oldStack.isEmpty()) {
+            ItemStack simulated = manualExtract(slot, oldStack, oldStack.getCount(), 0, Action.SIMULATE);
+            if (simulated.getCount() != oldStack.getCount()) return SlotMutationResult.REJECTED;
+        }
+        if (!newStack.isEmpty()
+                && getCapacity() - getStored() + oldStack.getCount() < newStack.getCount()) {
+            return SlotMutationResult.REJECTED;
+        }
+
+        ItemStack removed = ItemStack.EMPTY;
+        if (!oldStack.isEmpty()) {
+            removed = manualExtract(slot, oldStack, oldStack.getCount(), 0, Action.PERFORM);
+            if (removed.getCount() != oldStack.getCount()) {
+                return restore(slot, removed)
+                        ? SlotMutationResult.REJECTED : SlotMutationResult.RECOVERY_FAILED;
+            }
+        }
+
+        if (newStack.isEmpty()) return SlotMutationResult.SUCCESS;
+        ItemStack simulatedRemainder = manualInsert(slot, newStack, newStack.getCount(), Action.SIMULATE);
+        if (!simulatedRemainder.isEmpty()) {
+            return restore(slot, removed)
+                    ? SlotMutationResult.REJECTED : SlotMutationResult.RECOVERY_FAILED;
+        }
+
+        ItemStack remainder = manualInsert(slot, newStack, newStack.getCount(), Action.PERFORM);
+        if (remainder.isEmpty()) return SlotMutationResult.SUCCESS;
+
+        int inserted = newStack.getCount() - remainder.getCount();
+        boolean removedNew = inserted <= 0 || extractedExactly(slot, newStack, inserted);
+        boolean restoredOld = restore(slot, removed);
+        return removedNew && restoredOld
+                ? SlotMutationResult.REJECTED : SlotMutationResult.RECOVERY_FAILED;
+    }
+
+    public int simulateInsertCount(int slot, ItemStack stack, int size) {
+        if (stack.isEmpty() || size <= 0) return 0;
+        ItemStack remainder = manualInsert(slot, stack, size, Action.SIMULATE);
+        return Math.max(0, size - remainder.getCount());
+    }
+
+    private SlotMutationResult insertExact(int slot, ItemStack template, int count) {
+        if (count <= 0) return SlotMutationResult.SUCCESS;
+        ItemStack simulated = manualInsert(slot, template, count, Action.SIMULATE);
+        if (!simulated.isEmpty()) return SlotMutationResult.REJECTED;
+        ItemStack remainder = manualInsert(slot, template, count, Action.PERFORM);
+        if (remainder.isEmpty()) return SlotMutationResult.SUCCESS;
+        int inserted = count - remainder.getCount();
+        return inserted <= 0 || extractedExactly(slot, template, inserted)
+                ? SlotMutationResult.REJECTED : SlotMutationResult.RECOVERY_FAILED;
+    }
+
+    private SlotMutationResult extractExact(int slot, ItemStack template, int count) {
+        if (count <= 0) return SlotMutationResult.SUCCESS;
+        ItemStack simulated = manualExtract(slot, template, count, 0, Action.SIMULATE);
+        if (simulated.getCount() != count) return SlotMutationResult.REJECTED;
+        ItemStack extracted = manualExtract(slot, template, count, 0, Action.PERFORM);
+        if (extracted.getCount() == count) return SlotMutationResult.SUCCESS;
+        return restore(slot, extracted)
+                ? SlotMutationResult.REJECTED : SlotMutationResult.RECOVERY_FAILED;
+    }
+
+    private boolean extractedExactly(int slot, ItemStack template, int count) {
+        ItemStack extracted = manualExtract(slot, template, count, 0, Action.PERFORM);
+        return extracted.getCount() == count;
+    }
+
+    private boolean restore(int slot, ItemStack stack) {
+        if (stack.isEmpty()) return true;
+        ItemStack remainder = manualInsert(slot, stack, stack.getCount(), Action.PERFORM);
+        return remainder.isEmpty();
+    }
+
+    private static ItemStack sanitized(ItemStack stack) {
+        if (stack.isEmpty()) return ItemStack.EMPTY;
+        ItemStack copy = stack.copy();
+        rsi$stripSlotTag(copy);
+        return copy;
+    }
+
+    private static boolean sameStack(ItemStack first, ItemStack second) {
+        if (first.isEmpty() || second.isEmpty()) return first.isEmpty() && second.isEmpty();
+        return first.getCount() == second.getCount() && ItemStack.isSameItemSameTags(first, second);
     }
 
     @Override

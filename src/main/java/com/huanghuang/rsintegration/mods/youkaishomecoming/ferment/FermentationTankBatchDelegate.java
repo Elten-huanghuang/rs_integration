@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.reflection.probes.YHKReflection;
 import com.huanghuang.rsintegration.util.Reflect;
 import com.refinedmods.refinedstorage.api.network.INetwork;
@@ -127,6 +128,11 @@ public final class FermentationTankBatchDelegate extends AbstractBatchDelegate {
             if (!ing.isEmpty()) specs.add(new IngredientSpec(ing, 1));
         }
         return specs.isEmpty() ? null : specs;
+    }
+
+    @Override
+    public BatchConcurrencyCapabilities concurrencyCapabilities() {
+        return BatchConcurrencyCapabilities.machineSlot();
     }
 
     @Override

@@ -64,7 +64,7 @@ public final class SelectedPath {
     /** User picked an alternative. Marks dirty when it differs from the prior choice. */
     public void selectBranch(IngredientKey nodeKey, int alternativeIndex, ResourceLocation recipeId) {
         Selection prev = branchSelections.put(nodeKey, new Selection(alternativeIndex, recipeId));
-        if (prev == null || prev.index() != alternativeIndex) {
+        if (prev == null || prev.index() != alternativeIndex || !prev.recipeId().equals(recipeId)) {
             dirty = true;
         }
         recalculatePending();

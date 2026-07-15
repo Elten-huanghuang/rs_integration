@@ -6,7 +6,14 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftOutputInterceptor;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.crafting.OperationExecutionKernel;
+import com.huanghuang.rsintegration.crafting.OperationResourceCoordinator;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
+import com.huanghuang.rsintegration.crafting.graph.GraphConcurrencyPolicy;
+import com.huanghuang.rsintegration.crafting.graph.MachineLeaseRegistry;
+import com.huanghuang.rsintegration.crafting.graph.NodeId;
+import com.huanghuang.rsintegration.crafting.graph.OperationBudget;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry.BoundMachine;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
@@ -34,9 +41,13 @@ import java.util.List;
 public final class ParallelCraftGroup implements IBatchDelegate {
 
     private final List<WorkerSlot> workers = new ArrayList<>();
+    private final java.util.Map<Integer, CraftOutputInterceptor.CaptureHandle> legacyCaptureHandles =
+            new java.util.HashMap<>();
     private final List<ItemStack> settledResults = new ArrayList<>();
     private final ModType modType;
     private final ResourceLocation recipeId;
+    private final BatchConcurrencyCapabilities concurrencyCapabilities;
+    private final boolean inferMode;
     private final OperationQueue operations;
     private final boolean[] safelyRecoverableVirtual;
     private BlockPos representativePos = BlockPos.ZERO;
@@ -45,22 +56,47 @@ public final class ParallelCraftGroup implements IBatchDelegate {
     private ExtractionLedger sharedLedger;
     private List<List<ItemStack>> operationMaterials = List.of();
     private List<List<ItemStack>> virtualDebits = List.of();
+    private List<List<ItemStack>> producerDebits = List.of();
     private List<ExtractionLedger.ReservationToken> reservationTokens = List.of();
     private List<IngredientSpec> baseSpecs;
     private ItemStack targetOutput;
+    private OperationBudget craftOperationBudget;
+    private OperationBudget globalOperationBudget;
+    private OperationExecutionKernel operationKernel;
+    private java.util.UUID craftId;
+    private NodeId nodeId;
     private boolean sharedMaterialMode;
     private boolean started;
     private boolean draining;
     private boolean queuedMaterialsRecovered;
     private String failureDetail = "";
 
+    private enum ChildPreparationState { READY, RETRY, FATAL }
+
+    private record ChildPreparation(ChildPreparationState state,
+                                    IBatchDelegate delegate,
+                                    String detail) {
+        static ChildPreparation ready(IBatchDelegate delegate) {
+            return new ChildPreparation(ChildPreparationState.READY, delegate, "");
+        }
+
+        static ChildPreparation retry(String detail) {
+            return new ChildPreparation(ChildPreparationState.RETRY, null, detail);
+        }
+
+        static ChildPreparation fatal(String detail) {
+            return new ChildPreparation(ChildPreparationState.FATAL, null, detail);
+        }
+    }
+
     private static final class WorkerSlot {
         final int id;
         final BoundMachine machine;
         IBatchDelegate delegate;
-        CraftOutputInterceptor.CaptureHandle captureHandle;
+        OperationExecutionKernel.Session operationSession;
         int operationId = -1;
         boolean pristineDelegate = true;
+        boolean hasStartedOperation;
         boolean needsFailureCleanup;
 
         WorkerSlot(int id, BoundMachine machine, IBatchDelegate delegate) {
@@ -77,17 +113,32 @@ public final class ParallelCraftGroup implements IBatchDelegate {
     public ParallelCraftGroup(List<BoundMachine> machines, ModType modType,
                               ResourceLocation recipeId, ServerPlayer player,
                               int totalOperations) {
+        this(machines, modType, recipeId, player, totalOperations, false, null);
+    }
+
+    public ParallelCraftGroup(List<BoundMachine> machines, ModType modType,
+                              ResourceLocation recipeId, ServerPlayer player,
+                              int totalOperations, boolean inferMode,
+                              @Nullable BatchConcurrencyCapabilities concurrencyCapabilities) {
         this.modType = modType;
         this.recipeId = recipeId;
+        this.inferMode = inferMode;
+        this.concurrencyCapabilities = concurrencyCapabilities;
         this.player = player;
         this.operations = new OperationQueue(totalOperations);
         this.safelyRecoverableVirtual = new boolean[totalOperations];
         java.util.Arrays.fill(this.safelyRecoverableVirtual, true);
         int workerId = 0;
         for (BoundMachine machine : machines) {
-            IBatchDelegate delegate = createAndValidateDelegate(machine, player);
-            if (delegate == null) continue;
-            workers.add(new WorkerSlot(workerId++, machine, delegate));
+            ChildPreparation preparation = prepareChildDelegate(machine, player);
+            if (preparation.state() != ChildPreparationState.READY || preparation.delegate() == null) {
+                if (preparation.state() == ChildPreparationState.FATAL) {
+                    RSIntegrationMod.LOGGER.warn("[RSI-ParallelGroup] Rejecting worker {}: {}",
+                            machine.pos(), preparation.detail());
+                }
+                continue;
+            }
+            workers.add(new WorkerSlot(workerId++, machine, preparation.delegate()));
             if (representativePos.equals(BlockPos.ZERO)) representativePos = machine.pos();
         }
         if (!workers.isEmpty()) baseSpecs = workers.get(0).delegate.getRequiredMaterials();
@@ -125,6 +176,26 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         this.virtualDebits = List.copyOf(copies);
     }
 
+    public void setProducerDebits(List<List<ItemStack>> debits) {
+        List<List<ItemStack>> copies = new ArrayList<>(debits.size());
+        for (List<ItemStack> debit : debits) copies.add(List.copyOf(copyStacks(debit)));
+        this.producerDebits = List.copyOf(copies);
+    }
+
+    public void setOperationBudgets(OperationBudget craftBudget, OperationBudget globalBudget) {
+        this.craftOperationBudget = craftBudget;
+        this.globalOperationBudget = globalBudget;
+    }
+
+    public void setOperationKernel(OperationExecutionKernel kernel,
+                                   java.util.UUID craftId, NodeId nodeId,
+                                   OperationBudget craftBudget) {
+        this.operationKernel = kernel;
+        this.craftId = craftId;
+        this.nodeId = nodeId;
+        this.craftOperationBudget = craftBudget;
+    }
+
     @Override
     public boolean tryStartWithMaterials(ServerPlayer player, List<ItemStack> materials,
                                          ExtractionLedger sharedLedger) {
@@ -132,7 +203,9 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         int perOperation = baseSpecs.size();
         if (materials.size() != perOperation * operations.totalOperations()
                 || reservationTokens.size() != operations.totalOperations()
-                || virtualDebits.size() != operations.totalOperations()) {
+                || virtualDebits.size() != operations.totalOperations()
+                || (!producerDebits.isEmpty()
+                && producerDebits.size() != operations.totalOperations())) {
             return false;
         }
         List<List<ItemStack>> slices = new ArrayList<>(operations.totalOperations());
@@ -165,29 +238,45 @@ public final class ParallelCraftGroup implements IBatchDelegate {
     }
 
     private boolean startInitialWorkers() {
-        int startedCount = 0;
+        if (workers.isEmpty()) {
+            beginDraining("no validated workers are available");
+            return false;
+        }
         for (WorkerSlot worker : workers) {
-            if (startNext(worker)) startedCount++;
+            startNext(worker);
             if (operations.queuedOperations() == 0) break;
         }
-        started = startedCount > 0;
-        if (!started) beginDraining("no workers accepted an operation");
-        return started;
+        // Resource contention is transient. Accept the group and retry queued
+        // operations from observeCraft() instead of failing after admission.
+        started = true;
+        return true;
     }
 
     private boolean startNext(WorkerSlot worker) {
-        int operationId = operations.claim(worker.id);
+        int operationId = operations.nextQueuedOperation();
         if (operationId < 0) return false;
 
-        IBatchDelegate delegate = worker.pristineDelegate
-                ? worker.delegate : createAndValidateDelegate(worker.machine, player);
-        worker.pristineDelegate = false;
-        if (delegate == null) {
-            operations.abandon(worker.id);
-            worker.operationId = -1;
-            beginDraining("worker validation failed at " + worker.machine.pos());
+        ChildPreparation preparation = worker.pristineDelegate
+                ? ChildPreparation.ready(worker.delegate)
+                : prepareChildDelegate(worker.machine, player);
+        if (preparation.state() == ChildPreparationState.RETRY) return false;
+        if (preparation.state() == ChildPreparationState.FATAL || preparation.delegate() == null) {
+            worker.pristineDelegate = false;
+            beginDraining(preparation.detail().isEmpty()
+                    ? "worker contract failed at " + worker.machine.pos()
+                    : preparation.detail());
             return false;
         }
+        IBatchDelegate delegate = preparation.delegate();
+        // Acquire the operation scope before consuming the queue id. A busy
+        // machine/capture/budget leaves the operation queued for a later tick.
+        if (!acquireOperationResources(worker, delegate, operationId)) return false;
+        int claimedOperation = operations.claim(worker.id);
+        if (claimedOperation != operationId) {
+            closeOperationResources(worker);
+            throw new IllegalStateException("operation queue changed during resource acquisition");
+        }
+        worker.pristineDelegate = false;
         worker.delegate = delegate;
         worker.operationId = operationId;
         // Once start is attempted, the delegate may already have moved this
@@ -195,22 +284,31 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         // those inputs back unless the operation was never dispatched.
         safelyRecoverableVirtual[operationId] = false;
         worker.needsFailureCleanup = false;
-        armCapture(worker);
         try {
+            if (worker.operationSession != null && !worker.operationSession.commit(() -> true)) {
+                handleFailedStart(worker, "worker commit boundary failed at " + worker.machine.pos());
+                return false;
+            }
             boolean accepted;
             if (sharedMaterialMode) {
                 if (delegate instanceof AbstractBatchDelegate abstractDelegate) {
                     abstractDelegate.useSharedLedger(sharedLedger);
                 }
-                accepted = delegate.tryStartWithMaterials(player,
+                accepted = worker.operationSession != null
+                        ? worker.operationSession.tryStart(() -> delegate.tryStartWithMaterials(player,
+                        copyStacksKeepingEmpty(operationMaterials.get(operationId)), sharedLedger))
+                        : delegate.tryStartWithMaterials(player,
                         copyStacksKeepingEmpty(operationMaterials.get(operationId)), sharedLedger);
             } else {
-                accepted = delegate.tryStartSingleCraft(player);
+                accepted = worker.operationSession != null
+                        ? worker.operationSession.tryStart(() -> delegate.tryStartSingleCraft(player))
+                        : delegate.tryStartSingleCraft(player);
             }
             if (!accepted) {
                 handleFailedStart(worker, "worker start failed at " + worker.machine.pos());
                 return false;
             }
+            worker.hasStartedOperation = true;
             return true;
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-ParallelGroup] Worker start threw at {}",
@@ -241,6 +339,7 @@ public final class ParallelCraftGroup implements IBatchDelegate {
                 // reservation stays unsettled and onBatchFailed recovers its machine.
                 operations.abandon(worker.id);
                 worker.operationId = -1;
+                closeOperationResources(worker);
                 worker.needsFailureCleanup = true;
                 beginDraining("worker observation failed at " + worker.machine.pos());
                 continue;
@@ -248,6 +347,7 @@ public final class ParallelCraftGroup implements IBatchDelegate {
             if (observation.phase() == CraftPhase.FAILED) {
                 operations.abandon(worker.id);
                 worker.operationId = -1;
+                closeOperationResources(worker);
                 worker.needsFailureCleanup = true;
                 beginDraining(worker.machine.pos() + ": " + observation.detail());
                 continue;
@@ -257,11 +357,21 @@ public final class ParallelCraftGroup implements IBatchDelegate {
             }
         }
 
+        if (!draining && operations.queuedOperations() > 0) {
+            dispatchQueuedOperations();
+        }
         if (draining && operations.isDrained()) {
             return new CraftObservation(CraftPhase.FAILED, failureDetail);
         }
         if (operations.isComplete()) return new CraftObservation(CraftPhase.DONE);
         return new CraftObservation(CraftPhase.WORKING);
+    }
+
+    private void dispatchQueuedOperations() {
+        for (WorkerSlot worker : workers) {
+            if (operations.queuedOperations() == 0) break;
+            if (!worker.running()) startNext(worker);
+        }
     }
 
     private boolean settleCompletedOperation(WorkerSlot worker) {
@@ -272,6 +382,7 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         } catch (Exception e) {
             operations.abandon(worker.id);
             worker.operationId = -1;
+            closeOperationResources(worker);
             worker.needsFailureCleanup = true;
             beginDraining("worker result collection failed at " + worker.machine.pos());
             return false;
@@ -286,6 +397,7 @@ public final class ParallelCraftGroup implements IBatchDelegate {
             settleReservation(operationId);
             operations.abandon(worker.id);
             worker.operationId = -1;
+            closeOperationResources(worker);
             worker.needsFailureCleanup = true;
             beginDraining("worker output was externally extracted at " + worker.machine.pos());
             return false;
@@ -295,6 +407,7 @@ public final class ParallelCraftGroup implements IBatchDelegate {
             settleReservation(operationId);
             operations.abandon(worker.id);
             worker.operationId = -1;
+            closeOperationResources(worker);
             worker.needsFailureCleanup = true;
             beginDraining("expected world output was not captured at " + worker.machine.pos());
             return false;
@@ -310,12 +423,14 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         } catch (Exception e) {
             operations.abandon(worker.id);
             worker.operationId = -1;
+            closeOperationResources(worker);
             worker.needsFailureCleanup = true;
             beginDraining("worker finish cleanup failed at " + worker.machine.pos());
             return false;
         }
         operations.complete(worker.id);
         worker.operationId = -1;
+        closeOperationResources(worker);
 
         if (!draining && operations.queuedOperations() > 0) startNext(worker);
         return !draining;
@@ -354,8 +469,34 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         return List.copyOf(recovery);
     }
 
+    public List<ItemStack> drainQueuedProducerMaterialsForRecovery() {
+        if (!draining || !sharedMaterialMode || producerDebits.isEmpty()) return List.of();
+        List<ItemStack> recovery = new ArrayList<>();
+        for (int operation = 0; operation < producerDebits.size(); operation++) {
+            if (safelyRecoverableVirtual[operation]) {
+                recovery.addAll(copyStacks(producerDebits.get(operation)));
+            }
+        }
+        producerDebits = List.of();
+        return List.copyOf(recovery);
+    }
+
+    public List<ExtractionLedger.ReservationToken> queuedReservationTokensForRecovery() {
+        if (!draining || !sharedMaterialMode) return List.of();
+        List<ExtractionLedger.ReservationToken> recovery = new ArrayList<>();
+        for (int operation = 0; operation < reservationTokens.size(); operation++) {
+            if (safelyRecoverableVirtual[operation]) recovery.add(reservationTokens.get(operation));
+        }
+        return List.copyOf(recovery);
+    }
+
     public boolean isDraining() {
         return draining;
+    }
+
+    /** Stop queued operations while allowing already-running workers to drain. */
+    public void stopDispatch() {
+        beginDraining("dispatch stopped by graph scheduler");
     }
 
     public int getCompletedOperations() {
@@ -364,6 +505,10 @@ public final class ParallelCraftGroup implements IBatchDelegate {
 
     public int getTotalOperations() {
         return operations.totalOperations();
+    }
+
+    public int getRunningOperations() {
+        return operations.runningOperations();
     }
 
     @Override
@@ -396,6 +541,7 @@ public final class ParallelCraftGroup implements IBatchDelegate {
             // Unconfirmed capture belongs to an unsettled operation. Cleanup may
             // return its inputs, so exporting that capture here could duplicate it.
             drainCapture(worker);
+            closeOperationResources(worker);
             if (worker.delegate != null && (worker.running() || worker.needsFailureCleanup)) {
                 try {
                     worker.delegate.onBatchFailed(player, reason);
@@ -413,7 +559,10 @@ public final class ParallelCraftGroup implements IBatchDelegate {
     @Override
     public void onBatchFinished(@NotNull ServerPlayer player) {
         started = false;
-        for (WorkerSlot worker : workers) drainCapture(worker);
+        for (WorkerSlot worker : workers) {
+            drainCapture(worker);
+            closeOperationResources(worker);
+        }
     }
 
     @Override
@@ -435,17 +584,26 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         for (WorkerSlot worker : workers) configureDelegate(worker.delegate, worker.machine);
     }
 
-    private IBatchDelegate createAndValidateDelegate(BoundMachine machine, ServerPlayer player) {
+    private ChildPreparation prepareChildDelegate(BoundMachine machine, ServerPlayer player) {
         IBatchDelegate delegate = createChildDelegate(modType);
-        if (delegate == null) return null;
+        if (delegate == null) {
+            return ChildPreparation.fatal("delegate factory returned null for " + modType.id());
+        }
         try {
-            if (!delegate.validateAndInit(player, recipeId, machine.dim(), machine.pos())) return null;
+            IBatchDelegate.PreparationResult result = delegate.prepare(
+                    player, recipeId, machine.dim(), machine.pos());
+            if (result.state() == IBatchDelegate.PreparationState.RETRY) {
+                return ChildPreparation.retry(result.detail());
+            }
+            if (result.state() == IBatchDelegate.PreparationState.FATAL) {
+                return ChildPreparation.fatal(result.detail());
+            }
             configureDelegate(delegate, machine);
-            return delegate;
+            return ChildPreparation.ready(delegate);
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-ParallelGroup] Worker validation failed at {}",
+            RSIntegrationMod.LOGGER.debug("[RSI-ParallelGroup] Worker preparation failed at {}",
                     machine.pos(), e);
-            return null;
+            return ChildPreparation.retry("worker preparation temporarily failed at " + machine.pos());
         }
     }
 
@@ -456,19 +614,75 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         if (targetOutput != null) abstractDelegate.setTargetOutput(targetOutput);
     }
 
-    private void armCapture(WorkerSlot worker) {
+    private boolean acquireOperationResources(WorkerSlot worker, IBatchDelegate delegate,
+                                              int operationId) {
+        if (operationKernel == null || craftId == null || nodeId == null
+                || craftOperationBudget == null) {
+            if (worker.hasStartedOperation && craftOperationBudget != null
+                    && globalOperationBudget != null) {
+                return OperationBudget.tryRecordStart(craftOperationBudget, globalOperationBudget);
+            }
+            armCaptureLegacy(worker);
+            return true;
+        }
+        GraphConcurrencyPolicy.Decision concurrency = GraphConcurrencyPolicy.decide(
+                modType.id(), delegate, concurrencyCapabilities);
+        if (concurrency.exclusive()) {
+            RSIntegrationMod.LOGGER.debug(
+                    "[RSI-ParallelGroup] Rejecting capability-exclusive child delegate={} reason={}",
+                    delegate.getClass().getSimpleName(), concurrency.reason());
+            return false;
+        }
+        ItemStack expected = delegate.getExpectedOutput();
+        var region = delegate.getOutputCaptureRegion();
+        boolean ownsWorldCapture = concurrency.capabilities().outputOwnership()
+                == BatchConcurrencyCapabilities.OutputOwnership.OWNED_WORLD_CAPTURE;
+        if (expected != null && !expected.isEmpty() && !ownsWorldCapture) return false;
+        OperationResourceCoordinator.CaptureRequest capture = ownsWorldCapture
+                && expected != null && !expected.isEmpty() && region != null
+                ? new OperationResourceCoordinator.CaptureRequest(worker.machine.dim(), region, expected)
+                : null;
+        List<MachineLeaseRegistry.MachineKey> machineScope = new ArrayList<>();
+        machineScope.add(new MachineLeaseRegistry.MachineKey(
+                worker.machine.dim(), worker.machine.pos(), modType.id()));
+        for (BlockPos offset : concurrency.capabilities().supportOffsets()) {
+            machineScope.add(new MachineLeaseRegistry.MachineKey(
+                    worker.machine.dim(), worker.machine.pos().offset(offset), modType.id() + ":support"));
+        }
+        try {
+            worker.operationSession = operationKernel.tryPrepare(
+                    craftId, nodeId, operationId, craftOperationBudget, machineScope, capture);
+            return worker.operationSession != null;
+        } catch (RuntimeException exception) {
+            worker.operationSession = null;
+            return false;
+        }
+    }
+
+    private void armCaptureLegacy(WorkerSlot worker) {
         ItemStack expected = worker.delegate.getExpectedOutput();
         if (expected == null || expected.isEmpty()) return;
         var region = worker.delegate.getOutputCaptureRegion();
         if (region == null) return;
         ResourceKey<Level> dimension = ResourceKey.create(Registries.DIMENSION, worker.machine.dim());
-        worker.captureHandle = CraftOutputInterceptor.arm(dimension, region, expected);
+        CraftOutputInterceptor.CaptureHandle handle = CraftOutputInterceptor.arm(dimension, region, expected);
+        if (handle == null) return;
+        worker.operationSession = null;
+        legacyCaptureHandles.put(worker.id, handle);
     }
 
-    private static List<ItemStack> drainCapture(WorkerSlot worker) {
-        CraftOutputInterceptor.CaptureHandle handle = worker.captureHandle;
-        worker.captureHandle = null;
+    private List<ItemStack> drainCapture(WorkerSlot worker) {
+        if (worker.operationSession != null) return worker.operationSession.drainCapture();
+        CraftOutputInterceptor.CaptureHandle handle = legacyCaptureHandles.remove(worker.id);
         return handle == null ? List.of() : handle.drainAndClose();
+    }
+
+    private void closeOperationResources(WorkerSlot worker) {
+        OperationExecutionKernel.Session session = worker.operationSession;
+        worker.operationSession = null;
+        if (session != null) session.close();
+        CraftOutputInterceptor.CaptureHandle handle = legacyCaptureHandles.remove(worker.id);
+        if (handle != null) handle.drainAndClose();
     }
 
     private void settleReservation(int operationId) {
@@ -525,8 +739,9 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         return copies;
     }
 
-    private static IBatchDelegate createChildDelegate(ModType type) {
+    private IBatchDelegate createChildDelegate(ModType type) {
         if (type == ModType.GENERIC) return null;
+        if (inferMode) return type.createInferDelegate();
         Class<? extends IBatchDelegate> versioned = ModVersionDelegateRegistry.resolve(type);
         if (versioned != null) {
             try {

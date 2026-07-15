@@ -24,7 +24,19 @@ public final class PlanTreeNode {
     public final int depth;
     @Nullable
     public final PlanStep step;    // null = leaf (raw material)
+    /** Stable logical DAG identity. Repeated tree references share this id. */
+    @Nullable
+    public final Integer graphNodeId;
     public final List<PlanTreeNode> children = new ArrayList<>();
+
+    /** Quantity carried by the producer edge that created this view reference. */
+    public int edgeQuantity;
+    /** True when this raw-material edge is sourced from the initial pool. */
+    public boolean initialSource;
+    /** Number of unresolved units attached to this input port. */
+    public int unresolved;
+    /** Output kind for producer nodes (PRIMARY/SECONDARY/REMAINDER/SYNTHETIC ordinal). */
+    public int outputKindOrdinal;
 
     // ---- interaction state (preserved across tree rebuilds) ----
     public boolean expanded = true;
@@ -45,11 +57,17 @@ public final class PlanTreeNode {
 
     public PlanTreeNode(IngredientKey key, ItemStack displayStack, int amount,
                         int depth, @Nullable PlanStep step) {
+        this(key, displayStack, amount, depth, step, null);
+    }
+
+    public PlanTreeNode(IngredientKey key, ItemStack displayStack, int amount,
+                        int depth, @Nullable PlanStep step, @Nullable Integer graphNodeId) {
         this.key = key;
         this.displayStack = displayStack;
         this.amount = amount;
         this.depth = depth;
         this.step = step;
+        this.graphNodeId = graphNodeId;
     }
 
     public boolean isLeaf() {

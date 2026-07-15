@@ -389,6 +389,20 @@ public final class SkilletBatchDelegate extends com.huanghuang.rsintegration.cra
     @Override
     public BlockPos getMachinePos() { return myPos; }
 
+    @Override
+    public ItemStack getExpectedOutput() {
+        if (recipe == null || myLevel == null || myPos == null) return null;
+        BlockEntity be = myLevel.getBlockEntity(myPos);
+        if (be == null || !isCampfireBE(be)) return null;
+        ItemStack expected = recipe.getResultItem(myLevel.registryAccess());
+        return expected.isEmpty() ? null : expected;
+    }
+
+    @Override
+    public net.minecraft.world.phys.AABB getOutputCaptureRegion() {
+        return myPos == null ? null : new net.minecraft.world.phys.AABB(myPos).inflate(1.5);
+    }
+
     // ── plan helpers ──
 
     public static void addFuelIfNeeded(@Nullable String recipeModTypeId,

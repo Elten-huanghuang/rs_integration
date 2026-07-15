@@ -21,3 +21,6 @@ logs/
 
 # Dependencies (keep only gradle wrapper)
 libs/
+
+# Claude Code local tooling state
+.claude/

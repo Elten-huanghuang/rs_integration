@@ -24,6 +24,7 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.BooleanValue ENABLE_MULTIBLOCK_AUTO_CRAFTING;
     public static ForgeConfigSpec.ConfigValue<List<? extends String>> PREFERRED_RECIPES;
     public static ForgeConfigSpec.IntValue MULTIBLOCK_CRAFT_TIMEOUT_SECONDS;
+    public static ForgeConfigSpec.IntValue CRAFTING_CHAIN_GLOBAL_TIMEOUT_SECONDS;
     public static ForgeConfigSpec.ConfigValue<List<? extends String>> MULTIBLOCK_RECIPE_BLACKLIST;
     public static ForgeConfigSpec.ConfigValue<List<? extends String>> MULTIBLOCK_RECIPE_ALLOWLIST;
 
@@ -50,6 +51,7 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.BooleanValue ENABLE_FARMERSRESPITE;
     public static ForgeConfigSpec.BooleanValue ENABLE_VANILLA_MACHINES;
     public static ForgeConfigSpec.BooleanValue ENABLE_SOPHISTICATED_BACKPACKS;
+    public static ForgeConfigSpec.BooleanValue ENABLE_FTB_QUEST_EXTERNAL_ITEM_PROGRESS;
     public static ForgeConfigSpec.BooleanValue ENABLE_JEI;
     public static ForgeConfigSpec.BooleanValue ENABLE_JEI_MARQUEE_SELECTION;
     public static ForgeConfigSpec.BooleanValue ENABLE_JEI_BOOKMARK_MARQUEE_SELECTION;
@@ -96,6 +98,13 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.IntValue CRAFTING_MAX_STEPS;
     public static ForgeConfigSpec.IntValue CRAFTING_RESOLVE_TIMEOUT_MS;
     public static ForgeConfigSpec.IntValue CRAFTING_MAX_ENSURE_CALLS;
+    public static ForgeConfigSpec.IntValue CRAFTING_MAX_CONCURRENT_GRAPH_NODES;
+    public static ForgeConfigSpec.IntValue CRAFTING_GRAPH_DISPATCH_PER_TICK;
+    public static ForgeConfigSpec.IntValue CRAFTING_GRAPH_DISPATCH_PER_CRAFT;
+    public static ForgeConfigSpec.IntValue CRAFTING_MAX_CONCURRENT_OPERATIONS;
+    public static ForgeConfigSpec.IntValue CRAFTING_OPERATION_DISPATCH_PER_CRAFT;
+    public static ForgeConfigSpec.ConfigValue<List<? extends String>> CRAFTING_PARALLEL_DISABLED_MODS;
+    public static ForgeConfigSpec.ConfigValue<List<? extends String>> CRAFTING_PARALLEL_DELEGATE_POLICIES;
     public static ForgeConfigSpec.IntValue RECIPE_TREE_MAX_DEPTH;
     public static ForgeConfigSpec.IntValue RECIPE_TREE_MAX_NODES;
     public static ForgeConfigSpec.IntValue RECIPE_TREE_BATCH_DEBOUNCE_MS;
@@ -196,6 +205,10 @@ public final class RSIntegrationConfig {
         ENABLE_SOPHISTICATED_BACKPACKS = c
                 .comment("Enable RS integration with Sophisticated Backpacks (RS-based upgrade items).")
                 .define("enableSophisticatedBackpacks", true);
+        ENABLE_FTB_QUEST_EXTERNAL_ITEM_PROGRESS = c
+                .comment("Count items actually inserted by Sophisticated Backpack/RS upgrades toward",
+                        "eligible non-consuming FTB Quests item tasks. Simulated and voided items are excluded.")
+                .define("enableFtbQuestExternalItemProgress", true);
         ENABLE_JEI = c
                 .comment("Show '+' buttons in JEI recipe views for remote crafting.",
                         "Client-side; the server value is synced to the client.")
@@ -404,6 +417,14 @@ public final class RSIntegrationConfig {
                         "If exceeded, the crafting chain is aborted and items are refunded.",
                         "Range: 10-600.")
                 .defineInRange("multiblockCraftTimeoutSeconds", 300, 10, 600);
+        CRAFTING_CHAIN_GLOBAL_TIMEOUT_SECONDS = s
+                .comment("Maximum total time (in seconds) for an entire graph crafting chain.",
+                        "This is a whole-chain ceiling on top of the per-node timeout: even if",
+                        "individual nodes keep making progress, the chain is aborted once this",
+                        "elapses, so a wedged or livelocked chain cannot run forever.",
+                        "Materials already dispatched into a machine are NOT refunded (never duped);",
+                        "only undispatched/settled materials are returned. Range: 60-3600.")
+                .defineInRange("craftingChainGlobalTimeoutSeconds", 900, 60, 3600);
         MULTIBLOCK_RECIPE_BLACKLIST = s
                 .comment("Multi-block recipe IDs that should NEVER be used for auto-crafting.",
                         "Format: \"modid:recipe_id\".")
@@ -442,6 +463,43 @@ public final class RSIntegrationConfig {
                         "Companion cap to craftingResolveTimeoutMs guarding against runaway recursion.",
                         "Increase alongside the timeout for deep recipe trees. Range: 1000-100000.")
                 .defineInRange("craftingMaxEnsureCalls", 10000, 1000, 100000);
+        CRAFTING_MAX_CONCURRENT_GRAPH_NODES = s
+                .comment("Maximum number of independent DAG recipe nodes that may run in parallel.",
+                        "Set to 1 for serial execution (safest); increase for multi-machine speedup.",
+                        "Only nodes with no material/machine/capture conflicts are dispatched.",
+                        "Range: 1-16.")
+                .defineInRange("craftingMaxConcurrentGraphNodes", 2, 1, 16);
+        CRAFTING_GRAPH_DISPATCH_PER_TICK = s
+                .comment("Maximum number of new graph nodes one craft may dispatch in a single tick.",
+                        "Admission retries do not consume this budget. Range: 1-16.")
+                .defineInRange("craftingGraphDispatchPerTick", 2, 1, 16);
+        CRAFTING_GRAPH_DISPATCH_PER_CRAFT = s
+                .comment("Maximum total graph-node dispatches in one craft run.",
+                        "Prevents retry/callback bugs from dispatching an unbounded number of operations.",
+                        "Set above craftingMaxSteps for normal large plans. Range: 16-32768.")
+                .defineInRange("craftingGraphDispatchPerCraft", 8192, 16, 32768);
+        CRAFTING_MAX_CONCURRENT_OPERATIONS = s
+                .comment("Maximum machine-backed operations one craft may own concurrently.",
+                        "A normal graph node costs one; a parallel group costs one per running worker.",
+                        "Range: 1-64.")
+                .defineInRange("craftingMaxConcurrentOperations", 4, 1, 64);
+        CRAFTING_OPERATION_DISPATCH_PER_CRAFT = s
+                .comment("Maximum machine-operation starts during one craft run.",
+                        "Retries before delegate start do not consume this budget. Range: 16-65536.")
+                .defineInRange("craftingOperationDispatchPerCraft", 16384, 16, 65536);
+        CRAFTING_PARALLEL_DISABLED_MODS = s
+                .comment("Mod/delegate type IDs that must always run as exclusive graph nodes.",
+                        "This denylist overrides a delegate's concurrency capability declaration.",
+                        "Example: [\"malum\", \"goety\"].")
+                .defineList("craftingParallelDisabledMods", List.of(),
+                        obj -> obj instanceof String str && ResourceLocation.tryParse(str + ":dummy") != null);
+        CRAFTING_PARALLEL_DELEGATE_POLICIES = s
+                .comment("Optional per-mod or per-delegate graph concurrency policy overrides.",
+                        "Format: id=AUTO|OFF|FORCE_WITH_GUARDS. A full or simple delegate class name",
+                        "is more specific than a mod type ID. FORCE_WITH_GUARDS never bypasses safety guards.",
+                        "Example: [\"avaritia=AUTO\", \"CrabTrapBatchDelegate=OFF\"].")
+                .defineList("craftingParallelDelegatePolicies", List.of(),
+                        obj -> obj instanceof String str && str.contains("="));
         RECIPE_TREE_MAX_DEPTH = s
                 .comment("Maximum depth for the client-side recipe tree view.",
                         "Limits how many nested layers the tree renders.",

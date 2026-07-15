@@ -1,0 +1,208 @@
+package com.huanghuang.rsintegration.crafting.graph;
+
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.function.Predicate;
+
+/** Deterministic graph lifecycle state used by the server-thread executor. */
+public final class DagScheduler {
+
+    public enum NodeState {
+        BLOCKED,
+        READY,
+        RUNNING,
+        SUCCEEDED,
+        FAILED,
+        CANCELLED
+    }
+
+    private final CraftPlanGraph graph;
+    private final Map<NodeId, NodeState> states = new HashMap<>();
+    private final Map<NodeId, Set<NodeId>> dependencies = new HashMap<>();
+    private final Map<NodeId, Set<NodeId>> dependents = new HashMap<>();
+    private final LinkedHashSet<NodeId> ready = new LinkedHashSet<>();
+    private boolean stopping;
+    private int epoch;
+
+    public int epoch() { return epoch; }
+    private NodeId failedNode;
+
+    public long countSucceeded() {
+        return states.values().stream().filter(s -> s == NodeState.SUCCEEDED).count();
+    }
+
+    public DagScheduler(CraftPlanGraph graph) {
+        this.graph = Objects.requireNonNull(graph, "graph");
+        CraftPlanValidator.validate(graph);
+        for (NodeId nodeId : graph.topologicalOrder()) {
+            Set<NodeId> nodeDependencies = new HashSet<>(graph.dependenciesOf(nodeId));
+            dependencies.put(nodeId, nodeDependencies);
+            states.put(nodeId, nodeDependencies.isEmpty() ? NodeState.READY : NodeState.BLOCKED);
+            if (nodeDependencies.isEmpty()) ready.add(nodeId);
+            for (NodeId dependency : nodeDependencies) {
+                dependents.computeIfAbsent(dependency, ignored -> new LinkedHashSet<>()).add(nodeId);
+            }
+        }
+    }
+
+    public List<NodeId> claimReady(int limit) {
+        if (stopping || limit <= 0) return List.of();
+        List<NodeId> claimed = new ArrayList<>(Math.min(limit, ready.size()));
+        var iterator = ready.iterator();
+        while (iterator.hasNext() && claimed.size() < limit) {
+            NodeId nodeId = iterator.next();
+            iterator.remove();
+            requireState(nodeId, NodeState.READY);
+            states.put(nodeId, NodeState.RUNNING);
+            claimed.add(nodeId);
+        }
+        return List.copyOf(claimed);
+    }
+
+    /**
+     * Return up to {@code limit} ready nodes in claim order WITHOUT transitioning
+     * them. Lets a caller inspect candidates (e.g. for an exclusivity decision)
+     * before committing to {@link #claim(NodeId)}.
+     */
+    public List<NodeId> peekReady(int limit) {
+        if (stopping || limit <= 0) return List.of();
+        List<NodeId> peeked = new ArrayList<>(Math.min(limit, ready.size()));
+        var iterator = ready.iterator();
+        while (iterator.hasNext() && peeked.size() < limit) {
+            peeked.add(iterator.next());
+        }
+        return List.copyOf(peeked);
+    }
+
+    /** Claim one specific ready node, transitioning it READY → RUNNING. */
+    public void claim(NodeId nodeId) {
+        if (stopping) throw new IllegalStateException("cannot claim while stopping: " + nodeId);
+        requireState(nodeId, NodeState.READY);
+        ready.remove(nodeId);
+        states.put(nodeId, NodeState.RUNNING);
+    }
+
+    public void releaseClaim(NodeId nodeId) {
+        requireState(nodeId, NodeState.RUNNING);
+        if (stopping) {
+            states.put(nodeId, NodeState.CANCELLED);
+            return;
+        }
+        states.put(nodeId, NodeState.READY);
+        ready.add(nodeId);
+    }
+
+    public void succeed(NodeId nodeId) {
+        succeed(nodeId, ignored -> true);
+    }
+
+    /** Complete a node and unlock only dependents whose material gate is ready. */
+    public void succeed(NodeId nodeId, Predicate<NodeId> readiness) {
+        Objects.requireNonNull(readiness, "readiness");
+        requireState(nodeId, NodeState.RUNNING);
+        states.put(nodeId, NodeState.SUCCEEDED);
+        if (stopping) return;
+        for (NodeId dependent : dependents.getOrDefault(nodeId, Set.of())) {
+            if (states.get(dependent) != NodeState.BLOCKED) continue;
+            boolean allSucceeded = dependencies.getOrDefault(dependent, Set.of()).stream()
+                    .allMatch(dependency -> states.get(dependency) == NodeState.SUCCEEDED);
+            if (allSucceeded && readiness.test(dependent)) {
+                states.put(dependent, NodeState.READY);
+                ready.add(dependent);
+            }
+        }
+    }
+
+    /** Re-evaluate material-gated nodes after incremental publications. */
+    public void refreshBlocked(Predicate<NodeId> readiness) {
+        Objects.requireNonNull(readiness, "readiness");
+        if (stopping) return;
+        for (NodeId nodeId : graph.topologicalOrder()) {
+            if (states.get(nodeId) != NodeState.BLOCKED) continue;
+            if (readiness.test(nodeId)) {
+                states.put(nodeId, NodeState.READY);
+                ready.add(nodeId);
+            }
+        }
+    }
+
+    public void fail(NodeId nodeId) {
+        requireState(nodeId, NodeState.RUNNING);
+        states.put(nodeId, NodeState.FAILED);
+        failedNode = nodeId;
+        stopScheduling();
+    }
+
+    void failRunningDuringStop(NodeId nodeId) {
+        requireState(nodeId, NodeState.RUNNING);
+        states.put(nodeId, NodeState.FAILED);
+        if (failedNode == null) failedNode = nodeId;
+    }
+
+    void cancelRunningDuringStop(NodeId nodeId) {
+        requireState(nodeId, NodeState.RUNNING);
+        states.put(nodeId, NodeState.CANCELLED);
+    }
+
+    public void stopScheduling() {
+        if (stopping) return;
+        stopping = true;
+        epoch++;
+        ready.clear();
+        for (Map.Entry<NodeId, NodeState> entry : states.entrySet()) {
+            if (entry.getValue() == NodeState.READY || entry.getValue() == NodeState.BLOCKED) {
+                entry.setValue(NodeState.CANCELLED);
+            }
+        }
+    }
+
+    public NodeState state(NodeId nodeId) {
+        return states.get(nodeId);
+    }
+
+    public Map<NodeId, NodeState> stateSnapshot() {
+        return Map.copyOf(states);
+    }
+
+    public boolean isStopping() {
+        return stopping;
+    }
+
+    public NodeId failedNode() {
+        return failedNode;
+    }
+
+    public boolean allSucceeded() {
+        return !states.isEmpty() && states.values().stream().allMatch(state -> state == NodeState.SUCCEEDED);
+    }
+
+    public boolean isDrained() {
+        return states.values().stream().noneMatch(state -> state == NodeState.RUNNING);
+    }
+
+    public Collection<NodeId> runningNodes() {
+        return states.entrySet().stream()
+                .filter(entry -> entry.getValue() == NodeState.RUNNING)
+                .map(Map.Entry::getKey)
+                .toList();
+    }
+
+    public int readyCount() {
+        return ready.size();
+    }
+
+    private void requireState(NodeId nodeId, NodeState expected) {
+        NodeState actual = states.get(nodeId);
+        if (actual == null) throw new IllegalArgumentException("unknown node " + nodeId);
+        if (actual != expected) {
+            throw new IllegalStateException("node " + nodeId + " is " + actual + ", expected " + expected);
+        }
+    }
+}

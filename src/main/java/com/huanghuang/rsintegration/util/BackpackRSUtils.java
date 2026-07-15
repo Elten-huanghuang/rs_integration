@@ -48,6 +48,7 @@ public final class BackpackRSUtils {
                 if (voidWrapper.isEnabled()) {
                     FilterLogic voidFilter = voidWrapper.getFilterLogic();
                     if (voidFilter.matchesFilter(stack)) {
+                        ExternalItemProgressSuppression.suppress();
                         itemEntity.discard();
                         return true;
                     }
@@ -63,6 +64,7 @@ public final class BackpackRSUtils {
         }
 
         if (remaining.isEmpty()) {
+            itemEntity.setItem(ItemStack.EMPTY);
             itemEntity.discard();
             return true;
         }
@@ -85,6 +87,7 @@ public final class BackpackRSUtils {
                 if (voidWrapper.isEnabled()) {
                     FilterLogic voidFilter = voidWrapper.getFilterLogic();
                     if (voidFilter.matchesFilter(stack)) {
+                        ExternalItemProgressSuppression.suppress();
                         return ItemStack.EMPTY;
                     }
                 }

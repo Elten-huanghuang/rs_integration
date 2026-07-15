@@ -1089,6 +1089,23 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         return myPos;
     }
 
+    @Override
+    public ItemStack getExpectedOutput() {
+        Recipe<?> outputRecipe = isBrazier
+                ? (brazierRecipeObj instanceof Recipe<?> recipe ? recipe : null)
+                : (ritualRecipe instanceof Recipe<?> recipe ? recipe : null);
+        if (outputRecipe == null || player == null) return null;
+        ServerLevel level = resolveMachineLevel(player);
+        if (level == null) return null;
+        ItemStack expected = RecipeIndex.tryGetResultItem(outputRecipe, level.registryAccess());
+        return expected.isEmpty() ? null : expected;
+    }
+
+    @Override
+    public net.minecraft.world.phys.AABB getOutputCaptureRegion() {
+        return myPos == null ? null : new net.minecraft.world.phys.AABB(myPos).inflate(3);
+    }
+
     // ── Brazier helpers ─────────────────────────────────────────
 
     private static final int CANDLESTICK_SEARCH_RANGE = 8;

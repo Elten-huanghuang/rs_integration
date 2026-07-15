@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.reflection.contract.ContractValidation;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.sidepanel.client.RSIKeyBindings;
 import com.huanghuang.rsintegration.crafting.AsyncCraftManager;
+import com.huanghuang.rsintegration.crafting.CraftProgressClientEvents;
 import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
 import com.huanghuang.rsintegration.mods.IModIntegration;
 import com.huanghuang.rsintegration.mods.aether.AetherRSModule;
@@ -151,7 +152,10 @@ public final class RSIntegrationMod {
         registerDisplayTest();
         RSIntegrationConfig.register();
         refreshConfigCache();
-        MOD_BUS.addListener((ModConfigEvent.Reloading e) -> refreshConfigCache());
+        MOD_BUS.addListener((ModConfigEvent.Reloading e) -> {
+            refreshConfigCache();
+            com.huanghuang.rsintegration.compat.ftbquests.ExternalItemProgressBridge.refreshEnabled();
+        });
         AltarBindingRegistry.registerHook(AltarBinding.RS_NETWORK, RSBindingHook.INSTANCE);
         ForgeChunkManager.setForcedChunkLoadingCallback(
                 MOD_ID, (level, ticketHelper) -> {});
@@ -166,12 +170,20 @@ public final class RSIntegrationMod {
                 () -> RSSidePanelClient::registerKeyMappings);
         DistExecutor.safeRunWhenOn(Dist.CLIENT,
                 () -> RSIKeyBindings::registerKeyMappings);
+        DistExecutor.safeRunWhenOn(Dist.CLIENT,
+                () -> () -> {
+                    com.huanghuang.rsintegration.crafting.CraftProgressKeybind.register();
+                    MinecraftForge.EVENT_BUS.register(com.huanghuang.rsintegration.crafting.CraftProgressOverlay.class);
+                });
         MOD_BUS.addListener(this::onClientSetup);
 
         FMLJavaModLoadingContext.get().getModEventBus().addListener(this::onCommonSetup);
+        MinecraftForge.EVENT_BUS.register(
+                com.huanghuang.rsintegration.compat.ftbquests.ExternalItemProgressBridge.class);
     }
 
     private void onCommonSetup(final FMLCommonSetupEvent event) {
+        com.huanghuang.rsintegration.compat.ftbquests.ExternalItemProgressBridge.initialize();
         for (ModuleEntry entry : MODULES) {
             if (!entry.configFlag().get() || !ModList.get().isLoaded(entry.modId())) continue;
             IModIntegration module = entry.supplier().get();
@@ -383,8 +395,10 @@ public final class RSIntegrationMod {
         MinecraftForge.EVENT_BUS.register(AltarBindingRegistry.class);
 
         // /reload clears recipe output caches so new datapack recipes take effect
-        MinecraftForge.EVENT_BUS.addListener((net.minecraftforge.event.AddReloadListenerEvent e) ->
-                com.huanghuang.rsintegration.recipe.ModRecipeHandlers.clearResultCaches());
+        MinecraftForge.EVENT_BUS.addListener((net.minecraftforge.event.AddReloadListenerEvent e) -> {
+            com.huanghuang.rsintegration.recipe.ModRecipeHandlers.clearResultCaches();
+            com.huanghuang.rsintegration.crafting.CraftPlanningRevision.bump();
+        });
 
         // Async craft chains
         MinecraftForge.EVENT_BUS.register(AsyncCraftManager.getInstance());
@@ -435,6 +449,12 @@ public final class RSIntegrationMod {
         DistExecutor.safeRunWhenOn(Dist.CLIENT, () -> () ->
                 net.minecraftforge.common.MinecraftForge.EVENT_BUS.register(
                         com.huanghuang.rsintegration.autoeat.client.AutoEatClientEvents.class));
+        DistExecutor.safeRunWhenOn(Dist.CLIENT, () -> () -> {
+            net.minecraftforge.common.MinecraftForge.EVENT_BUS.addListener(
+                    CraftProgressClientEvents::onClientLogin);
+            net.minecraftforge.common.MinecraftForge.EVENT_BUS.addListener(
+                    CraftProgressClientEvents::onClientLogout);
+        });
         DistExecutor.safeRunWhenOn(Dist.CLIENT, () -> () ->
                 net.minecraftforge.common.MinecraftForge.EVENT_BUS.addListener(
                         (net.minecraftforge.client.event.ClientPlayerNetworkEvent.LoggingOut e) ->

@@ -40,8 +40,44 @@ public interface IBatchDelegate {
         }
     }
 
+    enum PreparationState {
+        READY,
+        RETRY,
+        FATAL
+    }
+
+    record PreparationResult(PreparationState state, String detail) {
+        public PreparationResult {
+            if (state == null) throw new IllegalArgumentException("preparation state is required");
+            detail = detail == null ? "" : detail;
+        }
+
+        public static PreparationResult ready() {
+            return new PreparationResult(PreparationState.READY, "");
+        }
+
+        public static PreparationResult retry(String detail) {
+            return new PreparationResult(PreparationState.RETRY, detail);
+        }
+
+        public static PreparationResult fatal(String detail) {
+            return new PreparationResult(PreparationState.FATAL, detail);
+        }
+    }
+
     boolean validateAndInit(@Nonnull ServerPlayer player, @Nonnull ResourceLocation recipeId,
                             @Nullable ResourceLocation dim, @Nonnull BlockPos pos);
+
+    /**
+     * Classify preparation without forcing callers to infer permanence from a boolean.
+     * Legacy delegates remain conservatively retryable when validation returns false.
+     */
+    default PreparationResult prepare(@Nonnull ServerPlayer player, @Nonnull ResourceLocation recipeId,
+                                      @Nullable ResourceLocation dim, @Nonnull BlockPos pos) {
+        return validateAndInit(player, recipeId, dim, pos)
+                ? PreparationResult.ready()
+                : PreparationResult.retry("delegate validation did not accept the machine yet");
+    }
 
     /**
      * Check machine is idle, extract materials for one craft, place them, and start.
@@ -70,6 +106,23 @@ public interface IBatchDelegate {
     @Nullable
     default List<IngredientSpec> getRequiredMaterials() {
         return null;
+    }
+
+    /**
+     * Structured safety contract for cross-node execution. Unknown or incomplete
+     * contracts remain exclusive even when the legacy boolean returns true.
+     */
+    @Nullable
+    default BatchConcurrencyCapabilities concurrencyCapabilities() {
+        return null;
+    }
+
+    /**
+     * Legacy opt-in retained for source compatibility. It is no longer sufficient
+     * by itself to enable cross-node execution.
+     */
+    default boolean supportsConcurrentNodeExecution() {
+        return false;
     }
 
     /**

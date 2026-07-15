@@ -128,6 +128,42 @@ public final class ExtractionLedger implements AutoCloseable {
         return ItemStack.EMPTY;
     }
 
+    /** Reserve one exact item/NBT identity while retaining the original source for refund. */
+    @Nonnull
+    public ItemStack reserveExact(@Nonnull ItemStack template, int count,
+                                  @Nullable INetwork network, @Nonnull ServerPlayer player,
+                                  @Nullable ResourceKey<Level> altarDim, @Nullable BlockPos altarPos) {
+        requireState(State.IDLE, State.RESERVING);
+        if (count <= 0 || template.isEmpty()) return ItemStack.EMPTY;
+        if (state == State.IDLE) transition(State.RESERVING);
+
+        Ingredient ingredient = Ingredient.of(template.copyWithCount(1));
+        if (network != null && reserveExactAvailability(network, template, count, pendingNet)) {
+            ItemStack reserved = template.copyWithCount(count);
+            recordEntry(new Entry(Source.NETWORK, ingredient, reserved, null,
+                    null, null, network, true));
+            return reserved;
+        }
+
+        if (altarDim != null && altarPos != null) {
+            INetwork bindingNet = AltarBindingRegistry.resolveNetworkForAltar(player, altarDim, altarPos);
+            if (bindingNet != null && reserveExactAvailability(bindingNet, template, count, pendingNet)) {
+                ItemStack reserved = template.copyWithCount(count);
+                recordEntry(new Entry(Source.ALTAR_BINDING, ingredient, reserved, null,
+                        altarDim, altarPos, bindingNet, true));
+                return reserved;
+            }
+        }
+
+        if (reserveExactInventoryAvailability(player, template, count)) {
+            ItemStack reserved = template.copyWithCount(count);
+            recordEntry(new Entry(Source.PLAYER_INVENTORY, ingredient, reserved, null,
+                    null, null, null, true));
+            return reserved;
+        }
+        return ItemStack.EMPTY;
+    }
+
     @Nonnull
     public ItemStack reserveFromNetwork(@Nonnull Ingredient ingredient, int count, @Nonnull INetwork network) {
         requireState(State.IDLE, State.RESERVING);
@@ -190,14 +226,14 @@ public final class ExtractionLedger implements AutoCloseable {
                             entry.id, entry.count, item.getCount());
                     // Include the partial extract so rollback can return already-split items
                     if (!item.isEmpty()) {
-                        extracted.add(new ExtractRecord(entry.source, item,
+                        extracted.add(new ExtractRecord(entry.id, entry.source, item.copy(),
                                 entry.altarDim, entry.altarPos, entry.sourceNetwork));
                     }
                     rollbackExtractedPhases(extracted, player);
                     transition(State.ROLLED_BACK);
                     return false;
                 }
-                extracted.add(new ExtractRecord(entry.source, item.copy(),
+                extracted.add(new ExtractRecord(entry.id, entry.source, item.copy(),
                         entry.altarDim, entry.altarPos, entry.sourceNetwork));
             }
         } catch (Exception e) {
@@ -215,6 +251,15 @@ public final class ExtractionLedger implements AutoCloseable {
         }
 
         // ── Phase 3: Confirm ────────────────────────────────────
+        for (ExtractRecord record : extracted) {
+            Entry entry = entriesById.get(record.entryId);
+            if (entry == null) {
+                rollbackExtractedPhases(extracted, player);
+                transition(State.ROLLED_BACK);
+                return false;
+            }
+            entry.confirmExtracted(record.stack);
+        }
         MaterialSources.invalidateFor(player);
         pendingNet.clear();
         pendingInv.clear();
@@ -297,13 +342,13 @@ public final class ExtractionLedger implements AutoCloseable {
     }
 
     /** Lightweight record for extracted items during commit rollback. */
-    private record ExtractRecord(Source source, ItemStack stack,
+    private record ExtractRecord(int entryId, Source source, ItemStack stack,
                                   @Nullable ResourceKey<Level> altarDim,
                                   @Nullable BlockPos altarPos,
                                   @Nullable INetwork sourceNetwork) {}
 
     /** Explicitly roll back all reservations without committing. */
-    public void rollback(@Nonnull ServerPlayer player) {
+    public void rollback(@Nullable ServerPlayer player) {
         if (state == State.IDLE || state == State.ROLLED_BACK) return;
         if (state == State.COMMITTED) {
             refundCommitted(null, player);
@@ -314,7 +359,7 @@ public final class ExtractionLedger implements AutoCloseable {
         transition(State.ROLLED_BACK);
     }
 
-    private void releaseReservations(ServerPlayer player) {
+    private void releaseReservations(@Nullable ServerPlayer player) {
         // Pending reservations were never physically extracted — just clear the
         // tracking maps so future reservations see accurate counts.
         pendingNet.clear();
@@ -355,7 +400,23 @@ public final class ExtractionLedger implements AutoCloseable {
      */
     public void settleCommitted(ReservationToken token) {
         requireState(State.COMMITTED);
-        if (token == null || token.entryIds().isEmpty()) return;
+        List<Entry> owned = requireOwnedEntries(token);
+        entries.removeAll(owned);
+        for (Entry entry : owned) entriesById.remove(entry.id);
+    }
+
+    /** Refund only the committed entries owned by operations that never dispatched. */
+    public void refundCommitted(ReservationToken token, @Nullable INetwork network,
+                                @Nullable ServerPlayer player) {
+        requireState(State.COMMITTED);
+        List<Entry> owned = requireOwnedEntries(token);
+        for (Entry entry : owned) refundEntry(entry, network, player);
+        entries.removeAll(owned);
+        for (Entry entry : owned) entriesById.remove(entry.id);
+    }
+
+    private List<Entry> requireOwnedEntries(ReservationToken token) {
+        if (token == null || token.entryIds().isEmpty()) return List.of();
         List<Entry> owned = new ArrayList<>(token.entryIds().size());
         for (Integer id : token.entryIds()) {
             Entry entry = entriesById.get(id);
@@ -364,8 +425,14 @@ public final class ExtractionLedger implements AutoCloseable {
             }
             owned.add(entry);
         }
-        entries.removeAll(owned);
-        for (Entry entry : owned) entriesById.remove(entry.id);
+        return owned;
+    }
+
+    /** Mark every remaining committed fragment as irreversibly consumed. */
+    public void settleAllCommitted() {
+        requireState(State.COMMITTED);
+        entries.clear();
+        entriesById.clear();
     }
 
     public void reset() {
@@ -411,23 +478,40 @@ public final class ExtractionLedger implements AutoCloseable {
         final Ingredient originalIngredient;
         final ItemStack template;
         final int count;
+        final boolean exactIdentity;
         @Nullable final ItemStack preExtracted;
         @Nullable final ResourceKey<Level> altarDim;
         @Nullable final BlockPos altarPos;
         @Nullable final INetwork sourceNetwork;
+        ItemStack extracted = ItemStack.EMPTY;
 
         Entry(Source source, Ingredient originalIngredient, ItemStack template, @Nullable ItemStack preExtracted,
               @Nullable ResourceKey<Level> altarDim, @Nullable BlockPos altarPos,
               @Nullable INetwork sourceNetwork) {
+            this(source, originalIngredient, template, preExtracted, altarDim, altarPos, sourceNetwork, false);
+        }
+
+        Entry(Source source, Ingredient originalIngredient, ItemStack template, @Nullable ItemStack preExtracted,
+              @Nullable ResourceKey<Level> altarDim, @Nullable BlockPos altarPos,
+              @Nullable INetwork sourceNetwork, boolean exactIdentity) {
             this.id = entryIdSeq.incrementAndGet();
             this.source = source;
             this.originalIngredient = originalIngredient;
             this.template = template;
             this.count = template.getCount();
+            this.exactIdentity = exactIdentity;
             this.preExtracted = preExtracted;
             this.altarDim = altarDim;
             this.altarPos = altarPos;
             this.sourceNetwork = sourceNetwork;
+        }
+
+        void confirmExtracted(ItemStack stack) {
+            this.extracted = stack.copy();
+        }
+
+        ItemStack refundableStack() {
+            return extracted.isEmpty() ? ItemStack.EMPTY : extracted.copy();
         }
     }
 
@@ -435,14 +519,23 @@ public final class ExtractionLedger implements AutoCloseable {
         return switch (entry.source) {
             case ALTAR_BINDING -> {
                 if (entry.preExtracted != null) yield entry.preExtracted.copy();
+                if (entry.exactIdentity && entry.sourceNetwork != null) {
+                    yield RSIntegrationNetwork.extractExactFromNetwork(
+                            entry.sourceNetwork, entry.template, entry.count, player);
+                }
                 // Use original Ingredient to avoid errors from aggregated extraction
                 yield AltarBindingRegistry.tryExtractFromBindings(player,
                         entry.altarDim, entry.altarPos,
                         entry.originalIngredient, entry.count);
             }
             case NETWORK -> {
-                if (network == null) yield ItemStack.EMPTY;
-                yield RSIntegrationNetwork.extractFromNetwork(network, entry.originalIngredient, entry.count, player);
+                INetwork source = entry.sourceNetwork != null ? entry.sourceNetwork : network;
+                if (source == null) yield ItemStack.EMPTY;
+                yield entry.exactIdentity
+                        ? RSIntegrationNetwork.extractExactFromNetwork(
+                                source, entry.template, entry.count, player)
+                        : RSIntegrationNetwork.extractFromNetwork(
+                                source, entry.originalIngredient, entry.count, player);
             }
             case PLAYER_INVENTORY -> {
                 ItemStack extracted = extractFromSlots(entry, player.getInventory().items);
@@ -515,6 +608,54 @@ public final class ExtractionLedger implements AutoCloseable {
             }
         }
         return extracted;
+    }
+
+    private boolean reserveExactAvailability(INetwork network, ItemStack template, int needed,
+                                             Map<CraftingResolver.StackKey, Integer> pending) {
+        try {
+            var cache = network.getItemStorageCache();
+            if (cache == null) return false;
+            CraftingResolver.StackKey key = CraftingResolver.StackKey.of(template, true);
+            int available = 0;
+            for (var entry : cache.getList().getStacks()) {
+                ItemStack stored = entry.getStack();
+                if (!stored.isEmpty() && ItemStack.isSameItemSameTags(stored, template)) {
+                    available += stored.getCount();
+                }
+            }
+            available -= pending.getOrDefault(key, 0);
+            if (available < needed) return false;
+            pending.merge(key, needed, Integer::sum);
+            return true;
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Ledger] Error scanning exact network stack", e);
+            return false;
+        }
+    }
+
+    private boolean reserveExactInventoryAvailability(ServerPlayer player, ItemStack template, int needed) {
+        CraftingResolver.StackKey key = CraftingResolver.StackKey.of(template, true);
+        int available = countExact(player.getInventory().items, template)
+                + countExact(player.getInventory().offhand, template)
+                + countExact(player.getInventory().armor, template);
+        for (IItemHandler backpack : findAllBackpackInventories(player)) {
+            for (int slot = 0; slot < backpack.getSlots(); slot++) {
+                ItemStack stored = backpack.getStackInSlot(slot);
+                if (ItemStack.isSameItemSameTags(stored, template)) available += stored.getCount();
+            }
+        }
+        available -= pendingInv.getOrDefault(key, 0);
+        if (available < needed) return false;
+        pendingInv.merge(key, needed, Integer::sum);
+        return true;
+    }
+
+    private static int countExact(List<ItemStack> stacks, ItemStack template) {
+        int total = 0;
+        for (ItemStack stack : stacks) {
+            if (ItemStack.isSameItemSameTags(stack, template)) total += stack.getCount();
+        }
+        return total;
     }
 
     private ItemStack findAvailableInNetwork(INetwork network, Ingredient ingredient, int needed) {
@@ -857,29 +998,35 @@ public final class ExtractionLedger implements AutoCloseable {
      */
     public void refundCommitted(@Nullable INetwork network, @Nullable ServerPlayer player) {
         if (state != State.COMMITTED) return;
-        for (Entry e : entries) {
-            if (e.template.isEmpty()) continue;
-            ItemStack refund = e.template.copyWithCount(e.count);
-            switch (e.source) {
-                case NETWORK, ALTAR_BINDING -> {
-                    INetwork net = e.sourceNetwork != null ? e.sourceNetwork : network;
-                    if (net != null) {
-                        var tracker = net.getItemStorageTracker();
-                        if (tracker != null && player != null) tracker.changed(player, refund.copy());
-                        ItemStack leftover = net.insertItem(refund, refund.getCount(), Action.PERFORM);
-                        if (!leftover.isEmpty()) {
-                            RSIntegrationMod.LOGGER.warn("[RSI-Ledger] Refund: RS insert had leftover for {} x{}",
-                                    refund.getDisplayName().getString(), refund.getCount());
-                            refundLeftoverToPlayerOrNetwork(leftover, player, network);
-                        }
-                    } else {
-                        refundLeftoverToPlayerOrNetwork(refund, player, network);
-                    }
-                }
-                case PLAYER_INVENTORY -> refundLeftoverToPlayerOrNetwork(refund, player, network);
-            }
-        }
+        for (Entry e : entries) refundEntry(e, network, player);
         transition(State.ROLLED_BACK);
+    }
+
+    private static void refundEntry(Entry e, @Nullable INetwork network,
+                                    @Nullable ServerPlayer player) {
+        ItemStack refund = e.refundableStack();
+        if (refund.isEmpty()) {
+            RSIntegrationMod.LOGGER.error("[RSI-Ledger] Committed entry {} has no recorded extracted fragment", e.id);
+            return;
+        }
+        switch (e.source) {
+            case NETWORK, ALTAR_BINDING -> {
+                INetwork net = e.sourceNetwork != null ? e.sourceNetwork : network;
+                if (net != null) {
+                    var tracker = net.getItemStorageTracker();
+                    if (tracker != null && player != null) tracker.changed(player, refund.copy());
+                    ItemStack leftover = net.insertItem(refund, refund.getCount(), Action.PERFORM);
+                    if (!leftover.isEmpty()) {
+                        RSIntegrationMod.LOGGER.warn("[RSI-Ledger] Refund: RS insert had leftover for {} x{}",
+                                refund.getDisplayName().getString(), refund.getCount());
+                        refundLeftoverToPlayerOrNetwork(leftover, player, network);
+                    }
+                } else {
+                    refundLeftoverToPlayerOrNetwork(refund, player, network);
+                }
+            }
+            case PLAYER_INVENTORY -> refundLeftoverToPlayerOrNetwork(refund, player, network);
+        }
     }
 
     /**
