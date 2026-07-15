@@ -492,6 +492,10 @@ public final class GenericCraftPacket {
                 || terminalStep.modType() != ModType.GENERIC);
         AsyncCraftChain chain = new AsyncCraftChain(player.getUUID(), player.getServer(), network,
                 graph, terminalStep, repeatCount);
+        RSIntegrationMod.LOGGER.info(
+                "[RSI-Craft] launch craftId={} graphNodes={} terminalRecipe={} executor={}",
+                chain.getCraftId(), graph.topologicalOrder().size(), terminalStep.recipeId(),
+                chain.isGraphExecution() ? "graph" : "flat-terminal-fallback");
         chain.setTargetOutput(targetOutput);
         UUID playerId = player.getUUID();
         var server = player.getServer();
@@ -534,9 +538,14 @@ public final class GenericCraftPacket {
             for (var e : forcedRecipes.entrySet()) {
                 ResourceLocation itemKey = ResourceLocation.tryParse(e.getKey());
                 ResourceLocation forcedId = ResourceLocation.tryParse(e.getValue());
-                if (itemKey != null && forcedId != null) {
-                    forcedOverrides.put(itemKey, forcedId);
+                if (itemKey == null || forcedId == null
+                        || !net.minecraft.core.registries.BuiltInRegistries.ITEM.containsKey(itemKey)
+                        || resolveRecipe(player.serverLevel(), forcedId) == null) {
+                    player.sendSystemMessage(Component.literal("Invalid forced recipe selection: "
+                            + e.getKey() + " -> " + e.getValue()));
+                    return;
                 }
+                forcedOverrides.put(itemKey, forcedId);
             }
         }
 
@@ -625,7 +634,7 @@ public final class GenericCraftPacket {
 
         // Pre-resolve: if intermediate steps are needed, execute them
         if (RSIntegrationConfig.ENABLE_MULTIBLOCK_AUTO_CRAFTING.get() && network != null
-                && recipe instanceof CraftingRecipe cr) {
+                && recipe instanceof CraftingRecipe cr && forcedRecipes.isEmpty()) {
             List<ResolutionStep> allSteps = CraftPacketUtils.resolveIntermediateSteps(player, network, cr);
             if (allSteps == null || allSteps.isEmpty()) {
                 RSIntegrationMod.LOGGER.debug("[RSI-Generic] resolveIntermediateSteps returned null/empty for {}, falling through", recipeId);
@@ -1142,9 +1151,14 @@ public final class GenericCraftPacket {
             for (var e : forcedRecipes.entrySet()) {
                 ResourceLocation itemKey = ResourceLocation.tryParse(e.getKey());
                 ResourceLocation forcedId = ResourceLocation.tryParse(e.getValue());
-                if (itemKey != null && forcedId != null) {
-                    forcedOverrides.put(itemKey, forcedId);
+                if (itemKey == null || forcedId == null
+                        || !net.minecraft.core.registries.BuiltInRegistries.ITEM.containsKey(itemKey)
+                        || resolveRecipe(player.serverLevel(), forcedId) == null) {
+                    player.sendSystemMessage(Component.literal("Invalid forced recipe selection: "
+                            + e.getKey() + " -> " + e.getValue()));
+                    return;
                 }
+                forcedOverrides.put(itemKey, forcedId);
             }
         }
 

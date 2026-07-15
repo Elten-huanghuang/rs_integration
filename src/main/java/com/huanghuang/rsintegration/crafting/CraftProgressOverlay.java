@@ -1,40 +1,44 @@
 package com.huanghuang.rsintegration.crafting;
 
-import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
-import com.huanghuang.rsintegration.crafting.batch.CraftCancelPacket;
+import com.huanghuang.rsintegration.util.UIRenderer;
 import com.mojang.blaze3d.systems.RenderSystem;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.util.FormattedCharSequence;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
-import net.minecraftforge.client.event.InputEvent;
 import net.minecraftforge.client.event.RenderGuiOverlayEvent;
 import net.minecraftforge.client.gui.overlay.VanillaGuiOverlay;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
-import org.lwjgl.glfw.GLFW;
 
-/**
- * Right-side HUD overlay showing running craft progress with a Cancel button.
- * Toggled by keybind; hidden entirely when no active craft or visibility off.
- */
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
+
+/** Compact right-side HUD for the active server-authoritative craft. */
 @OnlyIn(Dist.CLIENT)
 public final class CraftProgressOverlay {
 
-    private static final int PANEL_WIDTH = 146;
-    private static final int PANEL_X_OFFSET = 8;
-    private static final int BAR_H = 10;
-    private static final int BTN_H = 16;
-    private static final int BG_COLOR = 0xCC1A1A1A;
-    private static final int BAR_BG = 0xFF333333;
-    private static final int BAR_FILL = 0xFF4CAF50;
-    private static final int TEXT_COLOR = 0xFFCCCCCC;
-    private static final int TITLE_COLOR = 0xFFFFFFFF;
-    private static final int CANCEL_BG = 0xFF994444;
-    private static final int CANCEL_HOVER = 0xFFCC5555;
+    private static final int MAX_PANEL_WIDTH = 184;
+    private static final int MIN_PANEL_WIDTH = 132;
+    private static final int SCREEN_MARGIN = 10;
+    private static final int CONTENT_PAD = 10;
+    private static final int BAR_HEIGHT = 8;
+    private static final int BUTTON_WIDTH = 72;
+    private static final int BUTTON_HEIGHT = 15;
 
-    // Hitbox for the cancel button — updated every render, read on mouse click
-    private static int cancelBtnX, cancelBtnY, cancelBtnW, cancelBtnH;
+    private static final int TEXT = 0xFFF1F4F6;
+    private static final int MUTED = 0xFFABB5BC;
+    private static final int BAR_BACKGROUND = 0xB8222C32;
+    private static final int BUTTON_TEXT = 0xFFF5EDEE;
+
+    private static int cancelBtnX;
+    private static int cancelBtnY;
+    private static int cancelBtnW;
+    private static int cancelBtnH;
 
     private CraftProgressOverlay() {}
 
@@ -43,160 +47,197 @@ public final class CraftProgressOverlay {
         if (event.getOverlay() != VanillaGuiOverlay.HOTBAR.type()) return;
         if (!CraftProgressTracker.hasActive() || !CraftProgressTracker.isVisible()) return;
 
-        CraftProgressSnapshot snap = CraftProgressTracker.first();
-        if (snap == null) return;
+        CraftProgressSnapshot snapshot = CraftProgressTracker.first();
+        if (snapshot == null) return;
+        Minecraft minecraft = Minecraft.getInstance();
+        if (minecraft.player == null) return;
 
-        Minecraft mc = Minecraft.getInstance();
-        if (mc.player == null) return;
+        GuiGraphics graphics = event.getGuiGraphics();
+        Font font = minecraft.font;
+        int screenWidth = minecraft.getWindow().getGuiScaledWidth();
+        int screenHeight = minecraft.getWindow().getGuiScaledHeight();
+        int panelWidth = Math.max(MIN_PANEL_WIDTH,
+                Math.min(MAX_PANEL_WIDTH, screenWidth - SCREEN_MARGIN * 2));
+        int textWidth = panelWidth - CONTENT_PAD * 2;
 
-        GuiGraphics gfx = event.getGuiGraphics();
-        Font font = mc.font;
-        int screenW = mc.getWindow().getGuiScaledWidth();
-        int screenH = mc.getWindow().getGuiScaledHeight();
-        int x = screenW - PANEL_WIDTH - PANEL_X_OFFSET;
-        int y = screenH / 2 - 50;
-        int rowH = font.lineHeight + 4;
-        boolean terminal = snap.isTerminal() || snap.failedStep() != null
-                || snap.chainState() == CraftProgressSnapshot.STATE_STOPPING;
-        boolean hasCancel = !terminal;
-        String nodeSummary = buildNodeSummary(snap);
-        boolean hasNodeSummary = !nodeSummary.isEmpty();
+        Component title = title(snapshot.result());
+        ItemStack target = CraftProgressTracker.target(snapshot.craftId());
+        Component detail = detail(snapshot);
+        List<FormattedCharSequence> detailLines = limitedLines(font, detail, textWidth, 2);
+        Component nodeSummary = nodeSummary(snapshot);
+        boolean showNodeSummary = nodeSummary != null;
+        boolean cancellable = cancellable(snapshot.result());
 
-        int totalH = 8 + rowH + 6 + BAR_H + 6 + rowH
-                + (hasNodeSummary ? rowH : 0) + (hasCancel ? 8 + BTN_H : 0) + 8;
+        int lineHeight = font.lineHeight;
+        int panelHeight = 10 + lineHeight + (!target.isEmpty() ? lineHeight + 6 : 0)
+                + 7 + BAR_HEIGHT + 7 + lineHeight
+                + detailLines.size() * (lineHeight + 1)
+                + (showNodeSummary ? lineHeight + 3 : 0)
+                + (cancellable ? lineHeight + 9 : 3) + 7;
+        int x = Math.max(SCREEN_MARGIN, screenWidth - panelWidth - SCREEN_MARGIN);
+        int maxY = Math.max(SCREEN_MARGIN, screenHeight - panelHeight - 34);
+        int y = Math.max(SCREEN_MARGIN + 18, Math.min(screenHeight / 2 - panelHeight / 2, maxY));
+
+        int accent = accent(snapshot.result());
         RenderSystem.enableBlend();
-        gfx.fill(x, y, x + PANEL_WIDTH, y + totalH, BG_COLOR);
-        gfx.renderOutline(x, y, PANEL_WIDTH, totalH, 0xFF555555);
+        RenderSystem.defaultBlendFunc();
+        UIRenderer.card(graphics, x, y, panelWidth, panelHeight, 6f, accent);
 
-        int cy = y + 6;
-
-        // Title
-        String title = terminal
-                ? (snap.failedStep() != null ? "Failed" : "Complete")
-                : "Crafting";
-        gfx.drawString(font, title, x + 6, cy, TITLE_COLOR);
-        cy += rowH;
-
-        // Progress bar
-        float pct = snap.totalNodes() > 0
-                ? (float) snap.completedNodes() / snap.totalNodes() : 0f;
-        int barW = PANEL_WIDTH - 16;
-        gfx.fill(x + 8, cy, x + 8 + barW, cy + BAR_H, BAR_BG);
-        if (pct > 0) gfx.fill(x + 8, cy, x + 8 + (int) (barW * pct), cy + BAR_H,
-                terminal ? 0xFF888888 : BAR_FILL);
-        String pctText = (int) (pct * 100) + "%";
-        gfx.drawCenteredString(font, pctText, x + PANEL_WIDTH / 2, cy + 1, TEXT_COLOR);
-        cy += BAR_H + 6;
-
-        // Detail line
-        String detail;
-        String nodeFailure = failedNodeDetail(snap);
-        if (terminal && !nodeFailure.isEmpty()) {
-            detail = nodeFailure;
-        } else if (terminal && snap.failedStep() != null) {
-            detail = snap.failedStep();
-        } else if (terminal) {
-            detail = snap.completedNodes() + "/" + snap.totalNodes() + " nodes — done";
-        } else {
-            detail = snap.completedNodes() + "/" + snap.totalNodes() + " nodes";
-            if (snap.runningNodes() > 0) detail += "  " + snap.runningNodes() + " running";
+        int contentX = x + CONTENT_PAD;
+        int cy = y + 7;
+        int percent = progressPercent(snapshot);
+        graphics.drawString(font, title, contentX, cy, TEXT, true);
+        String percentText = percent + "%";
+        graphics.drawString(font, percentText,
+                x + panelWidth - CONTENT_PAD - font.width(percentText), cy, accent, true);
+        cy += lineHeight + 4;
+        if (!target.isEmpty()) {
+            graphics.renderItem(target, contentX, cy - 2);
+            Component targetName = target.getHoverName().copy().append(
+                    target.getCount() > 1 ? Component.literal(" ×" + target.getCount()) : Component.empty());
+            graphics.drawString(font, targetName, contentX + 20, cy + 2, TEXT, false);
+            cy += lineHeight + 6;
         }
-        gfx.drawString(font, fitLine(font, detail), x + 6, cy, TEXT_COLOR);
-        cy += rowH;
-        if (hasNodeSummary) {
-            gfx.drawString(font, fitLine(font, nodeSummary), x + 6, cy, TEXT_COLOR);
-            cy += rowH;
+        cy += 3;
+
+        UIRenderer.rounded(graphics, contentX, cy, textWidth, BAR_HEIGHT,
+                BAR_HEIGHT / 2f, BAR_BACKGROUND);
+        int fillWidth = Math.round(textWidth * (percent / 100f));
+        if (fillWidth > 0) {
+            UIRenderer.rounded(graphics, contentX, cy, fillWidth, BAR_HEIGHT,
+                    BAR_HEIGHT / 2f, accent);
         }
+        cy += BAR_HEIGHT + 7;
 
-        // Cancel button (only when not terminal)
-        if (hasCancel) {
-            cy += 4;
-            cancelBtnX = x + 12;
-            cancelBtnY = cy;
-            cancelBtnW = PANEL_WIDTH - 24;
-            cancelBtnH = BTN_H;
+        Component summary = Component.translatable("rsi.progress.summary",
+                snapshot.completedNodes(), snapshot.totalNodes(), snapshot.runningNodes());
+        graphics.drawString(font, summary, contentX, cy, TEXT, false);
+        cy += lineHeight + 3;
 
-            int mouseX = (int) mc.mouseHandler.xpos() * screenW / mc.getWindow().getScreenWidth();
-            int mouseY = (int) mc.mouseHandler.ypos() * screenH / mc.getWindow().getScreenHeight();
-            boolean hover = mouseX >= cancelBtnX && mouseX <= cancelBtnX + cancelBtnW
-                    && mouseY >= cancelBtnY && mouseY <= cancelBtnY + cancelBtnH;
-            int bg = hover ? CANCEL_HOVER : CANCEL_BG;
-            gfx.fill(cancelBtnX, cancelBtnY, cancelBtnX + cancelBtnW, cancelBtnY + cancelBtnH, bg);
-            String label = "Cancel";
-            gfx.drawCenteredString(font, label,
-                    cancelBtnX + cancelBtnW / 2, cancelBtnY + (BTN_H - font.lineHeight) / 2, 0xFFFFFFFF);
-        } else {
-            cancelBtnX = cancelBtnY = cancelBtnW = cancelBtnH = 0;
+        for (FormattedCharSequence line : detailLines) {
+            graphics.drawString(font, line, contentX, cy, MUTED, false);
+            cy += lineHeight + 1;
+        }
+        if (showNodeSummary) {
+            cy += 1;
+            graphics.drawString(font, nodeSummary, contentX, cy, MUTED, false);
+            cy += lineHeight + 2;
         }
 
+        if (cancellable) {
+            cy += 3;
+            graphics.drawString(font, Component.translatable("rsi.progress.manage_hint"),
+                    contentX, cy, MUTED, false);
+        }
+        clearCancelHitbox();
         RenderSystem.disableBlend();
     }
 
-    private static String fitLine(Font font, String text) {
-        int maxWidth = PANEL_WIDTH - 12;
-        if (font.width(text) <= maxWidth) return text;
-        String suffix = "...";
-        return font.plainSubstrByWidth(text, Math.max(0, maxWidth - font.width(suffix))) + suffix;
+    static Component title(CraftProgressSnapshot.Result result) {
+        return Component.translatable(titleKey(result));
     }
 
-    private static String failedNodeDetail(CraftProgressSnapshot snapshot) {
-        for (CraftProgressSnapshot.NodeProgress node : snapshot.nodes()) {
-            if (node.state() == CraftProgressSnapshot.NodeState.FAILED && !node.detail().isEmpty()) {
-                return node.detail();
+    static String titleKey(CraftProgressSnapshot.Result result) {
+        return "rsi.progress.status." + result.name().toLowerCase(Locale.ROOT);
+    }
+
+    static int accent(CraftProgressSnapshot.Result result) {
+        return switch (result) {
+            case RUNNING -> 0xFF68A9E8;
+            case WAITING -> 0xFFE0B35A;
+            case STOPPING -> 0xFFB89AD7;
+            case SUCCEEDED -> 0xFF67BE7B;
+            case FAILED -> 0xFFE06C75;
+            case CANCELLED -> 0xFF929DA5;
+        };
+    }
+
+    static boolean cancellable(CraftProgressSnapshot.Result result) {
+        return result == CraftProgressSnapshot.Result.RUNNING
+                || result == CraftProgressSnapshot.Result.WAITING;
+    }
+
+    static Component detail(CraftProgressSnapshot snapshot) {
+        CraftProgressSnapshot.Reason reason = snapshot.reason();
+        if (reason == CraftProgressSnapshot.Reason.NONE) {
+            for (CraftProgressSnapshot.NodeProgress node : snapshot.nodes()) {
+                if (node.reason() != CraftProgressSnapshot.Reason.NONE) {
+                    reason = node.reason();
+                    break;
+                }
             }
         }
-        return "";
+        if (reason != CraftProgressSnapshot.Reason.NONE) {
+            return Component.translatable(reason.translationKey());
+        }
+        return Component.translatable(switch (snapshot.result()) {
+            case FAILED -> "rsi.progress.reason.failed_unspecified";
+            case CANCELLED -> "rsi.progress.reason.player_cancelled";
+            case SUCCEEDED -> "rsi.progress.status.succeeded";
+            case STOPPING -> "rsi.progress.status.stopping";
+            case WAITING -> "rsi.progress.reason.waiting_materials";
+            case RUNNING -> "rsi.progress.reason.none";
+        });
     }
 
-    private static String buildNodeSummary(CraftProgressSnapshot snapshot) {
-        if (snapshot.nodes().isEmpty()) return "";
+    private static Component nodeSummary(CraftProgressSnapshot snapshot) {
+        if (snapshot.nodes().isEmpty()) return null;
         int blocked = 0;
         int ready = 0;
-        int running = 0;
         int draining = 0;
         int completedOperations = 0;
         int totalOperations = 0;
         for (CraftProgressSnapshot.NodeProgress node : snapshot.nodes()) {
-            switch (node.state()) {
-                case BLOCKED -> blocked++;
-                case READY -> ready++;
-                case RUNNING -> running++;
-                default -> { }
-            }
+            if (node.state() == CraftProgressSnapshot.NodeState.BLOCKED) blocked++;
+            if (node.state() == CraftProgressSnapshot.NodeState.READY) ready++;
             if (node.draining()) draining++;
             completedOperations += node.completedOperations();
             totalOperations += node.totalOperations();
         }
-        StringBuilder summary = new StringBuilder();
-        if (blocked > 0) summary.append("B:").append(blocked).append(' ');
-        if (ready > 0) summary.append("R:").append(ready).append(' ');
-        if (running > 0) summary.append("Run:").append(running).append(' ');
-        if (draining > 0) summary.append("Drain:").append(draining).append(' ');
-        summary.append("Ops ").append(completedOperations).append('/').append(totalOperations);
-        return summary.toString();
-    }
-
-    @SubscribeEvent
-    public static void onMouseClick(InputEvent.MouseButton event) {
-        if (event.getAction() != GLFW.GLFW_PRESS || event.getButton() != GLFW.GLFW_MOUSE_BUTTON_LEFT) return;
-        if (cancelBtnW <= 0 || cancelBtnH <= 0) return;
-        Minecraft mc = Minecraft.getInstance();
-        if (mc.player == null || mc.screen != null) return;
-        if (!CraftProgressTracker.hasActive()) return;
-
-        int screenW = mc.getWindow().getGuiScaledWidth();
-        int screenH = mc.getWindow().getGuiScaledHeight();
-        int mouseX = (int) mc.mouseHandler.xpos() * screenW / mc.getWindow().getScreenWidth();
-        int mouseY = (int) mc.mouseHandler.ypos() * screenH / mc.getWindow().getScreenHeight();
-
-        if (mouseX >= cancelBtnX && mouseX <= cancelBtnX + cancelBtnW
-                && mouseY >= cancelBtnY && mouseY <= cancelBtnY + cancelBtnH) {
-            CraftProgressSnapshot snap = CraftProgressTracker.first();
-            if (snap != null && !snap.isTerminal()) {
-                BatchCraftNetworkHandler.CHANNEL.sendToServer(
-                        new CraftCancelPacket(snap.craftId()));
-                CraftProgressTracker.remove(snap.craftId());
-            }
+        List<Component> parts = new ArrayList<>();
+        if (blocked > 0) parts.add(Component.translatable("rsi.progress.badge.blocked", blocked));
+        if (ready > 0) parts.add(Component.translatable("rsi.progress.badge.ready", ready));
+        if (draining > 0) parts.add(Component.translatable("rsi.progress.badge.draining", draining));
+        if (totalOperations > 1) {
+            parts.add(Component.translatable("rsi.progress.summary_operations",
+                    completedOperations, totalOperations));
         }
+        if (parts.isEmpty()) return null;
+        Component result = parts.get(0).copy();
+        for (int i = 1; i < parts.size(); i++) {
+            result = result.copy().append(Component.literal(" · ")).append(parts.get(i));
+        }
+        return result;
     }
+
+    private static List<FormattedCharSequence> limitedLines(Font font, Component component,
+                                                              int width, int limit) {
+        List<FormattedCharSequence> lines = font.split(component, width);
+        if (lines.size() <= limit) return lines;
+        return List.copyOf(lines.subList(0, limit));
+    }
+
+    static int progressPercent(CraftProgressSnapshot snapshot) {
+        if (snapshot.result() == CraftProgressSnapshot.Result.SUCCEEDED) return 100;
+        if (snapshot.totalNodes() <= 0) return 0;
+        return Math.max(0, Math.min(99,
+                Math.round(snapshot.completedNodes() * 100f / snapshot.totalNodes())));
+    }
+
+    private static boolean isMouseOver(Minecraft minecraft, int screenWidth, int screenHeight,
+                                       int x, int y, int width, int height) {
+        int mouseX = (int) minecraft.mouseHandler.xpos() * screenWidth
+                / minecraft.getWindow().getScreenWidth();
+        int mouseY = (int) minecraft.mouseHandler.ypos() * screenHeight
+                / minecraft.getWindow().getScreenHeight();
+        return mouseX >= x && mouseX <= x + width && mouseY >= y && mouseY <= y + height;
+    }
+
+    private static void clearCancelHitbox() {
+        cancelBtnX = 0;
+        cancelBtnY = 0;
+        cancelBtnW = 0;
+        cancelBtnH = 0;
+    }
+
 }

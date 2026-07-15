@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.crafting.graph;
 
+import com.huanghuang.rsintegration.crafting.CraftPlanningRevision;
+
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -13,12 +15,23 @@ public record CraftPlanGraph(
         List<MaterialAllocation> allocations,
         List<RootDemand> rootDemands,
         List<UnresolvedDemand> unresolvedDemands,
-        List<NodeId> topologicalOrder
+        List<NodeId> topologicalOrder,
+        long planningRevision
 ) {
     public static final int CURRENT_VERSION = 1;
 
+    public CraftPlanGraph(int version, List<CraftNode> nodes,
+                          List<MaterialAllocation> allocations,
+                          List<RootDemand> rootDemands,
+                          List<UnresolvedDemand> unresolvedDemands,
+                          List<NodeId> topologicalOrder) {
+        this(version, nodes, allocations, rootDemands, unresolvedDemands,
+                topologicalOrder, CraftPlanningRevision.current());
+    }
+
     public CraftPlanGraph {
         if (version <= 0) throw new IllegalArgumentException("graph version must be positive");
+        if (planningRevision <= 0) throw new IllegalArgumentException("planning revision must be positive");
         nodes = List.copyOf(nodes);
         allocations = List.copyOf(allocations);
         rootDemands = List.copyOf(rootDemands);

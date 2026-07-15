@@ -35,6 +35,19 @@ class DagSchedulerTest extends BootstrapTest {
     }
 
     @Test
+    void materialPublicationCanUnlockDependentBeforeProducerTerminal() {
+        DagScheduler scheduler = new DagScheduler(forkJoinGraph());
+        List<NodeId> producers = scheduler.claimReady(2);
+
+        scheduler.refreshBlocked(nodeId -> nodeId.equals(new NodeId(2)));
+
+        assertEquals(DagScheduler.NodeState.READY, scheduler.state(new NodeId(2)));
+        assertEquals(List.of(new NodeId(2)), scheduler.claimReady(1));
+        assertEquals(DagScheduler.NodeState.RUNNING, scheduler.state(producers.get(0)));
+        assertEquals(DagScheduler.NodeState.RUNNING, scheduler.state(producers.get(1)));
+    }
+
+    @Test
     void failureStopsDispatchButLetsRunningSiblingDrain() {
         DagScheduler scheduler = new DagScheduler(forkJoinGraph());
         List<NodeId> running = scheduler.claimReady(2);

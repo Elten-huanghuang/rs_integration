@@ -973,6 +973,20 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
         return myPos;
     }
 
+    @Override
+    public ItemStack getExpectedOutput() {
+        return isRitual && pendingResult != null && !pendingResult.isEmpty()
+                ? pendingResult : null;
+    }
+
+    @Override
+    public net.minecraft.world.phys.AABB getOutputCaptureRegion() {
+        if (!isRitual || myPos == null) return null;
+        return new net.minecraft.world.phys.AABB(
+                myPos.getX() - 0.5, myPos.getY() + 2.0, myPos.getZ() - 0.5,
+                myPos.getX() + 1.5, myPos.getY() + 3.5, myPos.getZ() + 1.5);
+    }
+
     // ── Step collection ──────────────────────────────────────────
 
     private static List<StepInput> collectSteps(Recipe<?> recipe) {

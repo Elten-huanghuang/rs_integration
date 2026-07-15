@@ -2,12 +2,9 @@ package com.huanghuang.rsintegration.resonance.backpack;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.resonance.disk.ResonanceDiskWrapper;
-import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.world.Container;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
-
-import java.util.ArrayList;
 
 public class ResonanceDiskInventory implements Container {
 
@@ -16,54 +13,55 @@ public class ResonanceDiskInventory implements Container {
 
     private final ResonanceDiskWrapper disk;
     private final ItemStack[] slots = new ItemStack[SLOTS];
+    private final ItemStack[] committed = new ItemStack[SLOTS];
+    private boolean reconciling;
+    private boolean reloadedAfterRecoveryFailure;
 
     public ResonanceDiskInventory(ResonanceDiskWrapper disk) {
         this.disk = disk;
-        for (int i = 0; i < SLOTS; i++) slots[i] = ItemStack.EMPTY;
+        for (int i = 0; i < SLOTS; i++) {
+            slots[i] = ItemStack.EMPTY;
+            committed[i] = ItemStack.EMPTY;
+        }
         loadFromDisk();
     }
 
     private void loadFromDisk() {
         int loaded = 0;
         int migrated = 0;
-        // First pass: items with RSISlot tag → designated slot (KEEP tag for NBT match with disk)
-        for (ItemStack stack : disk.delegate().getStacks()) {
-            if (stack.isEmpty()) continue;
-            net.minecraft.nbt.CompoundTag tag = stack.getTag();
-            int slot = (tag != null && tag.contains(RSI_SLOT_TAG)) ? tag.getInt(RSI_SLOT_TAG) : -1;
-            if (slot < 0 || slot >= SLOTS) continue;
-            slots[slot] = stack.copy();
-            loaded++;
-        }
-        // Second pass: items without a valid slot assignment → fill empty slots.
-        // Covers: (a) pre-slot-tracking items with no RSISlot tag,
-        //         (b) items inserted via RSInventoryBridge/TickSimulator with RSISlot=-1.
-        // Container and disk copies share the same NBT, so manualExtract can find them.
-        // On first player interaction, ResonanceSlot.set() will re-tag them via manualInsert.
-        for (ItemStack stack : disk.delegate().getStacks()) {
-            if (stack.isEmpty()) continue;
-            net.minecraft.nbt.CompoundTag tag = stack.getTag();
-            int slotVal = (tag != null && tag.contains(RSI_SLOT_TAG)) ? tag.getInt(RSI_SLOT_TAG) : -1;
-            if (slotVal >= 0 && slotVal < SLOTS) continue; // already placed by pass 1
-            int slot = nextEmpty();
+        for (ItemStack stored : disk.delegate().getStacks()) {
+            if (stored.isEmpty()) continue;
+            ItemStack display = stored.copy();
+            net.minecraft.nbt.CompoundTag tag = display.getTag();
+            int designated = tag != null && tag.contains(RSI_SLOT_TAG)
+                    ? tag.getInt(RSI_SLOT_TAG) : -1;
+            ResonanceDiskWrapper.rsi$stripSlotTag(display);
+
+            int slot = designated;
+            if (slot < 0 || slot >= SLOTS || !slots[slot].isEmpty()) {
+                slot = nextEmpty();
+                migrated++;
+            }
             if (slot < 0) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Backpack] loadFromDisk: {} distinct stacks exceed {} slots — "
-                    + "{} orphaned stacks are only accessible via RS Grid, not backpack UI",
-                    disk.delegate().getStacks().size(), SLOTS,
-                    disk.delegate().getStacks().size() - SLOTS);
-            break;
-        }
-            slots[slot] = stack.copy();
+                RSIntegrationMod.LOGGER.warn("[RSI-Backpack] {} distinct stacks exceed {} UI slots; "
+                        + "remaining stacks stay accessible through the RS grid",
+                        disk.delegate().getStacks().size(), SLOTS);
+                break;
+            }
+            slots[slot] = display.copy();
+            committed[slot] = display.copy();
             loaded++;
-            migrated++;
         }
-        if (loaded > 0) RSIntegrationMod.LOGGER.info("[RSI-Backpack] loadFromDisk done: {} loaded ({} migrated), diskStored={}",
-                loaded, migrated, disk.getStored());
+        if (loaded > 0) {
+            RSIntegrationMod.LOGGER.info("[RSI-Backpack] Loaded {} stacks ({} remapped), diskStored={}",
+                    loaded, migrated, disk.getStored());
+        }
     }
 
     private int nextEmpty() {
-        for (int i = 0; i < SLOTS; i++)
+        for (int i = 0; i < SLOTS; i++) {
             if (slots[i].isEmpty()) return i;
+        }
         return -1;
     }
 
@@ -81,56 +79,135 @@ public class ResonanceDiskInventory implements Container {
 
     @Override
     public ItemStack removeItem(int index, int count) {
-        ItemStack stack = slots[index];
-        if (stack.isEmpty()) return ItemStack.EMPTY;
-        ItemStack taken = stack.split(count);
-        if (stack.isEmpty()) slots[index] = ItemStack.EMPTY;
-        disk.manualExtract(index, taken.copy(), taken.getCount(), 0, Action.PERFORM);
-        ResonanceDiskWrapper.rsi$stripSlotTag(taken);
+        if (count <= 0 || slots[index].isEmpty()) return ItemStack.EMPTY;
+        ItemStack previous = committed[index].copy();
+        int removedCount = Math.min(count, previous.getCount());
+        ItemStack requested = previous.copy();
+        requested.shrink(removedCount);
+        if (requested.isEmpty()) requested = ItemStack.EMPTY;
+        if (!commit(index, previous, requested)) return ItemStack.EMPTY;
+
+        ItemStack taken = previous.copyWithCount(removedCount);
+        if (!reloadedAfterRecoveryFailure) {
+            slots[index] = requested.copy();
+            committed[index] = requested.copy();
+        }
         return taken;
     }
 
     @Override
     public ItemStack removeItemNoUpdate(int index) {
-        ItemStack stack = slots[index];
-        if (stack.isEmpty()) return ItemStack.EMPTY;
+        ItemStack previous = committed[index].copy();
+        if (previous.isEmpty() || !commit(index, previous, ItemStack.EMPTY)) return ItemStack.EMPTY;
         slots[index] = ItemStack.EMPTY;
-        disk.manualExtract(index, stack.copy(), stack.getCount(), 0, Action.PERFORM);
-        ResonanceDiskWrapper.rsi$stripSlotTag(stack);
-        return stack;
+        committed[index] = ItemStack.EMPTY;
+        return previous;
     }
 
     @Override
     public void setItem(int index, ItemStack stack) {
-        // Pure slot writer by design: the only caller is ResonanceSlot.set(),
-        // which already extracts/inserts against the disk before delegating here.
-        // Syncing the disk again would double-apply the swap and dupe/lose items.
-        slots[index] = stack;
+        ItemStack requested = sanitize(stack);
+        int limit = Math.min(getMaxStackSize(), requested.getMaxStackSize());
+        if (!requested.isEmpty() && requested.getCount() > limit) requested.setCount(limit);
+
+        ItemStack previous = committed[index].copy();
+        if (commit(index, previous, requested)) {
+            slots[index] = requested.copy();
+            committed[index] = requested.copy();
+        } else if (!reloadedAfterRecoveryFailure) {
+            slots[index] = previous.copy();
+        }
     }
 
     @Override
     public int getMaxStackSize() { return 64; }
 
     @Override
-    public void setChanged() {}
+    public void setChanged() {
+        if (reconciling) return;
+        reconciling = true;
+        try {
+            for (int i = 0; i < SLOTS; i++) {
+                ItemStack requested = sanitize(slots[i]);
+                ItemStack previous = committed[i].copy();
+                if (sameStack(previous, requested)) continue;
+                if (commit(i, previous, requested)) {
+                    slots[i] = requested.copy();
+                    committed[i] = requested.copy();
+                } else if (!reloadedAfterRecoveryFailure) {
+                    slots[i] = previous.copy();
+                } else {
+                    break;
+                }
+            }
+        } finally {
+            reconciling = false;
+        }
+    }
 
     @Override
     public boolean stillValid(Player player) { return true; }
 
     @Override
     public void clearContent() {
-        // Extract all stacks from disk — handles both slot-mapped and orphaned entries
-        for (ItemStack stack : new ArrayList<>(disk.delegate().getStacks())) {
-            if (!stack.isEmpty()) {
-                disk.manualExtractExact(stack, stack.getCount(), 0, Action.PERFORM);
+        for (int i = 0; i < SLOTS; i++) {
+            ItemStack previous = committed[i].copy();
+            if (previous.isEmpty()) continue;
+            if (commit(i, previous, ItemStack.EMPTY)) {
+                slots[i] = ItemStack.EMPTY;
+                committed[i] = ItemStack.EMPTY;
             }
         }
-        for (int i = 0; i < SLOTS; i++) {
-            slots[i] = ItemStack.EMPTY;
-        }
+    }
+
+    int simulateAccept(int index, ItemStack stack) {
+        if (stack.isEmpty()) return 0;
+        ItemStack current = committed[index];
+        if (!current.isEmpty() && !ItemStack.isSameItemSameTags(current, sanitize(stack))) return 0;
+        int stackSpace = stack.getMaxStackSize() - current.getCount();
+        int capacitySpace = disk.getCapacity() - disk.getStored();
+        int request = Math.min(stack.getCount(), Math.min(stackSpace, capacitySpace));
+        return disk.simulateInsertCount(index, stack, Math.max(0, request));
     }
 
     int getStoredCount() { return disk.getStored(); }
 
     int getCapacity() { return disk.getCapacity(); }
+
+    private boolean commit(int index, ItemStack previous, ItemStack requested) {
+        reloadedAfterRecoveryFailure = false;
+        if (sameStack(previous, requested)) return true;
+        ResonanceDiskWrapper.SlotMutationResult result =
+                disk.reconcileSlot(index, previous, requested);
+        if (result == ResonanceDiskWrapper.SlotMutationResult.RECOVERY_FAILED) {
+            RSIntegrationMod.LOGGER.error("[RSI-Backpack] Slot {} mutation and recovery failed: {} x{} -> {} x{}; reloading disk state",
+                    index, previous.getItem(), previous.getCount(), requested.getItem(), requested.getCount());
+            reloadFromDisk();
+            reloadedAfterRecoveryFailure = true;
+        } else if (result == ResonanceDiskWrapper.SlotMutationResult.REJECTED) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Backpack] Rejected slot {} mutation: {} x{} -> {} x{}",
+                    index, previous.getItem(), previous.getCount(), requested.getItem(), requested.getCount());
+        }
+        return result == ResonanceDiskWrapper.SlotMutationResult.SUCCESS;
+    }
+
+    private void reloadFromDisk() {
+        for (int i = 0; i < SLOTS; i++) {
+            slots[i] = ItemStack.EMPTY;
+            committed[i] = ItemStack.EMPTY;
+        }
+        loadFromDisk();
+    }
+
+    private static ItemStack sanitize(ItemStack stack) {
+        if (stack.isEmpty()) return ItemStack.EMPTY;
+        ItemStack copy = stack.copy();
+        ResonanceDiskWrapper.rsi$stripSlotTag(copy);
+        return copy;
+    }
+
+    private static boolean sameStack(ItemStack first, ItemStack second) {
+        if (first.isEmpty() || second.isEmpty()) return first.isEmpty() && second.isEmpty();
+        return first.getCount() == second.getCount() && ItemStack.isSameItemSameTags(first, second);
+    }
 }

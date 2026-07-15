@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Predicate;
 
 /** Deterministic graph lifecycle state used by the server-thread executor. */
 public final class DagScheduler {
@@ -99,6 +100,12 @@ public final class DagScheduler {
     }
 
     public void succeed(NodeId nodeId) {
+        succeed(nodeId, ignored -> true);
+    }
+
+    /** Complete a node and unlock only dependents whose material gate is ready. */
+    public void succeed(NodeId nodeId, Predicate<NodeId> readiness) {
+        Objects.requireNonNull(readiness, "readiness");
         requireState(nodeId, NodeState.RUNNING);
         states.put(nodeId, NodeState.SUCCEEDED);
         if (stopping) return;
@@ -106,9 +113,22 @@ public final class DagScheduler {
             if (states.get(dependent) != NodeState.BLOCKED) continue;
             boolean allSucceeded = dependencies.getOrDefault(dependent, Set.of()).stream()
                     .allMatch(dependency -> states.get(dependency) == NodeState.SUCCEEDED);
-            if (allSucceeded) {
+            if (allSucceeded && readiness.test(dependent)) {
                 states.put(dependent, NodeState.READY);
                 ready.add(dependent);
+            }
+        }
+    }
+
+    /** Re-evaluate material-gated nodes after incremental publications. */
+    public void refreshBlocked(Predicate<NodeId> readiness) {
+        Objects.requireNonNull(readiness, "readiness");
+        if (stopping) return;
+        for (NodeId nodeId : graph.topologicalOrder()) {
+            if (states.get(nodeId) != NodeState.BLOCKED) continue;
+            if (readiness.test(nodeId)) {
+                states.put(nodeId, NodeState.READY);
+                ready.add(nodeId);
             }
         }
     }

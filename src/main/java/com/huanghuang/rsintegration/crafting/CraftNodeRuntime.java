@@ -6,6 +6,7 @@ import com.huanghuang.rsintegration.crafting.graph.ConcurrentNodeExecutor;
 import com.huanghuang.rsintegration.crafting.graph.MachineLeaseRegistry;
 import com.huanghuang.rsintegration.crafting.graph.NodeAdmissionCoordinator;
 import com.huanghuang.rsintegration.crafting.graph.NodeId;
+import com.huanghuang.rsintegration.crafting.graph.NodeOutputAccumulator;
 import com.huanghuang.rsintegration.crafting.loadbalancer.ParallelCraftGroup;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
@@ -30,10 +31,15 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
     @Nullable
     private final NodeAdmissionCoordinator.Admission admission;
     @Nullable
-    private CraftOutputInterceptor.CaptureHandle capture;
+    private final OperationExecutionKernel.Session operationSession;
+    @Nullable
+    private CaptureSession capture;
+    @Nullable
+    private NodeOutputAccumulator outputs;
     private boolean dispatched;
     private boolean resourcesClosed;
     private List<ItemStack> confirmedOutputs = List.of();
+    private boolean terminalOutputsDrained;
     private int waitTicks;
     private int drainingTicks;
     private boolean stopRequested;
@@ -46,23 +52,54 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
     CraftNodeRuntime(NodeId nodeId, String nodeLabel, IBatchDelegate delegate,
                      @Nullable ExtractionLedger nodeLedger,
                      @Nullable MachineLeaseRegistry.Lease machineLease) {
-        this(nodeId, nodeLabel, delegate, nodeLedger, machineLease, null);
+        this(nodeId, nodeLabel, delegate, nodeLedger, machineLease, null, null);
     }
 
     CraftNodeRuntime(NodeId nodeId, String nodeLabel, IBatchDelegate delegate,
                      @Nullable ExtractionLedger nodeLedger,
-                     @Nullable MachineLeaseRegistry.Lease machineLease,
-                     @Nullable NodeAdmissionCoordinator.Admission admission) {
+                     @Nullable NodeAdmissionCoordinator.Admission admission,
+                     @Nullable OperationExecutionKernel.Session operationSession) {
+        this(nodeId, nodeLabel, delegate, nodeLedger, null, admission, operationSession);
+    }
+
+    private CraftNodeRuntime(NodeId nodeId, String nodeLabel, IBatchDelegate delegate,
+                             @Nullable ExtractionLedger nodeLedger,
+                             @Nullable MachineLeaseRegistry.Lease machineLease,
+                             @Nullable NodeAdmissionCoordinator.Admission admission,
+                             @Nullable OperationExecutionKernel.Session operationSession) {
         this.nodeId = nodeId;
         this.nodeLabel = nodeLabel;
         this.delegate = delegate;
         this.nodeLedger = nodeLedger;
         this.machineLease = machineLease;
         this.admission = admission;
+        this.operationSession = operationSession;
     }
 
-    void attachCapture(CraftOutputInterceptor.CaptureHandle handle) {
+    void attachCapture(CaptureSession handle) {
         this.capture = handle;
+    }
+
+    void attachOutputs(NodeOutputAccumulator outputs) {
+        this.outputs = outputs;
+    }
+
+    List<NodeOutputAccumulator.Publication> drainIncrementalOutputs() {
+        if (outputs == null) return List.of();
+        List<ItemStack> actual = new java.util.ArrayList<>(drainSettledResults());
+        if (terminal && !terminalOutputsDrained) {
+            terminalOutputsDrained = true;
+            actual.addAll(confirmedOutputs);
+        }
+        return outputs.add(actual);
+    }
+
+    boolean outputsComplete() {
+        return outputs == null || outputs.isComplete();
+    }
+
+    List<ItemStack> drainOutputSurplus() {
+        return outputs == null ? List.of() : outputs.drainSurplus();
     }
 
     void setChainContext(List<ItemStack> virtualInventory, @Nullable ServerPlayer player) {
@@ -82,17 +119,79 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
 
     void markDispatched() { dispatched = true; }
 
+    void markStartFailed(String reason) {
+        failureReason = reason;
+    }
+
     boolean wasDispatched() { return dispatched; }
+
+    @Nullable OperationExecutionKernel.TerminalClass operationTerminalClass() {
+        return operationSession == null ? null : operationSession.terminalClass();
+    }
+
+    OperationExecutionKernel.CompletionResult completeOperation(
+            OperationExecutionKernel.OutputValidator outputs,
+            OperationExecutionKernel.SettlementAction settlement) {
+        if (operationSession == null) {
+            boolean outputComplete = outputs.validate();
+            settlement.settle();
+            return outputComplete
+                    ? OperationExecutionKernel.CompletionResult.SUCCEEDED
+                    : OperationExecutionKernel.CompletionResult.OUTPUT_SHORTAGE;
+        }
+        return operationSession.complete(outputs, settlement);
+    }
+
+    void settleOperation(OperationExecutionKernel.SettlementAction action) {
+        if (operationSession != null && !operationSession.settled()) {
+            operationSession.settle(action);
+        } else {
+            action.settle();
+        }
+    }
+
+    void classifyTermination(TerminationCoordinator coordinator) {
+        if (delegate instanceof ParallelCraftGroup group) {
+            int completed = group.getCompletedOperations();
+            int running = group.getRunningOperations();
+            int queued = Math.max(0, group.getTotalOperations() - completed - running);
+            for (int i = 0; i < completed; i++) {
+                coordinator.classify(TerminationCoordinator.OperationState.SETTLED);
+            }
+            for (int i = 0; i < running; i++) {
+                coordinator.classify(TerminationCoordinator.OperationState.IN_FLIGHT);
+            }
+            for (int i = 0; i < queued; i++) {
+                coordinator.classify(TerminationCoordinator.OperationState.PRE_START);
+            }
+            return;
+        }
+        OperationExecutionKernel.TerminalClass terminalClass = operationTerminalClass();
+        if (terminalClass == null) {
+            coordinator.classify(dispatched
+                    ? TerminationCoordinator.OperationState.UNKNOWN
+                    : TerminationCoordinator.OperationState.PRE_START);
+            return;
+        }
+        coordinator.classify(switch (terminalClass) {
+            case PRE_START -> TerminationCoordinator.OperationState.PRE_START;
+            case IN_FLIGHT -> TerminationCoordinator.OperationState.IN_FLIGHT;
+            case SETTLED -> TerminationCoordinator.OperationState.SETTLED;
+        });
+    }
 
     boolean markResourcesClosed() {
         if (resourcesClosed) return false;
         resourcesClosed = true;
+        if (operationSession != null) operationSession.close();
         return true;
     }
 
     List<ItemStack> confirmedOutputs() { return confirmedOutputs; }
 
-    @Nullable MachineLeaseRegistry.Lease machineLease() { return machineLease; }
+    @Nullable MachineLeaseRegistry.Lease machineLease() {
+        return operationSession != null ? operationSession.machineLease() : machineLease;
+    }
 
     int waitTicks() { return waitTicks; }
 
@@ -113,8 +212,9 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
     }
 
     String machineLabel() {
-        if (machineLease == null) return "";
-        var machine = machineLease.machine();
+        MachineLeaseRegistry.Lease lease = machineLease();
+        if (lease == null) return "";
+        var machine = lease.machine();
         return machine.dimension() + "@" + machine.position().toShortString();
     }
 
@@ -122,7 +222,9 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
 
     @Override
     public ConcurrentNodeExecutor.Observation observe() {
-        if (delegate == null) return ConcurrentNodeExecutor.Observation.FAILED;
+        if (delegate == null || failureReason != null) {
+            return ConcurrentNodeExecutor.Observation.FAILED;
+        }
         waitTicks++;
 
         try {
@@ -169,7 +271,7 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
     public void stopDispatch() {
         stopRequested = true;
         if (delegate instanceof ParallelCraftGroup group) {
-            group.isDraining(); // force lazy drain flag
+            group.stopDispatch();
         }
     }
 
@@ -201,16 +303,24 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
         return List.of();
     }
 
+    List<ItemStack> drainQueuedProducerMaterials() {
+        if (delegate instanceof ParallelCraftGroup group) {
+            return group.drainQueuedProducerMaterialsForRecovery();
+        }
+        return List.of();
+    }
+
+    List<ExtractionLedger.ReservationToken> queuedReservationTokens() {
+        if (delegate instanceof ParallelCraftGroup group) {
+            return group.queuedReservationTokensForRecovery();
+        }
+        return List.of();
+    }
+
     private void doSucceed() {
         if (terminal) return;
         terminal = true;
         List<ItemStack> outputs = new java.util.ArrayList<>();
-        for (ItemStack s : drainSettledResults()) {
-            if (s != null && !s.isEmpty()) outputs.add(s.copy());
-        }
-        for (ItemStack s : drainQueuedMaterials()) {
-            if (s != null && !s.isEmpty()) outputs.add(s.copy());
-        }
         List<ItemStack> captured = disarmCapture();
         for (ItemStack s : captured) {
             if (s != null && !s.isEmpty()) outputs.add(s.copy());
@@ -247,7 +357,7 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
     }
 
     List<ItemStack> disarmCapture() {
-        CraftOutputInterceptor.CaptureHandle handle = capture;
+        CaptureSession handle = capture;
         capture = null;
         return handle == null ? List.of() : handle.drainAndClose();
     }

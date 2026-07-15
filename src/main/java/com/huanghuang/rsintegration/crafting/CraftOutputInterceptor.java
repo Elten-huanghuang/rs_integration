@@ -97,6 +97,12 @@ public final class CraftOutputInterceptor {
         return ItemStack.isSameItem(first, second);
     }
 
+    public static int activeZoneCount() {
+        int total = 0;
+        for (Map<UUID, ActiveZone> zones : ZONES.values()) total += zones.size();
+        return total;
+    }
+
     /** Used by optional magnet mixins to leave protected entities untouched. */
     public static boolean isInActiveZone(Level level, Vec3 pos) {
         if (ZONES.isEmpty()) return false;

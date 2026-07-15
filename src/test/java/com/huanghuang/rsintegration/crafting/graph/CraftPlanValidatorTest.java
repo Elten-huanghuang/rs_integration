@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.crafting.graph;
 
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -226,6 +227,134 @@ class CraftPlanValidatorTest extends BootstrapTest {
                 List.of(), List.of(nodeId));
 
         assertThrows(IllegalArgumentException.class, () -> CraftPlanValidator.validate(graph));
+    }
+
+    @Test
+    void acceptsMixedInitialAndProducerSupplyWithSecondaryAndRemainderPorts() {
+        NodeId producerId = new NodeId(0);
+        NodeId consumerId = new NodeId(1);
+        MaterialKey iron = MaterialKey.of(new ItemStack(Items.IRON_INGOT));
+        MaterialKey bucket = MaterialKey.of(new ItemStack(Items.BUCKET));
+        MaterialKey target = MaterialKey.of(new ItemStack(Items.STICK));
+        OutputPortId secondary = new OutputPortId(producerId, 0);
+        OutputPortId remainder = new OutputPortId(producerId, 1);
+        InputPortId ironInput = new InputPortId(consumerId, 0);
+        InputPortId bucketInput = new InputPortId(consumerId, 1);
+        CraftNode producer = node(producerId, "same_recipe", List.of(), List.of(
+                new OutputDeclaration(secondary, iron, 2, OutputKind.SECONDARY),
+                new OutputDeclaration(remainder, bucket, 1, OutputKind.REMAINDER)));
+        CraftNode consumer = node(consumerId, "same_recipe", List.of(
+                new InputDemand(ironInput, Ingredient.of(Items.IRON_INGOT), 3,
+                        DemandRole.CONSUMED, new ItemStack(Items.IRON_INGOT)),
+                new InputDemand(bucketInput, Ingredient.of(Items.BUCKET), 1,
+                        DemandRole.CATALYST, new ItemStack(Items.BUCKET))), List.of());
+        CraftPlanGraph graph = new CraftPlanGraph(1, List.of(producer, consumer), List.of(
+                new MaterialAllocation(new AllocationId(0), ironInput,
+                        new MaterialSource.InitialPool(iron), iron, 1),
+                new MaterialAllocation(new AllocationId(1), ironInput,
+                        new MaterialSource.ProducerOutput(secondary), iron, 2),
+                new MaterialAllocation(new AllocationId(2), bucketInput,
+                        new MaterialSource.ProducerOutput(remainder), bucket, 1)),
+                List.of(new RootDemand(Ingredient.of(Items.STICK), 1, 0,
+                        new ItemStack(Items.STICK), List.of(new RootAllocation(
+                        new MaterialSource.InitialPool(target), target, 1)))),
+                List.of(), List.of(producerId, consumerId));
+
+        CraftPlanValidator.validate(graph);
+        assertEquals(2, graph.nodesById().size());
+        assertEquals(List.of(producerId, consumerId), graph.topologicalOrder());
+    }
+
+    @Test
+    void acceptsPartialAllocationClosedByUnresolvedQuantity() {
+        NodeId nodeId = new NodeId(0);
+        InputPortId input = new InputPortId(nodeId, 0);
+        MaterialKey iron = MaterialKey.of(new ItemStack(Items.IRON_INGOT));
+        MaterialKey target = MaterialKey.of(new ItemStack(Items.STICK));
+        CraftPlanGraph graph = new CraftPlanGraph(1,
+                List.of(node(nodeId, "partial", List.of(new InputDemand(input,
+                        Ingredient.of(Items.IRON_INGOT), 3, DemandRole.CONSUMED,
+                        new ItemStack(Items.IRON_INGOT))), List.of())),
+                List.of(new MaterialAllocation(new AllocationId(0), input,
+                        new MaterialSource.InitialPool(iron), iron, 1)),
+                List.of(new RootDemand(Ingredient.of(Items.STICK), 2, 1,
+                        new ItemStack(Items.STICK), List.of(new RootAllocation(
+                        new MaterialSource.InitialPool(target), target, 1)))),
+                List.of(new UnresolvedDemand(input, Ingredient.of(Items.IRON_INGOT), 2,
+                        new ItemStack(Items.IRON_INGOT))), List.of(nodeId));
+
+        CraftPlanValidator.validate(graph);
+    }
+
+    @Test
+    void rejectsProducerOverallocatedAcrossInputAndRoot() {
+        NodeId producerId = new NodeId(0);
+        NodeId consumerId = new NodeId(1);
+        MaterialKey iron = MaterialKey.of(new ItemStack(Items.IRON_INGOT));
+        OutputPortId output = new OutputPortId(producerId, 0);
+        InputPortId input = new InputPortId(consumerId, 0);
+        CraftPlanGraph graph = new CraftPlanGraph(1, List.of(
+                node(producerId, "producer", List.of(), List.of(
+                        new OutputDeclaration(output, iron, 2, OutputKind.PRIMARY))),
+                node(consumerId, "consumer", List.of(new InputDemand(input,
+                        Ingredient.of(Items.IRON_INGOT), 1, DemandRole.CONSUMED,
+                        new ItemStack(Items.IRON_INGOT))), List.of())),
+                List.of(new MaterialAllocation(new AllocationId(0), input,
+                        new MaterialSource.ProducerOutput(output), iron, 1)),
+                List.of(new RootDemand(Ingredient.of(Items.IRON_INGOT), 2, 0,
+                        new ItemStack(Items.IRON_INGOT), List.of(new RootAllocation(
+                        new MaterialSource.ProducerOutput(output), iron, 2)))),
+                List.of(), List.of(producerId, consumerId));
+
+        assertThrows(IllegalArgumentException.class, () -> CraftPlanValidator.validate(graph));
+    }
+
+    @Test
+    void nbtDistinctMaterialsCannotCrossAllocations() {
+        NodeId nodeId = new NodeId(0);
+        InputPortId input = new InputPortId(nodeId, 0);
+        MaterialKey red = taggedDiamond("red");
+        MaterialKey blue = taggedDiamond("blue");
+        MaterialKey target = MaterialKey.of(new ItemStack(Items.STICK));
+        CraftPlanGraph graph = new CraftPlanGraph(1,
+                List.of(node(nodeId, "nbt", List.of(new InputDemand(input,
+                        Ingredient.of(red.toStack(1)), 1, DemandRole.CONSUMED, red.toStack(1))), List.of())),
+                List.of(new MaterialAllocation(new AllocationId(0), input,
+                        new MaterialSource.InitialPool(red), blue, 1)),
+                List.of(new RootDemand(Ingredient.of(Items.STICK), 1, 0,
+                        new ItemStack(Items.STICK), List.of(new RootAllocation(
+                        new MaterialSource.InitialPool(target), target, 1)))),
+                List.of(), List.of(nodeId));
+
+        assertThrows(IllegalArgumentException.class, () -> CraftPlanValidator.validate(graph));
+    }
+
+    @Test
+    void rejectsMissingAndDuplicateTopologicalNodes() {
+        NodeId first = new NodeId(0);
+        NodeId second = new NodeId(1);
+        MaterialKey target = MaterialKey.of(new ItemStack(Items.STICK));
+        List<CraftNode> nodes = List.of(node(first, "first", List.of(), List.of()),
+                node(second, "second", List.of(), List.of()));
+        RootDemand root = new RootDemand(Ingredient.of(Items.STICK), 1, 0,
+                new ItemStack(Items.STICK), List.of(new RootAllocation(
+                new MaterialSource.InitialPool(target), target, 1)));
+
+        CraftPlanGraph missing = new CraftPlanGraph(1, nodes, List.of(), List.of(root),
+                List.of(), List.of(first));
+        CraftPlanGraph duplicate = new CraftPlanGraph(1, nodes, List.of(), List.of(root),
+                List.of(), List.of(first, first));
+
+        assertThrows(IllegalArgumentException.class, () -> CraftPlanValidator.validate(missing));
+        assertThrows(IllegalArgumentException.class, () -> CraftPlanValidator.validate(duplicate));
+    }
+
+    private static MaterialKey taggedDiamond(String variant) {
+        ItemStack stack = new ItemStack(Items.DIAMOND);
+        CompoundTag tag = new CompoundTag();
+        tag.putString("variant", variant);
+        stack.setTag(tag);
+        return MaterialKey.of(stack);
     }
 
     private static CraftNode node(NodeId id, String path, List<InputDemand> inputs,

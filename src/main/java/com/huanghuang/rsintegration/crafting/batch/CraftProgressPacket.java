@@ -13,18 +13,14 @@ import java.util.List;
 import java.util.UUID;
 import java.util.function.Supplier;
 
-/**
- * S2C: periodic progress update for a running craft.
- * Terminal state is indicated by sequence == {@link CraftProgressSnapshot#TERMINAL_SEQUENCE}.
- */
+/** S2C progress update for one running or terminal craft. */
 public final class CraftProgressPacket {
 
     static final int MAX_NODES = 4096;
-    static final int MAX_FAILED_STEP_LENGTH = 1024;
+    static final int MAX_TECHNICAL_DETAIL_LENGTH = 1024;
     static final int MAX_RECIPE_ID_LENGTH = 256;
     static final int MAX_MOD_TYPE_ID_LENGTH = 128;
     static final int MAX_MACHINE_LABEL_LENGTH = 256;
-    static final int MAX_DETAIL_LENGTH = 1024;
 
     private final CraftProgressSnapshot snapshot;
 
@@ -35,13 +31,14 @@ public final class CraftProgressPacket {
     public void encode(FriendlyByteBuf buf) {
         buf.writeUUID(snapshot.craftId());
         buf.writeVarInt(snapshot.sequence());
-        buf.writeByte(snapshot.chainState());
+        buf.writeVarInt(snapshot.result().ordinal());
+        buf.writeVarInt(snapshot.reason().ordinal());
         buf.writeVarInt(requireNonNegative(snapshot.completedNodes(), "completedNodes"));
         buf.writeVarInt(requireNonNegative(snapshot.totalNodes(), "totalNodes"));
         buf.writeVarInt(requireNonNegative(snapshot.runningNodes(), "runningNodes"));
-        buf.writeBoolean(snapshot.failedStep() != null);
-        if (snapshot.failedStep() != null) {
-            buf.writeUtf(snapshot.failedStep(), MAX_FAILED_STEP_LENGTH);
+        buf.writeBoolean(snapshot.technicalDetail() != null);
+        if (snapshot.technicalDetail() != null) {
+            buf.writeUtf(snapshot.technicalDetail(), MAX_TECHNICAL_DETAIL_LENGTH);
         }
         List<CraftProgressSnapshot.NodeProgress> nodes = snapshot.nodes();
         if (nodes.size() > MAX_NODES) {
@@ -49,8 +46,7 @@ public final class CraftProgressPacket {
         }
         buf.writeVarInt(nodes.size());
         for (CraftProgressSnapshot.NodeProgress node : nodes) {
-            int completedOperations = requireNonNegative(
-                    node.completedOperations(), "completedOperations");
+            int completedOperations = requireNonNegative(node.completedOperations(), "completedOperations");
             int totalOperations = requireNonNegative(node.totalOperations(), "totalOperations");
             int runningOperations = requireNonNegative(node.runningOperations(), "runningOperations");
             validateOperationCountsForEncode(completedOperations, totalOperations, runningOperations);
@@ -62,7 +58,8 @@ public final class CraftProgressPacket {
             buf.writeVarInt(totalOperations);
             buf.writeVarInt(runningOperations);
             buf.writeUtf(node.machineLabel(), MAX_MACHINE_LABEL_LENGTH);
-            buf.writeUtf(node.detail(), MAX_DETAIL_LENGTH);
+            buf.writeVarInt(node.reason().ordinal());
+            buf.writeUtf(node.technicalDetail(), MAX_TECHNICAL_DETAIL_LENGTH);
             buf.writeBoolean(node.draining());
         }
     }
@@ -70,36 +67,35 @@ public final class CraftProgressPacket {
     public static CraftProgressPacket decode(FriendlyByteBuf buf) {
         UUID craftId = buf.readUUID();
         int sequence = buf.readVarInt();
-        byte state = buf.readByte();
+        CraftProgressSnapshot.Result result = CraftProgressSnapshot.Result.fromOrdinal(buf.readVarInt());
+        CraftProgressSnapshot.Reason reason = CraftProgressSnapshot.Reason.fromOrdinal(buf.readVarInt());
         int completed = readNonNegative(buf, "completedNodes");
         int total = readNonNegative(buf, "totalNodes");
         int running = readNonNegative(buf, "runningNodes");
-        String failed = buf.readBoolean() ? buf.readUtf(MAX_FAILED_STEP_LENGTH) : null;
-        List<CraftProgressSnapshot.NodeProgress> nodes = List.of();
-        if (buf.isReadable()) {
-            int count = readBoundedCount(buf);
-            List<CraftProgressSnapshot.NodeProgress> decoded = new ArrayList<>(count);
-            for (int i = 0; i < count; i++) {
-                int nodeId = readNonNegative(buf, "nodeId");
-                CraftProgressSnapshot.NodeState nodeState =
-                        CraftProgressSnapshot.NodeState.fromOrdinal(buf.readVarInt());
-                String recipeId = buf.readUtf(MAX_RECIPE_ID_LENGTH);
-                String modTypeId = buf.readUtf(MAX_MOD_TYPE_ID_LENGTH);
-                int completedOperations = readNonNegative(buf, "completedOperations");
-                int totalOperations = readNonNegative(buf, "totalOperations");
-                int runningOperations = readNonNegative(buf, "runningOperations");
-                validateOperationCounts(completedOperations, totalOperations, runningOperations);
-                String machineLabel = buf.readUtf(MAX_MACHINE_LABEL_LENGTH);
-                String detail = buf.readUtf(MAX_DETAIL_LENGTH);
-                boolean draining = buf.readBoolean();
-                decoded.add(new CraftProgressSnapshot.NodeProgress(nodeId, nodeState,
-                        recipeId, modTypeId, completedOperations, totalOperations,
-                        runningOperations, machineLabel, detail, draining));
-            }
-            nodes = List.copyOf(decoded);
+        String detail = buf.readBoolean() ? buf.readUtf(MAX_TECHNICAL_DETAIL_LENGTH) : null;
+        int count = readBoundedCount(buf);
+        List<CraftProgressSnapshot.NodeProgress> nodes = new ArrayList<>(count);
+        for (int i = 0; i < count; i++) {
+            int nodeId = readNonNegative(buf, "nodeId");
+            CraftProgressSnapshot.NodeState nodeState =
+                    CraftProgressSnapshot.NodeState.fromOrdinal(buf.readVarInt());
+            String recipeId = buf.readUtf(MAX_RECIPE_ID_LENGTH);
+            String modTypeId = buf.readUtf(MAX_MOD_TYPE_ID_LENGTH);
+            int completedOperations = readNonNegative(buf, "completedOperations");
+            int totalOperations = readNonNegative(buf, "totalOperations");
+            int runningOperations = readNonNegative(buf, "runningOperations");
+            validateOperationCounts(completedOperations, totalOperations, runningOperations);
+            String machineLabel = buf.readUtf(MAX_MACHINE_LABEL_LENGTH);
+            CraftProgressSnapshot.Reason nodeReason =
+                    CraftProgressSnapshot.Reason.fromOrdinal(buf.readVarInt());
+            String nodeDetail = buf.readUtf(MAX_TECHNICAL_DETAIL_LENGTH);
+            boolean draining = buf.readBoolean();
+            nodes.add(new CraftProgressSnapshot.NodeProgress(nodeId, nodeState,
+                    recipeId, modTypeId, completedOperations, totalOperations,
+                    runningOperations, machineLabel, nodeReason, nodeDetail, draining));
         }
-        return new CraftProgressPacket(new CraftProgressSnapshot(craftId, sequence, state,
-                completed, total, running, failed, nodes));
+        return new CraftProgressPacket(new CraftProgressSnapshot(craftId, sequence, result, reason,
+                completed, total, running, detail, List.copyOf(nodes)));
     }
 
     private static int readBoundedCount(FriendlyByteBuf buf) {

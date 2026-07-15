@@ -639,6 +639,19 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
         return myPos;
     }
 
+    @Override
+    public ItemStack getExpectedOutput() {
+        if (recipe == null || myLevel == null) return null;
+        ItemStack expected = com.huanghuang.rsintegration.crafting.RecipeIndex
+                .tryGetResultItem(recipe, myLevel.registryAccess());
+        return expected.isEmpty() ? null : expected;
+    }
+
+    @Override
+    public net.minecraft.world.phys.AABB getOutputCaptureRegion() {
+        return myPos == null ? null : new net.minecraft.world.phys.AABB(myPos).inflate(3);
+    }
+
     // ── Pedestal helpers ─────────────────────────────────────────
 
     /** Spirit crucible may appear in Malum's capturePedestals() result

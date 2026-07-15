@@ -46,6 +46,14 @@ public final class PlanTreeModel {
         return fromLegacySteps(plan);
     }
 
+    private static int maxTreeCandidates() {
+        try {
+            return RSIntegrationConfig.RECIPE_TREE_MAX_CANDIDATES.get();
+        } catch (IllegalStateException ignored) {
+            return 8;
+        }
+    }
+
     private static PlanTreeModel fromLegacySteps(PlanResponse plan) {
         Map<IngredientKey, PlanStep> producerByOutput = new LinkedHashMap<>();
         for (PlanStep step : plan.steps()) {
@@ -75,8 +83,21 @@ public final class PlanTreeModel {
         for (PlanGraphView.NodeView node : graph.nodes()) nodes.put(node.nodeId(), node);
 
         ItemStack target = plan.targetResult();
+        PlanStep targetStep = null;
+        if (plan.recipeId() != null) {
+            for (PlanStep step : plan.steps()) {
+                if (plan.recipeId().equals(step.recipeId().toString())) {
+                    targetStep = step;
+                    break;
+                }
+            }
+        }
         PlanTreeNode root = new PlanTreeNode(IngredientKey.of(target), target,
-                target.getCount() * Math.max(1, plan.repeatCount()), 0, null);
+                target.getCount() * Math.max(1, plan.repeatCount()), 0, targetStep);
+        if (targetStep != null) {
+            root.limited = targetStep.alternatives().size()
+                    > RSIntegrationConfig.RECIPE_TREE_MAX_CANDIDATES.get();
+        }
         applyAvailability(root, plan, target);
 
         // Root allocations are explicit sinks. A plan may contain several root
@@ -134,6 +155,7 @@ public final class PlanTreeModel {
                 ? producer.primaryOutput().copyWithCount(1) : material.copyWithCount(1);
         PlanTreeNode node = new PlanTreeNode(IngredientKey.of(display), display,
                 quantity, depth, producer.asPlanStep(), producer.nodeId());
+        node.limited = node.step.alternatives().size() > maxTreeCandidates();
         node.edgeQuantity = quantity;
         for (PlanGraphView.OutputView output : producer.outputs()) {
             if (output.portIndex() == source.producerPortIndex()) {

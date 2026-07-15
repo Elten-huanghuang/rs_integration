@@ -8,6 +8,7 @@ import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.reflection.probes.YHKReflection;
 import com.huanghuang.rsintegration.util.Reflect;
 import com.refinedmods.refinedstorage.api.network.INetwork;
+import dev.xkmc.youkaishomecoming.content.block.food.PotFoodBlock;
 import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
@@ -62,11 +63,6 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
     private static volatile Method getResultMethod;    // PotCookingRecipe.getResult()
     private static volatile Method inProgressMethod;   // TimedRecipeBlockEntity.inProgress()
     private static volatile Method containerMethod;    // CookingBlockEntity.container()
-    // -- PotFoodBlock (soup-pot result block) reflection; all optional --
-    private static volatile Class<?> potFoodBlockClass;   // content.block.food.PotFoodBlock
-    private static volatile Method asBowlsMethod;         // PotFoodBlock.asBowls() -> food * serve
-    private static volatile Field potFoodFoodField;       // BowlBlock.food (ItemLike) — fallback
-    private static volatile Field potFoodServeField;      // PotFoodBlock.serve (int) — fallback
     private static volatile boolean reflectionProbed;
 
     @Override
@@ -102,22 +98,14 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
         for (Ingredient ing : ingredients) {
             if (!ing.isEmpty()) specs.add(new IngredientSpec(ing, 1));
         }
-        // Soup-pot recipes serve into bowls: reserve `serve` bowls so the
-        // resolver auto-crafts them if missing and the ledger accounts for them.
-        ItemStack bowls = computeServeBowls(recipe);
-        if (!bowls.isEmpty()) {
-            specs.add(new IngredientSpec(
-                    Ingredient.of(bowls), bowls.getCount()));
+        // PotFood recipes must have a valid serving-container contract. Never
+        // silently omit bowls, which would mint free bowl-servings at collection.
+        if (isPotFoodRecipe(recipe)) {
+            ItemStack bowls = computeServeBowls(recipe);
+            if (bowls.isEmpty()) return null;
+            specs.add(new IngredientSpec(Ingredient.of(bowls), bowls.getCount()));
         }
         return specs.isEmpty() ? null : specs;
-    }
-
-    /** Whether {@code stack} is the serve-bowl for this recipe (a required
-     *  material that must NOT be inserted into the pot). */
-    private boolean isServeBowl(ItemStack stack) {
-        if (stack.isEmpty()) return false;
-        ItemStack bowls = computeServeBowls(recipe);
-        return !bowls.isEmpty() && stack.getItem() == bowls.getItem();
     }
 
     @Override
@@ -199,12 +187,26 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
             RSIntegrationMod.LOGGER.warn("[RSI-CookingPot] setLastPlayer reflection failed", e);
         }
 
-        for (ItemStack mat : materials) {
+        ItemStack serveBowls = computeServeBowls(recipe);
+        if (isPotFoodRecipe(recipe)) {
+            if (serveBowls.isEmpty() || materials.isEmpty()) {
+                forceChunkLoad(false);
+                return false;
+            }
+            ItemStack suppliedBowls = materials.get(materials.size() - 1);
+            if (!ItemStack.isSameItemSameTags(serveBowls, suppliedBowls)
+                    || suppliedBowls.getCount() < serveBowls.getCount()) {
+                forceChunkLoad(false);
+                return false;
+            }
+        }
+
+        for (int i = 0; i < materials.size(); i++) {
+            ItemStack mat = materials.get(i);
             if (mat.isEmpty()) continue;
-            // Serve-bowls are reserved as a required material but must not go
-            // into the pot — they're the containers the finished servings ship
-            // in (consumed at collectResult time).
-            if (isServeBowl(mat)) continue;
+            // Only the final, validated material is the serving container. Do not
+            // skip a same-item bowl that is an actual recipe ingredient.
+            if (!serveBowls.isEmpty() && i == materials.size() - 1) continue;
             ItemStack single = mat.copyWithCount(1);
             if (!tryAddItem(be, single)) {
                 RSIntegrationMod.LOGGER.warn("[RSI-CookPot] tryAddItem failed for {}",
@@ -274,6 +276,9 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
         // finishRecipe() calls level.setBlock(getBlockPos(), state) for blocks.
         var stateAtPot = myLevel.getBlockState(myPos);
         if (!stateAtPot.isAir()) {
+            // PotFoodBlock is handled transactionally above. This guard prevents
+            // future serving regressions from returning the entire pot as an item.
+            if (stateAtPot.getBlock() instanceof PotFoodBlock) return ItemStack.EMPTY;
             String key = net.minecraft.core.registries.BuiltInRegistries.BLOCK
                     .getKey(stateAtPot.getBlock()).toString();
             boolean isPot = key.contains("cooking_") || key.contains("iron_pot")
@@ -331,88 +336,73 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
     }
 
     /**
-     * If the pot position now holds a YHK soup-pot block ({@code PotFoodBlock}),
-     * serve it into bowls instead of collecting the whole block.
-     * <p>
-     * Mirrors manual play: each serving is one food item shipped in a bowl. The
-     * bowls were already consumed from the network at craft start (they are a
-     * required material — see {@link #getRequiredMaterials}), so here we only
-     * scoop the servings out and remove the emptied pot block. Returns:
-     * <ul>
-     *   <li>{@code food * serve} when a soup pot was served;</li>
-     *   <li>{@code null} when the pot position is not a PotFoodBlock (caller
-     *       falls back to the legacy block-collection path).</li>
-     * </ul>
+     * Serve a PotFoodBlock and atomically restore the matching empty pot.
+     * Returns null only when the block is definitely not a PotFoodBlock. EMPTY
+     * means it is a PotFoodBlock but its serving contract could not be proven;
+     * callers must fail closed and leave the world state untouched.
      */
     @Nullable
     private ItemStack tryServePotFood(ServerPlayer player) {
-        probeReflection();
-        if (potFoodBlockClass == null) return null;
-
         var state = myLevel.getBlockState(myPos);
-        var block = state.getBlock();
-        if (!potFoodBlockClass.isInstance(block)) return null;
+        if (!(state.getBlock() instanceof PotFoodBlock potFood)) return null;
 
-        ItemStack bowls = readPotFoodBowls(block);
-        if (bowls.isEmpty()) {
-            RSIntegrationMod.LOGGER.warn("[RSI-CookPot] PotFoodBlock at {} produced no servings", myPos);
-            return null;
-        }
-        int serve = bowls.getCount();
-        ItemStack foodUnit = bowls.copyWithCount(1);
-
-        // Scoop the servings out and remove the emptied pot so it's never
-        // collected whole. (Bowls were already consumed at craft start.)
-        myLevel.removeBlock(myPos, false);
-        RSIntegrationMod.LOGGER.debug("[RSI-CookPot] Served soup pot at {}: {} x{}",
-                myPos, foodUnit.getHoverName().getString(), serve);
-        return foodUnit.copyWithCount(serve);
-    }
-
-    /** Read {@code food * serve} from a PotFoodBlock via asBowls(), with a
-     *  field-based fallback. Returns EMPTY if neither path works. */
-    private static ItemStack readPotFoodBowls(net.minecraft.world.level.block.Block block) {
-        if (asBowlsMethod != null) {
-            try {
-                Object r = asBowlsMethod.invoke(block);
-                if (r instanceof ItemStack s && !s.isEmpty()) return s;
-            } catch (Exception e) {
-                RSIntegrationMod.LOGGER.debug("[RSI-CookPot] asBowls() failed, trying fields", e);
-            }
-        }
-        // Fallback: food (ItemLike) * serve (int)
-        if (potFoodFoodField != null && potFoodServeField != null) {
-            try {
-                Object food = potFoodFoodField.get(block);
-                int serve = potFoodServeField.getInt(block);
-                if (food instanceof net.minecraft.world.level.ItemLike il && serve > 0) {
-                    return new ItemStack(il.asItem(), serve);
-                }
-            } catch (Exception e) {
-                RSIntegrationMod.LOGGER.debug("[RSI-CookPot] PotFoodBlock field read failed", e);
-            }
-        }
-        return ItemStack.EMPTY;
-    }
-
-    /** Compute the bowls a soup-pot recipe needs to serve its result:
-     *  {@code food.getCraftingRemainingItem() * serve}. Returns EMPTY when the
-     *  recipe result is not a PotFoodBlock (plain-item cooking recipe). */
-    private static ItemStack computeServeBowls(Recipe<?> recipe) {
-        probeReflection();
-        if (potFoodBlockClass == null) return ItemStack.EMPTY;
-        ItemStack result = getRecipeResult(recipe);
-        if (result.isEmpty() || !(result.getItem() instanceof net.minecraft.world.item.BlockItem bi))
+        ItemStack servings = potFood.asBowls();
+        var emptyPot = emptyPotState(potFood, state);
+        if (servings.isEmpty() || emptyPot == null) {
+            RSIntegrationMod.LOGGER.error(
+                    "[RSI-CookPot] Cannot safely serve PotFoodBlock at {}; preserving it in-world", myPos);
             return ItemStack.EMPTY;
-        if (!potFoodBlockClass.isInstance(bi.getBlock())) return ItemStack.EMPTY;
-        ItemStack bowls = readPotFoodBowls(bi.getBlock());
-        if (bowls.isEmpty()) return ItemStack.EMPTY;
-        int serve = bowls.getCount();
-        ItemStack foodUnit = bowls.copyWithCount(1);
+        }
+        if (!myLevel.setBlock(myPos, emptyPot, 3)) {
+            RSIntegrationMod.LOGGER.error(
+                    "[RSI-CookPot] Failed to restore empty pot at {}; preserving output as failed", myPos);
+            return ItemStack.EMPTY;
+        }
+        RSIntegrationMod.LOGGER.debug("[RSI-CookPot] Served pot at {}: {} x{}; restored {}",
+                myPos, servings.getHoverName().getString(), servings.getCount(), BOWL_KEYS[potIndex]);
+        return servings.copy();
+    }
+
+    @Nullable
+    private net.minecraft.world.level.block.state.BlockState emptyPotState(
+            PotFoodBlock potFood, net.minecraft.world.level.block.state.BlockState foodState) {
+        ItemStack potItem = new ItemStack(potFood.asItem());
+        if (!potItem.hasCraftingRemainingItem()) return null;
+        ItemStack remainder = potItem.getCraftingRemainingItem();
+        if (!(remainder.getItem() instanceof net.minecraft.world.item.BlockItem blockItem)) return null;
+        String key = net.minecraft.core.registries.BuiltInRegistries.BLOCK
+                .getKey(blockItem.getBlock()).toString();
+        if (!BOWL_KEYS[potIndex].equals(key)) return null;
+
+        var emptyState = blockItem.getBlock().defaultBlockState();
+        var facing = net.minecraft.world.level.block.state.properties.BlockStateProperties.FACING;
+        if (foodState.hasProperty(facing) && emptyState.hasProperty(facing)) {
+            emptyState = emptyState.setValue(facing, foodState.getValue(facing));
+        }
+        return emptyState;
+    }
+
+    private static boolean isPotFoodRecipe(Recipe<?> recipe) {
+        ItemStack result = getRecipeResult(recipe);
+        return !result.isEmpty()
+                && result.getItem() instanceof net.minecraft.world.item.BlockItem blockItem
+                && blockItem.getBlock() instanceof PotFoodBlock;
+    }
+
+    /** Compute one serving container per food returned by PotFoodBlock.asBowls(). */
+    private static ItemStack computeServeBowls(Recipe<?> recipe) {
+        ItemStack result = getRecipeResult(recipe);
+        if (result.isEmpty() || !(result.getItem() instanceof net.minecraft.world.item.BlockItem blockItem)
+                || !(blockItem.getBlock() instanceof PotFoodBlock potFood)) {
+            return ItemStack.EMPTY;
+        }
+        ItemStack servings = potFood.asBowls();
+        if (servings.isEmpty()) return ItemStack.EMPTY;
+        ItemStack foodUnit = servings.copyWithCount(1);
         if (!foodUnit.hasCraftingRemainingItem()) return ItemStack.EMPTY;
-        Item bowlItem = foodUnit.getCraftingRemainingItem().getItem();
-        if (bowlItem == net.minecraft.world.item.Items.AIR) return ItemStack.EMPTY;
-        return new ItemStack(bowlItem, serve);
+        ItemStack container = foodUnit.getCraftingRemainingItem();
+        if (container.isEmpty()) return ItemStack.EMPTY;
+        return container.copyWithCount(servings.getCount());
     }
 
     @Override
@@ -552,21 +542,8 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
             getInputMethod = YHKReflection.potCookingRecipeClass.getMethod("getInput");
             getResultMethod = YHKReflection.potCookingRecipeClass.getMethod("getResult");
 
-            // PotFoodBlock (soup-pot result) — optional; if any probe fails,
-            // collectResult falls back to the legacy block-collection path.
-            try {
-                potFoodBlockClass = Class.forName(
-                        "dev.xkmc.youkaishomecoming.content.block.food.PotFoodBlock");
-                asBowlsMethod = potFoodBlockClass.getMethod("asBowls");
-                asBowlsMethod.setAccessible(true);
-                potFoodServeField = potFoodBlockClass.getDeclaredField("serve");
-                potFoodServeField.setAccessible(true);
-                // food is declared on BowlBlock (superclass) — walk up
-                potFoodFoodField = findFieldInHierarchy(potFoodBlockClass, "food");
-                if (potFoodFoodField != null) potFoodFoodField.setAccessible(true);
-            } catch (Exception e) {
-                RSIntegrationMod.LOGGER.debug("[RSI-CookPot] PotFoodBlock probe unavailable", e);
-            }
+            // PotFoodBlock uses its public API below; it must never fall back to
+            // reflective field access or generic block-item collection.
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-CookPot] Reflection probe failed", e);
         }

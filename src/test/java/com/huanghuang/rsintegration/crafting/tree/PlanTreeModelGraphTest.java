@@ -22,7 +22,9 @@ class PlanTreeModelGraphTest extends BootstrapTest {
     void repeatedProducerReferencesShareLogicalNodeId() {
         PlanGraphView.NodeView producer = new PlanGraphView.NodeView(0,
                 new ResourceLocation("test", "iron"), "generic", 1,
-                new ItemStack(Items.IRON_INGOT), List.of(), List.of(
+                new ItemStack(Items.IRON_INGOT),
+                List.of(new ResourceLocation("test", "iron_alternate")), List.of("generic"),
+                List.of(), List.of(
                 new PlanGraphView.OutputView(0, new ItemStack(Items.IRON_INGOT), 3, 0)));
         PlanGraphView.NodeView left = new PlanGraphView.NodeView(1,
                 new ResourceLocation("test", "left"), "generic", 1,
@@ -55,6 +57,7 @@ class PlanTreeModelGraphTest extends BootstrapTest {
         assertEquals(1, tree.root.children.get(0).children.get(0).edgeQuantity);
         assertEquals(2, tree.root.children.get(1).children.get(0).edgeQuantity);
         assertTrue(tree.root.children.get(0).children.get(0).graphNodeId == 0);
+        assertTrue(tree.root.children.get(0).children.get(0).hasAlternatives());
     }
 
     @Test

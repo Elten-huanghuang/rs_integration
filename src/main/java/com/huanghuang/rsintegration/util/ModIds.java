@@ -31,6 +31,9 @@ public final class ModIds {
     public static final String FTB_CHUNKS = "ftbchunks";
     public static final String CADMUS = "cadmus";
     public static final String SOPHISTICATED_BACKPACKS = "sophisticatedbackpacks";
+    public static final String FTB_QUESTS = "ftbquests";
+    public static final String FTB_TEAMS = "ftbteams";
+    public static final String YZZZ_OPTIMIZATION = "yzzzopt";
     public static final String BETTER_COMBAT = "bettercombat";
     public static final String CRABBERS_DELIGHT = "crabbersdelight";
 

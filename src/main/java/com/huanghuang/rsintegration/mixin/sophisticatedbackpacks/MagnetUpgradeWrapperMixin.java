@@ -1,12 +1,19 @@
 package com.huanghuang.rsintegration.mixin.sophisticatedbackpacks;
 
+import com.huanghuang.rsintegration.compat.ftbquests.ExternalItemProgressBridge;
 import com.huanghuang.rsintegration.util.BackpackRSUtils;
+import com.huanghuang.rsintegration.util.ExternalItemProgressSuppression;
+import com.huanghuang.rsintegration.util.InsertedStackDelta;
+import com.huanghuang.rsintegration.util.RsOperationPlayerContext;
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
+import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.item.ItemEntity;
@@ -56,6 +63,8 @@ public abstract class MagnetUpgradeWrapperMixin
     private static volatile Class<?> rsi$debrisClass;
     @Unique
     private static volatile boolean rsi$debrisProbed;
+    @Unique
+    private ItemStack rsi$magnetInput = ItemStack.EMPTY;
 
     @Unique
     private static boolean rsi$isDebrisEntity(Entity e) {
@@ -99,13 +108,48 @@ public abstract class MagnetUpgradeWrapperMixin
 
     @Inject(method = "tryToInsertItem", at = @At(value = "HEAD"), remap = false, cancellable = true)
     private void tryToInsertItem(ItemEntity itemEntity, CallbackInfoReturnable<Boolean> cir) {
+        rsi$magnetInput = itemEntity.getItem().copy();
+        ExternalItemProgressSuppression.beginOperation();
         if (!this.rsi$isRs) return;
         UUID backpackUuid = this.storageWrapper.getContentsUuid().orElse(null);
-        cir.setReturnValue(BackpackRSUtils.handleRsInsertion(this.getFilterLogic(), itemEntity,
+        boolean inserted = BackpackRSUtils.handleRsInsertion(this.getFilterLogic(), itemEntity,
                 backpackUuid,
                 this.rsi$rsBlockPos, this.rsi$rsDimensionKey,
-                rsi$getUpgradesOfType(VoidUpgradeWrapper.class), this.rsi$voidUpgrade));
+                rsi$getUpgradesOfType(VoidUpgradeWrapper.class), this.rsi$voidUpgrade);
+        ItemStack input = rsi$magnetInput;
+        rsi$magnetInput = ItemStack.EMPTY;
+        rsi$reportInsertion(input, itemEntity.getItem());
+        cir.setReturnValue(inserted);
         cir.cancel();
+    }
+
+    @Inject(method = "tryToInsertItem", at = @At("RETURN"), remap = false)
+    private void rsi$reportMagnetInsertion(ItemEntity itemEntity, CallbackInfoReturnable<Boolean> cir) {
+        ItemStack input = rsi$magnetInput;
+        rsi$magnetInput = ItemStack.EMPTY;
+        rsi$reportInsertion(input, itemEntity.getItem());
+    }
+
+    @Unique
+    private static void rsi$reportInsertion(ItemStack input, ItemStack remainder) {
+        boolean suppressed = ExternalItemProgressSuppression.consume();
+        ServerPlayer player = RsOperationPlayerContext.current();
+        if (suppressed || player == null || input.isEmpty()) return;
+        ExternalItemProgressBridge.enqueue(player,
+                InsertedStackDelta.between(input, remainder));
+    }
+
+    @WrapOperation(
+            method = "tick",
+            at = @At(value = "INVOKE",
+                    target = "Lnet/p3pp3rf1y/sophisticatedcore/upgrades/magnet/MagnetUpgradeWrapper;pickupItems(Lnet/minecraft/world/entity/Entity;Lnet/minecraft/world/level/Level;Lnet/minecraft/core/BlockPos;)I"),
+            remap = false)
+    private int rsi$withPlayerContext(MagnetUpgradeWrapper instance, Entity entity,
+                                      Level level, BlockPos pos, Operation<Integer> original) {
+        if (!(entity instanceof ServerPlayer player)) return original.call(instance, entity, level, pos);
+        try (RsOperationPlayerContext.Scope ignored = RsOperationPlayerContext.push(player)) {
+            return original.call(instance, entity, level, pos);
+        }
     }
 
     @Inject(method = "pickup", at = @At(value = "HEAD"), remap = false, cancellable = true)

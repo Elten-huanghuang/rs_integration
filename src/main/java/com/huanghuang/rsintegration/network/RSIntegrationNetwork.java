@@ -434,6 +434,40 @@ public final class RSIntegrationNetwork {
         return ItemStack.EMPTY;
     }
 
+    /** Extract one exact item/NBT identity from the network. */
+    public static ItemStack extractExactFromNetwork(INetwork network, ItemStack template, int count,
+                                                    @Nullable ServerPlayer player) {
+        if (template.isEmpty() || count <= 0) return ItemStack.EMPTY;
+        try {
+            if (player != null) {
+                var sec = network.getSecurityManager();
+                if (sec != null && !sec.hasPermission(Permission.EXTRACT, player)) {
+                    RSIntegrationMod.LOGGER.warn("[RSI] extractExactFromNetwork: player {} lacks EXTRACT permission",
+                            player.getGameProfile().getName());
+                    return ItemStack.EMPTY;
+                }
+            }
+            ItemStack request = template.copyWithCount(1);
+            ItemStack extracted = network.extractItem(request, count, Action.PERFORM);
+            if (extracted.isEmpty() || ItemStack.isSameItemSameTags(extracted, template)) {
+                return extracted;
+            }
+            RSIntegrationMod.LOGGER.error("[RSI] Exact extraction returned the wrong identity; refunding {} x{}",
+                    extracted.getDisplayName().getString(), extracted.getCount());
+            ItemStack leftover = network.insertItem(extracted, extracted.getCount(), Action.PERFORM);
+            if (!leftover.isEmpty()) {
+                RSIntegrationMod.LOGGER.error("[RSI] Exact extraction identity refund left {} x{} unreturned",
+                        leftover.getDisplayName().getString(), leftover.getCount());
+            }
+            // Return only the unrefunded fragment so the ledger can account for
+            // and roll it back through its normal partial-extraction path.
+            return leftover;
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.error("[RSI] extractExactFromNetwork error", e);
+            return ItemStack.EMPTY;
+        }
+    }
+
     public static boolean hasItemInNetwork(INetwork network, Ingredient ingredient) {
         try {
             var cache = network.getItemStorageCache();

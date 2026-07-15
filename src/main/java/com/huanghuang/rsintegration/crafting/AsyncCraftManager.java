@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.crafting;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.graph.CaptureLeaseRegistry;
 import com.huanghuang.rsintegration.crafting.graph.MachineLeaseRegistry;
+import com.huanghuang.rsintegration.crafting.graph.OperationBudget;
 import com.huanghuang.rsintegration.command.PerformanceMonitor;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
@@ -22,8 +23,7 @@ public final class AsyncCraftManager {
 
     private static final AsyncCraftManager INSTANCE = new AsyncCraftManager();
     private final ActiveCraftRegistry<UUID, AsyncCraftChain> activeChains = new ActiveCraftRegistry<>();
-    private final MachineLeaseRegistry machineLeases = new MachineLeaseRegistry();
-    private final CaptureLeaseRegistry captureLeases = new CaptureLeaseRegistry();
+    private OperationServices operationServices = new OperationServices();
 
     private AsyncCraftManager() {}
 
@@ -53,11 +53,23 @@ public final class AsyncCraftManager {
     }
 
     MachineLeaseRegistry machineLeases() {
-        return machineLeases;
+        return operationServices.machines();
     }
 
     CaptureLeaseRegistry captureLeases() {
-        return captureLeases;
+        return operationServices.captures();
+    }
+
+    OperationBudget operationBudget() {
+        return operationServices.globalBudget();
+    }
+
+    OperationResourceCoordinator operationResources() {
+        return operationServices.resources();
+    }
+
+    OperationExecutionKernel operationKernel() {
+        return operationServices.kernel();
     }
 
     @Nullable
@@ -102,14 +114,26 @@ public final class AsyncCraftManager {
         List<AsyncCraftChain> snapshot = INSTANCE.activeChains.snapshot();
         for (AsyncCraftChain chain : snapshot) {
             try {
-                chain.abort("Server stopping");
+                chain.abortForServerStop();
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.error("[RSI-AsyncMgr] Failed to abort chain during shutdown for player {}",
                         chain.getPlayerId(), e);
             }
         }
-        INSTANCE.machineLeases.clear();
-        INSTANCE.captureLeases.clear();
+        OperationServices retired = INSTANCE.operationServices;
+        OperationServices.Audit audit = retired.audit(INSTANCE.activeChains.size());
+        if (!audit.clean()) {
+            RSIntegrationMod.LOGGER.error(
+                    "[RSI-AsyncMgr] Shutdown audit incomplete: crafts={} operations={} machines={} captures={} zones={} machineOwners={} captureOwners={}",
+                    audit.activeCrafts(), audit.activeOperations(), audit.machineLeases(),
+                    audit.captureLeases(), audit.captureZones(), retired.machines().snapshot(),
+                    retired.captures().snapshot());
+        } else {
+            RSIntegrationMod.LOGGER.info("[RSI-AsyncMgr] Shutdown audit complete: no active ownership remains");
+        }
+        // Retire the whole generation so stale permits can never mutate the next
+        // integrated/dedicated server's operation accounting.
+        INSTANCE.operationServices = new OperationServices();
     }
 
     public void cancelAllForPlayer(UUID playerId) {
@@ -122,7 +146,8 @@ public final class AsyncCraftManager {
             if (chain.belongsTo(playerId)) toAbort.add(chain);
         }
         for (AsyncCraftChain chain : toAbort) {
-            chain.abort(reason);
+            if ("Player disconnected".equals(reason)) chain.abortOffline(reason);
+            else chain.cancel(reason);
             RSIntegrationMod.LOGGER.debug("[RSI-AsyncMgr] Cancelled chain for player {}: {}", playerId, reason);
         }
     }
@@ -141,8 +166,13 @@ public final class AsyncCraftManager {
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.error("[RSI-AsyncMgr] Chain tick error", e);
                 String msg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
-                chain.abort("Internal error: " + msg);
-                activeChains.remove(chain.getCraftId());
+                try {
+                    chain.abort("Internal error: " + msg);
+                } catch (Exception terminationError) {
+                    RSIntegrationMod.LOGGER.error(
+                            "[RSI-AsyncMgr] Chain termination also failed; keeping craft {} registered for audit",
+                            chain.getCraftId(), terminationError);
+                }
             }
         }
         PerformanceMonitor.recordTick(
