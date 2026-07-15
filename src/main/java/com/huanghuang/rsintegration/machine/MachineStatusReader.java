@@ -31,7 +31,7 @@ public final class MachineStatusReader {
             var m = Reflect.findMethod(AbstractFurnaceBlockEntity.class, name, new Class<?>[0]);
             if (m != null) return m;
         }
-        RSIntegrationMod.LOGGER.warn("[RSI-MachineStatus] isLit method not found (no SRG match)");
+        RSIntegrationMod.LOGGER.debug("[RSI-MachineStatus] isLit method not found (no mapped match)");
         return null;
     }
 

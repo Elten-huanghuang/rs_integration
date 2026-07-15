@@ -19,6 +19,11 @@ public final class OperationQueue {
         this.totalOperations = totalOperations;
     }
 
+    /** Return the next operation id without consuming it. */
+    public int nextQueuedOperation() {
+        return dispatchStopped || nextOperation >= totalOperations ? -1 : nextOperation;
+    }
+
     /** Claim the next operation for a currently idle worker. */
     public int claim(int workerId) {
         if (dispatchStopped || inFlight.containsKey(workerId) || nextOperation >= totalOperations) {

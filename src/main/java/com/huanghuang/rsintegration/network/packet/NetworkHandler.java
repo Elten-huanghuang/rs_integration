@@ -23,7 +23,7 @@ import net.minecraftforge.network.simple.SimpleChannel;
 public final class NetworkHandler {
 
     /** Bump this whenever packet serialization or the registered packet set changes. */
-    private static final String PROTOCOL_VERSION = "8";
+    private static final String PROTOCOL_VERSION = "10";
 
     public static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
             new ResourceLocation(RSIntegrationMod.MOD_ID, "main"),

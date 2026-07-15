@@ -5,80 +5,43 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * Atomically admits ready DAG nodes into the running set.
- * Physical ledgers and delegates are attached only after this logical gate succeeds.
+ * Atomically admits ready DAG nodes by reserving their material allocations.
+ * Physical operation resources are owned exclusively by OperationExecutionKernel sessions.
  */
 public final class NodeAdmissionCoordinator {
 
     public record Candidate(
             NodeId nodeId,
-            List<MaterialBroker.Request> materialRequests,
-            List<MachineRequest> machines,
-            List<CaptureRequest> captures
+            List<MaterialBroker.Request> materialRequests
     ) {
         public Candidate {
             Objects.requireNonNull(nodeId, "nodeId");
             materialRequests = List.copyOf(materialRequests);
-            machines = List.copyOf(machines);
-            captures = List.copyOf(captures);
-        }
-    }
-
-    public record MachineRequest(MachineLeaseRegistry.MachineKey machine, int operationId) {
-        public MachineRequest {
-            Objects.requireNonNull(machine, "machine");
-            if (operationId < 0) throw new IllegalArgumentException("operation id must be non-negative");
-        }
-    }
-
-    public record CaptureRequest(
-            net.minecraft.resources.ResourceLocation dimension,
-            net.minecraft.world.phys.AABB region,
-            MaterialKey expectedMaterial,
-            int operationId
-    ) {
-        public CaptureRequest {
-            Objects.requireNonNull(dimension, "dimension");
-            Objects.requireNonNull(region, "region");
-            Objects.requireNonNull(expectedMaterial, "expectedMaterial");
-            if (operationId < 0) throw new IllegalArgumentException("operation id must be non-negative");
         }
     }
 
     public record Admission(
             NodeId nodeId,
-            MaterialBroker.ReservationToken materialToken,
-            List<MachineLeaseRegistry.Lease> machineLeases,
-            List<CaptureLeaseRegistry.Lease> captureLeases
+            MaterialBroker.ReservationToken materialToken
     ) {
         public Admission {
             Objects.requireNonNull(nodeId, "nodeId");
             Objects.requireNonNull(materialToken, "materialToken");
-            machineLeases = List.copyOf(machineLeases);
-            captureLeases = List.copyOf(captureLeases);
         }
     }
 
-    private final java.util.UUID craftId;
     private final DagScheduler scheduler;
     private final MaterialBroker materials;
-    private final MachineLeaseRegistry machines;
-    private final CaptureLeaseRegistry captures;
 
-    public NodeAdmissionCoordinator(java.util.UUID craftId, DagScheduler scheduler,
-                                    MaterialBroker materials, MachineLeaseRegistry machines,
-                                    CaptureLeaseRegistry captures) {
-        this.craftId = Objects.requireNonNull(craftId, "craftId");
+    public NodeAdmissionCoordinator(DagScheduler scheduler, MaterialBroker materials) {
         this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
         this.materials = Objects.requireNonNull(materials, "materials");
-        this.machines = Objects.requireNonNull(machines, "machines");
-        this.captures = Objects.requireNonNull(captures, "captures");
     }
 
     /**
      * Admit one node that the caller has already claimed RUNNING. A null result
-     * means a transient material/lease conflict; the caller may release the claim
-     * and retry on a later tick.
+     * means a transient material conflict; the caller may release the claim and
+     * retry on a later tick.
      */
     public Admission tryAdmitClaimed(Candidate candidate) {
         Objects.requireNonNull(candidate, "candidate");
@@ -117,75 +80,36 @@ public final class NodeAdmissionCoordinator {
     }
 
     public void releaseBeforeDispatch(Admission admission) {
-        releaseResourcesBeforeDispatch(admission);
+        materials.release(admission.materialToken());
         scheduler.releaseClaim(admission.nodeId());
     }
 
-    public void releaseResourcesBeforeDispatch(Admission admission) {
+    public void releaseMaterial(Admission admission) {
         materials.release(admission.materialToken());
-        releaseLeases(admission);
     }
 
-    public void settleResources(Admission admission) {
+    public void settleMaterial(Admission admission) {
         materials.settle(admission.materialToken());
-        releaseLeases(admission);
     }
 
-    public void refundCommittedResources(Admission admission) {
+    public void refundCommittedMaterial(Admission admission) {
         materials.refund(admission.materialToken());
-        releaseLeases(admission);
     }
 
     public void succeed(Admission admission) {
-        settleResources(admission);
+        settleMaterial(admission);
         scheduler.succeed(admission.nodeId());
     }
 
     public void failAfterCommit(Admission admission) {
-        refundCommittedResources(admission);
+        refundCommittedMaterial(admission);
         scheduler.fail(admission.nodeId());
     }
 
     private Admission tryAdmit(Candidate candidate) {
         MaterialBroker.ReservationToken materialToken = materials.reserve(
                 candidate.nodeId(), candidate.materialRequests());
-        if (materialToken == null) return null;
-
-        List<MachineLeaseRegistry.Lease> machineLeases = new ArrayList<>();
-        List<CaptureLeaseRegistry.Lease> captureLeases = new ArrayList<>();
-        for (MachineRequest request : candidate.machines()) {
-            MachineLeaseRegistry.Lease lease = machines.tryAcquire(request.machine(),
-                    new MachineLeaseRegistry.Owner(craftId, candidate.nodeId(), request.operationId()));
-            if (lease == null) {
-                rollbackAdmission(materialToken, machineLeases, captureLeases);
-                return null;
-            }
-            machineLeases.add(lease);
-        }
-        for (CaptureRequest request : candidate.captures()) {
-            CaptureLeaseRegistry.Lease lease = captures.tryAcquire(request.dimension(), request.region(),
-                    request.expectedMaterial(), new CaptureLeaseRegistry.Owner(
-                            craftId, candidate.nodeId(), request.operationId()));
-            if (lease == null) {
-                rollbackAdmission(materialToken, machineLeases, captureLeases);
-                return null;
-            }
-            captureLeases.add(lease);
-        }
-        return new Admission(candidate.nodeId(), materialToken, machineLeases, captureLeases);
-    }
-
-    private void rollbackAdmission(MaterialBroker.ReservationToken materialToken,
-                                   List<MachineLeaseRegistry.Lease> machineLeases,
-                                   List<CaptureLeaseRegistry.Lease> captureLeases) {
-        for (CaptureLeaseRegistry.Lease lease : captureLeases) captures.release(lease);
-        for (MachineLeaseRegistry.Lease lease : machineLeases) machines.release(lease);
-        materials.release(materialToken);
-    }
-
-    public void releaseLeases(Admission admission) {
-        for (CaptureLeaseRegistry.Lease lease : admission.captureLeases()) captures.release(lease);
-        for (MachineLeaseRegistry.Lease lease : admission.machineLeases()) machines.release(lease);
+        return materialToken == null ? null : new Admission(candidate.nodeId(), materialToken);
     }
 
     private static Candidate nextCandidate(List<Candidate> candidates, NodeId nodeId, int start) {

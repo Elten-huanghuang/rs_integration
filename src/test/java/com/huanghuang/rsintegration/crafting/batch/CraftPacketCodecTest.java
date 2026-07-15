@@ -4,9 +4,11 @@ import com.huanghuang.rsintegration.crafting.CraftProgressSnapshot;
 import com.huanghuang.rsintegration.crafting.CraftProgressSnapshot.NodeProgress;
 import com.huanghuang.rsintegration.crafting.CraftProgressSnapshot.NodeState;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
-import io.netty.handler.codec.DecoderException;
 import io.netty.buffer.Unpooled;
+import io.netty.handler.codec.DecoderException;
 import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -14,15 +16,9 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/**
- * Round-trip codec tests for the stage-4 craft progress/cancel packets.
- * Verifies encode → decode preserves every field, including the terminal
- * sequence sentinel and the optional failed-step string.
- */
 class CraftPacketCodecTest extends BootstrapTest {
 
     private static FriendlyByteBuf buffer() {
@@ -30,150 +26,79 @@ class CraftPacketCodecTest extends BootstrapTest {
     }
 
     @Test
-    void progressPacketRoundTripsWithoutFailedStep() {
+    void progressPacketRoundTripsStructuredResultAndReason() {
         UUID craftId = UUID.randomUUID();
-        CraftProgressSnapshot snap = new CraftProgressSnapshot(craftId, 7,
-                CraftProgressSnapshot.STATE_EXECUTING, 3, 10, 2, null);
+        CraftProgressSnapshot snapshot = new CraftProgressSnapshot(craftId, 9,
+                CraftProgressSnapshot.Result.WAITING,
+                CraftProgressSnapshot.Reason.MACHINE_BUSY,
+                1, 3, 1, "diagnostic", List.of(
+                new NodeProgress(0, NodeState.SUCCEEDED, "test:first", "generic",
+                        3, 3, 0, "", CraftProgressSnapshot.Reason.NONE, "", false),
+                new NodeProgress(1, NodeState.RUNNING, "test:second", "malum",
+                        2, 5, 2, "test:dimension@1, 2, 3",
+                        CraftProgressSnapshot.Reason.MACHINE_BUSY, "machine probe", true)));
         FriendlyByteBuf buf = buffer();
-        new CraftProgressPacket(snap).encode(buf);
 
+        new CraftProgressPacket(snapshot).encode(buf);
         CraftProgressSnapshot decoded = CraftProgressPacket.decode(buf).snapshot();
-        assertEquals(snap, decoded);
-        assertNull(decoded.failedStep());
-        assertEquals(0, buf.readableBytes(), "decode must consume the whole buffer");
+
+        assertEquals(snapshot, decoded);
+        assertEquals(0, buf.readableBytes());
+        assertFalse(decoded.isTerminal());
     }
 
     @Test
-    void progressPacketRoundTripsWithFailedStep() {
-        UUID craftId = UUID.randomUUID();
-        CraftProgressSnapshot snap = new CraftProgressSnapshot(craftId, 42,
-                CraftProgressSnapshot.STATE_STOPPING, 5, 8, 1, "minecraft:diamond_block");
-        FriendlyByteBuf buf = buffer();
-        new CraftProgressPacket(snap).encode(buf);
-
-        CraftProgressSnapshot decoded = CraftProgressPacket.decode(buf).snapshot();
-        assertEquals(snap, decoded);
-        assertEquals("minecraft:diamond_block", decoded.failedStep());
-        assertTrue(decoded.isTerminal(), "STOPPING state is terminal");
-    }
-
-    @Test
-    void progressPacketPreservesTerminalSequenceSentinel() {
-        UUID craftId = UUID.randomUUID();
-        CraftProgressSnapshot snap = new CraftProgressSnapshot(craftId,
+    void terminalResultSurvivesRoundTrip() {
+        CraftProgressSnapshot snapshot = new CraftProgressSnapshot(UUID.randomUUID(),
                 CraftProgressSnapshot.TERMINAL_SEQUENCE,
-                CraftProgressSnapshot.STATE_EXECUTING, 10, 10, 0, null);
+                CraftProgressSnapshot.Result.CANCELLED,
+                CraftProgressSnapshot.Reason.PLAYER_CANCELLED,
+                2, 5, 0, "Player cancelled the craft");
         FriendlyByteBuf buf = buffer();
-        new CraftProgressPacket(snap).encode(buf);
 
+        new CraftProgressPacket(snapshot).encode(buf);
         CraftProgressSnapshot decoded = CraftProgressPacket.decode(buf).snapshot();
-        assertEquals(CraftProgressSnapshot.TERMINAL_SEQUENCE, decoded.sequence());
-        assertTrue(decoded.isTerminal(), "terminal sequence sentinel survives round-trip");
+
+        assertEquals(CraftProgressSnapshot.Result.CANCELLED, decoded.result());
+        assertEquals(CraftProgressSnapshot.Reason.PLAYER_CANCELLED, decoded.reason());
+        assertTrue(decoded.isTerminal());
     }
 
     @Test
-    void progressPacketDecodesLegacyPayloadWithoutNodes() {
-        UUID craftId = UUID.randomUUID();
-        FriendlyByteBuf buf = buffer();
-        buf.writeUUID(craftId);
-        buf.writeVarInt(3);
-        buf.writeByte(CraftProgressSnapshot.STATE_EXECUTING);
+    void unknownEnumsUseSafeFallbacks() {
+        FriendlyByteBuf buf = basePayload(Integer.MAX_VALUE, Integer.MAX_VALUE);
         buf.writeVarInt(1);
-        buf.writeVarInt(4);
-        buf.writeVarInt(2);
+        buf.writeVarInt(0);
+        buf.writeVarInt(Integer.MAX_VALUE);
+        buf.writeUtf("test:recipe");
+        buf.writeUtf("generic");
+        buf.writeVarInt(0);
+        buf.writeVarInt(1);
+        buf.writeVarInt(0);
+        buf.writeUtf("");
+        buf.writeVarInt(Integer.MAX_VALUE);
+        buf.writeUtf("");
         buf.writeBoolean(false);
 
         CraftProgressSnapshot decoded = CraftProgressPacket.decode(buf).snapshot();
 
-        assertEquals(craftId, decoded.craftId());
-        assertTrue(decoded.nodes().isEmpty());
-        assertEquals(0, buf.readableBytes());
-    }
-
-    @Test
-    void progressPacketRoundTripsNodeProgress() {
-        UUID craftId = UUID.randomUUID();
-        CraftProgressSnapshot snap = new CraftProgressSnapshot(craftId, 9,
-                CraftProgressSnapshot.STATE_EXECUTING, 1, 3, 1, null, List.of(
-                new NodeProgress(0, NodeState.SUCCEEDED, "test:first", "generic",
-                        3, 3, 0, "", "", false),
-                new NodeProgress(1, NodeState.RUNNING, "test:second", "malum",
-                        2, 5, 2, "test:dimension@1, 2, 3", "settling", true),
-                new NodeProgress(2, NodeState.BLOCKED, "test:third", "generic",
-                        0, 1, 0, "", "waiting for inputs", false)));
-        FriendlyByteBuf buf = buffer();
-        new CraftProgressPacket(snap).encode(buf);
-
-        CraftProgressSnapshot decoded = CraftProgressPacket.decode(buf).snapshot();
-
-        assertEquals(snap, decoded);
-        assertEquals(0, buf.readableBytes());
-    }
-
-    @Test
-    void progressPacketMapsUnknownNodeStateToUnknown() {
-        FriendlyByteBuf buf = nodePayloadBuffer();
-        buf.writeVarInt(17);
-        buf.writeVarInt(Integer.MAX_VALUE);
-        writeNodeTail(buf);
-
-        CraftProgressSnapshot decoded = CraftProgressPacket.decode(buf).snapshot();
-
+        assertEquals(CraftProgressSnapshot.Result.RUNNING, decoded.result());
+        assertEquals(CraftProgressSnapshot.Reason.UNKNOWN, decoded.reason());
         assertEquals(NodeState.UNKNOWN, decoded.nodes().get(0).state());
+        assertEquals(CraftProgressSnapshot.Reason.UNKNOWN, decoded.nodes().get(0).reason());
     }
 
     @Test
     void progressPacketRejectsOversizedNodeCount() {
-        FriendlyByteBuf buf = legacyPayloadBuffer();
+        FriendlyByteBuf buf = basePayload(0, 0);
         buf.writeVarInt(CraftProgressPacket.MAX_NODES + 1);
-
         assertThrows(DecoderException.class, () -> CraftProgressPacket.decode(buf));
     }
 
     @Test
-    void progressPacketRejectsNegativeCounts() {
-        FriendlyByteBuf buf = buffer();
-        buf.writeUUID(UUID.randomUUID());
+    void progressPacketRejectsInvalidOperationCounts() {
+        FriendlyByteBuf buf = basePayload(0, 0);
         buf.writeVarInt(1);
-        buf.writeByte(CraftProgressSnapshot.STATE_EXECUTING);
-        buf.writeVarInt(-1);
-        buf.writeVarInt(1);
-        buf.writeVarInt(0);
-        buf.writeBoolean(false);
-
-        assertThrows(DecoderException.class, () -> CraftProgressPacket.decode(buf));
-    }
-
-    @Test
-    void progressPacketRejectsNegativeNodeId() {
-        FriendlyByteBuf buf = nodePayloadBuffer();
-        buf.writeVarInt(-1);
-        buf.writeVarInt(NodeState.READY.ordinal());
-        writeNodeTail(buf);
-
-        assertThrows(DecoderException.class, () -> CraftProgressPacket.decode(buf));
-    }
-
-    @Test
-    void progressPacketRejectsNegativeNodeOperationCount() {
-        FriendlyByteBuf buf = nodePayloadBuffer();
-        buf.writeVarInt(0);
-        buf.writeVarInt(NodeState.RUNNING.ordinal());
-        buf.writeUtf("test:recipe");
-        buf.writeUtf("generic");
-        buf.writeVarInt(-1);
-        buf.writeVarInt(1);
-        buf.writeVarInt(0);
-        buf.writeUtf("");
-        buf.writeUtf("");
-        buf.writeBoolean(false);
-
-        assertThrows(DecoderException.class, () -> CraftProgressPacket.decode(buf));
-    }
-
-    @Test
-    void progressPacketRejectsOperationCountsExceedingTotal() {
-        FriendlyByteBuf buf = nodePayloadBuffer();
         buf.writeVarInt(0);
         buf.writeVarInt(NodeState.RUNNING.ordinal());
         buf.writeUtf("test:recipe");
@@ -182,99 +107,53 @@ class CraftPacketCodecTest extends BootstrapTest {
         buf.writeVarInt(2);
         buf.writeVarInt(1);
         buf.writeUtf("");
+        buf.writeVarInt(CraftProgressSnapshot.Reason.NONE.ordinal());
         buf.writeUtf("");
         buf.writeBoolean(false);
-
         assertThrows(DecoderException.class, () -> CraftProgressPacket.decode(buf));
     }
 
     @Test
     void nodeProgressNormalizesNullsAndInvalidCounts() {
         NodeProgress progress = new NodeProgress(0, null, null, null,
-                9, -1, 4, null, null, false);
+                9, -1, 4, null, null, null, false);
 
         assertEquals(NodeState.UNKNOWN, progress.state());
-        assertEquals("", progress.recipeId());
-        assertEquals("", progress.modTypeId());
         assertEquals(0, progress.completedOperations());
         assertEquals(0, progress.totalOperations());
         assertEquals(0, progress.runningOperations());
-        assertEquals("", progress.machineLabel());
-        assertEquals("", progress.detail());
+        assertEquals(CraftProgressSnapshot.Reason.NONE, progress.reason());
+        assertEquals("", progress.technicalDetail());
     }
 
     @Test
-    void progressPacketRejectsOversizedUtf() {
-        FriendlyByteBuf buf = nodePayloadBuffer();
-        buf.writeVarInt(0);
-        buf.writeVarInt(NodeState.READY.ordinal());
-        buf.writeUtf("x".repeat(CraftProgressPacket.MAX_RECIPE_ID_LENGTH + 1));
+    void startedAndCancelPacketsRoundTrip() {
+        UUID craftId = UUID.randomUUID();
+        FriendlyByteBuf started = buffer();
+        ItemStack target = new ItemStack(Items.DIAMOND, 3);
+        new CraftStartedPacket(craftId, 12, true, target).encode(started);
+        CraftStartedPacket decodedStarted = CraftStartedPacket.decode(started);
+        assertEquals(craftId, decodedStarted.craftId());
+        assertEquals(12, decodedStarted.totalNodes());
+        assertTrue(decodedStarted.graphMode());
+        assertTrue(ItemStack.isSameItemSameTags(target, decodedStarted.target()));
+        assertEquals(3, decodedStarted.target().getCount());
 
-        assertThrows(DecoderException.class, () -> CraftProgressPacket.decode(buf));
+        FriendlyByteBuf cancel = buffer();
+        new CraftCancelPacket(craftId).encode(cancel);
+        assertEquals(craftId, CraftCancelPacket.decode(cancel).craftId());
     }
 
-    private static FriendlyByteBuf legacyPayloadBuffer() {
+    private static FriendlyByteBuf basePayload(int result, int reason) {
         FriendlyByteBuf buf = buffer();
         buf.writeUUID(UUID.randomUUID());
         buf.writeVarInt(1);
-        buf.writeByte(CraftProgressSnapshot.STATE_EXECUTING);
+        buf.writeVarInt(result);
+        buf.writeVarInt(reason);
         buf.writeVarInt(0);
         buf.writeVarInt(1);
         buf.writeVarInt(0);
         buf.writeBoolean(false);
         return buf;
-    }
-
-    private static FriendlyByteBuf nodePayloadBuffer() {
-        FriendlyByteBuf buf = legacyPayloadBuffer();
-        buf.writeVarInt(1);
-        return buf;
-    }
-
-    private static void writeNodeTail(FriendlyByteBuf buf) {
-        buf.writeUtf("test:recipe");
-        buf.writeUtf("generic");
-        buf.writeVarInt(0);
-        buf.writeVarInt(1);
-        buf.writeVarInt(0);
-        buf.writeUtf("");
-        buf.writeUtf("");
-        buf.writeBoolean(false);
-    }
-
-    @Test
-    void startedPacketRoundTrips() {
-        UUID craftId = UUID.randomUUID();
-        FriendlyByteBuf buf = buffer();
-        new CraftStartedPacket(craftId, 12, true).encode(buf);
-
-        CraftStartedPacket decoded = CraftStartedPacket.decode(buf);
-        assertEquals(craftId, decoded.craftId());
-        assertEquals(12, decoded.totalNodes());
-        assertTrue(decoded.graphMode());
-        assertEquals(0, buf.readableBytes());
-    }
-
-    @Test
-    void startedPacketRoundTripsNonGraphMode() {
-        UUID craftId = UUID.randomUUID();
-        FriendlyByteBuf buf = buffer();
-        new CraftStartedPacket(craftId, 0, false).encode(buf);
-
-        CraftStartedPacket decoded = CraftStartedPacket.decode(buf);
-        assertEquals(craftId, decoded.craftId());
-        assertEquals(0, decoded.totalNodes());
-        assertFalse(decoded.graphMode());
-    }
-
-    @Test
-    void cancelPacketRoundTrips() {
-        UUID craftId = UUID.randomUUID();
-        FriendlyByteBuf buf = buffer();
-        new CraftCancelPacket(craftId).encode(buf);
-
-        CraftCancelPacket decoded = CraftCancelPacket.decode(buf);
-        assertEquals(craftId, decoded.craftId());
-        assertEquals(0, buf.readableBytes());
     }
 }

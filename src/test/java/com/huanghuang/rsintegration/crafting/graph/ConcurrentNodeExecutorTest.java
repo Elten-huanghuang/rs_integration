@@ -206,6 +206,26 @@ class ConcurrentNodeExecutorTest extends BootstrapTest {
     }
 
     @Test
+    void quiesceObservesAndSettlesWithoutDispatchingReadyNodes() {
+        DagScheduler scheduler = new DagScheduler(forkJoinGraph());
+        Map<NodeId, FakeWorker> workers = new HashMap<>();
+        workers.put(new NodeId(0), new FakeWorker(ConcurrentNodeExecutor.Observation.SUCCEEDED));
+        workers.put(new NodeId(1), new FakeWorker(ConcurrentNodeExecutor.Observation.WORKING));
+        ConcurrentNodeExecutor executor = new ConcurrentNodeExecutor(scheduler, workers::get, 1);
+
+        executor.tick();
+        assertEquals(DagScheduler.NodeState.RUNNING, scheduler.state(new NodeId(0)));
+        assertEquals(DagScheduler.NodeState.READY, scheduler.state(new NodeId(1)));
+
+        executor.quiesceOnce();
+
+        assertEquals(0, executor.runningCount());
+        assertEquals(DagScheduler.NodeState.CANCELLED, scheduler.state(new NodeId(0)));
+        assertEquals(DagScheduler.NodeState.CANCELLED, scheduler.state(new NodeId(1)));
+        assertTrue(executor.isTerminal());
+    }
+
+    @Test
     void legacyConstructorTreatsEveryNodeAsConcurrencySafe() {
         DagScheduler scheduler = new DagScheduler(forkJoinGraph());
         Map<NodeId, FakeWorker> workers = new HashMap<>();

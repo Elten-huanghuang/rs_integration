@@ -53,6 +53,17 @@ public final class CaptureLeaseRegistry {
         return leases.size();
     }
 
+    public int countOwnedBy(UUID craftId) {
+        Objects.requireNonNull(craftId, "craftId");
+        return (int) leases.values().stream()
+                .filter(lease -> lease.owner().craftId().equals(craftId))
+                .count();
+    }
+
+    public Map<Long, Lease> snapshot() {
+        return Map.copyOf(leases);
+    }
+
     public void clear() {
         leases.clear();
     }

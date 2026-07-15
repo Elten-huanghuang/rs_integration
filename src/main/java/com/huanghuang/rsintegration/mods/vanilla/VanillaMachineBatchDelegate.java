@@ -18,6 +18,9 @@ import net.minecraft.world.item.crafting.*;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.AbstractFurnaceBlockEntity;
+import net.minecraft.world.level.block.entity.BlastFurnaceBlockEntity;
+import net.minecraft.world.level.block.entity.FurnaceBlockEntity;
+import net.minecraft.world.level.block.entity.SmokerBlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraftforge.registries.ForgeRegistries;
@@ -170,24 +173,20 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
             // Validate furnace type matches recipe type (safety net —
             // classification should route recipes to the correct ModType,
             // but mismatched bindings could still exist from older data).
-            String beClassName = be.getClass().getName().toLowerCase();
-            if (recipe instanceof BlastingRecipe && !beClassName.contains("blast")) {
-                RSIntegrationMod.LOGGER.debug("[RSI-Vanilla] Type mismatch: BlastingRecipe on non-blast machine {} at {}",
-                        beClassName, myPos);
+            if (recipe instanceof BlastingRecipe && !(be instanceof BlastFurnaceBlockEntity)) {
+                RSIntegrationMod.LOGGER.debug("[RSI-Vanilla] Type mismatch: BlastingRecipe requires BlastFurnaceBlockEntity, got {} at {}",
+                        be.getClass().getName(), myPos);
                 return false;
             }
-            if (recipe instanceof SmokingRecipe && !beClassName.contains("smoker")) {
-                RSIntegrationMod.LOGGER.debug("[RSI-Vanilla] Type mismatch: SmokingRecipe on non-smoker machine {} at {}",
-                        beClassName, myPos);
+            if (recipe instanceof SmokingRecipe && !(be instanceof SmokerBlockEntity)) {
+                RSIntegrationMod.LOGGER.debug("[RSI-Vanilla] Type mismatch: SmokingRecipe requires SmokerBlockEntity, got {} at {}",
+                        be.getClass().getName(), myPos);
                 return false;
             }
-            if (recipe instanceof SmeltingRecipe
-                    && (beClassName.contains("blast") || beClassName.contains("smoker"))) {
-                if (!beClassName.contains("furnace") || beClassName.contains("blast")) {
-                    RSIntegrationMod.LOGGER.debug("[RSI-Vanilla] Type mismatch: SmeltingRecipe on wrong furnace type {} at {}",
-                            beClassName, myPos);
-                    return false;
-                }
+            if (recipe instanceof SmeltingRecipe && !(be instanceof FurnaceBlockEntity)) {
+                RSIntegrationMod.LOGGER.debug("[RSI-Vanilla] Type mismatch: SmeltingRecipe requires FurnaceBlockEntity, got {} at {}",
+                        be.getClass().getName(), myPos);
+                return false;
             }
 
             // The chain owns only an idle machine. Existing output cannot be

@@ -29,12 +29,14 @@ public final class PlanResponsePacket {
      * malicious packet's preallocation so a bogus count cannot OOM the client.
      */
     private static final int MAX_DECODE_COUNT = 4096;
+    private static final int MAX_RECIPE_ID_LENGTH = 256;
+    private static final int MAX_TARGET_NAME_LENGTH = 256;
+    private static final int MAX_MOD_TYPE_LENGTH = 128;
+    private static final int MAX_DIMENSION_LENGTH = 128;
+    private static final int MAX_MESSAGE_LENGTH = 2048;
+    private static final int MAX_DISPLAY_NAME_LENGTH = 256;
 
-    /**
-     * Read a VarInt count and clamp it to {@code [0, MAX_DECODE_COUNT]} before it
-     * is used to size a collection. A negative or oversized value is treated as
-     * corrupt input and clamped rather than trusted.
-     */
+    /** Reject corrupt counts before allocation or field decoding. */
     private static int readBoundedCount(FriendlyByteBuf buf) {
         int raw = buf.readVarInt();
         if (raw < 0 || raw > MAX_DECODE_COUNT) {
@@ -55,11 +57,11 @@ public final class PlanResponsePacket {
 
     public void encode(FriendlyByteBuf buf) {
         buf.writeBoolean(plan.success());
-        buf.writeUtf(plan.recipeId() != null ? plan.recipeId() : "");
+        buf.writeUtf(plan.recipeId() != null ? plan.recipeId() : "", MAX_RECIPE_ID_LENGTH);
         // Always send full plan data — even infeasible plans need the recipe
         // chain structure so the player can see what intermediate steps are
         // required and which leaf materials are missing.
-        buf.writeUtf(plan.targetName());
+        buf.writeUtf(plan.targetName(), MAX_TARGET_NAME_LENGTH);
         buf.writeItem(plan.targetResult());
         // Steps
         buf.writeVarInt(plan.steps().size());
@@ -76,18 +78,18 @@ public final class PlanResponsePacket {
                 buf.writeResourceLocation(alt);
             }
             buf.writeBoolean(step.modType() != null);
-            if (step.modType() != null) buf.writeUtf(step.modType().id());
+            if (step.modType() != null) buf.writeUtf(step.modType().id(), MAX_MOD_TYPE_LENGTH);
             buf.writeVarInt(step.depth());
             buf.writeBoolean(step.hasOrSiblings());
             buf.writeVarInt(step.recipeWidth());
             buf.writeVarInt(step.recipeHeight());
             buf.writeVarInt(step.alternativeModTypes().size());
             for (String mt : step.alternativeModTypes()) {
-                buf.writeUtf(mt);
+                buf.writeUtf(mt, MAX_MOD_TYPE_LENGTH);
             }
             buf.writeVarInt(step.warnings().size());
             for (String w : step.warnings()) {
-                buf.writeUtf(w);
+                buf.writeUtf(w, MAX_MESSAGE_LENGTH);
             }
         }
         // Materials
@@ -100,19 +102,19 @@ public final class PlanResponsePacket {
         // Missing
         buf.writeVarInt(plan.missing().size());
         for (String m : plan.missing()) {
-            buf.writeUtf(m);
+            buf.writeUtf(m, MAX_MESSAGE_LENGTH);
         }
         // Execution routing
         buf.writeBoolean(plan.executionModTypeId() != null);
-        if (plan.executionModTypeId() != null) buf.writeUtf(plan.executionModTypeId());
+        if (plan.executionModTypeId() != null) buf.writeUtf(plan.executionModTypeId(), MAX_MOD_TYPE_LENGTH);
         buf.writeBoolean(plan.executionDim() != null);
-        if (plan.executionDim() != null) buf.writeUtf(plan.executionDim());
+        if (plan.executionDim() != null) buf.writeUtf(plan.executionDim(), MAX_DIMENSION_LENGTH);
         buf.writeVarInt(plan.executionPosX());
         buf.writeVarInt(plan.executionPosY());
         buf.writeVarInt(plan.executionPosZ());
         // Mod warnings (Goety research/structure, FA essences)
         buf.writeVarInt(plan.modWarnings().size());
-        for (String w : plan.modWarnings()) buf.writeUtf(w);
+        for (String w : plan.modWarnings()) buf.writeUtf(w, MAX_MESSAGE_LENGTH);
         buf.writeVarInt(plan.repeatCount());
         // Embers alchemy pedestal data
         buf.writeBoolean(plan.embersCode() != null);
@@ -123,12 +125,12 @@ public final class PlanResponsePacket {
         buf.writeBoolean(plan.embersAspectNames() != null);
         if (plan.embersAspectNames() != null) {
             buf.writeVarInt(plan.embersAspectNames().length);
-            for (String s : plan.embersAspectNames()) buf.writeUtf(s);
+            for (String s : plan.embersAspectNames()) buf.writeUtf(s, MAX_DISPLAY_NAME_LENGTH);
         }
         buf.writeBoolean(plan.embersInputNames() != null);
         if (plan.embersInputNames() != null) {
             buf.writeVarInt(plan.embersInputNames().length);
-            for (String s : plan.embersInputNames()) buf.writeUtf(s);
+            for (String s : plan.embersInputNames()) buf.writeUtf(s, MAX_DISPLAY_NAME_LENGTH);
         }
         buf.writeVarLong(plan.embersSeed());
         buf.writeBoolean(plan.embersCanInfer());
@@ -138,7 +140,7 @@ public final class PlanResponsePacket {
         if (plan.baseItem() != null) buf.writeItem(plan.baseItem());
         // boundMachineTypes availability passport
         buf.writeVarInt(plan.boundMachineTypes().size());
-        for (String mt : plan.boundMachineTypes()) buf.writeUtf(mt);
+        for (String mt : plan.boundMachineTypes()) buf.writeUtf(mt, MAX_MOD_TYPE_LENGTH);
         // Leftovers (overproduction from integer batch rounding)
         buf.writeVarInt(plan.leftovers().size());
         for (Map.Entry<IngredientKey, Integer> e : plan.leftovers().entrySet()) {
@@ -155,11 +157,11 @@ public final class PlanResponsePacket {
 
     public static PlanResponsePacket decode(FriendlyByteBuf buf) {
         boolean success = buf.readBoolean();
-        String recipeId = buf.readUtf();
+        String recipeId = buf.readUtf(MAX_RECIPE_ID_LENGTH);
         // Always read full plan data — the server sends the recipe chain
         // structure even for infeasible plans so the client can render
         // intermediate steps and material shortages.
-        String targetName = buf.readUtf();
+        String targetName = buf.readUtf(MAX_TARGET_NAME_LENGTH);
         ItemStack targetResult = buf.readItem();
         // Steps
         int stepCount = readBoundedCount(buf);
@@ -180,7 +182,7 @@ public final class PlanResponsePacket {
             }
             ModType modType = null;
             if (buf.readBoolean()) {
-                modType = ModType.byId(buf.readUtf());
+                modType = ModType.byId(buf.readUtf(MAX_MOD_TYPE_LENGTH));
             }
             int depth = buf.readVarInt();
             boolean hasOrSiblings = buf.readBoolean();
@@ -189,12 +191,12 @@ public final class PlanResponsePacket {
             int altModCount = readBoundedCount(buf);
             List<String> alternativeModTypes = new ArrayList<>(altModCount);
             for (int j = 0; j < altModCount; j++) {
-                alternativeModTypes.add(buf.readUtf());
+                alternativeModTypes.add(buf.readUtf(MAX_MOD_TYPE_LENGTH));
             }
             int warnCount = readBoundedCount(buf);
             List<String> warnings = new ArrayList<>(warnCount);
             for (int j = 0; j < warnCount; j++) {
-                warnings.add(buf.readUtf());
+                warnings.add(buf.readUtf(MAX_MESSAGE_LENGTH));
             }
             steps.add(new PlanStep(rid, output, batches, inputs, alternatives, modType,
                     depth, hasOrSiblings, recipeWidth, recipeHeight, alternativeModTypes,
@@ -211,18 +213,18 @@ public final class PlanResponsePacket {
         int missCount = readBoundedCount(buf);
         List<String> missing = new ArrayList<>(missCount);
         for (int i = 0; i < missCount; i++) {
-            missing.add(buf.readUtf());
+            missing.add(buf.readUtf(MAX_MESSAGE_LENGTH));
         }
         // Execution routing
-        String execModType = buf.readBoolean() ? buf.readUtf() : null;
-        String execDim = buf.readBoolean() ? buf.readUtf() : null;
+        String execModType = buf.readBoolean() ? buf.readUtf(MAX_MOD_TYPE_LENGTH) : null;
+        String execDim = buf.readBoolean() ? buf.readUtf(MAX_DIMENSION_LENGTH) : null;
         int execX = buf.readVarInt();
         int execY = buf.readVarInt();
         int execZ = buf.readVarInt();
         // Mod warnings
         int modWarnCount = readBoundedCount(buf);
         List<String> modWarnings = new ArrayList<>(modWarnCount);
-        for (int i = 0; i < modWarnCount; i++) modWarnings.add(buf.readUtf());
+        for (int i = 0; i < modWarnCount; i++) modWarnings.add(buf.readUtf(MAX_MESSAGE_LENGTH));
         int repeatCount = buf.readVarInt();
         // Embers alchemy pedestal data
         int[] embersCode = null;
@@ -235,13 +237,13 @@ public final class PlanResponsePacket {
         if (buf.readBoolean()) {
             int len = readBoundedCount(buf);
             embersAspectNames = new String[len];
-            for (int i = 0; i < len; i++) embersAspectNames[i] = buf.readUtf();
+            for (int i = 0; i < len; i++) embersAspectNames[i] = buf.readUtf(MAX_DISPLAY_NAME_LENGTH);
         }
         String[] embersInputNames = null;
         if (buf.readBoolean()) {
             int len = readBoundedCount(buf);
             embersInputNames = new String[len];
-            for (int i = 0; i < len; i++) embersInputNames[i] = buf.readUtf();
+            for (int i = 0; i < len; i++) embersInputNames[i] = buf.readUtf(MAX_DISPLAY_NAME_LENGTH);
         }
         long embersSeed = buf.readVarLong();
         boolean embersCanInfer = buf.readBoolean();
@@ -251,7 +253,7 @@ public final class PlanResponsePacket {
         // boundMachineTypes availability passport
         int boundMtCount = readBoundedCount(buf);
         Set<String> boundMachineTypes = new LinkedHashSet<>();
-        for (int i = 0; i < boundMtCount; i++) boundMachineTypes.add(buf.readUtf());
+        for (int i = 0; i < boundMtCount; i++) boundMachineTypes.add(buf.readUtf(MAX_MOD_TYPE_LENGTH));
         // Leftovers (overproduction)
         int leftoverCount = readBoundedCount(buf);
         Map<IngredientKey, Integer> leftovers = new LinkedHashMap<>();
@@ -283,9 +285,17 @@ public final class PlanResponsePacket {
         for (PlanGraphView.NodeView node : graph.nodes()) {
             buf.writeVarInt(node.nodeId());
             buf.writeResourceLocation(node.recipeId());
-            buf.writeUtf(node.modTypeId(), 128);
+            buf.writeUtf(node.modTypeId(), MAX_MOD_TYPE_LENGTH);
             buf.writeVarInt(node.executions());
             buf.writeItem(node.primaryOutput());
+            buf.writeVarInt(node.alternativeIds().size());
+            for (ResourceLocation alternative : node.alternativeIds()) {
+                buf.writeResourceLocation(alternative);
+            }
+            buf.writeVarInt(node.alternativeModTypeIds().size());
+            for (String alternativeModType : node.alternativeModTypeIds()) {
+                buf.writeUtf(alternativeModType, MAX_MOD_TYPE_LENGTH);
+            }
             buf.writeVarInt(node.inputs().size());
             for (PlanGraphView.InputView input : node.inputs()) {
                 buf.writeVarInt(input.portIndex());
@@ -332,15 +342,23 @@ public final class PlanResponsePacket {
         for (int nodeId : graph.topologicalOrder()) buf.writeVarInt(nodeId);
     }
 
-    private static PlanGraphView readGraph(FriendlyByteBuf buf) {
+    static PlanGraphView readGraph(FriendlyByteBuf buf) {
         int version = buf.readVarInt();
         List<PlanGraphView.NodeView> nodes = new ArrayList<>();
         for (int i = 0, n = readBoundedCount(buf); i < n; i++) {
             int nodeId = readNonNegativeVarInt(buf, "graph node id");
             ResourceLocation recipe = buf.readResourceLocation();
-            String modType = buf.readUtf(128);
+            String modType = buf.readUtf(MAX_MOD_TYPE_LENGTH);
             int executions = readNonNegativeVarInt(buf, "graph executions");
             ItemStack primary = buf.readItem();
+            List<ResourceLocation> alternativeIds = new ArrayList<>();
+            for (int j = 0, m = readBoundedCount(buf); j < m; j++) {
+                alternativeIds.add(buf.readResourceLocation());
+            }
+            List<String> alternativeModTypes = new ArrayList<>();
+            for (int j = 0, m = readBoundedCount(buf); j < m; j++) {
+                alternativeModTypes.add(buf.readUtf(MAX_MOD_TYPE_LENGTH));
+            }
             List<PlanGraphView.InputView> inputs = new ArrayList<>();
             for (int j = 0, m = readBoundedCount(buf); j < m; j++) {
                 inputs.add(new PlanGraphView.InputView(readNonNegativeVarInt(buf, "input port"), buf.readItem(),
@@ -352,7 +370,7 @@ public final class PlanResponsePacket {
                         readNonNegativeVarInt(buf, "output quantity"), buf.readVarInt()));
             }
             nodes.add(new PlanGraphView.NodeView(nodeId, recipe, modType, executions,
-                    primary, inputs, outputs));
+                    primary, alternativeIds, alternativeModTypes, inputs, outputs));
         }
         List<PlanGraphView.EdgeView> edges = new ArrayList<>();
         for (int i = 0, n = readBoundedCount(buf); i < n; i++) {

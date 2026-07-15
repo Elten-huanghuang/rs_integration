@@ -38,10 +38,14 @@ public final class ChainRepeatController {
             if (skipped > 0) {
                 PlayerUtils.safeSendMessage(server, playerId,
                         Component.translatable("rsi.repeat.aborted", skipped));
+                RSIntegrationMod.LOGGER.warn(
+                        "[RSI-Repeat] Chain aborted (reason={}) — skipping {} remaining repeats",
+                        chain.abortReason(), skipped);
+            } else {
+                RSIntegrationMod.LOGGER.debug(
+                        "[RSI-Repeat] Terminal chain aborted with no remaining repeats (reason={})",
+                        chain.abortReason());
             }
-            RSIntegrationMod.LOGGER.warn(
-                    "[RSI-Repeat] Chain aborted (reason={}) — skipping {} remaining repeats",
-                    chain.abortReason(), skipped);
             return;
         }
 

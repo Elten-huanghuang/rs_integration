@@ -152,7 +152,10 @@ public final class RSIntegrationMod {
         registerDisplayTest();
         RSIntegrationConfig.register();
         refreshConfigCache();
-        MOD_BUS.addListener((ModConfigEvent.Reloading e) -> refreshConfigCache());
+        MOD_BUS.addListener((ModConfigEvent.Reloading e) -> {
+            refreshConfigCache();
+            com.huanghuang.rsintegration.compat.ftbquests.ExternalItemProgressBridge.refreshEnabled();
+        });
         AltarBindingRegistry.registerHook(AltarBinding.RS_NETWORK, RSBindingHook.INSTANCE);
         ForgeChunkManager.setForcedChunkLoadingCallback(
                 MOD_ID, (level, ticketHelper) -> {});
@@ -175,9 +178,12 @@ public final class RSIntegrationMod {
         MOD_BUS.addListener(this::onClientSetup);
 
         FMLJavaModLoadingContext.get().getModEventBus().addListener(this::onCommonSetup);
+        MinecraftForge.EVENT_BUS.register(
+                com.huanghuang.rsintegration.compat.ftbquests.ExternalItemProgressBridge.class);
     }
 
     private void onCommonSetup(final FMLCommonSetupEvent event) {
+        com.huanghuang.rsintegration.compat.ftbquests.ExternalItemProgressBridge.initialize();
         for (ModuleEntry entry : MODULES) {
             if (!entry.configFlag().get() || !ModList.get().isLoaded(entry.modId())) continue;
             IModIntegration module = entry.supplier().get();
@@ -389,8 +395,10 @@ public final class RSIntegrationMod {
         MinecraftForge.EVENT_BUS.register(AltarBindingRegistry.class);
 
         // /reload clears recipe output caches so new datapack recipes take effect
-        MinecraftForge.EVENT_BUS.addListener((net.minecraftforge.event.AddReloadListenerEvent e) ->
-                com.huanghuang.rsintegration.recipe.ModRecipeHandlers.clearResultCaches());
+        MinecraftForge.EVENT_BUS.addListener((net.minecraftforge.event.AddReloadListenerEvent e) -> {
+            com.huanghuang.rsintegration.recipe.ModRecipeHandlers.clearResultCaches();
+            com.huanghuang.rsintegration.crafting.CraftPlanningRevision.bump();
+        });
 
         // Async craft chains
         MinecraftForge.EVENT_BUS.register(AsyncCraftManager.getInstance());

@@ -3,7 +3,9 @@ package com.huanghuang.rsintegration.crafting.graph;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
@@ -36,10 +38,34 @@ public final class MachineLeaseRegistry {
     public Lease tryAcquire(MachineKey machine, Owner owner) {
         Objects.requireNonNull(machine, "machine");
         Objects.requireNonNull(owner, "owner");
-        if (leases.containsKey(machine)) return null;
-        Lease lease = new Lease(machine, owner, nextGeneration++);
-        leases.put(machine, lease);
-        return lease;
+        List<Lease> acquired = tryAcquireAll(List.of(machine), owner);
+        return acquired == null ? null : acquired.get(0);
+    }
+
+    /** Acquire a complete machine/support scope without leaving partial leases. */
+    public List<Lease> tryAcquireAll(List<MachineKey> scope, Owner owner) {
+        Objects.requireNonNull(scope, "scope");
+        Objects.requireNonNull(owner, "owner");
+        if (scope.isEmpty()) throw new IllegalArgumentException("machine scope must not be empty");
+        List<MachineKey> unique = new ArrayList<>();
+        for (MachineKey machine : scope) {
+            Objects.requireNonNull(machine, "machine");
+            if (unique.contains(machine)) continue;
+            if (leases.containsKey(machine)) return null;
+            unique.add(machine);
+        }
+        List<Lease> acquired = new ArrayList<>(unique.size());
+        for (MachineKey machine : unique) {
+            Lease lease = new Lease(machine, owner, nextGeneration++);
+            leases.put(machine, lease);
+            acquired.add(lease);
+        }
+        return List.copyOf(acquired);
+    }
+
+    public void releaseAll(List<Lease> scope) {
+        if (scope == null) return;
+        for (Lease lease : scope) release(lease);
     }
 
     public boolean release(Lease lease) {
@@ -57,6 +83,17 @@ public final class MachineLeaseRegistry {
 
     public int size() {
         return leases.size();
+    }
+
+    public int countOwnedBy(UUID craftId) {
+        Objects.requireNonNull(craftId, "craftId");
+        return (int) leases.values().stream()
+                .filter(lease -> lease.owner().craftId().equals(craftId))
+                .count();
+    }
+
+    public Map<MachineKey, Lease> snapshot() {
+        return Map.copyOf(leases);
     }
 
     public void clear() {

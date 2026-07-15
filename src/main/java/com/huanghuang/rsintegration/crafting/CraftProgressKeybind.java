@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.mojang.blaze3d.platform.InputConstants;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.KeyMapping;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
@@ -29,7 +30,7 @@ public final class CraftProgressKeybind {
         TOGGLE_PROGRESS = new KeyMapping(
                 "key.rsi.toggle_progress",
                 InputConstants.Type.KEYSYM,
-                GLFW.GLFW_KEY_UNKNOWN,
+                GLFW.GLFW_KEY_P,
                 "key.categories.rsi"
         );
         RSIntegrationMod.MOD_BUS.addListener(
@@ -43,7 +44,7 @@ public final class CraftProgressKeybind {
         if (event.getAction() != GLFW.GLFW_PRESS) return;
         if (!CraftProgressTracker.hasActive()) return;
         while (TOGGLE_PROGRESS.consumeClick()) {
-            CraftProgressTracker.toggleVisible();
+            Minecraft.getInstance().setScreen(new CraftProgressScreen());
         }
     }
 }

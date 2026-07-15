@@ -8,26 +8,73 @@ import java.util.UUID;
 public record CraftProgressSnapshot(
         UUID craftId,
         int sequence,
-        byte chainState,   // 0=EXECUTING, 1=STOPPING
+        Result result,
+        Reason reason,
         int completedNodes,
         int totalNodes,
         int runningNodes,
-        @Nullable String failedStep,
+        @Nullable String technicalDetail,
         List<NodeProgress> nodes
 ) {
-    public static final byte STATE_EXECUTING = 0;
-    public static final byte STATE_STOPPING = 1;
     public static final int TERMINAL_SEQUENCE = Integer.MAX_VALUE;
 
     public CraftProgressSnapshot {
+        result = result == null ? Result.RUNNING : result;
+        reason = reason == null ? Reason.NONE : reason;
         nodes = nodes == null ? List.of() : List.copyOf(nodes);
     }
 
-    public CraftProgressSnapshot(UUID craftId, int sequence, byte chainState,
+    public CraftProgressSnapshot(UUID craftId, int sequence, Result result, Reason reason,
                                  int completedNodes, int totalNodes, int runningNodes,
-                                 @Nullable String failedStep) {
-        this(craftId, sequence, chainState, completedNodes, totalNodes, runningNodes,
-                failedStep, List.of());
+                                 @Nullable String technicalDetail) {
+        this(craftId, sequence, result, reason, completedNodes, totalNodes, runningNodes,
+                technicalDetail, List.of());
+    }
+
+    public enum Result {
+        RUNNING,
+        WAITING,
+        STOPPING,
+        SUCCEEDED,
+        FAILED,
+        CANCELLED;
+
+        public static Result fromOrdinal(int ordinal) {
+            Result[] values = values();
+            return ordinal >= 0 && ordinal < values.length ? values[ordinal] : RUNNING;
+        }
+
+        public boolean terminal() {
+            return this == SUCCEEDED || this == FAILED || this == CANCELLED;
+        }
+    }
+
+    public enum Reason {
+        NONE,
+        WAITING_MATERIALS,
+        MACHINE_BUSY,
+        CHUNK_UNLOADED,
+        OPERATION_BUDGET,
+        RESOURCE_CONFLICT,
+        CONTRACT_INCOMPATIBLE,
+        MATERIAL_EXTRACTION_FAILED,
+        START_REJECTED,
+        OUTPUT_MISSING,
+        TIMEOUT,
+        PLAYER_CANCELLED,
+        PLAYER_OFFLINE,
+        SERVER_STOP,
+        INTERNAL_ERROR,
+        UNKNOWN;
+
+        public static Reason fromOrdinal(int ordinal) {
+            Reason[] values = values();
+            return ordinal >= 0 && ordinal < values.length ? values[ordinal] : UNKNOWN;
+        }
+
+        public String translationKey() {
+            return "rsi.progress.reason." + name().toLowerCase(java.util.Locale.ROOT);
+        }
     }
 
     public enum NodeState {
@@ -54,7 +101,8 @@ public record CraftProgressSnapshot(
             int totalOperations,
             int runningOperations,
             String machineLabel,
-            String detail,
+            Reason reason,
+            String technicalDetail,
             boolean draining
     ) {
         public NodeProgress {
@@ -66,11 +114,12 @@ public record CraftProgressSnapshot(
             runningOperations = Math.min(Math.max(0, runningOperations),
                     totalOperations - completedOperations);
             machineLabel = machineLabel == null ? "" : machineLabel;
-            detail = detail == null ? "" : detail;
+            reason = reason == null ? Reason.NONE : reason;
+            technicalDetail = technicalDetail == null ? "" : technicalDetail;
         }
     }
 
     public boolean isTerminal() {
-        return sequence == TERMINAL_SEQUENCE || chainState == STATE_STOPPING;
+        return sequence == TERMINAL_SEQUENCE || result.terminal();
     }
 }

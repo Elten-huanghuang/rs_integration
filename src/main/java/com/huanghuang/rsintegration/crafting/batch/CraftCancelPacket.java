@@ -55,7 +55,7 @@ public final class CraftCancelPacket {
                 return;
             }
             if (chain.isDone()) return;
-            chain.abort("Cancelled");
+            chain.cancel("Player cancelled the craft");
             player.sendSystemMessage(Component.translatable("rsi.async.cancelled"));
         });
         ctx.get().setPacketHandled(true);

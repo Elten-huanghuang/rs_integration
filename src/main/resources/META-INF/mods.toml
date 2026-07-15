@@ -42,6 +42,20 @@ logoFile = ""
     side = "BOTH"
 
 [[dependencies.${mod_id}]]
+    modId = "ftbquests"
+    mandatory = false
+    versionRange = "[2001.4.13,)"
+    ordering = "AFTER"
+    side = "BOTH"
+
+[[dependencies.${mod_id}]]
+    modId = "ftbteams"
+    mandatory = false
+    versionRange = "[2001.1.4,)"
+    ordering = "AFTER"
+    side = "BOTH"
+
+[[dependencies.${mod_id}]]
     modId = "goety"
     mandatory = false
     versionRange = "[0,)"

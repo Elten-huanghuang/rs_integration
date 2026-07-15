@@ -1742,6 +1742,23 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         return myPos;
     }
 
+    @Override
+    public ItemStack getExpectedOutput() {
+        if (machineType != MachineType.CRYSTAL_RITUAL || recipe == null || player == null) return null;
+        ServerLevel level = resolveMachineLevel(player);
+        if (level == null) return null;
+        ItemStack expected = com.huanghuang.rsintegration.crafting.RecipeIndex
+                .tryGetResultItem(recipe, level.registryAccess());
+        return expected.isEmpty() ? null : expected;
+    }
+
+    @Override
+    public net.minecraft.world.phys.AABB getOutputCaptureRegion() {
+        if (machineType != MachineType.CRYSTAL_RITUAL || myPos == null) return null;
+        return new net.minecraft.world.phys.AABB(
+                myPos.offset(-2, -1, -2), myPos.offset(2, 3, 2));
+    }
+
     //
     // WR commits the ledger BEFORE placing items (unlike Goety). Whether a
     // clear must physically RETURN the machine contents to RS, or merely VOID

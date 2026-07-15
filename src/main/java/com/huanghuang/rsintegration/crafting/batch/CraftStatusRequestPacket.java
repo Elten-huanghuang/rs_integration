@@ -61,22 +61,31 @@ public final class CraftStatusRequestPacket {
                     if (chain != null) {
                         RSIntegrationMod.LOGGER.warn("[RSI-Status] Player {} requested craft {} owned by {}",
                                 player.getGameProfile().getName(), packet.craftId, chain.getPlayerId());
+                    } else {
+                        sendSync(player, CraftStatusSyncPacket.notFound(packet.craftId));
                     }
                     return;
                 }
                 sendStatus(player, chain);
                 return;
             }
-            for (AsyncCraftChain chain : manager.activeCraftsFor(player.getUUID())) {
-                sendStatus(player, chain);
-            }
+            java.util.List<AsyncCraftChain> active = manager.activeCraftsFor(player.getUUID());
+            for (AsyncCraftChain chain : active) sendStatus(player, chain);
+            sendSync(player, CraftStatusSyncPacket.full(
+                    active.stream().map(AsyncCraftChain::getCraftId).toList()));
         });
         ctx.setPacketHandled(true);
     }
 
+    private static void sendSync(ServerPlayer player, CraftStatusSyncPacket packet) {
+        BatchCraftNetworkHandler.CHANNEL.sendTo(packet,
+                player.connection.connection, NetworkDirection.PLAY_TO_CLIENT);
+    }
+
     private static void sendStatus(ServerPlayer player, AsyncCraftChain chain) {
         BatchCraftNetworkHandler.CHANNEL.sendTo(
-                new CraftStartedPacket(chain.getCraftId(), chain.stepsCount(), chain.isGraphExecution()),
+                new CraftStartedPacket(chain.getCraftId(), chain.stepsCount(),
+                        chain.isGraphExecution(), chain.displayTarget()),
                 player.connection.connection, NetworkDirection.PLAY_TO_CLIENT);
         BatchCraftNetworkHandler.CHANNEL.sendTo(
                 new CraftProgressPacket(chain.nextStatusSnapshot()),

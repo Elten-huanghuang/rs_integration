@@ -41,6 +41,12 @@ class PlanGraphViewTest extends BootstrapTest {
 
         assertEquals(List.of(0, 1, 2), view.topologicalOrder());
         assertEquals(3, view.nodes().size());
+        assertEquals(List.of(new ResourceLocation("test", "alternate")),
+                view.nodes().get(0).alternativeIds());
+        assertEquals(List.of(ModType.GENERIC.id()),
+                view.nodes().get(0).alternativeModTypeIds());
+        assertEquals(view.nodes().get(0).alternativeIds(),
+                view.nodes().get(0).asPlanStep().alternatives());
         assertEquals(2, view.edges().size());
         assertEquals(0, view.edges().get(0).source().producerNodeId());
         assertEquals(1, view.edges().get(0).quantity());
@@ -69,7 +75,35 @@ class PlanGraphViewTest extends BootstrapTest {
         assertEquals(graph.edges().size(), decoded.graph().edges().size());
         assertEquals(graph.edges().get(1).quantity(), decoded.graph().edges().get(1).quantity());
         assertEquals(tag, decoded.graph().nodes().get(0).primaryOutput().getTag());
+        assertEquals(graph.nodes().get(0).alternativeIds(),
+                decoded.graph().nodes().get(0).alternativeIds());
+        assertEquals(graph.nodes().get(0).alternativeModTypeIds(),
+                decoded.graph().nodes().get(0).alternativeModTypeIds());
+        assertEquals(graph.nodes().get(0).primaryOutput().getCount(),
+                decoded.graph().nodes().get(0).primaryOutput().getCount());
+        assertEquals(1, decoded.graph().nodes().get(0).outputs().get(0).display().getCount());
+        assertEquals(3, decoded.graph().nodes().get(0).outputs().get(0).quantity());
+        assertEquals(1, decoded.graph().edges().get(1).material().getCount());
+        assertEquals(2, decoded.graph().edges().get(1).quantity());
         assertEquals(0, buf.readableBytes());
+    }
+
+    @Test
+    void legacyPacketWithoutGraphTailStillDecodes() {
+        PlanResponse plan = new PlanResponse(true, "Diamond", new ItemStack(Items.DIAMOND),
+                List.of(), java.util.Map.of(), List.of(), "test:root",
+                null, null, 0, 0, 0, List.of(), 1,
+                null, null, null, 0, false, false, false, null,
+                java.util.Set.of(), java.util.Map.of(), null, null);
+        FriendlyByteBuf encoded = new FriendlyByteBuf(Unpooled.buffer());
+        new PlanResponsePacket(plan).encode(encoded);
+        encoded.writerIndex(encoded.writerIndex() - 1);
+
+        PlanResponse decoded = PlanResponsePacket.decode(encoded).plan();
+
+        assertEquals("test:root", decoded.recipeId());
+        assertEquals(null, decoded.graph());
+        assertEquals(0, encoded.readableBytes());
     }
 
     private static CraftPlanGraph sharedProducerGraph() {
@@ -84,7 +118,7 @@ class PlanGraphViewTest extends BootstrapTest {
         OutputPortId leftOutput = new OutputPortId(leftId, 0);
         OutputPortId rightOutput = new OutputPortId(rightId, 0);
         CraftNode producer = node(producerId, "producer", List.of(),
-                List.of(new OutputDeclaration(producerOutput, iron, 3, OutputKind.PRIMARY)));
+                List.of(new OutputDeclaration(producerOutput, iron, 3, OutputKind.PRIMARY)), true);
         CraftNode left = node(leftId, "left", List.of(input(leftInput, 1)),
                 List.of(new OutputDeclaration(leftOutput, diamond, 1, OutputKind.PRIMARY)));
         CraftNode right = node(rightId, "right", List.of(input(rightInput, 2)),
@@ -107,8 +141,15 @@ class PlanGraphViewTest extends BootstrapTest {
 
     private static CraftNode node(NodeId id, String path, List<InputDemand> inputs,
                                   List<OutputDeclaration> outputs) {
+        return node(id, path, inputs, outputs, false);
+    }
+
+    private static CraftNode node(NodeId id, String path, List<InputDemand> inputs,
+                                  List<OutputDeclaration> outputs, boolean withAlternative) {
         return new CraftNode(id, new ResourceLocation("test", path), ModType.GENERIC.id(),
                 new ResourceLocation("minecraft", "crafting"), 1,
-                List.of(), List.of(), false, null, null, inputs, outputs);
+                withAlternative ? List.of(new ResourceLocation("test", "alternate")) : List.of(),
+                withAlternative ? List.of(ModType.GENERIC.id()) : List.of(),
+                false, null, null, inputs, outputs);
     }
 }

@@ -59,7 +59,8 @@ public record PlanGraphView(
                             output.quantity(), output.kind().ordinal()))
                     .toList();
             nodes.add(new NodeView(node.id().value(), node.recipeId(), node.modTypeId(),
-                    node.executions(), primary, inputs, outputs));
+                    node.executions(), primary, node.alternativeIds(), node.alternativeModTypeIds(),
+                    inputs, outputs));
         }
 
         List<EdgeView> edges = graph.allocations().stream().map(allocation -> {
@@ -102,9 +103,20 @@ public record PlanGraphView(
 
     public record NodeView(int nodeId, ResourceLocation recipeId, String modTypeId,
                            int executions, ItemStack primaryOutput,
+                           List<ResourceLocation> alternativeIds,
+                           List<String> alternativeModTypeIds,
                            List<InputView> inputs, List<OutputView> outputs) {
+        public NodeView(int nodeId, ResourceLocation recipeId, String modTypeId,
+                        int executions, ItemStack primaryOutput,
+                        List<InputView> inputs, List<OutputView> outputs) {
+            this(nodeId, recipeId, modTypeId, executions, primaryOutput,
+                    List.of(), List.of(), inputs, outputs);
+        }
+
         public NodeView {
             primaryOutput = primaryOutput.copy();
+            alternativeIds = List.copyOf(alternativeIds);
+            alternativeModTypeIds = List.copyOf(alternativeModTypeIds);
             inputs = List.copyOf(inputs);
             outputs = List.copyOf(outputs);
         }
@@ -113,7 +125,8 @@ public record PlanGraphView(
             List<ItemStack> displayInputs = inputs.stream()
                     .map(input -> input.display().copyWithCount(input.quantity())).toList();
             return new PlanStep(recipeId, primaryOutput.copy(), Math.max(1, executions),
-                    displayInputs, List.of(), ModType.byId(modTypeId));
+                    displayInputs, alternativeIds, ModType.byId(modTypeId), 0,
+                    !alternativeIds.isEmpty(), 0, 0, alternativeModTypeIds);
         }
     }
 
