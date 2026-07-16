@@ -452,8 +452,7 @@ public final class CraftingResolver {
                 consumeMs, candMs, candidates.size(), describeFirstItem(ingredient));
         if (candidates.isEmpty()) {
             ctx.diag("ensureIngredient FAILED: no candidates for " + describeFirstItem(ingredient));
-            if (ctx.bestEffort && ctx.missingOut != null) {
-                recordUnresolved(ctx, consumer, ingredient, count);
+            if (recordBestEffortUnresolved(ctx, consumer, ingredient, count, "no-candidates")) {
                 return true;
             }
             return false;
@@ -496,8 +495,7 @@ public final class CraftingResolver {
                     + ", all rejected) for " + describeFirstItem(ingredient));
             RSIntegrationMod.LOGGER.debug("[RSI-ensure] no viable candidates for {} ({} total candidates rejected, alive-building took {}ms)",
                     describeFirstItem(ingredient), candidates.size(), aliveMs);
-            if (ctx.bestEffort && ctx.missingOut != null) {
-                recordUnresolved(ctx, consumer, ingredient, count);
+            if (recordBestEffortUnresolved(ctx, consumer, ingredient, count, "no-viable-candidates")) {
                 return true;
             }
             return false;
@@ -573,8 +571,8 @@ public final class CraftingResolver {
                 edges.rollback();
                 if (ctx.timedOut()) {
                     PerformanceMonitor.recordResolveTimeout();
-                    if (ctx.bestEffort && ctx.missingOut != null) {
-                        ctx.missingOut.add(describeFirstItem(ingredient));
+                    if (recordBestEffortUnresolved(ctx, consumer, ingredient, count,
+                            "timeout-after-craft-failure")) {
                         return true;
                     }
                     return false;
@@ -596,8 +594,8 @@ public final class CraftingResolver {
             edges.rollback();
             if (ctx.timedOut()) {
                 PerformanceMonitor.recordResolveTimeout();
-                if (ctx.bestEffort && ctx.missingOut != null) {
-                    ctx.missingOut.add(describeFirstItem(ingredient));
+                if (recordBestEffortUnresolved(ctx, consumer, ingredient, count,
+                        "timeout-after-consume-failure")) {
                     return true;
                 }
                 return false;
@@ -606,16 +604,30 @@ public final class CraftingResolver {
 
         ctx.diag("ensureIngredient FAILED: exhausted " + alive.size() + " viable candidates for "
                 + describeFirstItem(ingredient));
-        if (ctx.bestEffort && ctx.missingOut != null) {
-            ctx.missingOut.add(describeFirstItem(ingredient));
+        if (recordBestEffortUnresolved(ctx, consumer, ingredient, count, "candidates-exhausted")) {
             return true;
         }
         return false;
     }
 
+    static boolean recordBestEffortUnresolved(ResolutionContext ctx,
+                                              @Nullable InputPortId consumer,
+                                              Ingredient ingredient,
+                                              int quantity,
+                                              String reason) {
+        if (!ctx.bestEffort) return false;
+        ctx.diag("ensureIngredient UNRESOLVED: reason=" + reason + " consumer=" + consumer
+                + " quantity=" + quantity + " ingredient=" + describeFirstItem(ingredient));
+        recordUnresolved(ctx, consumer, ingredient, quantity);
+        return true;
+    }
+
     private static void recordUnresolved(ResolutionContext ctx, @Nullable InputPortId consumer,
                                          Ingredient ingredient, int quantity) {
-        ctx.missingOut.add(describeFirstItem(ingredient));
+        if (ctx.missingOut != null) {
+            String missing = describeFirstItem(ingredient);
+            if (!ctx.missingOut.contains(missing)) ctx.missingOut.add(missing);
+        }
         if (consumer != null) ctx.addUnresolved(consumer, ingredient, quantity);
     }
 

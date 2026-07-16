@@ -38,4 +38,9 @@ public interface ModRecipeHandler {
     default List<ItemStack> getSecondaryOutputs(@Nonnull Recipe<?> recipe, @Nonnull RegistryAccess access) {
         return List.of();
     }
+
+    /** Whether one execution is guaranteed to produce the item returned by {@link #getResultItem}. */
+    default boolean hasDeterministicPrimaryOutput(@Nonnull Recipe<?> recipe) {
+        return true;
+    }
 }

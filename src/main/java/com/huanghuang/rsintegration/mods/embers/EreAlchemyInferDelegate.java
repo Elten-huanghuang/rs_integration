@@ -62,6 +62,8 @@ extends AbstractBatchDelegate {
     private List<EreAlchemyBatchDelegate.PedestalInfo> pedestals;
     @Nullable
     private ServerPlayer player;
+    @Nullable
+    private EreAlchemyLock.Lease lockLease;
     private Phase phase = Phase.INIT;
     private List<int[]> allCombinations;
     private List<int[]> candidates;
@@ -71,7 +73,7 @@ extends AbstractBatchDelegate {
     private int waitStartTick;
     private ItemStack successResult = ItemStack.EMPTY;
     private boolean succeeded;
-    private List<IngredientSpec> firstAttemptSpecs;
+    private EreAlchemyMaterials firstAttemptMaterials;
     private int[] aspectEquivClasses;
 
     private static String progressKey(UUID playerId, String recipeId) {
@@ -224,8 +226,8 @@ extends AbstractBatchDelegate {
         this.succeeded = false;
         this.phase = Phase.INIT;
         this.buildFirstAttemptSpecs();
-        if (!EreAlchemyLock.tryLock(lvl.dimension(), (BlockPos)pos, player.getUUID())) {
-            player.sendSystemMessage(Component.translatable("rsi.embers.error.tablet_locked"));
+        this.lockLease = EreAlchemyLock.tryAcquire(lvl.dimension(), (BlockPos)pos, player.getUUID());
+        if (this.lockLease == null) {
             return false;
         }
         RSIntegrationMod.LOGGER.debug("[RSI-Embers-Infer] Init OK: recipe={} aspects={} inputs={} combos={} firstGuess={}", (Object)recipeId, (Object)this.aspectsSize, (Object)this.inputsSize, (Object)this.allCombinations.size(), (Object)Arrays.toString(this.currentGuess));
@@ -237,7 +239,25 @@ extends AbstractBatchDelegate {
 
     @Nullable
     public List<IngredientSpec> getRequiredMaterials() {
-        return this.firstAttemptSpecs;
+        return this.firstAttemptMaterials != null ? this.firstAttemptMaterials.allSpecs() : null;
+    }
+
+    @Override
+    public List<IngredientSpec> getGraphSpecs() {
+        return this.firstAttemptMaterials != null ? this.firstAttemptMaterials.graphSpecs() : List.of();
+    }
+
+    @Override
+    public List<IngredientSpec> getSupplementalSpecs() {
+        return this.firstAttemptMaterials != null
+                ? this.firstAttemptMaterials.supplementalSpecs() : List.of();
+    }
+
+    @Override
+    public List<ItemStack> mergeSupplementalMaterials(List<ItemStack> graphMaterials,
+                                                       List<ItemStack> supplementalMaterials) {
+        if (this.firstAttemptMaterials == null) return graphMaterials;
+        return this.firstAttemptMaterials.mergeStacks(graphMaterials, supplementalMaterials);
     }
 
     public boolean tryStartSingleCraft(ServerPlayer player) {
@@ -432,8 +452,19 @@ extends AbstractBatchDelegate {
         return false;
     }
 
+    @Override
+    public void releasePreparationResources() {
+        releaseAlchemyLease();
+    }
+
+    private void releaseAlchemyLease() {
+        if (this.lockLease == null) return;
+        EreAlchemyLock.release(this.lockLease);
+        this.lockLease = null;
+    }
+
     public ItemStack collectResult(ServerPlayer player) {
-        EreAlchemyLock.unlock(this.level.dimension(), (BlockPos)this.machinePos);
+        releaseAlchemyLease();
         if (this.succeeded && !this.successResult.isEmpty()) {
             ItemStack out = this.successResult.copy();
             this.successResult = ItemStack.EMPTY;
@@ -467,7 +498,7 @@ extends AbstractBatchDelegate {
 
     @Override
     protected void clearMachineState(BlockEntity be, ServerPlayer player) {
-        EreAlchemyLock.unlock(this.level.dimension(), be.getBlockPos());
+        releaseAlchemyLease();
         this.clearAndRefundSurvivors();
     }
 
@@ -604,15 +635,14 @@ extends AbstractBatchDelegate {
     }
 
     private void buildFirstAttemptSpecs() {
-        this.firstAttemptSpecs = new ArrayList<IngredientSpec>();
-        Ingredient tabletIng = Reflect.getField((Object)this.recipe, "tablet").map(o -> (Ingredient)o).orElse(null);
-        if (tabletIng != null) {
-            this.firstAttemptSpecs.add(new IngredientSpec(tabletIng, 1));
-        }
+        Ingredient tabletIng = Reflect.getField((Object)this.recipe, "tablet")
+                .filter(Ingredient.class::isInstance).map(Ingredient.class::cast).orElse(null);
+        List<Ingredient> guessedAspects = new ArrayList<>(this.inputsSize);
         for (int i = 0; i < this.inputsSize; ++i) {
-            this.firstAttemptSpecs.add(new IngredientSpec(this.aspects.get(this.currentGuess[i]), 1));
-            this.firstAttemptSpecs.add(new IngredientSpec(this.inputs.get(i), 1));
+            guessedAspects.add(this.aspects.get(this.currentGuess[i]));
         }
+        this.firstAttemptMaterials = EreAlchemyMaterials.create(
+                tabletIng, guessedAspects, this.inputs);
     }
 
     private boolean placeMaterialsAndSpark(List<ItemStack> materials) {
@@ -763,7 +793,7 @@ extends AbstractBatchDelegate {
         if (tabletBE != null && !tabletBE.isRemoved()) {
             Object tabletInv = Reflect.getField((Object)tabletBE, "inventory").orElse(null);
             if (tabletInv != null) {
-                ItemStack s = Reflect.invoke(tabletInv, "getStackInSlot", 0).map(o -> (ItemStack)o).orElse(ItemStack.EMPTY);
+                ItemStack s = Reflect.invokeInt(tabletInv, "getStackInSlot", 0).map(o -> (ItemStack)o).orElse(ItemStack.EMPTY);
                 if (!s.isEmpty()) {
                     toRefund.add(s.copy());
                     Reflect.invoke(tabletInv, "setStackInSlot", 0, ItemStack.EMPTY);

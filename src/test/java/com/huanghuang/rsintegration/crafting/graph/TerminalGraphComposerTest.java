@@ -89,6 +89,21 @@ class TerminalGraphComposerTest extends BootstrapTest {
     }
 
     @Test
+    void marksRandomTerminalOutputAsDynamic() {
+        MaterialKey geode = MaterialKey.of(new ItemStack(Items.PRISMARINE));
+        CraftPlanGraph base = new CraftPlanGraph(1, List.of(), List.of(), List.of(
+                new RootDemand(Ingredient.of(Items.PRISMARINE), 1, 0,
+                        new ItemStack(Items.PRISMARINE), List.of(new RootAllocation(
+                        new MaterialSource.InitialPool(geode), geode, 1)))), List.of(), List.of());
+
+        CraftPlanGraph result = TerminalGraphComposer.compose(base, step("random", 1),
+                new ItemStack(Items.SNIFFER_EGG), false);
+
+        assertEquals(OutputKind.DYNAMIC, result.nodes().get(0).outputs().get(0).kind());
+        CraftPlanValidator.validate(result);
+    }
+
+    @Test
     void rejectsUnresolvedOrUnknownTerminalShape() {
         MaterialKey iron = MaterialKey.of(new ItemStack(Items.IRON_INGOT));
         CraftPlanGraph unresolved = new CraftPlanGraph(1, List.of(), List.of(), List.of(

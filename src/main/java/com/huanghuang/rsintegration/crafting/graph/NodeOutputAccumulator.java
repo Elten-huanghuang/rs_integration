@@ -29,6 +29,7 @@ public final class NodeOutputAccumulator {
         }
         List<Publication> publications = new ArrayList<>();
         for (OutputDeclaration declaration : declarations) {
+            if (declaration.kind() == OutputKind.DYNAMIC) continue;
             int remaining = declaration.quantity() - published.get(declaration.id());
             if (remaining <= 0) continue;
             for (ItemStack stack : pending) {
@@ -53,6 +54,7 @@ public final class NodeOutputAccumulator {
     public List<Shortage> shortages() {
         List<Shortage> shortages = new ArrayList<>();
         for (OutputDeclaration declaration : declarations) {
+            if (declaration.kind() == OutputKind.DYNAMIC) continue;
             int actual = published.get(declaration.id());
             if (actual < declaration.quantity()) {
                 shortages.add(new Shortage(declaration.id(), declaration.kind(),

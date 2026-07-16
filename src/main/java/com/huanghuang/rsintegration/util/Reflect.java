@@ -118,6 +118,11 @@ public final class Reflect {
         return invokeExact(obj, methodName, paramTypes, args);
     }
 
+    /** Invoke a method whose sole parameter is a primitive {@code int}. */
+    public static <T> Optional<T> invokeInt(Object obj, String methodName, int arg) {
+        return invokeExact(obj, methodName, new Class<?>[]{int.class}, arg);
+    }
+
     /**
      * Invoke a method with explicit parameter types.
      * Use this when the method is overloaded or has primitive parameters.

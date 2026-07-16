@@ -193,15 +193,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
         }
 
         if (!hasWater) {
-            player.sendSystemMessage(Component.translatable("rsi.eidolon.warn.needs_water"));
-            try {
-                be.getClass().getMethod("fill").invoke(be);
-                hasWater = true;
-                player.sendSystemMessage(Component.translatable("rsi.eidolon.info.auto_filled"));
-            } catch (Exception ex) {
-                player.sendSystemMessage(Component.translatable("rsi.eidolon.error.fill_failed"));
-                return false;
-            }
+            RSIntegrationMod.LOGGER.debug("[RSI-Batch-Eidolon] Crucible at {} will be filled when the selected operation starts", pos);
         }
 
         if (!boiling) {
@@ -708,8 +700,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
     public boolean tryStartWithMaterials(ServerPlayer player, List<ItemStack> materials,
                                          ExtractionLedger sharedLedger) {
         this.player = player;
-        this.sharedLedger = sharedLedger;
-        this.usingSharedLedger = true;
+        useSharedLedger(sharedLedger);
 
         // Ritual mode: materials were pre-extracted by chain.
         // First item is reagent, rest are pedestal/focus items (not consumed).
@@ -777,9 +768,13 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
         } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-Eidolon] Reflection probe failed", e); }
 
         if (!hasWater) {
+            player.sendSystemMessage(Component.translatable("rsi.eidolon.warn.needs_water"));
             try {
                 crucible.getClass().getMethod("fill").invoke(crucible);
+                player.sendSystemMessage(Component.translatable("rsi.eidolon.info.auto_filled"));
             } catch (Exception ex) {
+                RSIntegrationMod.LOGGER.error("[RSI-Batch-Eidolon] Failed to fill selected crucible", ex);
+                player.sendSystemMessage(Component.translatable("rsi.eidolon.error.fill_failed"));
                 return false;
             }
         }
@@ -929,7 +924,16 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
     @Override
     protected void clearMachineState(BlockEntity be, ServerPlayer player) {
         refundAll();
-        if (isRitual) cleanupBrazier();
+        if (isRitual) {
+            cleanupBrazier();
+        } else if (!isWorktable && crucible != null) {
+            try {
+                if (stepsField != null) stepsField.set(crucible, new ArrayList<>());
+                ((BlockEntity) crucible).setChanged();
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.warn("[RSI-Batch-Eidolon] Failed to clear crucible state during recovery", e);
+            }
+        }
         pendingResult = ItemStack.EMPTY;
         craftCompleted = false;
         resetState();
@@ -1086,8 +1090,9 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
     // ── Refund ───────────────────────────────────────────────────
 
     private void refundAll() {
-        if (ledger == null || !ledger.isCommitted()) return;
-        ledger.refundCommitted(network, player);
+        ExtractionLedger activeLedger = usingSharedLedger && sharedLedger != null ? sharedLedger : ledger;
+        if (activeLedger == null || !activeLedger.isCommitted()) return;
+        activeLedger.refundCommitted(network, player);
     }
 
     // ── Plan warnings ─────────────────────────────────────────────

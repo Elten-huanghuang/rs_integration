@@ -112,6 +112,15 @@ final class ResolutionContext {
                       Map<Item, List<RecipeIndex.Entry>> index,
                       Map<CraftingResolver.StackKey, Integer> keyedCounts,
                       @Nullable Map<ResourceLocation, ResourceLocation> preferredRecipes,
+                      boolean bestEffort,
+                      @Nullable List<String> missingOut) {
+        this(level, index, keyedCounts, preferredRecipes, null, null, bestEffort, missingOut);
+    }
+
+    ResolutionContext(Level level,
+                      Map<Item, List<RecipeIndex.Entry>> index,
+                      Map<CraftingResolver.StackKey, Integer> keyedCounts,
+                      @Nullable Map<ResourceLocation, ResourceLocation> preferredRecipes,
                       @Nullable ServerPlayer player,
                       @Nullable INetwork network,
                       boolean bestEffort,

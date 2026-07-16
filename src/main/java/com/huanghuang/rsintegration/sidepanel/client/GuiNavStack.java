@@ -4,7 +4,6 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 
 import com.huanghuang.rsintegration.machine.MachineHub;
 import com.huanghuang.rsintegration.machine.MachineHubRenderer;
-import com.huanghuang.rsintegration.mixin.minecraft.AbstractContainerScreenAccessor;
 import com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler;
 import com.huanghuang.rsintegration.sidepanel.network.ReturnToRSPacket;
 import net.minecraft.client.Minecraft;
@@ -187,8 +186,7 @@ public final class GuiNavStack {
         if (!(screen instanceof AbstractContainerScreen<?> acs)) return;
         if (!(screen instanceof com.refinedmods.refinedstorage.screen.grid.GridScreen)) return;
 
-        AbstractContainerScreenAccessor acc = (AbstractContainerScreenAccessor) acs;
-        MachineHubRenderer.render(event.getGuiGraphics(), acc.getLeftPos(), acc.getTopPos(),
-                acc.getImageWidth(), event.getMouseX(), event.getMouseY());
+        MachineHubRenderer.render(event.getGuiGraphics(), acs.getGuiLeft(), acs.getGuiTop(),
+                acs.getXSize(), event.getMouseX(), event.getMouseY());
     }
 }

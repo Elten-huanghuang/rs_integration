@@ -16,6 +16,13 @@ public final class TerminalGraphComposer {
     public static CraftPlanGraph compose(CraftPlanGraph base,
                                          CraftingResolver.ResolutionStep terminalStep,
                                          ItemStack terminalOutput) {
+        return compose(base, terminalStep, terminalOutput, true);
+    }
+
+    public static CraftPlanGraph compose(CraftPlanGraph base,
+                                         CraftingResolver.ResolutionStep terminalStep,
+                                         ItemStack terminalOutput,
+                                         boolean deterministicPrimaryOutput) {
         Objects.requireNonNull(base, "base");
         Objects.requireNonNull(terminalStep, "terminalStep");
         Objects.requireNonNull(terminalOutput, "terminalOutput");
@@ -54,8 +61,9 @@ public final class TerminalGraphComposer {
         ItemStack totalOutput = terminalOutput.copyWithCount(Math.multiplyExact(
                 terminalOutput.getCount(), terminalStep.executions()));
         OutputPortId outputId = new OutputPortId(terminalId, 0);
+        OutputKind outputKind = deterministicPrimaryOutput ? OutputKind.PRIMARY : OutputKind.DYNAMIC;
         OutputDeclaration output = new OutputDeclaration(outputId, MaterialKey.of(totalOutput),
-                totalOutput.getCount(), OutputKind.PRIMARY);
+                totalOutput.getCount(), outputKind);
         CraftNode terminal = new CraftNode(terminalId, terminalStep.recipeId(),
                 terminalStep.modType().id(), terminalStep.recipeTypeId(), terminalStep.executions(),
                 terminalStep.alternativeIds(), terminalStep.alternativeModTypes(),

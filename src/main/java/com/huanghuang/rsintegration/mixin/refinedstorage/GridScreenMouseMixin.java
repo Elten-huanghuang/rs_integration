@@ -3,7 +3,6 @@ package com.huanghuang.rsintegration.mixin.refinedstorage;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.machine.MachineHub;
 import com.huanghuang.rsintegration.machine.MachineHubInputHandler;
-import com.huanghuang.rsintegration.mixin.minecraft.AbstractContainerScreenAccessor;
 import com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler;
 import com.huanghuang.rsintegration.sidepanel.client.MachineTabHandler;
 import com.refinedmods.refinedstorage.screen.grid.GridScreen;
@@ -48,9 +47,8 @@ public abstract class GridScreenMouseMixin {
         GridScreenMouseMixin self = (GridScreenMouseMixin) (Object) screen;
         if (!self.rsi$swipeActive) return;
 
-        AbstractContainerScreenAccessor acc = (AbstractContainerScreenAccessor) screen;
-        double relX = event.getMouseX() - acc.getLeftPos();
-        double relY = event.getMouseY() - acc.getTopPos();
+        double relX = event.getMouseX() - screen.getGuiLeft();
+        double relY = event.getMouseY() - screen.getGuiTop();
         if (screen.isOverSlotArea(relX, relY)) {
             int slot = screen.getSlotNumber();
             List<IGridStack> stacks = screen.getView().getStacks();
@@ -81,9 +79,8 @@ public abstract class GridScreenMouseMixin {
                 && Screen.hasControlDown() && button == 0
                 && !MachineTabHandler.isMachineCenterHovered()) {
             GridScreen screen = (GridScreen) (Object) this;
-            AbstractContainerScreenAccessor acc = (AbstractContainerScreenAccessor) this;
-            double relX = mouseX - acc.getLeftPos();
-            double relY = mouseY - acc.getTopPos();
+            double relX = mouseX - screen.getGuiLeft();
+            double relY = mouseY - screen.getGuiTop();
             if (screen.isOverSlotArea(relX, relY)) {
                 int slot = screen.getSlotNumber();
                 List<IGridStack> stacks = screen.getView().getStacks();

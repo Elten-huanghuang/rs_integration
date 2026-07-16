@@ -44,9 +44,12 @@ extends AbstractBatchDelegate {
     private BlockPos machinePos;
     private Object recipe;
     private List<Ingredient> code;
+    private EreAlchemyMaterials materials;
     private Object tablet;
     private List<PedestalInfo> pedestals;
     private boolean craftStarted;
+    @Nullable
+    private EreAlchemyLock.Lease lockLease;
     @Nullable
     private ServerPlayer player;
 
@@ -93,6 +96,17 @@ extends AbstractBatchDelegate {
         @SuppressWarnings("unchecked")
         List<Ingredient> codeList = (List<Ingredient>) (Object) Reflect.invoke((Object)this.recipe, "getCode", seed).map(o -> (List<?>)o).orElse(Collections.emptyList());
         this.code = codeList;
+        @SuppressWarnings("unchecked")
+        List<Ingredient> inputs = (List<Ingredient>) (Object) Reflect.getField((Object)this.recipe, "inputs")
+                .map(o -> (List<?>)o).orElse(Collections.emptyList());
+        Ingredient tabletIngredient = Reflect.getField((Object)this.recipe, "tablet")
+                .filter(Ingredient.class::isInstance).map(Ingredient.class::cast).orElse(null);
+        if (inputs.size() != this.code.size()) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Embers] Code/input count mismatch: {} code entries, {} inputs",
+                    this.code.size(), inputs.size());
+            return false;
+        }
+        this.materials = EreAlchemyMaterials.create(tabletIngredient, this.code, inputs);
         this.pedestals = EreAlchemyBatchDelegate.scanPedestals((Level)lvl, pos);
         if (this.pedestals.size() < this.code.size()) {
             RSIntegrationMod.LOGGER.warn("[RSI-Embers] Pedestal count mismatch: {} available, {} needed", (Object)this.pedestals.size(), (Object)this.code.size());
@@ -100,16 +114,22 @@ extends AbstractBatchDelegate {
             return false;
         }
         this.network = RSIntegrationNetwork.resolveNetworkFromPlayer((ServerPlayer)player);
+        this.lockLease = EreAlchemyLock.tryAcquire(lvl.dimension(), (BlockPos)pos, player.getUUID());
+        if (this.lockLease == null) {
+            // Preparation is retried by the chain; do not mutate the machine or spam chat here.
+            return false;
+        }
         EreAlchemyBatchDelegate.recycleBlockingItems(lvl, pos, this.pedestals, player);
         for (PedestalInfo p : this.pedestals) {
-            ItemStack bottomStack;
             Object bottomInv;
-            ItemStack topStack;
             Object topInv = Reflect.getField((Object)p.be(), "inventory").orElse(null);
-            if (topInv != null && !(topStack = Reflect.invoke(topInv, "getStackInSlot", 0).map(o -> (ItemStack)o).orElse(ItemStack.EMPTY)).isEmpty()) {
-                RSIntegrationMod.LOGGER.warn("[RSI-Embers] Pedestal top at {} still occupied after recycle: {}", (Object)p.pos(), (Object)topStack);
-                player.sendSystemMessage(Component.translatable("rsi.embers.error.pedestal_top_occupied", p.pos().toShortString(), topStack.getHoverName().getString()));
-                return false;
+            if (topInv != null) {
+                ItemStack topStack = readInventoryStack(topInv);
+                if (!topStack.isEmpty()) {
+                    RSIntegrationMod.LOGGER.warn("[RSI-Embers] Pedestal top at {} still occupied after recycle: {}", (Object)p.pos(), (Object)topStack);
+                    player.sendSystemMessage(Component.translatable("rsi.embers.error.pedestal_top_occupied", p.pos().toShortString(), topStack.getHoverName().getString()));
+                    return false;
+                }
             }
             BlockEntity bottomBE = lvl.getBlockEntity(p.pos().below());
             if (bottomBE == null || !EmbersReflection.alchemyPedestalBEClass.isInstance(bottomBE)) {
@@ -121,13 +141,12 @@ extends AbstractBatchDelegate {
             if (bottomBE.isRemoved()) {
                 RSIntegrationMod.LOGGER.debug("[RSI-Embers] Pedestal bottom at {} isRemoved=true but BE type valid \u2014 ignoring spurious flag", (Object)p.pos().below());
             }
-            if ((bottomInv = Reflect.getField((Object)bottomBE, "inventory").orElse(null)) == null || (bottomStack = Reflect.invoke(bottomInv, "getStackInSlot", 0).map(o -> (ItemStack)o).orElse(ItemStack.EMPTY)).isEmpty()) continue;
+            bottomInv = Reflect.getField((Object)bottomBE, "inventory").orElse(null);
+            if (bottomInv == null) continue;
+            ItemStack bottomStack = readInventoryStack(bottomInv);
+            if (bottomStack.isEmpty()) continue;
             RSIntegrationMod.LOGGER.warn("[RSI-Embers] Pedestal bottom at {} still occupied after recycle: {}", (Object)p.pos().below(), (Object)bottomStack);
             player.sendSystemMessage(Component.translatable("rsi.embers.error.pedestal_bottom_occupied", p.pos().below().toShortString(), bottomStack.getHoverName().getString()));
-            return false;
-        }
-        if (!EreAlchemyLock.tryLock(lvl.dimension(), (BlockPos)pos, player.getUUID())) {
-            player.sendSystemMessage(Component.translatable("rsi.embers.error.tablet_locked"));
             return false;
         }
         @SuppressWarnings("unchecked")
@@ -152,24 +171,24 @@ extends AbstractBatchDelegate {
 
     @Nullable
     public List<IngredientSpec> getRequiredMaterials() {
-        if (this.recipe == null || this.code == null) {
-            return null;
-        }
-        ArrayList<IngredientSpec> specs = new ArrayList<IngredientSpec>();
-        Ingredient tabletIng = Reflect.getField((Object)this.recipe, "tablet").map(o -> (Ingredient)o).orElse(null);
-        if (tabletIng != null) {
-            specs.add(new IngredientSpec(tabletIng, 1));
-        }
-        @SuppressWarnings("unchecked")
-        List<?> inputsRaw = (List<?>) Reflect.getField((Object)this.recipe, "inputs").orElse(Collections.emptyList());
-        for (int i = 0; i < this.code.size(); ++i) {
-            Object t;
-            specs.add(new IngredientSpec(this.code.get(i), 1));
-            if (i >= inputsRaw.size() || !((t = inputsRaw.get(i)) instanceof Ingredient)) continue;
-            Ingredient inputIng = (Ingredient)t;
-            specs.add(new IngredientSpec(inputIng, 1));
-        }
-        return specs;
+        return this.materials != null ? this.materials.allSpecs() : null;
+    }
+
+    @Override
+    public List<IngredientSpec> getGraphSpecs() {
+        return this.materials != null ? this.materials.graphSpecs() : List.of();
+    }
+
+    @Override
+    public List<IngredientSpec> getSupplementalSpecs() {
+        return this.materials != null ? this.materials.supplementalSpecs() : List.of();
+    }
+
+    @Override
+    public List<ItemStack> mergeSupplementalMaterials(List<ItemStack> graphMaterials,
+                                                       List<ItemStack> supplementalMaterials) {
+        if (this.materials == null) return graphMaterials;
+        return this.materials.mergeStacks(graphMaterials, supplementalMaterials);
     }
 
     public boolean tryStartSingleCraft(ServerPlayer player) {
@@ -197,7 +216,8 @@ extends AbstractBatchDelegate {
             player.sendSystemMessage(Component.translatable("rsi.embers.error.tablet_output_occupied"));
             return false;
         }
-        int expectedMaterialCount = 1 + 2 * this.code.size();
+        int expectedMaterialCount = this.materials != null
+                ? this.materials.allSpecs().size() : 1 + 2 * this.code.size();
         if (materials.size() < expectedMaterialCount) {
             RSIntegrationMod.LOGGER.error("[RSI-Embers] Material count mismatch: expected >= {}, got {}", (Object)expectedMaterialCount, (Object)materials.size());
             return false;
@@ -242,6 +262,7 @@ extends AbstractBatchDelegate {
                 RSIntegrationMod.LOGGER.warn("[RSI-Embers] sparkProgress FAILED: progress stayed 0 — recipe mismatch or items wrong");
                 player.sendSystemMessage(Component.translatable("rsi.embers.error.placement_failed"));
                 this.clearAllSlots();
+                releaseAlchemyLease();
                 return false;
             }
             this.craftStarted = true;
@@ -253,6 +274,7 @@ extends AbstractBatchDelegate {
             RSIntegrationMod.LOGGER.error("[RSI-Embers] Material placement failed:", (Throwable)e);
             player.sendSystemMessage(Component.translatable("rsi.embers.error.placement_failed"));
             this.clearAllSlots();
+            releaseAlchemyLease();
             return false;
         }
     }
@@ -272,8 +294,19 @@ extends AbstractBatchDelegate {
         return complete;
     }
 
+    @Override
+    public void releasePreparationResources() {
+        releaseAlchemyLease();
+    }
+
+    private void releaseAlchemyLease() {
+        if (this.lockLease == null) return;
+        EreAlchemyLock.release(this.lockLease);
+        this.lockLease = null;
+    }
+
     public ItemStack collectResult(ServerPlayer player) {
-        EreAlchemyLock.unlock(this.level.dimension(), (BlockPos)this.machinePos);
+        releaseAlchemyLease();
         this.craftStarted = false;
         if (this.tablet == null) {
             RSIntegrationMod.LOGGER.debug("[RSI-Embers] collectResult: tablet is null");
@@ -334,7 +367,7 @@ extends AbstractBatchDelegate {
 
     @Override
     protected void clearMachineState(BlockEntity be, ServerPlayer player) {
-        EreAlchemyLock.unlock(be.getLevel().dimension(), be.getBlockPos());
+        releaseAlchemyLease();
         this.craftStarted = false;
         this.clearAllSlots();
     }
@@ -421,7 +454,7 @@ extends AbstractBatchDelegate {
         if (tabletBE != null && EmbersReflection.alchemyTabletBEClass != null && EmbersReflection.alchemyTabletBEClass.isInstance(tabletBE)) {
             ItemStack itemStack;
             Object tabletInv = Reflect.getField((Object)tabletBE, "inventory").orElse(null);
-            if (tabletInv != null && !(itemStack = Reflect.invoke(tabletInv, "getStackInSlot", 0).map(o -> (ItemStack)o).orElse(ItemStack.EMPTY)).isEmpty()) {
+            if (tabletInv != null && !(itemStack = Reflect.invokeInt(tabletInv, "getStackInSlot", 0).map(o -> (ItemStack)o).orElse(ItemStack.EMPTY)).isEmpty()) {
                 recycled.add(itemStack.copy());
                 Reflect.invoke(tabletInv, "setStackInSlot", 0, ItemStack.EMPTY);
                 tabletBE.setChanged();
@@ -436,20 +469,23 @@ extends AbstractBatchDelegate {
         }
         if (pedestals != null) {
             for (PedestalInfo pedestalInfo : pedestals) {
-                ItemStack s;
                 Object bottomInv;
                 BlockEntity bottomBE;
                 BlockPos bottomPos;
-                ItemStack s2;
                 Object topInv = Reflect.getField((Object)pedestalInfo.be(), "inventory").orElse(null);
-                if (topInv != null && !(s2 = Reflect.invoke(topInv, "getStackInSlot", 0).map(o -> (ItemStack)o).orElse(ItemStack.EMPTY)).isEmpty()) {
-                    recycled.add(s2.copy());
-                    Reflect.invoke(topInv, "setStackInSlot", 0, ItemStack.EMPTY);
-                    ((BlockEntity) pedestalInfo.be()).setChanged();
+                if (topInv != null) {
+                    ItemStack s2 = readInventoryStack(topInv);
+                    if (!s2.isEmpty()) {
+                        recycled.add(s2.copy());
+                        writeInventoryStack(topInv, ItemStack.EMPTY);
+                        ((BlockEntity) pedestalInfo.be()).setChanged();
+                    }
                 }
-                if (!level.isLoaded(bottomPos = pedestalInfo.pos().below()) || (bottomBE = level.getBlockEntity(bottomPos)) == null || EmbersReflection.alchemyPedestalBEClass == null || !EmbersReflection.alchemyPedestalBEClass.isInstance(bottomBE) || (bottomInv = Reflect.getField((Object)bottomBE, "inventory").orElse(null)) == null || (s = Reflect.invoke(bottomInv, "getStackInSlot", 0).map(o -> (ItemStack)o).orElse(ItemStack.EMPTY)).isEmpty()) continue;
+                if (!level.isLoaded(bottomPos = pedestalInfo.pos().below()) || (bottomBE = level.getBlockEntity(bottomPos)) == null || EmbersReflection.alchemyPedestalBEClass == null || !EmbersReflection.alchemyPedestalBEClass.isInstance(bottomBE) || (bottomInv = Reflect.getField((Object)bottomBE, "inventory").orElse(null)) == null) continue;
+                ItemStack s = readInventoryStack(bottomInv);
+                if (s.isEmpty()) continue;
                 recycled.add(s.copy());
-                Reflect.invoke(bottomInv, "setStackInSlot", 0, ItemStack.EMPTY);
+                writeInventoryStack(bottomInv, ItemStack.EMPTY);
                 bottomBE.setChanged();
             }
         }
@@ -482,31 +518,52 @@ extends AbstractBatchDelegate {
         }
     }
 
+    private static ItemStack readInventoryStack(Object inventory) {
+        if (inventory instanceof net.minecraftforge.items.IItemHandler handler) {
+            return handler.getStackInSlot(0);
+        }
+        return Reflect.invoke(inventory, "getStackInSlot", 0)
+                .filter(ItemStack.class::isInstance)
+                .map(ItemStack.class::cast)
+                .orElse(ItemStack.EMPTY);
+    }
+
+    private static void writeInventoryStack(Object inventory, ItemStack stack) {
+        if (inventory instanceof net.minecraftforge.items.IItemHandlerModifiable handler) {
+            handler.setStackInSlot(0, stack);
+            return;
+        }
+        Reflect.invoke(inventory, "setStackInSlot", 0, stack);
+    }
+
     private void clearAllSlots() {
         ItemStack s2;
         Object tabletInv;
         ArrayList<ItemStack> toRefund = new ArrayList<ItemStack>();
-        if (this.tablet != null && (tabletInv = Reflect.getField((Object)this.tablet, "inventory").orElse(null)) != null && !(s2 = Reflect.invoke(tabletInv, "getStackInSlot", 0).map(o -> (ItemStack)o).orElse(ItemStack.EMPTY)).isEmpty()) {
+        if (this.tablet != null && (tabletInv = Reflect.getField((Object)this.tablet, "inventory").orElse(null)) != null && !(s2 = Reflect.invokeInt(tabletInv, "getStackInSlot", 0).map(o -> (ItemStack)o).orElse(ItemStack.EMPTY)).isEmpty()) {
             toRefund.add(s2.copy());
             Reflect.invoke(tabletInv, "setStackInSlot", 0, ItemStack.EMPTY);
             ((BlockEntity) this.tablet).setChanged();
         }
         if (this.pedestals != null && this.level != null) {
             for (PedestalInfo top : this.pedestals) {
-                ItemStack is;
                 Object bottomInv;
                 BlockEntity bottomBE;
                 BlockPos bottomPos;
-                ItemStack as;
                 Object topInv = Reflect.getField((Object)top.be(), "inventory").orElse(null);
-                if (topInv != null && !(as = Reflect.invoke(topInv, "getStackInSlot", 0).map(o -> (ItemStack)o).orElse(ItemStack.EMPTY)).isEmpty()) {
-                    toRefund.add(as.copy());
-                    Reflect.invoke(topInv, "setStackInSlot", 0, ItemStack.EMPTY);
-                    ((BlockEntity) top.be()).setChanged();
+                if (topInv != null) {
+                    ItemStack as = readInventoryStack(topInv);
+                    if (!as.isEmpty()) {
+                        toRefund.add(as.copy());
+                        writeInventoryStack(topInv, ItemStack.EMPTY);
+                        ((BlockEntity) top.be()).setChanged();
+                    }
                 }
-                if (!this.level.isLoaded(bottomPos = top.pos().below()) || (bottomBE = this.level.getBlockEntity(bottomPos)) == null || EmbersReflection.alchemyPedestalBEClass == null || !EmbersReflection.alchemyPedestalBEClass.isInstance(bottomBE) || (bottomInv = Reflect.getField((Object)bottomBE, "inventory").orElse(null)) == null || (is = Reflect.invoke(bottomInv, "getStackInSlot", 0).map(o -> (ItemStack)o).orElse(ItemStack.EMPTY)).isEmpty()) continue;
+                if (!this.level.isLoaded(bottomPos = top.pos().below()) || (bottomBE = this.level.getBlockEntity(bottomPos)) == null || EmbersReflection.alchemyPedestalBEClass == null || !EmbersReflection.alchemyPedestalBEClass.isInstance(bottomBE) || (bottomInv = Reflect.getField((Object)bottomBE, "inventory").orElse(null)) == null) continue;
+                ItemStack is = readInventoryStack(bottomInv);
+                if (is.isEmpty()) continue;
                 toRefund.add(is.copy());
-                Reflect.invoke(bottomInv, "setStackInSlot", 0, ItemStack.EMPTY);
+                writeInventoryStack(bottomInv, ItemStack.EMPTY);
                 bottomBE.setChanged();
             }
         }

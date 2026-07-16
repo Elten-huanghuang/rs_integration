@@ -70,6 +70,17 @@ public final class AetherworksRecipeHandler extends AbstractRecipeHandler {
         return ItemStack.EMPTY;
     }
 
+    @Override
+    public boolean hasDeterministicPrimaryOutput(Recipe<?> recipe) {
+        try {
+            Object results = recipe.getClass().getMethod("getAllResults").invoke(recipe);
+            return !(results instanceof List<?> list) || list.size() <= 1;
+        } catch (ReflectiveOperationException e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-Aetherworks] getAllResults reflection failed", e);
+            return true;
+        }
+    }
+
     @Nullable
     @Override
     public List<IngredientSpec> getIngredients(Recipe<?> recipe) {

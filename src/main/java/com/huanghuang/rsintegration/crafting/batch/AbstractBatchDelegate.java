@@ -182,6 +182,7 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
      */
     @Override
     public final void onBatchFailed(@Nullable ServerPlayer player, String reason) {
+        releasePreparationResources();
         BlockPos pos = getMachinePos();
         // Virtual delegates (e.g. GenericBatchDelegate for CUSTOM_GUI recipes)
         // have no physical machine — nothing to clean up.
