@@ -468,11 +468,11 @@ public final class RSIntegrationConfig {
                         "Set to 1 for serial execution (safest); increase for multi-machine speedup.",
                         "Only nodes with no material/machine/capture conflicts are dispatched.",
                         "Range: 1-16.")
-                .defineInRange("craftingMaxConcurrentGraphNodes", 2, 1, 16);
+                .defineInRange("craftingMaxConcurrentGraphNodes", 4, 1, 16);
         CRAFTING_GRAPH_DISPATCH_PER_TICK = s
                 .comment("Maximum number of new graph nodes one craft may dispatch in a single tick.",
                         "Admission retries do not consume this budget. Range: 1-16.")
-                .defineInRange("craftingGraphDispatchPerTick", 2, 1, 16);
+                .defineInRange("craftingGraphDispatchPerTick", 4, 1, 16);
         CRAFTING_GRAPH_DISPATCH_PER_CRAFT = s
                 .comment("Maximum total graph-node dispatches in one craft run.",
                         "Prevents retry/callback bugs from dispatching an unbounded number of operations.",
@@ -482,7 +482,7 @@ public final class RSIntegrationConfig {
                 .comment("Maximum machine-backed operations one craft may own concurrently.",
                         "A normal graph node costs one; a parallel group costs one per running worker.",
                         "Range: 1-64.")
-                .defineInRange("craftingMaxConcurrentOperations", 4, 1, 64);
+                .defineInRange("craftingMaxConcurrentOperations", 8, 1, 64);
         CRAFTING_OPERATION_DISPATCH_PER_CRAFT = s
                 .comment("Maximum machine-operation starts during one craft run.",
                         "Retries before delegate start do not consume this budget. Range: 16-65536.")

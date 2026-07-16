@@ -114,10 +114,16 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
         if (level == null) return failObservation("machine dimension unavailable");
         if (!level.isLoaded(pos)) level.getChunk(pos);
         BlockEntity be = level.getBlockEntity(pos);
-        if (be == null || be.isRemoved()) return failObservation("machine block entity missing");
+        if (be == null || be.isRemoved()) return observeMissingMachineCraft(level, pos);
         CraftObservation observed = observeMachineCraft(level, be);
         if (observed != null) phase = observed.phase();
         return observed != null ? observed : new CraftObservation(phase);
+    }
+
+    /** Machine-specific observation when normal operation removes or replaces the block entity. */
+    @Nonnull
+    protected CraftObservation observeMissingMachineCraft(@Nonnull ServerLevel level, @Nonnull BlockPos pos) {
+        return failObservation("machine block entity missing");
     }
 
     /** Machine-specific phase observation. New slot delegates should override. */

@@ -6,15 +6,14 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.network.chat.Component;
-import net.minecraft.world.item.ItemStack;
 import net.minecraft.util.FormattedCharSequence;
+import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import net.minecraftforge.client.event.RenderGuiOverlayEvent;
 import net.minecraftforge.client.gui.overlay.VanillaGuiOverlay;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
@@ -22,23 +21,18 @@ import java.util.Locale;
 @OnlyIn(Dist.CLIENT)
 public final class CraftProgressOverlay {
 
-    private static final int MAX_PANEL_WIDTH = 184;
-    private static final int MIN_PANEL_WIDTH = 132;
+    private static final int MAX_PANEL_WIDTH = 214;
+    private static final int MIN_PANEL_WIDTH = 158;
     private static final int SCREEN_MARGIN = 10;
-    private static final int CONTENT_PAD = 10;
-    private static final int BAR_HEIGHT = 8;
-    private static final int BUTTON_WIDTH = 72;
-    private static final int BUTTON_HEIGHT = 15;
+    private static final int CONTENT_PAD = 11;
+    private static final int BAR_HEIGHT = 6;
 
     private static final int TEXT = 0xFFF1F4F6;
-    private static final int MUTED = 0xFFABB5BC;
-    private static final int BAR_BACKGROUND = 0xB8222C32;
-    private static final int BUTTON_TEXT = 0xFFF5EDEE;
-
-    private static int cancelBtnX;
-    private static int cancelBtnY;
-    private static int cancelBtnW;
-    private static int cancelBtnH;
+    private static final int MUTED = 0xFF9DA9B1;
+    private static final int DIM = 0xFF71808A;
+    private static final int SURFACE = 0xB81B252B;
+    private static final int BAR_BACKGROUND = 0xFF253139;
+    private static final int DIVIDER = 0x443F505A;
 
     private CraftProgressOverlay() {}
 
@@ -50,7 +44,7 @@ public final class CraftProgressOverlay {
         CraftProgressSnapshot snapshot = CraftProgressTracker.first();
         if (snapshot == null) return;
         Minecraft minecraft = Minecraft.getInstance();
-        if (minecraft.player == null) return;
+        if (minecraft.player == null || minecraft.screen instanceof CraftProgressScreen) return;
 
         GuiGraphics graphics = event.getGuiGraphics();
         Font font = minecraft.font;
@@ -58,79 +52,130 @@ public final class CraftProgressOverlay {
         int screenHeight = minecraft.getWindow().getGuiScaledHeight();
         int panelWidth = Math.max(MIN_PANEL_WIDTH,
                 Math.min(MAX_PANEL_WIDTH, screenWidth - SCREEN_MARGIN * 2));
-        int textWidth = panelWidth - CONTENT_PAD * 2;
-
-        Component title = title(snapshot.result());
+        int innerWidth = panelWidth - CONTENT_PAD * 2;
+        int accent = accent(snapshot.result());
+        int percent = progressPercent(snapshot);
         ItemStack target = CraftProgressTracker.target(snapshot.craftId());
-        Component detail = detail(snapshot);
-        List<FormattedCharSequence> detailLines = limitedLines(font, detail, textWidth, 2);
-        Component nodeSummary = nodeSummary(snapshot);
-        boolean showNodeSummary = nodeSummary != null;
-        boolean cancellable = cancellable(snapshot.result());
+        List<FormattedCharSequence> detailLines = limitedLines(font, detail(snapshot), innerWidth, 2);
+        CraftProgressPresentation.Selection current =
+                CraftProgressPresentation.currentNodes(snapshot, 2);
 
-        int lineHeight = font.lineHeight;
-        int panelHeight = 10 + lineHeight + (!target.isEmpty() ? lineHeight + 6 : 0)
-                + 7 + BAR_HEIGHT + 7 + lineHeight
-                + detailLines.size() * (lineHeight + 1)
-                + (showNodeSummary ? lineHeight + 3 : 0)
-                + (cancellable ? lineHeight + 9 : 3) + 7;
+        int headerHeight = target.isEmpty() ? 27 : 34;
+        int progressHeight = 33;
+        int detailHeight = detailLines.size() * (font.lineHeight + 1) + 8;
+        int stepsHeight = current.nodes().isEmpty() ? 0
+                : 16 + current.nodes().size() * 31 + (current.remaining() > 0 ? 11 : 0);
+        int footerHeight = cancellable(snapshot.result()) ? 22 : 8;
+        int panelHeight = 9 + headerHeight + progressHeight + detailHeight + stepsHeight + footerHeight;
+
         int x = Math.max(SCREEN_MARGIN, screenWidth - panelWidth - SCREEN_MARGIN);
         int maxY = Math.max(SCREEN_MARGIN, screenHeight - panelHeight - 34);
         int y = Math.max(SCREEN_MARGIN + 18, Math.min(screenHeight / 2 - panelHeight / 2, maxY));
 
-        int accent = accent(snapshot.result());
         RenderSystem.enableBlend();
         RenderSystem.defaultBlendFunc();
-        UIRenderer.card(graphics, x, y, panelWidth, panelHeight, 6f, accent);
+        UIRenderer.roundedGradient(graphics, x, y, panelWidth, panelHeight, 7f,
+                0xE81B252B, 0xE8121A1F);
+        graphics.fill(x + 1, y + 6, x + 4, y + panelHeight - 6, accent);
+        graphics.fill(x + 5, y + panelHeight - 2, x + panelWidth - 6,
+                y + panelHeight - 1, 0x33000000);
 
         int contentX = x + CONTENT_PAD;
-        int cy = y + 7;
-        int percent = progressPercent(snapshot);
-        graphics.drawString(font, title, contentX, cy, TEXT, true);
-        String percentText = percent + "%";
-        graphics.drawString(font, percentText,
-                x + panelWidth - CONTENT_PAD - font.width(percentText), cy, accent, true);
-        cy += lineHeight + 4;
+        int right = x + panelWidth - CONTENT_PAD;
+        int cy = y + 9;
         if (!target.isEmpty()) {
-            graphics.renderItem(target, contentX, cy - 2);
-            Component targetName = target.getHoverName().copy().append(
-                    target.getCount() > 1 ? Component.literal(" ×" + target.getCount()) : Component.empty());
-            graphics.drawString(font, targetName, contentX + 20, cy + 2, TEXT, false);
-            cy += lineHeight + 6;
+            UIRenderer.slotBg(graphics, contentX, cy, 20, 0xFF42535D);
+            graphics.renderItem(target, contentX + 2, cy + 2);
+            graphics.renderItemDecorations(font, target, contentX + 2, cy + 2);
         }
-        cy += 3;
+        int textX = contentX + (target.isEmpty() ? 0 : 28);
+        String targetName = target.isEmpty()
+                ? Component.translatable("rsi.progress.target_unknown").getString()
+                : target.getHoverName().getString();
+        graphics.drawString(font, font.plainSubstrByWidth(targetName, right - textX),
+                textX, cy + 1, TEXT, true);
+        graphics.drawString(font, title(snapshot.result()), textX, cy + 14, accent, false);
+        cy += headerHeight;
 
-        UIRenderer.rounded(graphics, contentX, cy, textWidth, BAR_HEIGHT,
+        UIRenderer.rounded(graphics, contentX, cy, innerWidth, BAR_HEIGHT,
                 BAR_HEIGHT / 2f, BAR_BACKGROUND);
-        int fillWidth = Math.round(textWidth * (percent / 100f));
+        int fillWidth = Math.round(innerWidth * percent / 100f);
         if (fillWidth > 0) {
             UIRenderer.rounded(graphics, contentX, cy, fillWidth, BAR_HEIGHT,
                     BAR_HEIGHT / 2f, accent);
         }
-        cy += BAR_HEIGHT + 7;
+        cy += BAR_HEIGHT + 6;
+        graphics.drawString(font, Component.translatable("rsi.progress.summary",
+                snapshot.completedNodes(), snapshot.totalNodes(), snapshot.runningNodes()),
+                contentX, cy, MUTED, false);
+        String percentText = percent + "%";
+        graphics.drawString(font, percentText, right - font.width(percentText), cy, accent, true);
+        cy += font.lineHeight + 7;
 
-        Component summary = Component.translatable("rsi.progress.summary",
-                snapshot.completedNodes(), snapshot.totalNodes(), snapshot.runningNodes());
-        graphics.drawString(font, summary, contentX, cy, TEXT, false);
-        cy += lineHeight + 3;
-
+        graphics.fill(contentX, cy, right, cy + 1, DIVIDER);
+        cy += 6;
         for (FormattedCharSequence line : detailLines) {
             graphics.drawString(font, line, contentX, cy, MUTED, false);
-            cy += lineHeight + 1;
+            cy += font.lineHeight + 1;
         }
-        if (showNodeSummary) {
-            cy += 1;
-            graphics.drawString(font, nodeSummary, contentX, cy, MUTED, false);
-            cy += lineHeight + 2;
+        cy += 2;
+
+        if (!current.nodes().isEmpty()) {
+            graphics.drawString(font, Component.translatable("rsi.progress.step.current"),
+                    contentX, cy, TEXT, true);
+            cy += 15;
+            for (CraftProgressSnapshot.NodeProgress node : current.nodes()) {
+                renderCurrentStep(graphics, font, node, contentX, cy, innerWidth);
+                cy += 31;
+            }
+            if (current.remaining() > 0) {
+                graphics.drawString(font, Component.translatable("rsi.progress.step.more",
+                        current.remaining()), contentX + 3, cy, DIM, false);
+                cy += 11;
+            }
         }
 
-        if (cancellable) {
-            cy += 3;
-            graphics.drawString(font, Component.translatable("rsi.progress.manage_hint"),
-                    contentX, cy, MUTED, false);
+        if (cancellable(snapshot.result())) {
+            graphics.fill(contentX, cy, right, cy + 1, DIVIDER);
+            cy += 7;
+            Component hint = Component.translatable("rsi.progress.manage_hint");
+            graphics.drawString(font, hint, contentX, cy, DIM, false);
+            UIRenderer.pillBadge(graphics, font, right - 20, cy - 3, 20, 15,
+                    0x663C5664, 0xFFD9E4EA, "P");
         }
-        clearCancelHitbox();
         RenderSystem.disableBlend();
+    }
+
+    private static void renderCurrentStep(GuiGraphics graphics, Font font,
+                                          CraftProgressSnapshot.NodeProgress node,
+                                          int x, int y, int width) {
+        int color = nodeColor(node);
+        UIRenderer.rounded(graphics, x, y, width, 27, 5f, SURFACE);
+        graphics.fill(x, y + 5, x + 3, y + 22, color);
+        ItemStack output = node.displayOutput();
+        if (!output.isEmpty()) graphics.renderItem(output, x + 7, y + 5);
+        int textX = x + (output.isEmpty() ? 8 : 28);
+        int available = Math.max(24, x + width - 7 - textX);
+        graphics.drawString(font, font.plainSubstrByWidth(
+                CraftProgressPresentation.outputName(node).getString(), available),
+                textX, y + 4, TEXT, false);
+        Component stepDetail = CraftProgressPresentation.state(node).copy()
+                .append(Component.literal(" · "))
+                .append(CraftProgressPresentation.machine(node));
+        graphics.drawString(font, font.plainSubstrByWidth(stepDetail.getString(), available),
+                textX, y + 15, color, false);
+    }
+
+    private static int nodeColor(CraftProgressSnapshot.NodeProgress node) {
+        if (node.draining()) return 0xFFB89AD7;
+        return switch (node.state()) {
+            case RUNNING -> 0xFF68A9E8;
+            case FAILED -> 0xFFE06C75;
+            case READY -> 0xFFE0B35A;
+            case BLOCKED -> 0xFF929DA5;
+            case SUCCEEDED -> 0xFF67BE7B;
+            case CANCELLED, UNKNOWN -> 0xFF71808A;
+        };
     }
 
     static Component title(CraftProgressSnapshot.Result result) {
@@ -180,36 +225,6 @@ public final class CraftProgressOverlay {
         });
     }
 
-    private static Component nodeSummary(CraftProgressSnapshot snapshot) {
-        if (snapshot.nodes().isEmpty()) return null;
-        int blocked = 0;
-        int ready = 0;
-        int draining = 0;
-        int completedOperations = 0;
-        int totalOperations = 0;
-        for (CraftProgressSnapshot.NodeProgress node : snapshot.nodes()) {
-            if (node.state() == CraftProgressSnapshot.NodeState.BLOCKED) blocked++;
-            if (node.state() == CraftProgressSnapshot.NodeState.READY) ready++;
-            if (node.draining()) draining++;
-            completedOperations += node.completedOperations();
-            totalOperations += node.totalOperations();
-        }
-        List<Component> parts = new ArrayList<>();
-        if (blocked > 0) parts.add(Component.translatable("rsi.progress.badge.blocked", blocked));
-        if (ready > 0) parts.add(Component.translatable("rsi.progress.badge.ready", ready));
-        if (draining > 0) parts.add(Component.translatable("rsi.progress.badge.draining", draining));
-        if (totalOperations > 1) {
-            parts.add(Component.translatable("rsi.progress.summary_operations",
-                    completedOperations, totalOperations));
-        }
-        if (parts.isEmpty()) return null;
-        Component result = parts.get(0).copy();
-        for (int i = 1; i < parts.size(); i++) {
-            result = result.copy().append(Component.literal(" · ")).append(parts.get(i));
-        }
-        return result;
-    }
-
     private static List<FormattedCharSequence> limitedLines(Font font, Component component,
                                                               int width, int limit) {
         List<FormattedCharSequence> lines = font.split(component, width);
@@ -223,21 +238,4 @@ public final class CraftProgressOverlay {
         return Math.max(0, Math.min(99,
                 Math.round(snapshot.completedNodes() * 100f / snapshot.totalNodes())));
     }
-
-    private static boolean isMouseOver(Minecraft minecraft, int screenWidth, int screenHeight,
-                                       int x, int y, int width, int height) {
-        int mouseX = (int) minecraft.mouseHandler.xpos() * screenWidth
-                / minecraft.getWindow().getScreenWidth();
-        int mouseY = (int) minecraft.mouseHandler.ypos() * screenHeight
-                / minecraft.getWindow().getScreenHeight();
-        return mouseX >= x && mouseX <= x + width && mouseY >= y && mouseY <= y + height;
-    }
-
-    private static void clearCancelHitbox() {
-        cancelBtnX = 0;
-        cancelBtnY = 0;
-        cancelBtnW = 0;
-        cancelBtnH = 0;
-    }
-
 }

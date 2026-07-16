@@ -12,6 +12,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -100,21 +101,31 @@ public final class PlanTreeModel {
         }
         applyAvailability(root, plan, target);
 
-        // Root allocations are explicit sinks. A plan may contain several root
-        // demands; each allocation becomes one view reference under the visual root.
+        // Root allocations are explicit sinks. Merge repeated input slots backed by
+        // the same producer output so a recipe that consumes four units from one
+        // batch is rendered as one "x4" producer reference, not four "x1" nodes.
         Set<Integer> path = new HashSet<>();
+        List<PlanGraphView.RootEdgeView> rootEdges = new java.util.ArrayList<>();
+        Map<IngredientKey, UnresolvedReference> unresolvedRoots = new LinkedHashMap<>();
         for (PlanGraphView.RootView demand : graph.roots()) {
-            for (PlanGraphView.RootEdgeView edge : demand.allocations()) {
-                root.children.add(buildGraphReference(edge.source(), edge.material(), edge.quantity(),
-                        1, graph, nodes, path, plan));
-            }
+            rootEdges.addAll(demand.allocations());
             if (demand.unresolvedQuantity() > 0) {
-                PlanTreeNode missing = new PlanTreeNode(IngredientKey.of(demand.display()),
-                        demand.display(), demand.unresolvedQuantity(), 1, null);
-                missing.unresolved = demand.unresolvedQuantity();
-                applyAvailability(missing, plan, demand.display());
-                root.children.add(missing);
+                IngredientKey key = IngredientKey.of(demand.display());
+                unresolvedRoots.compute(key, (ignored, existing) -> existing == null
+                        ? new UnresolvedReference(demand.display(), demand.unresolvedQuantity())
+                        : existing.add(demand.unresolvedQuantity()));
             }
+        }
+        for (GraphReference edge : mergeRootEdges(rootEdges)) {
+            root.children.add(buildGraphReference(edge.source(), edge.material(), edge.quantity(),
+                    1, graph, nodes, path, plan));
+        }
+        for (UnresolvedReference missingRef : unresolvedRoots.values()) {
+            PlanTreeNode missing = new PlanTreeNode(IngredientKey.of(missingRef.display()),
+                    missingRef.display(), missingRef.quantity(), 1, null);
+            missing.unresolved = missingRef.quantity();
+            applyAvailability(missing, plan, missingRef.display());
+            root.children.add(missing);
         }
         return new PlanTreeModel(root);
     }
@@ -165,8 +176,7 @@ public final class PlanTreeModel {
         }
         applyAvailability(node, plan, display);
 
-        for (PlanGraphView.EdgeView edge : graph.edges()) {
-            if (edge.consumerNodeId() != producer.nodeId()) continue;
+        for (GraphReference edge : mergeConsumerEdges(graph, producer.nodeId())) {
             PlanTreeNode child = buildGraphReference(edge.source(), edge.material(), edge.quantity(),
                     depth + 1, graph, nodes, path, plan);
             node.children.add(child);
@@ -174,16 +184,71 @@ public final class PlanTreeModel {
         // Unresolved demand is a separate portion of the input port. Keep it as
         // its own view reference even when the same port is partially supplied;
         // attaching it to an allocated child hides the conservation split.
+        Map<IngredientKey, UnresolvedReference> unresolved = new LinkedHashMap<>();
         for (PlanGraphView.UnresolvedView view : graph.unresolved()) {
             if (view.consumerNodeId() != producer.nodeId()) continue;
-            PlanTreeNode missing = new PlanTreeNode(IngredientKey.of(view.display()), view.display(),
-                    view.quantity(), depth + 1, null);
-            missing.unresolved = view.quantity();
-            applyAvailability(missing, plan, view.display());
+            IngredientKey key = IngredientKey.of(view.display());
+            unresolved.compute(key, (ignored, existing) -> existing == null
+                    ? new UnresolvedReference(view.display(), view.quantity())
+                    : existing.add(view.quantity()));
+        }
+        for (UnresolvedReference missingRef : unresolved.values()) {
+            PlanTreeNode missing = new PlanTreeNode(IngredientKey.of(missingRef.display()),
+                    missingRef.display(), missingRef.quantity(), depth + 1, null);
+            missing.unresolved = missingRef.quantity();
+            applyAvailability(missing, plan, missingRef.display());
             node.children.add(missing);
         }
         path.remove(producer.nodeId());
         return node;
+    }
+
+    private static List<GraphReference> mergeRootEdges(List<PlanGraphView.RootEdgeView> edges) {
+        Map<GraphReferenceKey, GraphReference> merged = new LinkedHashMap<>();
+        for (PlanGraphView.RootEdgeView edge : edges) {
+            mergeGraphReference(merged, edge.source(), edge.material(), edge.quantity());
+        }
+        return List.copyOf(merged.values());
+    }
+
+    private static List<GraphReference> mergeConsumerEdges(PlanGraphView graph, int consumerNodeId) {
+        Map<GraphReferenceKey, GraphReference> merged = new LinkedHashMap<>();
+        for (PlanGraphView.EdgeView edge : graph.edges()) {
+            if (edge.consumerNodeId() != consumerNodeId) continue;
+            mergeGraphReference(merged, edge.source(), edge.material(), edge.quantity());
+        }
+        return List.copyOf(merged.values());
+    }
+
+    private static void mergeGraphReference(Map<GraphReferenceKey, GraphReference> merged,
+                                            PlanGraphView.SourceView source,
+                                            ItemStack material, int quantity) {
+        GraphReferenceKey key = new GraphReferenceKey(source, IngredientKey.of(material));
+        merged.compute(key, (ignored, existing) -> existing == null
+                ? new GraphReference(source, material, quantity)
+                : existing.add(quantity));
+    }
+
+    private record GraphReferenceKey(PlanGraphView.SourceView source, IngredientKey material) {}
+
+    private record GraphReference(PlanGraphView.SourceView source, ItemStack material, int quantity) {
+        private GraphReference {
+            material = material.copyWithCount(1);
+        }
+
+        private GraphReference add(int additional) {
+            return new GraphReference(source, material, quantity + additional);
+        }
+    }
+
+    private record UnresolvedReference(ItemStack display, int quantity) {
+        private UnresolvedReference {
+            display = display.copyWithCount(1);
+        }
+
+        private UnresolvedReference add(int additional) {
+            return new UnresolvedReference(display, quantity + additional);
+        }
     }
 
     /**

@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.crafting.loadbalancer;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.api.RSIMachineAccessor;
+import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry.BoundMachine;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceKey;
@@ -118,6 +119,11 @@ public final class LoadBalancer {
      * different dimensions are all checked correctly.
      */
     public static List<BoundMachine> filterAvailable(List<BoundMachine> machines, MinecraftServer server) {
+        return filterAvailable(machines, server, null);
+    }
+
+    public static List<BoundMachine> filterAvailable(List<BoundMachine> machines, MinecraftServer server,
+                                                     @Nullable IBatchDelegate delegate) {
         List<BoundMachine> available = new ArrayList<>(machines.size());
         for (BoundMachine m : machines) {
             BlockPos pos = m.pos();
@@ -128,7 +134,12 @@ public final class LoadBalancer {
             if (!level.isLoaded(pos)) continue;
 
             BlockEntity be = level.getBlockEntity(pos);
-            if (be == null || be.isRemoved()) continue;
+            if (be == null || be.isRemoved()) {
+                if (delegate != null && delegate.acceptsMachineWithoutBlockEntity(level, pos)) {
+                    available.add(m);
+                }
+                continue;
+            }
 
             // Busy check via Mixin interface (no-op when Mixin not yet implemented)
             if (be instanceof RSIMachineAccessor acc && acc.rsi$isBusy()) {

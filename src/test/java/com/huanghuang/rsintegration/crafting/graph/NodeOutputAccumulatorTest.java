@@ -53,6 +53,40 @@ class NodeOutputAccumulatorTest extends BootstrapTest {
         assertEquals("blue", accumulator.drainSurplus().get(0).getTag().getString("variant"));
     }
 
+    @Test
+    void reportsEveryUnmetDeclarationWithoutDrainingSurplus() {
+        NodeId node = new NodeId(2);
+        OutputDeclaration primary = new OutputDeclaration(new OutputPortId(node, 0),
+                MaterialKey.of(new ItemStack(Items.DIAMOND)), 3, OutputKind.PRIMARY);
+        OutputDeclaration remainder = new OutputDeclaration(new OutputPortId(node, 1),
+                MaterialKey.of(new ItemStack(Items.BUCKET)), 1, OutputKind.REMAINDER);
+        NodeOutputAccumulator accumulator = new NodeOutputAccumulator(List.of(primary, remainder));
+
+        accumulator.add(List.of(new ItemStack(Items.DIAMOND, 2), new ItemStack(Items.EMERALD)));
+
+        List<NodeOutputAccumulator.Shortage> shortages = accumulator.shortages();
+        assertEquals(2, shortages.size());
+        assertEquals(1, shortages.get(0).missing());
+        assertEquals(OutputKind.PRIMARY, shortages.get(0).kind());
+        assertEquals(1, shortages.get(1).missing());
+        assertEquals(OutputKind.REMAINDER, shortages.get(1).kind());
+        assertTrue(accumulator.describeShortages().contains("minecraft:bucket"));
+        assertEquals(1, accumulator.drainSurplus().get(0).getCount());
+    }
+
+    @Test
+    void completedDeclarationsHaveNoShortages() {
+        OutputDeclaration declaration = new OutputDeclaration(
+                new OutputPortId(new NodeId(3), 0),
+                MaterialKey.of(new ItemStack(Items.DIAMOND)), 1, OutputKind.PRIMARY);
+        NodeOutputAccumulator accumulator = new NodeOutputAccumulator(List.of(declaration));
+
+        accumulator.add(List.of(new ItemStack(Items.DIAMOND)));
+
+        assertTrue(accumulator.shortages().isEmpty());
+        assertTrue(accumulator.describeShortages().isEmpty());
+    }
+
     private static ItemStack tagged(String variant, int count) {
         ItemStack stack = new ItemStack(Items.DIAMOND, count);
         CompoundTag tag = new CompoundTag();

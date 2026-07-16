@@ -89,6 +89,7 @@ public final class GraphConcurrencyPolicy {
         }
         if (capabilities.sideEffects() != BatchConcurrencyCapabilities.SideEffects.NONE
                 && capabilities.sideEffects() != BatchConcurrencyCapabilities.SideEffects.MACHINE_LOCAL
+                && capabilities.sideEffects() != BatchConcurrencyCapabilities.SideEffects.LOCAL_WORLD_ITEMS
                 && capabilities.sideEffects() != BatchConcurrencyCapabilities.SideEffects.ADJACENT_MACHINE
                 && capabilities.sideEffects() != BatchConcurrencyCapabilities.SideEffects.INFER) {
             return Decision.deny("delegate has non-local side effects: "

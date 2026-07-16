@@ -148,6 +148,22 @@ class ConcurrentNodeExecutorTest extends BootstrapTest {
     }
 
     @Test
+    void retryFactoryMustLeaveClaimOwnedByExecutor() {
+        DagScheduler scheduler = new DagScheduler(forkJoinGraph());
+        ConcurrentNodeExecutor.AdmissionWorkerFactory factory = nodeId -> {
+            assertEquals(DagScheduler.NodeState.RUNNING, scheduler.state(nodeId));
+            return ConcurrentNodeExecutor.StartResult.retry();
+        };
+        ConcurrentNodeExecutor executor = new ConcurrentNodeExecutor(
+                scheduler, factory, 1, nodeId -> false);
+
+        executor.tick();
+
+        assertEquals(DagScheduler.NodeState.READY, scheduler.state(new NodeId(0)));
+        assertEquals(0, executor.runningCount());
+    }
+
+    @Test
     void perTickDispatchBudgetSpreadsReadyNodesAcrossTicks() {
         DagScheduler scheduler = new DagScheduler(forkJoinGraph());
         Map<NodeId, FakeWorker> workers = new HashMap<>();

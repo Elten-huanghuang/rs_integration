@@ -292,8 +292,9 @@ public final class MarketBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
+    @Nullable
     public BlockPos getMachinePos() {
-        return BlockPos.ZERO;
+        return null;
     }
 
     // ── Plan-time warnings ─────────────────────────────────────────

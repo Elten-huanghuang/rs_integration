@@ -703,6 +703,9 @@ public final class AltarBindingRegistry {
         if (ModIds.MALUM.equals(type.id()) && "spirit_infusion".equals(hint)) {
             return "spirit_altar";
         }
+        if (ModIds.ID_FA_CLIBANO.equals(type.id())) {
+            return null;
+        }
         // malum_spirit_crucible is a leaf type — all recipes are Spirit Crucible
         // recipes and all bindings are Spirit Crucible bindings.  Sub-type
         // filtering is unnecessary and can cause false negatives when the

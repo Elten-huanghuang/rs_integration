@@ -574,6 +574,14 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         return workers.size();
     }
 
+    /** Compact stable summary for progress snapshots; avoids sending every worker position. */
+    public String machineLabel() {
+        if (workers.isEmpty()) return "";
+        BoundMachine first = workers.get(0).machine;
+        String label = first.dim() + "@" + first.pos().toShortString();
+        return workers.size() > 1 ? label + " (+" + (workers.size() - 1) + ")" : label;
+    }
+
     public void setMachineServer(MinecraftServer server) {
         this.machineServer = server;
         for (WorkerSlot worker : workers) configureDelegate(worker.delegate, worker.machine);

@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.mods.touhoulittlemaid.TlmAltarStructure;
+import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
@@ -91,6 +92,13 @@ public final class BindingEventHandler {
 
         BlockPos pos = event.getPos();
         BlockPos bindingPos = resolveRootPos(event.getLevel(), pos, block, className);
+        if ("forbidden_arcanus_clibano".equals(matched.modType.id())
+                && bindingPos.equals(pos)
+                && !className.equals("com.stal111.forbidden_arcanus.common.block.ClibanoMainPartBlock")) {
+            player.displayClientMessage(Component.translatable("rsi.clibano.error.structure_missing"), true);
+            event.setCanceled(true);
+            return;
+        }
 
         // If root resolution moved us to the master block, recompute identity
         // from the root position so blockKey/blockRegKey/displayStack reflect
@@ -150,9 +158,15 @@ public final class BindingEventHandler {
                 if (binding.isPresent()) {
                     AltarBindingRegistry.bind(event.getLevel().dimension(), bindingPos, binding.get());
                     BindingStorage.addBinding(held, dim, bindingPos, blockKey, blockRegKey, displayStack);
+                    Component dimensionName = Component.translatable(
+                            "dimension." + dim.getNamespace() + "." + dim.getPath())
+                            .withStyle(ChatFormatting.YELLOW);
+                    Component coloredBlockName = blockName.copy().withStyle(ChatFormatting.GOLD);
+                    Component coloredPosition = Component.literal(bindingPos.toShortString())
+                            .withStyle(ChatFormatting.AQUA);
                     player.displayClientMessage(
                             Component.translatable("gui.rs_integration.altar.bound",
-                                    blockName, binding.get().displayName()),
+                                    coloredBlockName, dimensionName, coloredPosition),
                             true);
                     sendBindingRefresh(player);
                 }
@@ -342,13 +356,15 @@ public final class BindingEventHandler {
     // item models and translations, since individual block items often lack
     // both.  Root-position resolution (resolveRootPos) uses class-name
     // reflection and is unaffected by this map.
-    public static final Map<String, String> MULTI_PART_ROOT_MAP = Map.of(
-            "tacz:workbench_a", "tacz:gun_smith_table",
-            "tacz:workbench_b", "tacz:gun_smith_table",
-            "tacz:workbench_c", "tacz:gun_smith_table",
-            "block.tacz.workbench_a", "tacz:gun_smith_table",
-            "block.tacz.workbench_b", "tacz:gun_smith_table",
-            "block.tacz.workbench_c", "tacz:gun_smith_table"
+    public static final Map<String, String> MULTI_PART_ROOT_MAP = Map.ofEntries(
+            Map.entry("tacz:workbench_a", "tacz:gun_smith_table"),
+            Map.entry("tacz:workbench_b", "tacz:gun_smith_table"),
+            Map.entry("tacz:workbench_c", "tacz:gun_smith_table"),
+            Map.entry("block.tacz.workbench_a", "tacz:gun_smith_table"),
+            Map.entry("block.tacz.workbench_b", "tacz:gun_smith_table"),
+            Map.entry("block.tacz.workbench_c", "tacz:gun_smith_table"),
+            Map.entry("forbidden_arcanus:clibano_main_part", "forbidden_arcanus:clibano_core"),
+            Map.entry("block.forbidden_arcanus.clibano_main_part", "forbidden_arcanus:clibano_core")
     );
 
     public static boolean supportsGuiByBlockKey(String blockKey) {
@@ -532,6 +548,31 @@ public final class BindingEventHandler {
     }
 
     private static BlockPos resolveRootPos(Level level, BlockPos pos, Block block, String className) {
+        // Forbidden & Arcanus Clibano: visible shell parts resolve the hidden
+        // main-part POI through the mod's own public structure contract.
+        if (className.equals("com.stal111.forbidden_arcanus.common.block.ClibanoCenterBlock")
+                || className.equals("com.stal111.forbidden_arcanus.common.block.ClibanoCornerBlock")
+                || className.equals("com.stal111.forbidden_arcanus.common.block.ClibanoHorizontalSideBlock")
+                || className.equals("com.stal111.forbidden_arcanus.common.block.ClibanoVerticalSideBlock")) {
+            try {
+                java.lang.reflect.Method findMainPos = block.getClass()
+                        .getMethod("findMainPos", Level.class, BlockPos.class);
+                Object resolved = findMainPos.invoke(block, level, pos);
+                if (resolved instanceof Optional<?> optional
+                        && optional.orElse(null) instanceof BlockPos mainPos) {
+                    BlockEntity main = level.getBlockEntity(mainPos);
+                    if (main != null && !main.isRemoved()
+                            && main.getClass().getName().equals(
+                            "com.stal111.forbidden_arcanus.common.block.entity.clibano.ClibanoMainBlockEntity")) {
+                        return mainPos;
+                    }
+                }
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.warn("[RSI-Bind] Clibano main-pos resolution failed at {}", pos, e);
+            }
+            return pos;
+        }
+
         // TACZ: 1×2 gun workbench — getRootPos is on the block, not the BE
         if (className.contains("GunSmithTableBlock")) {
             try {

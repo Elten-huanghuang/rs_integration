@@ -54,6 +54,7 @@ public final class CraftProgressPacket {
             buf.writeVarInt(node.state().ordinal());
             buf.writeUtf(node.recipeId(), MAX_RECIPE_ID_LENGTH);
             buf.writeUtf(node.modTypeId(), MAX_MOD_TYPE_ID_LENGTH);
+            buf.writeItem(node.displayOutput());
             buf.writeVarInt(completedOperations);
             buf.writeVarInt(totalOperations);
             buf.writeVarInt(runningOperations);
@@ -81,6 +82,7 @@ public final class CraftProgressPacket {
                     CraftProgressSnapshot.NodeState.fromOrdinal(buf.readVarInt());
             String recipeId = buf.readUtf(MAX_RECIPE_ID_LENGTH);
             String modTypeId = buf.readUtf(MAX_MOD_TYPE_ID_LENGTH);
+            net.minecraft.world.item.ItemStack displayOutput = buf.readItem();
             int completedOperations = readNonNegative(buf, "completedOperations");
             int totalOperations = readNonNegative(buf, "totalOperations");
             int runningOperations = readNonNegative(buf, "runningOperations");
@@ -91,7 +93,7 @@ public final class CraftProgressPacket {
             String nodeDetail = buf.readUtf(MAX_TECHNICAL_DETAIL_LENGTH);
             boolean draining = buf.readBoolean();
             nodes.add(new CraftProgressSnapshot.NodeProgress(nodeId, nodeState,
-                    recipeId, modTypeId, completedOperations, totalOperations,
+                    recipeId, modTypeId, displayOutput, completedOperations, totalOperations,
                     runningOperations, machineLabel, nodeReason, nodeDetail, draining));
         }
         return new CraftProgressPacket(new CraftProgressSnapshot(craftId, sequence, result, reason,

@@ -8,6 +8,8 @@ import com.huanghuang.rsintegration.sidepanel.RSInventoryTransferHandler;
 import com.huanghuang.rsintegration.util.ModIds;
 import mezz.jei.api.IModPlugin;
 import mezz.jei.api.JeiPlugin;
+import mezz.jei.api.registration.IRecipeCategoryRegistration;
+import mezz.jei.api.registration.IRecipeRegistration;
 import mezz.jei.api.registration.IRecipeTransferRegistration;
 import mezz.jei.api.runtime.IJeiRuntime;
 import net.minecraft.resources.ResourceLocation;
@@ -43,15 +45,39 @@ public final class RSJeiPlugin implements IModPlugin {
         if (RSIntegrationConfig.ENABLE_GOETY.get() && ModList.get().isLoaded(ModIds.GOETY)) {
             GoetyRSModule.INSTANCE.onJeiRuntimeAvailable(jeiRuntime);
         }
+        if (ModList.get().isLoaded(ModIds.FTB_QUESTS)) {
+            com.huanghuang.rsintegration.compat.ftbquests.client.FtbQuestJeiRuntime
+                    .onRuntimeAvailable(jeiRuntime);
+        }
     }
 
     @Override
     public void onRuntimeUnavailable() {
         JeiMarqueeSelector.unregister();
         cachedRuntime = null;
+        if (ModList.get().isLoaded(ModIds.FTB_QUESTS)) {
+            com.huanghuang.rsintegration.compat.ftbquests.client.FtbQuestJeiRuntime
+                    .onRuntimeUnavailable();
+        }
         if (RSIntegrationConfig.ENABLE_GOETY.get() && ModList.get().isLoaded(ModIds.GOETY)) {
             GoetyRSModule.INSTANCE.onJeiRuntimeUnavailable();
         }
+    }
+
+    @Override
+    public void registerCategories(IRecipeCategoryRegistration registration) {
+        if (ModList.get().isLoaded(ModIds.FTB_QUESTS)) {
+            registration.addRecipeCategories(
+                    new com.huanghuang.rsintegration.compat.ftbquests.client.FtbQuestSubmissionCategory(
+                            registration.getJeiHelpers().getGuiHelper()));
+        }
+    }
+
+    @Override
+    public void registerRecipes(IRecipeRegistration registration) {
+        // FTB Quests client data is not guaranteed to exist during JEI's static
+        // registration pass. Player-specific entries are added from
+        // FtbQuestJeiRuntime once ClientQuestFile has synchronized.
     }
 
     @Override

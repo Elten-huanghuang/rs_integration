@@ -61,6 +61,39 @@ class PlanTreeModelGraphTest extends BootstrapTest {
     }
 
     @Test
+    void repeatedSlotsFromOneBatchRenderAsOneQuantity() {
+        PlanGraphView.NodeView producer = new PlanGraphView.NodeView(3,
+                new ResourceLocation("malum", "spirit_infusion/alchemy_glass"), "malum", 1,
+                new ItemStack(Items.GLASS, 4), List.of(), List.of(
+                new PlanGraphView.OutputView(0, new ItemStack(Items.GLASS), 4, 0)));
+        PlanGraphView.NodeView consumer = new PlanGraphView.NodeView(4,
+                new ResourceLocation("test", "consumer"), "generic", 1,
+                new ItemStack(Items.DIAMOND), List.of(), List.of(
+                new PlanGraphView.OutputView(0, new ItemStack(Items.DIAMOND), 1, 0)));
+        PlanGraphView.SourceView glassSource = new PlanGraphView.SourceView(false, 3, 0);
+        PlanGraphView graph = new PlanGraphView(1, List.of(producer, consumer), List.of(
+                new PlanGraphView.EdgeView(4, 0, glassSource, new ItemStack(Items.GLASS), 1),
+                new PlanGraphView.EdgeView(4, 1, glassSource, new ItemStack(Items.GLASS), 1),
+                new PlanGraphView.EdgeView(4, 2, glassSource, new ItemStack(Items.GLASS), 1),
+                new PlanGraphView.EdgeView(4, 3, glassSource, new ItemStack(Items.GLASS), 1)),
+                List.of(new PlanGraphView.RootView(new ItemStack(Items.DIAMOND), 1, 0,
+                        List.of(new PlanGraphView.RootEdgeView(
+                                new PlanGraphView.SourceView(false, 4, 0),
+                                new ItemStack(Items.DIAMOND), 1)))),
+                List.of(), List.of(3, 4));
+        PlanResponse plan = new PlanResponse(true, "root", new ItemStack(Items.DIAMOND),
+                List.of(), Map.of(), List.of(), "test:root", null, null, 0, 0, 0,
+                List.of(), 1, null, null, null, 0, false, false, false, null,
+                Set.of(), Map.of(), null, graph);
+
+        PlanTreeNode consumerTree = PlanTreeModel.from(plan).root.children.get(0);
+        assertEquals(1, consumerTree.children.size());
+        assertEquals(4, consumerTree.children.get(0).amount);
+        assertEquals(4, consumerTree.children.get(0).edgeQuantity);
+        assertEquals(3, consumerTree.children.get(0).graphNodeId);
+    }
+
+    @Test
     void collapseStateUsesNodeIdForSameItemRecipes() {
         ResourceLocation sharedRecipe = new ResourceLocation("test", "same_recipe");
         PlanTreeNode first = new PlanTreeNode(IngredientKey.of(new ItemStack(Items.IRON_INGOT)),

@@ -123,6 +123,17 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
         failureReason = reason;
     }
 
+    void markCompletionFailed(String reason) {
+        failureReason = reason;
+    }
+
+    String outputShortageDetail() {
+        if (outputs == null) return "declared graph outputs were not fully collected";
+        String detail = outputs.describeShortages();
+        return detail.isEmpty() ? "declared graph outputs were not fully collected"
+                : "output shortage: " + detail;
+    }
+
     boolean wasDispatched() { return dispatched; }
 
     @Nullable OperationExecutionKernel.TerminalClass operationTerminalClass() {
@@ -212,6 +223,7 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
     }
 
     String machineLabel() {
+        if (delegate instanceof ParallelCraftGroup group) return group.machineLabel();
         MachineLeaseRegistry.Lease lease = machineLease();
         if (lease == null) return "";
         var machine = lease.machine();
@@ -357,9 +369,12 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
     }
 
     List<ItemStack> disarmCapture() {
+        List<ItemStack> drained = new java.util.ArrayList<>();
+        if (operationSession != null) drained.addAll(operationSession.drainCapture());
         CaptureSession handle = capture;
         capture = null;
-        return handle == null ? List.of() : handle.drainAndClose();
+        if (handle != null) drained.addAll(handle.drainAndClose());
+        return List.copyOf(drained);
     }
 
     boolean isDraining() {

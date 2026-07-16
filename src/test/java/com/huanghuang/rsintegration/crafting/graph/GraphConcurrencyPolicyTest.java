@@ -2,6 +2,8 @@ package com.huanghuang.rsintegration.crafting.graph;
 
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
+import com.huanghuang.rsintegration.mods.crockpot.CrockPotBatchDelegate;
+import com.huanghuang.rsintegration.mods.farmersdelight.CookingPotBatchDelegate;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
@@ -39,6 +41,33 @@ class GraphConcurrencyPolicyTest {
         GraphConcurrencyPolicy.Decision decision = GraphConcurrencyPolicy.decide(
                 "test", new FakeDelegate(safe()), List.of(), List.of());
         assertFalse(decision.exclusive());
+    }
+
+    @Test
+    void localWorldRemaindersRemainConcurrencySafe() {
+        GraphConcurrencyPolicy.Decision decision = GraphConcurrencyPolicy.decide(
+                "test", new FakeDelegate(BatchConcurrencyCapabilities.machineSlotWithLocalWorldItems()),
+                List.of(), List.of());
+
+        assertFalse(decision.exclusive());
+        assertEquals(BatchConcurrencyCapabilities.SideEffects.LOCAL_WORLD_ITEMS,
+                decision.capabilities().sideEffects());
+        assertEquals(BatchConcurrencyCapabilities.OutputOwnership.MACHINE_SLOT,
+                decision.capabilities().outputOwnership());
+    }
+
+    @Test
+    void realCookingDelegatesKeepOnlyProvenConcurrencyContracts() {
+        GraphConcurrencyPolicy.Decision farmersDelight = GraphConcurrencyPolicy.decide(
+                "farmersdelight_cooking_pot", new CookingPotBatchDelegate(), List.of(), List.of());
+        GraphConcurrencyPolicy.Decision crockPot = GraphConcurrencyPolicy.decide(
+                "crockpot", new CrockPotBatchDelegate(), List.of(), List.of());
+
+        assertFalse(farmersDelight.exclusive());
+        assertEquals(BatchConcurrencyCapabilities.SideEffects.LOCAL_WORLD_ITEMS,
+                farmersDelight.capabilities().sideEffects());
+        assertTrue(crockPot.exclusive());
+        assertEquals("delegate has no concurrency capability", crockPot.reason());
     }
 
     @Test

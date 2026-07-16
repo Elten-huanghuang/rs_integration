@@ -167,7 +167,7 @@ public final class YoukaisHomecomingRSModule implements IModIntegration {
                 "youkaishomecoming_ferment", false
         ));
 
-        // ── Small Iron Pot (矮锅) ──
+        // ── Small Iron Pot (小铁锅) ──
         BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
                 "youkaishomecoming", ModType.byId("youkaishomecoming_cooking_small"),
                 RSIntegrationConfig.ENABLE_YOUKAISHOMECOMING,
@@ -177,7 +177,7 @@ public final class YoukaisHomecomingRSModule implements IModIntegration {
                 "youkaishomecoming_cooking_small", false
         ));
 
-        // ── Short Iron Pot (短锅) ──
+        // ── Short Iron Pot (矮锅) ──
         BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
                 "youkaishomecoming", ModType.byId("youkaishomecoming_cooking_short"),
                 RSIntegrationConfig.ENABLE_YOUKAISHOMECOMING,

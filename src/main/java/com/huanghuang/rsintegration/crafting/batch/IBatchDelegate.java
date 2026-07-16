@@ -80,6 +80,15 @@ public interface IBatchDelegate {
     }
 
     /**
+     * Whether a bound block without a block entity is a valid idle form for this delegate.
+     * Most machines require a block entity; world-interaction machines may opt in after
+     * validating the concrete block at the bound position.
+     */
+    default boolean acceptsMachineWithoutBlockEntity(@Nonnull ServerLevel level, @Nonnull BlockPos pos) {
+        return false;
+    }
+
+    /**
      * Check machine is idle, extract materials for one craft, place them, and start.
      * @return true if the craft was successfully started
      */

@@ -48,6 +48,11 @@ public final class ConcurrentNodeExecutor {
         void publish(NodeId nodeId, Worker worker);
     }
 
+    @FunctionalInterface
+    public interface FailureHandler {
+        void failed(NodeId nodeId, Worker worker);
+    }
+
     public record StartResult(StartStatus status, Worker worker) {
         public StartResult {
             Objects.requireNonNull(status, "status");
@@ -92,6 +97,7 @@ public final class ConcurrentNodeExecutor {
     private final AdmissionWorkerFactory workers;
     private final PublicationHandler publications;
     private final CompletionHandler completions;
+    private final FailureHandler failures;
     private final ExclusivityOracle exclusivity;
     private final int maxConcurrentNodes;
     private final int maxDispatchPerTick;
@@ -145,10 +151,20 @@ public final class ConcurrentNodeExecutor {
                                   PublicationHandler publications,
                                   CompletionHandler completions, int maxDispatchPerTick,
                                   int maxDispatchPerCraft) {
+        this(scheduler, workers, maxConcurrentNodes, exclusivity, publications,
+                completions, (nodeId, worker) -> { }, maxDispatchPerTick, maxDispatchPerCraft);
+    }
+
+    public ConcurrentNodeExecutor(DagScheduler scheduler, AdmissionWorkerFactory workers,
+                                  int maxConcurrentNodes, ExclusivityOracle exclusivity,
+                                  PublicationHandler publications,
+                                  CompletionHandler completions, FailureHandler failures,
+                                  int maxDispatchPerTick, int maxDispatchPerCraft) {
         this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
         this.workers = Objects.requireNonNull(workers, "workers");
         this.publications = Objects.requireNonNull(publications, "publications");
         this.completions = Objects.requireNonNull(completions, "completions");
+        this.failures = Objects.requireNonNull(failures, "failures");
         this.exclusivity = Objects.requireNonNull(exclusivity, "exclusivity");
         if (maxConcurrentNodes < 1 || maxDispatchPerTick < 1 || maxDispatchPerCraft < 1) {
             throw new IllegalArgumentException("executor limits must be positive");
@@ -213,6 +229,8 @@ public final class ConcurrentNodeExecutor {
                 }
                 case FAILED -> {
                     running.remove(result.nodeId);
+                    try { failures.failed(result.nodeId, result.worker); }
+                    catch (RuntimeException ignored) { }
                     result.worker.cleanupFailure();
                     if (!scheduler.isStopping()) {
                         scheduler.fail(result.nodeId);

@@ -36,6 +36,7 @@ public record BatchConcurrencyCapabilities(
     public enum SideEffects {
         NONE,
         MACHINE_LOCAL,
+        LOCAL_WORLD_ITEMS,
         ADJACENT_MACHINE,
         PLAYER_TRANSFORM,
         WORLD_GLOBAL,
@@ -64,6 +65,17 @@ public record BatchConcurrencyCapabilities(
                 OutputOwnership.MACHINE_SLOT,
                 CleanupContract.SEPARABLE_OFFLINE,
                 SideEffects.MACHINE_LOCAL,
+                PreparationContract.RETRY_SAFE,
+                List.of());
+    }
+
+    /** Main output stays in the leased machine; recipe remainders may drop nearby but are not DAG assets. */
+    public static BatchConcurrencyCapabilities machineSlotWithLocalWorldItems() {
+        return new BatchConcurrencyCapabilities(
+                MaterialOwnership.CHAIN_RESERVED,
+                OutputOwnership.MACHINE_SLOT,
+                CleanupContract.SEPARABLE_OFFLINE,
+                SideEffects.LOCAL_WORLD_ITEMS,
                 PreparationContract.RETRY_SAFE,
                 List.of());
     }
