@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.reflection.probes.FarmersDelightReflection;
 import com.refinedmods.refinedstorage.api.network.INetwork;
@@ -94,6 +95,11 @@ public final class CookingPotBatchDelegate extends com.huanghuang.rsintegration.
             specs.add(new IngredientSpec(Ingredient.of(container), 1));
         }
         return specs.isEmpty() ? null : specs;
+    }
+
+    @Override
+    public BatchConcurrencyCapabilities concurrencyCapabilities() {
+        return BatchConcurrencyCapabilities.machineSlotWithLocalWorldItems();
     }
 
     @Override

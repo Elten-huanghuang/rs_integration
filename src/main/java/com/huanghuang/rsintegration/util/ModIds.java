@@ -48,6 +48,7 @@ public final class ModIds {
     public static final String ID_FD_SKILLET = "farmersdelight_skillet";
     public static final String ID_FD_COOKING_POT = "farmersdelight_cooking_pot";
     public static final String ID_FR_KETTLE = "farmersrespite_kettle";
+    public static final String ID_FA_CLIBANO = "forbidden_arcanus_clibano";
 
     // Youkai's Homecoming
     public static final String YOUKAISHOMECOMING = "youkaishomecoming";

@@ -28,6 +28,7 @@ import net.minecraftforge.items.IItemHandler;
 import net.minecraftforge.items.ItemHandlerHelper;
 import org.jetbrains.annotations.NotNull;
 
+import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -86,6 +87,11 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
         this.recipe = found;
         this.craftDone = false;
         return true;
+    }
+
+    @Override
+    public boolean acceptsMachineWithoutBlockEntity(@Nonnull ServerLevel level, @Nonnull BlockPos pos) {
+        return CookingPotCompletionPolicy.isIdleBowl(level.getBlockState(pos), BOWL_KEYS[potIndex]);
     }
 
     @Nullable
@@ -218,6 +224,17 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
 
         be.setChanged();
         return true;
+    }
+
+    @Nonnull
+    @Override
+    protected CraftObservation observeMissingMachineCraft(@Nonnull ServerLevel level, @Nonnull BlockPos pos) {
+        var state = level.getBlockState(pos);
+        ItemStack expected = getRecipeResult(recipe);
+        if (CookingPotCompletionPolicy.isExpectedResultBlock(state, expected)) {
+            return doneObservation();
+        }
+        return failObservation("machine block entity missing");
     }
 
     @Override

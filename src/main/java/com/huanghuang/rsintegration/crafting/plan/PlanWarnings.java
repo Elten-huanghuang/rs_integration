@@ -11,6 +11,7 @@ import com.huanghuang.rsintegration.mods.farmersdelight.SkilletBatchDelegate;
 import com.huanghuang.rsintegration.mods.immortalersdelight.EnchantalCoolerBatchDelegate;
 import com.huanghuang.rsintegration.mods.embers.EreAlchemyBatchDelegate;
 import com.huanghuang.rsintegration.mods.farmingforblockheads.MarketBatchDelegate;
+import com.huanghuang.rsintegration.mods.forbidden.ClibanoBatchDelegate;
 import com.huanghuang.rsintegration.mods.forbidden.FaBatchDelegate;
 import com.huanghuang.rsintegration.mods.goety.GoetyBatchDelegate;
 import com.huanghuang.rsintegration.mods.malum.MalumBatchDelegate;
@@ -47,6 +48,9 @@ public final class PlanWarnings {
                 break;
             case ModIds.FORBIDDEN_ARCANUS:
                 warnings.addAll(FaBatchDelegate.getPlanWarnings(player, recipe, dim, pos));
+                break;
+            case ModIds.ID_FA_CLIBANO:
+                warnings.addAll(ClibanoBatchDelegate.getPlanWarnings(player, recipe, dim, pos));
                 break;
             case ModIds.WIZARDS_REBORN:
                 warnings.addAll(WRBatchDelegate.getPlanWarnings(player, recipe, dim, pos));

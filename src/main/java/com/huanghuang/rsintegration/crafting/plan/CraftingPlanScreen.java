@@ -436,6 +436,16 @@ public final class CraftingPlanScreen extends Screen {
 
     private void onConfirm() {
         String recipeId = plan.recipeId();
+        ResourceLocation targetId = ResourceLocation.tryParse(recipeId);
+        if (com.huanghuang.rsintegration.compat.ftbquests.QuestSubmissionTargetIds
+                .isQuestSubmission(targetId)) {
+            BatchCraftNetworkHandler.CHANNEL.sendToServer(
+                    new com.huanghuang.rsintegration.compat.ftbquests.QuestSubmissionRequestPacket(
+                            com.huanghuang.rsintegration.compat.ftbquests.QuestSubmissionTargetIds
+                                    .questId(targetId), false));
+            onClose();
+            return;
+        }
         if (recipeId != null && !recipeId.isEmpty()) {
             Map<String, String> forced = exportForcedSelections();
             sendCraftPacket(ResourceLocation.tryParse(recipeId), false, forced,

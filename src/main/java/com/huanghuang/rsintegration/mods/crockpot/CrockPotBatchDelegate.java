@@ -71,6 +71,7 @@ public final class CrockPotBatchDelegate extends com.huanghuang.rsintegration.cr
         this.myDim = level.dimension();
         this.myPos = pos;
         this.player = player;
+        this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
 
         Recipe<?> found = level.getRecipeManager().byKey(recipeId).orElse(null);
         if (found == null) {
@@ -107,10 +108,9 @@ public final class CrockPotBatchDelegate extends com.huanghuang.rsintegration.cr
     @Nullable
     @Override
     public List<IngredientSpec> getRequiredMaterials() {
-        // For recipes with category constraints, the single-craft path handles
-        // food-value-aware item selection. Return null so the chain falls back
-        // to tryStartSingleCraft().
-        if (hasCatConstraints) return null;
+        if (hasCatConstraints) {
+            return buildCategoryPlanIngredients(recipe, network, myLevel, myPos);
+        }
 
         var handler = ModRecipeHandlers.handlerFor(recipe);
         if (handler != null) {
@@ -298,11 +298,12 @@ public final class CrockPotBatchDelegate extends com.huanghuang.rsintegration.cr
 
         int outputSlot = potLevel + 1;
         ItemStack output = itemHandler.getStackInSlot(outputSlot);
-        boolean inputsEmpty = true;
-        for (int slot = 0; slot < potLevel; slot++) {
-            inputsEmpty &= itemHandler.getStackInSlot(slot).isEmpty();
-        }
-        return !output.isEmpty() || inputsEmpty;
+        if (output.isEmpty()) return false;
+
+        ExpectedProduction expected = getExpectedProduction();
+        return expected != null
+                && ItemStack.isSameItem(output, expected.item())
+                && output.getCount() >= expected.count();
     }
 
     @Override

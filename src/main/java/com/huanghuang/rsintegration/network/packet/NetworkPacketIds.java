@@ -67,4 +67,7 @@ public final class NetworkPacketIds {
     public static final int AUTO_EAT_BLACKLIST_UPDATE = 83;
     public static final int AUTO_EAT_BLACKLIST_REQUEST = 84;
     public static final int AUTO_EAT_BLACKLIST_SYNC = 85;
+
+    // ── FTB Quests submission (90-99) ────────────────────────────────
+    public static final int FTB_QUEST_SUBMISSION_REQUEST = 90;
 }

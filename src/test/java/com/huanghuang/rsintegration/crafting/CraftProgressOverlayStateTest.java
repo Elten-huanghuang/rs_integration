@@ -1,5 +1,8 @@
 package com.huanghuang.rsintegration.crafting;
 
+import com.huanghuang.rsintegration.testutil.BootstrapTest;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -9,7 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-class CraftProgressOverlayStateTest {
+class CraftProgressOverlayStateTest extends BootstrapTest {
 
     @Test
     void terminalStatesCannotBeCancelled() {
@@ -39,6 +42,48 @@ class CraftProgressOverlayStateTest {
         assertEquals("rsi.progress.reason.failed_unspecified",
                 CraftProgressOverlay.detail(failed).getContents() instanceof net.minecraft.network.chat.contents.TranslatableContents contents
                         ? contents.getKey() : "");
+    }
+
+    @Test
+    void currentNodesPreferStableRunningTier() {
+        CraftProgressSnapshot.NodeProgress ready = node(0, CraftProgressSnapshot.NodeState.READY, false);
+        CraftProgressSnapshot.NodeProgress runningA = node(1, CraftProgressSnapshot.NodeState.RUNNING, false);
+        CraftProgressSnapshot.NodeProgress draining = node(2, CraftProgressSnapshot.NodeState.RUNNING, true);
+        CraftProgressSnapshot.NodeProgress runningB = node(3, CraftProgressSnapshot.NodeState.RUNNING, false);
+        CraftProgressSnapshot snapshot = new CraftProgressSnapshot(UUID.randomUUID(), 1,
+                CraftProgressSnapshot.Result.RUNNING, CraftProgressSnapshot.Reason.NONE,
+                0, 4, 3, null, List.of(ready, runningA, draining, runningB));
+
+        CraftProgressPresentation.Selection selection =
+                CraftProgressPresentation.currentNodes(snapshot, 1);
+
+        assertEquals(List.of(runningA), selection.nodes());
+        assertEquals(1, selection.remaining());
+    }
+
+    @Test
+    void currentNodesFallBackFromFailureToBlockedReason() {
+        CraftProgressSnapshot.NodeProgress blocked = new CraftProgressSnapshot.NodeProgress(0,
+                CraftProgressSnapshot.NodeState.BLOCKED, "test:blocked", "generic",
+                ItemStack.EMPTY, 0, 1, 0, "", CraftProgressSnapshot.Reason.MACHINE_BUSY,
+                "", false);
+        CraftProgressSnapshot.NodeProgress failed = node(1, CraftProgressSnapshot.NodeState.FAILED, false);
+        CraftProgressSnapshot failedSnapshot = new CraftProgressSnapshot(UUID.randomUUID(), 1,
+                CraftProgressSnapshot.Result.FAILED, CraftProgressSnapshot.Reason.UNKNOWN,
+                0, 2, 0, null, List.of(blocked, failed));
+        CraftProgressSnapshot blockedSnapshot = new CraftProgressSnapshot(UUID.randomUUID(), 1,
+                CraftProgressSnapshot.Result.WAITING, CraftProgressSnapshot.Reason.NONE,
+                0, 1, 0, null, List.of(blocked));
+
+        assertEquals(List.of(failed), CraftProgressPresentation.currentNodes(failedSnapshot, 2).nodes());
+        assertEquals(List.of(blocked), CraftProgressPresentation.currentNodes(blockedSnapshot, 2).nodes());
+    }
+
+    private static CraftProgressSnapshot.NodeProgress node(
+            int id, CraftProgressSnapshot.NodeState state, boolean draining) {
+        return new CraftProgressSnapshot.NodeProgress(id, state, "test:step_" + id, "generic",
+                new ItemStack(Items.IRON_INGOT), 0, 1, state == CraftProgressSnapshot.NodeState.RUNNING ? 1 : 0,
+                "", CraftProgressSnapshot.Reason.NONE, "", draining);
     }
 
     @Test

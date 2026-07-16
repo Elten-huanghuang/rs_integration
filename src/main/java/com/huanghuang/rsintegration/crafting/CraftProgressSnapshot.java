@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.crafting;
 
+import net.minecraft.world.item.ItemStack;
+
 import javax.annotation.Nullable;
 import java.util.List;
 import java.util.UUID;
@@ -97,6 +99,7 @@ public record CraftProgressSnapshot(
             NodeState state,
             String recipeId,
             String modTypeId,
+            ItemStack displayOutput,
             int completedOperations,
             int totalOperations,
             int runningOperations,
@@ -109,6 +112,8 @@ public record CraftProgressSnapshot(
             state = state == null ? NodeState.UNKNOWN : state;
             recipeId = recipeId == null ? "" : recipeId;
             modTypeId = modTypeId == null ? "" : modTypeId;
+            displayOutput = displayOutput == null || displayOutput.isEmpty()
+                    ? ItemStack.EMPTY : displayOutput.copy();
             totalOperations = Math.max(0, totalOperations);
             completedOperations = Math.min(Math.max(0, completedOperations), totalOperations);
             runningOperations = Math.min(Math.max(0, runningOperations),
@@ -116,6 +121,11 @@ public record CraftProgressSnapshot(
             machineLabel = machineLabel == null ? "" : machineLabel;
             reason = reason == null ? Reason.NONE : reason;
             technicalDetail = technicalDetail == null ? "" : technicalDetail;
+        }
+
+        @Override
+        public ItemStack displayOutput() {
+            return displayOutput.copy();
         }
     }
 

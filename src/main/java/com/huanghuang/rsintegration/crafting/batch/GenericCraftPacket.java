@@ -32,6 +32,7 @@ import com.huanghuang.rsintegration.crafting.AsyncCraftManager;
 import com.huanghuang.rsintegration.crafting.ChainRepeatController;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
+import com.huanghuang.rsintegration.crafting.graph.TerminalGraphComposer;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.MaterialSources;
 import com.huanghuang.rsintegration.crafting.PreviewRateLimiter;
@@ -487,22 +488,16 @@ public final class GenericCraftPacket {
                                                @Nullable net.minecraft.core.BlockPos pos,
                                                boolean inferMode, @Nullable ItemStack baseItem,
                                                @Nullable ItemStack targetOutput) {
-        boolean amplified = repeatCount > 1 && (graph.nodes().stream()
-                .anyMatch(node -> !ModType.GENERIC.id().equals(node.modTypeId()))
-                || terminalStep.modType() != ModType.GENERIC);
-        AsyncCraftChain chain = new AsyncCraftChain(player.getUUID(), player.getServer(), network,
-                graph, terminalStep, repeatCount);
+        AsyncCraftChain chain = new AsyncCraftChain(player.getUUID(), player.getServer(), network, graph);
         RSIntegrationMod.LOGGER.info(
-                "[RSI-Craft] launch craftId={} graphNodes={} terminalRecipe={} executor={}",
-                chain.getCraftId(), graph.topologicalOrder().size(), terminalStep.recipeId(),
-                chain.isGraphExecution() ? "graph" : "flat-terminal-fallback");
+                "[RSI-Craft] launch craftId={} graphNodes={} terminalRecipe={} executor=graph terminalEmbedded=true",
+                chain.getCraftId(), graph.topologicalOrder().size(), terminalStep.recipeId());
         chain.setTargetOutput(targetOutput);
         UUID playerId = player.getUUID();
         var server = player.getServer();
         AsyncCraftManager.getInstance().submit(chain);
-        int effectiveRepeat = amplified ? 1 : repeatCount;
         chain.onDone(() -> ChainRepeatController.scheduleNext(
-                chain, server, playerId, effectiveRepeat, chain.getMachineCount(),
+                chain, server, playerId, 1, chain.getMachineCount(),
                 (p, rem) -> tryResolve(p, recipeId, forcedRecipes, dim, pos, rem,
                         inferMode, baseItem, targetOutput)));
         player.sendSystemMessage(TextBuilder.translate(
@@ -614,20 +609,58 @@ public final class GenericCraftPacket {
                 && network != null && RSIntegrationConfig.ENABLE_MULTIBLOCK_AUTO_CRAFTING.get()
                 && modType != ModType.byId("smithing")) {
             if (modType != null) {
+                List<IngredientSpec> graphSpecs = new ArrayList<>();
+                for (IngredientSpec spec : specs) {
+                    if (!spec.isEmpty()) graphSpecs.add(spec);
+                }
                 Map<StackKey, Integer> avail = MaterialSources.listAllAvailable(player, network);
                 List<String> missing = new ArrayList<>();
-                CraftPlanGraph graph = CraftingResolver.resolveGraphForSpecsWithTypes(
-                        specs, avail, player.serverLevel(), player, network, missing,
+                CraftPlanGraph inputGraph = CraftingResolver.resolveGraphForSpecsWithTypes(
+                        graphSpecs, avail, player.serverLevel(), player, network, missing,
                         forcedOverrides, false);
                 if (!missing.isEmpty()) {
                     player.sendSystemMessage(Component.translatable(
                             "rsi.generic.error.missing_materials", CraftPacketUtils.formatMissingSummary(missing)));
                     return;
                 }
-                launchGraphAsyncChain(player, graph,
-                        new ResolutionStep(recipeId, modType, recipeId, inferMode),
-                        network, repeatCount, recipeId, forcedRecipes, dim, pos,
-                        inferMode, baseItem, targetOutput);
+                ResolutionStep terminalStep = new ResolutionStep(recipeId, modType, recipeId,
+                        List.of(), List.of(), inferMode, repeatCount);
+                ItemStack recipeOutput = ModRecipeHandlers.tryGetResultItem(
+                        recipe, player.serverLevel().registryAccess());
+                if (targetOutput != null && !targetOutput.isEmpty()
+                        && !recipeOutput.isEmpty() && targetOutput.getItem() == recipeOutput.getItem()) {
+                    recipeOutput = targetOutput.copyWithCount(recipeOutput.getCount());
+                }
+                if (!inferMode && repeatCount == 1 && !graphSpecs.isEmpty() && !recipeOutput.isEmpty()) {
+                    try {
+                        CraftPlanGraph completeGraph = TerminalGraphComposer.compose(
+                                inputGraph, terminalStep, recipeOutput);
+                        launchGraphAsyncChain(player, completeGraph, terminalStep,
+                                network, repeatCount, recipeId, forcedRecipes, dim, pos,
+                                inferMode, baseItem, targetOutput);
+                        return;
+                    } catch (IllegalArgumentException | ArithmeticException exception) {
+                        RSIntegrationMod.LOGGER.warn(
+                                "[RSI-Craft] terminal graph composition rejected recipe={} reason={}",
+                                recipeId, exception.getMessage());
+                    }
+                }
+                RSIntegrationMod.LOGGER.info(
+                        "[RSI-Craft] terminal graph fallback recipe={} reason={}", recipeId,
+                        inferMode ? "infer-mode" : repeatCount > 1 ? "repeat-count" :
+                                graphSpecs.isEmpty() ? "dynamic-inputs" : "unknown-output");
+                AsyncCraftChain fallback = new AsyncCraftChain(player.getUUID(), player.getServer(), network,
+                        inputGraph, terminalStep, repeatCount);
+                fallback.setTargetOutput(targetOutput);
+                AsyncCraftManager.getInstance().submit(fallback);
+                UUID playerId = player.getUUID();
+                var server = player.getServer();
+                fallback.onDone(() -> ChainRepeatController.scheduleNext(
+                        fallback, server, playerId, 1, fallback.getMachineCount(),
+                        (p, rem) -> tryResolve(p, recipeId, forcedRecipes, dim, pos, rem,
+                                inferMode, baseItem, targetOutput)));
+                player.sendSystemMessage(TextBuilder.translate(
+                        "rsi.async.chain_started", fallback.stepsCount()).build());
                 return;
             }
         }

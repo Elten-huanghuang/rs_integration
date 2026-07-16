@@ -25,7 +25,9 @@ public final class FaRecipeHandler extends AbstractRecipeHandler {
     @Override
     public boolean canHandle(Recipe<?> recipe) {
         if (recipe instanceof FaRitualWrapper) return true;
-        return recipe.getClass().getName().startsWith("com.stal111.forbidden_arcanus.");
+        String className = recipe.getClass().getName();
+        if (className.equals("com.stal111.forbidden_arcanus.common.recipe.ClibanoRecipe")) return false;
+        return className.startsWith("com.stal111.forbidden_arcanus.");
     }
 
     @Override

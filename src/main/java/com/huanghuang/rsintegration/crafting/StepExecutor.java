@@ -14,6 +14,7 @@ import com.huanghuang.rsintegration.crafting.graph.OutputDeclaration;
 import com.huanghuang.rsintegration.crafting.graph.OutputKind;
 import com.huanghuang.rsintegration.crafting.graph.OutputPortId;
 import com.huanghuang.rsintegration.command.PerformanceMonitor;
+import com.huanghuang.rsintegration.mods.crockpot.CrockPotBatchDelegate;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
@@ -109,6 +110,12 @@ final class StepExecutor {
         NodeId graphNodeId = ctx.allocateNodeId();
 
         List<IngredientSpec> specs = CraftPacketUtils.extractIngredientSpecs(entry.recipe());
+        if (entry.modType() == ModType.byId("crockpot")
+                && com.huanghuang.rsintegration.recipe.CrockPotRecipeHandler.hasCategoryConstraints(entry.recipe())) {
+            List<IngredientSpec> categorySpecs = CrockPotBatchDelegate.buildCategoryPlanIngredients(
+                    entry.recipe(), ctx.network, ctx.level, null);
+            if (categorySpecs != null && !categorySpecs.isEmpty()) specs = categorySpecs;
+        }
 
         // If the standard ingredient path returned garbage (AIR, bare items
         // without NBT from TACZ/Applied Armorer), repair via reflection.
@@ -158,12 +165,6 @@ final class StepExecutor {
         if (entry.recipe() instanceof CraftingRecipe cr) {
             for (ItemStack remainder : CraftPacketUtils.getRecipeRemainders(cr)) {
                 registerGraphOutput(remainder, batches, OutputKind.REMAINDER,
-                        graphNodeId, graphOutputs, ctx);
-            }
-        } else {
-            for (IngredientSpec spec : specs) {
-                if (spec.isEmpty()) continue;
-                registerGraphRemainder(spec.ingredient(), mulCount(spec.count(), batches),
                         graphNodeId, graphOutputs, ctx);
             }
         }
@@ -275,23 +276,6 @@ final class StepExecutor {
         OutputPortId port = new OutputPortId(nodeId, outputs.size());
         outputs.add(new OutputDeclaration(port, MaterialKey.of(produced), produced.getCount(), kind));
         ctx.addProduced(produced, new MaterialSource.ProducerOutput(port));
-    }
-
-    private static void registerGraphRemainder(Ingredient ingredient, int count, NodeId nodeId,
-                                               List<OutputDeclaration> outputs, ResolutionContext ctx) {
-        for (ItemStack stack : ingredient.getItems()) {
-            if (stack.isEmpty()) continue;
-            try {
-                ItemStack remainder = stack.getCraftingRemainingItem();
-                if (!remainder.isEmpty()) {
-                    registerGraphOutput(remainder.copyWithCount(1), count, OutputKind.REMAINDER,
-                            nodeId, outputs, ctx);
-                    return;
-                }
-            } catch (Exception e) {
-                RSIntegrationMod.LOGGER.debug("[RSI] getCraftingRemainingItem probe failed", e);
-            }
-        }
     }
 
     private static CraftNode toGraphNode(NodeId nodeId, CraftingResolver.ResolutionStep step,

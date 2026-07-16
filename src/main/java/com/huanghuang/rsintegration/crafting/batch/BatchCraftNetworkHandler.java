@@ -37,6 +37,14 @@ public final class BatchCraftNetworkHandler {
         ch.registerMessage(NetworkPacketIds.CRAFT_STATUS_SYNC, CraftStatusSyncPacket.class,
                 CraftStatusSyncPacket::encode, CraftStatusSyncPacket::decode, CraftStatusSyncPacket::handle,
                 java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_CLIENT));
+        if (net.minecraftforge.fml.ModList.get().isLoaded(com.huanghuang.rsintegration.util.ModIds.FTB_QUESTS)) {
+            ch.registerMessage(NetworkPacketIds.FTB_QUEST_SUBMISSION_REQUEST,
+                    com.huanghuang.rsintegration.compat.ftbquests.QuestSubmissionRequestPacket.class,
+                    com.huanghuang.rsintegration.compat.ftbquests.QuestSubmissionRequestPacket::encode,
+                    com.huanghuang.rsintegration.compat.ftbquests.QuestSubmissionRequestPacket::decode,
+                    com.huanghuang.rsintegration.compat.ftbquests.QuestSubmissionRequestPacket::handle,
+                    java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_SERVER));
+        }
         registered = true;
     }
 }

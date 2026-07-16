@@ -146,6 +146,25 @@ public class RecipeGuiLayoutsMixin {
                 skippedNoRecipe++; continue;
             }
 
+            if (recipe instanceof com.huanghuang.rsintegration.compat.ftbquests.QuestSubmissionSnapshot quest) {
+                ResourceLocation questRecipeId =
+                        com.huanghuang.rsintegration.compat.ftbquests.QuestSubmissionTargetIds
+                                .of(quest.questId());
+                Runnable handler = () -> BatchCraftNetworkHandler.CHANNEL.sendToServer(
+                        new com.huanghuang.rsintegration.compat.ftbquests.QuestSubmissionRequestPacket(
+                                quest.questId()));
+                rsi$layoutIndices.add(i);
+                rsi$positions.add(new int[]{0, 0, 10, 10});
+                rsi$recipeIds.add(questRecipeId);
+                AltarCraftButtons.add(0, 0, 10, 10, handler,
+                        "gui.rs_integration.jei.ftb_quest_submit", questRecipeId,
+                        player.level().dimension().location(), player.blockPosition(), null);
+                rsi$hasMachineGui.add(false);
+                buttonsAdded++;
+                totalRecipes++;
+                continue;
+            }
+
             String recipeClassName = recipe.getClass().getName();
             boolean isFa = recipeClassName.startsWith("com.stal111.forbidden_arcanus");
             boolean isFaOrTlm = isFa

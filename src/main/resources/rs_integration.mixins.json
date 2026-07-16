@@ -23,6 +23,7 @@
     "refinedstorage.NetworkItemUseMixin",
     "refinedstorage.StackUtilsMixin",
     "minecraft.AbstractFurnaceAccessor",
+    "forbidden.ClibanoMainBlockEntityAccessor",
     "sophisticatedbackpacks.InventoryInteractionHelperMixin",
     "sophisticatedbackpacks.InventoryHelperExternalItemMixin",
     "sophisticatedbackpacks.MagnetUpgradeWrapperMixin",

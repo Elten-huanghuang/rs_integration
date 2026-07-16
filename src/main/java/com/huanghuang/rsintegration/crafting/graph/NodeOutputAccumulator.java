@@ -47,10 +47,30 @@ public final class NodeOutputAccumulator {
     }
 
     public boolean isComplete() {
+        return shortages().isEmpty();
+    }
+
+    public List<Shortage> shortages() {
+        List<Shortage> shortages = new ArrayList<>();
         for (OutputDeclaration declaration : declarations) {
-            if (published.get(declaration.id()) != declaration.quantity()) return false;
+            int actual = published.get(declaration.id());
+            if (actual < declaration.quantity()) {
+                shortages.add(new Shortage(declaration.id(), declaration.kind(),
+                        declaration.material(), declaration.quantity(), actual));
+            }
         }
-        return true;
+        return List.copyOf(shortages);
+    }
+
+    public String describeShortages() {
+        return shortages().stream()
+                .map(shortage -> shortage.kind().name().toLowerCase(java.util.Locale.ROOT)
+                        + " " + net.minecraft.core.registries.BuiltInRegistries.ITEM
+                        .getKey(shortage.material().item())
+                        + " expected=" + shortage.expected()
+                        + " published=" + shortage.published()
+                        + " missing=" + shortage.missing())
+                .collect(java.util.stream.Collectors.joining(", "));
     }
 
     public List<ItemStack> drainSurplus() {
@@ -58,6 +78,22 @@ public final class NodeOutputAccumulator {
         for (ItemStack stack : pending) result.add(stack.copy());
         pending.clear();
         return List.copyOf(result);
+    }
+
+    public record Shortage(OutputPortId port, OutputKind kind, MaterialKey material,
+                           int expected, int published) {
+        public Shortage {
+            Objects.requireNonNull(port, "port");
+            Objects.requireNonNull(kind, "kind");
+            Objects.requireNonNull(material, "material");
+            if (expected <= 0 || published < 0 || published >= expected) {
+                throw new IllegalArgumentException("invalid output shortage");
+            }
+        }
+
+        public int missing() {
+            return expected - published;
+        }
     }
 
     public record Publication(OutputPortId port, MaterialKey material, ItemStack stack) {

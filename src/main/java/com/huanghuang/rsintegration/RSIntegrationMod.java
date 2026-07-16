@@ -450,6 +450,8 @@ public final class RSIntegrationMod {
                 net.minecraftforge.common.MinecraftForge.EVENT_BUS.register(
                         com.huanghuang.rsintegration.autoeat.client.AutoEatClientEvents.class));
         DistExecutor.safeRunWhenOn(Dist.CLIENT, () -> () -> {
+            net.minecraftforge.common.MinecraftForge.EVENT_BUS.register(
+                    com.huanghuang.rsintegration.compat.ftbquests.client.FtbQuestJeiRuntime.class);
             net.minecraftforge.common.MinecraftForge.EVENT_BUS.addListener(
                     CraftProgressClientEvents::onClientLogin);
             net.minecraftforge.common.MinecraftForge.EVENT_BUS.addListener(

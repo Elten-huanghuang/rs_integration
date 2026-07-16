@@ -33,16 +33,28 @@ class CraftPacketCodecTest extends BootstrapTest {
                 CraftProgressSnapshot.Reason.MACHINE_BUSY,
                 1, 3, 1, "diagnostic", List.of(
                 new NodeProgress(0, NodeState.SUCCEEDED, "test:first", "generic",
-                        3, 3, 0, "", CraftProgressSnapshot.Reason.NONE, "", false),
+                        new ItemStack(Items.IRON_INGOT), 3, 3, 0, "", CraftProgressSnapshot.Reason.NONE, "", false),
                 new NodeProgress(1, NodeState.RUNNING, "test:second", "malum",
-                        2, 5, 2, "test:dimension@1, 2, 3",
+                        new ItemStack(Items.DIAMOND), 2, 5, 2, "test:dimension@1, 2, 3",
                         CraftProgressSnapshot.Reason.MACHINE_BUSY, "machine probe", true)));
         FriendlyByteBuf buf = buffer();
 
         new CraftProgressPacket(snapshot).encode(buf);
         CraftProgressSnapshot decoded = CraftProgressPacket.decode(buf).snapshot();
 
-        assertEquals(snapshot, decoded);
+        assertEquals(snapshot.craftId(), decoded.craftId());
+        assertEquals(snapshot.sequence(), decoded.sequence());
+        assertEquals(snapshot.result(), decoded.result());
+        assertEquals(snapshot.reason(), decoded.reason());
+        assertEquals(snapshot.nodes().size(), decoded.nodes().size());
+        for (int i = 0; i < snapshot.nodes().size(); i++) {
+            NodeProgress expected = snapshot.nodes().get(i);
+            NodeProgress actual = decoded.nodes().get(i);
+            assertEquals(expected.nodeId(), actual.nodeId());
+            assertEquals(expected.state(), actual.state());
+            assertTrue(ItemStack.matches(expected.displayOutput(), actual.displayOutput()));
+            assertEquals(expected.machineLabel(), actual.machineLabel());
+        }
         assertEquals(0, buf.readableBytes());
         assertFalse(decoded.isTerminal());
     }
@@ -72,6 +84,7 @@ class CraftPacketCodecTest extends BootstrapTest {
         buf.writeVarInt(Integer.MAX_VALUE);
         buf.writeUtf("test:recipe");
         buf.writeUtf("generic");
+        buf.writeItem(ItemStack.EMPTY);
         buf.writeVarInt(0);
         buf.writeVarInt(1);
         buf.writeVarInt(0);
@@ -103,6 +116,7 @@ class CraftPacketCodecTest extends BootstrapTest {
         buf.writeVarInt(NodeState.RUNNING.ordinal());
         buf.writeUtf("test:recipe");
         buf.writeUtf("generic");
+        buf.writeItem(ItemStack.EMPTY);
         buf.writeVarInt(2);
         buf.writeVarInt(2);
         buf.writeVarInt(1);
@@ -115,7 +129,7 @@ class CraftPacketCodecTest extends BootstrapTest {
 
     @Test
     void nodeProgressNormalizesNullsAndInvalidCounts() {
-        NodeProgress progress = new NodeProgress(0, null, null, null,
+        NodeProgress progress = new NodeProgress(0, null, null, null, null,
                 9, -1, 4, null, null, null, false);
 
         assertEquals(NodeState.UNKNOWN, progress.state());

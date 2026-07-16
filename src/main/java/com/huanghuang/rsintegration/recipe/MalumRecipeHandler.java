@@ -33,9 +33,17 @@ public final class MalumRecipeHandler extends AbstractRecipeHandler {
         // that method dispatches straight back to this handler, causing infinite
         // recursion / StackOverflowError. All resolution is done inline below.
 
-        // 1. Method probes. getDeclaredMethods() (not getMethod, which is no-arg
-        //    only) so we can find both no-arg and RegistryAccess-arg overloads,
-        //    including the vanilla getResultItem(m_8043_) override on mod recipes.
+        // Malum's ILodestoneRecipe base exposes generic result methods that may return
+        // a one-item display stack. Concrete recipes such as SpiritInfusionRecipe keep
+        // the authoritative stack (including its batch count) in an output field, so
+        // prefer that field before probing inherited methods.
+        ItemStack fieldOutput = findNamedOutputField(recipe);
+        if (!fieldOutput.isEmpty()) return fieldOutput;
+
+        // Method fallback for Malum recipe types that do not expose an output field.
+        // getDeclaredMethods() (not getMethod, which is no-arg only) lets us find both
+        // no-arg and RegistryAccess-arg overloads, including the vanilla
+        // getResultItem(m_8043_) override on mod recipes.
         for (String name : new String[]{"getResultItem", "m_8043_", "getResult", "getOutput"}) {
             for (java.lang.reflect.Method m : recipe.getClass().getMethods()) {
                 if (!m.getName().equals(name)) continue;
@@ -56,9 +64,10 @@ public final class MalumRecipeHandler extends AbstractRecipeHandler {
                 }
             }
         }
-        // 2. Field fallback: walk the hierarchy (output may live in a superclass)
-        //    and filter by name so an unrelated ItemStack field (icon/cached
-        //    input) isn't mis-read as the product.
+        return ItemStack.EMPTY;
+    }
+
+    private ItemStack findNamedOutputField(Recipe<?> recipe) {
         Class<?> scan = recipe.getClass();
         while (scan != null && scan != Object.class) {
             for (java.lang.reflect.Field f : scan.getDeclaredFields()) {
@@ -68,7 +77,7 @@ public final class MalumRecipeHandler extends AbstractRecipeHandler {
                 try {
                     f.setAccessible(true);
                     Object v = f.get(recipe);
-                    if (v instanceof ItemStack s && !s.isEmpty()) return s;
+                    if (v instanceof ItemStack s && !s.isEmpty()) return s.copy();
                 } catch (Exception e) {
                     RSIntegrationMod.LOGGER.debug("[RSI-Recipe] reflection probe failed", e);
                 }
