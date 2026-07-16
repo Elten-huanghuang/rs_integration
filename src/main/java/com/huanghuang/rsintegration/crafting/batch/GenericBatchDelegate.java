@@ -228,8 +228,10 @@ public final class GenericBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
+    @Nullable
     public BlockPos getMachinePos() {
-        return myPos;
+        // Generic recipes execute logically and have no physical machine to observe.
+        return null;
     }
 
     private void refundAll() {

@@ -42,11 +42,21 @@ public final class EreAlchemyRecipeHandler extends AbstractRecipeHandler {
     public List<IngredientSpec> getIngredients(Recipe<?> recipe) {
         List<IngredientSpec> specs = new ArrayList<>();
 
-        // tablet (center Ingredient) and aspects (catalyst items) are NOT
-        // included — they are placed once and recycled across repeat batches.
-        // The EmbersPlanInfo pedestal layout shows which catalysts are needed
-        // per pedestal, and the execution delegate handles extraction/refund
-        // internally. Only consumed inputs are listed here.
+        // The alchemy tablet is a real consumed/reserved machine input. The
+        // execution delegate extracts it into the tablet inventory, so it must
+        // also be present in the recipe tree and material bill. Aspect catalysts
+        // remain omitted here because the Embers plan layout renders them
+        // separately and they are recycled across repeat batches.
+        Reflect.findField(recipe.getClass(), "tablet").ifPresent(f -> {
+            if (!Ingredient.class.isAssignableFrom(f.getType())) return;
+            f.setAccessible(true);
+            try {
+                Ingredient tablet = (Ingredient) f.get(recipe);
+                if (tablet != null && !tablet.isEmpty()) {
+                    specs.add(new IngredientSpec(tablet, 1));
+                }
+            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
+        });
 
         // inputs — ArrayList<Ingredient> (material items, N pedestals)
         Reflect.findField(recipe.getClass(), "inputs").ifPresent(f -> {

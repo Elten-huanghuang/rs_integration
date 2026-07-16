@@ -87,6 +87,20 @@ class NodeOutputAccumulatorTest extends BootstrapTest {
         assertTrue(accumulator.describeShortages().isEmpty());
     }
 
+    @Test
+    void dynamicDeclarationAcceptsAndPreservesAnyRuntimeResult() {
+        OutputDeclaration declaration = new OutputDeclaration(
+                new OutputPortId(new NodeId(4), 0),
+                MaterialKey.of(new ItemStack(Items.SNIFFER_EGG)), 2, OutputKind.DYNAMIC);
+        NodeOutputAccumulator accumulator = new NodeOutputAccumulator(List.of(declaration));
+
+        assertTrue(accumulator.add(List.of(new ItemStack(Items.PRISMARINE_SHARD))).isEmpty());
+
+        assertTrue(accumulator.isComplete());
+        assertTrue(accumulator.shortages().isEmpty());
+        assertEquals(1, accumulator.drainSurplus().get(0).getCount());
+    }
+
     private static ItemStack tagged(String variant, int count) {
         ItemStack stack = new ItemStack(Items.DIAMOND, count);
         CompoundTag tag = new CompoundTag();

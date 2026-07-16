@@ -4,7 +4,6 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.ClientSyncedConfig;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.machine.MachineHub;
-import com.huanghuang.rsintegration.mixin.minecraft.AbstractContainerScreenAccessor;
 import com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler;
 import com.huanghuang.rsintegration.sidepanel.client.MachineTabHandler;
 import com.huanghuang.rsintegration.sidepanel.data.BindingInfo;
@@ -60,8 +59,8 @@ public abstract class GridScreenMachineTabMixin {
             RSSidePanelNetworkHandler.sendRequestSync();
         }
 
-        AbstractContainerScreenAccessor acc = (AbstractContainerScreenAccessor) this;
-        int topPos = acc.getTopPos();
+        var screen = (com.refinedmods.refinedstorage.screen.grid.GridScreen) (Object) this;
+        int topPos = screen.getGuiTop();
 
         int sideButtonBottom = 0;
         try {

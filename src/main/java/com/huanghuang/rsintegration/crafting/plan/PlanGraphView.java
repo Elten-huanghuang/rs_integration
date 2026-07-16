@@ -43,7 +43,8 @@ public record PlanGraphView(
         List<NodeView> nodes = new ArrayList<>(graph.nodes().size());
         for (CraftNode node : graph.nodes()) {
             ItemStack primary = node.outputs().stream()
-                    .filter(output -> output.kind() == OutputKind.PRIMARY)
+                    .filter(output -> output.kind() == OutputKind.PRIMARY
+                            || output.kind() == OutputKind.DYNAMIC)
                     .findFirst()
                     .map(output -> output.material().toStack(
                             Math.max(1, output.quantity() / Math.max(1, node.executions()))))

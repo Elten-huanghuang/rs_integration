@@ -962,11 +962,15 @@ public final class AsyncCraftChain {
         NodeAdmissionCoordinator.Candidate candidate = new NodeAdmissionCoordinator.Candidate(
                 nodeId, graphRequests.getOrDefault(nodeId, List.of()));
         NodeAdmissionCoordinator.Admission admission = graphAdmissions.tryAdmitClaimed(candidate);
-        if (admission == null) return ConcurrentNodeExecutor.StartResult.retry();
+        if (admission == null) {
+            prepared.delegate().releasePreparationResources();
+            return ConcurrentNodeExecutor.StartResult.retry();
+        }
 
         GraphDispatchResult dispatch = dispatchPreparedGraphNode(
                 nodeId, prepared, online, admission);
         if (dispatch.state() == DispatchState.RETRY) {
+            prepared.delegate().releasePreparationResources();
             graphAdmissions.releaseMaterial(admission);
             return ConcurrentNodeExecutor.StartResult.retry();
         }
@@ -974,6 +978,7 @@ public final class AsyncCraftChain {
             graphFailureDetails.put(nodeId, dispatch.detail());
             RSIntegrationMod.LOGGER.warn(ctx.format("Graph node {} dispatch failed: {}"),
                     nodeId, dispatch.detail());
+            prepared.delegate().releasePreparationResources();
             graphAdmissions.releaseMaterial(admission);
             return ConcurrentNodeExecutor.StartResult.failed();
         }
@@ -998,6 +1003,19 @@ public final class AsyncCraftChain {
                 ? step.modType().createInferDelegate() : createDelegate(step.modType());
         if (delegate == null) {
             return PreparationResult.fatal("No delegate for mod type " + step.modType().id());
+        }
+        if (delegate instanceof GenericBatchDelegate) {
+            if (!delegate.validateAndInit(online, step.recipeId(), null, BlockPos.ZERO)) {
+                return PreparationResult.fatal("Virtual recipe validation failed for " + step.recipeId());
+            }
+            if (delegate instanceof AbstractBatchDelegate abd) {
+                abd.setMachineServer(server);
+                if (targetOutput != null && isGraphTerminalNode(nodeId)) abd.setTargetOutput(targetOutput);
+            }
+            BoundMachine virtual = new BoundMachine(online.level().dimension().location(),
+                    BlockPos.ZERO, step.modType(), "virtual");
+            return PreparationResult.ready(new PreparedGraphNode(step, delegate,
+                    List.of(virtual), 1, false));
         }
         if (machines.isEmpty()) {
             return PreparationResult.fatal("No bound machine matches " + step.recipeId());
@@ -1029,11 +1047,16 @@ public final class AsyncCraftChain {
                         }
                     }
                     if (eligible.isEmpty()) delegate = candidate;
+                    else candidate.releasePreparationResources();
                     eligible.add(machine);
                 } else if (result.state() == IBatchDelegate.PreparationState.RETRY) {
+                    candidate.releasePreparationResources();
                     retryableRejection = true;
                 } else if (fatalDetail.isEmpty()) {
+                    candidate.releasePreparationResources();
                     fatalDetail = result.detail();
+                } else {
+                    candidate.releasePreparationResources();
                 }
             } catch (RuntimeException exception) {
                 validationThrew = true;
@@ -1082,14 +1105,29 @@ public final class AsyncCraftChain {
             }
         }
         try {
-            List<IngredientSpec> specs = delegate.getRequiredMaterials();
-            if (specs == null || specs.isEmpty()) {
+            List<IngredientSpec> graphSpecs = delegate.getGraphSpecs();
+            if (graphSpecs == null || graphSpecs.isEmpty()) {
+                if (delegate.getClass().getName().endsWith(".WRBatchDelegate")
+                        && prepared.step().recipeId().getPath().startsWith("arcane_iterator/")) {
+                    return dispatchPrivateLedgerGraphNode(nodeId, prepared, delegate, online,
+                            admission, nodeLedger);
+                }
                 return GraphDispatchResult.fatal("delegate did not expose graph materials");
             }
             GraphNodeMaterials reserved = reserveGraphNodeMaterials(
-                    delegate, specs, online, nodeLedger, admission.materialToken());
+                    delegate, graphSpecs, online, nodeLedger, admission.materialToken());
             if (reserved == null) return GraphDispatchResult.retry("exact graph materials are temporarily unavailable");
             List<ItemStack> materials = reserved.materials();
+
+            List<IngredientSpec> supplementalSpecs = delegate.getSupplementalSpecs();
+            if (supplementalSpecs != null && !supplementalSpecs.isEmpty()) {
+                List<ItemStack> supplementalMaterials = reserveSupplementalMaterials(
+                        supplementalSpecs, online, nodeLedger);
+                if (supplementalMaterials == null) {
+                    return GraphDispatchResult.retry("supplemental materials unavailable");
+                }
+                materials = delegate.mergeSupplementalMaterials(materials, supplementalMaterials);
+            }
             OperationExecutionKernel.Session operationSession = null;
             if (delegate instanceof ParallelCraftGroup group) {
                 group.setReservationTokens(reserved.operationTokens());
@@ -1151,27 +1189,63 @@ public final class AsyncCraftChain {
             runtime.markDispatched();
             nodeRuntimes.put(nodeId, runtime);
             IBatchDelegate startDelegate = delegate;
+            List<ItemStack> startMaterials = materials;
             boolean accepted = operationSession != null
                     ? operationSession.tryStart(
-                    () -> startDelegate.tryStartWithMaterials(online, materials, nodeLedger))
-                    : startDelegate.tryStartWithMaterials(online, materials, nodeLedger);
+                    () -> startDelegate.tryStartWithMaterials(online, startMaterials, nodeLedger))
+                    : startDelegate.tryStartWithMaterials(online, startMaterials, nodeLedger);
             if (!accepted) {
                 runtime.markStartFailed("delegate rejected graph dispatch after start attempt");
             }
             return GraphDispatchResult.started(runtime);
         } catch (RuntimeException exception) {
+            String message = delegate.getClass().getSimpleName() + " start threw "
+                    + exception.getClass().getSimpleName()
+                    + (exception.getMessage() != null ? ": " + exception.getMessage() : "");
+            RSIntegrationMod.LOGGER.error(ctx.format("Graph node {} dispatch threw in {}"),
+                    nodeId, delegate.getClass().getSimpleName(), exception);
             CraftNodeRuntime runtime = nodeRuntimes.get(nodeId);
             if (runtime != null) {
-                runtime.markStartFailed(exception.getMessage() != null
-                        ? exception.getMessage() : "graph dispatch threw");
+                runtime.markStartFailed(message);
                 return GraphDispatchResult.started(runtime);
             }
             if (nodeLedger.isCommitted()) nodeLedger.refundCommitted(network, online);
             try { delegate.onBatchFailed(online, "graph dispatch failed before start"); }
             catch (RuntimeException ignored) { }
-            return GraphDispatchResult.fatal(exception.getMessage() != null
-                    ? exception.getMessage() : "graph dispatch failed before start");
+            return GraphDispatchResult.fatal(message);
         }
+    }
+
+    private GraphDispatchResult dispatchPrivateLedgerGraphNode(
+            NodeId nodeId, PreparedGraphNode prepared, IBatchDelegate delegate,
+            ServerPlayer online, NodeAdmissionCoordinator.Admission admission,
+            ExtractionLedger nodeLedger) {
+        List<MachineLeaseRegistry.MachineKey> machineScope = List.of(
+                new MachineLeaseRegistry.MachineKey(prepared.machine().dim(),
+                        prepared.machine().pos(), prepared.step().modType().id()));
+        OperationExecutionKernel.Session operationSession = operationKernel.tryPrepare(
+                craftId, nodeId, 0, craftOperationBudget, machineScope, null);
+        if (operationSession == null) {
+            return GraphDispatchResult.retry("operation budget or machine is temporarily unavailable");
+        }
+        if (!operationSession.commit(() -> nodeLedger.commit(network, online))) {
+            operationSession.close();
+            return GraphDispatchResult.retry("node ledger commit did not complete");
+        }
+
+        CraftNodeRuntime runtime = new CraftNodeRuntime(nodeId,
+                prepared.step().recipeId().toString(), delegate, nodeLedger,
+                admission, operationSession);
+        CraftNode graphNode = graphNodes.get(nodeId);
+        if (graphNode != null) runtime.attachOutputs(new NodeOutputAccumulator(graphNode.outputs()));
+        runtime.setChainContext(virtualInventory, online);
+        graphAdmissions.commit(admission);
+        runtime.markDispatched();
+        nodeRuntimes.put(nodeId, runtime);
+
+        boolean accepted = operationSession.tryStart(() -> delegate.tryStartSingleCraft(online));
+        if (!accepted) runtime.markStartFailed("delegate rejected private-ledger graph dispatch");
+        return GraphDispatchResult.started(runtime);
     }
 
     private void publishIncrementalGraphOutputs(NodeId nodeId, ConcurrentNodeExecutor.Worker worker) {
@@ -1600,7 +1674,8 @@ public final class AsyncCraftChain {
     private static ItemStack displayOutput(@Nullable CraftNode node) {
         if (node == null) return ItemStack.EMPTY;
         return node.outputs().stream()
-                .filter(output -> output.kind() == OutputKind.PRIMARY)
+                .filter(output -> output.kind() == OutputKind.PRIMARY
+                        || output.kind() == OutputKind.DYNAMIC)
                 .findFirst()
                 .map(output -> output.material().toStack(
                         Math.max(1, output.quantity() / Math.max(1, node.executions()))))
@@ -2605,6 +2680,34 @@ public final class AsyncCraftChain {
         return materials;
     }
 
+    /** Reserve materials deliberately omitted from graph demands. */
+    @Nullable
+    private List<ItemStack> reserveSupplementalMaterials(
+            List<IngredientSpec> specs, ServerPlayer online, ExtractionLedger targetLedger) {
+        int mark = targetLedger.reservationMark();
+        List<ItemStack> materials = new ArrayList<>(specs.size());
+        for (IngredientSpec spec : specs) {
+            if (spec.isEmpty()) {
+                materials.add(ItemStack.EMPTY);
+                continue;
+            }
+            ItemStack reserved = targetLedger.reserve(
+                    spec.ingredient(), spec.count(), network, online, null, null);
+            if (reserved.isEmpty() || reserved.getCount() != spec.count()) {
+                while (targetLedger.reservationMark() > mark) {
+                    targetLedger.cancelLastReservation();
+                }
+                RSIntegrationMod.LOGGER.warn(ctx.format(
+                                "Supplemental reserve failed: need {} of '{}' for step {}"),
+                        spec.count(), CraftPacketUtils.describeIngredient(spec.ingredient()).getString(),
+                        steps.get(currentStepIdx).recipeId());
+                return null;
+            }
+            materials.add(reserved);
+        }
+        return materials;
+    }
+
     // ── output capture (magnet protection) ───────────────────────
 
     /**
@@ -3261,7 +3364,6 @@ public final class AsyncCraftChain {
     // ── delegate factory ─────────────────────────────────────────
 
     private static IBatchDelegate createDelegate(ModType type) {
-        if (type == ModType.GENERIC) return null;
         // 1. Check version-specific delegate registry first
         Class<? extends IBatchDelegate> versioned = ModVersionDelegateRegistry.resolve(type);
         if (versioned != null) {

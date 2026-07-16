@@ -660,8 +660,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
     public boolean tryStartWithMaterials(ServerPlayer player, List<ItemStack> materials,
                                          ExtractionLedger sharedLedger) {
         this.player = player;
-        this.sharedLedger = sharedLedger;
-        this.usingSharedLedger = true;
+        useSharedLedger(sharedLedger);
         this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
         this.activationExtractedFromPlayer = null;
 
@@ -698,10 +697,11 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
 
         if (!checkRitualPrerequisites(ritualRecipe, ritual)) return false;
 
+        List<ItemStack> remainingMaterials = new ArrayList<>(materials);
         ItemStack activationItem = ItemStack.EMPTY;
         Ingredient activationIng = Reflect.<Ingredient>invoke(ritualRecipe, GoetyReflection.M_GET_ACTIVATION_ITEM).orElse(Ingredient.EMPTY);
         if (activationIng != null && !activationIng.isEmpty()) {
-            activationItem = removeActivationFromMaterials(materials, activationIng);
+            activationItem = removeActivationFromMaterials(remainingMaterials, activationIng);
             if (activationItem.isEmpty()) {
                 RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] Activation item not in materials, extracting from player");
                 activationItem = extractActivationFromPlayer(activationIng);
@@ -714,7 +714,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             }
         }
 
-        if (materials.isEmpty()) {
+        if (remainingMaterials.isEmpty()) {
             try {
                 if (!checkRitualIsValid(ritual, activationItem)) {
                     player.sendSystemMessage(Component.translatable("rsi.goety.error.ritual_invalid"));
@@ -726,27 +726,27 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
                 }
                 player.sendSystemMessage(Component.translatable("rsi.goety.error.one_click_failed"));
                 refundActivationToPlayer();
+                return false;
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.error("[RSI-Batch-Goety] tryStartWithMaterials: Failed to start ritual (no materials)", e);
                 player.sendSystemMessage(Component.translatable("rsi.goety.error.one_click_failed"));
                 refundActivationToPlayer();
                 return false;
             }
-            return true;
         }
 
         List<Object> availablePedestals = findAvailablePedestals(resolveMachineLevel(player), ritual);
-        if (availablePedestals.size() < materials.size()) {
+        if (availablePedestals.size() < remainingMaterials.size()) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-Goety] tryStartWithMaterials: insufficient pedestals (need {}, found {})",
-                    materials.size(), availablePedestals.size());
+                    remainingMaterials.size(), availablePedestals.size());
             player.sendSystemMessage(Component.translatable("rsi.goety.error.one_click_failed"));
             refundActivationToPlayer();
             return false;
         }
 
         try {
-            for (int i = 0; i < materials.size(); i++) {
-                ItemStack stack = materials.get(i);
+            for (int i = 0; i < remainingMaterials.size(); i++) {
+                ItemStack stack = remainingMaterials.get(i);
                 if (stack.isEmpty()) continue;
                 Object ped = availablePedestals.get(i);
                 writePedestalItem(ped, stack);

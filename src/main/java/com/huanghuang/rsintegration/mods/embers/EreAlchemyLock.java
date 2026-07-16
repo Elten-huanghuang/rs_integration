@@ -22,12 +22,19 @@ import java.util.concurrent.TimeUnit;
 public final class EreAlchemyLock {
 
     private static long getTtlMs() {
-        return TimeUnit.MINUTES.toMillis(RSIntegrationConfig.EMBERS_LOCK_TIMEOUT_MINUTES.get());
+        try {
+            return TimeUnit.MINUTES.toMillis(RSIntegrationConfig.EMBERS_LOCK_TIMEOUT_MINUTES.get());
+        } catch (Exception ignored) {
+            return TimeUnit.MINUTES.toMillis(10);
+        }
     }
 
-    private record LockEntry(UUID playerId, long timestamp) {}
+    public record Lease(GlobalPos position, UUID ownerId, long generation) {}
+
+    private record LockEntry(UUID ownerId, long generation, long timestamp) {}
 
     private static final Map<GlobalPos, LockEntry> LOCKS = new ConcurrentHashMap<>();
+    private static long nextGeneration = 1L;
 
     /**
      * Try to acquire the lock at {@code (dim, pos)} for {@code playerId}.
@@ -36,23 +43,36 @@ public final class EreAlchemyLock {
      * @return {@code true} if the lock was acquired (or an expired lock was
      *         replaced), {@code false} if the lock is still held by another player.
      */
-    public static boolean tryLock(ResourceKey<Level> dim, BlockPos pos, UUID playerId) {
+    public static synchronized Lease tryAcquire(ResourceKey<Level> dim, BlockPos pos, UUID ownerId) {
         GlobalPos gp = GlobalPos.of(dim, pos);
         LockEntry existing = LOCKS.get(gp);
         if (existing != null) {
-            if (System.currentTimeMillis() - existing.timestamp > getTtlMs()) {
-                // Expired — atomically remove only if it is still the same entry.
-                LOCKS.remove(gp, existing);
-                // Fall through to acquire below.
-            } else {
-                return false;
-            }
+            if (System.currentTimeMillis() - existing.timestamp() <= getTtlMs()) return null;
+            LOCKS.remove(gp, existing);
         }
-        return LOCKS.putIfAbsent(gp, new LockEntry(playerId, System.currentTimeMillis())) == null;
+        long generation = nextGeneration++;
+        LOCKS.put(gp, new LockEntry(ownerId, generation, System.currentTimeMillis()));
+        return new Lease(gp, ownerId, generation);
     }
 
+    public static boolean release(Lease lease) {
+        if (lease == null) return false;
+        LockEntry actual = LOCKS.get(lease.position());
+        if (actual == null || !actual.ownerId().equals(lease.ownerId())
+                || actual.generation() != lease.generation()) return false;
+        return LOCKS.remove(lease.position(), actual);
+    }
+
+    /** @deprecated use {@link #tryAcquire(ResourceKey, BlockPos, UUID)}. */
+    @Deprecated
+    public static boolean tryLock(ResourceKey<Level> dim, BlockPos pos, UUID playerId) {
+        return tryAcquire(dim, pos, playerId) != null;
+    }
+
+    /** @deprecated ownerless unlock is unsafe and retained only for source compatibility. */
+    @Deprecated
     public static void unlock(ResourceKey<Level> dim, BlockPos pos) {
-        LOCKS.remove(GlobalPos.of(dim, pos));
+        // Intentionally do nothing: an ownerless caller could delete another craft's lease.
     }
 
     public static int clearAll() {
@@ -72,7 +92,7 @@ public final class EreAlchemyLock {
         Iterator<Map.Entry<GlobalPos, LockEntry>> it = LOCKS.entrySet().iterator();
         while (it.hasNext()) {
             Map.Entry<GlobalPos, LockEntry> entry = it.next();
-            if (now - entry.getValue().timestamp > getTtlMs()) {
+            if (now - entry.getValue().timestamp() > getTtlMs()) {
                 it.remove();
                 removed++;
             }

@@ -104,7 +104,9 @@ public final class MalumRecipeHandler extends AbstractRecipeHandler {
 | 钩子 | 职责 |
 |------|------|
 | `validateAndInit(player, recipeId, dim, pos)` | 验证机器存在、空闲、配方可执行 |
-| `getRequiredMaterials()` | 返回合成所需全部材料 |
+| `getRequiredMaterials()` | 返回按机器放置顺序排列的全部材料 |
+| `getGraphSpecs()` / `getSupplementalSpecs()` | 默认全部材料由 graph 分配；仅当配方规划层有意隐藏催化剂时拆分，supplemental 由执行层直接预留 |
+| `mergeSupplementalMaterials()` | 将 graph 材料与 supplemental 材料恢复为机器要求的准确放置顺序；非简单尾部追加时必须覆写 |
 | `concurrencyCapabilities()` | 声明跨 DAG 节点并发所需的材料、输出、cleanup、副作用和机器 scope 契约；未知或不完整时保持 exclusive |
 | `getMachinePos()` | 返回绑定的机器坐标（`abstract`，每个子类必须实现） |
 | `tryStartSingleCraft(player)` | 独立路径：从网络提取材料 → 填入机器 → 触发合成 |
@@ -558,7 +560,7 @@ DAG 并发采用 fail-closed capability 模型。`supportsConcurrentNodeExecutio
 | Aether | Altar | Freezer、Incubator、fallback |
 | Eidolon | `ItemRitualRecipe`、`GenericRitualRecipe`、Crucible/Brazier subtype | `WorktableRecipe` 和未知 subtype |
 | Wizards Reborn | 仅 `CrystalRitualRecipe` | `CrystalInfusionRecipe`、`ArcaneIteratorRecipe`、Crystallizer、Workbench |
-| Embers | 普通 alchemy tablet；infer 仅 `EreAlchemyInferDelegate` | 其他 infer/fallback |
+| Embers | 普通 alchemy tablet；infer 仅 `EreAlchemyInferDelegate`；aspect 催化剂通过 supplemental reservation 从 RS 网络补充，并按 `tablet + (aspect, input) × N` 放置 | 其他 infer/fallback |
 | 机器槽/明确结果 | Avaritia Crafting Table、Farmer's Respite Kettle | capability 未完成的 Compressor、Cooler、Crab Trap 等 |
 
 world-output delegate 只有声明 `OWNED_WORLD_CAPTURE` 才能创建 capture request。`CaptureLeaseRegistry` 按维度、区域和输出 material 防止冲突；缺少预期输出或 capture 获取失败时必须 fail closed，不能补发 recipe template。

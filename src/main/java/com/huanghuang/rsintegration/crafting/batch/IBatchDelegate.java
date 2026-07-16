@@ -10,6 +10,8 @@ import net.minecraft.world.item.ItemStack;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 public interface IBatchDelegate {
@@ -118,6 +120,53 @@ public interface IBatchDelegate {
     }
 
     /**
+     * The portion of {@link #getRequiredMaterials()} that the graph planner
+     * should allocate via MaterialBroker checkout. Defaults to the full list
+     * for delegates that do not override it.
+     * <p>
+     * Embers alchemy returns only tablet + inputs here; the missing aspects
+     * are returned by {@link #getSupplementalSpecs()} and reserved directly
+     * from the RS network without going through the graph.
+     */
+    @Nonnull
+    default List<IngredientSpec> getGraphSpecs() {
+        List<IngredientSpec> full = getRequiredMaterials();
+        return full != null ? full : Collections.emptyList();
+    }
+
+    /**
+     * Materials that bypass the graph planner and are reserved directly from
+     * the RS network after (or alongside) graph reservation. Used by Embers
+     * alchemy for aspect catalysts, which the planner deliberately omits.
+     * <p>
+     * Return {@code Collections.emptyList()} when there are no supplemental
+     * materials (the default). When non-empty, {@code AsyncCraftChain} will
+     * extract these from the network independently of the graph checkout.
+     */
+    @Nonnull
+    default List<IngredientSpec> getSupplementalSpecs() {
+        return List.of();
+    }
+
+    /**
+     * Merge graph-allocated and directly reserved supplemental materials into
+     * the order expected by {@link #tryStartWithMaterials}. Delegates exposing
+     * supplemental specs must override this method when concatenation is not
+     * their placement order.
+     */
+    @Nonnull
+    default List<ItemStack> mergeSupplementalMaterials(
+            @Nonnull List<ItemStack> graphMaterials,
+            @Nonnull List<ItemStack> supplementalMaterials) {
+        if (supplementalMaterials.isEmpty()) return graphMaterials;
+        List<ItemStack> merged = new ArrayList<>(
+                graphMaterials.size() + supplementalMaterials.size());
+        merged.addAll(graphMaterials);
+        merged.addAll(supplementalMaterials);
+        return merged;
+    }
+
+    /**
      * Structured safety contract for cross-node execution. Unknown or incomplete
      * contracts remain exclusive even when the legacy boolean returns true.
      */
@@ -194,6 +243,10 @@ public interface IBatchDelegate {
     @Nullable
     default ExpectedProduction getExpectedProduction() {
         return null;
+    }
+
+    /** Release resources acquired during preparation when this candidate is discarded. */
+    default void releasePreparationResources() {
     }
 
     /** Cleanup and refund on batch failure. */

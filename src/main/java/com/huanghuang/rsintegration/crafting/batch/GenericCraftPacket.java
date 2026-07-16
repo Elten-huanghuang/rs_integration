@@ -37,6 +37,7 @@ import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.MaterialSources;
 import com.huanghuang.rsintegration.crafting.PreviewRateLimiter;
 import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
+import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.recipe.CrockPotRecipeHandler;
 import com.huanghuang.rsintegration.recipe.WRRecipeHandler;
@@ -633,8 +634,11 @@ public final class GenericCraftPacket {
                 }
                 if (!inferMode && repeatCount == 1 && !graphSpecs.isEmpty() && !recipeOutput.isEmpty()) {
                     try {
+                        ModRecipeHandler recipeHandler = ModRecipeHandlers.handlerFor(recipe);
+                        boolean deterministicPrimary = recipeHandler == null
+                                || recipeHandler.hasDeterministicPrimaryOutput(recipe);
                         CraftPlanGraph completeGraph = TerminalGraphComposer.compose(
-                                inputGraph, terminalStep, recipeOutput);
+                                inputGraph, terminalStep, recipeOutput, deterministicPrimary);
                         launchGraphAsyncChain(player, completeGraph, terminalStep,
                                 network, repeatCount, recipeId, forcedRecipes, dim, pos,
                                 inferMode, baseItem, targetOutput);

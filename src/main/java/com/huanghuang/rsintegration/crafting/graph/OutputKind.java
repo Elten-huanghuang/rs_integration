@@ -4,5 +4,6 @@ public enum OutputKind {
     PRIMARY,
     SECONDARY,
     REMAINDER,
-    SYNTHETIC
+    SYNTHETIC,
+    DYNAMIC
 }

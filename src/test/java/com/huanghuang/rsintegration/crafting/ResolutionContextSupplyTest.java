@@ -158,6 +158,47 @@ class ResolutionContextSupplyTest extends BootstrapTest {
         assertEquals(new NodeId(0), context.allocateNodeId());
     }
 
+    @Test
+    void bestEffortMissingIngredientClosesConsumerPortWithoutMissingOutputList() {
+        ResolutionContext context = new ResolutionContext(null, Map.of(), Map.of(), null,
+                true, null);
+        InputPortId input = new InputPortId(new NodeId(0), 0);
+
+        boolean resolved = CraftingResolver.recordBestEffortUnresolved(context, input,
+                Ingredient.of(Items.IRON_INGOT), 1, "test");
+
+        assertTrue(resolved);
+        assertTrue(context.graphAllocations.isEmpty());
+        assertEquals(1, context.graphUnresolved.size());
+        assertEquals(input, context.graphUnresolved.get(0).consumer());
+        assertEquals(1, context.graphUnresolved.get(0).quantity());
+    }
+
+    @Test
+    void bestEffortClosesMultipleIndependentWrStylePorts() {
+        ResolutionContext context = new ResolutionContext(null, Map.of(), Map.of(), null,
+                true, null);
+        List<Ingredient> ingredients = List.of(
+                Ingredient.of(Items.IRON_INGOT),
+                Ingredient.of(Items.GOLD_INGOT),
+                Ingredient.of(Items.DIAMOND),
+                Ingredient.of(Items.REDSTONE));
+
+        for (int index = 0; index < ingredients.size(); index++) {
+            InputPortId input = new InputPortId(new NodeId(6 + index), 0);
+            assertTrue(CraftingResolver.recordBestEffortUnresolved(context, input,
+                    ingredients.get(index), 1, "test"));
+        }
+
+        assertTrue(context.graphAllocations.isEmpty());
+        assertEquals(4, context.graphUnresolved.size());
+        for (int index = 0; index < context.graphUnresolved.size(); index++) {
+            assertEquals(new InputPortId(new NodeId(6 + index), 0),
+                    context.graphUnresolved.get(index).consumer());
+            assertEquals(1, context.graphUnresolved.get(index).quantity());
+        }
+    }
+
     private static ItemStack taggedDiamond(String variant, int count) {
         ItemStack stack = new ItemStack(Items.DIAMOND, count);
         CompoundTag tag = new CompoundTag();

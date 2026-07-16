@@ -186,11 +186,13 @@ Existing Sophisticated Backpacks upgrades that, when bound to an RS Grid (via NB
 | **Deposit Upgrade (RS)** | When targeting an RS Grid, pushes backpack contents into the RS network (config `depositUpgradeRS`, default off) |
 | **Compacting Upgrade (RS)** | Auto-compresses compactable items from the RS network; also auto-combines Majrusz's Accessories matching the whitelist filter |
 
-## Embers Alchemy Calculate Mode
+## Embers Alchemy
 
-In addition to the default "Infer" mode (trial-and-error), a deterministic calculation mode is available:
+Embers Alchemy Tablet recipes support both inferred and deterministic pedestal layouts:
 
-- Uses the alchemical code system (aspect-position inference) to pre-compute exact pedestal layouts
+- Places the tablet ingredient on the Alchemy Tablet, aspect catalysts in pedestal bottoms, and recipe inputs in pedestal tops
+- Reserves tablet/input materials through the crafting graph while reserving hidden aspect catalysts directly from the RS network, preserving the exact placement order
+- Reuses inferred alchemical codes for later deterministic crafts, including recipes with a single repeated aspect
 - Configurable max attempts, zero-black-pin abort limit, lock timeout, and progress timeout
 
 ## Debug Commands
