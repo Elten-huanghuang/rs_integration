@@ -1098,17 +1098,24 @@ public final class AsyncCraftChain {
             }
         }
         try {
-            List<IngredientSpec> graphSpecs = delegate.getGraphSpecs();
-            if (graphSpecs == null || graphSpecs.isEmpty()) {
-                if (delegate.getClass().getName().endsWith(".WRBatchDelegate")
-                        && prepared.step().recipeId().getPath().startsWith("arcane_iterator/")) {
-                    return dispatchPrivateLedgerGraphNode(nodeId, prepared, delegate, online,
-                            admission, nodeLedger);
+            GraphNodeMaterials reserved;
+            if (delegate instanceof com.huanghuang.rsintegration.mods.crockpot.CrockPotBatchDelegate crockPot
+                    && crockPot.usesPlannedCategoryMaterials()) {
+                reserved = reservePlannedCheckoutMaterials(
+                        online, nodeLedger, admission.materialToken());
+            } else {
+                List<IngredientSpec> graphSpecs = delegate.getGraphSpecs();
+                if (graphSpecs == null || graphSpecs.isEmpty()) {
+                    if (delegate.getClass().getName().endsWith(".WRBatchDelegate")
+                            && prepared.step().recipeId().getPath().startsWith("arcane_iterator/")) {
+                        return dispatchPrivateLedgerGraphNode(nodeId, prepared, delegate, online,
+                                admission, nodeLedger);
+                    }
+                    return GraphDispatchResult.fatal("delegate did not expose graph materials");
                 }
-                return GraphDispatchResult.fatal("delegate did not expose graph materials");
+                reserved = reserveGraphNodeMaterials(
+                        delegate, graphSpecs, online, nodeLedger, admission.materialToken());
             }
-            GraphNodeMaterials reserved = reserveGraphNodeMaterials(
-                    delegate, graphSpecs, online, nodeLedger, admission.materialToken());
             if (reserved == null) return GraphDispatchResult.retry("exact graph materials are temporarily unavailable");
             List<ItemStack> materials = reserved.materials();
 
@@ -1369,6 +1376,31 @@ public final class AsyncCraftChain {
             virtualDebits = List.copyOf(virtualDebits);
             producerDebits = List.copyOf(producerDebits);
         }
+    }
+
+    @Nullable
+    private GraphNodeMaterials reservePlannedCheckoutMaterials(
+            ServerPlayer online, ExtractionLedger ledger,
+            MaterialBroker.ReservationToken materialToken) {
+        if (graphMaterials == null) return null;
+        MaterialBroker.Checkout checkout = graphMaterials.checkout(materialToken);
+        if (checkout.fragments().isEmpty()) return null;
+
+        List<ItemStack> materials = new ArrayList<>();
+        for (MaterialBroker.Fragment fragment : checkout.fragments()) {
+            ItemStack planned = fragment.stack();
+            if (fragment.source() instanceof MaterialSource.InitialPool) {
+                ItemStack reserved = ledger.reserveExact(
+                        planned, planned.getCount(), network, online, null, null);
+                if (reserved.isEmpty()) return null;
+                materials.add(reserved);
+            } else if (fragment.source() instanceof MaterialSource.ProducerOutput) {
+                materials.add(planned.copy());
+            } else {
+                return null;
+            }
+        }
+        return new GraphNodeMaterials(materials, List.of(), List.of(), List.of());
     }
 
     @Nullable

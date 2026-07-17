@@ -71,7 +71,7 @@ public final class ApotheosisLibraryImportScreen {
                 .pos(panelLeft + 8, panelTop + PANEL_H - 26).size(82, 20).build();
         event.addListener(importFiltered);
         importAll = Button.builder(Component.translatable("rsi.apotheosis.library.import_all"),
-                        button -> doImport(importableIds(allEntries)))
+                        button -> doImport(importableIds(displayEntries)))
                 .pos(panelLeft + 94, panelTop + PANEL_H - 26).size(66, 20).build();
         event.addListener(importAll);
         updateWidgetState();

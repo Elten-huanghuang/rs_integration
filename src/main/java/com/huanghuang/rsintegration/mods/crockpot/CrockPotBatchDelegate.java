@@ -5,6 +5,8 @@ import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.crafting.IngredientMatcher;
+import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.recipe.CrockPotRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
@@ -24,6 +26,7 @@ import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraftforge.common.crafting.StrictNBTIngredient;
 import net.minecraftforge.common.world.ForgeChunkManager;
 import net.minecraftforge.items.IItemHandler;
 import net.minecraftforge.items.ItemHandlerHelper;
@@ -103,6 +106,15 @@ public final class CrockPotBatchDelegate extends com.huanghuang.rsintegration.cr
         RSIntegrationMod.LOGGER.debug("[RSI-Batch-CrockPot] validateAndInit OK: recipe={} blockPotLevel={} recipeMinLevel={} hasCatConstraints={}",
                 recipeId, potLevel, recipeMinLevel, hasCatConstraints);
         return true;
+    }
+
+    public boolean usesPlannedCategoryMaterials() {
+        return hasCatConstraints;
+    }
+
+    private static Ingredient concreteIngredient(ItemStack stack) {
+        ItemStack one = stack.copyWithCount(1);
+        return one.hasTag() ? StrictNBTIngredient.of(one) : Ingredient.of(one);
     }
 
     @Nullable
@@ -378,11 +390,17 @@ public final class CrockPotBatchDelegate extends com.huanghuang.rsintegration.cr
         if (plan == null) return null;
 
         List<IngredientSpec> result = new ArrayList<>(plan.fixed());
-        // Merge selected filler by item into IngredientSpecs (e.g. "apple ×3").
-        LinkedHashMap<Item, Integer> counts = new LinkedHashMap<>();
-        for (ItemStack st : plan.filler()) counts.merge(st.getItem(), 1, Integer::sum);
-        for (Map.Entry<Item, Integer> e : counts.entrySet()) {
-            result.add(new IngredientSpec(Ingredient.of(new ItemStack(e.getKey())), e.getValue()));
+        LinkedHashMap<MaterialKey, ItemStack> grouped = new LinkedHashMap<>();
+        for (ItemStack stack : plan.filler()) {
+            MaterialKey key = MaterialKey.of(stack);
+            grouped.compute(key, (ignored, existing) -> {
+                if (existing == null) return stack.copyWithCount(1);
+                existing.grow(1);
+                return existing;
+            });
+        }
+        for (ItemStack stack : grouped.values()) {
+            result.add(new IngredientSpec(concreteIngredient(stack), stack.getCount()));
         }
         return result.isEmpty() ? null : result;
     }
@@ -406,12 +424,12 @@ public final class CrockPotBatchDelegate extends com.huanghuang.rsintegration.cr
 
         // One network snapshot shared by every term trial and by both callers.
         List<CrockPotFoodValues.Candidate> candidates = new ArrayList<>();
-        Map<Item, Integer> baseAvail = new HashMap<>();
+        Map<MaterialKey, Integer> baseAvail = new HashMap<>();
         for (var entry : network.getItemStorageCache().getList().getStacks()) {
             ItemStack stack = entry.getStack();
             if (stack.isEmpty() || stack.getCount() <= 0) continue;
             candidates.add(new CrockPotFoodValues.Candidate(stack, stack.getCount()));
-            baseAvail.merge(stack.getItem(), stack.getCount(), Integer::sum);
+            baseAvail.merge(MaterialKey.of(stack), stack.getCount(), Integer::sum);
         }
 
         for (CrockPotRecipeHandler.Term term : CrockPotRecipeHandler.expandRequirements(recipe)) {
@@ -430,9 +448,9 @@ public final class CrockPotBatchDelegate extends com.huanghuang.rsintegration.cr
     @Nullable
     private static CategoryPlan tryResolveTerm(CrockPotRecipeHandler.Term term,
                                                List<CrockPotFoodValues.Candidate> candidates,
-                                               Map<Item, Integer> baseAvail,
+                                               Map<MaterialKey, Integer> baseAvail,
                                                Level level, int blockPotLevel) {
-        Map<Item, Integer> avail = new HashMap<>(baseAvail);
+        Map<MaterialKey, Integer> avail = new HashMap<>(baseAvail);
         List<IngredientSpec> fixedSpecs = new ArrayList<>();
         List<ItemStack> fixedStacks = new ArrayList<>();
         int usedSlots = 0;
@@ -440,13 +458,18 @@ public final class CrockPotBatchDelegate extends com.huanghuang.rsintegration.cr
         for (IngredientSpec spec : term.fixed()) {
             if (spec.isEmpty()) continue;
             ItemStack pick = ItemStack.EMPTY;
-            for (ItemStack opt : spec.ingredient().getItems()) {
-                if (opt.isEmpty()) continue;
-                if (avail.getOrDefault(opt.getItem(), 0) >= spec.count()) { pick = opt; break; }
+            for (CrockPotFoodValues.Candidate candidate : candidates) {
+                ItemStack option = candidate.stack();
+                if (option.isEmpty() || !IngredientMatcher.test(spec.ingredient(), option)) continue;
+                MaterialKey key = MaterialKey.of(option);
+                if (avail.getOrDefault(key, 0) >= spec.count()) {
+                    pick = option;
+                    break;
+                }
             }
-            if (pick.isEmpty()) return null; // fixed ingredient not available → term fails
-            avail.merge(pick.getItem(), -spec.count(), Integer::sum);
-            fixedSpecs.add(spec);
+            if (pick.isEmpty()) return null;
+            avail.merge(MaterialKey.of(pick), -spec.count(), Integer::sum);
+            fixedSpecs.add(new IngredientSpec(concreteIngredient(pick), spec.count()));
             fixedStacks.add(pick.copyWithCount(spec.count()));
             usedSlots += spec.count();
         }
@@ -463,8 +486,8 @@ public final class CrockPotBatchDelegate extends com.huanghuang.rsintegration.cr
         // Filler candidates draw from the decremented snapshot so fixed items aren't re-picked.
         List<CrockPotFoodValues.Candidate> fillerCands = new ArrayList<>();
         for (CrockPotFoodValues.Candidate c : candidates) {
-            int a = avail.getOrDefault(c.stack().getItem(), 0);
-            if (a > 0) fillerCands.add(new CrockPotFoodValues.Candidate(c.stack(), a));
+            int available = avail.getOrDefault(MaterialKey.of(c.stack()), 0);
+            if (available > 0) fillerCands.add(new CrockPotFoodValues.Candidate(c.stack(), available));
         }
 
         List<ItemStack> filler = CrockPotFoodValues.select(

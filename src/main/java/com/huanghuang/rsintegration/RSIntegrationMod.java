@@ -445,6 +445,7 @@ public final class RSIntegrationMod {
         // and re-register against the new dimension's network.
         MinecraftForge.EVENT_BUS.addListener((PlayerEvent.PlayerChangedDimensionEvent e) -> {
             if (e.getEntity() instanceof ServerPlayer sp) {
+                RSIntegrationNetwork.invalidateNetworkResolution(sp.getUUID());
                 if (RSSidePanelNetworkHandler.hasListener(sp.getUUID())) {
                     RSSidePanelNetworkHandler.unregisterListener(sp.getUUID());
                     INetwork network = RSIntegrationNetwork.resolveNetworkFromPlayer(sp);
@@ -459,6 +460,7 @@ public final class RSIntegrationMod {
         // materials are refunded rather than silently lost.
         MinecraftForge.EVENT_BUS.addListener((ServerStoppingEvent e) -> {
             AsyncCraftManager.abortAll();
+            RSSidePanelNetworkHandler.clearServerState();
         });
 
         // Chunk unload safety net: force-close remote GUI whose machine

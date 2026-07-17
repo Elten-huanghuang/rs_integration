@@ -27,10 +27,29 @@ import java.util.UUID;
 
 public final class RSIntegrationNetwork {
 
+    private static final PlayerNetworkResolutionCache<INetwork> RESOLUTION_CACHE =
+            new PlayerNetworkResolutionCache<>();
+
     private RSIntegrationNetwork() {}
 
     @Nullable
     public static INetwork resolveNetworkFromPlayer(ServerPlayer player) {
+        UUID playerId = player.getUUID();
+        MinecraftServer server = player.server;
+        Object dimension = player.level().dimension();
+        AbstractContainerMenu menu = player.containerMenu;
+        long tick = server.getTickCount();
+        PlayerNetworkResolutionCache.Entry<INetwork> cached =
+                RESOLUTION_CACHE.get(playerId, server, dimension, menu, tick);
+        if (cached != null) return cached.value();
+
+        INetwork network = resolveNetworkFromPlayerUncached(player);
+        RESOLUTION_CACHE.put(playerId, server, dimension, menu, tick, network);
+        return network;
+    }
+
+    @Nullable
+    private static INetwork resolveNetworkFromPlayerUncached(ServerPlayer player) {
         INetwork net = getNetworkFromContainer(player.containerMenu);
         if (net != null) { logResolved("container", net); return net; }
 
@@ -54,15 +73,18 @@ public final class RSIntegrationNetwork {
         return null;
     }
 
+    public static void invalidateNetworkResolution(UUID playerId) {
+        RESOLUTION_CACHE.invalidate(playerId);
+    }
+
+    public static void clearNetworkResolutionCache() {
+        RESOLUTION_CACHE.clear();
+        lastNearbyScan.clear();
+    }
+
     private static void logResolved(String source, INetwork net) {
-        if (!RSIntegrationMod.LOGGER.isDebugEnabled()) return;
-        try {
-            var cache = net.getItemStorageCache();
-            int count = cache != null && cache.getList() != null
-                    ? cache.getList().getStacks().size() : -1;
-            RSIntegrationMod.LOGGER.debug("[RSI] Resolved network via {} ({} items in cache)", source, count);
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI] Resolved network via {} (cache probe failed)", source, e);
+        if (RSIntegrationMod.LOGGER.isDebugEnabled()) {
+            RSIntegrationMod.LOGGER.debug("[RSI] Resolved network via {}", source);
         }
     }
 
@@ -184,12 +206,6 @@ public final class RSIntegrationNetwork {
         // Standard path: RS NetworkItem / WirelessGrid
         if (NetworkItem.isValid(stack)) {
             ResourceKey<Level> dim = NetworkItem.getDimension(stack);
-            RSIntegrationMod.LOGGER.debug("[RSI] NetworkItem.isValid=true item={} dim={} x={} y={} z={}",
-                    stack.getDescriptionId(),
-                    dim != null ? dim.location() : "null",
-                    NetworkItem.getX(stack),
-                    NetworkItem.getY(stack),
-                    NetworkItem.getZ(stack));
             if (dim != null) {
                 BlockPos pos = new BlockPos(
                         NetworkItem.getX(stack),
@@ -197,25 +213,15 @@ public final class RSIntegrationNetwork {
                         NetworkItem.getZ(stack));
                 INetwork net = resolveNetwork(player.server, dim, pos);
                 if (net != null) return net;
-                RSIntegrationMod.LOGGER.debug("[RSI] NetworkItem valid but resolveNetwork "
-                        + "returned null for pos={} dim={}", pos, dim.location());
             }
-        } else {
-            RSIntegrationMod.LOGGER.debug("[RSI] NetworkItem.isValid=false item={}", stack.getDescriptionId());
         }
 
-        // Fallback: read NBT directly (some RS item variants store network
-        // info under different keys or class hierarchy prevents isValid())
         if (stack.hasTag()) {
             CompoundTag tag = stack.getTag();
-            RSIntegrationMod.LOGGER.debug("[RSI] NBT fallback for item={} keys={}",
-                    stack.getDescriptionId(), tag.getAllKeys());
             INetwork net = resolveFromNbt(player.server, tag);
             if (net != null) return net;
         }
 
-        RSIntegrationMod.LOGGER.debug("[RSI] resolveFromNetworkItem ALL PATHS FAILED for item={}",
-                stack.getDescriptionId());
         return null;
     }
 

@@ -46,10 +46,9 @@ public final class RSSidePanelNetworkHandler {
     public static final SimpleChannel CHANNEL = NetworkHandler.CHANNEL;
 
     private static final Map<UUID, ListenerEntry> playerListeners = new ConcurrentHashMap<>();
-    private static net.minecraft.server.MinecraftServer cachedServer;
 
     // ── Pending deltas per player — collected during a tick, flushed at end ──
-    private static final Map<UUID, List<RSSidePanelDeltaPacket.Entry>> pendingDeltas = new ConcurrentHashMap<>();
+    private static final AtomicBatchQueue<UUID, RSSidePanelDeltaPacket.Entry> pendingDeltas = new AtomicBatchQueue<>();
     // ── Machine status: last-pushed snapshot per (player, dim, pos) for diff ──
     private static final Map<UUID, Map<String, MachineStatus>> lastPushedStatuses = new ConcurrentHashMap<>();
     private static int machineScanCounter;
@@ -129,18 +128,13 @@ public final class RSSidePanelNetworkHandler {
             pushMachineStatusDeltas(event.getServer());
         }
 
-        if (pendingDeltas.isEmpty()) return;
+        if (pendingDeltas.keysSnapshot().isEmpty()) return;
 
         RSIntegrationMod.LOGGER.debug("[RSI-Delta] Tick-end flush: {} players with pending deltas",
-                pendingDeltas.size());
+                pendingDeltas.keysSnapshot().size());
 
-        // Snapshot and clear — matching RS native GridItemDeltaMessage batching
-        Map<UUID, List<RSSidePanelDeltaPacket.Entry>> snapshot = new HashMap<>(pendingDeltas);
-        pendingDeltas.clear();
-
-        for (var entry : snapshot.entrySet()) {
-            UUID playerId = entry.getKey();
-            List<RSSidePanelDeltaPacket.Entry> deltas = entry.getValue();
+        for (UUID playerId : pendingDeltas.keysSnapshot()) {
+            List<RSSidePanelDeltaPacket.Entry> deltas = pendingDeltas.drain(playerId);
             if (deltas.isEmpty()) continue;
 
             ServerPlayer player = findPlayer(event.getServer(), playerId);
@@ -399,8 +393,7 @@ public final class RSSidePanelNetworkHandler {
      *  Multiple changes to the same stackId within a tick are consolidated. */
     public static void queueDelta(ServerPlayer player, UUID stackId,
                                   ItemStack stack, long timestamp, boolean craftable) {
-        pendingDeltas.computeIfAbsent(player.getUUID(), k -> java.util.Collections.synchronizedList(new ArrayList<>()))
-                .add(new RSSidePanelDeltaPacket.Entry(stackId, stack, timestamp, craftable));
+        pendingDeltas.add(player.getUUID(), new RSSidePanelDeltaPacket.Entry(stackId, stack, timestamp, craftable));
     }
 
     // ── storage cache listener management ──────────────────────────
@@ -412,7 +405,6 @@ public final class RSSidePanelNetworkHandler {
         if (cache == null) return false;
 
         UUID pid = player.getUUID();
-        if (player.getServer() != null) cachedServer = player.getServer();
         boolean isNew = !playerListeners.containsKey(pid);
         unregisterListener(pid);
 
@@ -433,6 +425,7 @@ public final class RSSidePanelNetworkHandler {
         } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Craftable probe failed", e); }
 
         var tracker = network.getItemStorageTracker();
+        final ListenerEntry[] entryHolder = new ListenerEntry[1];
 
         IStorageCacheListener<ItemStack> listener = new IStorageCacheListener<>() {
             @Override
@@ -440,16 +433,19 @@ public final class RSSidePanelNetworkHandler {
 
             @Override
             public void onInvalidated() {
+                ListenerEntry entry = entryHolder[0];
+                if (entry == null || playerListeners.get(pid) != entry) return;
                 RSIntegrationMod.LOGGER.warn("[RSI] Storage cache invalidated for player {} — attempting re-registration", pid);
-                playerListeners.remove(pid);
-                pendingDeltas.remove(pid);
+                if (!playerListeners.remove(pid, entry)) return;
+                pendingDeltas.clear(pid);
+                com.huanghuang.rsintegration.network.RSIntegrationNetwork.invalidateNetworkResolution(pid);
 
                 // Attempt immediate re-registration on the new cache.
                 // Some RS storage implementations rebuild the cache on certain
                 // operations and fire onInvalidated spuriously.  If the network
                 // is still alive, grab the fresh cache and re-attach — otherwise
                 // the panel would stay blank until the next periodic sync (15s).
-                net.minecraft.server.MinecraftServer server = cachedServer;
+                net.minecraft.server.MinecraftServer server = player.getServer();
                 if (server != null) {
                     ServerPlayer sp = server.getPlayerList().getPlayer(pid);
                     if (sp != null) {
@@ -475,6 +471,8 @@ public final class RSSidePanelNetworkHandler {
             }
 
             private void queue(ItemStack stack, int change, UUID entryId) {
+                ListenerEntry entry = entryHolder[0];
+                if (entry == null || playerListeners.get(pid) != entry) return;
                 if (stack == null || stack.getItem() == null) return;
 
                 RSIntegrationMod.LOGGER.debug("[RSI-Delta] Cache onChanged: item={} change={} id={}",
@@ -493,11 +491,11 @@ public final class RSSidePanelNetworkHandler {
                     if (cached != null && !cached.isEmpty()) {
                         absoluteCount = cached.getCount();
                     } else {
-                        var entry = list.getEntry(stack, com.refinedmods.refinedstorage.api.util.IComparer.COMPARE_NBT);
-                        if (entry != null) {
-                            var es = entry.getStack();
+                        var stackEntry = list.getEntry(stack, com.refinedmods.refinedstorage.api.util.IComparer.COMPARE_NBT);
+                        if (stackEntry != null) {
+                            var es = stackEntry.getStack();
                             if (es != null) absoluteCount = es.getCount();
-                            if (stackId == null) stackId = entry.getId();
+                            if (stackId == null) stackId = stackEntry.getId();
                         }
                     }
                 }
@@ -540,7 +538,9 @@ public final class RSSidePanelNetworkHandler {
             }
         };
         cache.addListener(listener);
-        playerListeners.put(pid, new ListenerEntry(listener, cache, network));
+        ListenerEntry entry = new ListenerEntry(listener, cache, network);
+        entryHolder[0] = entry;
+        playerListeners.put(pid, entry);
         return isNew;
     }
 
@@ -551,7 +551,24 @@ public final class RSSidePanelNetworkHandler {
                 old.cache.removeListener(old.listener);
             } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Listener removal failed", e); }
         }
-        pendingDeltas.remove(playerId);
+        pendingDeltas.clear(playerId);
+        com.huanghuang.rsintegration.network.RSIntegrationNetwork.invalidateNetworkResolution(playerId);
+    }
+
+    public static void clearServerState() {
+        for (ListenerEntry entry : List.copyOf(playerListeners.values())) {
+            try {
+                entry.cache.removeListener(entry.listener);
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.debug("[RSI] Listener removal failed during server cleanup", e);
+            }
+        }
+        playerListeners.clear();
+        pendingDeltas.clear();
+        lastPushedStatuses.clear();
+        machineScanCounter = 0;
+        tickFiringConfirmed = false;
+        com.huanghuang.rsintegration.network.RSIntegrationNetwork.clearNetworkResolutionCache();
     }
 
     /** @return true if the player has an active storage-cache listener. */
@@ -576,6 +593,7 @@ public final class RSSidePanelNetworkHandler {
     public static void onContainerClose(PlayerContainerEvent.Close event) {
         if (event.getEntity() instanceof ServerPlayer sp) {
             RemoteGuiAuth.deauthorize(sp.getUUID(), event.getContainer());
+            com.huanghuang.rsintegration.network.RSIntegrationNetwork.invalidateNetworkResolution(sp.getUUID());
         }
     }
 

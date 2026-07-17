@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.mods.crockpot;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
 import com.huanghuang.rsintegration.recipe.CrockPotRecipeHandler;
 import com.huanghuang.rsintegration.reflection.probes.CrockPotReflection;
 import net.minecraft.world.item.Item;
@@ -145,8 +146,10 @@ public final class CrockPotFoodValues {
         if (!isReady() || remaining <= 0) return null;
 
         float[] current = Arrays.copyOf(startFV, CAT);
-        Map<Item, Integer> avail = new HashMap<>();
-        for (Candidate c : candidates) avail.merge(c.stack().getItem(), c.available(), Integer::sum);
+        Map<MaterialKey, Integer> avail = new HashMap<>();
+        for (Candidate c : candidates) {
+            avail.merge(MaterialKey.of(c.stack()), c.available(), Integer::sum);
+        }
 
         List<ItemStack> chosen = new ArrayList<>();
 
@@ -158,7 +161,7 @@ public final class CrockPotFoodValues {
             float bestScore = Float.NEGATIVE_INFINITY;
             for (Candidate cand : candidates) {
                 ItemStack stack = cand.stack();
-                if (stack.isEmpty() || avail.getOrDefault(stack.getItem(), 0) <= 0) continue;
+                if (stack.isEmpty() || avail.getOrDefault(MaterialKey.of(stack), 0) <= 0) continue;
                 float[] fv = compute(stack, level);
                 if (fv == null || !reducesDeficit(current, catMins, fv) || breachesMax(current, catMaxs, fv)) continue;
                 float score = deficitScore(current, catMins, fv);
@@ -166,7 +169,7 @@ public final class CrockPotFoodValues {
             }
             if (best.isEmpty()) return null; // no item can make progress toward a minimum
 
-            avail.merge(best.getItem(), -1, Integer::sum);
+            avail.merge(MaterialKey.of(best), -1, Integer::sum);
             chosen.add(best.copyWithCount(1));
             float[] fv = compute(best, level);
             if (fv != null) for (int c = 0; c < CAT; c++) current[c] += fv[c];
@@ -183,7 +186,7 @@ public final class CrockPotFoodValues {
             float bestImpact = Float.POSITIVE_INFINITY; // lower = more neutral
             for (Candidate cand : candidates) {
                 ItemStack stack = cand.stack();
-                if (stack.isEmpty() || avail.getOrDefault(stack.getItem(), 0) <= 0) continue;
+                if (stack.isEmpty() || avail.getOrDefault(MaterialKey.of(stack), 0) <= 0) continue;
                 float[] fv = compute(stack, level);
                 if (fv == null || breachesMax(current, catMaxs, fv)) continue;
                 float impact = foodValueMagnitude(fv);
@@ -191,7 +194,7 @@ public final class CrockPotFoodValues {
             }
             if (best.isEmpty()) break; // no neutral filler available — pot starts with fewer slots
 
-            avail.merge(best.getItem(), -1, Integer::sum);
+            avail.merge(MaterialKey.of(best), -1, Integer::sum);
             chosen.add(best.copyWithCount(1));
             float[] fv = compute(best, level);
             if (fv != null) for (int c = 0; c < CAT; c++) current[c] += fv[c];
