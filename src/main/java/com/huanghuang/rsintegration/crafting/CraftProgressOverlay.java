@@ -64,7 +64,7 @@ public final class CraftProgressOverlay {
         int progressHeight = 33;
         int detailHeight = detailLines.size() * (font.lineHeight + 1) + 8;
         int stepsHeight = current.nodes().isEmpty() ? 0
-                : 16 + current.nodes().size() * 31 + (current.remaining() > 0 ? 11 : 0);
+                : 16 + current.nodes().size() * 42 + (current.remaining() > 0 ? 11 : 0);
         int footerHeight = cancellable(snapshot.result()) ? 22 : 8;
         int panelHeight = 9 + headerHeight + progressHeight + detailHeight + stepsHeight + footerHeight;
 
@@ -126,7 +126,7 @@ public final class CraftProgressOverlay {
             cy += 15;
             for (CraftProgressSnapshot.NodeProgress node : current.nodes()) {
                 renderCurrentStep(graphics, font, node, contentX, cy, innerWidth);
-                cy += 31;
+                cy += 42;
             }
             if (current.remaining() > 0) {
                 graphics.drawString(font, Component.translatable("rsi.progress.step.more",
@@ -150,8 +150,8 @@ public final class CraftProgressOverlay {
                                           CraftProgressSnapshot.NodeProgress node,
                                           int x, int y, int width) {
         int color = nodeColor(node);
-        UIRenderer.rounded(graphics, x, y, width, 27, 5f, SURFACE);
-        graphics.fill(x, y + 5, x + 3, y + 22, color);
+        UIRenderer.rounded(graphics, x, y, width, 38, 5f, SURFACE);
+        graphics.fill(x, y + 5, x + 3, y + 33, color);
         ItemStack output = node.displayOutput();
         if (!output.isEmpty()) graphics.renderItem(output, x + 7, y + 5);
         int textX = x + (output.isEmpty() ? 8 : 28);
@@ -159,11 +159,12 @@ public final class CraftProgressOverlay {
         graphics.drawString(font, font.plainSubstrByWidth(
                 CraftProgressPresentation.outputName(node).getString(), available),
                 textX, y + 4, TEXT, false);
-        Component stepDetail = CraftProgressPresentation.state(node).copy()
-                .append(Component.literal(" · "))
-                .append(CraftProgressPresentation.machine(node));
-        graphics.drawString(font, font.plainSubstrByWidth(stepDetail.getString(), available),
+        Component state = CraftProgressPresentation.state(node);
+        Component machine = CraftProgressPresentation.machine(node);
+        graphics.drawString(font, font.plainSubstrByWidth(state.getString(), available),
                 textX, y + 15, color, false);
+        graphics.drawString(font, font.plainSubstrByWidth(machine.getString(), available),
+                textX, y + 26, MUTED, false);
     }
 
     private static int nodeColor(CraftProgressSnapshot.NodeProgress node) {

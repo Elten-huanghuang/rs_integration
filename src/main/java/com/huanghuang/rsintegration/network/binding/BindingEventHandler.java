@@ -153,6 +153,8 @@ public final class BindingEventHandler {
             if (BindingStorage.hasBinding(held, dim, bindingPos)) {
                 BindingStorage.removeBinding(held, dim, bindingPos);
                 AltarBindingRegistry.unbind(event.getLevel().dimension(), bindingPos, AltarBinding.RS_NETWORK);
+                AltarBindingRegistry.invalidateScanCache();
+                com.huanghuang.rsintegration.network.RSIntegrationNetwork.invalidateNetworkResolution(player.getUUID());
                 player.displayClientMessage(
                         Component.translatable("gui.rs_integration.altar.unbound", blockName),
                         true);
@@ -162,6 +164,8 @@ public final class BindingEventHandler {
                 if (binding.isPresent()) {
                     AltarBindingRegistry.bind(event.getLevel().dimension(), bindingPos, binding.get());
                     BindingStorage.addBinding(held, dim, bindingPos, blockKey, blockRegKey, displayStack);
+                    AltarBindingRegistry.invalidateScanCache();
+                    com.huanghuang.rsintegration.network.RSIntegrationNetwork.invalidateNetworkResolution(player.getUUID());
                     Component dimensionName = Component.translatable(
                             "dimension." + dim.getNamespace() + "." + dim.getPath())
                             .withStyle(ChatFormatting.YELLOW);

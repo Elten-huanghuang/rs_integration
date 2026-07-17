@@ -577,6 +577,7 @@ public final class AltarBindingRegistry {
     public static void onServerStopped(ServerStoppedEvent event) {
         BINDINGS.clear();
         SCAN_CACHE.clear();
+        com.huanghuang.rsintegration.network.RSIntegrationNetwork.clearNetworkResolutionCache();
     }
 
     @SubscribeEvent
@@ -599,6 +600,7 @@ public final class AltarBindingRegistry {
         if (server != null) {
             for (ServerPlayer p : server.getPlayerList().getPlayers()) {
                 cleanupPlayerNBT(p, dim.location(), pos);
+                com.huanghuang.rsintegration.network.RSIntegrationNetwork.invalidateNetworkResolution(p.getUUID());
                 com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler.sendBindingSync(p);
             }
         }
@@ -702,7 +704,7 @@ public final class AltarBindingRegistry {
             if (stack.isEmpty()) continue;
             for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
                 ModType entryType = ModType.fromBlockKey(entry.blockKey());
-                RSIntegrationMod.LOGGER.info(
+                RSIntegrationMod.LOGGER.debug(
                         "[RSI-DIAG] collectBindingsForType: item={}, blockKey={}, entryType={}, lookingFor={}",
                         stack.getItem(), entry.blockKey(),
                         entryType != null ? entryType.id() : "null",
@@ -711,7 +713,7 @@ public final class AltarBindingRegistry {
                 if (!isExecutableBinding(type, entry.blockKey())) continue;
                 if (normalized != null && entry.blockKey() != null
                         && !entry.blockKey().toLowerCase(java.util.Locale.ROOT).contains(normalized)) {
-                    RSIntegrationMod.LOGGER.info(
+                    RSIntegrationMod.LOGGER.debug(
                             "[RSI-DIAG] collectBindingsForType: filtered out — blockKey={} doesn't contain normalized={}",
                             entry.blockKey(), normalized);
                     continue;

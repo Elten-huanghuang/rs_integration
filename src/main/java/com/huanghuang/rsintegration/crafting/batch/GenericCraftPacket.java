@@ -611,7 +611,20 @@ public final class GenericCraftPacket {
                 && modType != ModType.byId("smithing")) {
             if (modType != null) {
                 List<IngredientSpec> graphSpecs = new ArrayList<>();
-                for (IngredientSpec spec : specs) {
+                List<IngredientSpec> executionSpecs = specs;
+                if (CrockPotRecipeHandler.hasCategoryConstraints(recipe)) {
+                    ServerLevel crockPotLevel = CraftPacketUtils.resolveLevel(
+                            player.server, effectiveDim, player);
+                    List<IngredientSpec> categorySpecs = CrockPotBatchDelegate.buildCategoryPlanIngredients(
+                            recipe, network, crockPotLevel, effectivePos);
+                    if (categorySpecs == null || categorySpecs.isEmpty()) {
+                        player.sendSystemMessage(Component.translatable(
+                                "rsi.crockpot.error.food_values"));
+                        return;
+                    }
+                    executionSpecs = categorySpecs;
+                }
+                for (IngredientSpec spec : executionSpecs) {
                     if (!spec.isEmpty()) graphSpecs.add(spec);
                 }
                 Map<StackKey, Integer> avail = MaterialSources.listAllAvailable(player, network);
