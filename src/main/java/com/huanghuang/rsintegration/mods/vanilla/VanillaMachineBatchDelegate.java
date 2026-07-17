@@ -104,6 +104,16 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
+    public boolean acceptsMachineWithoutBlockEntity(ServerLevel level, BlockPos pos) {
+        ResourceLocation blockId = ForgeRegistries.BLOCKS.getKey(level.getBlockState(pos).getBlock());
+        if (blockId == null) return false;
+        String path = blockId.getPath();
+        return path.contains("stonecutter")
+                || path.contains("smithing_table")
+                || path.contains("campfire");
+    }
+
+    @Override
     public boolean validateAndInit(ServerPlayer player, ResourceLocation recipeId,
                                    @Nullable ResourceLocation dim, BlockPos pos) {
         this.player = player;
@@ -152,7 +162,8 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
                     || blockId.contains("stonecutter")) {
                 this.kind = MachineKind.VIRTUAL;
             } else if (recipe instanceof AbstractCookingRecipe
-                    && blockMatchesCooking(blockId, recipe)) {
+                    && CookingMachineFamily.fromRecipe(recipe).matches(
+                            level.getBlockState(pos).getBlock())) {
                 // VIRTUAL fallback for furnace/blast/smoker when the chunk isn't
                 // fully loaded. Only accept if the block ID matches the recipe type
                 // so a smithing table doesn't steal smelting recipes.
@@ -170,22 +181,20 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
                 this.kind = MachineKind.VIRTUAL;
                 return true;
             }
-            // Validate furnace type matches recipe type (safety net —
-            // classification should route recipes to the correct ModType,
-            // but mismatched bindings could still exist from older data).
-            if (recipe instanceof BlastingRecipe && !(be instanceof BlastFurnaceBlockEntity)) {
-                RSIntegrationMod.LOGGER.debug("[RSI-Vanilla] Type mismatch: BlastingRecipe requires BlastFurnaceBlockEntity, got {} at {}",
-                        be.getClass().getName(), myPos);
+            CookingMachineFamily expectedFamily = CookingMachineFamily.fromRecipe(recipe);
+            CookingMachineFamily actualFamily = CookingMachineFamily.fromBlock(
+                    level.getBlockState(pos).getBlock());
+            if (expectedFamily == CookingMachineFamily.UNKNOWN || expectedFamily != actualFamily) {
+                RSIntegrationMod.LOGGER.debug("[RSI-Vanilla] Cooking family mismatch: recipe={} expected={} actual={} at {}",
+                        recipe.getId(), expectedFamily, actualFamily, myPos);
                 return false;
             }
-            if (recipe instanceof SmokingRecipe && !(be instanceof SmokerBlockEntity)) {
-                RSIntegrationMod.LOGGER.debug("[RSI-Vanilla] Type mismatch: SmokingRecipe requires SmokerBlockEntity, got {} at {}",
-                        be.getClass().getName(), myPos);
-                return false;
-            }
-            if (recipe instanceof SmeltingRecipe && !(be instanceof FurnaceBlockEntity)) {
-                RSIntegrationMod.LOGGER.debug("[RSI-Vanilla] Type mismatch: SmeltingRecipe requires FurnaceBlockEntity, got {} at {}",
-                        be.getClass().getName(), myPos);
+            BrickFurnaceCompat.Eligibility brickEligibility = BrickFurnaceCompat.canExecute(be, recipe);
+            if (!brickEligibility.allowed()) {
+                RSIntegrationMod.LOGGER.debug("[RSI-BrickFurnace] Rejected recipe {} at {}: {}",
+                        recipe.getId(), myPos, brickEligibility.detail());
+                player.sendSystemMessage(Component.translatable(
+                        "rsi.brickfurnace.error.recipe_rejected", brickEligibility.detail()));
                 return false;
             }
 
@@ -402,7 +411,8 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
     }
 
     private boolean ensureFuel(ServerPlayer player) {
-        int cookingTime = (recipe instanceof AbstractCookingRecipe acr) ? acr.getCookingTime() : 200;
+        int cookingTime = recipe instanceof AbstractCookingRecipe acr
+                ? BrickFurnaceCompat.effectiveCookTicks(furnaceBE, acr) : 200;
 
         // Burn time already banked in litTime counts toward this item's cook.
         int litTime = 0;
@@ -421,7 +431,8 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         // so we must ensure enough units are present rather than trusting burnTime > 0.
         ItemStack existing = furnaceBE.getItem(1);
         if (!existing.isEmpty()) {
-            int singleBurn = ForgeHooks.getBurnTime(existing, recipe.getType());
+            int singleBurn = BrickFurnaceCompat.effectiveBurnTicks(
+                    furnaceBE, existing, fuelRecipeType());
             if (singleBurn <= 0) return false; // non-fuel item blocking the slot
             int needed = VanillaFurnaceFuelPolicy.requiredAmount(remainingCook, singleBurn);
             int slotLimit = Math.min(existing.getMaxStackSize(), furnaceBE.getMaxStackSize());
@@ -446,8 +457,17 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         }
         VanillaFurnaceFuelPolicy.Selection selection = VanillaFurnaceFuelPolicy.select(
                 candidates, RSIntegrationConfig.VANILLA_FURNACE_FUEL_PRIORITY.get(),
-                recipe.getType(), remainingCook);
+                remainingCook,
+                stack -> BrickFurnaceCompat.effectiveBurnTicks(furnaceBE, stack, fuelRecipeType()));
         return selection != null && supplyFuel(player, selection.fuel(), selection.amount());
+    }
+
+    private RecipeType<?> fuelRecipeType() {
+        return switch (CookingMachineFamily.fromRecipe(recipe)) {
+            case BLAST_FURNACE -> RecipeType.BLASTING;
+            case SMOKER -> RecipeType.SMOKING;
+            default -> RecipeType.SMELTING;
+        };
     }
 
     /** Extract {@code amount} of {@code fuelType} from RS into the fuel slot. */
@@ -476,7 +496,8 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
     private void refundLeftoverFuel() {
         if (furnaceBE == null) return;
         ItemStack fuel = furnaceBE.getItem(1);
-        if (fuel.isEmpty() || ForgeHooks.getBurnTime(fuel, recipe.getType()) <= 0) return;
+        if (fuel.isEmpty() || BrickFurnaceCompat.effectiveBurnTicks(
+                furnaceBE, fuel, fuelRecipeType()) <= 0) return;
         furnaceBE.setItem(1, ItemStack.EMPTY);
         furnaceBE.setChanged();
         refundToRSNetwork(fuel);
@@ -675,14 +696,36 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         }
     }
 
-    private static boolean blockMatchesCooking(String blockId, Recipe<?> recipe) {
-        if (recipe instanceof BlastingRecipe) return blockId.contains("blast_furnace");
-        if (recipe instanceof SmokingRecipe) return blockId.contains("smoker");
-        if (recipe instanceof CampfireCookingRecipe) return blockId.contains("campfire");
-        return blockId.contains("furnace") && !blockId.contains("blast");
+    // ── polling / collection ──────────────────────────────────────
+
+    @NotNull
+    @Override
+    protected CraftObservation observeMachineCraft(@NotNull ServerLevel level, @NotNull BlockEntity be) {
+        if (kind == MachineKind.FURNACE && BrickFurnaceCompat.isBrickFurnace(be)) {
+            BrickFurnaceCompat.Eligibility eligibility = BrickFurnaceCompat.canExecute(be, recipe);
+            if (!eligibility.allowed()) return failObservation(eligibility.detail());
+            AbstractCookingRecipe actual = BrickFurnaceCompat.resolvedRecipe(be);
+            if (actual == null) return failObservation("Brick Furnace did not accept the input recipe");
+            if (!actual.getId().equals(recipe.getId())) {
+                return failObservation("Brick Furnace resolved a different recipe: " + actual.getId());
+            }
+            if (phase == CraftPhase.WAITING_FOR_START) return workingObservation();
+            if (isMachineCraftFinished(level, be)) return doneObservation();
+            return workingObservation();
+        }
+        return super.observeMachineCraft(level, be);
     }
 
-    // ── polling / collection ──────────────────────────────────────
+    @Override
+    protected CraftObservation observeMissingMachineCraft(ServerLevel level, BlockPos pos) {
+        // Stonecutters and smithing tables are intentionally executed virtually and
+        // have no BlockEntity. Their result is ready as soon as the pre-reserved
+        // materials have been committed and computeResult() succeeds.
+        if (kind == MachineKind.VIRTUAL) {
+            return craftDone ? doneObservation() : workingObservation();
+        }
+        return super.observeMissingMachineCraft(level, pos);
+    }
 
     @Override
     protected boolean isMachineCraftFinished(ServerLevel level, BlockEntity be) {

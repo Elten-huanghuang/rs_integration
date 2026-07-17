@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.compat.ftbquests;
 
+import com.huanghuang.rsintegration.RSIntegrationMod;
 import dev.ftb.mods.ftbquests.quest.BaseQuestFile;
 import dev.ftb.mods.ftbquests.quest.Quest;
 import dev.ftb.mods.ftbquests.quest.ServerQuestFile;
@@ -12,6 +13,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 
 import javax.annotation.Nullable;
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -61,7 +63,7 @@ public final class FtbQuestSubmissionScanner {
             for (Task task : quest.getTasksAsList()) {
                 if (data.isCompleted(task)) continue;
                 if (!(task instanceof ItemTask itemTask)) {
-                    if (!task.isOptionalForProgression()) {
+                    if (!isOptionalForProgression(task, data)) {
                         eligibility = QuestSubmissionEligibility.NON_ITEM_TASK_REQUIRED;
                         break;
                     }
@@ -82,7 +84,7 @@ public final class FtbQuestSubmissionScanner {
                 if (display.isEmpty() && !valid.isEmpty()) display = valid.get(0);
                 requirements.add(new QuestItemRequirement(itemTask.getId(), display, valid,
                         required, progress, true, false, false,
-                        itemTask.isOptionalForProgression()));
+                        isOptionalForProgression(itemTask, data)));
             }
             if (eligibility == QuestSubmissionEligibility.ELIGIBLE && requirements.isEmpty()) {
                 eligibility = QuestSubmissionEligibility.NO_REMAINING_ITEM_TASKS;
@@ -102,6 +104,24 @@ public final class FtbQuestSubmissionScanner {
         return new QuestSubmissionSnapshot(quest.getId(), quest.getTitle().getString(), icon,
                 quest.canBeRepeated(), quest.getRequireSequentialTasks(), eligibility,
                 requirements, itemRewards, quest.getRewards().size(), hasChoice);
+    }
+
+    /** Supports both FTB Quests 2001.4.13's no-arg API and 2001.4.22's TeamData API. */
+    private static boolean isOptionalForProgression(Task task, TeamData data) {
+        try {
+            Method method;
+            try {
+                method = task.getClass().getMethod("isOptionalForProgression", TeamData.class);
+                return (Boolean) method.invoke(task, data);
+            } catch (NoSuchMethodException ignored) {
+                method = task.getClass().getMethod("isOptionalForProgression");
+                return (Boolean) method.invoke(task);
+            }
+        } catch (ReflectiveOperationException | ClassCastException e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-FTBQuests] Failed to inspect optional task state for {}",
+                    task.getId(), e);
+            return false;
+        }
     }
 
     private static QuestSubmissionEligibility baseEligibility(Quest quest, TeamData data,

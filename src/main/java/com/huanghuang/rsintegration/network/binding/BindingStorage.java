@@ -168,6 +168,44 @@ public final class BindingStorage {
         return false;
     }
 
+    /** Copy-on-write replacement for one binding's machine identity. */
+    public static boolean replaceBindingBlockKey(ItemStack stack, ResourceLocation dim, BlockPos pos,
+                                                 String expectedBlockKey, String replacementBlockKey) {
+        CompoundTag oldTag = stack.getTag();
+        if (oldTag == null || expectedBlockKey.equals(replacementBlockKey)) return false;
+        CompoundTag tag = oldTag.copy();
+        if (!tag.contains(KEY_BINDINGS, Tag.TAG_LIST) && tag.contains("aec_bound_x")) {
+            if (!dim.toString().equals(tag.getString("aec_bound_dim"))
+                    || pos.getX() != tag.getInt("aec_bound_x")
+                    || pos.getY() != tag.getInt("aec_bound_y")
+                    || pos.getZ() != tag.getInt("aec_bound_z")
+                    || !expectedBlockKey.equals(tag.getString("aec_bound_block"))) {
+                return false;
+            }
+            migrateFromLegacy(tag);
+        }
+        ListTag list = tag.getList(KEY_BINDINGS, Tag.TAG_COMPOUND);
+        for (int i = 0; i < list.size(); i++) {
+            CompoundTag entryTag = list.getCompound(i);
+            if (dim.toString().equals(entryTag.getString("dim"))
+                    && pos.getX() == entryTag.getInt("x")
+                    && pos.getY() == entryTag.getInt("y")
+                    && pos.getZ() == entryTag.getInt("z")
+                    && expectedBlockKey.equals(entryTag.getString("block"))) {
+                entryTag.putString("block", replacementBlockKey);
+                tag.put(KEY_BINDINGS, list);
+                stack.setTag(tag);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public static String replaceBlockKeyPrefix(String blockKey, String replacementPrefix) {
+        int separator = blockKey == null ? -1 : blockKey.indexOf("||");
+        return separator < 0 ? blockKey : replacementPrefix + blockKey.substring(separator);
+    }
+
     public static boolean hasBinding(ItemStack stack, ResourceLocation dim, BlockPos pos) {
         if (!stack.hasTag()) return false;
         CompoundTag tag = stack.getTag();

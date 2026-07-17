@@ -113,14 +113,18 @@ public final class BindingEventHandler {
 
         ResourceLocation dim = event.getLevel().dimension().location();
         BlockState state = event.getLevel().getBlockState(pos);
+        net.minecraft.world.level.block.entity.BlockEntity be = event.getLevel().getBlockEntity(pos);
         String blockKey = matched.blockKey(block);
+        if ("ironfurnaces_furnace".equals(matched.modType.id())
+                && be != null && isIronFurnace(be)) {
+            blockKey = ironFurnacePrefix(be) + "||" + block.getDescriptionId();
+        }
         String blockRegKey = ForgeRegistries.BLOCKS.getKey(block).toString();
 
         // Extract displayStack BEFORE resolveBlockName so the NBT-bearing
         // stack (with BlockEntityTag/BlockId) is available for name resolution.
         // Previously this was after the call, so displayStack was always null.
         ItemStack displayStack = state.getBlock().getCloneItemStack(event.getLevel(), pos, state);
-        net.minecraft.world.level.block.entity.BlockEntity be = event.getLevel().getBlockEntity(pos);
         if (be != null && !displayStack.isEmpty()) {
             // TACZ gun workbenches need the full BlockEntityTag for BEWLR
             // rendering and getName() / getHoverName().  Other BEs (YHK
@@ -173,6 +177,28 @@ public final class BindingEventHandler {
             }
         }
         event.setCanceled(true);
+    }
+
+    private static boolean isIronFurnace(BlockEntity be) {
+        Class<?> type = be.getClass();
+        while (type != null) {
+            if ("ironfurnaces.tileentity.furnaces.BlockIronFurnaceTileBase".equals(type.getName())) return true;
+            type = type.getSuperclass();
+        }
+        return false;
+    }
+
+    private static String ironFurnacePrefix(BlockEntity be) {
+        try {
+            Object recipeType = be.getClass().getField("recipeType").get(be);
+            ResourceLocation id = recipeType instanceof net.minecraft.world.item.crafting.RecipeType<?> type
+                    ? ForgeRegistries.RECIPE_TYPES.getKey(type) : null;
+            if (id != null && "blasting".equals(id.getPath())) return "ironfurnaces_blast_furnace";
+            if (id != null && "smoking".equals(id.getPath())) return "ironfurnaces_smoker";
+        } catch (ReflectiveOperationException exception) {
+            RSIntegrationMod.LOGGER.debug("[RSI-Bind] Iron Furnaces recipe type probe failed", exception);
+        }
+        return "ironfurnaces_furnace";
     }
 
     public static final class MachineBindingTarget {
@@ -344,7 +370,19 @@ public final class BindingEventHandler {
 
     @Nullable
     public static MachineBindingTarget findTargetByClass(String className) {
-        return CLASS_TARGET_MAP.get(className);
+        MachineBindingTarget exact = CLASS_TARGET_MAP.get(className);
+        if (exact != null) return exact;
+        try {
+            Class<?> blockClass = Class.forName(className, false, BindingEventHandler.class.getClassLoader());
+            for (MachineBindingTarget target : TARGETS) {
+                for (String targetName : target.blockClassNames) {
+                    Class<?> targetClass = Class.forName(targetName, false,
+                            BindingEventHandler.class.getClassLoader());
+                    if (targetClass.isAssignableFrom(blockClass)) return target;
+                }
+            }
+        } catch (ClassNotFoundException | LinkageError ignored) {}
+        return null;
     }
 
     private static final Map<String, Boolean> PREFIX_GUI_MAP = new LinkedHashMap<>();
@@ -382,7 +420,7 @@ public final class BindingEventHandler {
             if (rl != null) {
                 var block = net.minecraftforge.registries.ForgeRegistries.BLOCKS.getValue(rl);
                 if (block != null) {
-                    MachineBindingTarget target = CLASS_TARGET_MAP.get(block.getClass().getName());
+                    MachineBindingTarget target = findTarget(block);
                     if (target != null && !target.supportsGui) return false;
                 }
             }
@@ -392,9 +430,19 @@ public final class BindingEventHandler {
 
     public static boolean supportsGuiAt(net.minecraft.world.level.Level level, net.minecraft.core.BlockPos pos) {
         if (level == null || pos == null) return false;
-        String className = level.getBlockState(pos).getBlock().getClass().getName();
-        MachineBindingTarget target = CLASS_TARGET_MAP.get(className);
+        MachineBindingTarget target = findTarget(level.getBlockState(pos).getBlock());
         return target != null && target.supportsGui;
+    }
+
+    @Nullable
+    private static MachineBindingTarget findTarget(Block block) {
+        String className = block.getClass().getName();
+        MachineBindingTarget exact = CLASS_TARGET_MAP.get(className);
+        if (exact != null) return exact;
+        for (MachineBindingTarget target : TARGETS) {
+            if (target.matches(block, className)) return target;
+        }
+        return null;
     }
 
     private static String extractBlockId(net.minecraft.nbt.CompoundTag tag) {

@@ -110,6 +110,10 @@ public final class AltarBindingRegistry {
         return null;
     }
 
+    public static void invalidateScanCache() {
+        SCAN_CACHE.clear();
+    }
+
     private AltarBindingRegistry() {}
 
     public static void registerHook(ResourceLocation type, IBindingHook hook) {
@@ -186,6 +190,21 @@ public final class AltarBindingRegistry {
             return true;
         }
         return false;
+    }
+
+    @Nullable
+    public static BindingStorage.BindingEntry findBindingEntry(ServerPlayer player,
+                                                                ResourceLocation dim,
+                                                                BlockPos pos) {
+        return findInInventory(player, stacks -> {
+            for (ItemStack stack : stacks) {
+                if (stack.isEmpty()) continue;
+                for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
+                    if (entry.dim().equals(dim) && entry.pos().equals(pos)) return entry;
+                }
+            }
+            return null;
+        });
     }
 
     private static ItemStack findBindingItem(List<ItemStack> stacks,
@@ -514,12 +533,42 @@ public final class AltarBindingRegistry {
                 }
                 INetwork net = resolveNetworkForAltar(player, altarDim, entry.pos());
                 if (net != null) {
-                    modTypeIds.add(entryType.id());
-                    blockKeysByType.computeIfAbsent(entryType.id(), k -> new HashSet<>())
-                            .add(entry.blockKey());
+                    addCompatibleTypeIds(entryType, entry.blockKey(), modTypeIds, blockKeysByType);
                 }
             }
         }
+    }
+
+    private static void addCompatibleTypeIds(ModType entryType, String blockKey,
+                                             Set<String> modTypeIds,
+                                             Map<String, Set<String>> blockKeysByType) {
+        addTypeId(entryType.id(), blockKey, modTypeIds, blockKeysByType);
+        String id = entryType.id();
+        if ("ironfurnaces_furnace".equals(id)) {
+            addTypeId("vanilla_furnace", blockKey, modTypeIds, blockKeysByType);
+        } else if ("ironfurnaces_blast_furnace".equals(id)) {
+            addTypeId("vanilla_blast_furnace", blockKey, modTypeIds, blockKeysByType);
+        } else if ("ironfurnaces_smoker".equals(id)) {
+            addTypeId("vanilla_smoker", blockKey, modTypeIds, blockKeysByType);
+        }
+    }
+
+    private static void addTypeId(String typeId, String blockKey,
+                                  Set<String> modTypeIds,
+                                  Map<String, Set<String>> blockKeysByType) {
+        modTypeIds.add(typeId);
+        blockKeysByType.computeIfAbsent(typeId, key -> new HashSet<>()).add(blockKey);
+    }
+
+    public static boolean isCompatibleMachineType(ModType requested, ModType bound) {
+        if (requested == null || bound == null) return false;
+        if (requested.id().equals(bound.id())) return true;
+        return switch (bound.id()) {
+            case "ironfurnaces_furnace" -> "vanilla_furnace".equals(requested.id());
+            case "ironfurnaces_blast_furnace" -> "vanilla_blast_furnace".equals(requested.id());
+            case "ironfurnaces_smoker" -> "vanilla_smoker".equals(requested.id());
+            default -> false;
+        };
     }
 
     // ── event handlers ──────────────────────────────────────────
@@ -620,7 +669,7 @@ public final class AltarBindingRegistry {
                         itemId, entry.blockKey(),
                         entryType != null ? entryType.id() : "null",
                         type.id());
-                if (entryType != type) continue;
+                if (!isCompatibleMachineType(type, entryType)) continue;
                 ResourceKey<Level> altarDim = ResourceKey.create(
                         net.minecraft.core.registries.Registries.DIMENSION, entry.dim());
                 ServerLevel entryLevel = player.server.getLevel(altarDim);
@@ -658,7 +707,8 @@ public final class AltarBindingRegistry {
                         stack.getItem(), entry.blockKey(),
                         entryType != null ? entryType.id() : "null",
                         type.id());
-                if (entryType == null || !entryType.id().equals(type.id())) continue;
+                if (!isCompatibleMachineType(type, entryType)) continue;
+                if (!isExecutableBinding(type, entry.blockKey())) continue;
                 if (normalized != null && entry.blockKey() != null
                         && !entry.blockKey().toLowerCase(java.util.Locale.ROOT).contains(normalized)) {
                     RSIntegrationMod.LOGGER.info(
@@ -678,6 +728,15 @@ public final class AltarBindingRegistry {
         }
     }
 
+    static boolean isExecutableBinding(ModType type, String blockKey) {
+        if (type == null || blockKey == null) return false;
+        if (!"goety".equals(type.id())) return true;
+        String key = blockKey.toLowerCase(java.util.Locale.ROOT);
+        return !key.startsWith("goety_component")
+                && !key.contains("cursed_cage")
+                && !key.contains("soul_candlestick");
+    }
+
     /** Map recipe-ID sub-type names to canonical machine-prefix names.
      *  Wizards Reborn names its recipe category "crystal_infusion"
      *  but the machine prefix used during binding is "crystal_ritual".
@@ -689,6 +748,12 @@ public final class AltarBindingRegistry {
     private static String normalizeSubType(String hint, ModType type) {
         if (hint == null) return null;
         if (type == null) return hint;
+        // These vanilla ModTypes each represent exactly one machine. A slash in a
+        // datapack/KubeJS recipe ID (for example minecraft:kjs/win_15) is only a
+        // namespace-like folder and must not be treated as a machine subtype.
+        if (type.id().startsWith("vanilla_") || "smithing".equals(type.id())) {
+            return null;
+        }
         if (ModIds.WIZARDS_REBORN.equals(type.id())) {
             if ("crystal_infusion".equals(hint)) {
                 return "crystal_ritual";
@@ -748,7 +813,10 @@ public final class AltarBindingRegistry {
         if (ModIds.TACZ.equals(type.id())) {
             return null;
         }
-        if (ModIds.GOETY.equals(type.id())) {
+        // Goety recipe folders identify content groups, not machine subtypes.
+        // Confluence workshop recipe IDs likewise use folders such as "goety/"
+        // to group imported recipes; every one executes on the same workshop.
+        if (ModIds.GOETY.equals(type.id()) || "confluence".equals(type.id())) {
             return null;
         }
         // farmersrespite_kettle is a leaf type — every KettleRecipe runs on the

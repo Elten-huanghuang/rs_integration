@@ -12,8 +12,11 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.Container;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.crafting.AbstractCookingRecipe;
+import net.minecraft.world.item.crafting.RecipeType;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.AbstractFurnaceBlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -105,6 +108,35 @@ public final class MachineInsertPacket {
 
             ChunkUtils.loadChunk(targetLevel, packet.pos);
             BlockEntity be = targetLevel.getBlockEntity(packet.pos);
+            if (isIronFurnace(be)) {
+                if (!(be instanceof Container iron) || !isOrdinaryIronFurnace(be)) {
+                    player.sendSystemMessage(Component.translatable("rsi.ironfurnaces.error.machine_mode_unsupported"));
+                    return;
+                }
+                int targetSlot = packet.slot == MachineSlotType.FUEL ? 1 : 0;
+                if (packet.slot == MachineSlotType.FUEL
+                        && ForgeHooks.getBurnTime(carried, ironRecipeType(be)) <= 0) {
+                    player.sendSystemMessage(Component.translatable("rsi.machine.error.not_fuel"));
+                    return;
+                }
+                ItemStack existing = iron.getItem(targetSlot);
+                if (!existing.isEmpty() && !ItemStack.isSameItemSameTags(existing, carried)) {
+                    player.sendSystemMessage(Component.translatable("rsi.machine.error.slot_mismatch"));
+                    return;
+                }
+                int canInsert = Math.min(carried.getCount(), iron.getMaxStackSize() - existing.getCount());
+                if (canInsert <= 0) {
+                    player.sendSystemMessage(Component.translatable("rsi.machine.error.slot_full"));
+                    return;
+                }
+                ItemStack merged = existing.isEmpty() ? carried.copy() : existing.copy();
+                merged.setCount(existing.getCount() + canInsert);
+                iron.setItem(targetSlot, merged);
+                ItemStack remaining = carried.copyWithCount(carried.getCount() - canInsert);
+                player.containerMenu.setCarried(remaining.isEmpty() ? ItemStack.EMPTY : remaining);
+                be.setChanged();
+                return;
+            }
             if (!(be instanceof AbstractFurnaceBlockEntity furnace)) {
                 player.sendSystemMessage(
                     Component.translatable("rsi.machine.error.wrong_type"));
@@ -148,5 +180,31 @@ public final class MachineInsertPacket {
             furnace.setChanged();
         });
         context.setPacketHandled(true);
+    }
+
+    private static boolean isIronFurnace(BlockEntity be) {
+        Class<?> type = be != null ? be.getClass() : null;
+        while (type != null) {
+            if ("ironfurnaces.tileentity.furnaces.BlockIronFurnaceTileBase".equals(type.getName())) return true;
+            type = type.getSuperclass();
+        }
+        return false;
+    }
+
+    private static boolean isOrdinaryIronFurnace(BlockEntity be) {
+        try {
+            return (boolean) be.getClass().getMethod("isFurnace").invoke(be);
+        } catch (ReflectiveOperationException exception) {
+            return false;
+        }
+    }
+
+    private static RecipeType<?> ironRecipeType(BlockEntity be) {
+        try {
+            Class<?> base = Class.forName("ironfurnaces.tileentity.furnaces.BlockIronFurnaceTileBase");
+            return (RecipeType<?>) base.getField("recipeType").get(be);
+        } catch (ReflectiveOperationException exception) {
+            return null;
+        }
     }
 }

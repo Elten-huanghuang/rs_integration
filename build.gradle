@@ -148,11 +148,8 @@ jar {
 
 jar.finalizedBy('reobfJar')
 
-// jarJar normally creates rs_integration-1.0.7-all.jar as a
-// separate artifact.  Drop the classifier so it overwrites the
-// standard jar.  Must wait for reobfJar so its input is already
-// SRG-mapped; reobfJarJar runs afterward and understands the
-// jar-in-jar layout (won't touch the nested jars).
+// jarJar normally creates an "all" artifact. Drop the classifier so the
+// reobfuscated Jar-in-Jar is the distributable file.
 tasks.named('jarJar', Jar) {
     dependsOn 'reobfJar'
     archiveClassifier = ''
@@ -166,5 +163,42 @@ tasks.named('jarJar', Jar) {
                 "Implementation-Vendor"   : "Huanghuang",
                 "MixinConfigs"            : "rs_integration.mixins.json"
         ])
+    }
+}
+
+tasks.configureEach {
+    if (name == 'jarJar') {
+        finalizedBy 'reobfJarJar'
+    }
+}
+
+tasks.register('verifyReleaseJar') {
+    dependsOn 'reobfJarJar'
+    doLast {
+        def archive = tasks.named('jarJar', Jar).get().archiveFile.get().asFile
+        def zip = new java.util.zip.ZipFile(archive)
+        try {
+            if (zip.getEntry('rs_integration.refmap.json') == null) {
+                throw new GradleException("Release jar is missing rs_integration.refmap.json: ${archive}")
+            }
+
+            def classEntry = zip.getEntry('com/huanghuang/rsintegration/ModItems.class')
+            if (classEntry == null) {
+                throw new GradleException("Release jar is missing ModItems.class: ${archive}")
+            }
+            def classBytes = zip.getInputStream(classEntry).bytes
+            def classData = new String(classBytes, java.nio.charset.StandardCharsets.ISO_8859_1)
+            if (classData.contains('CREATIVE_MODE_TAB')) {
+                throw new GradleException("Release jar still contains development mappings: ${archive}")
+            }
+        } finally {
+            zip.close()
+        }
+    }
+}
+
+tasks.configureEach {
+    if (name == 'reobfJarJar') {
+        finalizedBy tasks.named('verifyReleaseJar')
     }
 }

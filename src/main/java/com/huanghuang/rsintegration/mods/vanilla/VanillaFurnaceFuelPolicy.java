@@ -35,7 +35,7 @@ public final class VanillaFurnaceFuelPolicy {
                 stack -> ForgeHooks.getBurnTime(stack, recipeType));
     }
 
-    static Selection select(List<ItemStack> candidates,
+    public static Selection select(List<ItemStack> candidates,
                             List<? extends String> priorityIds,
                             int requiredTicks,
                             java.util.function.ToIntFunction<ItemStack> burnTime) {

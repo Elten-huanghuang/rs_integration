@@ -9,6 +9,7 @@ import com.huanghuang.rsintegration.crafting.CraftProgressClientEvents;
 import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
 import com.huanghuang.rsintegration.mods.IModIntegration;
 import com.huanghuang.rsintegration.mods.aether.AetherRSModule;
+import com.huanghuang.rsintegration.mods.apotheosis.ApotheosisRSModule;
 import com.huanghuang.rsintegration.mods.aetherworks.AetherworksRSModule;
 import com.huanghuang.rsintegration.mods.aetherworks.client.AetherworksClientSetup;
 import com.huanghuang.rsintegration.mods.avaritia.AvaritiaRSModule;
@@ -22,6 +23,7 @@ import com.huanghuang.rsintegration.mods.farmingforblockheads.FarmingForBlockhea
 import com.huanghuang.rsintegration.mods.forbidden.FaRSModule;
 import com.huanghuang.rsintegration.mods.goety.GoetyRSModule;
 import com.huanghuang.rsintegration.mods.immortalersdelight.ImmortalersDelightRSModule;
+import com.huanghuang.rsintegration.mods.ironfurnaces.IronFurnacesRSModule;
 import com.huanghuang.rsintegration.mods.malum.MalumRSModule;
 import com.huanghuang.rsintegration.mods.slashblade.SlashBladeRSModule;
 import com.huanghuang.rsintegration.mods.tacz.TaczRSModule;
@@ -128,6 +130,8 @@ public final class RSIntegrationMod {
                     () -> AetherworksRSModule.INSTANCE),
             new ModuleEntry(ModIds.AETHER, RSIntegrationConfig.ENABLE_AETHER,
                     () -> AetherRSModule.INSTANCE),
+            new ModuleEntry(ModIds.APOTHEOSIS, RSIntegrationConfig.ENABLE_APOTHEOSIS,
+                    () -> ApotheosisRSModule.INSTANCE),
             new ModuleEntry(ModIds.CROCKPOT, RSIntegrationConfig.ENABLE_CROCKPOT,
                     () -> CrockPotRSModule.INSTANCE),
             new ModuleEntry(ModIds.TACZ, RSIntegrationConfig.ENABLE_TACZ,
@@ -145,7 +149,9 @@ public final class RSIntegrationMod {
             new ModuleEntry(ModIds.YOUKAISHOMECOMING, RSIntegrationConfig.ENABLE_YOUKAISHOMECOMING,
                     () -> YoukaisHomecomingRSModule.INSTANCE),
             new ModuleEntry(ModIds.FARMERSRESPITE, RSIntegrationConfig.ENABLE_FARMERSRESPITE,
-                    () -> FarmersRespiteRSModule.INSTANCE)
+                    () -> FarmersRespiteRSModule.INSTANCE),
+            new ModuleEntry(ModIds.IRON_FURNACES, RSIntegrationConfig.ENABLE_IRON_FURNACES,
+                    () -> IronFurnacesRSModule.INSTANCE)
     );
 
     public RSIntegrationMod() {
@@ -211,17 +217,6 @@ public final class RSIntegrationMod {
                     ));
         }
 
-        // --- Apotheosis Reforging Table ---
-        if (ModList.get().isLoaded("apotheosis")) {
-            BindingEventHandler.registerTarget(
-                    new BindingEventHandler.MachineBindingTarget(
-                            "apotheosis", ModType.byId("custom_gui"),
-                            RSIntegrationConfig.ENABLE_MACHINE_GUI_TABS,
-                            List.of("dev.shadowsoffire.apotheosis.adventure.affix.reforging.ReforgingTableBlock"),
-                            "apotheosis"
-                    ));
-        }
-
         // --- CrabbersDelight Crab Trap (loot-table driven, needs dedicated delegate) ---
         if (ModList.get().isLoaded("crabbersdelight")) {
             ModType.register("crabbersdelight",
@@ -243,16 +238,26 @@ public final class RSIntegrationMod {
         // --- Vanilla Machines (built-in, not IModIntegration) ----------
         if (RSIntegrationConfig.ENABLE_VANILLA_MACHINES.get()) {
             String delegateClass = "com.huanghuang.rsintegration.mods.vanilla.VanillaMachineBatchDelegate";
+            String cookingDelegateClass = "com.huanghuang.rsintegration.mods.vanilla.CookingMachineBatchDelegate";
 
             // ── Furnace ────────────────────────────────────────────
             ModType.register("vanilla_furnace",
-                    new String[]{"net.minecraft.world.item.crafting.SmeltingRecipe"},
+                    new String[]{
+                            "net.minecraft.world.item.crafting.SmeltingRecipe",
+                            "cech12.brickfurnace.crafting.BrickSmeltingRecipe"
+                    },
                     new String[]{"furnace"},
                     new String[]{"vanilla_furnace"},
-                    ModType.delegateSupplier(delegateClass));
+                    ModType.delegateSupplier(cookingDelegateClass));
             ModType.configureJei("vanilla_furnace",
-                    new String[][]{{"minecraft:smelting", "vanilla_furnace"}},
-                    new String[][]{{"net.minecraft.world.item.crafting.SmeltingRecipe", "vanilla_furnace"}},
+                    new String[][]{
+                            {"minecraft:smelting", "vanilla_furnace"},
+                            {"brickfurnace:smelting", "vanilla_furnace"}
+                    },
+                    new String[][]{
+                            {"net.minecraft.world.item.crafting.SmeltingRecipe", "vanilla_furnace"},
+                            {"cech12.brickfurnace.crafting.BrickSmeltingRecipe", "vanilla_furnace"}
+                    },
                     "gui.rs_integration.jei.vanilla_furnace_craft");
             BindingEventHandler.registerTarget(
                     new BindingEventHandler.MachineBindingTarget(
@@ -263,13 +268,22 @@ public final class RSIntegrationMod {
 
             // ── Blast Furnace ──────────────────────────────────────
             ModType.register("vanilla_blast_furnace",
-                    new String[]{"net.minecraft.world.item.crafting.BlastingRecipe"},
+                    new String[]{
+                            "net.minecraft.world.item.crafting.BlastingRecipe",
+                            "cech12.brickfurnace.crafting.BrickBlastingRecipe"
+                    },
                     new String[]{"blast_furnace"},
                     new String[]{"vanilla_blast_furnace"},
-                    ModType.delegateSupplier(delegateClass));
+                    ModType.delegateSupplier(cookingDelegateClass));
             ModType.configureJei("vanilla_blast_furnace",
-                    new String[][]{{"minecraft:blasting", "vanilla_blast_furnace"}},
-                    new String[][]{{"net.minecraft.world.item.crafting.BlastingRecipe", "vanilla_blast_furnace"}},
+                    new String[][]{
+                            {"minecraft:blasting", "vanilla_blast_furnace"},
+                            {"brickfurnace:blasting", "vanilla_blast_furnace"}
+                    },
+                    new String[][]{
+                            {"net.minecraft.world.item.crafting.BlastingRecipe", "vanilla_blast_furnace"},
+                            {"cech12.brickfurnace.crafting.BrickBlastingRecipe", "vanilla_blast_furnace"}
+                    },
                     "gui.rs_integration.jei.vanilla_blast_furnace_craft");
             BindingEventHandler.registerTarget(
                     new BindingEventHandler.MachineBindingTarget(
@@ -280,13 +294,22 @@ public final class RSIntegrationMod {
 
             // ── Smoker ─────────────────────────────────────────────
             ModType.register("vanilla_smoker",
-                    new String[]{"net.minecraft.world.item.crafting.SmokingRecipe"},
+                    new String[]{
+                            "net.minecraft.world.item.crafting.SmokingRecipe",
+                            "cech12.brickfurnace.crafting.BrickSmokingRecipe"
+                    },
                     new String[]{"smoker"},
                     new String[]{"vanilla_smoker"},
-                    ModType.delegateSupplier(delegateClass));
+                    ModType.delegateSupplier(cookingDelegateClass));
             ModType.configureJei("vanilla_smoker",
-                    new String[][]{{"minecraft:smoking", "vanilla_smoker"}},
-                    new String[][]{{"net.minecraft.world.item.crafting.SmokingRecipe", "vanilla_smoker"}},
+                    new String[][]{
+                            {"minecraft:smoking", "vanilla_smoker"},
+                            {"brickfurnace:smoking", "vanilla_smoker"}
+                    },
+                    new String[][]{
+                            {"net.minecraft.world.item.crafting.SmokingRecipe", "vanilla_smoker"},
+                            {"cech12.brickfurnace.crafting.BrickSmokingRecipe", "vanilla_smoker"}
+                    },
                     "gui.rs_integration.jei.vanilla_smoker_craft");
             BindingEventHandler.registerTarget(
                     new BindingEventHandler.MachineBindingTarget(

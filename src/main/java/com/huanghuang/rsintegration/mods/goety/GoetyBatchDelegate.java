@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.mods.goety;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
@@ -55,6 +56,8 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
     private List<Object> filledPedestals;
     private int soulCost;
     private boolean ritualEverSeenActive;
+    private long ritualIdleSinceGameTime = -1L;
+    private static final int RITUAL_IDLE_STABILITY_TICKS = 20;
     private ItemStack activationExtractedFromPlayer;
 
     // Brazier-mode state
@@ -65,6 +68,21 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
     private boolean brazierCraftStarted;
 
     // ── IBatchDelegate impl ───────────────────────────────────────
+
+    @Override
+    public PreparationResult prepare(ServerPlayer player, ResourceLocation recipeId,
+                                     @Nullable ResourceLocation dim, BlockPos pos) {
+        if (validateAndInit(player, recipeId, dim, pos)) {
+            return PreparationResult.ready();
+        }
+        if (altar != null && Reflect.getField(altar, GoetyReflection.F_CURRENT_RITUAL_RECIPE).orElse(null) != null) {
+            return PreparationResult.retry("Goety altar is still processing");
+        }
+        if (altar != null && ritualRecipe != null) {
+            return PreparationResult.retry("Goety altar is not ready for another ritual");
+        }
+        return PreparationResult.fatal("Goety machine validation failed for " + recipeId);
+    }
 
     @Override
     public boolean validateAndInit(ServerPlayer player, ResourceLocation recipeId,
@@ -139,6 +157,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         }
         this.ritualRecipe = foundRecipe;
         this.ritualEverSeenActive = false;
+        this.ritualIdleSinceGameTime = -1L;
         RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] validateAndInit [5/9] recipe verified as RitualRecipe");
 
         this.soulCost = Reflect.<Integer>invoke(ritualRecipe, GoetyReflection.M_GET_SOUL_COST).orElse(0);
@@ -854,29 +873,54 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         // via recipe-manager lookup, which defeats null-after-completion detection.
         if (Reflect.getField(altar, GoetyReflection.F_CURRENT_RITUAL_RECIPE).orElse(null) != null) {
             ritualEverSeenActive = true;
+            ritualIdleSinceGameTime = -1L;
             return false;
         }
-        if (!ritualEverSeenActive && player != null) {
-            ItemStack expected = RecipeIndex.tryGetResultItem((Recipe<?>) ritualRecipe, level.registryAccess());
-            if (!expected.isEmpty()) {
-                BlockPos pos = be.getBlockPos();
-                if (pos != null && level.isLoaded(pos)) {
-                    var entities = level.getEntitiesOfClass(
-                            net.minecraft.world.entity.item.ItemEntity.class,
-                            new net.minecraft.world.phys.AABB(pos).inflate(3),
-                            e -> ItemStack.isSameItemSameTags(e.getItem(), expected));
-                    if (!entities.isEmpty()) return true;
-                }
-                var inv = player.getInventory();
-                for (ItemStack stack : inv.items) {
-                    if (ItemStack.isSameItemSameTags(stack, expected)) return true;
-                }
-                for (ItemStack stack : inv.offhand) {
-                    if (ItemStack.isSameItemSameTags(stack, expected)) return true;
-                }
+        if (!hasExpectedRitualOutput(level, be)) {
+            ritualIdleSinceGameTime = -1L;
+            return false;
+        }
+        if (!ritualEverSeenActive) {
+            return true;
+        }
+        long now = level.getGameTime();
+        if (ritualIdleSinceGameTime < 0L) {
+            ritualIdleSinceGameTime = now;
+            return false;
+        }
+        return now - ritualIdleSinceGameTime >= RITUAL_IDLE_STABILITY_TICKS;
+    }
+
+    private boolean hasExpectedRitualOutput(ServerLevel level, BlockEntity be) {
+        ItemStack expected = RecipeIndex.tryGetResultItem((Recipe<?>) ritualRecipe, level.registryAccess());
+        if (expected.isEmpty()) return false;
+
+        var handlerOpt = Reflect.<Object>getField(altar, "itemStackHandler");
+        if (handlerOpt.isPresent() && handlerOpt.get() instanceof LazyOptional<?> lazy) {
+            var resolved = lazy.resolve();
+            if (resolved.isPresent() && resolved.get() instanceof IItemHandler handler
+                    && IBatchDelegate.matchesProducedItem(handler.getStackInSlot(0), expected)) {
+                return true;
             }
         }
-        return ritualEverSeenActive;
+
+        BlockPos pos = be.getBlockPos();
+        if (pos != null && level.isLoaded(pos)) {
+            var entities = level.getEntitiesOfClass(
+                    net.minecraft.world.entity.item.ItemEntity.class,
+                    new net.minecraft.world.phys.AABB(pos).inflate(3),
+                    e -> IBatchDelegate.matchesProducedItem(e.getItem(), expected));
+            if (!entities.isEmpty()) return true;
+        }
+        if (player == null) return false;
+        var inv = player.getInventory();
+        for (ItemStack stack : inv.items) {
+            if (IBatchDelegate.matchesProducedItem(stack, expected)) return true;
+        }
+        for (ItemStack stack : inv.offhand) {
+            if (IBatchDelegate.matchesProducedItem(stack, expected)) return true;
+        }
+        return false;
     }
 
     private boolean isBrazierCraftComplete(ServerLevel level) {
@@ -909,9 +953,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
                     var handler = (IItemHandler) resolved.get();
                     ItemStack inAltar = handler.getStackInSlot(0);
                     if (!inAltar.isEmpty()) {
-                        boolean matches = ItemStack.isSameItemSameTags(inAltar, expected)
-                                || ItemStack.isSameItem(inAltar, expected);
-                        if (matches) {
+                        if (IBatchDelegate.matchesProducedItem(inAltar, expected)) {
                             ItemStack collected = inAltar.copy();
                             if (collected.getCount() > expected.getCount()) {
                                 collected.setCount(expected.getCount());
@@ -932,8 +974,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             var entities = machineLevel.getEntitiesOfClass(
                     net.minecraft.world.entity.item.ItemEntity.class,
                     new net.minecraft.world.phys.AABB(myPos).inflate(3),
-                    e -> ItemStack.isSameItemSameTags(e.getItem(), expected)
-                            || ItemStack.isSameItem(e.getItem(), expected));
+                    e -> IBatchDelegate.matchesProducedItem(e.getItem(), expected));
             for (var entity : entities) {
                 ItemStack collected = entity.getItem().copy();
                 if (collected.getCount() > expected.getCount()) {
@@ -965,7 +1006,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
 
         for (ItemStack stack : all) {
-            if (ItemStack.isSameItemSameTags(stack, expected)) {
+            if (IBatchDelegate.matchesProducedItem(stack, expected)) {
                 ItemStack collected = stack.split(expected.getCount());
                 return collected;
             }
@@ -990,7 +1031,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             var entities = brazierLevel.getEntitiesOfClass(
                     net.minecraft.world.entity.item.ItemEntity.class,
                     new net.minecraft.world.phys.AABB(myPos).inflate(3),
-                    e -> ItemStack.isSameItemSameTags(e.getItem(), expected));
+                    e -> IBatchDelegate.matchesProducedItem(e.getItem(), expected));
             for (var entity : entities) {
                 ItemStack collected = entity.getItem().copy();
                 if (collected.getCount() > expected.getCount()) {
@@ -1008,12 +1049,12 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         // Fallback: check player inventory
         var inv = player.getInventory();
         for (ItemStack stack : inv.items) {
-            if (ItemStack.isSameItemSameTags(stack, expected)) {
+            if (IBatchDelegate.matchesProducedItem(stack, expected)) {
                 return stack.split(expected.getCount());
             }
         }
         for (ItemStack stack : inv.offhand) {
-            if (ItemStack.isSameItemSameTags(stack, expected)) {
+            if (IBatchDelegate.matchesProducedItem(stack, expected)) {
                 return stack.split(expected.getCount());
             }
         }
@@ -1028,6 +1069,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             recoverBrazierItems();
         } else {
             ritualEverSeenActive = false;
+            ritualIdleSinceGameTime = -1L;
             refundActivationToPlayer();
             recoverFromPedestals();
         }
@@ -1041,6 +1083,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             brazierCraftStarted = false;
         } else {
             ritualEverSeenActive = false;
+            ritualIdleSinceGameTime = -1L;
             clearFilledPedestals();
         }
         resetState();

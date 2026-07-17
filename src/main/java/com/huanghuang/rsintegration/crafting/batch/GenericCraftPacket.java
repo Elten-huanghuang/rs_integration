@@ -858,6 +858,8 @@ public final class GenericCraftPacket {
                         if (tracker != null) tracker.changed(player, result.copy());
                         ItemStack leftover = network.insertItem(result.copy(), result.getCount(),
                                 com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                        ItemStack inserted = com.huanghuang.rsintegration.util.InsertedStackDelta.between(result, leftover);
+                        com.huanghuang.rsintegration.compat.ftbquests.ExternalItemProgressBridge.enqueueCrafted(player, inserted);
                         if (!leftover.isEmpty()) {
                             safeGiveToPlayer(player, leftover);
                         }
