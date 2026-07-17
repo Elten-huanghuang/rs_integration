@@ -22,6 +22,7 @@ public final class ModIds {
     public static final String IMMORTERS_DELIGHT = "immortalers_delight";
     public static final String FARMERSDELIGHT = "farmersdelight";
     public static final String FARMERSRESPITE = "farmersrespite";
+    public static final String IRON_FURNACES = "ironfurnaces";
     public static final String MAJRUSZS_ACCESSORIES = "majruszsaccessories";
 
     // Dependencies
@@ -36,6 +37,7 @@ public final class ModIds {
     public static final String YZZZ_OPTIMIZATION = "yzzzopt";
     public static final String BETTER_COMBAT = "bettercombat";
     public static final String CRABBERS_DELIGHT = "crabbersdelight";
+    public static final String APOTHEOSIS = "apotheosis";
 
     // Composite ModType IDs (one mod → multiple machine types)
     public static final String ID_EMBERS_ALCHEMY = "embers_alchemy";

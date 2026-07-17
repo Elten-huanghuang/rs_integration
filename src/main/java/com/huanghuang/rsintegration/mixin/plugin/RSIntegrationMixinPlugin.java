@@ -33,8 +33,22 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
         // @Mixin TARGET class is absent; a body reference to another absent mod
         // class would instead NoClassDefFoundError at apply/runtime. Probe that
         // second class here so the whole mixin is skipped when it is missing.
+        if (mixinClassName.contains("apotheosis.EnchLibraryScreenMixin")) {
+            return isClassPresent("dev.shadowsoffire.apotheosis.ench.library.EnchLibraryScreen");
+        }
+        if (mixinClassName.contains("ironfurnaces.BlockIronFurnaceTileBaseMixin")) {
+            return isClassPresent("ironfurnaces.tileentity.furnaces.BlockIronFurnaceTileBase");
+        }
         if (mixinClassName.contains("forbidden.ClibanoMainBlockEntityAccessor")) {
             return isClassPresent("com.stal111.forbidden_arcanus.common.block.entity.clibano.ClibanoMainBlockEntity");
+        }
+        if (mixinClassName.contains("CraftingManagerMixin")
+                || mixinClassName.contains("CraftingTaskMixin")
+                || mixinClassName.contains("CraftingTaskAccessor")
+                || mixinClassName.contains("ItemGridHandlerMixin")) {
+            return isClassPresent("com.refinedmods.refinedstorage.apiimpl.autocrafting.CraftingManager")
+                    && isClassPresent("dev.ftb.mods.ftbquests.quest.ServerQuestFile")
+                    && isClassPresent("dev.ftb.mods.ftbquests.quest.TeamData");
         }
         if (mixinClassName.contains("InventoryHelperExternalItemMixin")) {
             return isClassPresent("dev.ftb.mods.ftbquests.quest.ServerQuestFile")
@@ -55,6 +69,11 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
         if (mixinClassName.contains("moonstone.NineSwordBooks")) {
             // Target is Moonstone; body uses Curios' SlotContext.
             return isClassPresent("top.theillusivec4.curios.api.SlotContext");
+        }
+        if (mixinClassName.contains("terraequipment.AutoPotionTickerMixin")) {
+            return isClassPresent("com.inolia_zaicek.terra_equipment.util.AutoPotionTicker")
+                    && isClassPresent("com.inolia_zaicek.terra_equipment.item.EffectPotionItem")
+                    && isClassPresent("com.inolia_zaicek.terra_equipment.config.TEConfig");
         }
         return true;
     }

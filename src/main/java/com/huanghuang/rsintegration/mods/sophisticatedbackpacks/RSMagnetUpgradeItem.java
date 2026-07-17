@@ -95,8 +95,11 @@ public class RSMagnetUpgradeItem extends MagnetUpgradeItem {
     private static String dimDisplayName(String dimKey) {
         ResourceLocation rl = ResourceLocation.tryParse(dimKey);
         if (rl == null) return dimKey;
+        String translationKey = "dimension." + rl.getNamespace() + "." + rl.getPath();
+        String translated = Component.translatable(translationKey).getString();
+        if (!translationKey.equals(translated)) return translated;
         String path = rl.getPath();
-        // Convert snake_case to Title Case: "the_nether" → "The Nether"
+        // Convert snake_case to Title Case when a modded dimension has no translation.
         String[] parts = path.split("_");
         StringBuilder sb = new StringBuilder();
         for (String part : parts) {

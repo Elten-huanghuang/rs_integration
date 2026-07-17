@@ -19,8 +19,7 @@ Deep integration between [Refined Storage](https://www.curseforge.com/minecraft/
 - **Binding Tooltips** — Hold Shift on any bound item to see its full bound-machine list with dimension names (supports resource-pack translations via `dimension.<namespace>.<path>`)
 - **Machine Management Center** — When the number of bound machines exceeds the config threshold, a hub button appears on the RS Grid side. Click to open a draggable, searchable (pinyin) grid overlay showing real-time machine status (Idle / Working / Output Ready), with left-click to collect/insert/open GUI, number keys 1-9 for quick selection
 - **Aetherworks HUD** — In-world overlay showing heat, temperature, ember level, lever binding, and auto-hammer status when looking at an Aetherium Anvil
-- **Resonance Disk** — A special RS storage disk whose contents contribute passive item effects (attribute modifiers, inventoryTick simulation, event-driven redirects) as if the items were in the player's inventory
-- **Resonance Backpack** — A portable GUI for browsing and managing the resonance disk contents, accessible via a button in the RS terminal side panel
+- **Resonance Disk** — A special RS storage disk whose contents provide passive effects, inventory Buffs, and compatible resource consumption as if carried by the player; supports every Wizard Terra Curios `BuffItem` and Terra Equipment's stacked infinite potions
 
 ## Dependencies
 
@@ -37,16 +36,19 @@ Deep integration between [Refined Storage](https://www.curseforge.com/minecraft/
 | Moonstone | Optional | Resonance disk Nine Sword Book support |
 | Chapter of Yuusha | Optional | Resonance disk Nine Sword Book compat support |
 | Reliquary | Optional | Resonance disk consumption redirect support |
+| Wizard Terra Curios | Optional | Resonance disk inventory effects for every `BuffItem` |
+| Terra Equipment | Optional | Resonance disk stacked infinite-potion effects |
 
 ## Supported Mods
 
 | Mod | Machines | Binding | Crafting | Remote GUI |
 |---|---|---|---|---|
 | **Vanilla** | Furnace, Blast Furnace, Smoker, Stonecutter, Smithing Table, Anvil, Enchanting Table | ✅ | ✅ | ✅ |
+| **Iron Furnaces** | All furnace tiers (regular, blasting, and smoking modes)¹ | ✅ | ✅ | ✅ |
 | **Goety** | Necro Brazier, Dark Altar, Cursed Cage, Soul Candlestick | ✅ | ✅ | ❌ |
 | **Malum** | Spirit Altar, Spirit Crucible (core + components) | ✅ | ✅ | ❌ |
 | **Eidolon** | Worktable, Crucible, Brazier | ✅ | ✅ | ⚠️¹ |
-| **Forbidden & Arcanus** | Hephaestus Forge, Smithing Table² | ✅ | ✅ | ❌ |
+| **Forbidden & Arcanus** | Hephaestus Forge, Smithing Table, Clibano | ✅ | ✅ | ❌ |
 | **Wizards Reborn** | Wissen Crystallizer, Arcane Iterator, Arcane Workbench, Crystal Block | ✅ | ✅ | ❌ |
 | **Touhou Little Maid** | Maid Altar | ✅ | ✅ | ❌ |
 | **Embers Rekindled** | Alchemy Tablet | ✅ | ✅ | ❌ |
@@ -72,11 +74,14 @@ Deep integration between [Refined Storage](https://www.curseforge.com/minecraft/
 | **Enigmatic Addons** | Passive item effects (via resonance disk) | ➖ | ➖ | ➖ |
 | **Moonstone** | Nine Sword Books (via resonance disk) | ➖ | ➖ | ➖ |
 | **Chapter of Yuusha** | Nine Sword Books compat (via resonance disk) | ➖ | ➖ | ➖ |
-| **Reliquary** | Pyromancer Staff, coin consumption (via resonance disk) | ➖ | ➖ | ➖ |
+| **Reliquary** | Pyromancer Staff consumption (via resonance disk) | ➖ | ➖ | ➖ |
 | **Forbidden & Arcanus** | Spectral Eye Amulet (via resonance disk) | ➖ | ➖ | ➖ |
+| **Wizard Terra Curios** | All `BuffItem` inventory Buffs (via resonance disk) | ➖ | ➖ | ➖ |
+| **Terra Equipment** | Stacked infinite potions meeting the mod's configured threshold (via resonance disk) | ➖ | ➖ | ➖ |
 
-> ¹ Eidolon remote GUI: worktable only.  
-> ² Forbidden & Arcanus `apply_*_modifier` recipes require a bound Smithing Table; JEI `+` opens the Smithing Table GUI with template and materials auto-filled.
+> ¹ Iron Furnaces currently supports regular furnace mode plus blasting/smoking upgrades; factory and generator modes are not supported for automatic processing.
+> ² Eidolon remote GUI: worktable only.
+> ³ Forbidden & Arcanus `apply_*_modifier` recipes require a bound Smithing Table; JEI `+` opens the Smithing Table GUI with template and materials auto-filled.
 
 **Custom GUI Machines** — Any mod with container-based machines (e.g. Metal Barrels, PGP, EMX Arms, Apotheosis, TerraCurio) can be added via `customGuiMachineMods` in config for remote GUI access, without writing any Java code. The default list includes `crabbersdelight`, `metalbarrels`, `pgp`, `emxarms`, `apotheosis`, `ancientreforging`. You must manually bind each machine by shift-right-clicking it with a Network Linker.
 

@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.sidepanel.client.AltarCraftButtons;
 import mezz.jei.gui.recipes.RecipesGui;
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.gen.Invoker;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
@@ -11,7 +12,10 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 import org.spongepowered.asm.mixin.Unique;
 
 @Mixin(value = RecipesGui.class, remap = false)
-public class RecipesGuiMixin {
+public abstract class RecipesGuiMixin {
+
+    @Invoker("updateLayout")
+    public abstract void rsi$invokeUpdateLayout();
 
     @Unique
     private static long missLastLogged;

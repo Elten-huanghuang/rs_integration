@@ -1,8 +1,10 @@
 package com.huanghuang.rsintegration.crafting;
 
+import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import org.junit.jupiter.api.Test;
@@ -32,6 +34,22 @@ class AsyncCraftChainProductionTest extends BootstrapTest {
 
         var expected = new IBatchDelegate.ExpectedProduction(new ItemStack(Items.IRON_INGOT), 2);
         assertEquals(2, AsyncCraftChain.countMatchingProduction(List.of(actualStack), expected));
+    }
+
+    @Test
+    void appendedTerminalKeepsResolverScaledExecutions() {
+        var intermediate = new CraftingResolver.ResolutionStep(
+                new ResourceLocation("test", "intermediate"), ModType.GENERIC,
+                new ResourceLocation("minecraft", "crafting"), List.of(), List.of(), false, 2);
+        var terminal = new CraftingResolver.ResolutionStep(
+                new ResourceLocation("test", "terminal"), ModType.GENERIC,
+                new ResourceLocation("test", "ritual"), List.of(), List.of(), false, 1);
+
+        List<CraftingResolver.ResolutionStep> combined =
+                AsyncCraftChain.compatibilitySteps(List.of(intermediate), terminal, 2);
+
+        assertEquals(2, combined.get(0).executions());
+        assertEquals(2, combined.get(1).executions());
     }
 
     @Test

@@ -17,8 +17,20 @@ public enum MachineInteractType {
     /** Classify a machine by its BlockEntity type. */
     public static MachineInteractType fromBe(BlockEntity be) {
         if (be instanceof AbstractFurnaceBlockEntity) return QUICK;
+        if (isIronFurnace(be)) return QUICK;
         // CampfireBlockEntity also extends AbstractFurnaceBlockEntity
         return GUI;
+    }
+
+    private static boolean isIronFurnace(BlockEntity be) {
+        Class<?> type = be != null ? be.getClass() : null;
+        while (type != null) {
+            if ("ironfurnaces.tileentity.furnaces.BlockIronFurnaceTileBase".equals(type.getName())) {
+                return true;
+            }
+            type = type.getSuperclass();
+        }
+        return false;
     }
 
     /** Classify by block class name (off-thread / no BE available). */

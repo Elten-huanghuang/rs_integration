@@ -50,5 +50,9 @@ public final class RSBindingSyncPacket {
     private static void applyOnClient(RSBindingSyncPacket packet) {
         BindingCache.getInstance().updateBindings(packet.bindings);
         MachineHub.refreshMachines();
+        if (net.minecraftforge.fml.ModList.get().isLoaded(
+                com.huanghuang.rsintegration.util.ModIds.JEI)) {
+            com.huanghuang.rsintegration.mods.ironfurnaces.client.IronFurnaceJeiRefresh.refreshIfOpen();
+        }
     }
 }

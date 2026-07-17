@@ -325,6 +325,8 @@ public final class CraftingPlanScreen extends Screen {
     protected void init() {
         super.init();
         currentRepeat = Math.max(1, Math.min(plan.repeatCount(), 64));
+        repeatBuf = Integer.toString(currentRepeat);
+        lastKeyTime = 0;
         lastRefreshCount = currentRepeat;
         altChoices.clear();
         Font font = minecraft.font;
@@ -2031,6 +2033,8 @@ public final class CraftingPlanScreen extends Screen {
                         case 6: currentRepeat = Math.min(64, currentRepeat + 10); break;
                         case 7: currentRepeat = 64; break;
                     }
+                    repeatBuf = Integer.toString(currentRepeat);
+                    lastKeyTime = 0;
                     requestPlanRefresh();
                     return true;
                 }

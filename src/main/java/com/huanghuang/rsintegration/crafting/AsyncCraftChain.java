@@ -187,7 +187,7 @@ public final class AsyncCraftChain {
                            CraftPlanGraph graph, CraftingResolver.ResolutionStep terminalStep,
                            int repeatCount) {
         this(UUID.randomUUID(), playerId, server, network,
-                amplifyModSteps(appendTerminalStep(projectSteps(graph), terminalStep), repeatCount), graph);
+                compatibilitySteps(projectSteps(graph), terminalStep, repeatCount), graph);
         // The resolver graph describes the materials needed by terminalStep; it
         // does not contain terminalStep itself. Running that graph scheduler would
         // therefore finish after the intermediates and silently skip the requested
@@ -319,29 +319,22 @@ public final class AsyncCraftChain {
         return List.copyOf(projected);
     }
 
-    private static List<CraftingResolver.ResolutionStep> appendTerminalStep(
+    static List<CraftingResolver.ResolutionStep> compatibilitySteps(
             List<CraftingResolver.ResolutionStep> projected,
-            CraftingResolver.ResolutionStep terminalStep) {
+            CraftingResolver.ResolutionStep terminalStep,
+            int repeatCount) {
         List<CraftingResolver.ResolutionStep> result = new ArrayList<>(projected.size() + 1);
+        // A resolver graph built from repeat-expanded root specs already contains
+        // scaled intermediate executions. Only the terminal recipe is absent.
         result.addAll(projected);
-        result.add(Objects.requireNonNull(terminalStep, "terminalStep"));
-        return List.copyOf(result);
-    }
-
-    private static List<CraftingResolver.ResolutionStep> amplifyModSteps(
-            List<CraftingResolver.ResolutionStep> source, int repeatCount) {
-        if (repeatCount <= 1) return source;
-        List<CraftingResolver.ResolutionStep> result = new ArrayList<>(source.size());
-        for (CraftingResolver.ResolutionStep step : source) {
-            if (step.modType() == ModType.GENERIC) {
-                result.add(step);
-            } else {
-                result.add(new CraftingResolver.ResolutionStep(step.recipeId(), step.modType(),
-                        step.recipeTypeId(), step.alternativeIds(), step.alternativeModTypes(),
-                        step.inferMode(), StepExecutor.mulCount(step.executions(), repeatCount),
-                        step.syntheticInput(), step.syntheticOutput()));
-            }
+        CraftingResolver.ResolutionStep terminal = Objects.requireNonNull(terminalStep, "terminalStep");
+        int executions = Math.max(1, repeatCount);
+        if (terminal.executions() != executions) {
+            terminal = new CraftingResolver.ResolutionStep(terminal.recipeId(), terminal.modType(),
+                    terminal.recipeTypeId(), terminal.alternativeIds(), terminal.alternativeModTypes(),
+                    terminal.inferMode(), executions, terminal.syntheticInput(), terminal.syntheticOutput());
         }
+        result.add(terminal);
         return List.copyOf(result);
     }
 
@@ -2139,30 +2132,40 @@ public final class AsyncCraftChain {
             // Fall through: single-machine path below
         }
 
-        IBatchDelegate delegate = step.inferMode()
+        IBatchDelegate initialDelegate = step.inferMode()
                 ? step.modType().createInferDelegate()
                 : createDelegate(step.modType());
-        if (delegate == null) return null;
+        if (initialDelegate == null) return null;
 
         // GenericBatchDelegate computes the result from pre-reserved materials
         // without a physical machine.  Use the shared-ledger preReserve flow so
         // intermediate outputs from prior chain steps (in virtualInventory) are
         // visible to subsequent steps.
-        if (delegate instanceof GenericBatchDelegate) {
-            if (!delegate.validateAndInit(online, step.recipeId(), null, null)) {
+        if (initialDelegate instanceof GenericBatchDelegate) {
+            if (!initialDelegate.validateAndInit(online, step.recipeId(), null, null)) {
                 return null;
             }
-            if (delegate instanceof AbstractBatchDelegate abd) {
+            if (initialDelegate instanceof AbstractBatchDelegate abd) {
                 abd.setMachineServer(server);
             }
-            return startGenericStep(delegate, step, online);
+            return startGenericStep(initialDelegate, step, online);
         }
 
-        // Try each bound machine until one validates successfully.
+        IBatchDelegate delegate = null;
+        // Try each bound machine until one is ready. Retryable preparation never
+        // reaches material reservation or ledger commit.
         BoundMachine matchedMachine = null;
+        boolean retryableRejection = false;
+        String fatalDetail = "";
         for (BoundMachine m : machines) {
             try {
-                if (delegate.validateAndInit(online, step.recipeId(), m.dim(), m.pos())) {
+                IBatchDelegate candidate = delegate == null ? initialDelegate
+                        : step.inferMode() ? step.modType().createInferDelegate() : createDelegate(step.modType());
+                if (candidate == null) continue;
+                IBatchDelegate.PreparationResult preparation = candidate.prepare(
+                        online, step.recipeId(), m.dim(), m.pos());
+                if (preparation.state() == IBatchDelegate.PreparationState.READY) {
+                    delegate = candidate;
                     matchedMachine = m;
                     if (delegate instanceof AbstractBatchDelegate abd) {
                         abd.setMachineDim(m.dim());
@@ -2171,15 +2174,22 @@ public final class AsyncCraftChain {
                     }
                     break;
                 }
+                candidate.releasePreparationResources();
+                if (preparation.state() == IBatchDelegate.PreparationState.RETRY) {
+                    retryableRejection = true;
+                } else if (fatalDetail.isEmpty()) {
+                    fatalDetail = preparation.detail();
+                }
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.debug(ctx.format("validateAndInit failed for machine at {}"), m.pos(), e);
+                RSIntegrationMod.LOGGER.debug(ctx.format("prepare failed for machine at {}"), m.pos(), e);
+                if (fatalDetail.isEmpty()) fatalDetail = e.getMessage();
             }
         }
         if (matchedMachine == null) {
-            // Machines were found but validateAndInit failed on every one.
-            // The delegate already printed a specific error (pedestal, energy, etc.).
-            RSIntegrationMod.LOGGER.warn(ctx.format("All {} bound machines failed validateAndInit for mod type {}: recipe={}"),
-                    machines.size(), step.modType(), step.recipeId());
+            RSIntegrationMod.LOGGER.warn(ctx.format(
+                    "All {} bound machines failed preparation for mod type {}: recipe={} detail={}"),
+                    machines.size(), step.modType(), step.recipeId(),
+                    retryableRejection ? "temporarily unavailable" : fatalDetail);
             online.sendSystemMessage(Component.translatable(
                     "rsi.async.error.machine_valid_failed", step.recipeId()));
             return null;
@@ -2199,8 +2209,9 @@ public final class AsyncCraftChain {
             RSIntegrationMod.LOGGER.warn(ctx.format("Protection check failed"), e);
         }
 
+        final IBatchDelegate startedDelegate = delegate;
         try {
-            List<IngredientSpec> specs = delegate.getRequiredMaterials();
+            List<IngredientSpec> specs = startedDelegate.getRequiredMaterials();
             if (specs != null && !specs.isEmpty()) {
                 List<ItemStack> materials = preReserveStepMaterials(specs, online);
                 if (materials == null) {
@@ -2236,7 +2247,7 @@ public final class AsyncCraftChain {
                     abd.useSharedLedger(ledger);
                 }
                 if (!flatOperationSession.tryStart(
-                        () -> delegate.tryStartWithMaterials(online, materials, ledger))) {
+                        () -> startedDelegate.tryStartWithMaterials(online, materials, ledger))) {
                     List<ItemStack> escaped = disarmOutputCapture();
                     closeFlatOperationScope();
                     if (!escaped.isEmpty()) {
@@ -2294,7 +2305,7 @@ public final class AsyncCraftChain {
                     return null;
                 }
                 if (!flatOperationSession.tryStart(
-                        () -> delegate.tryStartSingleCraft(online, ledger))) {
+                        () -> startedDelegate.tryStartSingleCraft(online, ledger))) {
                     List<ItemStack> escaped = disarmOutputCapture();
                     closeFlatOperationScope();
                     if (!escaped.isEmpty()) {
@@ -2449,9 +2460,20 @@ public final class AsyncCraftChain {
         }
 
         // Build a parallel group — constructor internally creates and validates
-        // one delegate per machine
+        // one delegate per machine. Pass the same recipe-aware capability contract
+        // used by graph execution; otherwise the operation kernel accepts the group
+        // but rejects every child as capability-exclusive after materials are committed.
+        IBatchDelegate capabilityProbe = step.inferMode()
+                ? step.modType().createInferDelegate() : createDelegate(step.modType());
+        var capabilityDecision = concurrencyDecision(step, capabilityProbe);
+        if (capabilityDecision.exclusive()) {
+            RSIntegrationMod.LOGGER.debug(ctx.format(
+                    "[LB] parallel disabled by capability policy: {}"), capabilityDecision.reason());
+            return null;
+        }
         ParallelCraftGroup group = new ParallelCraftGroup(available, step.modType(),
-                step.recipeId(), online, stepRemaining);
+                step.recipeId(), online, stepRemaining, step.inferMode(),
+                capabilityDecision.capabilities());
         if (!group.validateAndInit(online, step.recipeId(), null, BlockPos.ZERO)) {
             RSIntegrationMod.LOGGER.debug(ctx.format("Parallel group empty — all children failed validateAndInit"));
             return null;
@@ -2796,7 +2818,7 @@ public final class AsyncCraftChain {
         int count = 0;
         for (ItemStack stack : results) {
             if (stack != null && !stack.isEmpty()
-                    && ItemStack.isSameItem(stack, expected.item())) {
+                    && IBatchDelegate.matchesProducedItem(stack, expected.item())) {
                 count = count > Integer.MAX_VALUE - stack.getCount()
                         ? Integer.MAX_VALUE : count + stack.getCount();
             }
@@ -2972,6 +2994,11 @@ public final class AsyncCraftChain {
                             com.refinedmods.refinedstorage.api.util.Action.PERFORM);
                     var tracker = network.getItemStorageTracker();
                     if (tracker != null) tracker.changed(online, vi.copy());
+                    ItemStack inserted = com.huanghuang.rsintegration.util.InsertedStackDelta.between(vi, leftover);
+                    if (targetOutput != null && vi.is(targetOutput.getItem())) {
+                        com.huanghuang.rsintegration.compat.ftbquests.ExternalItemProgressBridge.enqueueCrafted(
+                                online, inserted);
+                    }
                     if (!leftover.isEmpty()) {
                         safeGiveToPlayer(online, leftover);
                     }

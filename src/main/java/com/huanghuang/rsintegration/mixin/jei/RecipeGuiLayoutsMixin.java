@@ -1211,7 +1211,7 @@ public class RecipeGuiLayoutsMixin {
                 if (!stack.isEmpty()) {
                     for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
                         if (debug) allBlockKeys.add(entry.blockKey());
-                        if (entry.blockKey().contains(filter)) return entry;
+                        if (rsi$bindingMatchesFilter(entry.blockKey(), filter)) return entry;
                     }
                 }
             }
@@ -1221,13 +1221,13 @@ public class RecipeGuiLayoutsMixin {
         for (ItemStack stack : inv.items) {
             for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
                 if (debug) allBlockKeys.add(entry.blockKey());
-                if (entry.blockKey().contains(filter)) return entry;
+                if (rsi$bindingMatchesFilter(entry.blockKey(), filter)) return entry;
             }
         }
         for (ItemStack stack : inv.offhand) {
             for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
                 if (debug) allBlockKeys.add(entry.blockKey());
-                if (entry.blockKey().contains(filter)) return entry;
+                if (rsi$bindingMatchesFilter(entry.blockKey(), filter)) return entry;
             }
         }
 
@@ -1241,7 +1241,7 @@ public class RecipeGuiLayoutsMixin {
                         ItemStack stack = stacks.getStackInSlot(s);
                         for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
                             if (debug) allBlockKeys.add(entry.blockKey());
-                            if (entry.blockKey().contains(filter)) return entry;
+                            if (rsi$bindingMatchesFilter(entry.blockKey(), filter)) return entry;
                         }
                     }
                 }
@@ -1254,6 +1254,25 @@ public class RecipeGuiLayoutsMixin {
         }
 
         return null;
+    }
+
+    @Unique
+    private static boolean rsi$bindingMatchesFilter(String blockKey, String filter) {
+        if (blockKey == null || filter == null) return false;
+        if (blockKey.contains(filter)) return true;
+        int sep = blockKey.indexOf("||");
+        if (sep < 0) return false;
+        String prefix = blockKey.substring(0, sep);
+        if ("vanilla_furnace".equals(filter)) {
+            return "ironfurnaces_furnace".equals(prefix);
+        }
+        if ("vanilla_blast_furnace".equals(filter)) {
+            return "ironfurnaces_blast_furnace".equals(prefix);
+        }
+        if ("vanilla_smoker".equals(filter)) {
+            return "ironfurnaces_smoker".equals(prefix);
+        }
+        return false;
     }
 
     @Unique

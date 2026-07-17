@@ -70,4 +70,11 @@ public final class NetworkPacketIds {
 
     // ── FTB Quests submission (90-99) ────────────────────────────────
     public static final int FTB_QUEST_SUBMISSION_REQUEST = 90;
+
+    // ── Apotheosis library (100-109) ─────────────────────────────────
+    public static final int APOTHEOSIS_LIBRARY_LEVEL = 100;
+    public static final int APOTHEOSIS_LIBRARY_SCAN_REQUEST = 101;
+    public static final int APOTHEOSIS_LIBRARY_SCAN_RESPONSE = 102;
+    public static final int APOTHEOSIS_LIBRARY_IMPORT_REQUEST = 103;
+    public static final int APOTHEOSIS_LIBRARY_IMPORT_RESULT = 104;
 }

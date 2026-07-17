@@ -35,6 +35,17 @@ public interface IBatchDelegate {
         }
     }
 
+    /**
+     * Match a physically produced stack against a recipe-output template.
+     * Runtime NBT (enchantments, durability, capabilities) may legitimately be
+     * added by the machine, so production auditing compares item identity only.
+     */
+    static boolean matchesProducedItem(@Nullable ItemStack actual, @Nullable ItemStack expected) {
+        return actual != null && expected != null
+                && !actual.isEmpty() && !expected.isEmpty()
+                && ItemStack.isSameItem(actual, expected);
+    }
+
     record ExpectedProduction(ItemStack item, int count) {
         public ExpectedProduction {
             item = item == null ? ItemStack.EMPTY : item.copyWithCount(1);

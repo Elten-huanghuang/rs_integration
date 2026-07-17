@@ -56,6 +56,9 @@ public final class MachineStatusReader {
         if (be instanceof AbstractFurnaceBlockEntity furnace) {
             return readFurnace(furnace);
         }
+        if (isIronFurnace(be)) {
+            return readIronFurnace(be);
+        }
 
         return MachineStatus.UNKNOWN;
     }
@@ -88,6 +91,33 @@ public final class MachineStatusReader {
 
         int displayMax = cookTotal > 0 ? cookTotal : 200;
         return new MachineStatus(state, cookProgress, displayMax, input, output, fuel);
+    }
+
+    private static MachineStatus readIronFurnace(BlockEntity be) {
+        try {
+            boolean ordinary = (boolean) be.getClass().getMethod("isFurnace").invoke(be);
+            if (!ordinary) return MachineStatus.UNKNOWN;
+            ItemStack input = ((net.minecraft.world.Container) be).getItem(0).copy();
+            ItemStack fuel = ((net.minecraft.world.Container) be).getItem(1).copy();
+            ItemStack output = ((net.minecraft.world.Container) be).getItem(2).copy();
+            int progress = be.getClass().getField("cookTime").getInt(be);
+            int total = be.getClass().getField("totalCookTime").getInt(be);
+            boolean burning = (boolean) be.getClass().getMethod("isBurning").invoke(be);
+            MachineState state = !output.isEmpty() ? MachineState.HAS_OUTPUT
+                    : (burning || progress > 0 ? MachineState.WORKING : MachineState.IDLE);
+            return new MachineStatus(state, progress, total > 0 ? total : 200, input, output, fuel);
+        } catch (ReflectiveOperationException | ClassCastException exception) {
+            return MachineStatus.UNKNOWN;
+        }
+    }
+
+    private static boolean isIronFurnace(BlockEntity be) {
+        Class<?> type = be.getClass();
+        while (type != null) {
+            if ("ironfurnaces.tileentity.furnaces.BlockIronFurnaceTileBase".equals(type.getName())) return true;
+            type = type.getSuperclass();
+        }
+        return false;
     }
 
     private static int readIntField(Object target, Field field) {

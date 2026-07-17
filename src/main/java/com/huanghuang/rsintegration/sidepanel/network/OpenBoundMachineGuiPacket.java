@@ -8,6 +8,7 @@ import com.huanghuang.rsintegration.network.gui.BlockGuiRegistry;
 import com.huanghuang.rsintegration.network.gui.GuiOpenRateLimiter;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.mods.apotheosis.ApotheosisLibraryBinding;
 import com.huanghuang.rsintegration.mods.vanilla.VanillaFurnaceFuelPolicy;
 import com.huanghuang.rsintegration.util.ChunkUtils;
 import com.refinedmods.refinedstorage.api.network.INetwork;
@@ -28,6 +29,7 @@ import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.inventory.SmithingMenu;
 import net.minecraftforge.registries.ForgeRegistries;
+import net.minecraftforge.fml.ModList;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -36,7 +38,6 @@ import net.minecraft.world.level.block.entity.AbstractFurnaceBlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
-import net.minecraftforge.common.ForgeHooks;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.entity.player.PlayerInteractEvent;
 import net.minecraftforge.items.ItemHandlerHelper;
@@ -129,6 +130,23 @@ public final class OpenBoundMachineGuiPacket {
                 return;
             }
 
+            var bindingEntry = AltarBindingRegistry.findBindingEntry(player, packet.dim, packet.pos);
+            if (bindingEntry == null) {
+                player.sendSystemMessage(Component.translatable("rsi.error.not_bound"));
+                return;
+            }
+
+            ResourceLocation requestedBlock = bindingEntry.blockRegKey() != null
+                    ? ResourceLocation.tryParse(bindingEntry.blockRegKey())
+                    : blockIdFromBindingKey(bindingEntry.blockKey());
+            if (requestedBlock != null
+                    && "apotheosis".equals(requestedBlock.getNamespace())
+                    && !ModList.get().isLoaded("apotheosis")) {
+                player.sendSystemMessage(Component.translatable(
+                        "rsi.machine.error.required_mod_missing", "Apotheosis"));
+                return;
+            }
+
             // Protection check
             PlayerInteractEvent.RightClickBlock event = new PlayerInteractEvent.RightClickBlock(
                     player, InteractionHand.MAIN_HAND, packet.pos,
@@ -149,6 +167,15 @@ public final class OpenBoundMachineGuiPacket {
             boolean isSmithing = false;
             if (level != null) {
                 ChunkUtils.loadChunk(level, packet.pos);
+                ResourceLocation currentBlock = ForgeRegistries.BLOCKS.getKey(
+                        level.getBlockState(packet.pos).getBlock());
+                if (ApotheosisLibraryBinding.isLibrary(bindingEntry.blockRegKey())
+                        && !ApotheosisLibraryBinding.matchesSavedBlock(
+                                bindingEntry.blockRegKey(), currentBlock)) {
+                    player.sendSystemMessage(Component.translatable(
+                            "rsi.machine.error.binding_block_changed"));
+                    return;
+                }
                 BlockEntity be = level.getBlockEntity(packet.pos);
                 if (be instanceof AbstractFurnaceBlockEntity) {
                     isFurnace = true;
@@ -190,6 +217,23 @@ public final class OpenBoundMachineGuiPacket {
             }
         });
         ctx.get().setPacketHandled(true);
+    }
+
+    static ResourceLocation blockIdFromBindingKey(@Nullable String blockKey) {
+        if (blockKey == null || blockKey.isBlank()) return null;
+        int separator = blockKey.indexOf("||");
+        if (separator >= 0 && separator + 2 < blockKey.length()) {
+            String descriptionId = blockKey.substring(separator + 2);
+            if (descriptionId.startsWith("block.")) {
+                String body = descriptionId.substring("block.".length());
+                int namespaceEnd = body.indexOf('.');
+                if (namespaceEnd > 0 && namespaceEnd < body.length() - 1) {
+                    return ResourceLocation.tryParse(body.substring(0, namespaceEnd)
+                            + ":" + body.substring(namespaceEnd + 1));
+                }
+            }
+        }
+        return ResourceLocation.tryParse(blockKey);
     }
 
     // ── material pre-fill ──────────────────────────────────────────
@@ -250,7 +294,8 @@ public final class OpenBoundMachineGuiPacket {
 
         // ── auto-supply fuel into slot 1 ──
         int cookingTime = recipe instanceof AbstractCookingRecipe acr
-                ? acr.getCookingTime() : 200;
+                ? com.huanghuang.rsintegration.mods.vanilla.BrickFurnaceCompat.effectiveCookTicks(furnace, acr)
+                : 200;
         int litTime = 0;
         if (LIT_TIME != null) {
             try {
@@ -285,7 +330,8 @@ public final class OpenBoundMachineGuiPacket {
         if (remainingCook <= 0) return;
         ItemStack existing = furnace.getItem(1);
         if (!existing.isEmpty()) {
-            int burn = ForgeHooks.getBurnTime(existing, recipe.getType());
+            int burn = com.huanghuang.rsintegration.mods.vanilla.BrickFurnaceCompat.effectiveBurnTicks(
+                    furnace, existing, recipeTypeFor(furnace, recipe));
             int needed = VanillaFurnaceFuelPolicy.requiredAmount(remainingCook, burn);
             if (burn <= 0 || needed > existing.getMaxStackSize()) return;
             if (existing.getCount() >= needed) return;
@@ -307,7 +353,9 @@ public final class OpenBoundMachineGuiPacket {
         }
         VanillaFurnaceFuelPolicy.Selection selection = VanillaFurnaceFuelPolicy.select(
                 candidates, RSIntegrationConfig.VANILLA_FURNACE_FUEL_PRIORITY.get(),
-                recipe.getType(), remainingCook);
+                remainingCook,
+                stack -> com.huanghuang.rsintegration.mods.vanilla.BrickFurnaceCompat.effectiveBurnTicks(
+                        furnace, stack, recipeTypeFor(furnace, recipe)));
         if (selection == null) return;
         ItemStack extracted = network.extractItem(selection.fuel().copyWithCount(1),
                 selection.amount(), Action.PERFORM);
@@ -320,6 +368,16 @@ public final class OpenBoundMachineGuiPacket {
             player.displayClientMessage(
                     Component.translatable("rsi.vanilla.info.fuel_supplied", extracted.getCount()), true);
         }
+    }
+
+    private static net.minecraft.world.item.crafting.RecipeType<?> recipeTypeFor(
+            AbstractFurnaceBlockEntity furnace, Recipe<?> recipe) {
+        return switch (com.huanghuang.rsintegration.mods.vanilla.CookingMachineFamily.fromBlock(
+                furnace.getBlockState().getBlock())) {
+            case BLAST_FURNACE -> net.minecraft.world.item.crafting.RecipeType.BLASTING;
+            case SMOKER -> net.minecraft.world.item.crafting.RecipeType.SMOKING;
+            default -> net.minecraft.world.item.crafting.RecipeType.SMELTING;
+        };
     }
 
     // ── Stonecutter / Smithing menu pre-fill ──────────────────────────

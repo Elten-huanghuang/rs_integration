@@ -49,6 +49,8 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.BooleanValue ENABLE_FARMERSDELIGHT;
     public static ForgeConfigSpec.BooleanValue ENABLE_YOUKAISHOMECOMING;
     public static ForgeConfigSpec.BooleanValue ENABLE_FARMERSRESPITE;
+    public static ForgeConfigSpec.BooleanValue ENABLE_IRON_FURNACES;
+    public static ForgeConfigSpec.BooleanValue ENABLE_APOTHEOSIS;
     public static ForgeConfigSpec.BooleanValue ENABLE_VANILLA_MACHINES;
     public static ForgeConfigSpec.BooleanValue ENABLE_SOPHISTICATED_BACKPACKS;
     public static ForgeConfigSpec.BooleanValue ENABLE_FTB_QUEST_EXTERNAL_ITEM_PROGRESS;
@@ -176,6 +178,14 @@ public final class RSIntegrationConfig {
         ENABLE_FARMERSRESPITE = c
                 .comment("Enable RS integration with Farmer's Respite (Kettle fluid brewing).")
                 .define("enableFarmersRespite", true);
+        ENABLE_IRON_FURNACES = c
+                .comment("Enable RS integration with Iron Furnaces ordinary furnace mode.",
+                        "Supports smelting, blasting, and smoking recipes; Factory and Generator modes are not supported.")
+                .define("enableIronFurnaces", true);
+        ENABLE_APOTHEOSIS = c
+                .comment("Enable RS integration with Apotheosis, including Fletching Table recipes and remote GUI access.",
+                        "Only applies when Apotheosis is installed.")
+                .define("enableApotheosis", true);
         ENABLE_AETHERWORKS = c
                 .comment("Enable RS integration with Embers Aetherworks Addon",
                         "(Aetherium Anvil remote crafting with auto-hammer support).")
@@ -206,8 +216,8 @@ public final class RSIntegrationConfig {
                 .comment("Enable RS integration with Sophisticated Backpacks (RS-based upgrade items).")
                 .define("enableSophisticatedBackpacks", true);
         ENABLE_FTB_QUEST_EXTERNAL_ITEM_PROGRESS = c
-                .comment("Count items actually inserted by Sophisticated Backpack/RS upgrades toward",
-                        "eligible non-consuming FTB Quests item tasks. Simulated and voided items are excluded.")
+                .comment("Count items actually inserted into RS by backpack upgrades and crafting toward",
+                        "eligible FTB Quests item tasks. Simulated, voided, refunded, and recovery items are excluded.")
                 .define("enableFtbQuestExternalItemProgress", true);
         ENABLE_JEI = c
                 .comment("Show '+' buttons in JEI recipe views for remote crafting.",
@@ -340,7 +350,7 @@ public final class RSIntegrationConfig {
                         "Mods that already have full module support (aether, crockpot, tacz, etc.)",
                         "should NOT be listed here — their modules handle binding automatically.",
                         "Example: [\"crabbersdelight\", \"metalbarrels\"]")
-                .defineList("customGuiMachineMods", List.of("crabbersdelight", "metalbarrels", "pgp", "emxarms", "apotheosis", "ancientreforging"),
+                .defineList("customGuiMachineMods", List.of("crabbersdelight", "metalbarrels", "pgp", "emxarms", "ancientreforging"),
                         obj -> obj instanceof String);
         c.pop();
 

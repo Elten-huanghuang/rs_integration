@@ -15,6 +15,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.Container;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
@@ -104,6 +105,28 @@ public final class MachineCollectPacket {
 
             ChunkUtils.loadChunk(targetLevel, packet.pos);
             BlockEntity be = targetLevel.getBlockEntity(packet.pos);
+            if (isIronFurnace(be)) {
+                if (!(be instanceof Container iron) || !isOrdinaryIronFurnace(be)) {
+                    player.sendSystemMessage(Component.translatable("rsi.ironfurnaces.error.machine_mode_unsupported"));
+                    return;
+                }
+                ItemStack output = iron.getItem(2).copy();
+                if (output.isEmpty()) {
+                    player.sendSystemMessage(Component.translatable("rsi.machine.error.no_output"));
+                    return;
+                }
+                iron.setItem(2, ItemStack.EMPTY);
+                be.setChanged();
+                if (packet.toRS) {
+                    INetwork network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
+                    if (network != null) {
+                        ItemStack leftover = network.insertItem(output, output.getCount(), Action.PERFORM);
+                        if (!leftover.isEmpty()) player.drop(leftover, false);
+                    } else player.drop(output, false);
+                } else if (!player.getInventory().add(output)) player.drop(output, false);
+                player.sendSystemMessage(Component.translatable("rsi.machine.collected", output.getCount(), output.getHoverName()));
+                return;
+            }
             if (!(be instanceof AbstractFurnaceBlockEntity furnace)) {
                 player.sendSystemMessage(
                     Component.translatable("rsi.machine.error.wrong_type"));
@@ -140,5 +163,22 @@ public final class MachineCollectPacket {
                 Component.translatable("rsi.machine.collected", output.getCount(), output.getHoverName()));
         });
         context.setPacketHandled(true);
+    }
+
+    private static boolean isIronFurnace(BlockEntity be) {
+        Class<?> type = be != null ? be.getClass() : null;
+        while (type != null) {
+            if ("ironfurnaces.tileentity.furnaces.BlockIronFurnaceTileBase".equals(type.getName())) return true;
+            type = type.getSuperclass();
+        }
+        return false;
+    }
+
+    private static boolean isOrdinaryIronFurnace(BlockEntity be) {
+        try {
+            return (boolean) be.getClass().getMethod("isFurnace").invoke(be);
+        } catch (ReflectiveOperationException exception) {
+            return false;
+        }
     }
 }
