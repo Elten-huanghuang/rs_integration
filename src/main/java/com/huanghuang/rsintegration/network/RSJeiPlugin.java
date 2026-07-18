@@ -1,9 +1,13 @@
 package com.huanghuang.rsintegration.network;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.config.ClientSyncedConfig;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.mods.jei.JeiMarqueeSelector;
 import com.huanghuang.rsintegration.mods.goety.GoetyRSModule;
+import com.huanghuang.rsintegration.mods.distantworlds.LithumAltarRecipeResolver;
+import com.huanghuang.rsintegration.mods.distantworlds.LithumAltarRecipeWrapper;
+import com.huanghuang.rsintegration.mods.distantworlds.client.LithumAltarFironRecipeCategory;
 import com.huanghuang.rsintegration.sidepanel.RSInventoryTransferHandler;
 import com.huanghuang.rsintegration.util.ModIds;
 import mezz.jei.api.IModPlugin;
@@ -40,7 +44,7 @@ public final class RSJeiPlugin implements IModPlugin {
     @Override
     public void onRuntimeAvailable(@NotNull IJeiRuntime jeiRuntime) {
         cachedRuntime = jeiRuntime;
-        if (!RSIntegrationConfig.ENABLE_JEI.get()) return;
+        if (ClientSyncedConfig.isSynced() ? !ClientSyncedConfig.ENABLE_JEI : !RSIntegrationConfig.ENABLE_JEI.get()) return;
         JeiMarqueeSelector.register();
         if (RSIntegrationConfig.ENABLE_GOETY.get() && ModList.get().isLoaded(ModIds.GOETY)) {
             GoetyRSModule.INSTANCE.onJeiRuntimeAvailable(jeiRuntime);
@@ -71,13 +75,38 @@ public final class RSJeiPlugin implements IModPlugin {
                     new com.huanghuang.rsintegration.compat.ftbquests.client.FtbQuestSubmissionCategory(
                             registration.getJeiHelpers().getGuiHelper()));
         }
+        if (RSIntegrationConfig.ENABLE_DISTANT_WORLDS.get()
+                && ModList.get().isLoaded(ModIds.DISTANT_WORLDS)) {
+            registration.addRecipeCategories(new LithumAltarFironRecipeCategory(
+                    registration.getJeiHelpers().getGuiHelper()));
+        }
     }
 
     @Override
     public void registerRecipes(IRecipeRegistration registration) {
+        if (RSIntegrationConfig.ENABLE_DISTANT_WORLDS.get()
+                && ModList.get().isLoaded(ModIds.DISTANT_WORLDS)) {
+            registration.addRecipes(LithumAltarFironRecipeCategory.TYPE,
+                    LithumAltarRecipeResolver.definitions().stream()
+                            .filter(LithumAltarRecipeResolver::isComplete)
+                            .map(definition -> new LithumAltarRecipeWrapper(
+                                    ResourceLocation.fromNamespaceAndPath("distant_worlds", definition.currentRecipe()),
+                                    definition))
+                            .toList());
+        }
         // FTB Quests client data is not guaranteed to exist during JEI's static
         // registration pass. Player-specific entries are added from
         // FtbQuestJeiRuntime once ClientQuestFile has synchronized.
+    }
+
+    @Override
+    public void registerRecipeCatalysts(mezz.jei.api.registration.IRecipeCatalystRegistration registration) {
+        if (RSIntegrationConfig.ENABLE_DISTANT_WORLDS.get()
+                && ModList.get().isLoaded(ModIds.DISTANT_WORLDS)) {
+            var item = net.minecraftforge.registries.ForgeRegistries.ITEMS.getValue(
+                    ResourceLocation.fromNamespaceAndPath(ModIds.DISTANT_WORLDS, "lithum_core"));
+            if (item != null) registration.addRecipeCatalyst(item, LithumAltarFironRecipeCategory.TYPE);
+        }
     }
 
     @Override

@@ -30,23 +30,32 @@ public final class EidolonRSModule implements IModIntegration {
 
     @Override
     public void registerModType() {
+        ModType.register("eidolon_worktable",
+                new String[]{"elucent.eidolon.recipe.WorktableRecipe"},
+                new String[]{"worktable"},
+                new String[]{"worktable"},
+                ModType.delegateSupplier("com.huanghuang.rsintegration.mods.eidolon.EidolonBatchDelegate"));
         ModType.register("eidolon",
                 new String[]{"elucent.eidolon."},
                 new String[]{"eidolon"},
                 new String[0],
                 ModType.delegateSupplier("com.huanghuang.rsintegration.mods.eidolon.EidolonBatchDelegate"));
+        ModType.configureJei("eidolon_worktable",
+                new String[][]{{"eidolon:worktable", "worktable"}},
+                new String[][]{{"elucent.eidolon.recipe.WorktableRecipe", "worktable"}},
+                "gui.rs_integration.jei.eidolon_worktable_craft");
         ModType.configureJei("eidolon",
-                new String[][]{{"eidolon:crucible", "crucible"}, {"eidolon:worktable", "worktable"}, {"eidolon:rituals", "ritual"}},
-                new String[][]{{"elucent.eidolon.recipe.WorktableRecipe", "worktable"}, {"elucent.eidolon.recipe.ItemRitualRecipe", "ritual"}, {"elucent.eidolon.recipe.GenericRitualRecipe", "ritual"}, {"elucent.eidolon.", "crucible"}},
-                null);
+                new String[][]{{"eidolon:crucible", "crucible"}, {"eidolon:rituals", "ritual"}},
+                new String[][]{{"elucent.eidolon.recipe.ItemRitualRecipe", "ritual"}, {"elucent.eidolon.recipe.GenericRitualRecipe", "ritual"}, {"elucent.eidolon.", "crucible"}},
+                "gui.rs_integration.jei.eidolon_crucible_craft");
     }
 
     @Override
     public void registerBindingTargets() {
         BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
-                "eidolon", ModType.byId("eidolon"), RSIntegrationConfig.ENABLE_EIDOLON, List.of(
+                "eidolon", ModType.byId("eidolon_worktable"), RSIntegrationConfig.ENABLE_EIDOLON, List.of(
                 "elucent.eidolon.common.block.WorktableBlock"
-        ), "eidolon"));
+        ), "eidolon_worktable"));
         // Crucible and Brazier are in-world ritual blocks, no container GUI.
         BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
                 "eidolon", ModType.byId("eidolon"), RSIntegrationConfig.ENABLE_EIDOLON, List.of(

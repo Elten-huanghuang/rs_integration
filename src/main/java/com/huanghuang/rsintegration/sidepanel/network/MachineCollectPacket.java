@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.sidepanel.network;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.network.ProtectionChecker;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.util.ChunkUtils;
@@ -100,6 +101,11 @@ public final class MachineCollectPacket {
             if (targetLevel == null) {
                 player.sendSystemMessage(
                     Component.translatable("rsi.error.dim_not_loaded"));
+                return;
+            }
+
+            if (!ProtectionChecker.canInteract(player, targetLevel, packet.pos)) {
+                player.sendSystemMessage(Component.translatable("rsi.error.protected_block"));
                 return;
             }
 

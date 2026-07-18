@@ -93,6 +93,9 @@ public final class ReturnToRSPacket {
                     .getKey(level.getBlockState(packet.pos).getBlock()).toString();
             RemoteGuiAuth.authorize(player, dimKey, packet.pos, blockId);
             net.minecraftforge.network.NetworkHooks.openScreen(player, provider, packet.pos);
+            if (!RemoteGuiAuth.bindOpenedMenu(player)) {
+                player.closeContainer();
+            }
         });
         ctx.get().setPacketHandled(true);
     }

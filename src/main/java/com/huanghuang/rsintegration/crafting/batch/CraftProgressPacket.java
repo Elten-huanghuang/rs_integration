@@ -4,8 +4,6 @@ import com.huanghuang.rsintegration.crafting.CraftProgressSnapshot;
 import com.huanghuang.rsintegration.crafting.CraftProgressTracker;
 import io.netty.handler.codec.DecoderException;
 import net.minecraft.network.FriendlyByteBuf;
-import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.api.distmarker.OnlyIn;
 import net.minecraftforge.network.NetworkEvent;
 
 import java.util.ArrayList;
@@ -133,7 +131,6 @@ public final class CraftProgressPacket {
         return value;
     }
 
-    @OnlyIn(Dist.CLIENT)
     public static void handle(CraftProgressPacket packet, Supplier<NetworkEvent.Context> ctx) {
         ctx.get().enqueueWork(() -> CraftProgressTracker.onProgress(packet.snapshot));
         ctx.get().setPacketHandled(true);

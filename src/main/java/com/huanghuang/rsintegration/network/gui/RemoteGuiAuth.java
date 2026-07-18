@@ -34,7 +34,7 @@ public final class RemoteGuiAuth {
     private static final long AUTH_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
     private record Authorization(ResourceKey<Level> dim, BlockPos pos, String expectedBlock,
-                                  long timestamp, int staleContainerId,
+                                  long timestamp, int staleContainerId, int menuId,
                                   int chunkX, int chunkZ) {}
 
     private static final Map<UUID, Authorization> ACTIVE = new ConcurrentHashMap<>();
@@ -69,7 +69,7 @@ public final class RemoteGuiAuth {
         int cx = pos.getX() >> 4;
         int cz = pos.getZ() >> 4;
         ACTIVE.put(player.getUUID(), new Authorization(dim, pos, expectedBlock, System.currentTimeMillis(),
-                staleId, cx, cz));
+                staleId, -1, cx, cz));
 
         // Force-load the machine's chunk while the GUI is open.
         // Track viewers ourselves — ForgeChunkManager tickets are not
@@ -89,14 +89,34 @@ public final class RemoteGuiAuth {
         }
     }
 
-    /** Check if a player is authorized for ANY remote container. */
-    public static boolean isAuthorized(ServerPlayer player, AbstractContainerMenu menu) {
-        var auth = ACTIVE.get(player.getUUID());
-        if (auth == null) return false;
-        if (isExpired(auth)) {
-            releaseAndRemove(player.getUUID());
+    /** Bind the pending authorization to the newly opened remote menu. */
+    public static boolean bindOpenedMenu(ServerPlayer player) {
+        return bindOpenedMenu(player, player.containerMenu);
+    }
+
+    /** Bind the pending authorization to a specific newly opened menu. */
+    public static boolean bindOpenedMenu(ServerPlayer player, @javax.annotation.Nullable AbstractContainerMenu menu) {
+        if (menu == null) return false;
+        UUID playerId = player.getUUID();
+        Authorization auth = ACTIVE.get(playerId);
+        if (auth == null || isExpired(auth) || !isBlockStillThere(player, auth)) {
+            releaseAndRemove(playerId);
             return false;
         }
+        ACTIVE.replace(playerId, auth, new Authorization(auth.dim(), auth.pos(), auth.expectedBlock(),
+                auth.timestamp(), auth.staleContainerId(), menu.containerId, auth.chunkX(), auth.chunkZ()));
+        return true;
+    }
+
+    /** Check if a player is authorized for the specific remote container. */
+    public static boolean isAuthorized(ServerPlayer player, AbstractContainerMenu menu) {
+        var auth = ACTIVE.get(player.getUUID());
+        if (auth == null || menu == null) return false;
+        if (isExpired(auth) || (auth.menuId() >= 0 && auth.menuId() != menu.containerId)) {
+            if (isExpired(auth)) releaseAndRemove(player.getUUID());
+            return false;
+        }
+        if (auth.menuId() < 0) return false;
         if (!isBlockStillThere(player, auth)) {
             releaseAndRemove(player.getUUID());
             return false;
@@ -115,7 +135,7 @@ public final class RemoteGuiAuth {
             if (level == null) return false;
         }
         if (level instanceof ServerLevel sl && !sl.hasChunkAt(auth.pos())) {
-            return true;
+            return false;
         }
         ResourceLocation currentBlock = ForgeRegistries.BLOCKS.getKey(
                 level.getBlockState(auth.pos()).getBlock());
@@ -140,6 +160,23 @@ public final class RemoteGuiAuth {
         releaseAndRemove(playerId);
     }
 
+    /** Clear all server-owned authorization and chunk viewer state. */
+    public static void clearServerState() {
+        var server = ServerLifecycleHooks.getCurrentServer();
+        for (UUID playerId : ACTIVE.keySet().toArray(UUID[]::new)) {
+            releaseAndRemove(playerId);
+        }
+        ACTIVE.clear();
+        if (!CHUNK_VIEWERS.isEmpty()) {
+            if (server != null) {
+                for (String key : CHUNK_VIEWERS.keySet()) {
+                    RSIntegrationMod.LOGGER.debug("[RSI-GuiAuth] clearing stale chunk viewer {}", key);
+                }
+            }
+            CHUNK_VIEWERS.clear();
+        }
+    }
+
     /** Release chunk force-load and remove the authorization. */
     private static void releaseAndRemove(UUID playerId) {
         var auth = ACTIVE.remove(playerId);
@@ -158,6 +195,12 @@ public final class RemoteGuiAuth {
         }
     }
 
+    /** Check whether the player's currently open menu is the authorized menu. */
+    public static boolean isAuthorizedCurrentMenu(ServerPlayer player) {
+        return isAuthorized(player, player.containerMenu);
+    }
+
+    /** Check whether a player has any pending/active authorization. */
     public static boolean hasActiveAuthorization(UUID playerId) {
         return hasActiveAuthorizationForBlock(playerId, null);
     }

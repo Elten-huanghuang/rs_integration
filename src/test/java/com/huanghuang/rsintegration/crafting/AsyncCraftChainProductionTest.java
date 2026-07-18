@@ -53,6 +53,20 @@ class AsyncCraftChainProductionTest extends BootstrapTest {
     }
 
     @Test
+    void resolverScaledModIntermediateIsNotMultipliedAgain() {
+        var intermediate = new CraftingResolver.ResolutionStep(
+                new ResourceLocation("malum", "runewood_plank"), ModType.byId("malum"),
+                new ResourceLocation("malum", "recipe"), List.of(), List.of(), false, 3);
+        List<CraftingResolver.ResolutionStep> combined =
+                AsyncCraftChain.compatibilitySteps(List.of(intermediate),
+                        new CraftingResolver.ResolutionStep(
+                                new ResourceLocation("test", "terminal"), ModType.GENERIC,
+                                new ResourceLocation("minecraft", "crafting"),
+                                List.of(), List.of(), false, 1), 4);
+        assertEquals(3, combined.get(0).executions());
+        assertEquals(4, combined.get(1).executions());
+    }
+    @Test
     void nullExpectationOptsOut() {
         assertEquals(0, AsyncCraftChain.countMatchingProduction(
                 List.of(new ItemStack(Items.IRON_INGOT, 64)), null));

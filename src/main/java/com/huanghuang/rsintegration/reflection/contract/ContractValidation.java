@@ -6,6 +6,7 @@ import com.huanghuang.rsintegration.reflection.probes.AetherworksReflection;
 import com.huanghuang.rsintegration.reflection.probes.BackpackReflection;
 import com.huanghuang.rsintegration.reflection.probes.CrabbersDelightReflection;
 import com.huanghuang.rsintegration.reflection.probes.CrockPotReflection;
+import com.huanghuang.rsintegration.reflection.probes.DistantWorldsReflection;
 import com.huanghuang.rsintegration.reflection.probes.EidolonReflection;
 import com.huanghuang.rsintegration.reflection.probes.EmbersReflection;
 import com.huanghuang.rsintegration.reflection.probes.FAReflection;
@@ -152,6 +153,7 @@ public final class ContractValidation {
         o = BackpackReflection.backpackBEClass;
         o = CrabbersDelightReflection.crabTrapBEClass;
         o = CrockPotReflection.crockPotBEClass;
+        o = DistantWorldsReflection.lithumCoreBlockClass;
         o = EidolonReflection.crucibleTileEntityClass;
         o = EmbersReflection.alchemyTabletBEClass;
         o = FAReflection.hephaestusForgeBEClass;

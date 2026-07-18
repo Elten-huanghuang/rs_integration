@@ -41,6 +41,7 @@
     "sophisticatedbackpacks.StorageContainerMenuBaseMixin",
     "sophisticatedbackpacks.CompactingUpgradeWrapperMixin",
     "crockpot.CrockPotMenuMixin",
+    "distantworlds.LithumCoreUpdateTickProcedureMixin",
     "reliquary.PyromancerStaffMixin",
     "enigmaticaddons.AvariceRingMixin",
     "moonstone.NineSwordBooksMixin",

@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.transfer;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
+import com.huanghuang.rsintegration.util.InsertedStackDelta;
 import com.huanghuang.rsintegration.util.ModIds;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;
@@ -30,7 +31,7 @@ final class ContainerTransferLogic {
     static void transferAll(ServerPlayer player, AbstractContainerMenu menu, byte mode) {
         if (mode == 1) {
             transferToBackpack(player, menu);
-        } else {
+        } else if (mode == 0) {
             transferToRS(player, menu);
         }
     }
@@ -89,9 +90,13 @@ final class ContainerTransferLogic {
             }
 
             int count = stack.getCount();
+            ItemStack input = stack.copy();
+            ItemStack remaining = network.insertItem(input, count, Action.PERFORM);
             var tracker = network.getItemStorageTracker();
-            if (tracker != null) tracker.changed(player, stack.copy());
-            ItemStack remaining = network.insertItem(stack.copy(), count, Action.PERFORM);
+            if (tracker != null && remaining.getCount() < count) {
+                tracker.changed(player, input.copyWithCount(count - remaining.getCount()));
+            }
+            InsertedStackDelta.report(player, input, remaining);
 
             if (remaining.isEmpty()) {
                 slot.set(ItemStack.EMPTY);
@@ -160,6 +165,7 @@ final class ContainerTransferLogic {
             }
 
             int inserted = count - remaining.getCount();
+            InsertedStackDelta.report(player, toMove, remaining);
             if (remaining.isEmpty()) {
                 totalItems += count;
                 totalStacks++;

@@ -11,12 +11,14 @@ import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.client.gui.screens.inventory.CreativeModeInventoryScreen;
 import net.minecraft.client.gui.screens.inventory.InventoryScreen;
 import net.minecraft.network.chat.Component;
+import net.minecraft.client.gui.GuiGraphics;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import net.minecraftforge.client.event.InputEvent;
 import net.minecraftforge.client.event.RegisterKeyMappingsEvent;
 import net.minecraftforge.client.event.ScreenEvent;
 import net.minecraftforge.client.settings.KeyConflictContext;
+import net.minecraftforge.client.event.RenderGuiEvent;
 import net.minecraftforge.common.MinecraftForge;
 
 import net.minecraftforge.fml.loading.FMLPaths;
@@ -37,6 +39,8 @@ public final class ContainerTransferClient {
     private static final byte MODE_BACKPACK = 1;
 
     private static byte currentMode = MODE_BACKPACK;
+    private static Component modeMessage;
+    private static long modeMessageUntil;
 
     private static final Path MODE_FILE =
             FMLPaths.CONFIGDIR.get().resolve("rs_integration_transfer_mode.txt");
@@ -79,6 +83,7 @@ public final class ContainerTransferClient {
         registerKeyMappings();
         MinecraftForge.EVENT_BUS.addListener(ContainerTransferClient::onScreenKeyPressed);
         MinecraftForge.EVENT_BUS.addListener(ContainerTransferClient::onKeyInput);
+        MinecraftForge.EVENT_BUS.addListener(ContainerTransferClient::onRenderGui);
 
         loadMode();
     }
@@ -121,15 +126,25 @@ public final class ContainerTransferClient {
             String key = (currentMode == MODE_RS)
                     ? "rsi.transfer.mode.rs"
                     : "rsi.transfer.mode.backpack";
-            mc.player.displayClientMessage(Component.translatable(key), true);
+            modeMessage = Component.translatable(key);
+            modeMessageUntil = System.currentTimeMillis() + 1800L;
+            mc.player.displayClientMessage(modeMessage, true);
         }
     }
 
+    private static void onRenderGui(RenderGuiEvent.Post event) {
+        if (modeMessage == null || System.currentTimeMillis() > modeMessageUntil) return;
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.screen == null) return;
+        GuiGraphics graphics = event.getGuiGraphics();
+        int width = mc.getWindow().getGuiScaledWidth();
+        int x = (width - mc.font.width(modeMessage)) / 2;
+        graphics.drawString(mc.font, modeMessage, x, 12, 0xFFFFFF, true);
+    }
+
     /**
-     * Recursively checks whether any text-input widget on the screen is
-     * currently focused.  Handles vanilla {@code EditBox}, mods that
-     * subclass it, and widgets whose class name contains known text-field
-     * keywords (e.g. Sophisticated Backpacks' custom search bar).
+     * Detect whether a text input widget is currently focused. Handles vanilla
+     * {@code EditBox}, mods that subclass it, and known text-field wrappers.
      */
     private static boolean isAnyTextInputFocused(Screen screen) {
         // Check the top-level focused widget first

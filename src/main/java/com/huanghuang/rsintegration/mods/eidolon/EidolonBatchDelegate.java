@@ -71,6 +71,32 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
     // ── IBatchDelegate impl ───────────────────────────────────────
 
     @Override
+    public PreparationResult prepare(ServerPlayer player, ResourceLocation recipeId,
+                                     @Nullable ResourceLocation dim, BlockPos pos) {
+        ServerLevel level = CraftPacketUtils.resolveLevel(player.server, dim, player);
+        if (level == null) return PreparationResult.fatal("machine dimension unavailable");
+
+        Recipe<?> candidate = level.getRecipeManager().byKey(recipeId).orElse(null);
+        if (candidate == null) return PreparationResult.fatal("recipe not found: " + recipeId);
+
+        boolean crucibleRecipe = EidolonReflection.crucibleRecipeClass != null
+                && EidolonReflection.crucibleRecipeClass.isInstance(candidate);
+        if (crucibleRecipe) {
+            if (!level.isLoaded(pos)) return PreparationResult.retry("crucible chunk is not loaded");
+            BlockEntity be = level.getBlockEntity(pos);
+            if (be == null || EidolonReflection.crucibleTileEntityClass == null
+                    || !EidolonReflection.crucibleTileEntityClass.isInstance(be)) {
+                return PreparationResult.fatal("bound machine is not an Eidolon crucible");
+            }
+            if (!isBoiling(be)) return PreparationResult.retry("crucible requires heat");
+        }
+
+        return validateAndInit(player, recipeId, dim, pos)
+                ? PreparationResult.ready()
+                : PreparationResult.retry("Eidolon machine is temporarily unavailable");
+    }
+
+    @Override
     public boolean validateAndInit(ServerPlayer player, ResourceLocation recipeId,
                                    @Nullable ResourceLocation dim, BlockPos pos) {
 
@@ -174,10 +200,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
             hasWater = f.getBoolean(be);
         } catch (Exception e) { hasWater = false; }
 
-        boolean boiling = false;
-        try {
-            if (boilingField != null) boiling = boilingField.getBoolean(be);
-        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-Eidolon] Reflection probe failed", e); }
+        boolean boiling = isBoiling(be);
 
         // Default to NOT empty: if we can't read the field we must assume
         // the crucible is busy to avoid starting a second craft on top of
@@ -197,7 +220,6 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
         }
 
         if (!boiling) {
-            player.sendSystemMessage(Component.translatable("rsi.eidolon.warn.needs_heat"));
             return false;
         }
 
@@ -1014,6 +1036,16 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
             RSIntegrationMod.LOGGER.error("[RSI-Batch-Eidolon] Failed to collect steps", e);
         }
         return result;
+    }
+
+    private static boolean isBoiling(BlockEntity be) {
+        if (be == null || boilingField == null) return false;
+        try {
+            return boilingField.getBoolean(be);
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-Batch-Eidolon] Reflection probe failed", e);
+            return false;
+        }
     }
 
     // ── Water amount ──────────────────────────────────────────────

@@ -1,6 +1,5 @@
 package com.huanghuang.rsintegration.mixin.sophisticatedbackpacks;
 
-import com.huanghuang.rsintegration.compat.ftbquests.ExternalItemProgressBridge;
 import com.huanghuang.rsintegration.util.ExternalItemProgressSuppression;
 import com.huanghuang.rsintegration.util.InsertedStackDelta;
 import net.minecraft.server.level.ServerPlayer;
@@ -35,9 +34,10 @@ public abstract class InventoryHelperExternalItemMixin {
                                                  UpgradeHandler upgrades, ItemStack input,
                                                  boolean simulate,
                                                  CallbackInfoReturnable<ItemStack> cir) {
-        boolean suppressed = ExternalItemProgressSuppression.consume();
-        if (suppressed || simulate || !(player instanceof ServerPlayer serverPlayer)) return;
-        ItemStack inserted = InsertedStackDelta.between(input, cir.getReturnValue());
-        ExternalItemProgressBridge.enqueue(serverPlayer, inserted);
+        if (simulate || !(player instanceof ServerPlayer serverPlayer)) {
+            ExternalItemProgressSuppression.consume();
+            return;
+        }
+        InsertedStackDelta.report(serverPlayer, input, cir.getReturnValue());
     }
 }

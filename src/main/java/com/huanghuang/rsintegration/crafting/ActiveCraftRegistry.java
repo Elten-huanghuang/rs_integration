@@ -10,25 +10,25 @@ final class ActiveCraftRegistry<K, V> {
 
     private final Map<K, V> crafts = new LinkedHashMap<>();
 
-    boolean add(K craftId, V craft) {
+    synchronized boolean add(K craftId, V craft) {
         Objects.requireNonNull(craftId, "craftId");
         Objects.requireNonNull(craft, "craft");
         return crafts.putIfAbsent(craftId, craft) == null;
     }
 
-    V get(K craftId) {
+    synchronized V get(K craftId) {
         return crafts.get(craftId);
     }
 
-    boolean remove(K craftId) {
+    synchronized boolean remove(K craftId) {
         return crafts.remove(craftId) != null;
     }
 
-    List<V> snapshot() {
+    synchronized List<V> snapshot() {
         return List.copyOf(crafts.values());
     }
 
-    int size() {
+    synchronized int size() {
         return crafts.size();
     }
 }

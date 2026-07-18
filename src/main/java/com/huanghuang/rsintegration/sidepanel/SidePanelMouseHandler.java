@@ -212,8 +212,9 @@ final class SidePanelMouseHandler {
             action = RSSidePanelClickPacket.ACTION_EXTRACT_STACK;
             extractCount = Math.max(1, clickedPs.getCount() / 2);
         }
-        RSSidePanelNetworkHandler.sendClick(clickedItem, action,
+        long operationId = RSSidePanelNetworkHandler.sendClick(clickedItem, action,
                 net.minecraft.client.gui.screens.Screen.hasShiftDown(), clickedPs.getId());
+        RSSidePanelClient.pendingOperationStacks.put(operationId, clickedPs.getId());
 
         if (extractCount > 0) {
             UUID pk = clickedPs.getId();
@@ -283,7 +284,9 @@ final class SidePanelMouseHandler {
                 if (ps != null && !ps.getStack().isEmpty()) dragItems.add(ps.getStack());
             }
             if (!dragItems.isEmpty()) {
-                RSSidePanelNetworkHandler.sendDragDistribute(dragItems);
+                long operationId = RSSidePanelNetworkHandler.sendDragDistribute(dragItems);
+                RSSidePanelClient.pendingOperationStacks.put(operationId,
+                        RSSidePanelClient.gridDragKeys.iterator().next());
                 for (UUID key : RSSidePanelClient.gridDragKeys) {
                     PanelStack ps = RSSidePanelClient.getById(key);
                     if (ps != null && ps.getCount() > 0) {
@@ -303,8 +306,9 @@ final class SidePanelMouseHandler {
             PanelStack ps = RSSidePanelClient.getById(key);
             if (ps != null) {
                 int extractCount = Math.min(ps.getStack().getMaxStackSize(), ps.getCount());
-                RSSidePanelNetworkHandler.sendClick(ps.getStack(),
+                long operationId = RSSidePanelNetworkHandler.sendClick(ps.getStack(),
                         RSSidePanelClickPacket.ACTION_EXTRACT_MAX, false, ps.getId());
+                RSSidePanelClient.pendingOperationStacks.put(operationId, key);
                 RSSidePanelClient.pendingExtractions.put(key,
                         new RSSidePanelClient.PendingExtraction(ps.getStack(), ps.timestamp, ps.craftable));
                 RSSidePanelClient.recordSlotAnim(key, -extractCount);

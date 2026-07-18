@@ -25,7 +25,7 @@ public final class CaptureLeaseRegistry {
     private final Map<Long, Lease> leases = new HashMap<>();
     private long nextId;
 
-    public Lease tryAcquire(ResourceLocation dimension, AABB region,
+    public synchronized Lease tryAcquire(ResourceLocation dimension, AABB region,
                             MaterialKey expectedMaterial, Owner owner) {
         Objects.requireNonNull(dimension, "dimension");
         Objects.requireNonNull(region, "region");
@@ -41,7 +41,7 @@ public final class CaptureLeaseRegistry {
         return lease;
     }
 
-    public boolean release(Lease lease) {
+    public synchronized boolean release(Lease lease) {
         if (lease == null) return false;
         Lease current = leases.get(lease.id());
         if (current == null || !current.equals(lease)) return false;
@@ -49,11 +49,11 @@ public final class CaptureLeaseRegistry {
         return true;
     }
 
-    public int size() {
+    public synchronized int size() {
         return leases.size();
     }
 
-    public int countOwnedBy(UUID craftId) {
+    public synchronized int countOwnedBy(UUID craftId) {
         Objects.requireNonNull(craftId, "craftId");
         return (int) leases.values().stream()
                 .filter(lease -> lease.owner().craftId().equals(craftId))
@@ -64,7 +64,7 @@ public final class CaptureLeaseRegistry {
         return Map.copyOf(leases);
     }
 
-    public void clear() {
+    public synchronized void clear() {
         leases.clear();
     }
 

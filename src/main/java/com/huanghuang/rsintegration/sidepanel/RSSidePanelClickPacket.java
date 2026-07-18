@@ -33,6 +33,7 @@ public final class RSSidePanelClickPacket {
     final List<ItemStack> dragItems;
     final ItemStack carriedItem;
     final UUID panelId; // matches RS onExtract(player, UUID id, ...)
+    long operationId;
 
     // 单次点击提取
     public RSSidePanelClickPacket(ItemStack targetItem, byte action, boolean isShift, UUID panelId) {
@@ -42,6 +43,7 @@ public final class RSSidePanelClickPacket {
         this.dragItems = Collections.emptyList();
         this.carriedItem = ItemStack.EMPTY;
         this.panelId = panelId;
+        this.operationId = RSSidePanelClient.nextOperationId();
     }
 
     // 拖拽分配
@@ -52,6 +54,7 @@ public final class RSSidePanelClickPacket {
         this.dragItems = new ArrayList<>(dragItems);
         this.carriedItem = ItemStack.EMPTY;
         this.panelId = null;
+        this.operationId = RSSidePanelClient.nextOperationId();
     }
 
     // Insert
@@ -62,10 +65,12 @@ public final class RSSidePanelClickPacket {
         this.dragItems = Collections.emptyList();
         this.carriedItem = carriedItem.copy();
         this.panelId = null;
+        this.operationId = RSSidePanelClient.nextOperationId();
     }
 
     void encode(FriendlyByteBuf buf) {
         buf.writeByte(action);
+        buf.writeVarLong(operationId);
         if (action == ACTION_DRAG_DISTRIBUTE) {
             buf.writeVarInt(dragItems.size());
             for (ItemStack stack : dragItems) writeStack(buf, stack);
@@ -82,19 +87,26 @@ public final class RSSidePanelClickPacket {
 
     static RSSidePanelClickPacket decode(FriendlyByteBuf buf) {
         byte action = buf.readByte();
+        long operationId = buf.readVarLong();
         if (action == ACTION_DRAG_DISTRIBUTE) {
             int count = Math.max(0, Math.min(buf.readVarInt(), 4096));
             List<ItemStack> items = new ArrayList<>(count);
             for (int i = 0; i < count; i++) items.add(readStack(buf));
-            return new RSSidePanelClickPacket(items);
+            RSSidePanelClickPacket packet = new RSSidePanelClickPacket(items);
+            packet.operationId = operationId;
+            return packet;
         }
         if (action == ACTION_INSERT) {
-            return new RSSidePanelClickPacket(readStack(buf), buf.readBoolean());
+            RSSidePanelClickPacket packet = new RSSidePanelClickPacket(readStack(buf), buf.readBoolean());
+            packet.operationId = operationId;
+            return packet;
         }
         ItemStack item = readStack(buf);
         boolean shift = buf.readBoolean();
         UUID id = buf.readBoolean() ? buf.readUUID() : null;
-        return new RSSidePanelClickPacket(item, action, shift, id);
+        RSSidePanelClickPacket packet = new RSSidePanelClickPacket(item, action, shift, id);
+        packet.operationId = operationId;
+        return packet;
     }
 
     private static void writeStack(FriendlyByteBuf buf, ItemStack stack) {

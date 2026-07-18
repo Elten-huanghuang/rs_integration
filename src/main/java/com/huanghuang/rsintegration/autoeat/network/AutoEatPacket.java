@@ -1,6 +1,8 @@
 package com.huanghuang.rsintegration.autoeat.network;
 
 import com.huanghuang.rsintegration.autoeat.AutoEatMode;
+import com.huanghuang.rsintegration.autoeat.AutoEatEngine;
+import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
 
@@ -34,6 +36,11 @@ public class AutoEatPacket {
         ctx.get().enqueueWork(() -> {
             var sender = ctx.get().getSender();
             if (sender != null && !(sender instanceof net.minecraftforge.common.util.FakePlayer)) {
+                if (!RSIntegrationConfig.ENABLE_AUTO_EAT.get()) {
+                    AutoEatEngine.sendFailure(sender, packet.mode,
+                            "rsi.autoeat.error.disabled");
+                    return;
+                }
                 // Throttle: each accepted eat clones the full network storage
                 // list + edibility scan. Dedicated limiter (not the GUI-open one)
                 // so eating never falsely throttles an unrelated GUI open.

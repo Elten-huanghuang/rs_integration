@@ -105,6 +105,11 @@ final class SidePanelTickManager {
             var pe = it.next();
             int extractionTimeout = com.huanghuang.rsintegration.config.RSIntegrationConfig.SIDE_PANEL_EXTRACTION_TIMEOUT.get();
             if (now - pe.getValue().createdAt > extractionTimeout) {
+                if (!RSSidePanelClient.pendingSyncRetries.remove(pe.getKey())) {
+                    RSSidePanelClient.pendingSyncRetries.add(pe.getKey());
+                    RSSidePanelNetworkHandler.sendRequestSync();
+                    continue;
+                }
                 RSSidePanelClient.PendingExtraction p = pe.getValue();
                 if (p.previousStack.getCount() > 0) {
                     PanelStack ps = RSSidePanelClient.getById(pe.getKey());

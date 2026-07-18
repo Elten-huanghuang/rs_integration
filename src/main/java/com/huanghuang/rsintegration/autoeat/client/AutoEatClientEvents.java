@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.autoeat.client;
 import com.huanghuang.rsintegration.autoeat.AutoEatMode;
 import com.huanghuang.rsintegration.autoeat.network.AutoEatPacket;
 import com.huanghuang.rsintegration.autoeat.network.RequestBlacklistPacket;
+import com.huanghuang.rsintegration.config.ClientSyncedConfig;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;
 import com.refinedmods.refinedstorage.api.network.grid.INetworkAwareGrid;
@@ -28,13 +29,14 @@ public final class AutoEatClientEvents {
     @SubscribeEvent
     public static void onClientDisconnect(ClientPlayerNetworkEvent.LoggingOut event) {
         ClientState.reset();
+        ClientSyncedConfig.reset();
         blacklistRequested = false;
     }
 
     @SubscribeEvent
     public static void onScreenInit(ScreenEvent.Init.Post event) {
         if (!(event.getScreen() instanceof GridScreen screen)) return;
-        if (!RSIntegrationConfig.ENABLE_AUTO_EAT.get()) return;
+        if (!isAutoEatEnabled()) return;
         if (screen.getMenu().getGrid().getGridType() != GridType.CRAFTING) return;
         if (!(screen.getMenu().getGrid() instanceof INetworkAwareGrid)) return;
 
@@ -92,6 +94,11 @@ public final class AutoEatClientEvents {
         }
     }
 
+    private static boolean isAutoEatEnabled() {
+        return ClientSyncedConfig.isSynced()
+                ? ClientSyncedConfig.ENABLE_AUTO_EAT
+                : RSIntegrationConfig.ENABLE_AUTO_EAT.get();
+    }
     private static Component getSelectLabel() {
         return ClientState.currentMode == AutoEatMode.STACK
                 ? Component.translatable("rsi.autoeat.btn.select")

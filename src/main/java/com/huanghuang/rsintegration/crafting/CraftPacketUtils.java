@@ -1208,10 +1208,28 @@ public final class CraftPacketUtils {
     @Nullable
     public static List<ResolutionStep> resolveIntermediateSteps(
             ServerPlayer player, INetwork network, CraftingRecipe recipe) {
+        return resolveIntermediateSteps(player, network, recipe, 1);
+    }
+
+    /**
+     * Resolve intermediates for the complete requested quantity. Batch counts
+     * are calculated from the scaled demand, so callers must not multiply the
+     * returned intermediate executions again.
+     */
+    public static List<ResolutionStep> resolveIntermediateSteps(
+            ServerPlayer player, INetwork network, CraftingRecipe recipe, int repeatCount) {
         Map<StackKey, Integer> available = MaterialSources.listAllAvailable(player, network);
+        int repeats = Math.max(1, repeatCount);
 
         List<IngredientSpec> specs = extractIngredientSpecs(recipe);
         if (specs == null) return null;
+        if (repeats > 1) {
+            List<IngredientSpec> scaled = new ArrayList<>(specs.size());
+            for (IngredientSpec spec : specs) {
+                scaled.add(new IngredientSpec(spec.ingredient(), mulCount(spec.count(), repeats)));
+            }
+            specs = scaled;
+        }
 
         List<String> missingCheck = new ArrayList<>();
         List<ResolutionStep> allSteps = CraftingResolver.resolveStepsForSpecsWithTypes(

@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.sidepanel.network;
 import com.huanghuang.rsintegration.api.ISmithingRecipeAccessor;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.network.ProtectionChecker;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.network.gui.BlockGuiRegistry;
 import com.huanghuang.rsintegration.network.gui.GuiOpenRateLimiter;
@@ -162,6 +163,14 @@ public final class OpenBoundMachineGuiPacket {
 
             // Determine machine type for pre-fill strategy
             net.minecraft.server.level.ServerLevel level = player.server.getLevel(dimKey);
+            if (level == null) {
+                player.sendSystemMessage(Component.translatable("rsi.error.dim_not_loaded"));
+                return;
+            }
+            if (!ProtectionChecker.canInteract(player, level, packet.pos)) {
+                player.sendSystemMessage(Component.translatable("rsi.error.protected_block"));
+                return;
+            }
             boolean isFurnace = false;
             boolean isStonecutter = false;
             boolean isSmithing = false;

@@ -203,6 +203,8 @@ final class StepExecutor {
             }
         }
 
+        // batches already represents the physical executions needed for the
+        // complete resolver demand; callers must not apply repeatCount again.
         CraftingResolver.ResolutionStep step = new CraftingResolver.ResolutionStep(entry.recipe().getId(), entry.modType(),
                 entry.recipeTypeId(), altIds, altModTypes, false, batches);
         ctx.steps.add(step);

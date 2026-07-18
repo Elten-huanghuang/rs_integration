@@ -171,8 +171,11 @@ public final class AltarBindingRegistry {
      * items' NBT and rebuilds the in-memory entry if found.
      */
     public static boolean isBound(ResourceKey<Level> dim, BlockPos altarPos, ServerPlayer player) {
-        if (isBound(dim, altarPos)) return true;
-        return rebuildBindingFromNBT(player, dim, altarPos);
+        // Never trust the process-wide cache alone: it may contain a binding
+        // reconstructed for a different player's NetworkItem.  Ownership is
+        // established by the requester's own item NBT.
+        if (rebuildBindingFromNBT(player, dim, altarPos)) return true;
+        return findBindingEntry(player, dim.location(), altarPos) != null;
     }
 
     /** Scan player inventory for a NetworkItem with a binding entry matching

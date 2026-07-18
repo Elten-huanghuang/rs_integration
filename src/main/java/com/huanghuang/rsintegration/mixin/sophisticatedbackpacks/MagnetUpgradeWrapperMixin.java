@@ -1,6 +1,5 @@
 package com.huanghuang.rsintegration.mixin.sophisticatedbackpacks;
 
-import com.huanghuang.rsintegration.compat.ftbquests.ExternalItemProgressBridge;
 import com.huanghuang.rsintegration.util.BackpackRSUtils;
 import com.huanghuang.rsintegration.util.ExternalItemProgressSuppression;
 import com.huanghuang.rsintegration.util.InsertedStackDelta;
@@ -132,11 +131,12 @@ public abstract class MagnetUpgradeWrapperMixin
 
     @Unique
     private static void rsi$reportInsertion(ItemStack input, ItemStack remainder) {
-        boolean suppressed = ExternalItemProgressSuppression.consume();
         ServerPlayer player = RsOperationPlayerContext.current();
-        if (suppressed || player == null || input.isEmpty()) return;
-        ExternalItemProgressBridge.enqueue(player,
-                InsertedStackDelta.between(input, remainder));
+        if (player == null) {
+            ExternalItemProgressSuppression.consume();
+            return;
+        }
+        InsertedStackDelta.report(player, input, remainder);
     }
 
     @WrapOperation(

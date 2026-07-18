@@ -839,14 +839,14 @@ public final class CraftingResolver {
 
     private static String describeItem(ItemStack stack) {
         if (stack.isEmpty()) return "???";
-        return stack.getHoverName().getString();
+        return stack.getDescriptionId();
     }
 
     private static String describeFirstItem(Ingredient ingredient) {
         String base = null;
         for (ItemStack stack : ingredient.getItems()) {
             if (!stack.isEmpty()) {
-                base = stack.getHoverName().getString();
+                base = stack.getDescriptionId();
                 break;
             }
         }

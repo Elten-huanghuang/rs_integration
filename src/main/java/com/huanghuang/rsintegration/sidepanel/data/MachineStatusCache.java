@@ -18,6 +18,7 @@ public final class MachineStatusCache {
 
     /** "{dim}:{x},{y},{z}" → MachineStatus */
     private final Map<String, MachineStatus> statusMap = new ConcurrentHashMap<>();
+    private volatile long lastSequence = -1L;
 
     private MachineStatusCache() {}
 
@@ -55,9 +56,21 @@ public final class MachineStatusCache {
         return false;
     }
 
-    /** Clear all cached status. */
+    public boolean acceptSequence(long sequence) {
+        if (sequence > 0 && sequence <= lastSequence) return false;
+        if (sequence > 0) lastSequence = sequence;
+        return true;
+    }
+
+    public void clearDimension(ResourceLocation dim) {
+        if (dim == null) return;
+        String prefix = dim.toString() + ":";
+        statusMap.keySet().removeIf(key -> key.startsWith(prefix));
+    }
+
     public void clear() {
         statusMap.clear();
+        lastSequence = -1L;
     }
 
     // ── Internal ─────────────────────────────────────────────────

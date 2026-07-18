@@ -30,19 +30,30 @@ public final class RSSidePanelSyncPacket {
     final List<BindingInfo> bindings;
     final int chunkIndex;
     final int totalChunks;
+    /** Monotonic server-side snapshot generation; prevents stale chunk sets overwriting newer state. */
+    final long generation;
 
     RSSidePanelSyncPacket(List<UUID> ids, List<ItemStack> items, List<Long> timestamps,
                           List<Boolean> craftableFlags,
                           int totalSlotCount, boolean networkAvailable, String networkName,
                           List<BindingInfo> bindings) {
         this(ids, items, timestamps, craftableFlags, totalSlotCount, networkAvailable,
-                networkName, bindings, 0, 1);
+                networkName, bindings, 0, 1, 0L);
     }
 
     RSSidePanelSyncPacket(List<UUID> ids, List<ItemStack> items, List<Long> timestamps,
                           List<Boolean> craftableFlags,
                           int totalSlotCount, boolean networkAvailable, String networkName,
                           List<BindingInfo> bindings, int chunkIndex, int totalChunks) {
+        this(ids, items, timestamps, craftableFlags, totalSlotCount, networkAvailable,
+                networkName, bindings, chunkIndex, totalChunks, 0L);
+    }
+
+    RSSidePanelSyncPacket(List<UUID> ids, List<ItemStack> items, List<Long> timestamps,
+                          List<Boolean> craftableFlags,
+                          int totalSlotCount, boolean networkAvailable, String networkName,
+                          List<BindingInfo> bindings, int chunkIndex, int totalChunks,
+                          long generation) {
         this.ids = ids;
         this.items = items;
         this.timestamps = timestamps;
@@ -53,6 +64,7 @@ public final class RSSidePanelSyncPacket {
         this.bindings = bindings;
         this.chunkIndex = chunkIndex;
         this.totalChunks = totalChunks;
+        this.generation = generation;
     }
 
     void encode(FriendlyByteBuf buf) {
@@ -79,6 +91,7 @@ public final class RSSidePanelSyncPacket {
         }
         buf.writeVarInt(chunkIndex);
         buf.writeVarInt(totalChunks);
+        buf.writeVarLong(generation);
     }
 
     static RSSidePanelSyncPacket decode(FriendlyByteBuf buf) {
@@ -106,12 +119,14 @@ public final class RSSidePanelSyncPacket {
         }
         int chunkIdx = 0;
         int totalChunks = 1;
+        long generation = 0L;
         if (buf.readableBytes() >= 2) {
             chunkIdx = buf.readVarInt();
             totalChunks = buf.readVarInt();
+            if (buf.readableBytes() > 0) generation = buf.readVarLong();
         }
         return new RSSidePanelSyncPacket(ids, items, timestamps, craftable, total, available,
-                name, bindings, chunkIdx, totalChunks);
+                name, bindings, chunkIdx, totalChunks, generation);
     }
 
     boolean isChunked() { return totalChunks > 1; }
