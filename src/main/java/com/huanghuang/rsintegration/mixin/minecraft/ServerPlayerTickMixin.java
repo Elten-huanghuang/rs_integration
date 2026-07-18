@@ -18,7 +18,7 @@ public abstract class ServerPlayerTickMixin {
     @Inject(method = "tick", at = @At("HEAD"))
     public void rsi$tickHead(CallbackInfo ci) {
         ServerPlayer self = (ServerPlayer) (Object) this;
-        if (RemoteGuiAuth.hasActiveAuthorization(self.getUUID())) {
+        if (RemoteGuiAuth.isAuthorizedCurrentMenu(self)) {
             RSIntegrationMod.LOGGER.debug("[RSI-Tick] Auth active for player={}, container={}",
                     self.getName().getString(),
                     self.containerMenu != null ? self.containerMenu.getClass().getSimpleName() : "null");
@@ -34,7 +34,7 @@ public abstract class ServerPlayerTickMixin {
     )
     public boolean rsi$wrapStillValidTick(AbstractContainerMenu menu, Player player,
                                           Operation<Boolean> original) {
-        if (RemoteGuiAuth.hasActiveAuthorization(player.getUUID())) {
+        if (RemoteGuiAuth.isAuthorized((ServerPlayer) player, menu)) {
             RSIntegrationMod.LOGGER.debug("[RSI-Tick] stillValid bypassed for {}",
                     player.getName().getString());
             return true;

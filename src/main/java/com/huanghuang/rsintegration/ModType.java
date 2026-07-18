@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.batch.GenericBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.mods.forbidden.FaRitualWrapper;
+import com.huanghuang.rsintegration.mods.distantworlds.LithumAltarRecipeWrapper;
 import com.huanghuang.rsintegration.util.ModIds;
 import net.minecraft.world.item.crafting.Recipe;
 
@@ -214,6 +215,9 @@ public final class ModType {
     public static ModType classifyRecipe(Recipe<?> recipe) {
         if (recipe instanceof FaRitualWrapper) {
             return byId(ModIds.FORBIDDEN_ARCANUS);
+        }
+        if (recipe instanceof LithumAltarRecipeWrapper) {
+            return byId("distant_worlds_lithum_altar");
         }
         String cn = recipe.getClass().getName();
         // ApplyModifierRecipe is a smithing-table recipe, not a Hephaestus Forge ritual

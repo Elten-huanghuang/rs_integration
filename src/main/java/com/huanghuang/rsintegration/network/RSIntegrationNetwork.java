@@ -62,14 +62,10 @@ public final class RSIntegrationNetwork {
         net = AltarBindingRegistry.resolveNetworkFromAnyBinding(player);
         if (net != null) { logResolved("binding", net); return net; }
 
-        net = resolveFromNearbyNode(player);
-        if (net != null) {
-            RSIntegrationMod.LOGGER.warn("[RSI] Resolved network via nearby-node fallback (last resort) — " +
-                    "player may be connected to a different network than intended");
-            return net;
-        }
-
-        RSIntegrationMod.LOGGER.debug("[RSI] resolveNetworkFromPlayer: all paths failed");
+        // Do not guess a network from spatial proximity.  A nearby node may
+        // belong to another player's network; callers performing extraction
+        // or insertion must use an explicit container, item, terminal, or binding.
+        RSIntegrationMod.LOGGER.debug("[RSI] resolveNetworkFromPlayer: no explicit network source");
         return null;
     }
 
@@ -334,7 +330,7 @@ public final class RSIntegrationNetwork {
     }
 
     // Cooldown cache for nearby-node scans — prevents repeated 4096-block sweeps
-    private static final java.util.Map<UUID, Long> lastNearbyScan = new java.util.HashMap<>();
+    private static final java.util.Map<UUID, Long> lastNearbyScan = new java.util.concurrent.ConcurrentHashMap<>();
     private static final long NEARBY_SCAN_COOLDOWN_MS = 10_000;
     private static final int NEARBY_SCAN_RANGE = 8;
 

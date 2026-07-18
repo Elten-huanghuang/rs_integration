@@ -19,38 +19,49 @@ final class SyncHandler {
     private static final Map<Integer, RSSidePanelSyncPacket> chunkAccum = new HashMap<>();
     private static int expectedChunks = 0;
     private static long lastChunkTime = 0;
-    private static final long CHUNK_EXPIRY_MS = 30_000;
+    private static final long CHUNK_EXPIRY_MS = 5_000;
+    private static long appliedGeneration = -1L;
+    private static long assemblingGeneration = -1L;
 
     static void onSyncReceived(RSSidePanelSyncPacket packet) {
         if (packet.isChunked()) {
             handleChunked(packet);
             return;
         }
+        if (packet.generation > 0 && packet.generation < appliedGeneration) return;
         applySync(packet.ids, packet.items, packet.timestamps, packet.craftableFlags,
                 packet.totalSlotCount, packet.networkAvailable, packet.networkName,
                 packet.getBindings());
+        if (packet.generation > 0) appliedGeneration = packet.generation;
     }
 
     /** Clear the chunked-sync accumulator on client logout so a stale partial
      *  sync from a previous server can't bleed into the next one. */
     public static void clearOnLogout() {
         chunkAccum.clear();
-        expectedChunks = 0;
+        appliedGeneration = -1L;
+        assemblingGeneration = -1L;
         lastChunkTime = 0;
     }
 
     private static void handleChunked(RSSidePanelSyncPacket packet) {
         long now = System.currentTimeMillis();
-        if (now - lastChunkTime > CHUNK_EXPIRY_MS) {
+        // Keep an in-flight generation intact while later chunks arrive.  Only
+        // an expired assembly or a new chunk-0 starts a fresh accumulator.
+        if (lastChunkTime > 0 && now - lastChunkTime > CHUNK_EXPIRY_MS) {
             chunkAccum.clear();
             expectedChunks = 0;
+            assemblingGeneration = -1L;
         }
         lastChunkTime = now;
 
         if (packet.chunkIndex == 0) {
+            if (packet.generation > 0 && packet.generation < appliedGeneration) return;
             chunkAccum.clear();
             expectedChunks = packet.totalChunks;
+            assemblingGeneration = packet.generation;
         }
+        if (packet.generation != assemblingGeneration) return;
         if (packet.totalChunks != expectedChunks) return;
 
         chunkAccum.put(packet.chunkIndex, packet);
@@ -81,6 +92,7 @@ final class SyncHandler {
                     chunkAccum.get(0).networkAvailable,
                     chunkAccum.get(0).networkName,
                     allBindings);
+            if (assemblingGeneration > 0) appliedGeneration = assemblingGeneration;
 
             chunkAccum.clear();
             expectedChunks = 0;
@@ -132,6 +144,8 @@ final class SyncHandler {
                 id, ForgeRegistries.ITEMS.getKey(stack.getItem()), stack.getCount(), craftable);
 
         RSSidePanelClient.pendingExtractions.remove(id);
+        RSSidePanelClient.pendingSyncRetries.remove(id);
+        RSSidePanelClient.pendingOperationStacks.values().removeIf(id::equals);
 
         int count = stack.getCount();
         Integer idx = RSSidePanelClient.idToIndex.get(id);

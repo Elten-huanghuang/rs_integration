@@ -15,6 +15,7 @@ import com.huanghuang.rsintegration.mods.aetherworks.client.AetherworksClientSet
 import com.huanghuang.rsintegration.mods.avaritia.AvaritiaRSModule;
 import com.huanghuang.rsintegration.mods.confluence.ConfluenceRSModule;
 import com.huanghuang.rsintegration.mods.crockpot.CrockPotRSModule;
+import com.huanghuang.rsintegration.mods.distantworlds.DistantWorldsRSModule;
 import com.huanghuang.rsintegration.mods.eidolon.EidolonRSModule;
 import com.huanghuang.rsintegration.mods.farmersdelight.FarmersDelightRSModule;
 import com.huanghuang.rsintegration.mods.farmersrespite.FarmersRespiteRSModule;
@@ -104,8 +105,11 @@ public final class RSIntegrationMod {
             FMLJavaModLoadingContext.get().getModEventBus();
 
     static {
-        DistExecutor.safeRunWhenOn(Dist.CLIENT, () -> () ->
-                MOD_BUS.addListener(AetherworksClientSetup::onRegisterOverlays));
+        DistExecutor.safeRunWhenOn(Dist.CLIENT, () -> () -> {
+            MOD_BUS.addListener(AetherworksClientSetup::onRegisterOverlays);
+            MOD_BUS.addListener(
+                    com.huanghuang.rsintegration.mods.distantworlds.client.DistantWorldsClientSetup::onRegisterOverlays);
+        });
     }
 
     private record ModuleEntry(String modId, ForgeConfigSpec.BooleanValue configFlag,
@@ -151,7 +155,9 @@ public final class RSIntegrationMod {
             new ModuleEntry(ModIds.FARMERSRESPITE, RSIntegrationConfig.ENABLE_FARMERSRESPITE,
                     () -> FarmersRespiteRSModule.INSTANCE),
             new ModuleEntry(ModIds.IRON_FURNACES, RSIntegrationConfig.ENABLE_IRON_FURNACES,
-                    () -> IronFurnacesRSModule.INSTANCE)
+                    () -> IronFurnacesRSModule.INSTANCE),
+            new ModuleEntry(ModIds.DISTANT_WORLDS, RSIntegrationConfig.ENABLE_DISTANT_WORLDS,
+                    () -> DistantWorldsRSModule.INSTANCE)
     );
 
     public RSIntegrationMod() {
@@ -161,6 +167,7 @@ public final class RSIntegrationMod {
         MOD_BUS.addListener((ModConfigEvent.Reloading e) -> {
             refreshConfigCache();
             com.huanghuang.rsintegration.compat.ftbquests.ExternalItemProgressBridge.refreshEnabled();
+            broadcastConfigSync();
         });
         AltarBindingRegistry.registerHook(AltarBinding.RS_NETWORK, RSBindingHook.INSTANCE);
         ForgeChunkManager.setForcedChunkLoadingCallback(
@@ -413,6 +420,7 @@ public final class RSIntegrationMod {
                 () -> () -> MinecraftForge.EVENT_BUS.register(BindingTooltipHandler.class));
         // Crafting
         BatchCraftNetworkHandler.register();
+        ConfigSyncPacket.register();
 
         // Altar binding registry (BINDINGS cache + scan caches)
         MinecraftForge.EVENT_BUS.register(AltarBindingRegistry.class);
@@ -429,9 +437,7 @@ public final class RSIntegrationMod {
         MinecraftForge.EVENT_BUS.addListener((PlayerEvent.PlayerLoggedInEvent e) -> {
             if (e.getEntity() instanceof ServerPlayer sp) {
                 NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> sp),
-                        new ConfigSyncPacket(
-                                RSIntegrationConfig.ENABLE_MACHINE_GUI_TABS.get(),
-                                RSIntegrationConfig.MACHINE_TAB_THRESHOLD.get()));
+                        ConfigSyncPacket.fromServerConfig());
             }
         });
         MinecraftForge.EVENT_BUS.addListener((PlayerEvent.PlayerLoggedOutEvent e) -> {
@@ -446,6 +452,7 @@ public final class RSIntegrationMod {
         MinecraftForge.EVENT_BUS.addListener((PlayerEvent.PlayerChangedDimensionEvent e) -> {
             if (e.getEntity() instanceof ServerPlayer sp) {
                 RSIntegrationNetwork.invalidateNetworkResolution(sp.getUUID());
+                com.huanghuang.rsintegration.sidepanel.data.MachineStatusCache.getInstance().clearDimension(e.getFrom().location());
                 if (RSSidePanelNetworkHandler.hasListener(sp.getUUID())) {
                     RSSidePanelNetworkHandler.unregisterListener(sp.getUUID());
                     INetwork network = RSIntegrationNetwork.resolveNetworkFromPlayer(sp);
@@ -460,6 +467,7 @@ public final class RSIntegrationMod {
         // materials are refunded rather than silently lost.
         MinecraftForge.EVENT_BUS.addListener((ServerStoppingEvent e) -> {
             AsyncCraftManager.abortAll();
+            RemoteGuiAuth.clearServerState();
             RSSidePanelNetworkHandler.clearServerState();
         });
 
@@ -517,6 +525,15 @@ public final class RSIntegrationMod {
     }
 
     @SuppressWarnings("removal")
+    private static void broadcastConfigSync() {
+        var server = net.minecraftforge.server.ServerLifecycleHooks.getCurrentServer();
+        if (server == null) return;
+        var packet = ConfigSyncPacket.fromServerConfig();
+        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+            NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), packet);
+        }
+    }
+
     private static void registerDisplayTest() {
         ModLoadingContext.get().registerExtensionPoint(IExtensionPoint.DisplayTest.class,
                 () -> new IExtensionPoint.DisplayTest(

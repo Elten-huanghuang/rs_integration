@@ -85,7 +85,17 @@ public final class RSSidePanelClient {
     static final List<PanelStack> displayList = new ArrayList<>();
     static volatile boolean displayDirty = true;
     static final Map<UUID, PendingExtraction> pendingExtractions = new HashMap<>();
+    /** Pending operations that received no delta yet and have requested one confirmation sync. */
+    static final Set<UUID> pendingSyncRetries = new HashSet<>();
+    static final Map<Long, UUID> pendingOperationStacks = new HashMap<>();
     static final PanelDataModel dataModel = new PanelDataModel();
+    static long nextOperationId = 1L;
+    static long nextOperationId() {
+        long id = nextOperationId++;
+        if (nextOperationId <= 0 || nextOperationId > 0x7FFF_FFFF_FFFF_FFFFL) nextOperationId = 1L;
+        return id;
+    }
+
 
     /** Clear per-server panel state on client logout so items/pending
      *  extractions from a previous server don't briefly show after switching. */
@@ -94,10 +104,14 @@ public final class RSSidePanelClient {
         idToIndex.clear();
         displayList.clear();
         pendingExtractions.clear();
+        pendingOperationStacks.clear();
+        pendingSyncRetries.clear();
         displayDirty = true;
         networkAvailable = false;
         networkName = "";
         SyncHandler.clearOnLogout();
+        com.huanghuang.rsintegration.sidepanel.data.MachineStatusCache.getInstance().clear();
+        com.huanghuang.rsintegration.config.ClientSyncedConfig.reset();
     }
 
     // ── Mouse/drag state ─────────────────────────────────────────

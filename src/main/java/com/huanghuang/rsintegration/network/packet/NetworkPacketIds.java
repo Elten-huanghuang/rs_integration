@@ -77,4 +77,8 @@ public final class NetworkPacketIds {
     public static final int APOTHEOSIS_LIBRARY_SCAN_RESPONSE = 102;
     public static final int APOTHEOSIS_LIBRARY_IMPORT_REQUEST = 103;
     public static final int APOTHEOSIS_LIBRARY_IMPORT_RESULT = 104;
+
+    // ── Distant Worlds Lithum Altar (110-119) ──────────────────────
+    public static final int LITHUM_ALTAR_STATUS_REQUEST = 110;
+    public static final int LITHUM_ALTAR_STATUS_SYNC = 111;
 }

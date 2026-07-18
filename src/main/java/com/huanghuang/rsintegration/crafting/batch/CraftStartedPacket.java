@@ -3,8 +3,6 @@ package com.huanghuang.rsintegration.crafting.batch;
 import com.huanghuang.rsintegration.crafting.CraftProgressTracker;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.world.item.ItemStack;
-import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.api.distmarker.OnlyIn;
 import net.minecraftforge.network.NetworkEvent;
 
 import java.util.UUID;
@@ -40,7 +38,6 @@ public final class CraftStartedPacket {
         return new CraftStartedPacket(buf.readUUID(), buf.readVarInt(), buf.readBoolean(), buf.readItem());
     }
 
-    @OnlyIn(Dist.CLIENT)
     public static void handle(CraftStartedPacket packet, Supplier<NetworkEvent.Context> ctx) {
         ctx.get().enqueueWork(() -> CraftProgressTracker.onStarted(packet));
         ctx.get().setPacketHandled(true);

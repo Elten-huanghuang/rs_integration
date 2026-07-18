@@ -71,6 +71,8 @@ public final class CraftingPlanScreen extends Screen {
     private static final int C_SLOT_HOVER = 0x80FFFFFF;
     private PlanResponse plan;
     private int currentRepeat = 1;
+    private long activeRequestId;
+    private long nextRequestId = 1L;
     private int scrollOffset;
     private int maxScroll;
     private boolean dragging;
@@ -250,6 +252,7 @@ public final class CraftingPlanScreen extends Screen {
         super(Component.translatable("rsi.plan.title",
                 plan.targetResult().getHoverName().getString()));
         this.plan = plan;
+        this.activeRequestId = 0L;
         // Adaptive view routing (§2.5): non-trivial plans open in the tree; simple ones stay on the card.
         this.viewMode = plan.steps().size() > 2 ? ViewMode.TREE : ViewMode.CARD;
         this.renderEngine = new PlanRenderEngine(Minecraft.getInstance().font);
@@ -261,6 +264,21 @@ public final class CraftingPlanScreen extends Screen {
     /** Exposed for {@link PlanResponsePacket} dedup check. */
     public String getRecipeId() {
         return plan.recipeId();
+    }
+
+    public long activeRequestId() {
+        return activeRequestId;
+    }
+
+    public void acceptResponse(long requestId, PlanResponse newPlan) {
+        if (requestId == 0L) {
+            if (activeRequestId != 0L) return;
+        } else if (requestId < activeRequestId) {
+            return;
+        } else {
+            activeRequestId = requestId;
+        }
+        updatePlan(newPlan);
     }
 
     /** Update plan data in-place (OR-path switch, repeat-count change, etc.).
@@ -482,10 +500,13 @@ public final class CraftingPlanScreen extends Screen {
             execPos = new net.minecraft.core.BlockPos(
                     plan.executionPosX(), plan.executionPosY(), plan.executionPosZ());
         }
+        long requestId = nextRequestId++;
+        if (nextRequestId <= 0 || nextRequestId > 0x7FFF_FFFF_FFFF_FFFFL) nextRequestId = 1L;
+        if (preview) activeRequestId = requestId;
         BatchCraftNetworkHandler.CHANNEL.sendToServer(
                 new GenericCraftPacket(rid, preview, forced, execDim, execPos,
                         repeatCount, inferMode, plan.baseItem(),
-                        executionTarget(plan.clickedOutput(), plan.targetResult())));
+                        executionTarget(plan.clickedOutput(), plan.targetResult()), requestId));
     }
 
     /** Open JEI for a specific recipe id. No-op when JEI is unavailable. */

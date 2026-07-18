@@ -33,6 +33,9 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
         // @Mixin TARGET class is absent; a body reference to another absent mod
         // class would instead NoClassDefFoundError at apply/runtime. Probe that
         // second class here so the whole mixin is skipped when it is missing.
+        if (mixinClassName.contains("distantworlds.LithumCoreUpdateTickProcedureMixin")) {
+            return isClassPresent("net.mcreator.distantworlds.procedures.LithumCoreUpdateTickProcedure");
+        }
         if (mixinClassName.contains("apotheosis.EnchLibraryScreenMixin")) {
             return isClassPresent("dev.shadowsoffire.apotheosis.ench.library.EnchLibraryScreen");
         }

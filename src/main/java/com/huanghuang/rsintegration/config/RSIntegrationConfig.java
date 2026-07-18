@@ -50,6 +50,13 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.BooleanValue ENABLE_YOUKAISHOMECOMING;
     public static ForgeConfigSpec.BooleanValue ENABLE_FARMERSRESPITE;
     public static ForgeConfigSpec.BooleanValue ENABLE_IRON_FURNACES;
+    public static ForgeConfigSpec.BooleanValue ENABLE_DISTANT_WORLDS;
+    public static ForgeConfigSpec.BooleanValue ALLOW_DISTANT_WORLDS_RESEARCH_BYPASS;
+    public static ForgeConfigSpec.BooleanValue DISABLE_DISTANT_WORLDS_FIRON_FAILURE;
+    public static ForgeConfigSpec.BooleanValue ALLOW_DISTANT_WORLDS_FUEL_AUTOMATION;
+    public static ForgeConfigSpec.IntValue DISTANT_WORLDS_FUEL_SEARCH_RADIUS;
+    public static ForgeConfigSpec.IntValue DISTANT_WORLDS_FUEL_BATCH_SIZE;
+    public static ForgeConfigSpec.ConfigValue<List<? extends String>> DISTANT_WORLDS_FUEL_PRIORITY;
     public static ForgeConfigSpec.BooleanValue ENABLE_APOTHEOSIS;
     public static ForgeConfigSpec.BooleanValue ENABLE_VANILLA_MACHINES;
     public static ForgeConfigSpec.BooleanValue ENABLE_SOPHISTICATED_BACKPACKS;
@@ -118,6 +125,7 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.IntValue RS_SIDE_PANEL_WIDTH;
     public static ForgeConfigSpec.IntValue RS_SIDE_PANEL_HEIGHT;
     public static ForgeConfigSpec.BooleanValue RS_SIDE_PANEL_HIDDEN;
+    public static ForgeConfigSpec.BooleanValue ENABLE_DISTANT_WORLDS_HUD;
 
 
     static {
@@ -182,6 +190,33 @@ public final class RSIntegrationConfig {
                 .comment("Enable RS integration with Iron Furnaces ordinary furnace mode.",
                         "Supports smelting, blasting, and smoking recipes; Factory and Generator modes are not supported.")
                 .define("enableIronFurnaces", true);
+        ENABLE_DISTANT_WORLDS = c
+                .comment("Enable RS integration with Distant Worlds Lithum Altar Firon recipes.")
+                .define("enableDistantWorlds", true);
+        ALLOW_DISTANT_WORLDS_RESEARCH_BYPASS = c
+                .comment("Allow RS Integration to craft Distant Worlds Firon recipes without the",
+                        "distant_worlds:incandescent_forever advancement.",
+                        "This only affects RSI automation; normal Distant Worlds altar interaction remains unchanged.")
+                .define("allowDistantWorldsResearchBypass", true);
+        DISABLE_DISTANT_WORLDS_FIRON_FAILURE = c
+                .comment("Disable the random failure/explosion branches for distant_worlds:firon_* altar rituals.",
+                        "Enabled by default so automated Firon crafts deterministically produce their real output.")
+                .define("disableDistantWorldsFironFailure", true);
+        ALLOW_DISTANT_WORLDS_FUEL_AUTOMATION = c
+                .comment("Automatically supply nearby Lithum Furnaces with tagged fuel while an RSI altar craft runs.")
+                .define("allowDistantWorldsFuelAutomation", true);
+        DISTANT_WORLDS_FUEL_SEARCH_RADIUS = c
+                .comment("Maximum block radius used to find a Lithum Furnace for an altar craft.")
+                .defineInRange("distantWorldsFuelSearchRadius", 8, 1, 32);
+        DISTANT_WORLDS_FUEL_BATCH_SIZE = c
+                .comment("Maximum fuel items inserted into the selected Lithum Furnace per refill.")
+                .defineInRange("distantWorldsFuelBatchSize", 4, 1, 64);
+        DISTANT_WORLDS_FUEL_PRIORITY = c
+                .comment("Preferred Lithum Furnace fuels, highest priority first.")
+                .defineListAllowEmpty(List.of("distantWorldsFuelPriority"),
+                        List.of("distant_worlds:curelite_block", "distant_worlds:raw_curelite_block",
+                                "distant_worlds:curelite", "distant_worlds:raw_curelite"),
+                        value -> value instanceof String sValue && ResourceLocation.tryParse(sValue) != null);
         ENABLE_APOTHEOSIS = c
                 .comment("Enable RS integration with Apotheosis, including Fletching Table recipes and remote GUI access.",
                         "Only applies when Apotheosis is installed.")
@@ -602,6 +637,11 @@ public final class RSIntegrationConfig {
         RS_SIDE_PANEL_HIDDEN = cl
                 .comment("Collapse the side panel to a small bar.")
                 .define("hidden", false);
+        cl.pop();
+        cl.push("distantWorlds");
+        ENABLE_DISTANT_WORLDS_HUD = cl
+                .comment("Show Lithum Altar status while looking at a Lithum Core.")
+                .define("enableHud", true);
         cl.pop();
         CLIENT_SPEC = cl.build();
     }

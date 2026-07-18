@@ -14,6 +14,8 @@ import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 import java.util.function.Supplier;
+import java.util.Set;
+import java.util.HashSet;
 
 public final class RSSidePanelRequestPacket {
 
@@ -40,6 +42,111 @@ public final class RSSidePanelRequestPacket {
         return new RSSidePanelRequestPacket(forceFullSync, isClosing);
     }
 
+    private static final java.util.Map<UUID, RefreshTask> REFRESH_TASKS = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final int ENTRIES_PER_TICK = 64;
+
+    static void refreshOnServerThread(ServerPlayer player, boolean forceFullSync) {
+        UUID id = player.getUUID();
+        REFRESH_TASKS.remove(id);
+        INetwork network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
+        if (network == null) {
+            RSSidePanelNetworkHandler.unregisterListener(id);
+            RSSidePanelNetworkHandler.sendSync(player, Collections.emptyList(), Collections.emptyList(), Collections.emptyList(), Collections.emptyList(), 0, false, "");
+            return;
+        }
+        try {
+            RSSidePanelNetworkHandler.registerListener(player, network);
+            IStorageCache<?> cache = network.getItemStorageCache();
+            var list = cache == null ? null : cache.getList();
+            if (list == null) {
+                RSSidePanelNetworkHandler.sendSync(player, Collections.emptyList(), Collections.emptyList(), Collections.emptyList(), Collections.emptyList(), 0, true, "");
+                return;
+            }
+            REFRESH_TASKS.put(id, new RefreshTask(player, network, list.getStacks().iterator()));
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI] SidePanel refresh setup failed", e);
+            RSSidePanelNetworkHandler.sendSync(player, Collections.emptyList(), Collections.emptyList(), Collections.emptyList(), Collections.emptyList(), 0, true, "");
+        }
+    }
+
+    static void advanceRefreshTasks(net.minecraft.server.MinecraftServer server) {
+        for (RefreshTask task : List.copyOf(REFRESH_TASKS.values())) {
+            ServerPlayer player = server.getPlayerList().getPlayer(task.playerId);
+            if (player == null || REFRESH_TASKS.get(task.playerId) != task) {
+                REFRESH_TASKS.remove(task.playerId, task);
+                continue;
+            }
+            if (!task.advance()) REFRESH_TASKS.remove(task.playerId, task);
+        }
+    }
+
+    static void cancelRefresh(UUID playerId) { REFRESH_TASKS.remove(playerId); }
+
+    private static final class RefreshTask {
+        final UUID playerId;
+        final ServerPlayer player;
+        final INetwork network;
+        final java.util.Iterator<?> entries;
+        final List<UUID> ids = new ArrayList<>();
+        final List<ItemStack> items = new ArrayList<>();
+        final List<Long> timestamps = new ArrayList<>();
+        final List<Boolean> craftable = new ArrayList<>();
+        int total;
+        final Set<String> craftableKeys = new HashSet<>();
+        final String networkName;
+
+        RefreshTask(ServerPlayer player, INetwork network, java.util.Iterator<?> entries) {
+            this.player = player; this.playerId = player.getUUID(); this.network = network; this.entries = entries;
+            this.networkName = resolveNetworkName(network);
+            try {
+                var manager = network.getCraftingManager();
+                if (manager != null) for (var pattern : manager.getPatterns()) {
+                    for (ItemStack output : pattern.getOutputs()) {
+                        if (!output.isEmpty()) {
+                            var key = net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(output.getItem());
+                            if (key != null) craftableKeys.add(key.toString());
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.debug("[RSI] Craftable snapshot failed", e);
+            }
+        }
+
+        boolean advance() {
+            int processed = 0;
+            var tracker = network.getItemStorageTracker();
+            while (entries.hasNext() && processed++ < ENTRIES_PER_TICK) {
+                Object entry = entries.next();
+                try {
+                    ItemStack stored = (ItemStack) entry.getClass().getMethod("getStack").invoke(entry);
+                    if (stored == null || stored.isEmpty()) continue;
+                    total++;
+                    UUID id = (UUID) entry.getClass().getMethod("getId").invoke(entry);
+                    ids.add(id); items.add(stored.copy());
+                    var tracked = tracker != null ? tracker.get(stored) : null;
+                    timestamps.add(tracked != null ? tracked.getTime() : 0L);
+                    var itemKey = net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(stored.getItem());
+                    craftable.add(itemKey != null && craftableKeys.contains(itemKey.toString()));
+                } catch (ReflectiveOperationException | ClassCastException ignored) {
+                    RSIntegrationMod.LOGGER.debug("[RSI] Invalid storage entry during refresh");
+                }
+            }
+            if (entries.hasNext()) return true;
+            RSSidePanelNetworkHandler.sendSync(player, ids, items, timestamps, craftable, total, true, networkName);
+            return false;
+        }
+    }
+
+    private static String resolveNetworkName(INetwork network) {
+        try {
+            var level = network.getLevel();
+            var pos = network.getPosition();
+            if (level != null && pos != null) return level.getBlockState(pos).getBlock().getName().getString();
+        } catch (Exception ignored) {}
+        return "";
+    }
+
     static void handle(RSSidePanelRequestPacket packet,
                        Supplier<NetworkEvent.Context> contextSupplier) {
         NetworkEvent.Context context = contextSupplier.get();
@@ -53,115 +160,8 @@ public final class RSSidePanelRequestPacket {
                 RSSidePanelNetworkHandler.unregisterListener(player.getUUID());
                 return;
             }
-
-            // Throttle the heavy refresh path (full cache + pattern scan +
-            // Curios reflection). Cleanup above is exempt so listeners always
-            // unregister. Dropped refresh is harmless — the client re-requests.
-            if (SidePanelRequestRateLimiter.isRateLimited(player.getUUID())) {
-                return;
-            }
-
-            INetwork network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
-            if (network == null) {
-                RSSidePanelNetworkHandler.unregisterListener(player.getUUID());
-                RSSidePanelNetworkHandler.sendSync(player,
-                        Collections.emptyList(), Collections.emptyList(),
-                        Collections.emptyList(), Collections.emptyList(),
-                        0, false, "");
-                return;
-            }
-
-            RSSidePanelNetworkHandler.registerListener(player, network);
-
-            try {
-                IStorageCache<?> cache = network.getItemStorageCache();
-                if (cache == null) {
-                    RSSidePanelNetworkHandler.sendSync(player,
-                            Collections.emptyList(), Collections.emptyList(),
-                            Collections.emptyList(), Collections.emptyList(),
-                            0, true, "");
-                    return;
-                }
-                var list = cache.getList();
-                if (list == null) {
-                    RSSidePanelNetworkHandler.sendSync(player,
-                            Collections.emptyList(), Collections.emptyList(),
-                            Collections.emptyList(), Collections.emptyList(),
-                            0, true, "");
-                    return;
-                }
-
-                var craftableKeys = new java.util.HashSet<String>();
-                try {
-                    var cm = network.getCraftingManager();
-                    if (cm != null) {
-                        for (var pattern : cm.getPatterns()) {
-                            for (ItemStack out : pattern.getOutputs()) {
-                                if (!out.isEmpty()) {
-                                    var k = net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(out.getItem());
-                                    if (k != null) {
-                                        String key = k.toString();
-                                        String nbt = PanelStack.stableNbtString(out.getTag());
-                                        if (!nbt.isEmpty()) key += "|" + nbt;
-                                        craftableKeys.add(key);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Craftable probe failed", e); }
-
-                // Collect items in storage-cache iteration order.
-                // Sorting and truncation is left entirely to the client
-                // (DisplayListManager.resort) — server-side pre-sorting
-                // cannot match the client's comparator, so any truncation
-                // here would drop items the client expects to see first.
-                List<UUID> ids = new ArrayList<>();
-                List<ItemStack> items = new ArrayList<>();
-                List<Long> timestamps = new ArrayList<>();
-                List<Boolean> craftableFlags = new ArrayList<>();
-                int totalCount = 0;
-                var tracker = network.getItemStorageTracker();
-                for (var entry : list.getStacks()) {
-                    Object raw = entry.getStack();
-                    if (!(raw instanceof ItemStack stored) || stored.isEmpty()) continue;
-                    totalCount++;
-                    ids.add(entry.getId());
-                    items.add(stored.copy());
-                    long ts = 0L;
-                    if (tracker != null) {
-                        var trackerEntry = tracker.get(stored);
-                        if (trackerEntry != null) ts = trackerEntry.getTime();
-                    }
-                    timestamps.add(ts);
-                    var k = net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(stored.getItem());
-                    if (k != null) {
-                        String key = k.toString();
-                        String nbt = PanelStack.stableNbtString(stored.getTag());
-                        if (!nbt.isEmpty()) key += "|" + nbt;
-                        craftableFlags.add(craftableKeys.contains(key));
-                    } else {
-                        craftableFlags.add(false);
-                    }
-                }
-
-                String netName = "";
-                try {
-                    var level = network.getLevel();
-                    var pos = network.getPosition();
-                    if (level != null && pos != null) {
-                        netName = level.getBlockState(pos).getBlock().getName().getString();
-                    }
-                } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Name probe failed", e); }
-
-                RSSidePanelNetworkHandler.sendSync(player, ids, items, timestamps, craftableFlags, totalCount, true, netName);
-            } catch (Exception e) {
-                RSIntegrationMod.LOGGER.warn("[RSI] SidePanel request error", e);
-                RSSidePanelNetworkHandler.sendSync(player,
-                        Collections.emptyList(), Collections.emptyList(),
-                        Collections.emptyList(), Collections.emptyList(),
-                        0, true, "");
-            }
+            if (SidePanelRequestRateLimiter.isRateLimited(player.getUUID())) return;
+            RSSidePanelNetworkHandler.startRefresh(player, packet.forceFullSync);
         });
         context.setPacketHandled(true);
     }

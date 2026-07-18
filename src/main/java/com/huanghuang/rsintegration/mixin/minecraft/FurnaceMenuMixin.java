@@ -13,7 +13,8 @@ public abstract class FurnaceMenuMixin {
 
     @Inject(method = "stillValid", at = @At("HEAD"), cancellable = true)
     private void rsi$bypassDistanceForRemoteGui(Player player, CallbackInfoReturnable<Boolean> cir) {
-        if (RemoteGuiAuth.hasActiveAuthorization(player.getUUID())) {
+        if (player instanceof net.minecraft.server.level.ServerPlayer sp
+                && RemoteGuiAuth.isAuthorizedCurrentMenu(sp)) {
             cir.setReturnValue(true);
             cir.cancel();
         }

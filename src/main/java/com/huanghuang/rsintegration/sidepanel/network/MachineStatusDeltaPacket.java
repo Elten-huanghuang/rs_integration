@@ -18,12 +18,19 @@ import java.util.function.Supplier;
 public final class MachineStatusDeltaPacket {
 
     private final List<Entry> entries;
+    private final long sequence;
 
     public MachineStatusDeltaPacket(List<Entry> entries) {
+        this(entries, 0L);
+    }
+
+    public MachineStatusDeltaPacket(List<Entry> entries, long sequence) {
         this.entries = entries;
+        this.sequence = sequence;
     }
 
     public List<Entry> entries() { return entries; }
+    public long sequence() { return sequence; }
 
     // ── Encode / Decode ──────────────────────────────────────────
 
@@ -32,21 +39,22 @@ public final class MachineStatusDeltaPacket {
         for (Entry e : entries) {
             buf.writeResourceLocation(e.dim);
             buf.writeBlockPos(e.pos);
-            e.status.encode(buf);
+            buf.writeBoolean(e.removed);
+            if (!e.removed) e.status.encode(buf);
         }
+        buf.writeVarLong(sequence);
     }
 
     public static MachineStatusDeltaPacket decode(FriendlyByteBuf buf) {
         int count = Math.max(0, Math.min(buf.readVarInt(), 4096));
         List<Entry> list = new ArrayList<>(count);
         for (int i = 0; i < count; i++) {
-            list.add(new Entry(
-                buf.readResourceLocation(),
-                buf.readBlockPos(),
-                MachineStatus.decode(buf)
-            ));
+            ResourceLocation dim = buf.readResourceLocation();
+            BlockPos pos = buf.readBlockPos();
+            boolean removed = buf.readBoolean();
+            list.add(new Entry(dim, pos, removed ? MachineStatus.UNKNOWN : MachineStatus.decode(buf), removed));
         }
-        return new MachineStatusDeltaPacket(list);
+        return new MachineStatusDeltaPacket(list, buf.readableBytes() > 0 ? buf.readVarLong() : 0L);
     }
 
     // ── Handle (client side) ─────────────────────────────────────
@@ -54,8 +62,10 @@ public final class MachineStatusDeltaPacket {
     public static void handle(MachineStatusDeltaPacket packet, Supplier<NetworkEvent.Context> ctx) {
         ctx.get().enqueueWork(() -> {
             MachineStatusCache cache = MachineStatusCache.getInstance();
+            if (!cache.acceptSequence(packet.sequence)) return;
             for (Entry e : packet.entries) {
-                cache.put(e.dim, e.pos, e.status);
+                if (e.removed) cache.remove(e.dim, e.pos);
+                else cache.put(e.dim, e.pos, e.status);
             }
         });
         ctx.get().setPacketHandled(true);
@@ -63,5 +73,13 @@ public final class MachineStatusDeltaPacket {
 
     // ── Entry ────────────────────────────────────────────────────
 
-    public record Entry(ResourceLocation dim, BlockPos pos, MachineStatus status) {}
+    public record Entry(ResourceLocation dim, BlockPos pos, MachineStatus status, boolean removed) {
+        public Entry(ResourceLocation dim, BlockPos pos, MachineStatus status) {
+            this(dim, pos, status, false);
+        }
+
+        public static Entry removed(ResourceLocation dim, BlockPos pos) {
+            return new Entry(dim, pos, MachineStatus.UNKNOWN, true);
+        }
+    }
 }

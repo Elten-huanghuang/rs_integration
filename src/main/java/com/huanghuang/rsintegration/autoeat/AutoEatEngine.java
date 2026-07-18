@@ -142,7 +142,18 @@ public final class AutoEatEngine {
         runningTasks.remove(player.getUUID());
     }
 
-    // ── Blacklist (player NBT) ──────────────────────────────────
+    public static void sendFailure(ServerPlayer player, AutoEatMode mode, String translationKey) {
+        NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
+                new AutoEatSyncPacket(mode, 0, Component.translatable(translationKey)));
+    }
+
+    private static void failState(ServerPlayer player, AutoEatMode mode,
+                                  String translationKey, String reason) {
+        RSIntegrationMod.debug("[RSI-AutoEat] request rejected for {}: {}",
+                player.getGameProfile().getName(), reason);
+        sendFailure(player, mode, translationKey);
+    }
+
 
     public static Set<ResourceLocation> getBlacklist(net.minecraft.world.entity.player.Player player) {
         Set<ResourceLocation> set = new HashSet<>();
@@ -173,14 +184,32 @@ public final class AutoEatEngine {
     // ── Inner execution ─────────────────────────────────────────
 
     private static void executeInner(ServerPlayer player, AutoEatMode mode, ResourceLocation selectedItem) {
-        if (!(player.containerMenu instanceof GridContainerMenu gridMenu)) return;
-        if (gridMenu.getGrid().getGridType() != GridType.CRAFTING) return;
-        if (!(gridMenu.getGrid() instanceof INetworkAwareGrid awareGrid)) return;
-        if (!gridMenu.getGrid().isGridActive()) return;
+        if (!(player.containerMenu instanceof GridContainerMenu gridMenu)) {
+            failState(player, mode, "rsi.autoeat.error.not_grid", "not_grid_menu");
+            return;
+        }
+        if (gridMenu.getGrid().getGridType() != GridType.CRAFTING) {
+            failState(player, mode, "rsi.autoeat.error.not_crafting_grid", "not_crafting_grid");
+            return;
+        }
+        if (!(gridMenu.getGrid() instanceof INetworkAwareGrid awareGrid)) {
+            failState(player, mode, "rsi.autoeat.error.network_unavailable", "not_network_aware");
+            return;
+        }
+        if (!gridMenu.getGrid().isGridActive()) {
+            failState(player, mode, "rsi.autoeat.error.grid_inactive", "grid_inactive");
+            return;
+        }
         INetwork network = awareGrid.getNetwork();
-        if (network == null) return;
+        if (network == null) {
+            failState(player, mode, "rsi.autoeat.error.network_unavailable", "network_missing");
+            return;
+        }
         IStorageCache<ItemStack> cache = network.getItemStorageCache();
-        if (cache == null) return;
+        if (mode != AutoEatMode.STACK && cache == null) {
+            failState(player, mode, "rsi.autoeat.error.network_unavailable", "cache_missing");
+            return;
+        }
 
         // Cost check
         String requiredEffect = RSIntegrationConfig.AUTO_EAT_REQUIRED_EFFECT.get();
@@ -342,7 +371,18 @@ public final class AutoEatEngine {
         int maxPerBatch = RSIntegrationConfig.AUTO_EAT_MAX_PER_BATCH.get();
         int toExtract = Math.min(maxStackSize, maxPerBatch);
         ItemStack template = new ItemStack(targetItem, toExtract);
-        ItemStack extracted = network.extractItem(template, toExtract, Action.PERFORM);
+        if (cache != null) {
+            for (var entry : cache.getList().getStacks()) {
+                ItemStack stored = entry.getStack();
+                if (!stored.isEmpty() && stored.is(targetItem)) {
+                    template = stored.copy();
+                    template.setCount(toExtract);
+                    break;
+                }
+            }
+        }
+        ItemStack extracted = network.extractItem(template, toExtract,
+                com.refinedmods.refinedstorage.api.util.IComparer.COMPARE_NBT, Action.PERFORM);
         if (extracted.isEmpty()) {
             NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
                     new AutoEatSyncPacket(AutoEatMode.STACK, 0,
@@ -368,7 +408,11 @@ public final class AutoEatEngine {
             net.minecraft.world.food.FoodProperties fp = extracted.getFoodProperties(player);
             boolean alwaysEat = fp != null && fp.canAlwaysEat();
             if (!player.canEat(alwaysEat)) {
-                break; // untouched `extracted` is reinserted below
+                if (!extracted.isEmpty()) {
+                    network.insertItem(extracted, extracted.getCount(), Action.PERFORM);
+                }
+                sendFailure(player, AutoEatMode.STACK, "rsi.autoeat.full");
+                return;
             }
             if (!payCost(network, player, AutoEatMode.STACK)) {
                 if (!extracted.isEmpty()) {

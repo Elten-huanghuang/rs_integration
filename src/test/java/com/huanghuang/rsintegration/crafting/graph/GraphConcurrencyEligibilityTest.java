@@ -13,6 +13,10 @@ class GraphConcurrencyEligibilityTest {
         assertEquals(BatchConcurrencyCapabilities.OutputOwnership.OWNED_WORLD_CAPTURE,
                 capability("malum_spirit_crucible", "recipe.Any", false).outputOwnership());
         assertEquals(BatchConcurrencyCapabilities.SideEffects.ADJACENT_MACHINE,
+                capability("malum", "recipe.SpiritInfusionRecipe", false).sideEffects());
+        assertEquals(0,
+                capability("malum", "recipe.SpiritInfusionRecipe", false).supportOffsets().size());
+        assertEquals(BatchConcurrencyCapabilities.SideEffects.ADJACENT_MACHINE,
                 capability("goety", "recipe.Any", false).sideEffects());
         assertEquals(BatchConcurrencyCapabilities.OutputOwnership.DELEGATE_RESULT,
                 capability("forbidden_arcanus", "recipe.Ritual", false).outputOwnership());

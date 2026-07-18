@@ -50,12 +50,23 @@ final class SearchController {
         return searchWidget;
     }
 
+    private static boolean isSidePanelHostScreen(Minecraft mc) {
+        if (mc.screen == null) return false;
+        // The panel is an inventory/machine overlay. Keep the global keybind
+        // out of chat, JEI, options/key-bindings and other non-container screens.
+        return mc.screen instanceof net.minecraft.client.gui.screens.inventory.AbstractContainerScreen<?>;
+    }
+
     // ── Key input (no screen open) ────────────────────────────────
 
     @SuppressWarnings("resource")
     static void onKeyInput(InputEvent.Key event) {
         var mc = Minecraft.getInstance();
         if (mc.player == null) return;
+        // The panel is an RS-grid overlay. Do not let its global keybind
+        // fire while typing in another screen or changing controls.
+        if (!isSidePanelHostScreen(mc)) return;
+        if (mc.screen.getFocused() instanceof net.minecraft.client.gui.components.EditBox) return;
         if (RSSidePanelClient.KEY_TOGGLE_PANEL.isActiveAndMatches(
                 com.mojang.blaze3d.platform.InputConstants.getKey(event.getKey(), event.getScanCode()))
                 && event.getAction() == GLFW.GLFW_PRESS) {

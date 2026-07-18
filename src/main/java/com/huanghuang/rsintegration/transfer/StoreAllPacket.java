@@ -39,6 +39,8 @@ public final class StoreAllPacket {
         ctx.enqueueWork(() -> {
             if (!RSIntegrationConfig.ENABLE_CONTAINER_TRANSFER.get()) return;
 
+            if (pkt.mode != 0 && pkt.mode != 1) return;
+
             AbstractContainerMenu menu = player.containerMenu;
             if (menu == null) return;
             if (menu instanceof net.minecraft.world.inventory.InventoryMenu) return;

@@ -53,6 +53,10 @@ public final class GraphConcurrencyEligibility {
             return capability(BatchConcurrencyCapabilities.OutputOwnership.OWNED_WORLD_CAPTURE,
                     BatchConcurrencyCapabilities.SideEffects.ADJACENT_MACHINE, 3);
         }
+        if ("malum".equals(type)) {
+            return capability(BatchConcurrencyCapabilities.OutputOwnership.OWNED_WORLD_CAPTURE,
+                    BatchConcurrencyCapabilities.SideEffects.ADJACENT_MACHINE, 0);
+        }
         if (WORLD_CAPTURE_TYPES.contains(type)) {
             return capability(BatchConcurrencyCapabilities.OutputOwnership.OWNED_WORLD_CAPTURE,
                     RITUAL_TYPES.contains(type)

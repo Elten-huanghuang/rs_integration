@@ -28,34 +28,32 @@ public final class ProtectionChecker {
 
     private ProtectionChecker() {}
 
+    public enum Decision { ALLOW, DENY, UNKNOWN }
+
+    /** Strict result for machine and cross-dimension interactions. */
+    public static Decision check(ServerPlayer player, ServerLevel level, BlockPos pos) {
+        if (player == null || level == null || pos == null) return Decision.DENY;
+        if (ModList.get().isLoaded(ModIds.FTB_CHUNKS) && !checkFTBChunks(player, level, pos)) {
+            return Decision.DENY;
+        }
+        if (ModList.get().isLoaded(ModIds.CADMUS) && !checkCadmus(player, level, pos)) {
+            return Decision.DENY;
+        }
+        return Decision.ALLOW;
+    }
+
     /**
-     * Check whether {@code player} is allowed to interact with the block
-     * at {@code pos} in {@code level}.
-     *
-     * @return {@code true} if the interaction is permitted, {@code false} if
-     *         a protection mod denies access
+     * Check whether a player is allowed to interact with a block at the supplied
+     * position. Kept as a compatibility wrapper for existing callers.
+     */
+    /**
+     * Check whether a player is allowed to interact with a block at the supplied
+     * position. Kept as a compatibility wrapper for existing callers.
      */
     public static boolean canInteract(ServerPlayer player, ServerLevel level, BlockPos pos) {
-        // FTB Chunks — chunk claiming with team-based permissions
-        if (ModList.get().isLoaded(ModIds.FTB_CHUNKS)) {
-            if (!checkFTBChunks(player, level, pos)) {
-                RSIntegrationMod.LOGGER.info("{} FTB Chunks denied {} at {} in {}",
-                        TAG, player.getGameProfile().getName(), pos, level.dimension().location());
-                return false;
-            }
-        }
-
-        // Cadmus — chunk claiming (used by some modpacks)
-        if (ModList.get().isLoaded(ModIds.CADMUS)) {
-            if (!checkCadmus(player, level, pos)) {
-                RSIntegrationMod.LOGGER.info("{} Cadmus denied {} at {} in {}",
-                        TAG, player.getGameProfile().getName(), pos, level.dimension().location());
-                return false;
-            }
-        }
-
-        return true;
+        return check(player, level, pos) == Decision.ALLOW;
     }
+
 
     // ── Static method helper (Reflect.invoke cannot use null obj) ──
 
@@ -223,13 +221,10 @@ public final class ProtectionChecker {
             }
         } catch (Exception e) { RSIntegrationMod.LOGGER.debug("{} reflection probe failed", TAG, e); }
 
-        // Can't determine — default to not claimed (allow). This is a SILENT
-        // fail-open: if FTB renamed these methods, every claimed chunk becomes
-        // allowed. Log at warn so API drift is visible instead of silently
-        // disabling claim protection.
-        RSIntegrationMod.LOGGER.warn("{} FTB Chunks: all claim-detection probes failed "
-                + "(API may have changed) — treating chunk as UNCLAIMED (fail-open)", TAG);
-        return false;
+        // Loaded providers default to denial when their API cannot be resolved;
+        // allowing here would turn reflection drift into a protection bypass.
+        RSIntegrationMod.LOGGER.warn("{} FTB claim-detection probes failed; denying interaction", TAG);
+        return true;
     }
 
     // ── FTB Chunks: claim owner extraction ────────────────────────

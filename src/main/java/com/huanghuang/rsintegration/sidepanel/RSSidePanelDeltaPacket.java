@@ -27,8 +27,13 @@ public final class RSSidePanelDeltaPacket {
         final ItemStack stack;
         final long timestamp;
         final boolean craftable;
+        final long operationId;
 
         public Entry(UUID stackId, ItemStack stack, long timestamp, boolean craftable) {
+            this(stackId, stack, timestamp, craftable, 0L);
+        }
+
+        public Entry(UUID stackId, ItemStack stack, long timestamp, boolean craftable, long operationId) {
             this.stackId = stackId;
             // Preserve item identity for count=0 stacks (full extraction)
             if (stack.getCount() <= 0 && stack.getItem() != null) {
@@ -39,6 +44,7 @@ public final class RSSidePanelDeltaPacket {
             }
             this.timestamp = timestamp;
             this.craftable = craftable;
+            this.operationId = operationId;
         }
     }
 
@@ -75,6 +81,7 @@ public final class RSSidePanelDeltaPacket {
             buf.writeVarInt(realCount);
             buf.writeVarLong(e.timestamp);
             buf.writeBoolean(e.craftable);
+            buf.writeVarLong(e.operationId);
         }
     }
 
@@ -86,7 +93,10 @@ public final class RSSidePanelDeltaPacket {
             ItemStack stack = buf.readItem();
             int realCount = buf.readVarInt();
             stack.setCount(realCount);
-            entries.add(new Entry(id, stack, buf.readVarLong(), buf.readBoolean()));
+            long timestamp = buf.readVarLong();
+            boolean craftable = buf.readBoolean();
+            long operationId = buf.isReadable() ? buf.readVarLong() : 0L;
+            entries.add(new Entry(id, stack, timestamp, craftable, operationId));
         }
         return new RSSidePanelDeltaPacket(entries);
     }

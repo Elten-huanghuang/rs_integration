@@ -4,6 +4,9 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.mods.farmingforblockheads.MarketRecipeWrapper;
 import com.huanghuang.rsintegration.mods.forbidden.FaRitualWrapper;
+import com.huanghuang.rsintegration.mods.distantworlds.LithumAltarRecipeResolver;
+import com.huanghuang.rsintegration.mods.distantworlds.LithumAltarRecipeDefinition;
+import com.huanghuang.rsintegration.mods.distantworlds.LithumAltarRecipeWrapper;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.util.Diagnostics;
@@ -119,6 +122,9 @@ public final class RecipeIndex {
             // ── Market entries (MarketRegistry, not RecipeManager) ────
             int marketIndexed = indexMarketEntries(idx, seen);
 
+            // ── Distant Worlds Firon Lithum Altar definitions ─────────
+            int distantWorldsIndexed = indexDistantWorldsFiron(idx, seen);
+
             index = idx;
             source = rm;
 
@@ -129,12 +135,13 @@ public final class RecipeIndex {
                     + " (skipped: " + skippedUnknown + " unknown, " + skippedEmptyResult
                     + " empty-result, " + skippedIdentity + " identity"
                     + ", " + faIndexed + " FA rituals"
-                    + ", " + marketIndexed + " market)");
+                    + ", " + marketIndexed + " market"
+                    + ", " + distantWorldsIndexed + " Distant Worlds Firon");
             RSIntegrationMod.LOGGER.info("[RecipeIndex] built: {} items, {} entries in {}ms"
                             + " (skipped: {} unknown, {} empty-result, {} identity"
-                            + ", {} FA rituals, {} market)",
+                            + ", {} FA rituals, {} market, {} Distant Worlds Firon)",
                     idx.size(), seen.size(), elapsed, skippedUnknown, skippedEmptyResult,
-                    skippedIdentity, faIndexed, marketIndexed);
+                    skippedIdentity, faIndexed, marketIndexed, distantWorldsIndexed);
             return idx;
         }
     }
@@ -387,6 +394,27 @@ public final class RecipeIndex {
             }
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RecipeIndex] Market entry scan failed", e);
+        }
+        return count;
+    }
+
+    // ── Distant Worlds Firon Lithum Altar indexing ─────────────────
+
+    private static int indexDistantWorldsFiron(Map<Item, List<Entry>> idx,
+                                                Set<ResourceLocation> seen) {
+        if (!net.minecraftforge.fml.ModList.get().isLoaded(ModIds.DISTANT_WORLDS)) return 0;
+        ModType type = ModType.byId(LithumAltarRecipeResolver.TYPE_ID);
+        if (type == ModType.GENERIC) return 0;
+        int count = 0;
+        for (LithumAltarRecipeDefinition definition : LithumAltarRecipeResolver.definitions()) {
+            ResourceLocation id = ResourceLocation.fromNamespaceAndPath(
+                    LithumAltarRecipeResolver.MOD_ID, definition.currentRecipe());
+            if (!seen.add(id) || !LithumAltarRecipeResolver.isComplete(definition)) continue;
+            LithumAltarRecipeWrapper wrapper = new LithumAltarRecipeWrapper(id, definition);
+            Entry entry = new Entry(wrapper, type,
+                    ResourceLocation.fromNamespaceAndPath("rs_integration", "lithum_altar_firon"));
+            idx.computeIfAbsent(definition.output().getItem(), ignored -> new ArrayList<>()).add(entry);
+            count++;
         }
         return count;
     }

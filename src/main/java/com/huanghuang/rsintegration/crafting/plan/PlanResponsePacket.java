@@ -22,6 +22,7 @@ import java.util.function.Supplier;
 public final class PlanResponsePacket {
 
     private final PlanResponse plan;
+    private final long requestId;
 
     /**
      * Upper bound on any decoded collection/array length. Far above any real
@@ -52,7 +53,15 @@ public final class PlanResponsePacket {
     }
 
     public PlanResponsePacket(PlanResponse plan) {
+        this(plan, 0L);
+    }
+
+    public PlanResponsePacket(PlanResponse plan, long requestId) {
+        if (requestId < 0 || requestId > 0x7FFF_FFFF_FFFF_FFFFL) {
+            throw new IllegalArgumentException("requestId out of range");
+        }
         this.plan = plan;
+        this.requestId = requestId;
     }
 
     public void encode(FriendlyByteBuf buf) {
@@ -153,6 +162,8 @@ public final class PlanResponsePacket {
         // Server-authored DAG view — protocol v8 tail
         buf.writeBoolean(plan.graph() != null);
         if (plan.graph() != null) writeGraph(buf, plan.graph());
+        buf.writeBoolean(requestId != 0L);
+        if (requestId != 0L) buf.writeVarLong(requestId);
     }
 
     public static PlanResponsePacket decode(FriendlyByteBuf buf) {
@@ -271,12 +282,19 @@ public final class PlanResponsePacket {
         if (buf.isReadable() && buf.readBoolean()) {
             graph = readGraph(buf);
         }
+        long requestId = 0L;
+        if (buf.isReadable() && buf.readBoolean()) {
+            requestId = buf.readVarLong();
+            if (requestId < 0 || requestId > 0x7FFF_FFFF_FFFF_FFFFL) {
+                throw new DecoderException("PlanResponsePacket requestId out of range");
+            }
+        }
         return new PlanResponsePacket(new PlanResponse(success, targetName, targetResult,
                 steps, materials, missing, recipeId,
                 execModType, execDim, execX, execY, execZ, modWarnings, repeatCount,
                 embersCode, embersAspectNames, embersInputNames, embersSeed, embersCanInfer,
                 embersCodeFromCache, executionMachineSupportsGui, baseItem, boundMachineTypes,
-                leftovers, clickedOutput, graph));
+                leftovers, clickedOutput, graph), requestId);
     }
 
     private static void writeGraph(FriendlyByteBuf buf, PlanGraphView graph) {
@@ -427,6 +445,10 @@ public final class PlanResponsePacket {
         return plan;
     }
 
+    public long requestId() {
+        return requestId;
+    }
+
     @SuppressWarnings("resource")
     public static void handle(PlanResponsePacket packet, Supplier<NetworkEvent.Context> ctxSupplier) {
         RSIntegrationMod.LOGGER.debug(
@@ -437,19 +459,73 @@ public final class PlanResponsePacket {
             RSIntegrationMod.LOGGER.debug(
                     "[RSI-PlanPkt] enqueueWork running on client thread: recipeId={}",
                     packet.plan.recipeId());
-            openScreen(packet.plan);
+            localizePlanForClient(packet.plan, packet.requestId);
         });
         ctx.setPacketHandled(true);
     }
 
     @OnlyIn(Dist.CLIENT)
-    private static void openScreen(PlanResponse plan) {
+    private static void localizePlanForClient(PlanResponse plan, long requestId) {
+        List<String> missing = localizeItemNames(plan.missing());
+        String targetName = plan.targetResult().isEmpty()
+                ? plan.targetName()
+                : plan.targetResult().getHoverName().getString();
+        PlanResponse localized = new PlanResponse(
+                plan.success(), targetName, plan.targetResult(), plan.steps(), plan.materials(), missing,
+                plan.recipeId(), plan.executionModTypeId(), plan.executionDim(), plan.executionPosX(),
+                plan.executionPosY(), plan.executionPosZ(), plan.modWarnings(), plan.repeatCount(),
+                plan.embersCode(), plan.embersAspectNames(), plan.embersInputNames(), plan.embersSeed(),
+                plan.embersCanInfer(), plan.embersCodeFromCache(), plan.executionMachineSupportsGui(),
+                plan.baseItem(), plan.boundMachineTypes(), plan.leftovers(), plan.clickedOutput(), plan.graph());
+        openScreen(localized, requestId);
+    }
+
+    @OnlyIn(Dist.CLIENT)
+    private static List<String> localizeItemNames(List<String> names) {
+        if (names.isEmpty()) return names;
+        List<String> localized = new ArrayList<>(names.size());
+        for (String name : names) {
+            String translated = name;
+            int hintStart = name.indexOf(" §");
+            String key = hintStart >= 0 ? name.substring(0, hintStart) : name;
+            String suffix = hintStart >= 0 ? name.substring(hintStart) : "";
+            if (net.minecraft.client.resources.language.I18n.exists(key)) {
+                translated = net.minecraft.client.resources.language.I18n.get(key) + suffix;
+            } else for (Item item : net.minecraft.core.registries.BuiltInRegistries.ITEM) {
+                if (item.getDescription().getString().equals(name)
+                        || item.getDescriptionId().equals(name)) {
+                    translated = item.getDescription().getString();
+                    break;
+                }
+            }
+            localized.add(translated);
+        }
+        return localized;
+    }
+
+    @OnlyIn(Dist.CLIENT)
+    private static void openScreen(PlanResponse plan, long requestId) {
         RSIntegrationMod.LOGGER.debug(
                 "[RSI-PlanPkt] openScreen called: success={} steps={}",
                 plan.success(), plan.steps().size());
         var mc = Minecraft.getInstance();
         if (mc.player == null) {
             RSIntegrationMod.LOGGER.warn("[RSI-PlanPkt] openScreen ABORT: mc.player is null");
+            return;
+        }
+        // A response can arrive after the user has already requested another
+        // recipe. Never let that stale response replace the active plan screen.
+        if (mc.screen instanceof CraftingPlanScreen existing
+                && requestId != 0L && requestId < existing.activeRequestId()) {
+            RSIntegrationMod.LOGGER.debug("[RSI-PlanPkt] Dropping stale request response {} < {}",
+                    requestId, existing.activeRequestId());
+            return;
+        }
+        if (mc.screen instanceof CraftingPlanScreen existing
+                && plan.recipeId() != null
+                && !plan.recipeId().equals(existing.getRecipeId())) {
+            RSIntegrationMod.LOGGER.debug("[RSI-PlanPkt] Dropping stale response: received={} active={}",
+                    plan.recipeId(), existing.getRecipeId());
             return;
         }
         // If a CraftingPlanScreen is already open for the same recipe,
@@ -460,7 +536,7 @@ public final class PlanResponsePacket {
                 && plan.recipeId().equals(existing.getRecipeId())) {
             RSIntegrationMod.LOGGER.debug("[RSI-PlanPkt] openScreen UPDATE: refreshing plan for {}",
                     plan.recipeId());
-            existing.updatePlan(plan);
+            existing.acceptResponse(requestId, plan);
             return;
         }
         try {

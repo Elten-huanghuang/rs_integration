@@ -95,6 +95,10 @@ public final class BlockGuiRegistry {
                     be != null ? be.getType().toString() : "N/A",
                     be instanceof MenuProvider);
             RemoteGuiAuth.deauthorize(player.getUUID(), null);
+        } else if (!RemoteGuiAuth.bindOpenedMenu(player)) {
+            RSIntegrationMod.LOGGER.warn("[RSI-MachineGUI] GUI opened without bindable remote menu at {}", pos);
+            player.closeContainer();
+            return false;
         }
         return success;
     }

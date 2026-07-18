@@ -35,7 +35,7 @@ public final class MachineLeaseRegistry {
     private final Map<MachineKey, Lease> leases = new HashMap<>();
     private long nextGeneration;
 
-    public Lease tryAcquire(MachineKey machine, Owner owner) {
+    public synchronized Lease tryAcquire(MachineKey machine, Owner owner) {
         Objects.requireNonNull(machine, "machine");
         Objects.requireNonNull(owner, "owner");
         List<Lease> acquired = tryAcquireAll(List.of(machine), owner);
@@ -43,7 +43,7 @@ public final class MachineLeaseRegistry {
     }
 
     /** Acquire a complete machine/support scope without leaving partial leases. */
-    public List<Lease> tryAcquireAll(List<MachineKey> scope, Owner owner) {
+    public synchronized List<Lease> tryAcquireAll(List<MachineKey> scope, Owner owner) {
         Objects.requireNonNull(scope, "scope");
         Objects.requireNonNull(owner, "owner");
         if (scope.isEmpty()) throw new IllegalArgumentException("machine scope must not be empty");
@@ -63,12 +63,12 @@ public final class MachineLeaseRegistry {
         return List.copyOf(acquired);
     }
 
-    public void releaseAll(List<Lease> scope) {
+    public synchronized void releaseAll(List<Lease> scope) {
         if (scope == null) return;
         for (Lease lease : scope) release(lease);
     }
 
-    public boolean release(Lease lease) {
+    public synchronized boolean release(Lease lease) {
         if (lease == null) return false;
         Lease current = leases.get(lease.machine());
         if (current == null || current.generation() != lease.generation()
@@ -77,26 +77,26 @@ public final class MachineLeaseRegistry {
         return true;
     }
 
-    public boolean isLeased(MachineKey machine) {
+    public synchronized boolean isLeased(MachineKey machine) {
         return leases.containsKey(machine);
     }
 
-    public int size() {
+    public synchronized int size() {
         return leases.size();
     }
 
-    public int countOwnedBy(UUID craftId) {
+    public synchronized int countOwnedBy(UUID craftId) {
         Objects.requireNonNull(craftId, "craftId");
         return (int) leases.values().stream()
                 .filter(lease -> lease.owner().craftId().equals(craftId))
                 .count();
     }
 
-    public Map<MachineKey, Lease> snapshot() {
+    public synchronized Map<MachineKey, Lease> snapshot() {
         return Map.copyOf(leases);
     }
 
-    public void clear() {
+    public synchronized void clear() {
         leases.clear();
     }
 }

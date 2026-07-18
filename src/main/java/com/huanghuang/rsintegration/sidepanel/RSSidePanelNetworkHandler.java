@@ -7,7 +7,6 @@ import com.huanghuang.rsintegration.machine.MachineStatus;
 import com.huanghuang.rsintegration.machine.MachineStatusReader;
 import com.huanghuang.rsintegration.network.binding.BindingStorage;
 import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
-import com.huanghuang.rsintegration.network.packet.ConfigSyncPacket;
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;
 import com.huanghuang.rsintegration.network.packet.NetworkPacketIds;
 import com.huanghuang.rsintegration.network.gui.GuiOpenRateLimiter;
@@ -51,7 +50,10 @@ public final class RSSidePanelNetworkHandler {
     private static final AtomicBatchQueue<UUID, RSSidePanelDeltaPacket.Entry> pendingDeltas = new AtomicBatchQueue<>();
     // ── Machine status: last-pushed snapshot per (player, dim, pos) for diff ──
     private static final Map<UUID, Map<String, MachineStatus>> lastPushedStatuses = new ConcurrentHashMap<>();
+    private static final Set<UUID> dirtyMachinePlayers = ConcurrentHashMap.newKeySet();
+    private static final Map<UUID, Long> syncGenerations = new ConcurrentHashMap<>();
     private static int machineScanCounter;
+    private static long machineStatusSequence;
     private static boolean registered;
 
     private RSSidePanelNetworkHandler() {}
@@ -89,9 +91,6 @@ public final class RSSidePanelNetworkHandler {
         ch.registerMessage(NetworkPacketIds.RS_BINDING_SYNC, RSBindingSyncPacket.class,
                 RSBindingSyncPacket::encode, RSBindingSyncPacket::decode, RSBindingSyncPacket::handle,
                 java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_CLIENT));
-        ch.registerMessage(NetworkPacketIds.CONFIG_SYNC, ConfigSyncPacket.class,
-                ConfigSyncPacket::encode, ConfigSyncPacket::decode, ConfigSyncPacket::handle,
-                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_CLIENT));
         ch.registerMessage(NetworkPacketIds.RETURN_TO_RS, ReturnToRSPacket.class,
                 ReturnToRSPacket::encode, ReturnToRSPacket::decode, ReturnToRSPacket::handle,
                 java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_SERVER));
@@ -123,9 +122,15 @@ public final class RSSidePanelNetworkHandler {
         }
 
         // ── Machine status push (every 40 ticks) ─────────────────
+        RSSidePanelRequestPacket.advanceRefreshTasks(event.getServer());
+
         machineScanCounter++;
         if (machineScanCounter % 40 == 0) {
-            pushMachineStatusDeltas(event.getServer());
+            for (UUID playerId : List.copyOf(dirtyMachinePlayers)) {
+                ServerPlayer player = findPlayer(event.getServer(), playerId);
+                if (player != null) pushMachineStatusDeltasFor(player);
+                dirtyMachinePlayers.remove(playerId);
+            }
         }
 
         if (pendingDeltas.keysSnapshot().isEmpty()) return;
@@ -161,10 +166,8 @@ public final class RSSidePanelNetworkHandler {
 
     // ── Machine status push ───────────────────────────────────────
 
-    private static void pushMachineStatusDeltas(net.minecraft.server.MinecraftServer server) {
-        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
-            pushMachineStatusDeltasFor(player);
-        }
+    public static void markMachineStatusDirty(UUID playerId) {
+        if (playerId != null) dirtyMachinePlayers.add(playerId);
     }
 
     private static void pushMachineStatusDeltasFor(ServerPlayer player) {
@@ -191,6 +194,7 @@ public final class RSSidePanelNetworkHandler {
                 k -> new ConcurrentHashMap<>());
 
         List<MachineStatusDeltaPacket.Entry> changed = new ArrayList<>();
+        Set<String> activeKeys = new HashSet<>();
 
         for (BindingInfo info : bindings) {
             // Defensive: skip entries with invalid dims before they reach network encoding
@@ -207,6 +211,7 @@ public final class RSSidePanelNetworkHandler {
             if (machineLevel == null) continue;
 
             String key = statusKey(info.dim(), info.pos());
+            activeKeys.add(key);
             MachineStatus current = MachineStatusReader.read(machineLevel, info.pos());
             MachineStatus last = playerLast.get(key);
 
@@ -216,10 +221,17 @@ public final class RSSidePanelNetworkHandler {
             }
         }
 
+        for (String staleKey : new ArrayList<>(playerLast.keySet())) {
+            if (activeKeys.contains(staleKey)) continue;
+            StatusAddress address = parseStatusKey(staleKey);
+            if (address != null) changed.add(MachineStatusDeltaPacket.Entry.removed(address.dim, address.pos));
+            playerLast.remove(staleKey);
+        }
+
         if (!changed.isEmpty()) {
             CHANNEL.send(
                 net.minecraftforge.network.PacketDistributor.PLAYER.with(() -> player),
-                new MachineStatusDeltaPacket(changed));
+                new MachineStatusDeltaPacket(changed, ++machineStatusSequence));
         }
     }
 
@@ -227,7 +239,25 @@ public final class RSSidePanelNetworkHandler {
         return dim.toString() + ":" + pos.getX() + "," + pos.getY() + "," + pos.getZ();
     }
 
-    // ── convenience senders ────────────────────────────────────────
+    private record StatusAddress(ResourceLocation dim, net.minecraft.core.BlockPos pos) {}
+
+    private static StatusAddress parseStatusKey(String key) {
+        try {
+            int comma2 = key.lastIndexOf(',');
+            int comma1 = key.lastIndexOf(',', comma2 - 1);
+            int colon = key.lastIndexOf(':', comma1 - 1);
+            if (colon < 0 || comma1 < 0 || comma2 < 0) return null;
+            ResourceLocation dim = ResourceLocation.tryParse(key.substring(0, colon));
+            if (dim == null) return null;
+            int x = Integer.parseInt(key.substring(colon + 1, comma1));
+            int y = Integer.parseInt(key.substring(comma1 + 1, comma2));
+            int z = Integer.parseInt(key.substring(comma2 + 1));
+            return new StatusAddress(dim, new net.minecraft.core.BlockPos(x, y, z));
+        } catch (RuntimeException ignored) {
+            return null;
+        }
+    }
+
 
     @OnlyIn(Dist.CLIENT)
     public static void sendRequestSync() {
@@ -236,6 +266,12 @@ public final class RSSidePanelNetworkHandler {
 
     public static void sendCloseRequest() {
         CHANNEL.sendToServer(new RSSidePanelRequestPacket(false, true));
+    }
+
+    /** Starts a server-thread refresh. The task scheduler hook is kept here so
+     * packet handling never performs an unbounded scan before enqueueing. */
+    public static void startRefresh(ServerPlayer player, boolean forceFullSync) {
+        RSSidePanelRequestPacket.refreshOnServerThread(player, forceFullSync);
     }
 
     public static void sendBindingSync(ServerPlayer player) {
@@ -296,11 +332,13 @@ public final class RSSidePanelNetworkHandler {
         if (total <= RSSidePanelSyncPacket.CHUNK_SIZE) {
             CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
                     new RSSidePanelSyncPacket(ids, items, timestamps, craftableFlags,
-                            totalSlotCount, networkAvailable, networkName, bindings));
+                            totalSlotCount, networkAvailable, networkName, bindings,
+                            0, 1, nextSyncGeneration(player)));
         } else {
             int totalChunks = (int) Math.ceil((double) total / RSSidePanelSyncPacket.CHUNK_SIZE);
             RSIntegrationMod.LOGGER.debug("[RSI] Splitting sync into {} chunks ({} items > {})",
                     totalChunks, total, RSSidePanelSyncPacket.CHUNK_SIZE);
+            long generation = nextSyncGeneration(player);
             for (int i = 0; i < totalChunks; i++) {
                 int from = i * RSSidePanelSyncPacket.CHUNK_SIZE;
                 int to = Math.min(from + RSSidePanelSyncPacket.CHUNK_SIZE, total);
@@ -312,7 +350,7 @@ public final class RSSidePanelNetworkHandler {
                 CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
                         new RSSidePanelSyncPacket(cIds, cItems, cTimestamps, cFlags,
                                 totalSlotCount, networkAvailable, networkName,
-                                cBindings, i, totalChunks));
+                                cBindings, i, totalChunks, generation));
             }
         }
     }
@@ -366,16 +404,22 @@ public final class RSSidePanelNetworkHandler {
         return sep >= 0 ? blockKey.substring(sep + 2) : blockKey;
     }
 
-    public static void sendClick(ItemStack targetItem, byte action, boolean isShift, UUID panelId) {
-        CHANNEL.sendToServer(new RSSidePanelClickPacket(targetItem, action, isShift, panelId));
+    public static long sendClick(ItemStack targetItem, byte action, boolean isShift, UUID panelId) {
+        RSSidePanelClickPacket packet = new RSSidePanelClickPacket(targetItem, action, isShift, panelId);
+        CHANNEL.sendToServer(packet);
+        return packet.operationId;
     }
 
-    public static void sendDragDistribute(List<ItemStack> items) {
-        CHANNEL.sendToServer(new RSSidePanelClickPacket(items));
+    public static long sendDragDistribute(List<ItemStack> items) {
+        RSSidePanelClickPacket packet = new RSSidePanelClickPacket(items);
+        CHANNEL.sendToServer(packet);
+        return packet.operationId;
     }
 
-    public static void sendInsert(ItemStack carried, boolean isRightClick) {
-        CHANNEL.sendToServer(new RSSidePanelClickPacket(carried, isRightClick));
+    public static long sendInsert(ItemStack carried, boolean isRightClick) {
+        RSSidePanelClickPacket packet = new RSSidePanelClickPacket(carried, isRightClick);
+        CHANNEL.sendToServer(packet);
+        return packet.operationId;
     }
 
     // ── Manual delta (for sendDeltaForItem safety net) ─────────────
@@ -401,6 +445,7 @@ public final class RSSidePanelNetworkHandler {
     @SuppressWarnings("unchecked")
     public static boolean registerListener(ServerPlayer player,
                                            com.refinedmods.refinedstorage.api.network.INetwork network) {
+        dirtyMachinePlayers.add(player.getUUID());
         IStorageCache<ItemStack> cache = network.getItemStorageCache();
         if (cache == null) return false;
 
@@ -551,8 +596,13 @@ public final class RSSidePanelNetworkHandler {
                 old.cache.removeListener(old.listener);
             } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Listener removal failed", e); }
         }
+        RSSidePanelRequestPacket.cancelRefresh(playerId);
         pendingDeltas.clear(playerId);
         com.huanghuang.rsintegration.network.RSIntegrationNetwork.invalidateNetworkResolution(playerId);
+    }
+
+    private static long nextSyncGeneration(ServerPlayer player) {
+        return syncGenerations.merge(player.getUUID(), 1L, Long::sum);
     }
 
     public static void clearServerState() {
@@ -565,8 +615,11 @@ public final class RSSidePanelNetworkHandler {
         }
         playerListeners.clear();
         pendingDeltas.clear();
+        dirtyMachinePlayers.clear();
         lastPushedStatuses.clear();
+        syncGenerations.clear();
         machineScanCounter = 0;
+        machineStatusSequence = 0;
         tickFiringConfirmed = false;
         com.huanghuang.rsintegration.network.RSIntegrationNetwork.clearNetworkResolutionCache();
     }
@@ -582,6 +635,7 @@ public final class RSSidePanelNetworkHandler {
             UUID pid = sp.getUUID();
             unregisterListener(pid);
             lastPushedStatuses.remove(pid);
+            dirtyMachinePlayers.remove(pid);
             RemoteGuiAuth.onPlayerLogout(pid);
             GuiOpenRateLimiter.onPlayerLogout(pid);
             com.huanghuang.rsintegration.crafting.PreviewRateLimiter.onPlayerLogout(pid);

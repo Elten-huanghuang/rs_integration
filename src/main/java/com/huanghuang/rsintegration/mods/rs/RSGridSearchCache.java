@@ -12,6 +12,7 @@ import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 
+import java.util.Locale;
 import java.util.Map;
 import java.util.Queue;
 import java.util.Set;
@@ -22,21 +23,48 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 /**
  * RS grid search cache with tick-based pre-warming.
  * <p>
- * When the RS grid opens, all visible stacks are queued and their tooltip/tag/mod
- * strings are computed incrementally on the client tick (time-budgeted at 1.5 ms/tick).
- * Once pre-warming completes, {@code #}, {@code $}, and {@code @} searches are O(1).
+ * When a special search mode is first used, matching strings are queued and
+ * computed incrementally on the client tick (time-budgeted at 1.5 ms/tick).
+ * Each mode is cached independently, so a {@code #} search does not build
+ * every stack's tooltip and mod-name data.
  * </p>
  */
 @OnlyIn(Dist.CLIENT)
 @Mod.EventBusSubscriber(value = Dist.CLIENT)
 public final class RSGridSearchCache {
 
-    /** Pre-computed, lowercased search strings for a single grid stack. */
-    private record Entry(String tooltip, String tags, String mod) {
-        static Entry build(IGridStack stack) {
-            return new Entry(buildTooltip(stack), buildTags(stack), buildMod(stack));
+    /** Lazily computed, lowercased search strings for a single grid stack. */
+    private static final class Entry {
+        private String tooltip;
+        private String tags;
+        private String mod;
+
+        synchronized void warm(IGridStack stack, int mask) {
+            if ((mask & SEARCH_TOOLTIP) != 0 && tooltip == null) tooltip = buildTooltip(stack);
+            if ((mask & SEARCH_TAGS) != 0 && tags == null) tags = buildTags(stack);
+            if ((mask & SEARCH_MOD) != 0 && mod == null) mod = buildMod(stack);
+        }
+
+        String tooltip(IGridStack stack) {
+            warm(stack, SEARCH_TOOLTIP);
+            return tooltip;
+        }
+
+        String tags(IGridStack stack) {
+            warm(stack, SEARCH_TAGS);
+            return tags;
+        }
+
+        String mod(IGridStack stack) {
+            warm(stack, SEARCH_MOD);
+            return mod;
         }
     }
+
+    private static final int SEARCH_TOOLTIP = 1;
+    private static final int SEARCH_TAGS = 2;
+    private static final int SEARCH_MOD = 4;
+    private static volatile int requestedSearches;
 
     private static final Map<UUID, Entry> CACHE = new ConcurrentHashMap<>();
 
@@ -82,20 +110,22 @@ public final class RSGridSearchCache {
             // Tooltip strings depend on UI state; tags/mod are objective but cheap
             // to recompute, so drop the whole entry and re-warm in one pass.
             CACHE.clear();
-            if (mc.screen instanceof GridScreen screen) {
+            PENDING_QUEUE.clear();
+            QUEUED_IDS.clear();
+            if (requestedSearches != 0 && mc.screen instanceof GridScreen screen) {
                 enqueueAll(screen);
             }
         }
 
-        // ── capture new stacks when in grid ──
-        if (mc.screen instanceof GridScreen screen) {
+        // ── capture new stacks only after a special search mode is used ──
+        if (requestedSearches != 0 && mc.screen instanceof GridScreen screen) {
             if (screen != lastScreen) {
                 lastScreen = screen;
                 enqueueAll(screen);
             } else if (mc.level.getGameTime() - lastPreWarmTick > RE_SCAN_INTERVAL) {
                 enqueueAll(screen);
             }
-        } else {
+        } else if (!(mc.screen instanceof GridScreen)) {
             // Keep cache for the session — no clear on close.
             lastScreen = null;
         }
@@ -118,13 +148,17 @@ public final class RSGridSearchCache {
             if (stack == null) continue;
 
             UUID id = stack.getId();
-            QUEUED_IDS.remove(id);
 
             // Zombie guard: skip stacks that were removed from the grid
             // before warm-up reached them — don't waste CPU on dead entries.
-            if (!alive.contains(id)) continue;
+            if (!alive.contains(id)) {
+                QUEUED_IDS.remove(id);
+                continue;
+            }
 
-            CACHE.computeIfAbsent(id, k -> Entry.build(stack));
+            Entry entry = CACHE.computeIfAbsent(id, k -> new Entry());
+            entry.warm(stack, requestedSearches);
+            QUEUED_IDS.remove(id);
         }
     }
 
@@ -153,6 +187,8 @@ public final class RSGridSearchCache {
         CACHE.clear();
         PENDING_QUEUE.clear();
         QUEUED_IDS.clear();
+        presentIds = Set.of();
+        requestedSearches = 0;
     }
 
     // ── accessors with lazy on-demand fallback ──
@@ -160,15 +196,27 @@ public final class RSGridSearchCache {
     // finishes, the entry is built on the spot.
 
     public static String getTooltip(UUID id, IGridStack stack) {
-        return CACHE.computeIfAbsent(id, k -> Entry.build(stack)).tooltip();
+        requestSearch(SEARCH_TOOLTIP);
+        return CACHE.computeIfAbsent(id, k -> new Entry()).tooltip(stack);
     }
 
     public static String getTags(UUID id, IGridStack stack) {
-        return CACHE.computeIfAbsent(id, k -> Entry.build(stack)).tags();
+        requestSearch(SEARCH_TAGS);
+        return CACHE.computeIfAbsent(id, k -> new Entry()).tags(stack);
     }
 
     public static String getMod(UUID id, IGridStack stack) {
-        return CACHE.computeIfAbsent(id, k -> Entry.build(stack)).mod();
+        requestSearch(SEARCH_MOD);
+        return CACHE.computeIfAbsent(id, k -> new Entry()).mod(stack);
+    }
+
+    private static void requestSearch(int search) {
+        if ((requestedSearches & search) != 0) return;
+        requestedSearches |= search;
+        PENDING_QUEUE.clear();
+        QUEUED_IDS.clear();
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.screen instanceof GridScreen screen) enqueueAll(screen);
     }
 
     // ── internal builders ──
@@ -220,7 +268,9 @@ public final class RSGridSearchCache {
     private static String buildTags(IGridStack stack) {
         StringBuilder sb = getClearBuilder();
         for (String tag : stack.getTags()) {
-            appendWithPinyin(sb, tag.toLowerCase());
+            if (tag != null && !tag.isEmpty()) {
+                sb.append(tag.toLowerCase(Locale.ROOT)).append('\n');
+            }
         }
         return sb.toString();
     }
