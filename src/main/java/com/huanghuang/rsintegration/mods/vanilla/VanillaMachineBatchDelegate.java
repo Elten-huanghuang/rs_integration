@@ -1,5 +1,9 @@
 package com.huanghuang.rsintegration.mods.vanilla;
 
+import com.huanghuang.rsintegration.util.ChunkUtils;
+
+import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
+
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
@@ -127,7 +131,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
             player.sendSystemMessage(Component.translatable("rsi.generic.error.dim_not_found"));
             return false;
         }
-        com.huanghuang.rsintegration.util.ChunkUtils.loadChunk(level, pos);
+        ChunkUtils.loadChunk(level, pos);
 
         this.myLevel = level;
         this.myDim = level.dimension();

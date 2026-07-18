@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.sidepanel;
 
+import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+
 import com.huanghuang.rsintegration.machine.MachineHub;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.Screen;
@@ -83,7 +85,7 @@ final class SidePanelTickManager {
             SearchController.pullJeiFilter();
 
         // Periodic full sync
-        int syncInterval = com.huanghuang.rsintegration.config.RSIntegrationConfig.SIDE_PANEL_SYNC_INTERVAL.get();
+        int syncInterval = RSIntegrationConfig.SIDE_PANEL_SYNC_INTERVAL.get();
         if (RSSidePanelClient.tickCounter % syncInterval == 0
                 && RSSidePanelClient.networkAvailable && !RSSidePanelClient.panelHidden) {
             RSSidePanelNetworkHandler.sendRequestSync();
@@ -103,7 +105,7 @@ final class SidePanelTickManager {
         var it = RSSidePanelClient.pendingExtractions.entrySet().iterator();
         while (it.hasNext()) {
             var pe = it.next();
-            int extractionTimeout = com.huanghuang.rsintegration.config.RSIntegrationConfig.SIDE_PANEL_EXTRACTION_TIMEOUT.get();
+            int extractionTimeout = RSIntegrationConfig.SIDE_PANEL_EXTRACTION_TIMEOUT.get();
             if (now - pe.getValue().createdAt > extractionTimeout) {
                 if (!RSSidePanelClient.pendingSyncRetries.remove(pe.getKey())) {
                     RSSidePanelClient.pendingSyncRetries.add(pe.getKey());

@@ -1,5 +1,10 @@
 package com.huanghuang.rsintegration.compat.ftbquests;
 
+import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
+
+import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
+
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.CraftingResolver;
@@ -49,7 +54,7 @@ public final class FtbQuestSubmissionService {
                 List.of(), 1, null, null, null, 0L,
                 false, false, false, null, java.util.Set.of(), java.util.Map.of(),
                 null, questPlan.graphView());
-        com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler.CHANNEL.send(
+        BatchCraftNetworkHandler.CHANNEL.send(
                 PacketDistributor.PLAYER.with(() -> player), new PlanResponsePacket(plan));
     }
 
@@ -78,7 +83,7 @@ public final class FtbQuestSubmissionService {
             return;
         }
 
-        if (steps.stream().allMatch(step -> step.modType() == com.huanghuang.rsintegration.ModType.GENERIC)) {
+        if (steps.stream().allMatch(step -> step.modType() == ModType.GENERIC)) {
             if (CraftPacketUtils.executeCraftingSteps(player, steps, network)) {
                 FtbQuestSubmissionExecutor.submit(player, questId, network);
             } else {
@@ -111,7 +116,7 @@ public final class FtbQuestSubmissionService {
             var node = nodes.get(nodeId);
             if (node == null) continue;
             steps.add(new CraftingResolver.ResolutionStep(node.recipeId(),
-                    com.huanghuang.rsintegration.ModType.byId(node.modTypeId()), node.recipeTypeId(),
+                    ModType.byId(node.modTypeId()), node.recipeTypeId(),
                     node.alternativeIds(), node.alternativeModTypeIds(), node.inferMode(),
                     node.executions(), node.syntheticInput(), node.syntheticOutput()));
         }

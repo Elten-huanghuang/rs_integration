@@ -1,5 +1,9 @@
 package com.huanghuang.rsintegration.mods.touhoulittlemaid;
 
+import com.huanghuang.rsintegration.util.ChunkUtils;
+
+import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
+
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 
@@ -221,7 +225,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
 
         this.storageBlockEntities = new ArrayList<>();
         for (BlockPos p : storagePositions) {
-            com.huanghuang.rsintegration.util.ChunkUtils.loadChunk(level, p);
+            ChunkUtils.loadChunk(level, p);
             BlockEntity storageBe = level.getBlockEntity(p);
             if (storageBe != null && TLMReflection.altarBEClass.isInstance(storageBe)) {
                 storageBlockEntities.add(storageBe);
@@ -349,7 +353,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
                 ItemStackHandler handler = rsi$tlmsGetHandler(storageBe);
                 if (!level.isLoaded(storagePositions.get(i))) {
                     RSIntegrationMod.LOGGER.warn("[RSI-Batch-TLM] Storage chunk unloaded at {} — force-loading", storagePositions.get(i));
-                    com.huanghuang.rsintegration.util.ChunkUtils.loadChunk((ServerLevel) level, storagePositions.get(i));
+                    ChunkUtils.loadChunk((ServerLevel) level, storagePositions.get(i));
                 }
                 handler.setStackInSlot(0, placed);
                 slotsFilled[i] = true;
@@ -427,7 +431,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
                 ItemStackHandler handler = rsi$tlmsGetHandler(storageBe);
                 if (!level.isLoaded(storagePositions.get(i))) {
                     RSIntegrationMod.LOGGER.warn("[RSI-Batch-TLM] Storage chunk unloaded at {} — force-loading", storagePositions.get(i));
-                    com.huanghuang.rsintegration.util.ChunkUtils.loadChunk((ServerLevel) level, storagePositions.get(i));
+                    ChunkUtils.loadChunk((ServerLevel) level, storagePositions.get(i));
                 }
                 handler.setStackInSlot(0, stack.copy());
                 slotsFilled[i] = true;
@@ -849,7 +853,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
             network = CraftPacketUtils.resolveNetworkForCraft(player, key, pos);
         }
         if (network == null) {
-            network = com.huanghuang.rsintegration.network.RSIntegrationNetwork
+            network = RSIntegrationNetwork
                     .resolveNetworkFromPlayer(player);
         }
         if (network != null) {

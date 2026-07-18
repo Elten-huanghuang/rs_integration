@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.resonance.backpack;
 
+import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
+
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.ModItems;
 import com.huanghuang.rsintegration.network.gui.GuiOpenRateLimiter;

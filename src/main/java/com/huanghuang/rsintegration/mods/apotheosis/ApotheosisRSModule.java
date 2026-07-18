@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.apotheosis;
 
+import com.huanghuang.rsintegration.mods.apotheosis.client.ApotheosisLibraryClientEvents;
+
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.mods.IModIntegration;
@@ -135,6 +137,6 @@ public final class ApotheosisRSModule implements IModIntegration {
     @Override
     public Supplier<DistExecutor.SafeRunnable> clientInitSupplier() {
         return () -> () -> MinecraftForge.EVENT_BUS.register(
-                com.huanghuang.rsintegration.mods.apotheosis.client.ApotheosisLibraryClientEvents.class);
+                ApotheosisLibraryClientEvents.class);
     }
 }

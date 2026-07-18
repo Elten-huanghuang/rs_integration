@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.crafting;
 
+import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
+
 import com.huanghuang.rsintegration.crafting.RSICraftException;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;

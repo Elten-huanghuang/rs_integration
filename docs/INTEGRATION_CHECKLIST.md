@@ -137,7 +137,22 @@ public final class MalumRecipeHandler extends AbstractRecipeHandler {
 
 即时型必须在 `MachineInteractType.fromBlockKey()` 中添加关键词，否则会错误尝试打开 GUI。
 
-### 3.6 物理产物收取
+### 3.7 配置生效生命周期
+
+配置按生效边界分为三类，修改配置后应按对应方式验证：
+
+| 类型 | 示例 | 生效时机 |
+|------|------|----------|
+| 本地客户端 UI | 侧边栏位置、按键、布局偏好、marquee 显示 | 运行时刷新或重新打开界面 |
+| 服务端权威同步 | 机器 GUI tab 开关、机器 tab 数量阈值 | 登录/重连后由 `ConfigSyncPacket` 原子同步 |
+| 注册期功能 | JEI category、transfer handler、mixin 开关 | 重启客户端 |
+
+服务端同步值只在 `ClientSyncedConfig.isSynced()` 为真时覆盖本地默认值；断开连接时必须调用 `ClientSyncedConfig.reset()`，避免跨服务器泄漏。收到同步包后客户端会先做范围校验，再一次性应用整个配置快照。
+
+JEI 注册期对象不承诺运行时热卸载。运行时筛选和动态列表可以刷新；依赖连接数据的行为按重连生效处理；category、transfer handler 和 mixin 开关按重启客户端生效处理。
+
+---
+
 
 - 世界 `ItemEntity` 产物由 Delegate 通过 `getExpectedOutput()` 和 `getOutputCaptureRegion()` 声明，交给 `CraftOutputInterceptor` 在实体加入世界时捕获。
 - 机器槽位产物允许漏斗、管道等外部自动化提取；`collectResult()` 只能收取调用时真实存在于输出槽中的内容，槽位为空时不得用预期配方结果补发。

@@ -1,5 +1,9 @@
 package com.huanghuang.rsintegration.mods.wizardsreborn;
 
+import com.huanghuang.rsintegration.util.Reflect;
+
+import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
+
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.RSIntegrationMod;
@@ -686,7 +690,7 @@ public final class WRWandCraftPacket {
 
     private static java.lang.reflect.Method rsi$getMethod(Class<?> clazz, String name, Class<?>... paramTypes)
             throws NoSuchMethodException {
-        java.lang.reflect.Method m = com.huanghuang.rsintegration.util.Reflect.findMethod(
+        java.lang.reflect.Method m = Reflect.findMethod(
                 clazz, name, paramTypes);
         if (m == null) throw new NoSuchMethodException(clazz.getName() + "." + name);
         return m;
@@ -715,7 +719,7 @@ public final class WRWandCraftPacket {
 
     private static int readWissenCost(Recipe<?> recipe) {
         try {
-            java.lang.reflect.Method m = com.huanghuang.rsintegration.util.Reflect.findMethod(
+            java.lang.reflect.Method m = Reflect.findMethod(
                     recipe.getClass(), "getWissen", new Class<?>[0]);
             if (m != null) return (int) m.invoke(recipe);
         } catch (Exception e) {
@@ -726,7 +730,7 @@ public final class WRWandCraftPacket {
 
     private static int readCurrentWissen(BlockEntity be) {
         try {
-            java.lang.reflect.Method m = com.huanghuang.rsintegration.util.Reflect.findMethod(
+            java.lang.reflect.Method m = Reflect.findMethod(
                     be.getClass(), "getWissen", new Class<?>[0]);
             if (m != null) return (int) m.invoke(be);
         } catch (Exception e) {

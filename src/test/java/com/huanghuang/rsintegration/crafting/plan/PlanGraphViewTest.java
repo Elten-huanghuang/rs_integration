@@ -31,6 +31,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class PlanGraphViewTest extends BootstrapTest {
 
@@ -89,7 +90,7 @@ class PlanGraphViewTest extends BootstrapTest {
     }
 
     @Test
-    void legacyPacketWithoutGraphTailStillDecodes() {
+    void truncatedPacketWithoutGraphTailIsRejected() {
         PlanResponse plan = new PlanResponse(true, "Diamond", new ItemStack(Items.DIAMOND),
                 List.of(), java.util.Map.of(), List.of(), "test:root",
                 null, null, 0, 0, 0, List.of(), 1,
@@ -99,11 +100,7 @@ class PlanGraphViewTest extends BootstrapTest {
         new PlanResponsePacket(plan).encode(encoded);
         encoded.writerIndex(encoded.writerIndex() - 1);
 
-        PlanResponse decoded = PlanResponsePacket.decode(encoded).plan();
-
-        assertEquals("test:root", decoded.recipeId());
-        assertEquals(null, decoded.graph());
-        assertEquals(0, encoded.readableBytes());
+        assertThrows(RuntimeException.class, () -> PlanResponsePacket.decode(encoded));
     }
 
     private static CraftPlanGraph sharedProducerGraph() {

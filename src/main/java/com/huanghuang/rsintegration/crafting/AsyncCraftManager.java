@@ -24,6 +24,11 @@ public final class AsyncCraftManager {
     private static final AsyncCraftManager INSTANCE = new AsyncCraftManager();
     private final ActiveCraftRegistry<UUID, AsyncCraftChain> activeChains = new ActiveCraftRegistry<>();
     private OperationServices operationServices = new OperationServices();
+    private final java.util.concurrent.ConcurrentLinkedQueue<Runnable> completionQueue = new java.util.concurrent.ConcurrentLinkedQueue<>();
+
+    void enqueueCompletion(Runnable callback) {
+        if (callback != null) completionQueue.add(callback);
+    }
 
     private AsyncCraftManager() {}
 
@@ -174,6 +179,13 @@ public final class AsyncCraftManager {
                             chain.getCraftId(), terminationError);
                 }
             }
+            if (chain.isDone()) {
+                activeChains.remove(chain.getCraftId());
+            }
+        }
+        for (Runnable callback; (callback = completionQueue.poll()) != null;) {
+            try { callback.run(); }
+            catch (RuntimeException e) { RSIntegrationMod.LOGGER.error("[RSI-AsyncMgr] Completion callback failed", e); }
         }
         PerformanceMonitor.recordTick(
                 System.nanoTime() - tickStart);

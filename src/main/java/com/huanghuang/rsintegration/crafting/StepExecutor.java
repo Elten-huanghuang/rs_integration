@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.crafting;
 
+import com.huanghuang.rsintegration.recipe.CrockPotRecipeHandler;
+
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
@@ -52,15 +54,21 @@ final class StepExecutor {
             PerformanceMonitor.recordResolveTimeout();
             return false;
         }
-        if (depth > maxDepth()) return false;
-        if (ctx.steps.size() + 1 > maxSteps()) return false;
+        if (depth > maxDepth()) {
+            RSIntegrationMod.LOGGER.debug("[RSI-Step] resolution guard DEPTH depth={} maxDepth={}", depth, maxDepth());
+            return false;
+        }
+        if (ctx.steps.size() + 1 > maxSteps()) {
+            RSIntegrationMod.LOGGER.debug("[RSI-Step] resolution guard STEPS steps={} maxSteps={}", ctx.steps.size(), maxSteps());
+            return false;
+        }
 
         ctx.beginUndo();
         edges.beginUndo();
         NodeId graphNodeId = ctx.allocateNodeId();
 
         List<InputDemand> graphInputs = planRecipeIngredientsForGraph(
-                recipe.getIngredients(), graphNodeId, ctx, depth + 1, edges, batches);
+                recipe.getIngredients(), graphNodeId, ctx, depth, edges, batches);
         if (graphInputs == null) {
             ctx.rollback();
             edges.rollback();
@@ -98,8 +106,14 @@ final class StepExecutor {
             PerformanceMonitor.recordResolveTimeout();
             return false;
         }
-        if (depth > maxDepth()) return false;
-        if (ctx.steps.size() + 1 > maxSteps()) return false;
+        if (depth > maxDepth()) {
+            RSIntegrationMod.LOGGER.debug("[RSI-Step] resolution guard DEPTH depth={} maxDepth={}", depth, maxDepth());
+            return false;
+        }
+        if (ctx.steps.size() + 1 > maxSteps()) {
+            RSIntegrationMod.LOGGER.debug("[RSI-Step] resolution guard STEPS steps={} maxSteps={}", ctx.steps.size(), maxSteps());
+            return false;
+        }
 
         if (entry.modType() == ModType.GENERIC && entry.recipe() instanceof CraftingRecipe cr) {
             return craftBatched(cr, ctx, depth, altIds, altModTypes, edges, batches);
@@ -111,7 +125,7 @@ final class StepExecutor {
 
         List<IngredientSpec> specs = CraftPacketUtils.extractIngredientSpecs(entry.recipe());
         if (entry.modType() == ModType.byId("crockpot")
-                && com.huanghuang.rsintegration.recipe.CrockPotRecipeHandler.hasCategoryConstraints(entry.recipe())) {
+                && CrockPotRecipeHandler.hasCategoryConstraints(entry.recipe())) {
             List<IngredientSpec> categorySpecs = CrockPotBatchDelegate.buildCategoryPlanIngredients(
                     entry.recipe(), ctx.network, ctx.level, null);
             if (categorySpecs != null && !categorySpecs.isEmpty()) specs = categorySpecs;
@@ -154,7 +168,7 @@ final class StepExecutor {
         }
 
         List<InputDemand> graphInputs = planRecipeSpecsForGraph(
-                specs, graphNodeId, ctx, depth + 1, edges, batches);
+                specs, graphNodeId, ctx, depth, edges, batches);
         if (graphInputs == null) {
             ctx.rollback();
             edges.rollback();

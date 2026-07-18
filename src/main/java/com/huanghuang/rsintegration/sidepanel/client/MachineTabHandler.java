@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.sidepanel.client;
 
+import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
+
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.machine.MachineHub;
 import com.huanghuang.rsintegration.machine.MachineSlotType;
@@ -44,7 +46,7 @@ public final class MachineTabHandler {
     }
 
     private static List<BindingInfo> filterByWhitelist(List<BindingInfo> list) {
-        list.removeIf(info -> !com.huanghuang.rsintegration.network.binding.BindingEventHandler
+        list.removeIf(info -> !BindingEventHandler
                 .supportsGuiByInfo(info));
         return list;
     }

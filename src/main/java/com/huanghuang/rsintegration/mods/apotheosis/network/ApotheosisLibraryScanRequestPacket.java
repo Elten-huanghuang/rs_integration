@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.apotheosis.network;
 
+import com.huanghuang.rsintegration.network.packet.NetworkHandler;
+
 import com.huanghuang.rsintegration.mods.apotheosis.ApotheosisLibraryService;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;
@@ -26,7 +28,7 @@ public record ApotheosisLibraryScanRequestPacket(ResourceLocation dimension, Blo
             var player = context.getSender();
             if (player == null) return;
             var result = ApotheosisLibraryService.scan(player, packet.dimension, packet.pos);
-            com.huanghuang.rsintegration.network.packet.NetworkHandler.CHANNEL.send(
+            NetworkHandler.CHANNEL.send(
                     PacketDistributor.PLAYER.with(() -> player),
                     ApotheosisLibraryScanResponsePacket.from(packet.dimension, packet.pos, result));
         });

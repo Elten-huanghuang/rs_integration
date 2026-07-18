@@ -272,15 +272,12 @@ public final class PlanResponsePacket {
             IngredientKey key = IngredientKey.read(buf);
             leftovers.put(key, buf.readVarInt());
         }
-        // Clicked ghost-output — protocol v7 tail
-        ItemStack clickedOutput = null;
-        if (buf.isReadable() && buf.readBoolean()) {
-            clickedOutput = buf.readItem();
-        }
-        // Server-authored DAG view — protocol v8 tail
-        PlanGraphView graph = null;
-        if (buf.isReadable() && buf.readBoolean()) {
-            graph = readGraph(buf);
+        // Clicked ghost-output — required protocol field.
+        ItemStack clickedOutput = buf.readBoolean() ? buf.readItem() : null;
+        // Server-authored DAG view — required protocol field.
+        PlanGraphView graph = buf.readBoolean() ? readGraph(buf) : null;
+        if (buf.readableBytes() != 0) {
+            throw new DecoderException("Trailing bytes in PlanResponsePacket");
         }
         long requestId = 0L;
         if (buf.isReadable() && buf.readBoolean()) {

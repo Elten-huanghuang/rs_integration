@@ -131,6 +131,24 @@ public interface IBatchDelegate {
     }
 
     /**
+     * Classifies required material slots for parallel execution. Reusable slots
+     * are reserved once per worker and remain installed while that worker drains
+     * its queued operations. Legacy delegates conservatively consume every slot
+     * for every operation.
+     */
+    enum MaterialReservationScope {
+        PER_OPERATION,
+        PER_WORKER_REUSABLE
+    }
+
+    @Nonnull
+    default List<MaterialReservationScope> getMaterialReservationScopes() {
+        List<IngredientSpec> specs = getRequiredMaterials();
+        if (specs == null || specs.isEmpty()) return List.of();
+        return Collections.nCopies(specs.size(), MaterialReservationScope.PER_OPERATION);
+    }
+
+    /**
      * The portion of {@link #getRequiredMaterials()} that the graph planner
      * should allocate via MaterialBroker checkout. Defaults to the full list
      * for delegates that do not override it.

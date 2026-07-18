@@ -1,5 +1,14 @@
 package com.huanghuang.rsintegration.crafting.batch;
 
+import com.huanghuang.rsintegration.compat.ftbquests.ExternalItemProgressBridge;
+import com.huanghuang.rsintegration.crafting.IngredientMatcher;
+import com.huanghuang.rsintegration.crafting.graph.CraftNode;
+import com.huanghuang.rsintegration.crafting.graph.NodeId;
+import com.huanghuang.rsintegration.crafting.plan.PlanGraphView;
+import com.huanghuang.rsintegration.util.InsertedStackDelta;
+
+import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
+
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
@@ -284,13 +293,15 @@ public final class GenericCraftPacket {
                 pos = raw;
             }
         }
-        int repeatCount = Math.max(1, Math.min(buf.readVarInt(), RSIntegrationConfig.REPEAT_COUNT_MAX.get()));
+        int rawRepeatCount = buf.readVarInt();
+        if (rawRepeatCount < 1 || rawRepeatCount > RSIntegrationConfig.REPEAT_COUNT_MAX.get())
+            throw new IllegalArgumentException("invalid repeat count");
+        int repeatCount = rawRepeatCount;
         boolean inferMode = buf.readBoolean();
         ItemStack baseItem = buf.readBoolean() ? buf.readItem() : null;
-        // targetOutput appended at tail; guard readability so a shorter buffer
-        // from an older client decodes cleanly to null instead of throwing.
+        // targetOutput is mandatory in protocol v18.
         ItemStack targetOutput = null;
-        if (buf.isReadable() && buf.readBoolean()) {
+        if (buf.readBoolean()) {
             targetOutput = buf.readItem();
         }
         long requestId = 0L;
@@ -887,8 +898,8 @@ public final class GenericCraftPacket {
                         if (tracker != null) tracker.changed(player, result.copy());
                         ItemStack leftover = network.insertItem(result.copy(), result.getCount(),
                                 com.refinedmods.refinedstorage.api.util.Action.PERFORM);
-                        ItemStack inserted = com.huanghuang.rsintegration.util.InsertedStackDelta.between(result, leftover);
-                        com.huanghuang.rsintegration.compat.ftbquests.ExternalItemProgressBridge.enqueueCrafted(player, inserted);
+                        ItemStack inserted = InsertedStackDelta.between(result, leftover);
+                        ExternalItemProgressBridge.enqueueCrafted(player, inserted);
                         if (!leftover.isEmpty()) {
                             safeGiveToPlayer(player, leftover);
                         }
@@ -1283,8 +1294,8 @@ public final class GenericCraftPacket {
                     recipeIngredients.stream().map(ingredient -> new IngredientSpec(ingredient, 1)).toList(),
                     available, player.serverLevel(),
                     player, network, missing, forcedOverrides, true);
-            Map<com.huanghuang.rsintegration.crafting.graph.NodeId,
-                    com.huanghuang.rsintegration.crafting.graph.CraftNode> graphNodes = planGraph.nodesById();
+            Map<NodeId,
+                    CraftNode> graphNodes = planGraph.nodesById();
             resolutionSteps = planGraph.topologicalOrder().stream()
                     .map(graphNodes::get)
                     .filter(Objects::nonNull)
@@ -2035,7 +2046,7 @@ public final class GenericCraftPacket {
                 boundMachineTypes,
                 leftovers,
                 clickedOutput,
-                planGraph != null ? com.huanghuang.rsintegration.crafting.plan.PlanGraphView.from(planGraph) : null
+                planGraph != null ? PlanGraphView.from(planGraph) : null
         );
 
         PLAN_CACHE.put(cacheKey, new CachedPlan(plan, System.nanoTime()));
@@ -2077,7 +2088,7 @@ public final class GenericCraftPacket {
     private static int countNbtMatching(Ingredient ingredient, Map<StackKey, Integer> available) {
         int total = 0;
         for (var e : available.entrySet()) {
-            if (com.huanghuang.rsintegration.crafting.IngredientMatcher.test(ingredient, e.getKey().toStack())) total += e.getValue();
+            if (IngredientMatcher.test(ingredient, e.getKey().toStack())) total += e.getValue();
         }
         return total;
     }

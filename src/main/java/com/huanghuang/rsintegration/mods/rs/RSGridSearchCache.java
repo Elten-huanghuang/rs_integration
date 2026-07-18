@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.rs;
 
+import com.huanghuang.rsintegration.autoeat.client.PinyinUtil;
+
 import com.refinedmods.refinedstorage.screen.grid.GridScreen;
 import com.refinedmods.refinedstorage.screen.grid.stack.IGridStack;
 import net.minecraft.client.Minecraft;
@@ -241,11 +243,11 @@ public final class RSGridSearchCache {
         sb.append(text).append('\n');
 
         try {
-            String pinyin = com.huanghuang.rsintegration.autoeat.client.PinyinUtil.toPinyin(text);
+            String pinyin = PinyinUtil.toPinyin(text);
             if (pinyin != null && !pinyin.isEmpty()) {
                 sb.append(pinyin.toLowerCase()).append('\n');
             }
-            String initials = com.huanghuang.rsintegration.autoeat.client.PinyinUtil.toPinyinInitials(text);
+            String initials = PinyinUtil.toPinyinInitials(text);
             // 首字母与全拼相等时(纯英文/无中文)不重复追加，省缓存空间
             if (initials != null && !initials.isEmpty()
                     && !initials.equalsIgnoreCase(pinyin)) {

@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.sidepanel;
 
+import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
+
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.refinedmods.refinedstorage.api.network.INetwork;
@@ -33,39 +35,50 @@ public final class RSSidePanelClickPacket {
     final List<ItemStack> dragItems;
     final ItemStack carriedItem;
     final UUID panelId; // matches RS onExtract(player, UUID id, ...)
-    long operationId;
+    final long operationId;
 
-    // 单次点击提取
-    public RSSidePanelClickPacket(ItemStack targetItem, byte action, boolean isShift, UUID panelId) {
+    public RSSidePanelClickPacket(ItemStack targetItem, byte action, boolean isShift,
+                                  UUID panelId, long operationId) {
+        if (operationId < 0) throw new IllegalArgumentException("operationId must be non-negative");
         this.action = action;
         this.isShift = isShift;
         this.targetItem = targetItem.copy();
         this.dragItems = Collections.emptyList();
         this.carriedItem = ItemStack.EMPTY;
         this.panelId = panelId;
-        this.operationId = RSSidePanelClient.nextOperationId();
+        this.operationId = operationId;
     }
 
-    // 拖拽分配
-    public RSSidePanelClickPacket(List<ItemStack> dragItems) {
+    public RSSidePanelClickPacket(ItemStack targetItem, byte action, boolean isShift, UUID panelId) {
+        this(targetItem, action, isShift, panelId, 0L);
+    }
+
+    public RSSidePanelClickPacket(List<ItemStack> dragItems, long operationId) {
+        if (operationId < 0) throw new IllegalArgumentException("operationId must be non-negative");
         this.action = ACTION_DRAG_DISTRIBUTE;
         this.isShift = false;
         this.targetItem = ItemStack.EMPTY;
         this.dragItems = new ArrayList<>(dragItems);
         this.carriedItem = ItemStack.EMPTY;
         this.panelId = null;
-        this.operationId = RSSidePanelClient.nextOperationId();
+        this.operationId = operationId;
     }
 
-    // Insert
-    public RSSidePanelClickPacket(ItemStack carriedItem, boolean isRightClick) {
+    public RSSidePanelClickPacket(List<ItemStack> dragItems) { this(dragItems, 0L); }
+
+    public RSSidePanelClickPacket(ItemStack carriedItem, boolean isRightClick, long operationId) {
+        if (operationId < 0) throw new IllegalArgumentException("operationId must be non-negative");
         this.action = ACTION_INSERT;
         this.isShift = isRightClick;
         this.targetItem = ItemStack.EMPTY;
         this.dragItems = Collections.emptyList();
         this.carriedItem = carriedItem.copy();
         this.panelId = null;
-        this.operationId = RSSidePanelClient.nextOperationId();
+        this.operationId = operationId;
+    }
+
+    public RSSidePanelClickPacket(ItemStack carriedItem, boolean isRightClick) {
+        this(carriedItem, isRightClick, 0L);
     }
 
     void encode(FriendlyByteBuf buf) {
@@ -88,25 +101,27 @@ public final class RSSidePanelClickPacket {
     static RSSidePanelClickPacket decode(FriendlyByteBuf buf) {
         byte action = buf.readByte();
         long operationId = buf.readVarLong();
+        if (operationId < 0) throw new IllegalArgumentException("negative operationId");
         if (action == ACTION_DRAG_DISTRIBUTE) {
-            int count = Math.max(0, Math.min(buf.readVarInt(), 4096));
+            int count = buf.readVarInt();
+            if (count < 0 || count > 4096) throw new IllegalArgumentException("invalid drag item count");
             List<ItemStack> items = new ArrayList<>(count);
             for (int i = 0; i < count; i++) items.add(readStack(buf));
-            RSSidePanelClickPacket packet = new RSSidePanelClickPacket(items);
-            packet.operationId = operationId;
-            return packet;
+            if (buf.readableBytes() != 0) throw new IllegalArgumentException("trailing side-panel drag bytes");
+            return new RSSidePanelClickPacket(items, operationId);
         }
         if (action == ACTION_INSERT) {
-            RSSidePanelClickPacket packet = new RSSidePanelClickPacket(readStack(buf), buf.readBoolean());
-            packet.operationId = operationId;
+            RSSidePanelClickPacket packet = new RSSidePanelClickPacket(readStack(buf), buf.readBoolean(), operationId);
+            if (buf.readableBytes() != 0) throw new IllegalArgumentException("trailing side-panel insert bytes");
             return packet;
         }
+        if (action < ACTION_EXTRACT_ONE || action > ACTION_EXTRACT_MAX)
+            throw new IllegalArgumentException("invalid side-panel action: " + action);
         ItemStack item = readStack(buf);
         boolean shift = buf.readBoolean();
         UUID id = buf.readBoolean() ? buf.readUUID() : null;
-        RSSidePanelClickPacket packet = new RSSidePanelClickPacket(item, action, shift, id);
-        packet.operationId = operationId;
-        return packet;
+        if (buf.readableBytes() != 0) throw new IllegalArgumentException("trailing side-panel click bytes");
+        return new RSSidePanelClickPacket(item, action, shift, id, operationId);
     }
 
     private static void writeStack(FriendlyByteBuf buf, ItemStack stack) {
@@ -129,13 +144,23 @@ public final class RSSidePanelClickPacket {
             return;
         }
         context.enqueueWork(() -> {
-            if (packet.action == ACTION_DRAG_DISTRIBUTE) {
-                handleDragDistribute(player, packet.dragItems);
-            } else if (packet.action == ACTION_INSERT) {
-                handleInsert(player, packet.isShift, packet.carriedItem);
-            } else {
-                handleSingleClick(player, packet.targetItem, packet.action, packet.isShift, packet.panelId);
+            OperationResult result;
+            try {
+                if (packet.action == ACTION_DRAG_DISTRIBUTE) {
+                    result = executeDragDistribute(player, packet.dragItems);
+                } else if (packet.action == ACTION_INSERT) {
+                    result = executeInsert(player, packet.isShift, packet.carriedItem);
+                } else {
+                    result = executeSingleClick(player, packet.targetItem, packet.action,
+                            packet.isShift, packet.panelId);
+                }
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.warn("[RSI] Side-panel operation failed for {}",
+                        player.getGameProfile().getName(), e);
+                result = OperationResult.failure(packet.panelId,
+                        RSSidePanelOperationResultPacket.ErrorCode.INTERNAL_ERROR);
             }
+            RSSidePanelNetworkHandler.sendOperationResult(player, packet.operationId, result);
         });
         context.setPacketHandled(true);
     }
@@ -143,6 +168,65 @@ public final class RSSidePanelClickPacket {
     // ── Flag constants matching RS IItemGridHandler ──────────────
     private static final int EXTRACT_HALF  = 1;
     private static final int EXTRACT_SHIFT = 4;
+
+    private static OperationResult executeSingleClick(ServerPlayer player, ItemStack targetItem,
+                                                       byte action, boolean isShift, UUID panelId) {
+        int before = storedCount(player, panelId, targetItem);
+        handleSingleClick(player, targetItem, action, isShift, panelId);
+        int after = storedCount(player, panelId, targetItem);
+        int actual = Math.max(0, before - after);
+        return actual > 0
+                ? OperationResult.success(panelId, actual)
+                : OperationResult.failure(panelId, RSSidePanelOperationResultPacket.ErrorCode.NOTHING_TRANSFERRED);
+    }
+
+    private static OperationResult executeInsert(ServerPlayer player, boolean rightClick, ItemStack carried) {
+        int before = player.containerMenu.getCarried().getCount();
+        handleInsert(player, rightClick, carried);
+        int actual = Math.max(0, before - player.containerMenu.getCarried().getCount());
+        return actual > 0
+                ? OperationResult.success(null, actual)
+                : OperationResult.failure(null, RSSidePanelOperationResultPacket.ErrorCode.NOTHING_TRANSFERRED);
+    }
+
+    private static OperationResult executeDragDistribute(ServerPlayer player, List<ItemStack> items) {
+        int before = 0;
+        for (ItemStack item : items) before += storedCount(player, null, item);
+        handleDragDistribute(player, items);
+        int after = 0;
+        for (ItemStack item : items) after += storedCount(player, null, item);
+        int actual = Math.max(0, before - after);
+        if (actual == items.size()) return OperationResult.success(null, actual);
+        if (actual > 0) return new OperationResult(false, null, actual,
+                RSSidePanelOperationResultPacket.ErrorCode.PARTIAL_TRANSFER);
+        return OperationResult.failure(null, RSSidePanelOperationResultPacket.ErrorCode.NOTHING_TRANSFERRED);
+    }
+
+    private static int storedCount(ServerPlayer player, UUID stackId, ItemStack template) {
+        INetwork network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
+        if (network == null || network.getItemStorageCache() == null) return 0;
+        var list = network.getItemStorageCache().getList();
+        if (list == null) return 0;
+        ItemStack stored = stackId != null ? list.get(stackId) : null;
+        if ((stored == null || stored.isEmpty()) && template != null && !template.isEmpty()) {
+            var entry = list.getEntry(template, 1);
+            stored = entry != null ? entry.getStack() : null;
+        }
+        return stored == null || stored.isEmpty() ? 0 : stored.getCount();
+    }
+
+    static record OperationResult(boolean success, UUID stackId, int actualCount,
+                                   RSSidePanelOperationResultPacket.ErrorCode errorCode) {
+        static OperationResult success(UUID stackId, int count) {
+            return new OperationResult(true, stackId, count,
+                    RSSidePanelOperationResultPacket.ErrorCode.NONE);
+        }
+
+        static OperationResult failure(UUID stackId,
+                                       RSSidePanelOperationResultPacket.ErrorCode code) {
+            return new OperationResult(false, stackId, 0, code);
+        }
+    }
 
     private static void handleSingleClick(ServerPlayer player, ItemStack targetItem,
                                            byte action, boolean isShift, UUID panelId) {

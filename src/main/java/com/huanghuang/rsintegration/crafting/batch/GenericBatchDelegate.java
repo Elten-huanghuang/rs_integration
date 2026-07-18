@@ -1,5 +1,9 @@
 package com.huanghuang.rsintegration.crafting.batch;
 
+import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
+
+import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
+
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
@@ -93,7 +97,7 @@ public final class GenericBatchDelegate extends AbstractBatchDelegate {
             }
         } else {
             this.pendingSecondary.addAll(
-                    com.huanghuang.rsintegration.recipe.ModRecipeHandlers.tryGetSecondaryOutputs(
+                    ModRecipeHandlers.tryGetSecondaryOutputs(
                             recipe, player.serverLevel().registryAccess()));
         }
 
@@ -179,7 +183,7 @@ public final class GenericBatchDelegate extends AbstractBatchDelegate {
                 }
             } else {
                 this.pendingSecondary.addAll(
-                        com.huanghuang.rsintegration.recipe.ModRecipeHandlers.tryGetSecondaryOutputs(
+                        ModRecipeHandlers.tryGetSecondaryOutputs(
                                 recipe, player.serverLevel().registryAccess()));
             }
         }

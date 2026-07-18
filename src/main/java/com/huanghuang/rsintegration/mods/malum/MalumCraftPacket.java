@@ -1,5 +1,9 @@
 package com.huanghuang.rsintegration.mods.malum;
 
+import com.huanghuang.rsintegration.util.ChunkUtils;
+
+import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
+
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.RSIntegrationMod;
@@ -98,7 +102,7 @@ public final class MalumCraftPacket {
             }
         }
 
-        com.huanghuang.rsintegration.util.ChunkUtils.loadChunk(level, pos);
+        ChunkUtils.loadChunk(level, pos);
         BlockEntity be = level.getBlockEntity(pos);
         Object altar = castSpiritAltar(be);
         if (altar == null) {

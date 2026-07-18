@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.apotheosis.network;
 
+import com.huanghuang.rsintegration.mods.apotheosis.ApotheosisLibraryModels;
+
 import com.huanghuang.rsintegration.mods.apotheosis.ApotheosisLibraryModels.ImportStats;
 import com.huanghuang.rsintegration.mods.apotheosis.ApotheosisLibraryService;
 import com.huanghuang.rsintegration.mods.apotheosis.client.ApotheosisLibraryClientEvents;
@@ -43,7 +45,7 @@ public record ApotheosisLibraryImportResultPacket(ResourceLocation dimension, Bl
                 buf.readVarInt(), buf.readVarInt());
         return new ApotheosisLibraryImportResultPacket(dimension, pos, stats,
                 ApotheosisLibraryScanResponsePacket.decode(buf),
-                buf.readUtf(com.huanghuang.rsintegration.mods.apotheosis.ApotheosisLibraryModels.MAX_ERROR_LENGTH));
+                buf.readUtf(ApotheosisLibraryModels.MAX_ERROR_LENGTH));
     }
 
     public static void handle(ApotheosisLibraryImportResultPacket packet,

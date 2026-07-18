@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.sidepanel.client;
 
+import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
+
 import com.huanghuang.rsintegration.machine.MachineInteractType;
 import com.huanghuang.rsintegration.machine.MachineState;
 import com.huanghuang.rsintegration.machine.MachineStatus;
@@ -123,7 +125,7 @@ public final class MachineTabRenderer {
      * look up the block, falling back to the crafting table icon.
      */
     private static ItemStack resolveIcon(BindingInfo info) {
-        return com.huanghuang.rsintegration.network.binding.BindingEventHandler.resolveBlockIcon(
+        return BindingEventHandler.resolveBlockIcon(
                 info.blockRegKey(), info.blockKey(), info.displayStack());
     }
 }

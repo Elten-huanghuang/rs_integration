@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.transfer;
 
+import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
+
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.util.InsertedStackDelta;

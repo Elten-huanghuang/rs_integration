@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.autoeat.network;
 
+import com.huanghuang.rsintegration.autoeat.AutoEatEngine;
+
 import net.minecraft.network.FriendlyByteBuf;
 
 public class AutoEatStopPacket {
@@ -14,7 +16,7 @@ public class AutoEatStopPacket {
         ctx.get().enqueueWork(() -> {
             var sender = ctx.get().getSender();
             if (sender != null && !(sender instanceof net.minecraftforge.common.util.FakePlayer)) {
-                com.huanghuang.rsintegration.autoeat.AutoEatEngine.stop(sender);
+                AutoEatEngine.stop(sender);
             }
         });
         ctx.get().setPacketHandled(true);

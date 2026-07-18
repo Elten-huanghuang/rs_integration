@@ -1,5 +1,10 @@
 package com.huanghuang.rsintegration.crafting;
 
+import com.huanghuang.rsintegration.compat.ftbquests.ExternalItemProgressBridge;
+import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
+import com.huanghuang.rsintegration.mods.crockpot.CrockPotBatchDelegate;
+import com.huanghuang.rsintegration.util.InsertedStackDelta;
+
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
 import com.huanghuang.rsintegration.crafting.batch.CraftProgressPacket;
@@ -220,7 +225,8 @@ public final class AsyncCraftChain {
                 : steps.get(0).recipeId();
         this.ctx = CraftLogContext.create(playerId, primaryRecipe);
         this.terminalListeners = new TerminalListeners(
-                error -> RSIntegrationMod.LOGGER.error(ctx.format("onDone callback threw"), error));
+                error -> RSIntegrationMod.LOGGER.error(ctx.format("onDone callback threw"), error),
+                AsyncCraftManager.getInstance()::enqueueCompletion);
         this.ledger.setLogContext(ctx);
         int cap;
         try { cap = RSIntegrationConfig.CRAFTING_MAX_CONCURRENT_GRAPH_NODES.get(); }
@@ -305,9 +311,9 @@ public final class AsyncCraftChain {
 
     private static List<CraftingResolver.ResolutionStep> projectSteps(CraftPlanGraph graph) {
         Objects.requireNonNull(graph, "graph");
-        Map<com.huanghuang.rsintegration.crafting.graph.NodeId, CraftNode> nodes = graph.nodesById();
+        Map<NodeId, CraftNode> nodes = graph.nodesById();
         List<CraftingResolver.ResolutionStep> projected = new ArrayList<>(graph.topologicalOrder().size());
-        for (com.huanghuang.rsintegration.crafting.graph.NodeId nodeId : graph.topologicalOrder()) {
+        for (NodeId nodeId : graph.topologicalOrder()) {
             CraftNode node = nodes.get(nodeId);
             if (node == null) throw new IllegalArgumentException("missing graph node " + nodeId);
             ModType modType = ModType.byId(node.modTypeId());
@@ -1099,7 +1105,7 @@ public final class AsyncCraftChain {
         }
         try {
             GraphNodeMaterials reserved;
-            if (delegate instanceof com.huanghuang.rsintegration.mods.crockpot.CrockPotBatchDelegate crockPot
+            if (delegate instanceof CrockPotBatchDelegate crockPot
                     && crockPot.usesPlannedCategoryMaterials()) {
                 reserved = reservePlannedCheckoutMaterials(
                         online, nodeLedger, admission.materialToken());
@@ -1141,7 +1147,7 @@ public final class AsyncCraftChain {
                 AABB region = delegate.getOutputCaptureRegion();
                 boolean ownsWorldCapture = concurrency.capabilities() != null
                         && concurrency.capabilities().outputOwnership()
-                        == com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities.OutputOwnership.OWNED_WORLD_CAPTURE;
+                        == BatchConcurrencyCapabilities.OutputOwnership.OWNED_WORLD_CAPTURE;
                 OperationResourceCoordinator.CaptureRequest capture = expected != null
                         && !expected.isEmpty() && region != null
                         ? new OperationResourceCoordinator.CaptureRequest(
@@ -1418,13 +1424,41 @@ public final class AsyncCraftChain {
             List<ExtractionLedger.ReservationToken> tokens = new ArrayList<>();
             List<List<ItemStack>> virtualDebits = new ArrayList<>();
             List<List<ItemStack>> producerDebits = new ArrayList<>();
+            List<ItemStack> reusable = new ArrayList<>();
+            List<IngredientSpec> perOperationSpecs = new ArrayList<>();
+            List<IngredientSpec> reusableSpecs = new ArrayList<>();
+            List<IBatchDelegate.MaterialReservationScope> scopes = group.getMaterialReservationScopes();
+            for (int i = 0; i < operationSpecs.size(); i++) {
+                if (i < scopes.size() && scopes.get(i) == IBatchDelegate.MaterialReservationScope.PER_WORKER_REUSABLE) {
+                    reusableSpecs.add(operationSpecs.get(i));
+                } else {
+                    perOperationSpecs.add(operationSpecs.get(i));
+                }
+            }
+            int workers = Math.min(group.getChildCount(), group.getTotalOperations());
+            for (int worker = 0; worker < workers; worker++) {
+                List<ItemStack> lane = reserveGraphMaterials(reusableSpecs, online, ledger, initialPool, producerPool);
+                if (lane == null) return null;
+                reusable.addAll(lane);
+            }
             for (int operation = 0; operation < group.getTotalOperations(); operation++) {
                 int mark = ledger.reservationMark();
                 List<ItemStack> producerBefore = copyStacks(producerPool);
                 List<ItemStack> slice = reserveGraphMaterials(
-                        operationSpecs, online, ledger, initialPool, producerPool);
+                        perOperationSpecs, online, ledger, initialPool, producerPool);
                 if (slice == null) return null;
-                materials.addAll(copyStacksKeepingEmpty(slice));
+                List<ItemStack> full = new ArrayList<>();
+                int consumedIndex = 0;
+                int reusableIndex = operation % Math.max(1, workers);
+                for (int i = 0; i < operationSpecs.size(); i++) {
+                    if (i < scopes.size() && scopes.get(i) == IBatchDelegate.MaterialReservationScope.PER_WORKER_REUSABLE) {
+                        full.add(reusable.get(reusableIndex));
+                        reusableIndex += workers;
+                    } else {
+                        full.add(slice.get(consumedIndex++));
+                    }
+                }
+                materials.addAll(copyStacksKeepingEmpty(full));
                 tokens.add(ledger.tokenSince(mark));
                 virtualDebits.add(List.of());
                 producerDebits.add(consumedFragments(producerBefore, producerPool));
@@ -1991,7 +2025,10 @@ public final class AsyncCraftChain {
                     addToInventory(workingInventory,
                             secondary.copyWithCount(StepExecutor.mulCount(secondary.getCount(), executions)));
                 }
-                for (ItemStack remainder : CraftPacketUtils.getRecipeRemainders(cr)) {
+                // Compute remainders from the actual stacks placed in the recipe,
+                // not ingredient templates. CraftTweaker copy/container recipes
+                // may derive the returned stack from NBT or durability.
+                for (ItemStack remainder : CraftPacketUtils.getRecipeRemainders(cr, consumed)) {
                     addToInventory(workingInventory,
                             remainder.copyWithCount(StepExecutor.mulCount(remainder.getCount(), executions)));
                 }
@@ -2538,7 +2575,8 @@ public final class AsyncCraftChain {
                 if (operationSpecs != null && !operationSpecs.isEmpty()
                         && group instanceof ParallelCraftGroup parallel) {
                     List<ReservedOperation> reserved = preReserveParallelOperations(
-                            operationSpecs, stepRemaining, online);
+                            operationSpecs, parallel.getMaterialReservationScopes(),
+                            parallel.getChildCount(), stepRemaining, online);
                     if (reserved == null) {
                         materials = null;
                     } else {
@@ -2619,22 +2657,63 @@ public final class AsyncCraftChain {
                                      List<ItemStack> virtualDebits) {}
 
     private List<ReservedOperation> preReserveParallelOperations(
-            List<IngredientSpec> specs, int operationCount, ServerPlayer online) {
+            List<IngredientSpec> specs,
+            List<IBatchDelegate.MaterialReservationScope> scopes,
+            int workerCount, int operationCount, ServerPlayer online) {
         List<ItemStack> virtualSnapshot = copyStacks(virtualInventory);
         List<ReservedOperation> reservations = new ArrayList<>();
+        int effectiveWorkers = Math.min(Math.max(1, workerCount), operationCount);
+        List<ItemStack> reusable = new ArrayList<>();
+        for (int i = 0; i < specs.size(); i++) {
+            if (i < scopes.size() && scopes.get(i) == IBatchDelegate.MaterialReservationScope.PER_WORKER_REUSABLE) {
+                IngredientSpec spec = specs.get(i);
+                for (int worker = 0; worker < effectiveWorkers; worker++) {
+                    List<IngredientSpec> one = List.of(new IngredientSpec(spec.ingredient(), spec.count()));
+                    List<ItemStack> material = preReserveStepMaterials(one, online);
+                    if (material == null) {
+                        ledger.reset();
+                        restoreVirtualSnapshot(virtualSnapshot);
+                        return null;
+                    }
+                    reusable.addAll(material);
+                }
+                break;
+            }
+        }
         for (int operation = 0; operation < operationCount; operation++) {
             int mark = ledger.reservationMark();
             List<ItemStack> virtualDebits = new ArrayList<>();
-            List<ItemStack> materials = preReserveStepMaterials(specs, online, virtualDebits);
+            List<IngredientSpec> perOperation = new ArrayList<>();
+            for (int i = 0; i < specs.size(); i++) {
+                if (i >= scopes.size() || scopes.get(i) == IBatchDelegate.MaterialReservationScope.PER_OPERATION) {
+                    perOperation.add(specs.get(i));
+                }
+            }
+            List<ItemStack> materials = preReserveStepMaterials(perOperation, online, virtualDebits);
             if (materials == null) {
                 ledger.reset();
                 restoreVirtualSnapshot(virtualSnapshot);
                 return null;
             }
-            ExtractionLedger.ReservationToken token = ledger.tokenSince(mark);
-            reservations.add(new ReservedOperation(materials, token, List.copyOf(virtualDebits)));
+            List<ItemStack> full = new ArrayList<>();
+            int perIndex = 0;
+            int reusableIndex = 0;
+            for (int i = 0; i < specs.size(); i++) {
+                if (i < scopes.size() && scopes.get(i) == IBatchDelegate.MaterialReservationScope.PER_WORKER_REUSABLE) {
+                    full.add(reusable.get((operation % effectiveWorkers) + reusableIndex));
+                    reusableIndex += effectiveWorkers;
+                } else {
+                    full.add(materials.get(perIndex++));
+                }
+            }
+            reservations.add(new ReservedOperation(full, ledger.tokenSince(mark), List.copyOf(virtualDebits)));
         }
         return List.copyOf(reservations);
+    }
+
+    private List<ReservedOperation> preReserveParallelOperations(
+            List<IngredientSpec> specs, int operationCount, ServerPlayer online) {
+        return preReserveParallelOperations(specs, List.of(), 1, operationCount, online);
     }
 
     private static List<ItemStack> copyStacksKeepingEmpty(List<ItemStack> stacks) {
@@ -3026,9 +3105,9 @@ public final class AsyncCraftChain {
                             com.refinedmods.refinedstorage.api.util.Action.PERFORM);
                     var tracker = network.getItemStorageTracker();
                     if (tracker != null) tracker.changed(online, vi.copy());
-                    ItemStack inserted = com.huanghuang.rsintegration.util.InsertedStackDelta.between(vi, leftover);
+                    ItemStack inserted = InsertedStackDelta.between(vi, leftover);
                     if (targetOutput != null && vi.is(targetOutput.getItem())) {
-                        com.huanghuang.rsintegration.compat.ftbquests.ExternalItemProgressBridge.enqueueCrafted(
+                        ExternalItemProgressBridge.enqueueCrafted(
                                 online, inserted);
                     }
                     if (!leftover.isEmpty()) {
@@ -3050,7 +3129,7 @@ public final class AsyncCraftChain {
         terminalListeners.fireOnce();
     }
 
-    /** Register an additive completion listener. Late listeners run immediately. */
+    /** Register an additive completion listener. Late listeners are queued on the server tick. */
     public void onDone(@Nullable Runnable callback) {
         terminalListeners.add(callback);
     }

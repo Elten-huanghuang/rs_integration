@@ -1,5 +1,9 @@
 package com.huanghuang.rsintegration.sidepanel;
 
+import com.huanghuang.rsintegration.sidepanel.client.GuiNavStack;
+import com.huanghuang.rsintegration.sidepanel.data.BindingCache;
+import com.huanghuang.rsintegration.sidepanel.network.OpenBoundMachineGuiPacket;
+
 import com.huanghuang.rsintegration.sidepanel.client.SidePanelInputHandler;
 import net.minecraft.client.Minecraft;
 import net.minecraft.world.item.ItemStack;
@@ -139,11 +143,11 @@ final class SidePanelMouseHandler {
                     PanelStack ps = RSSidePanelClient.displayList.get(dIdx);
                     if (ps != null) {
                         String itemKey = RSSidePanelClient.keyOf(ps.getStack());
-                        var info = com.huanghuang.rsintegration.sidepanel.data.BindingCache.getInstance().getBinding(itemKey);
+                        var info = BindingCache.getInstance().getBinding(itemKey);
                         if (info != null) {
-                            com.huanghuang.rsintegration.sidepanel.client.GuiNavStack.pushCurrent();
+                            GuiNavStack.pushCurrent();
                             RSSidePanelNetworkHandler.CHANNEL.sendToServer(
-                                    new com.huanghuang.rsintegration.sidepanel.network.OpenBoundMachineGuiPacket(
+                                    new OpenBoundMachineGuiPacket(
                                             info.dim(), info.pos(), itemKey));
                             return;
                         }
