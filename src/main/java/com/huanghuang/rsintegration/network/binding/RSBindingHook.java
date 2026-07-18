@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.network.binding;
 
+import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
+
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.item.NetworkItem;
 import net.minecraft.core.BlockPos;

@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.sidepanel.client;
 
+import com.huanghuang.rsintegration.sidepanel.data.BindingCache;
+
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.sidepanel.PanelStack;
 import com.huanghuang.rsintegration.sidepanel.RSSidePanelClient;
@@ -194,7 +196,7 @@ public final class SidePanelRenderer {
 
                 // GUI icon for bound machines
                 String itemKey = RSSidePanelClient.keyOf(stack);
-                if (!itemKey.isEmpty() && com.huanghuang.rsintegration.sidepanel.data.BindingCache.getInstance().hasGui(itemKey)) {
+                if (!itemKey.isEmpty() && BindingCache.getInstance().hasGui(itemKey)) {
                     int guiIconX = ix + 10;
                     int guiIconY = iy + 10;
                     boolean guiHovered = mouseX >= guiIconX && mouseX < guiIconX + 8

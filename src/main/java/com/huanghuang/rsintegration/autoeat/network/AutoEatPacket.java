@@ -1,5 +1,8 @@
 package com.huanghuang.rsintegration.autoeat.network;
 
+import com.huanghuang.rsintegration.autoeat.AutoEatEngine;
+import com.huanghuang.rsintegration.autoeat.AutoEatRateLimiter;
+
 import com.huanghuang.rsintegration.autoeat.AutoEatMode;
 import com.huanghuang.rsintegration.autoeat.AutoEatEngine;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
@@ -44,10 +47,10 @@ public class AutoEatPacket {
                 // Throttle: each accepted eat clones the full network storage
                 // list + edibility scan. Dedicated limiter (not the GUI-open one)
                 // so eating never falsely throttles an unrelated GUI open.
-                if (com.huanghuang.rsintegration.autoeat.AutoEatRateLimiter.isRateLimited(sender.getUUID())) {
+                if (AutoEatRateLimiter.isRateLimited(sender.getUUID())) {
                     return;
                 }
-                com.huanghuang.rsintegration.autoeat.AutoEatEngine.execute(sender, packet.mode, packet.selectedItem);
+                AutoEatEngine.execute(sender, packet.mode, packet.selectedItem);
             }
         });
         ctx.get().setPacketHandled(true);

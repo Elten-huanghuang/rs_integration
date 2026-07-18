@@ -1,5 +1,10 @@
 package com.huanghuang.rsintegration.sidepanel.network;
 
+import com.huanghuang.rsintegration.mods.vanilla.BrickFurnaceCompat;
+import com.huanghuang.rsintegration.mods.vanilla.CookingMachineFamily;
+
+import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
+
 import com.huanghuang.rsintegration.api.ISmithingRecipeAccessor;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
@@ -303,7 +308,7 @@ public final class OpenBoundMachineGuiPacket {
 
         // ── auto-supply fuel into slot 1 ──
         int cookingTime = recipe instanceof AbstractCookingRecipe acr
-                ? com.huanghuang.rsintegration.mods.vanilla.BrickFurnaceCompat.effectiveCookTicks(furnace, acr)
+                ? BrickFurnaceCompat.effectiveCookTicks(furnace, acr)
                 : 200;
         int litTime = 0;
         if (LIT_TIME != null) {
@@ -339,7 +344,7 @@ public final class OpenBoundMachineGuiPacket {
         if (remainingCook <= 0) return;
         ItemStack existing = furnace.getItem(1);
         if (!existing.isEmpty()) {
-            int burn = com.huanghuang.rsintegration.mods.vanilla.BrickFurnaceCompat.effectiveBurnTicks(
+            int burn = BrickFurnaceCompat.effectiveBurnTicks(
                     furnace, existing, recipeTypeFor(furnace, recipe));
             int needed = VanillaFurnaceFuelPolicy.requiredAmount(remainingCook, burn);
             if (burn <= 0 || needed > existing.getMaxStackSize()) return;
@@ -363,7 +368,7 @@ public final class OpenBoundMachineGuiPacket {
         VanillaFurnaceFuelPolicy.Selection selection = VanillaFurnaceFuelPolicy.select(
                 candidates, RSIntegrationConfig.VANILLA_FURNACE_FUEL_PRIORITY.get(),
                 remainingCook,
-                stack -> com.huanghuang.rsintegration.mods.vanilla.BrickFurnaceCompat.effectiveBurnTicks(
+                stack -> BrickFurnaceCompat.effectiveBurnTicks(
                         furnace, stack, recipeTypeFor(furnace, recipe)));
         if (selection == null) return;
         ItemStack extracted = network.extractItem(selection.fuel().copyWithCount(1),
@@ -381,7 +386,7 @@ public final class OpenBoundMachineGuiPacket {
 
     private static net.minecraft.world.item.crafting.RecipeType<?> recipeTypeFor(
             AbstractFurnaceBlockEntity furnace, Recipe<?> recipe) {
-        return switch (com.huanghuang.rsintegration.mods.vanilla.CookingMachineFamily.fromBlock(
+        return switch (CookingMachineFamily.fromBlock(
                 furnace.getBlockState().getBlock())) {
             case BLAST_FURNACE -> net.minecraft.world.item.crafting.RecipeType.BLASTING;
             case SMOKER -> net.minecraft.world.item.crafting.RecipeType.SMOKING;

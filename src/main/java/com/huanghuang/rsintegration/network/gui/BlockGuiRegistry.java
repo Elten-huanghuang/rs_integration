@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.network.gui;
 
+import com.huanghuang.rsintegration.util.ChunkUtils;
+
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.machine.StandardMenuProviderOpener;
 import com.huanghuang.rsintegration.network.gui.RemoteGuiAuth;
@@ -54,7 +56,7 @@ public final class BlockGuiRegistry {
         }
         // Try to force-load the chunk first — getBlockState needs the chunk
         if (!level.hasChunkAt(pos)) {
-            com.huanghuang.rsintegration.util.ChunkUtils.loadChunk(level, pos);
+            ChunkUtils.loadChunk(level, pos);
             if (!level.hasChunkAt(pos)) {
                 RSIntegrationMod.LOGGER.warn("[RSI-MachineGUI] openGui failed: chunk not loaded at {} dim={}", pos, dim);
                 return false;

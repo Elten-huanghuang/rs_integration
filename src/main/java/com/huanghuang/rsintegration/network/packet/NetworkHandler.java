@@ -28,8 +28,8 @@ public final class NetworkHandler {
     public static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
             new ResourceLocation(RSIntegrationMod.MOD_ID, "main"),
             () -> PROTOCOL_VERSION,
-            NetworkRegistry.acceptMissingOr(PROTOCOL_VERSION),
-            NetworkRegistry.acceptMissingOr(PROTOCOL_VERSION)
+            PROTOCOL_VERSION::equals,
+            PROTOCOL_VERSION::equals
     );
 
     private NetworkHandler() {}

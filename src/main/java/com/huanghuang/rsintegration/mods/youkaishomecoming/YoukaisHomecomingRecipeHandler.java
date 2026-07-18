@@ -1,5 +1,8 @@
 package com.huanghuang.rsintegration.mods.youkaishomecoming;
 
+import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
+import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
+
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
@@ -17,7 +20,7 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 
-public final class YoukaisHomecomingRecipeHandler implements com.huanghuang.rsintegration.recipe.ModRecipeHandler {
+public final class YoukaisHomecomingRecipeHandler implements ModRecipeHandler {
 
     private static final String MOKA_RECIPE =
             "dev.xkmc.youkaishomecoming.content.pot.moka.MokaRecipe";
@@ -80,7 +83,7 @@ public final class YoukaisHomecomingRecipeHandler implements com.huanghuang.rsin
                     output.isEmpty() ? "EMPTY" : output.getHoverName().getString(), output.getCount());
             return output;
         }
-        return com.huanghuang.rsintegration.recipe.ModRecipeHandlers.tryGetResultItem(recipe, access);
+        return ModRecipeHandlers.tryGetResultItem(recipe, access);
     }
 
     @Nonnull

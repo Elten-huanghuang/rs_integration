@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.jei;
 
+import com.huanghuang.rsintegration.crafting.plan.CraftingPlanScreen;
+
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.sidepanel.client.RSIKeyBindings;
@@ -310,7 +312,7 @@ public final class JeiMarqueeSelector {
         if (screen == null) return;
         // Our own full-screen planning UI owns its whole area — JEI's list overlays it, but the
         // marquee and JEI click-shortcuts must not hijack drags meant for the recipe tree.
-        if (screen instanceof com.huanghuang.rsintegration.crafting.plan.CraftingPlanScreen) return;
+        if (screen instanceof CraftingPlanScreen) return;
         int mx = (int) event.getMouseX();
         int my = (int) event.getMouseY();
         IJeiRuntime runtime = RSJeiPlugin.getRuntime();

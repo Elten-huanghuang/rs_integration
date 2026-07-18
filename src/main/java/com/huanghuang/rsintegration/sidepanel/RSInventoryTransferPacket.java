@@ -1,5 +1,9 @@
 package com.huanghuang.rsintegration.sidepanel;
 
+import com.huanghuang.rsintegration.util.Reflect;
+
+import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
+
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
@@ -200,7 +204,7 @@ public final class RSInventoryTransferPacket {
         try {
             Object ritual = null;
             for (String methodName : new String[]{"getRitual", "getCrystalRitual"}) {
-                java.lang.reflect.Method m = com.huanghuang.rsintegration.util.Reflect
+                java.lang.reflect.Method m = Reflect
                         .findMethod(recipe.getClass(), methodName, new Class<?>[0]);
                 if (m != null) {
                     Object r = m.invoke(recipe);
@@ -208,7 +212,7 @@ public final class RSInventoryTransferPacket {
                 }
             }
             if (ritual != null) {
-                java.lang.reflect.Method getCrystalType = com.huanghuang.rsintegration.util.Reflect
+                java.lang.reflect.Method getCrystalType = Reflect
                         .findMethod(ritual.getClass(), "getCrystalType",
                                 new Class<?>[]{net.minecraft.world.item.ItemStack.class});
                 if (getCrystalType != null) {

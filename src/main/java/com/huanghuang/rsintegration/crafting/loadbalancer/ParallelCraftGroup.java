@@ -166,6 +166,11 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         return baseSpecs == null ? null : List.copyOf(baseSpecs);
     }
 
+    public List<IBatchDelegate.MaterialReservationScope> getMaterialReservationScopes() {
+        if (workers.isEmpty() || workers.get(0).delegate == null) return List.of();
+        return workers.get(0).delegate.getMaterialReservationScopes();
+    }
+
     public void setReservationTokens(List<ExtractionLedger.ReservationToken> tokens) {
         this.reservationTokens = List.copyOf(tokens);
     }

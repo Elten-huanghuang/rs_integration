@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.crafting.plan;
 
+import com.huanghuang.rsintegration.mods.farmersrespite.kettle.FRKettleBatchDelegate;
+
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.mods.aether.AetherFurnaceBatchDelegate;
 import com.huanghuang.rsintegration.mods.aetherworks.AetherworksBatchDelegate;
@@ -74,7 +76,7 @@ public final class PlanWarnings {
                 warnings.addAll(CrockPotBatchDelegate.getPlanWarnings(player, recipe, dim, pos));
                 break;
             case ModIds.ID_FR_KETTLE:
-                warnings.addAll(com.huanghuang.rsintegration.mods.farmersrespite.kettle.FRKettleBatchDelegate
+                warnings.addAll(FRKettleBatchDelegate
                         .getPlanWarnings(player, recipe, dim, pos));
                 break;
             case ModIds.FARMINGFORBLOCKHEADS:

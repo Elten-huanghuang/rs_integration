@@ -1,5 +1,9 @@
 package com.huanghuang.rsintegration.mixin.jei;
 
+import com.huanghuang.rsintegration.compat.ftbquests.QuestSubmissionRequestPacket;
+import com.huanghuang.rsintegration.compat.ftbquests.QuestSubmissionSnapshot;
+import com.huanghuang.rsintegration.compat.ftbquests.QuestSubmissionTargetIds;
+
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.util.Reflect;
 import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
@@ -147,12 +151,12 @@ public class RecipeGuiLayoutsMixin {
                 skippedNoRecipe++; continue;
             }
 
-            if (recipe instanceof com.huanghuang.rsintegration.compat.ftbquests.QuestSubmissionSnapshot quest) {
+            if (recipe instanceof QuestSubmissionSnapshot quest) {
                 ResourceLocation questRecipeId =
-                        com.huanghuang.rsintegration.compat.ftbquests.QuestSubmissionTargetIds
+                        QuestSubmissionTargetIds
                                 .of(quest.questId());
                 Runnable handler = () -> BatchCraftNetworkHandler.CHANNEL.sendToServer(
-                        new com.huanghuang.rsintegration.compat.ftbquests.QuestSubmissionRequestPacket(
+                        new QuestSubmissionRequestPacket(
                                 quest.questId()));
                 rsi$layoutIndices.add(i);
                 rsi$positions.add(new int[]{0, 0, 10, 10});

@@ -1,5 +1,9 @@
 package com.huanghuang.rsintegration.mods.crockpot;
 
+import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
+
+import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
+
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
@@ -42,7 +46,7 @@ import java.util.List;
 import java.util.Map;
 
 /** Batch delegate for Crock Pot cooking recipes (all pot levels). */
-public final class CrockPotBatchDelegate extends com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate {
+public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
 
     private ServerPlayer player;
     private ServerLevel myLevel;

@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.eidolon;
 
+import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
+
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.util.ChunkUtils;

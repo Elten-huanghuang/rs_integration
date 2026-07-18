@@ -1,5 +1,8 @@
 package com.huanghuang.rsintegration.network;
 
+import com.huanghuang.rsintegration.compat.ftbquests.client.FtbQuestJeiRuntime;
+import com.huanghuang.rsintegration.compat.ftbquests.client.FtbQuestSubmissionCategory;
+
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.ClientSyncedConfig;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
@@ -50,7 +53,7 @@ public final class RSJeiPlugin implements IModPlugin {
             GoetyRSModule.INSTANCE.onJeiRuntimeAvailable(jeiRuntime);
         }
         if (ModList.get().isLoaded(ModIds.FTB_QUESTS)) {
-            com.huanghuang.rsintegration.compat.ftbquests.client.FtbQuestJeiRuntime
+            FtbQuestJeiRuntime
                     .onRuntimeAvailable(jeiRuntime);
         }
     }
@@ -60,7 +63,7 @@ public final class RSJeiPlugin implements IModPlugin {
         JeiMarqueeSelector.unregister();
         cachedRuntime = null;
         if (ModList.get().isLoaded(ModIds.FTB_QUESTS)) {
-            com.huanghuang.rsintegration.compat.ftbquests.client.FtbQuestJeiRuntime
+            FtbQuestJeiRuntime
                     .onRuntimeUnavailable();
         }
         if (RSIntegrationConfig.ENABLE_GOETY.get() && ModList.get().isLoaded(ModIds.GOETY)) {
@@ -72,7 +75,7 @@ public final class RSJeiPlugin implements IModPlugin {
     public void registerCategories(IRecipeCategoryRegistration registration) {
         if (ModList.get().isLoaded(ModIds.FTB_QUESTS)) {
             registration.addRecipeCategories(
-                    new com.huanghuang.rsintegration.compat.ftbquests.client.FtbQuestSubmissionCategory(
+                    new FtbQuestSubmissionCategory(
                             registration.getJeiHelpers().getGuiHelper()));
         }
         if (RSIntegrationConfig.ENABLE_DISTANT_WORLDS.get()

@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.farmersdelight;
 
+import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
+
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
@@ -34,7 +36,7 @@ import java.util.List;
 import java.util.Map;
 
 /** Batch delegate for Farmer's Delight Skillet (also handles campfire). */
-public final class SkilletBatchDelegate extends com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate {
+public final class SkilletBatchDelegate extends AbstractBatchDelegate {
 
     private static final String CAMPFIRE_BE =
             "net.minecraft.world.level.block.entity.CampfireBlockEntity";

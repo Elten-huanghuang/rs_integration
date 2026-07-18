@@ -1,5 +1,10 @@
 package com.huanghuang.rsintegration.network.binding;
 
+import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler;
+
+import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
+
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.util.ModIds;
@@ -580,12 +585,12 @@ public final class AltarBindingRegistry {
     public static void onServerStopped(ServerStoppedEvent event) {
         BINDINGS.clear();
         SCAN_CACHE.clear();
-        com.huanghuang.rsintegration.network.RSIntegrationNetwork.clearNetworkResolutionCache();
+        RSIntegrationNetwork.clearNetworkResolutionCache();
     }
 
     @SubscribeEvent
     public static void onBlockBreak(net.minecraftforge.event.level.BlockEvent.BreakEvent event) {
-        if (!com.huanghuang.rsintegration.config.RSIntegrationConfig.ENABLE_BINDING.get()) return;
+        if (!RSIntegrationConfig.ENABLE_BINDING.get()) return;
         if (!(event.getLevel() instanceof Level level)) return;
         ResourceKey<Level> dim = level.dimension();
         BlockPos pos = event.getPos();
@@ -603,8 +608,8 @@ public final class AltarBindingRegistry {
         if (server != null) {
             for (ServerPlayer p : server.getPlayerList().getPlayers()) {
                 cleanupPlayerNBT(p, dim.location(), pos);
-                com.huanghuang.rsintegration.network.RSIntegrationNetwork.invalidateNetworkResolution(p.getUUID());
-                com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler.sendBindingSync(p);
+                RSIntegrationNetwork.invalidateNetworkResolution(p.getUUID());
+                RSSidePanelNetworkHandler.sendBindingSync(p);
             }
         }
     }

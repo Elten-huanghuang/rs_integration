@@ -1,5 +1,8 @@
 package com.huanghuang.rsintegration.mods.malum;
 
+import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
+import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
+
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.reflection.probes.MalumReflection;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
@@ -157,7 +160,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
         }
 
         // Resolve network early for stray item recovery
-        this.network = com.huanghuang.rsintegration.crafting.CraftPacketUtils
+        this.network = CraftPacketUtils
                 .resolveNetworkForCraft(player, level.dimension(), pos);
 
         // Check crucible is idle (no active recipe)
@@ -294,6 +297,20 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
         });
 
         return result.isEmpty() ? null : result;
+    }
+
+    @Override
+    public List<IBatchDelegate.MaterialReservationScope>
+    getMaterialReservationScopes() {
+        List<IngredientSpec> specs = getRequiredMaterials();
+        if (specs == null || specs.isEmpty()) return List.of();
+        List<IBatchDelegate.MaterialReservationScope> scopes =
+                new ArrayList<>(specs.size());
+        scopes.add(IBatchDelegate.MaterialReservationScope.PER_WORKER_REUSABLE);
+        for (int i = 1; i < specs.size(); i++) {
+            scopes.add(IBatchDelegate.MaterialReservationScope.PER_OPERATION);
+        }
+        return scopes;
     }
 
     // ── Internal: extraction + placement ─────────────────────────
@@ -442,10 +459,14 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
         int matIdx = 0;
 
         if (!materials.isEmpty()) {
-            // Catalyst
-            ItemStack mat = materials.get(matIdx++);
-            if (!mat.isEmpty()) {
-                setSlot(invCatalyst, 0, mat.copy());
+            // Catalyst is a worker-level reusable material. The physical slot
+            // survives queued operations on the same crucible; never overwrite it.
+            ItemStack existing = invCatalyst.getStackInSlot(0);
+            if (!existing.isEmpty()) {
+                matIdx++;
+            } else {
+                ItemStack mat = materials.get(matIdx++);
+                if (!mat.isEmpty()) setSlot(invCatalyst, 0, mat.copy());
             }
         }
         // Spirits — one per slot, each spirit count may need splitting
@@ -561,7 +582,9 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
 
     @Override
     public void onBatchFinished(@NotNull ServerPlayer player) {
-        clearAllSlots();
+        // The catalyst is a worker-level reusable input. Keep it in the
+        // crucible for the next queued operation; only spirits are consumed.
+        clearSpiritSlots();
         resetState();
     }
 
@@ -595,6 +618,19 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
         }
     }
 
+    private void clearSpiritSlots() {
+        if (invSpirits != null) {
+            for (int i = 0; i < invSpirits.getSlots(); i++) {
+                ItemStack s = invSpirits.getStackInSlot(i);
+                if (!s.isEmpty()) {
+                    if (!usingSharedLedger) returnCrucibleItem(s);
+                    setSlot(invSpirits, i, ItemStack.EMPTY);
+                }
+            }
+        }
+        if (crucibleBE instanceof net.minecraft.world.level.block.entity.BlockEntity be) be.setChanged();
+    }
+
     private void clearAllSlots() {
         // Shared ledger handles refund — do not double-insert from crucible slots
         final boolean refund = !usingSharedLedger;
@@ -624,7 +660,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
     private void returnCrucibleItem(ItemStack stack) {
         if (stack.isEmpty()) return;
         if (network == null) {
-            network = com.huanghuang.rsintegration.crafting.CraftPacketUtils
+            network = CraftPacketUtils
                     .resolveNetworkForCraft(player, myLevel.dimension(), myPos);
         }
         if (network != null) {
@@ -641,7 +677,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
     private ItemStack extractFromRS(ServerPlayer player, net.minecraft.world.item.crafting.Ingredient ingredient,
                                     int count, ExtractionLedger ledger, boolean useShared) {
         if (this.network == null) {
-            this.network = com.huanghuang.rsintegration.crafting.CraftPacketUtils
+            this.network = CraftPacketUtils
                     .resolveNetworkForCraft(player, myLevel.dimension(), myPos);
         }
         if (this.network == null) return ItemStack.EMPTY;

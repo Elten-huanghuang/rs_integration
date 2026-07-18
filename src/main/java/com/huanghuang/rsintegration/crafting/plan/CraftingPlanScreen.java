@@ -1,5 +1,9 @@
 package com.huanghuang.rsintegration.crafting.plan;
 
+import com.huanghuang.rsintegration.compat.ftbquests.QuestSubmissionRequestPacket;
+import com.huanghuang.rsintegration.compat.ftbquests.QuestSubmissionTargetIds;
+import com.huanghuang.rsintegration.network.RSJeiPlugin;
+
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
@@ -457,11 +461,11 @@ public final class CraftingPlanScreen extends Screen {
     private void onConfirm() {
         String recipeId = plan.recipeId();
         ResourceLocation targetId = ResourceLocation.tryParse(recipeId);
-        if (com.huanghuang.rsintegration.compat.ftbquests.QuestSubmissionTargetIds
+        if (QuestSubmissionTargetIds
                 .isQuestSubmission(targetId)) {
             BatchCraftNetworkHandler.CHANNEL.sendToServer(
-                    new com.huanghuang.rsintegration.compat.ftbquests.QuestSubmissionRequestPacket(
-                            com.huanghuang.rsintegration.compat.ftbquests.QuestSubmissionTargetIds
+                    new QuestSubmissionRequestPacket(
+                            QuestSubmissionTargetIds
                                     .questId(targetId), false));
             onClose();
             return;
@@ -512,7 +516,7 @@ public final class CraftingPlanScreen extends Screen {
     /** Open JEI for a specific recipe id. No-op when JEI is unavailable. */
     private void openRecipeInJei(ResourceLocation recipeId) {
         mezz.jei.api.runtime.IJeiRuntime runtime =
-                com.huanghuang.rsintegration.network.RSJeiPlugin.getRuntime();
+                RSJeiPlugin.getRuntime();
         if (runtime == null || minecraft.level == null) return;
         var vanillaRecipe = minecraft.level.getRecipeManager().byKey(recipeId).orElse(null);
         if (vanillaRecipe == null) return;

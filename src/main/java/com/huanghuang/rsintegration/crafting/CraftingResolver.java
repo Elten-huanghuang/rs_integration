@@ -313,7 +313,7 @@ public final class CraftingResolver {
 
         CraftPlanGraph graph = new CraftPlanGraph(CraftPlanGraph.CURRENT_VERSION,
                 ctx.graphNodes, ctx.graphAllocations, roots, ctx.graphUnresolved,
-                ctx.graphNodes.stream().map(com.huanghuang.rsintegration.crafting.graph.CraftNode::id).toList());
+                ctx.graphNodes.stream().map(CraftNode::id).toList());
         CraftPlanValidator.validate(graph);
         return graph;
     }
@@ -398,9 +398,14 @@ public final class CraftingResolver {
         // spirits resolve last, after costly base-material sub-crafts).
         if (ctx.timedOut()) {
             PerformanceMonitor.recordResolveTimeout();
+            ctx.diag("ensureIngredient guard TIMEOUT depth=" + depth + " count=" + count);
             return false;
         }
-        if (++ctx.ensureCalls > maxEnsureCalls()) return false;
+        if (++ctx.ensureCalls > maxEnsureCalls()) {
+            ctx.diag("ensureIngredient guard ENSURE_CALLS calls=" + ctx.ensureCalls
+                    + " max=" + maxEnsureCalls() + " depth=" + depth + " count=" + count);
+            return false;
+        }
 
         int alreadyHave = ctx.countMatching(ingredient);
         long consumeMs = (System.nanoTime() - consumeStart) / 1_000_000;

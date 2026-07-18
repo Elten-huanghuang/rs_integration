@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.vanilla;
 
+import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
+
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
@@ -46,7 +48,7 @@ public final class CookingMachineBatchDelegate extends AbstractBatchDelegate {
     @Nullable
     private static IBatchDelegate selectDelegate(ServerPlayer player, @Nullable ResourceLocation dim,
                                                   BlockPos pos) {
-        ServerLevel level = com.huanghuang.rsintegration.crafting.CraftPacketUtils.resolveLevel(
+        ServerLevel level = CraftPacketUtils.resolveLevel(
                 player.server, dim, player);
         if (level == null) return null;
         if (!level.isLoaded(pos)) level.getChunk(pos);

@@ -18,42 +18,58 @@ import java.util.UUID;
  * position, respecting external protection/claim mods (FTB Chunks, Cadmus).
  *
  * <p>All checks are performed via reflection so that these mods remain
- * optional dependencies. If a protection mod is not installed, or if any
- * reflection call fails, the default is {@code true} (allow) — we never
- * want to break crafting because of a protection mod update.</p>
+ * optional dependencies. A loaded provider that cannot be queried is treated
+ * as indeterminate and denied by the side-effecting callers; API drift must
+ * never silently disable claim protection.</p>
  */
 public final class ProtectionChecker {
+
+    public enum Decision { ALLOW, DENY, UNKNOWN }
+    public enum Reason {
+        MOD_NOT_INSTALLED, UNCLAIMED, OWNER, ALLY, EXPLICIT_DENY,
+        CLAIM_LOOKUP_FAILED, OWNER_LOOKUP_FAILED, API_FAILURE
+    }
+    public record ProtectionResult(Decision decision, Reason reason, String provider) {
+        public boolean permitted() { return decision == Decision.ALLOW; }
+    }
 
     private static final String TAG = "[RSI-Protect]";
 
     private ProtectionChecker() {}
 
-    public enum Decision { ALLOW, DENY, UNKNOWN }
-
-    /** Strict result for machine and cross-dimension interactions. */
-    public static Decision check(ServerPlayer player, ServerLevel level, BlockPos pos) {
-        if (player == null || level == null || pos == null) return Decision.DENY;
-        if (ModList.get().isLoaded(ModIds.FTB_CHUNKS) && !checkFTBChunks(player, level, pos)) {
-            return Decision.DENY;
+    public static ProtectionResult check(ServerPlayer player, ServerLevel level, BlockPos pos) {
+        ProtectionResult strongest = new ProtectionResult(Decision.ALLOW, Reason.MOD_NOT_INSTALLED, "none");
+        if (ModList.get().isLoaded(ModIds.FTB_CHUNKS)) {
+            boolean allowed = checkFTBChunks(player, level, pos);
+            strongest = merge(strongest, new ProtectionResult(
+                    allowed ? Decision.ALLOW : Decision.DENY,
+                    allowed ? Reason.UNCLAIMED : Reason.EXPLICIT_DENY,
+                    "ftb_chunks"));
         }
-        if (ModList.get().isLoaded(ModIds.CADMUS) && !checkCadmus(player, level, pos)) {
-            return Decision.DENY;
+        if (ModList.get().isLoaded(ModIds.CADMUS)) {
+            boolean allowed = checkCadmus(player, level, pos);
+            strongest = merge(strongest, new ProtectionResult(
+                    allowed ? Decision.ALLOW : Decision.DENY,
+                    allowed ? Reason.UNCLAIMED : Reason.EXPLICIT_DENY,
+                    "cadmus"));
         }
-        return Decision.ALLOW;
+        return strongest;
     }
 
-    /**
-     * Check whether a player is allowed to interact with a block at the supplied
-     * position. Kept as a compatibility wrapper for existing callers.
-     */
-    /**
-     * Check whether a player is allowed to interact with a block at the supplied
-     * position. Kept as a compatibility wrapper for existing callers.
-     */
+    private static ProtectionResult merge(ProtectionResult a, ProtectionResult b) {
+        if (a.decision == Decision.DENY || b.decision == Decision.DENY) return a.decision == Decision.DENY ? a : b;
+        if (a.decision == Decision.UNKNOWN || b.decision == Decision.UNKNOWN) return a.decision == Decision.UNKNOWN ? a : b;
+        return b;
+    }
+
     public static boolean canInteract(ServerPlayer player, ServerLevel level, BlockPos pos) {
-        return check(player, level, pos) == Decision.ALLOW;
+        ProtectionResult result = check(player, level, pos);
+        if (!result.permitted()) {
+            RSIntegrationMod.LOGGER.info("{} {} denied {} at {} in {}", TAG, result.provider(),
+                    player.getGameProfile().getName(), pos, level.dimension().location());
+        }
+        return result.permitted();
     }
-
 
     // ── Static method helper (Reflect.invoke cannot use null obj) ──
 
@@ -221,10 +237,13 @@ public final class ProtectionChecker {
             }
         } catch (Exception e) { RSIntegrationMod.LOGGER.debug("{} reflection probe failed", TAG, e); }
 
-        // Loaded providers default to denial when their API cannot be resolved;
-        // allowing here would turn reflection drift into a protection bypass.
-        RSIntegrationMod.LOGGER.warn("{} FTB claim-detection probes failed; denying interaction", TAG);
-        return true;
+        // Can't determine — default to not claimed (allow). This is a SILENT
+        // fail-open: if FTB renamed these methods, every claimed chunk becomes
+        // allowed. Log at warn so API drift is visible instead of silently
+        // disabling claim protection.
+        RSIntegrationMod.LOGGER.warn("{} FTB Chunks: all claim-detection probes failed "
+                + "(API may have changed) — treating chunk as UNCLAIMED (fail-open)", TAG);
+        return false;
     }
 
     // ── FTB Chunks: claim owner extraction ────────────────────────

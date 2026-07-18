@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.compat.ftbquests.client;
 
+import com.huanghuang.rsintegration.compat.ftbquests.QuestSubmissionRequestPacket;
+
 import com.huanghuang.rsintegration.compat.ftbquests.QuestItemRequirement;
 import com.huanghuang.rsintegration.network.RSJeiPlugin;
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;
@@ -118,7 +120,7 @@ public final class FtbQuestSubmissionCategory implements IRecipeCategory<QuestSu
         var runtime = RSJeiPlugin.getRuntime();
         if (runtime == null) return false;
         NetworkHandler.CHANNEL.sendToServer(
-                new com.huanghuang.rsintegration.compat.ftbquests.QuestSubmissionRequestPacket(
+                new QuestSubmissionRequestPacket(
                         snapshot.questId()));
         return true;
     }

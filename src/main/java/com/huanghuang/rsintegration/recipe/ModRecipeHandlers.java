@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.recipe;
 
+import com.huanghuang.rsintegration.crafting.RecipeIndex;
+
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
@@ -256,6 +258,6 @@ public final class ModRecipeHandlers {
     // ── shared secondary-output extraction ────────────────────────
 
     public static List<ItemStack> tryGetSecondaryOutputs(Recipe<?> recipe, RegistryAccess access) {
-        return com.huanghuang.rsintegration.crafting.RecipeIndex.tryGetSecondaryOutputs(recipe, access);
+        return RecipeIndex.tryGetSecondaryOutputs(recipe, access);
     }
 }

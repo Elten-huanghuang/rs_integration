@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.youkaishomecoming.moka;
 
+import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
+
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
@@ -267,7 +269,7 @@ public final class MokaPotBatchDelegate extends AbstractBatchDelegate {
     @Override
     public ExpectedProduction getExpectedProduction() {
         ItemStack result = recipe == null || myLevel == null ? ItemStack.EMPTY
-                : com.huanghuang.rsintegration.recipe.ModRecipeHandlers.tryGetResultItem(
+                : ModRecipeHandlers.tryGetResultItem(
                         recipe, myLevel.registryAccess());
         return result.isEmpty() ? null : new ExpectedProduction(result, result.getCount());
     }

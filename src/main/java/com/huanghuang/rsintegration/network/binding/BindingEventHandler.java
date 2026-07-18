@@ -1,5 +1,10 @@
 package com.huanghuang.rsintegration.network.binding;
 
+import com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler;
+import com.huanghuang.rsintegration.sidepanel.data.BindingInfo;
+
+import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
+
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
@@ -154,7 +159,7 @@ public final class BindingEventHandler {
                 BindingStorage.removeBinding(held, dim, bindingPos);
                 AltarBindingRegistry.unbind(event.getLevel().dimension(), bindingPos, AltarBinding.RS_NETWORK);
                 AltarBindingRegistry.invalidateScanCache();
-                com.huanghuang.rsintegration.network.RSIntegrationNetwork.invalidateNetworkResolution(player.getUUID());
+                RSIntegrationNetwork.invalidateNetworkResolution(player.getUUID());
                 player.displayClientMessage(
                         Component.translatable("gui.rs_integration.altar.unbound", blockName),
                         true);
@@ -165,7 +170,7 @@ public final class BindingEventHandler {
                     AltarBindingRegistry.bind(event.getLevel().dimension(), bindingPos, binding.get());
                     BindingStorage.addBinding(held, dim, bindingPos, blockKey, blockRegKey, displayStack);
                     AltarBindingRegistry.invalidateScanCache();
-                    com.huanghuang.rsintegration.network.RSIntegrationNetwork.invalidateNetworkResolution(player.getUUID());
+                    RSIntegrationNetwork.invalidateNetworkResolution(player.getUUID());
                     Component dimensionName = Component.translatable(
                             "dimension." + dim.getNamespace() + "." + dim.getPath())
                             .withStyle(ChatFormatting.YELLOW);
@@ -416,7 +421,7 @@ public final class BindingEventHandler {
         return PREFIX_GUI_MAP.getOrDefault(prefix, prefix.isEmpty());
     }
 
-    public static boolean supportsGuiByInfo(com.huanghuang.rsintegration.sidepanel.data.BindingInfo info) {
+    public static boolean supportsGuiByInfo(BindingInfo info) {
         if (!supportsGuiByBlockKey(info.blockKey())) return false;
         String regKey = info.blockRegKey();
         if (regKey != null) {
@@ -593,7 +598,7 @@ public final class BindingEventHandler {
 
     private static void sendBindingRefresh(ServerPlayer player) {
         try {
-            com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler.sendBindingSync(player);
+            RSSidePanelNetworkHandler.sendBindingSync(player);
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.debug("[RSI-Bind] Failed to send binding sync", e);
         }

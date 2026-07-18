@@ -1,5 +1,8 @@
 package com.huanghuang.rsintegration.mods.malum;
 
+import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.crafting.RecipeIndex;
+
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 
@@ -312,9 +315,9 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     @Nullable
-    public List<com.huanghuang.rsintegration.crafting.IngredientSpec> getRequiredMaterials() {
+    public List<IngredientSpec> getRequiredMaterials() {
         if (recipe == null) return null;
-        return com.huanghuang.rsintegration.crafting.CraftPacketUtils.extractIngredientSpecs(recipe);
+        return CraftPacketUtils.extractIngredientSpecs(recipe);
     }
 
     @Override
@@ -466,7 +469,7 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
 
         // Fallback: scan for ItemEntity near the altar (it may have finished
         // between our poll ticks and we missed the transition)
-        ItemStack expected = com.huanghuang.rsintegration.crafting.RecipeIndex
+        ItemStack expected = RecipeIndex
                 .tryGetResultItem(recipe, level.registryAccess());
         if (!expected.isEmpty()) {
             BlockPos pos = be.getBlockPos();
@@ -483,7 +486,7 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public ItemStack collectResult(ServerPlayer player) {
-        ItemStack expected = com.huanghuang.rsintegration.crafting.RecipeIndex
+        ItemStack expected = RecipeIndex
                 .tryGetResultItem(recipe, player.serverLevel().registryAccess());
         if (expected.isEmpty()) return ItemStack.EMPTY;
 
@@ -642,7 +645,7 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
     @Override
     public ItemStack getExpectedOutput() {
         if (recipe == null || myLevel == null) return null;
-        ItemStack expected = com.huanghuang.rsintegration.crafting.RecipeIndex
+        ItemStack expected = RecipeIndex
                 .tryGetResultItem(recipe, myLevel.registryAccess());
         return expected.isEmpty() ? null : expected;
     }
