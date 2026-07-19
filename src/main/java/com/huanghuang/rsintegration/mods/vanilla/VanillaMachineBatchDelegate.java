@@ -375,6 +375,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         // Phase 3: Place REAL input (post-commit) on furnace
         if (!inputTemplate.isEmpty()) {
             furnaceBE.setItem(0, inputTemplate.copy());
+            BrickFurnaceCompat.invalidateRecipeCache(furnaceBE);
         }
 
         // Phase 4: Supply fuel (real extraction + placement, outside ledger)
@@ -397,6 +398,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
 
         // Place pre-reserved input (chain already committed the ledger)
         furnaceBE.setItem(0, materials.get(0).copy());
+        BrickFurnaceCompat.invalidateRecipeCache(furnaceBE);
 
         // Auto-supply fuel (extracts directly from RS, outside ledger)
         if (!ensureFuel(player)) {
@@ -708,6 +710,10 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         if (kind == MachineKind.FURNACE && BrickFurnaceCompat.isBrickFurnace(be)) {
             BrickFurnaceCompat.Eligibility eligibility = BrickFurnaceCompat.canExecute(be, recipe);
             if (!eligibility.allowed()) return failObservation(eligibility.detail());
+            // Very fast configurations can finish between dispatch and the first
+            // observation. Once output exists, an empty input and recipe cache are
+            // normal completion state, not evidence that the recipe was rejected.
+            if (!furnaceBE.getItem(2).isEmpty()) return doneObservation();
             AbstractCookingRecipe actual = BrickFurnaceCompat.resolvedRecipe(be);
             if (actual == null) return failObservation("Brick Furnace did not accept the input recipe");
             if (!actual.getId().equals(recipe.getId())) {

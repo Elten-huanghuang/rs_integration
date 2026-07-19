@@ -10,7 +10,6 @@ import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
 import com.huanghuang.rsintegration.crafting.graph.MaterialSource;
 import com.huanghuang.rsintegration.crafting.graph.NodeId;
 import com.huanghuang.rsintegration.crafting.graph.UnresolvedDemand;
-import com.huanghuang.rsintegration.recipe.SlashBladeRecipeHandler;
 import com.huanghuang.rsintegration.util.Diagnostics;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.resources.ResourceLocation;
@@ -286,9 +285,7 @@ final class ResolutionContext {
 
             for (CachedStack candidate : candidates) {
                 // Use the pre-created ItemStack — zero allocation per call
-                if (IngredientMatcher.test(ingredient, candidate.stack)
-                        || SlashBladeRecipeHandler.matchesStackKey(ingredient, candidate.key)
-                        || matchesSlashBladeFallback(ingredient, candidate.key)) {
+                if (IngredientMatcher.test(ingredient, candidate.key)) {
                     total += counts.getOrDefault(candidate.key, 0);
                 }
             }
@@ -310,21 +307,12 @@ final class ResolutionContext {
         if (constrained) {
             total = 0;
             for (Map.Entry<CraftingResolver.StackKey, Integer> entry : counts.entrySet()) {
-                if (entry.getValue() > 0 && IngredientMatcher.test(ingredient, entry.getKey().toStack())) {
+                if (entry.getValue() > 0 && IngredientMatcher.test(ingredient, entry.getKey())) {
                     total += entry.getValue();
                 }
             }
         }
         return total;
-    }
-
-    private static boolean matchesSlashBladeFallback(Ingredient ingredient, CraftingResolver.StackKey key) {
-        if (!SlashBladeRecipeHandler.isSlashBladeIngredient(ingredient)) return false;
-        if (key.tag() != null) return false; // handled by matchesStackKey
-        for (ItemStack ingItem : ingredient.getItems()) {
-            if (!ingItem.isEmpty() && ingItem.getItem() == key.item()) return true;
-        }
-        return false;
     }
 
     SupplyConsumption consumeMatchingDetailed(Ingredient ingredient, int needed) {
@@ -373,9 +361,7 @@ final class ResolutionContext {
     }
 
     private static boolean matches(Ingredient ingredient, CraftingResolver.StackKey key) {
-        return IngredientMatcher.test(ingredient, key.toStack())
-                || SlashBladeRecipeHandler.matchesStackKey(ingredient, key)
-                || matchesSlashBladeFallback(ingredient, key);
+        return IngredientMatcher.test(ingredient, key);
     }
 
     private int consumeSupplyLots(MaterialKey material, int needed, List<SupplySlice> slices) {

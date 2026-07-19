@@ -112,6 +112,8 @@ final class SyncHandler {
         RSSidePanelClient.panels.clear();
         RSSidePanelClient.idToIndex.clear();
         RSSidePanelClient.pendingExtractions.clear();
+        RSSidePanelClient.pendingOperationStacks.clear();
+        RSSidePanelClient.pendingSyncRetries.clear();
 
         for (int i = 0; i < items.size(); i++) {
             ItemStack s = items.get(i);
@@ -216,5 +218,26 @@ final class SyncHandler {
         RSSidePanelClient.displayDirty = true;
 
         RSSidePanelClient.dataModel.applyDelta(id, stack, timestamp, craftable);
+    }
+
+    static void onOperationResult(RSSidePanelOperationResultPacket packet) {
+        long opId = packet.operationId();
+        UUID trackedStackId = RSSidePanelClient.pendingOperationStacks.remove(opId);
+
+        if (!packet.success()) {
+            RSIntegrationMod.LOGGER.debug("[RSI] Operation {} failed: code={}", opId, packet.errorCode());
+            // Keep the pending extraction until an authoritative delta/full sync
+            // arrives. Removing it here would discard the rollback snapshot even
+            // though failed operations normally produce no storage delta.
+        } else {
+            RSIntegrationMod.LOGGER.debug("[RSI] Operation {} succeeded: count={}", opId, packet.actualCount());
+        }
+
+        UUID packetStackId = packet.stackId();
+        if (trackedStackId != null && packetStackId != null
+                && !trackedStackId.equals(packetStackId)) {
+            RSIntegrationMod.LOGGER.warn("[RSI] Operation {} stack mismatch: tracked={}, acknowledged={}",
+                    opId, trackedStackId, packetStackId);
+        }
     }
 }

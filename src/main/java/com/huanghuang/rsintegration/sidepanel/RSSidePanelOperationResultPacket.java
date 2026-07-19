@@ -55,6 +55,9 @@ public final class RSSidePanelOperationResultPacket {
         int count = buf.readVarInt();
         if (count < 0) throw new IllegalArgumentException("negative actualCount");
         ErrorCode code = buf.readEnum(ErrorCode.class);
+        if (buf.readableBytes() != 0) {
+            throw new IllegalArgumentException("trailing side-panel operation result bytes");
+        }
         return new RSSidePanelOperationResultPacket(id, success, stackId, count, code);
     }
 

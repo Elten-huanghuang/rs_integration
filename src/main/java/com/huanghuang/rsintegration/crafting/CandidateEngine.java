@@ -113,7 +113,7 @@ final class CandidateEngine {
             if (ctx.timedOut()) break;
             if (!(entry.recipe() instanceof CraftingRecipe cr)) continue;
             vanillaCount++;
-            ItemStack output = cr.getResultItem(ctx.level.registryAccess());
+            ItemStack output = ModRecipeHandlers.tryGetResultItem(cr, ctx.level.registryAccess());
             if (passesOutputCheck(entry, output, ingredient, ingredientAllNbt, nbtStrict, diag)) {
                 dedup.put(entry.recipe().getId(), entry);
             }
@@ -254,8 +254,8 @@ final class CandidateEngine {
     private static int scoreRecipe(CraftingRecipe recipe, ResolutionContext ctx, boolean nbtStrict,
                                      @javax.annotation.Nullable Map<Ingredient, Integer> matchCache) {
         int score = 0;
-        ResourceLocation outputKey = ForgeRegistries.ITEMS.getKey(
-                recipe.getResultItem(ctx.level.registryAccess()).getItem());
+        ItemStack output = ModRecipeHandlers.tryGetResultItem(recipe, ctx.level.registryAccess());
+        ResourceLocation outputKey = ForgeRegistries.ITEMS.getKey(output.getItem());
         if (outputKey != null && ctx.preferredRecipes != null) {
             ResourceLocation preferred = ctx.preferredRecipes.get(outputKey);
             if (preferred != null && preferred.equals(recipe.getId())) {
@@ -272,7 +272,6 @@ final class CandidateEngine {
 
         score -= recipe.getIngredients().size();
 
-        ItemStack output = recipe.getResultItem(ctx.level.registryAccess());
         if (output.getCount() > 1) {
             // Gate output bonus behind ingredient availability for the same
             // reason as the mod-recipe path: avoid over-ranking decompression

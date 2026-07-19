@@ -108,7 +108,8 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
         // Validate idle — null means we couldn't read the field; assume busy
         Boolean crafting = (Boolean) getField(altar, "isCrafting");
         if (crafting == null || Boolean.TRUE.equals(crafting)) {
-            player.sendSystemMessage(Component.translatable("rsi.malum.warn.already_crafting"));
+            // Preparation is polled while a parallel group waits for this altar.
+            // The progress HUD reports MACHINE_BUSY; chat must remain silent here.
             return false;
         }
         try {

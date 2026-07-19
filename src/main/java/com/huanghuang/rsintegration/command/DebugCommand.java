@@ -9,7 +9,6 @@ import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.network.binding.BindingStorage;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
-import com.huanghuang.rsintegration.recipe.SlashBladeRecipeHandler;
 import com.huanghuang.rsintegration.crafting.MaterialSources;
 import com.huanghuang.rsintegration.mods.embers.KnownCodeSavedData;
 import com.huanghuang.rsintegration.mods.embers.EreAlchemyLock;
@@ -269,7 +268,7 @@ public final class DebugCommand {
         // Pre-check: count how many of the target item are already available
         int alreadyHave = 0;
         for (var entry : available.entrySet()) {
-            if (entry.getValue() > 0 && (ingredient.test(entry.getKey().toStack()) || SlashBladeRecipeHandler.matchesStackKey(ingredient, entry.getKey()))) {
+            if (entry.getValue() > 0 && IngredientMatcher.test(ingredient, entry.getKey())) {
                 alreadyHave += entry.getValue();
             }
         }

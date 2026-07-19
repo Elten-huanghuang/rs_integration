@@ -51,16 +51,16 @@ public final class RSIntegrationNetwork {
     @Nullable
     private static INetwork resolveNetworkFromPlayerUncached(ServerPlayer player) {
         INetwork net = getNetworkFromContainer(player.containerMenu);
-        if (net != null) { logResolved("container", net); return net; }
+        if (net != null) return net;
 
         net = resolveFromPlayerInventory(player);
-        if (net != null) { logResolved("inventory", net); return net; }
+        if (net != null) return net;
 
         net = resolveFromContainerTerminal(player);
-        if (net != null) { logResolved("terminal", net); return net; }
+        if (net != null) return net;
 
         net = AltarBindingRegistry.resolveNetworkFromAnyBinding(player);
-        if (net != null) { logResolved("binding", net); return net; }
+        if (net != null) return net;
 
         // Do not guess a network from spatial proximity.  A nearby node may
         // belong to another player's network; callers performing extraction
@@ -181,8 +181,8 @@ public final class RSIntegrationNetwork {
                 java.lang.reflect.Method getNetwork = be.getClass().getMethod("getNetwork");
                 Object result = getNetwork.invoke(be);
                 if (result instanceof INetwork net) {
-                    RSIntegrationMod.LOGGER.debug("[RSI] resolveNetwork: got network via reflection from {}",
-                            be.getClass().getName());
+                    // Don't log on success path - this method is called frequently during
+                    // recipe resolution (once per binding per tick), making logs unreadable.
                     return net;
                 }
             } catch (Exception e) {
@@ -361,14 +361,27 @@ public final class RSIntegrationNetwork {
     }
 
     private static INetwork resolveFromContainerTerminal(ServerPlayer player) {
-        if (player.containerMenu == null) return null;
+        AbstractContainerMenu menu = player.containerMenu;
+        if (menu == null) return null;
+
+        // Only attempt reflection on Refined Storage containers. Other mod containers
+        // (vanilla menus, other mod UIs) never have getGrid() and this saves:
+        // - ~6 reflection calls per tick per player with open containers
+        // - Stack trace allocation and GC pressure from NoSuchMethodException
+        if (!menu.getClass().getName().startsWith("com.refinedmods.refinedstorage.")) {
+            return null;
+        }
+
         try {
-            Method getGrid = player.containerMenu.getClass().getMethod("getGrid");
-            Object grid = getGrid.invoke(player.containerMenu);
+            Method getGrid = menu.getClass().getMethod("getGrid");
+            Object grid = getGrid.invoke(menu);
             if (grid == null) return null;
             Method getStack = grid.getClass().getMethod("getItemStack");
             ItemStack stack = (ItemStack) getStack.invoke(grid);
             return resolveFromNetworkItem(player, stack);
+        } catch (NoSuchMethodException e) {
+            // RS container without getGrid() - not an error
+            return null;
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.debug("[RSI] Container terminal resolve failed", e);
             return null;

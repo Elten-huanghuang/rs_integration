@@ -15,6 +15,7 @@ import com.huanghuang.rsintegration.crafting.graph.MachineLeaseRegistry;
 import com.huanghuang.rsintegration.crafting.graph.NodeId;
 import com.huanghuang.rsintegration.crafting.graph.OperationBudget;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.PreparationMessageScope;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry.BoundMachine;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import net.minecraft.core.BlockPos;
@@ -571,6 +572,13 @@ public final class ParallelCraftGroup implements IBatchDelegate {
     }
 
     @Override
+    public void releaseReusableMaterials(@NotNull ServerPlayer player) {
+        for (WorkerSlot worker : workers) {
+            if (worker.delegate != null) worker.delegate.releaseReusableMaterials(player);
+        }
+    }
+
+    @Override
     public BlockPos getMachinePos() {
         return representativePos;
     }
@@ -603,8 +611,8 @@ public final class ParallelCraftGroup implements IBatchDelegate {
             return ChildPreparation.fatal("delegate factory returned null for " + modType.id());
         }
         try {
-            IBatchDelegate.PreparationResult result = delegate.prepare(
-                    player, recipeId, machine.dim(), machine.pos());
+            IBatchDelegate.PreparationResult result = PreparationMessageScope.prepare(
+                    delegate, player, recipeId, machine.dim(), machine.pos());
             if (result.state() == IBatchDelegate.PreparationState.RETRY) {
                 return ChildPreparation.retry(result.detail());
             }

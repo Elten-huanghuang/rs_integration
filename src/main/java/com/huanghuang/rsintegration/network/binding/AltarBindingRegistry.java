@@ -517,10 +517,7 @@ public final class AltarBindingRegistry {
     public static boolean hasAnyBindingForType(ServerPlayer player, ModType type) {
         if (type == ModType.GENERIC) return true;
         TickCache cache = getTickCache(player);
-        boolean result = cache.modTypeIds.contains(type.id());
-        RSIntegrationMod.LOGGER.debug("[RSI-DIAG] hasAnyBindingForType (cached): type={} → {}",
-                type.id(), result);
-        return result;
+        return cache.modTypeIds.contains(type.id());
     }
 
     /** Collect all ModType IDs and blockKeys that this stack list has fresh bindings for. */
@@ -671,14 +668,6 @@ public final class AltarBindingRegistry {
             if (stack.isEmpty()) continue;
             for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
                 ModType entryType = ModType.fromBlockKey(entry.blockKey());
-                var rl = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(
-                        stack.getItem());
-                String itemId = rl != null ? rl.toString() : "unknown";
-                RSIntegrationMod.LOGGER.debug(
-                        "[RSI-DIAG] scanBindingsForType: item={}, blockKey={}, entryType={}, lookingFor={}",
-                        itemId, entry.blockKey(),
-                        entryType != null ? entryType.id() : "null",
-                        type.id());
                 if (!isCompatibleMachineType(type, entryType)) continue;
                 ResourceKey<Level> altarDim = ResourceKey.create(
                         net.minecraft.core.registries.Registries.DIMENSION, entry.dim());
@@ -688,9 +677,6 @@ public final class AltarBindingRegistry {
                     continue;
                 }
                 INetwork net = resolveNetworkForAltar(player, altarDim, entry.pos());
-                RSIntegrationMod.LOGGER.debug(
-                        "[RSI-DIAG] scanBindingsForType: resolveNetworkForAltar({}, {}, {}) → {}",
-                        entry.dim(), entry.pos(), type.id(), net != null ? "FOUND" : "null");
                 if (net != null) {
                     return true;
                 }
@@ -712,18 +698,10 @@ public final class AltarBindingRegistry {
             if (stack.isEmpty()) continue;
             for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
                 ModType entryType = ModType.fromBlockKey(entry.blockKey());
-                RSIntegrationMod.LOGGER.debug(
-                        "[RSI-DIAG] collectBindingsForType: item={}, blockKey={}, entryType={}, lookingFor={}",
-                        stack.getItem(), entry.blockKey(),
-                        entryType != null ? entryType.id() : "null",
-                        type.id());
                 if (!isCompatibleMachineType(type, entryType)) continue;
                 if (!isExecutableBinding(type, entry.blockKey())) continue;
                 if (normalized != null && entry.blockKey() != null
                         && !entry.blockKey().toLowerCase(java.util.Locale.ROOT).contains(normalized)) {
-                    RSIntegrationMod.LOGGER.debug(
-                            "[RSI-DIAG] collectBindingsForType: filtered out — blockKey={} doesn't contain normalized={}",
-                            entry.blockKey(), normalized);
                     continue;
                 }
                 ResourceKey<Level> altarDim = ResourceKey.create(

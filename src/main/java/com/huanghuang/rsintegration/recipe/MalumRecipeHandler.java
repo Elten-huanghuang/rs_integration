@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.recipe;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.util.Reflect;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.world.item.Item;
@@ -99,6 +100,8 @@ public final class MalumRecipeHandler extends AbstractRecipeHandler {
             Field countField = iwcClass.get().getDeclaredField("count");
             countField.setAccessible(true);
             List<IngredientSpec> result = new ArrayList<>();
+            boolean focusingRecipe = recipe.getClass().getName()
+                    .endsWith(".SpiritFocusingRecipe");
 
             // Spirit/Focusing recipes: single "input" field. In older Malum this
             // is an IngredientWithCount; in malum 1.6.6+ SpiritFocusingRecipe.input
@@ -112,9 +115,11 @@ public final class MalumRecipeHandler extends AbstractRecipeHandler {
                     if (iwcClass.get().isInstance(iwc)) {
                         Ingredient ing = (Ingredient) ingField.get(iwc);
                         int count = countField.getInt(iwc);
-                        if (ing != null && count > 0) result.add(new IngredientSpec(ing, count));
+                        if (ing != null && count > 0) result.add(new IngredientSpec(ing, count,
+                                focusingRecipe ? DemandRole.CATALYST : DemandRole.CONSUMED));
                     } else if (iwc instanceof Ingredient plain && !plain.isEmpty()) {
-                        result.add(new IngredientSpec(plain, 1));
+                        result.add(new IngredientSpec(plain, 1,
+                                focusingRecipe ? DemandRole.CATALYST : DemandRole.CONSUMED));
                     }
                 } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
             });

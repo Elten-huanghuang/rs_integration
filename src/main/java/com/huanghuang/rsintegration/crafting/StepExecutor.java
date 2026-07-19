@@ -25,7 +25,9 @@ import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraftforge.registries.ForgeRegistries;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Executes recipe steps: material planning and result registration.
@@ -67,8 +69,9 @@ final class StepExecutor {
         edges.beginUndo();
         NodeId graphNodeId = ctx.allocateNodeId();
 
-        List<InputDemand> graphInputs = planRecipeIngredientsForGraph(
-                recipe.getIngredients(), graphNodeId, ctx, depth, edges, batches);
+        List<IngredientSpec> specs = CraftPacketUtils.extractCraftingIngredientSpecs(recipe);
+        List<InputDemand> graphInputs = planRecipeSpecsForGraph(
+                specs, graphNodeId, ctx, depth, edges, batches);
         if (graphInputs == null) {
             ctx.rollback();
             edges.rollback();
@@ -77,11 +80,11 @@ final class StepExecutor {
 
         List<OutputDeclaration> graphOutputs = new ArrayList<>();
         for (ItemStack remainder : CraftPacketUtils.getRecipeRemainders(recipe)) {
-            registerGraphOutput(remainder, batches, OutputKind.REMAINDER,
+            registerGraphOutput(remainder, remainderBatches(remainder, specs, batches), OutputKind.REMAINDER,
                     graphNodeId, graphOutputs, ctx);
         }
 
-        ItemStack result = recipe.getResultItem(ctx.level.registryAccess());
+        ItemStack result = ModRecipeHandlers.tryGetResultItem(recipe, ctx.level.registryAccess());
         registerGraphOutput(result, batches, OutputKind.PRIMARY, graphNodeId, graphOutputs, ctx);
 
         for (ItemStack secondary : ModRecipeHandlers.tryGetSecondaryOutputs(recipe, ctx.level.registryAccess())) {
@@ -178,7 +181,7 @@ final class StepExecutor {
         List<OutputDeclaration> graphOutputs = new ArrayList<>();
         if (entry.recipe() instanceof CraftingRecipe cr) {
             for (ItemStack remainder : CraftPacketUtils.getRecipeRemainders(cr)) {
-                registerGraphOutput(remainder, batches, OutputKind.REMAINDER,
+                registerGraphOutput(remainder, remainderBatches(remainder, specs, batches), OutputKind.REMAINDER,
                         graphNodeId, graphOutputs, ctx);
             }
         }
@@ -253,19 +256,51 @@ final class StepExecutor {
         if (depth > maxDepth() || ctx.steps.size() + 1 > maxSteps()) return null;
         List<InputDemand> inputs = new ArrayList<>();
         int index = 0;
-        for (IngredientSpec spec : specs) {
+        for (IngredientSpec spec : coalesceSpecsForGraph(specs)) {
             if (spec.isEmpty()) continue;
-            int quantity = mulCount(spec.count(), batches);
+            int quantity = CraftPacketUtils.requiredCount(spec, batches);
             InputPortId port = new InputPortId(nodeId, index++);
             if (!CraftingResolver.ensureIngredient(spec.ingredient(), quantity,
                     ctx, depth + 1, edges, port, null)) {
                 return null;
             }
             inputs.add(new InputDemand(port, spec.ingredient(), quantity,
-                    demandRole(spec.ingredient()), firstDisplay(spec.ingredient())));
+                    effectiveDemandRole(spec), firstDisplay(spec.ingredient())));
         }
         return inputs;
     }
+
+    /**
+     * Graph input ports represent material demand, not crafting-grid positions.
+     * Coalescing equivalent slots lets the resolver batch one producer node instead
+     * of creating one identical node per shaped-recipe slot.
+     */
+    static List<IngredientSpec> coalesceSpecsForGraph(List<IngredientSpec> specs) {
+        Map<GraphSpecKey, IngredientSpec> merged = new LinkedHashMap<>();
+        int fallbackIndex = 0;
+        for (IngredientSpec spec : specs) {
+            if (spec.isEmpty()) continue;
+            GraphSpecKey key;
+            try {
+                key = new GraphSpecKey(spec.role(), spec.ingredient().getClass().getName(),
+                        spec.ingredient().toJson().toString(), -1);
+            } catch (Exception ignored) {
+                // A broken custom serializer must not cause unrelated predicates to merge.
+                key = new GraphSpecKey(spec.role(), "", "", fallbackIndex++);
+            }
+            merged.compute(key, (ignored, existing) -> {
+                if (existing == null) return spec;
+                long total = (long) existing.count() + spec.count();
+                return new IngredientSpec(existing.ingredient(),
+                        total > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) total,
+                        existing.role());
+            });
+        }
+        return List.copyOf(merged.values());
+    }
+
+    private record GraphSpecKey(DemandRole role, String ingredientClass,
+                                String serializedIngredient, int fallbackIndex) {}
 
     private static DemandRole demandRole(Ingredient ingredient) {
         for (ItemStack stack : ingredient.getItems()) {
@@ -277,6 +312,15 @@ final class StepExecutor {
             }
         }
         return DemandRole.CONSUMED;
+    }
+
+    private static DemandRole effectiveDemandRole(IngredientSpec spec) {
+        return spec.role() == DemandRole.CONSUMED
+                ? demandRole(spec.ingredient()) : spec.role();
+    }
+
+    private static int remainderBatches(ItemStack remainder, List<IngredientSpec> specs, int batches) {
+        return CraftPacketUtils.remainderExecutions(remainder, specs, batches);
     }
 
     private static ItemStack firstDisplay(Ingredient ingredient) {

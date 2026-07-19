@@ -707,7 +707,7 @@ public final class CraftingResolver {
         int selfConsumed = 0;
         for (IngredientSpec spec : specs) {
             if (spec.isEmpty()) continue;
-            if (spec.ingredient().test(output)) {
+            if (spec.role() != DemandRole.CATALYST && spec.ingredient().test(output)) {
                 selfConsumed += spec.count();
             }
         }
@@ -724,11 +724,11 @@ public final class CraftingResolver {
     private static boolean requiresMissingSelfInput(CraftingRecipe recipe, ItemStack output, ResolutionContext ctx) {
         int selfConsumed = 0;
         boolean anyMissing = false;
-        for (Ingredient ing : recipe.getIngredients()) {
-            if (ing.isEmpty()) continue;
-            if (ing.test(output)) {
-                selfConsumed++;
-                if (ctx.countMatching(ing) <= 0) anyMissing = true;
+        for (IngredientSpec spec : CraftPacketUtils.extractCraftingIngredientSpecs(recipe)) {
+            if (spec.isEmpty()) continue;
+            if (spec.ingredient().test(output)) {
+                if (spec.role() != DemandRole.CATALYST) selfConsumed += spec.count();
+                if (ctx.countMatching(spec.ingredient()) <= 0) anyMissing = true;
             }
         }
         // Amplification recipes (A + catalyst → n*A, n > 1): allow even when
@@ -741,10 +741,10 @@ public final class CraftingResolver {
                                         net.minecraft.core.RegistryAccess access) {
         if (entry.recipe() instanceof CraftingRecipe cr) {
             int selfConsumed = 0;
-            for (Ingredient ing : cr.getIngredients()) {
-                if (ing.isEmpty()) continue;
-                if (ing.test(output)) {
-                    selfConsumed++;
+            for (IngredientSpec spec : CraftPacketUtils.extractCraftingIngredientSpecs(cr)) {
+                if (spec.isEmpty() || spec.role() == DemandRole.CATALYST) continue;
+                if (spec.ingredient().test(output)) {
+                    selfConsumed += spec.count();
                 }
             }
             return output.getCount() - selfConsumed;
@@ -763,7 +763,7 @@ public final class CraftingResolver {
         int selfConsumed = 0;
         for (IngredientSpec spec : specs) {
             if (spec.isEmpty()) continue;
-            if (spec.ingredient().test(output))
+            if (spec.role() != DemandRole.CATALYST && spec.ingredient().test(output))
                 selfConsumed += spec.count();
         }
         return output.getCount() - selfConsumed;

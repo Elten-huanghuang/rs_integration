@@ -275,16 +275,19 @@ public final class PlanResponsePacket {
         // Clicked ghost-output — required protocol field.
         ItemStack clickedOutput = buf.readBoolean() ? buf.readItem() : null;
         // Server-authored DAG view — required protocol field.
-        PlanGraphView graph = buf.readBoolean() ? readGraph(buf) : null;
-        if (buf.readableBytes() != 0) {
-            throw new DecoderException("Trailing bytes in PlanResponsePacket");
-        }
+        boolean hasGraph = buf.readBoolean();
+        PlanGraphView graph = hasGraph ? readGraph(buf) : null;
+        // requestId follows graph and is a required protocol field.
         long requestId = 0L;
-        if (buf.isReadable() && buf.readBoolean()) {
+        if (buf.readBoolean()) {
             requestId = buf.readVarLong();
             if (requestId < 0 || requestId > 0x7FFF_FFFF_FFFF_FFFFL) {
                 throw new DecoderException("PlanResponsePacket requestId out of range");
             }
+        }
+        // Fail closed on trailing bytes after full packet consumed
+        if (buf.readableBytes() != 0) {
+            throw new DecoderException("Trailing bytes in PlanResponsePacket");
         }
         return new PlanResponsePacket(new PlanResponse(success, targetName, targetResult,
                 steps, materials, missing, recipeId,
@@ -376,13 +379,15 @@ public final class PlanResponsePacket {
             }
             List<PlanGraphView.InputView> inputs = new ArrayList<>();
             for (int j = 0, m = readBoundedCount(buf); j < m; j++) {
-                inputs.add(new PlanGraphView.InputView(readNonNegativeVarInt(buf, "input port"), buf.readItem(),
-                        readNonNegativeVarInt(buf, "input quantity"), buf.readVarInt()));
+                inputs.add(new PlanGraphView.InputView(readNonNegativeVarInt(buf, "input port"),
+                        buf.readItem(), readNonNegativeVarInt(buf, "input quantity"),
+                        readNonNegativeVarInt(buf, "input role ordinal")));
             }
             List<PlanGraphView.OutputView> outputs = new ArrayList<>();
             for (int j = 0, m = readBoundedCount(buf); j < m; j++) {
-                outputs.add(new PlanGraphView.OutputView(readNonNegativeVarInt(buf, "output port"), buf.readItem(),
-                        readNonNegativeVarInt(buf, "output quantity"), buf.readVarInt()));
+                outputs.add(new PlanGraphView.OutputView(readNonNegativeVarInt(buf, "output port"),
+                        buf.readItem(), readNonNegativeVarInt(buf, "output quantity"),
+                        readNonNegativeVarInt(buf, "output kind ordinal")));
             }
             nodes.add(new PlanGraphView.NodeView(nodeId, recipe, modType, executions,
                     primary, alternativeIds, alternativeModTypes, inputs, outputs));

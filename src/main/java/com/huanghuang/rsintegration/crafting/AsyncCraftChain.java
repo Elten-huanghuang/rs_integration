@@ -9,6 +9,7 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
 import com.huanghuang.rsintegration.crafting.batch.CraftProgressPacket;
 import com.huanghuang.rsintegration.crafting.batch.CraftStartedPacket;
+import com.huanghuang.rsintegration.crafting.batch.PreparationMessageScope;
 import net.minecraftforge.network.NetworkDirection;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.graph.CraftNode;
@@ -537,6 +538,7 @@ public final class AsyncCraftChain {
                     }
                     try {
                         currentDelegate.onBatchFinished(online);
+                        currentDelegate.releaseReusableMaterials(online);
                     } catch (Exception fe) {
                         RSIntegrationMod.LOGGER.error(ctx.format("onBatchFinished error"), fe);
                     }
@@ -1004,7 +1006,8 @@ public final class AsyncCraftChain {
             return PreparationResult.fatal("No delegate for mod type " + step.modType().id());
         }
         if (delegate instanceof GenericBatchDelegate) {
-            if (!delegate.validateAndInit(online, step.recipeId(), null, BlockPos.ZERO)) {
+            if (!PreparationMessageScope.validate(
+                    delegate, online, step.recipeId(), null, BlockPos.ZERO)) {
                 return PreparationResult.fatal("Virtual recipe validation failed for " + step.recipeId());
             }
             if (delegate instanceof AbstractBatchDelegate abd) {
@@ -1035,8 +1038,8 @@ public final class AsyncCraftChain {
                     fatalDetail = "delegate factory returned null for " + step.modType().id();
                     continue;
                 }
-                IBatchDelegate.PreparationResult result = candidate.prepare(
-                        online, step.recipeId(), machine.dim(), machine.pos());
+                IBatchDelegate.PreparationResult result = PreparationMessageScope.prepare(
+                        candidate, online, step.recipeId(), machine.dim(), machine.pos());
                 if (result.state() == IBatchDelegate.PreparationState.READY) {
                     if (candidate instanceof AbstractBatchDelegate abd) {
                         abd.setMachineDim(machine.dim());
@@ -1095,7 +1098,8 @@ public final class AsyncCraftChain {
             ParallelCraftGroup group = new ParallelCraftGroup(workers,
                     prepared.step().modType(), prepared.step().recipeId(), online,
                     prepared.step().executions(), prepared.step().inferMode(), groupCapability);
-            if (group.validateAndInit(online, prepared.step().recipeId(), null, BlockPos.ZERO)) {
+            if (PreparationMessageScope.validate(
+                    group, online, prepared.step().recipeId(), null, BlockPos.ZERO)) {
                 group.setMachineServer(server);
                 if (targetOutput != null && isGraphTerminalNode(nodeId)) {
                     group.setTargetOutput(targetOutput);
@@ -1120,7 +1124,8 @@ public final class AsyncCraftChain {
                     return GraphDispatchResult.fatal("delegate did not expose graph materials");
                 }
                 reserved = reserveGraphNodeMaterials(
-                        delegate, graphSpecs, online, nodeLedger, admission.materialToken());
+                        delegate, graphSpecs, prepared.step().executions(), online,
+                        nodeLedger, admission.materialToken());
             }
             if (reserved == null) return GraphDispatchResult.retry("exact graph materials are temporarily unavailable");
             List<ItemStack> materials = reserved.materials();
@@ -1411,8 +1416,9 @@ public final class AsyncCraftChain {
 
     @Nullable
     private GraphNodeMaterials reserveGraphNodeMaterials(
-            IBatchDelegate delegate, List<IngredientSpec> specs, ServerPlayer online,
-            ExtractionLedger ledger, MaterialBroker.ReservationToken materialToken) {
+            IBatchDelegate delegate, List<IngredientSpec> specs, int executions,
+            ServerPlayer online, ExtractionLedger ledger,
+            MaterialBroker.ReservationToken materialToken) {
         if (delegate instanceof ParallelCraftGroup group) {
             List<IngredientSpec> operationSpecs = group.getOperationMaterials();
             if (operationSpecs == null || operationSpecs.isEmpty()) return null;
@@ -1469,10 +1475,28 @@ public final class AsyncCraftChain {
                 ? graphMaterials.checkout(materialToken) : new MaterialBroker.Checkout(List.of());
         List<ItemStack> initialPool = new ArrayList<>(checkout.initialStacks());
         List<ItemStack> producerPool = new ArrayList<>(checkout.producerStacks());
+        List<IngredientSpec> scaledSpecs = scaleGraphSpecsForExecutions(specs,
+                delegate.getMaterialReservationScopes(), executions);
         List<ItemStack> materials = reserveGraphMaterials(
-                specs, online, ledger, initialPool, producerPool);
+                scaledSpecs, online, ledger, initialPool, producerPool);
         return materials == null ? null
                 : new GraphNodeMaterials(materials, List.of(), List.of(), List.of());
+    }
+
+    static List<IngredientSpec> scaleGraphSpecsForExecutions(
+            List<IngredientSpec> specs,
+            List<IBatchDelegate.MaterialReservationScope> scopes,
+            int executions) {
+        int multiplier = Math.max(1, executions);
+        List<IngredientSpec> scaledSpecs = new ArrayList<>(specs.size());
+        for (int i = 0; i < specs.size(); i++) {
+            IngredientSpec spec = specs.get(i);
+            boolean reusable = i < scopes.size()
+                    && scopes.get(i) == IBatchDelegate.MaterialReservationScope.PER_WORKER_REUSABLE;
+            int count = reusable ? spec.count() : StepExecutor.mulCount(spec.count(), multiplier);
+            scaledSpecs.add(new IngredientSpec(spec.ingredient(), count, spec.role()));
+        }
+        return List.copyOf(scaledSpecs);
     }
 
     private static List<ItemStack> consumedFragments(
@@ -1964,13 +1988,14 @@ public final class AsyncCraftChain {
                 // can transfer input data to the output.  getResultItem()
                 // returns a bare template that discards backpack contents,
                 // blade stats, enchantments, etc.
-                List<Ingredient> ingredients = cr.getIngredients();
-                ItemStack[] consumed = new ItemStack[Math.min(ingredients.size(), 9)];
+                List<IngredientSpec> specs = CraftPacketUtils.extractCraftingIngredientSpecs(cr);
+                ItemStack[] consumed = new ItemStack[Math.min(specs.size(), 9)];
 
-                for (int ingIdx = 0; ingIdx < ingredients.size(); ingIdx++) {
-                    Ingredient ing = ingredients.get(ingIdx);
-                    if (ing.isEmpty()) continue;
-                    int stillNeeded = executions;
+                for (int ingIdx = 0; ingIdx < specs.size(); ingIdx++) {
+                    IngredientSpec spec = specs.get(ingIdx);
+                    if (spec.isEmpty()) continue;
+                    Ingredient ing = spec.ingredient();
+                    int stillNeeded = CraftPacketUtils.requiredCount(spec, executions);
                     boolean captured = false;
                     for (int i = 0; i < workingInventory.size() && stillNeeded > 0; i++) {
                         ItemStack vi = workingInventory.get(i);
@@ -2017,6 +2042,9 @@ public final class AsyncCraftChain {
                 }
 
                 ItemStack result = CraftPacketUtils.assembleCraftingOutput(cr, consumed, online);
+                if (result.isEmpty()) {
+                    result = ModRecipeHandlers.tryGetResultItem(cr, overworld.registryAccess());
+                }
                 if (!result.isEmpty()) {
                     addToInventory(workingInventory,
                             result.copyWithCount(StepExecutor.mulCount(result.getCount(), executions)));
@@ -2029,8 +2057,11 @@ public final class AsyncCraftChain {
                 // not ingredient templates. CraftTweaker copy/container recipes
                 // may derive the returned stack from NBT or durability.
                 for (ItemStack remainder : CraftPacketUtils.getRecipeRemainders(cr, consumed)) {
+                    int remainderExecutions = CraftPacketUtils.remainderExecutions(
+                            remainder, specs, executions);
                     addToInventory(workingInventory,
-                            remainder.copyWithCount(StepExecutor.mulCount(remainder.getCount(), executions)));
+                            remainder.copyWithCount(StepExecutor.mulCount(
+                                    remainder.getCount(), remainderExecutions)));
                 }
             } else {
                 // Non-crafting GENERIC recipe (e.g. sawmill, custom mod type)
@@ -2040,7 +2071,7 @@ public final class AsyncCraftChain {
 
                 for (IngredientSpec spec : specs) {
                     if (spec.isEmpty()) continue;
-                    int stillNeeded = StepExecutor.mulCount(spec.count(), executions);
+                    int stillNeeded = CraftPacketUtils.requiredCount(spec, executions);
                     var iter = workingInventory.iterator();
                     while (iter.hasNext() && stillNeeded > 0) {
                         ItemStack vi = iter.next();
@@ -2090,8 +2121,8 @@ public final class AsyncCraftChain {
                         try {
                             ItemStack remainder = stack.getCraftingRemainingItem();
                             if (!remainder.isEmpty()) {
-                                addToInventory(workingInventory,
-                                        remainder.copyWithCount(StepExecutor.mulCount(spec.count(), executions)));
+                                addToInventory(workingInventory, remainder.copyWithCount(
+                                        CraftPacketUtils.requiredCount(spec, executions)));
                                 break;
                             }
                         } catch (Exception e) {
@@ -2211,7 +2242,8 @@ public final class AsyncCraftChain {
         // intermediate outputs from prior chain steps (in virtualInventory) are
         // visible to subsequent steps.
         if (initialDelegate instanceof GenericBatchDelegate) {
-            if (!initialDelegate.validateAndInit(online, step.recipeId(), null, null)) {
+            if (!PreparationMessageScope.validate(
+                    initialDelegate, online, step.recipeId(), null, BlockPos.ZERO)) {
                 return null;
             }
             if (initialDelegate instanceof AbstractBatchDelegate abd) {
@@ -2231,8 +2263,8 @@ public final class AsyncCraftChain {
                 IBatchDelegate candidate = delegate == null ? initialDelegate
                         : step.inferMode() ? step.modType().createInferDelegate() : createDelegate(step.modType());
                 if (candidate == null) continue;
-                IBatchDelegate.PreparationResult preparation = candidate.prepare(
-                        online, step.recipeId(), m.dim(), m.pos());
+                IBatchDelegate.PreparationResult preparation = PreparationMessageScope.prepare(
+                        candidate, online, step.recipeId(), m.dim(), m.pos());
                 if (preparation.state() == IBatchDelegate.PreparationState.READY) {
                     delegate = candidate;
                     matchedMachine = m;
@@ -2543,7 +2575,8 @@ public final class AsyncCraftChain {
         ParallelCraftGroup group = new ParallelCraftGroup(available, step.modType(),
                 step.recipeId(), online, stepRemaining, step.inferMode(),
                 capabilityDecision.capabilities());
-        if (!group.validateAndInit(online, step.recipeId(), null, BlockPos.ZERO)) {
+        if (!PreparationMessageScope.validate(
+                group, online, step.recipeId(), null, BlockPos.ZERO)) {
             RSIntegrationMod.LOGGER.debug(ctx.format("Parallel group empty — all children failed validateAndInit"));
             return null;
         }
@@ -2668,7 +2701,8 @@ public final class AsyncCraftChain {
             if (i < scopes.size() && scopes.get(i) == IBatchDelegate.MaterialReservationScope.PER_WORKER_REUSABLE) {
                 IngredientSpec spec = specs.get(i);
                 for (int worker = 0; worker < effectiveWorkers; worker++) {
-                    List<IngredientSpec> one = List.of(new IngredientSpec(spec.ingredient(), spec.count()));
+                    List<IngredientSpec> one = List.of(new IngredientSpec(
+                            spec.ingredient(), spec.count(), spec.role()));
                     List<ItemStack> material = preReserveStepMaterials(one, online);
                     if (material == null) {
                         ledger.reset();
@@ -3225,6 +3259,7 @@ public final class AsyncCraftChain {
             if (result != null && !result.isEmpty()) addToVirtualInventory(result);
         }
         currentDelegate.onBatchFinished(player);
+        currentDelegate.releaseReusableMaterials(player);
         if (flatOperationSession != null && flatOperationSession.startAttempted()
                 && !flatOperationSession.settled()) {
             flatOperationSession.settle(() -> {

@@ -60,7 +60,7 @@ public final class CraftPlanValidator {
                 errors.add("missing consumer " + allocation.consumer());
                 continue;
             }
-            if (!IngredientMatcher.test(input.ingredient(), allocation.material().toStack(1))) {
+            if (!IngredientMatcher.test(input.ingredient(), allocation.material())) {
                 errors.add("material does not satisfy input " + allocation.consumer());
             }
             suppliedByInput.merge(allocation.consumer(), allocation.quantity(), Integer::sum);
@@ -103,7 +103,7 @@ public final class CraftPlanValidator {
 
         for (RootDemand root : graph.rootDemands()) {
             for (RootAllocation allocation : root.allocations()) {
-                if (!IngredientMatcher.test(root.ingredient(), allocation.material().toStack(1))) {
+                if (!IngredientMatcher.test(root.ingredient(), allocation.material())) {
                     errors.add("root material mismatch");
                 }
                 if (allocation.source() instanceof MaterialSource.InitialPool initial) {

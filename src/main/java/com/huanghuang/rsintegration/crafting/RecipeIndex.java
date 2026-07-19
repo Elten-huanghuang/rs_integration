@@ -490,8 +490,8 @@ public final class RecipeIndex {
 
     public static ItemStack tryGetResultItem(Recipe<?> recipe, RegistryAccess access) {
         if (recipe == null) return ItemStack.EMPTY;
-        if (recipe instanceof CraftingRecipe cr) {
-            return cr.getResultItem(access).copy();
+        if (recipe instanceof CraftingRecipe) {
+            return ModRecipeHandlers.tryGetResultItem(recipe, access);
         }
         var handler = ModRecipeHandlers.handlerFor(recipe);
         if (handler != null && DISPATCH_GUARD.get() != recipe.getClass()) {
@@ -634,30 +634,35 @@ public final class RecipeIndex {
             }
         } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
         try {
-            Object obj = recipe.getClass().getMethod("getOutputs").invoke(recipe);
-            // Unlike getRemainingItems/getByproducts/getRollResults (byproduct-
-            // specific), many mods' getOutputs() returns the FULL output list
-            // including the primary result. Since callers add the primary
-            // separately (tryGetResultItem), drop the first stack equal to the
-            // primary so it isn't duplicated into the RS network.
-            ItemStack primary = tryGetResultItem(recipe, access);
-            boolean primaryDropped = false;
-            List<ItemStack> fromGetOutputs = new ArrayList<>();
-            if (obj instanceof List<?> list) {
-                for (Object e : list) {
-                    if (e instanceof ItemStack s && !s.isEmpty()) fromGetOutputs.add(s.copy());
+            Method m = Reflect.findMethod(recipe.getClass(), "getOutputs", new Class<?>[0]);
+            if (m == null) {
+                // Method not found in class hierarchy, skip this handler
+            } else {
+                Object obj = m.invoke(recipe);
+                // Unlike getRemainingItems/getByproducts/getRollResults (byproduct-
+                // specific), many mods' getOutputs() returns the FULL output list
+                // including the primary result. Since callers add the primary
+                // separately (tryGetResultItem), drop the first stack equal to the
+                // primary so it isn't duplicated into the RS network.
+                ItemStack primary = tryGetResultItem(recipe, access);
+                boolean primaryDropped = false;
+                List<ItemStack> fromGetOutputs = new ArrayList<>();
+                if (obj instanceof List<?> list) {
+                    for (Object e : list) {
+                        if (e instanceof ItemStack s && !s.isEmpty()) fromGetOutputs.add(s.copy());
+                    }
+                } else if (obj instanceof ItemStack[] arr) {
+                    for (ItemStack s : arr) {
+                        if (!s.isEmpty()) fromGetOutputs.add(s.copy());
+                    }
                 }
-            } else if (obj instanceof ItemStack[] arr) {
-                for (ItemStack s : arr) {
-                    if (!s.isEmpty()) fromGetOutputs.add(s.copy());
+                for (ItemStack s : fromGetOutputs) {
+                    if (!primaryDropped && !primary.isEmpty() && ItemStack.isSameItemSameTags(s, primary)) {
+                        primaryDropped = true; // skip exactly one copy of the primary
+                        continue;
+                    }
+                    results.add(s);
                 }
-            }
-            for (ItemStack s : fromGetOutputs) {
-                if (!primaryDropped && !primary.isEmpty() && ItemStack.isSameItemSameTags(s, primary)) {
-                    primaryDropped = true; // skip exactly one copy of the primary
-                    continue;
-                }
-                results.add(s);
             }
         } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
         // Only fall back to raw field scanning when no getter yielded anything.

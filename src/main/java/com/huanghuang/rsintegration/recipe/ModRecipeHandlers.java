@@ -32,6 +32,8 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class ModRecipeHandlers {
 
     private static final Map<Class<?>, Method> RESULT_METHOD_CACHE = new ConcurrentHashMap<>();
+    private static final Map<Class<?>, CraftTweakerOutputAccessor> CT_OUTPUT_ACCESSOR_CACHE = new ConcurrentHashMap<>();
+    private static final Set<Class<?>> NO_CT_OUTPUT_ACCESSOR_CACHE = ConcurrentHashMap.newKeySet();
     /** Caches the ItemStack-producing field per recipe class. */
     private static final Map<Class<?>, java.lang.reflect.Field> OUTPUT_FIELD_CACHE = new ConcurrentHashMap<>();
     /** Classes that have been scanned and have no suitable output field. */
@@ -113,7 +115,9 @@ public final class ModRecipeHandlers {
      */
     public static ItemStack tryGetResultItem(Recipe<?> recipe, RegistryAccess access) {
         if (recipe instanceof CraftingRecipe cr) {
-            return cr.getResultItem(access).copy();
+            ItemStack result = cr.getResultItem(access);
+            if (!result.isEmpty()) return result.copy();
+            return tryGetCraftTweakerOutput(recipe);
         }
         ResourceLocation id = recipe.getId();
         if (GLOBAL_EMPTY_CACHE.contains(id)) return ItemStack.EMPTY;
@@ -129,6 +133,53 @@ public final class ModRecipeHandlers {
         }
         return result.copy();
     }
+
+    private static ItemStack tryGetCraftTweakerOutput(Recipe<?> recipe) {
+        Class<?> clazz = recipe.getClass();
+        if (!clazz.getName().startsWith("com.blamejared.crafttweaker.api.recipe.type.CT")) {
+            return ItemStack.EMPTY;
+        }
+        if (NO_CT_OUTPUT_ACCESSOR_CACHE.contains(clazz)) return ItemStack.EMPTY;
+
+        CraftTweakerOutputAccessor accessor = CT_OUTPUT_ACCESSOR_CACHE.get(clazz);
+        if (accessor == null) {
+            try {
+                Method getCtOutput = clazz.getMethod("getCtOutput");
+                Class<?> outputType = getCtOutput.getReturnType();
+                Method getInternal;
+                try {
+                    getInternal = outputType.getMethod("getImmutableInternal");
+                } catch (NoSuchMethodException ignored) {
+                    getInternal = outputType.getMethod("getInternal");
+                }
+                if (!ItemStack.class.isAssignableFrom(getInternal.getReturnType())) {
+                    NO_CT_OUTPUT_ACCESSOR_CACHE.add(clazz);
+                    return ItemStack.EMPTY;
+                }
+                accessor = new CraftTweakerOutputAccessor(getCtOutput, getInternal);
+                CT_OUTPUT_ACCESSOR_CACHE.put(clazz, accessor);
+            } catch (ReflectiveOperationException e) {
+                NO_CT_OUTPUT_ACCESSOR_CACHE.add(clazz);
+                RSIntegrationMod.LOGGER.debug("[RSI-Handler] CraftTweaker output accessor unavailable for {}",
+                        clazz.getName(), e);
+                return ItemStack.EMPTY;
+            }
+        }
+
+        try {
+            Object ctOutput = accessor.getCtOutput().invoke(recipe);
+            if (ctOutput == null) return ItemStack.EMPTY;
+            Object internal = accessor.getInternal().invoke(ctOutput);
+            return internal instanceof ItemStack stack && !stack.isEmpty()
+                    ? stack.copy() : ItemStack.EMPTY;
+        } catch (ReflectiveOperationException e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-Handler] CraftTweaker output read failed for {}",
+                    clazz.getName(), e);
+            return ItemStack.EMPTY;
+        }
+    }
+
+    private record CraftTweakerOutputAccessor(Method getCtOutput, Method getInternal) {}
 
     /**
      * Internal reflection-based result extraction.  Only called on cache miss
@@ -260,4 +311,5 @@ public final class ModRecipeHandlers {
     public static List<ItemStack> tryGetSecondaryOutputs(Recipe<?> recipe, RegistryAccess access) {
         return RecipeIndex.tryGetSecondaryOutputs(recipe, access);
     }
+
 }

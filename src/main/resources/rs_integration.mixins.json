@@ -13,6 +13,7 @@
     "minecraft.InventoryAccessor",
     "minecraft.ItemEntityAccessor",
     "minecraft.ServerPlayerTickMixin",
+    "minecraft.ServerPlayerMessageMixin",
     "minecraft.ServerGamePacketListenerMixin",
     "minecraft.SmithingTransformRecipeAccessor",
     "minecraft.SmithingTrimRecipeAccessor",

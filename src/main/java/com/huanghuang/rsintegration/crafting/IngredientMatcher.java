@@ -1,9 +1,13 @@
 package com.huanghuang.rsintegration.crafting;
 
+import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
+import com.huanghuang.rsintegration.recipe.SlashBladeRecipeHandler;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraftforge.registries.ForgeRegistries;
+
+import java.util.Objects;
 
 /** Shared ingredient matching for stateful items whose semantic state may use
  * different numeric NBT tag types across CraftTweaker and the owning mod. */
@@ -12,6 +16,21 @@ public final class IngredientMatcher {
             new ResourceLocation("enigmaticlegacy", "earth_heart");
 
     private IngredientMatcher() {}
+
+    /**
+     * Match a graph material without losing state that cannot be reconstructed as
+     * a fully initialized mod ItemStack (notably SlashBlade capability state).
+     */
+    public static boolean test(Ingredient ingredient, MaterialKey actual) {
+        Objects.requireNonNull(actual, "actual");
+        return test(ingredient, actual.toStack(1))
+                || SlashBladeRecipeHandler.matchesMaterialKey(ingredient, actual);
+    }
+
+    public static boolean test(Ingredient ingredient, CraftingResolver.StackKey actual) {
+        Objects.requireNonNull(actual, "actual");
+        return test(ingredient, new MaterialKey(actual.item(), actual.tag()));
+    }
 
     public static boolean test(Ingredient ingredient, ItemStack actual) {
         if (ingredient.test(actual)) return true;

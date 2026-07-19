@@ -589,6 +589,18 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
     }
 
     @Override
+    public void releaseReusableMaterials(@NotNull ServerPlayer player) {
+        if (invCatalyst == null) return;
+        for (int i = 0; i < invCatalyst.getSlots(); i++) {
+            ItemStack catalyst = invCatalyst.getStackInSlot(i);
+            if (catalyst.isEmpty()) continue;
+            returnCrucibleItem(catalyst.copy());
+            setSlot(invCatalyst, i, ItemStack.EMPTY);
+        }
+        if (crucibleBE instanceof BlockEntity be) be.setChanged();
+    }
+
+    @Override
     public BlockPos getMachinePos() {
         return myPos;
     }
