@@ -69,7 +69,9 @@ class PlanGraphViewTest extends BootstrapTest {
                 java.util.Set.of(), java.util.Map.of(), null, graph);
         FriendlyByteBuf buf = new FriendlyByteBuf(Unpooled.buffer());
         new PlanResponsePacket(plan).encode(buf);
+        int encodedSize = buf.readableBytes();
 
+        // Decode and check graph decoded correctly
         PlanResponse decoded = PlanResponsePacket.decode(buf).plan();
         assertNotNull(decoded.graph());
         assertEquals(graph.topologicalOrder(), decoded.graph().topologicalOrder());
@@ -86,21 +88,51 @@ class PlanGraphViewTest extends BootstrapTest {
         assertEquals(3, decoded.graph().nodes().get(0).outputs().get(0).quantity());
         assertEquals(1, decoded.graph().edges().get(1).material().getCount());
         assertEquals(2, decoded.graph().edges().get(1).quantity());
-        assertEquals(0, buf.readableBytes());
+        assertEquals(0, buf.readableBytes(), "encoded=" + encodedSize);
     }
 
     @Test
-    void truncatedPacketWithoutGraphTailIsRejected() {
+    void decodeRejectsTrailingBytes() {
+        // Encode a valid packet, then append trailing garbage
+        PlanGraphView graph = PlanGraphView.from(sharedProducerGraph());
+        PlanResponse plan = new PlanResponse(true, "Diamond", new ItemStack(Items.DIAMOND),
+                List.of(), java.util.Map.of(), List.of(), "test:root",
+                null, null, 0, 0, 0, List.of(), 1,
+                null, null, null, 0, false, false, false, null,
+                java.util.Set.of(), java.util.Map.of(), null, graph);
+        FriendlyByteBuf buf = new FriendlyByteBuf(Unpooled.buffer());
+        new PlanResponsePacket(plan).encode(buf);
+        // Append one trailing byte
+        buf.writeByte(0xFF);
+        assertThrows(io.netty.handler.codec.DecoderException.class, () -> PlanResponsePacket.decode(buf));
+    }
+
+    @Test
+    void decodeRejectsTruncatedRequestIdMarker() {
         PlanResponse plan = new PlanResponse(true, "Diamond", new ItemStack(Items.DIAMOND),
                 List.of(), java.util.Map.of(), List.of(), "test:root",
                 null, null, 0, 0, 0, List.of(), 1,
                 null, null, null, 0, false, false, false, null,
                 java.util.Set.of(), java.util.Map.of(), null, null);
-        FriendlyByteBuf encoded = new FriendlyByteBuf(Unpooled.buffer());
-        new PlanResponsePacket(plan).encode(encoded);
-        encoded.writerIndex(encoded.writerIndex() - 1);
+        FriendlyByteBuf buf = new FriendlyByteBuf(Unpooled.buffer());
+        new PlanResponsePacket(plan).encode(buf);
+        buf.writerIndex(buf.writerIndex() - 1);
 
-        assertThrows(RuntimeException.class, () -> PlanResponsePacket.decode(encoded));
+        assertThrows(IndexOutOfBoundsException.class, () -> PlanResponsePacket.decode(buf));
+    }
+
+    @Test
+    void packetRoundTripPreservesRequestId() {
+        PlanResponse plan = new PlanResponse(true, "Diamond", new ItemStack(Items.DIAMOND),
+                List.of(), java.util.Map.of(), List.of(), "test:root",
+                null, null, 0, 0, 0, List.of(), 1,
+                null, null, null, 0, false, false, false, null,
+                java.util.Set.of(), java.util.Map.of(), null, null);
+        FriendlyByteBuf buf = new FriendlyByteBuf(Unpooled.buffer());
+        new PlanResponsePacket(plan, 42L).encode(buf);
+
+        assertEquals(42L, PlanResponsePacket.decode(buf).requestId());
+        assertEquals(0, buf.readableBytes());
     }
 
     private static CraftPlanGraph sharedProducerGraph() {

@@ -94,6 +94,9 @@ public final class RSSidePanelNetworkHandler {
         ch.registerMessage(NetworkPacketIds.RETURN_TO_RS, ReturnToRSPacket.class,
                 ReturnToRSPacket::encode, ReturnToRSPacket::decode, ReturnToRSPacket::handle,
                 java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_SERVER));
+        ch.registerMessage(NetworkPacketIds.SIDE_PANEL_OPERATION_RESULT, RSSidePanelOperationResultPacket.class,
+                RSSidePanelOperationResultPacket::encode, RSSidePanelOperationResultPacket::decode, RSSidePanelOperationResultPacket::handle,
+                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_CLIENT));
         ch.registerMessage(NetworkPacketIds.OPEN_RESONANCE_BACKPACK, OpenResonanceBackpackPacket.class,
                 OpenResonanceBackpackPacket::encode, OpenResonanceBackpackPacket::decode, OpenResonanceBackpackPacket::handle,
                 java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_SERVER));
@@ -420,6 +423,16 @@ public final class RSSidePanelNetworkHandler {
         RSSidePanelClickPacket packet = new RSSidePanelClickPacket(carried, isRightClick);
         CHANNEL.sendToServer(packet);
         return packet.operationId;
+    }
+
+    // ── Operation result (server → client) ─────────────────────────
+
+    /** Send the result of a side-panel operation back to the client. */
+    public static void sendOperationResult(ServerPlayer player, long operationId,
+                                           RSSidePanelClickPacket.OperationResult result) {
+        CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
+                new RSSidePanelOperationResultPacket(operationId, result.success(),
+                        result.stackId(), result.actualCount(), result.errorCode()));
     }
 
     // ── Manual delta (for sendDeltaForItem safety net) ─────────────

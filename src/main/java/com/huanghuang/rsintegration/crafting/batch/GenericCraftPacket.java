@@ -737,8 +737,8 @@ public final class GenericCraftPacket {
             List<String> missingCheck = new ArrayList<>();
             List<IngredientSpec> scaledSpecs = new ArrayList<>();
             for (IngredientSpec spec : CraftPacketUtils.extractIngredientSpecs(cr2)) {
-                scaledSpecs.add(new IngredientSpec(spec.ingredient(),
-                        CraftPacketUtils.mulCount(spec.count(), Math.max(1, repeatCount))));
+                int count = CraftPacketUtils.requiredCount(spec, repeatCount);
+                scaledSpecs.add(new IngredientSpec(spec.ingredient(), count, spec.role()));
             }
             List<ResolutionStep> planSteps = CraftingResolver.resolveStepsForSpecsWithTypes(
                     scaledSpecs, avail, player.serverLevel(),
@@ -883,8 +883,8 @@ public final class GenericCraftPacket {
                     result = RecipeIndex.tryGetResultItem(recipe, player.serverLevel().registryAccess());
                 }
                 if (result.isEmpty()) {
-                    RSIntegrationMod.LOGGER.debug("[RSI-Generic] Result unavailable for {} ({})",
-                            recipeId, recipe.getClass().getSimpleName());
+                    RSIntegrationMod.LOGGER.warn("[RSI-Generic] Result unavailable for {} ({}), class={}",
+                            recipeId, recipe.getClass().getSimpleName(), recipe.getClass().getName());
                 }
 
                 if (!result.isEmpty()) {
@@ -1093,7 +1093,9 @@ public final class GenericCraftPacket {
                 for (IngredientSpec spec : specs) {
                     if (spec.isEmpty()) continue;
                     perRecipe.add(spec.ingredient());
-                    for (int i = 0; i < CraftPacketUtils.mulCount(spec.count(), repeatCount); i++) expanded.add(spec.ingredient());
+                    for (int i = 0; i < CraftPacketUtils.requiredCount(spec, repeatCount); i++) {
+                        expanded.add(spec.ingredient());
+                    }
                 }
                 displayIngredients = perRecipe;
                 recipeIngredients = expanded;
@@ -1165,7 +1167,9 @@ public final class GenericCraftPacket {
             for (IngredientSpec spec : specs) {
                 if (spec.isEmpty()) continue;
                 perRecipe.add(spec.ingredient());
-                for (int i = 0; i < spec.count() * repeatCount; i++) expanded.add(spec.ingredient());
+                for (int i = 0; i < CraftPacketUtils.requiredCount(spec, repeatCount); i++) {
+                    expanded.add(spec.ingredient());
+                }
             }
             displayIngredients = perRecipe;
             recipeIngredients = expanded;
@@ -1801,31 +1805,17 @@ public final class GenericCraftPacket {
             }
             Recipe<?> stepRecipe = resolveRecipe(player.serverLevel(), step.recipeId());
             if (stepRecipe == null) continue;
-            if (stepRecipe instanceof CraftingRecipe scr) {
-                // Vanilla crafting: ingredient-per-slot preserves grid layout
-                for (Ingredient ing : scr.getIngredients()) {
-                    if (ing.isEmpty()) continue;
-                    ItemStack matched = matchAndConsume(ing, matAvailable);
+            List<IngredientSpec> specs = stepRecipe instanceof CraftingRecipe craftingRecipe
+                    ? CraftPacketUtils.extractCraftingIngredientSpecs(craftingRecipe)
+                    : CraftPacketUtils.extractIngredientSpecs(stepRecipe);
+            if (specs != null) {
+                for (IngredientSpec spec : specs) {
+                    if (spec.isEmpty()) continue;
+                    ItemStack matched = matchAndConsume(spec.ingredient(), matAvailable);
                     if (matched != null) {
-                        neededCounts.merge(matched.getItem(), step.batches(), Integer::sum);
-                        itemSource.putIfAbsent(matched.getItem(), ing);
-                    }
-                }
-            } else {
-                // Mod recipes: extractIngredientSpecs preserves per-ingredient
-                // counts via registered ModRecipeHandler (extractIngredients
-                // returns a flat list that drops per-craft quantities, causing
-                // the material strip to under-report vs. the tree display).
-                List<IngredientSpec> specs = CraftPacketUtils.extractIngredientSpecs(stepRecipe);
-                if (specs != null) {
-                    for (IngredientSpec spec : specs) {
-                        if (spec.isEmpty()) continue;
-                        ItemStack matched = matchAndConsume(spec.ingredient(), matAvailable);
-                        if (matched != null) {
-                            neededCounts.merge(matched.getItem(),
-                                    CraftPacketUtils.mulCount(spec.count(), step.batches()), Integer::sum);
-                            itemSource.putIfAbsent(matched.getItem(), spec.ingredient());
-                        }
+                        neededCounts.merge(matched.getItem(),
+                                CraftPacketUtils.requiredCount(spec, step.batches()), Integer::sum);
+                        itemSource.putIfAbsent(matched.getItem(), spec.ingredient());
                     }
                 }
             }
@@ -2088,7 +2078,7 @@ public final class GenericCraftPacket {
     private static int countNbtMatching(Ingredient ingredient, Map<StackKey, Integer> available) {
         int total = 0;
         for (var e : available.entrySet()) {
-            if (IngredientMatcher.test(ingredient, e.getKey().toStack())) total += e.getValue();
+            if (IngredientMatcher.test(ingredient, e.getKey())) total += e.getValue();
         }
         return total;
     }

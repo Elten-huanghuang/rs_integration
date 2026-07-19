@@ -569,4 +569,8 @@ public final class RSSidePanelClient {
     public static void onDeltaReceived(UUID id, ItemStack stack, long timestamp, boolean craftable) {
         SyncHandler.onDeltaReceived(id, stack, timestamp, craftable);
     }
+
+    public static void onOperationResult(RSSidePanelOperationResultPacket packet) {
+        SyncHandler.onOperationResult(packet);
+    }
 }

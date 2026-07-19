@@ -1,6 +1,8 @@
 package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.contents.TranslatableContents;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import org.junit.jupiter.api.Test;
@@ -94,5 +96,27 @@ class CraftProgressOverlayStateTest extends BootstrapTest {
         }
         assertFalse(CraftProgressOverlay.accent(CraftProgressSnapshot.Result.RUNNING)
                 == CraftProgressOverlay.accent(CraftProgressSnapshot.Result.FAILED));
+    }
+
+    @Test
+    void currentStepDetailsKeepTheirTranslationComponents() {
+        CraftProgressSnapshot.NodeProgress node = new CraftProgressSnapshot.NodeProgress(0,
+                CraftProgressSnapshot.NodeState.BLOCKED, "test:compact_recipe", "",
+                ItemStack.EMPTY, 0, 1, 0, "invalid dimension@1, 2, 3",
+                CraftProgressSnapshot.Reason.MACHINE_BUSY, "", false);
+
+        assertEquals("rsi.progress.step.recipe",
+                translationKey(CraftProgressPresentation.outputName(node)));
+        Component detail = CraftProgressPresentation.machineWithReason(node);
+        assertEquals("rsi.progress.step.machine_reason", translationKey(detail));
+        Object machineArgument = ((TranslatableContents) detail.getContents()).getArgs()[0];
+        assertTrue(machineArgument instanceof Component);
+        assertEquals("rsi.progress.step.machine",
+                translationKey((Component) machineArgument));
+    }
+
+    private static String translationKey(Component component) {
+        return component.getContents() instanceof TranslatableContents contents
+                ? contents.getKey() : "";
     }
 }

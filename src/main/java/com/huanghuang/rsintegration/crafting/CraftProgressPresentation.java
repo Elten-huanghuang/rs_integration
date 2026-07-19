@@ -47,9 +47,10 @@ final class CraftProgressPresentation {
         ItemStack output = node.displayOutput();
         if (!output.isEmpty()) return output.getHoverName();
         ResourceLocation recipe = ResourceLocation.tryParse(node.recipeId());
-        return Component.literal(recipe == null
-                ? Component.translatable("rsi.progress.step.unknown").getString()
-                : PlanRenderEngine.formatRecipeName(recipe));
+        return recipe == null
+                ? Component.translatable("rsi.progress.step.unknown")
+                : Component.translatable("rsi.progress.step.recipe",
+                PlanRenderEngine.formatRecipeName(recipe));
     }
 
     static Component state(CraftProgressSnapshot.NodeProgress node) {
@@ -64,33 +65,41 @@ final class CraftProgressPresentation {
     }
 
     static Component machine(CraftProgressSnapshot.NodeProgress node) {
-        String type = node.modTypeId().isEmpty()
-                ? Component.translatable("rsi.progress.step.machine_unknown").getString()
-                : PlanRenderEngine.formatModTypeLabel(node.modTypeId());
-        String location = formatMachineLabel(node.machineLabel());
-        if (location.isEmpty()) return Component.literal(type);
+        Component type = node.modTypeId().isEmpty()
+                ? Component.translatable("rsi.progress.step.machine_unknown")
+                : Component.literal(PlanRenderEngine.formatModTypeLabel(node.modTypeId()));
+        Component location = formatMachineLabel(node.machineLabel());
+        if (location.getString().isEmpty()) return type;
         return Component.translatable("rsi.progress.step.machine", type, location);
     }
 
-    private static String formatMachineLabel(String label) {
-        if (label.isEmpty()) return "";
+    static Component machineWithReason(CraftProgressSnapshot.NodeProgress node) {
+        Component machine = machine(node);
+        if (node.reason() == CraftProgressSnapshot.Reason.NONE) return machine;
+        return Component.translatable("rsi.progress.step.machine_reason", machine,
+                Component.translatable(node.reason().translationKey()));
+    }
+
+    private static Component formatMachineLabel(String label) {
+        if (label.isEmpty()) return Component.empty();
         int at = label.indexOf('@');
         String dimension = at >= 0 ? label.substring(0, at) : label;
         String position = at >= 0 ? label.substring(at + 1) : "";
-        String translated = translateDimension(dimension);
-        return position.isEmpty() ? translated : translated + " · " + position;
+        Component translated = translateDimension(dimension);
+        return position.isEmpty() ? translated
+                : Component.translatable("rsi.progress.step.location", translated, position);
     }
 
-    private static String translateDimension(String dimension) {
+    private static Component translateDimension(String dimension) {
         ResourceLocation id = ResourceLocation.tryParse(dimension);
-        if (id == null) return dimension;
+        if (id == null) return Component.literal(dimension);
         String key = "dimension." + id.getNamespace() + "." + id.getPath();
-        if (I18n.exists(key)) return I18n.get(key);
+        if (I18n.exists(key)) return Component.translatable(key);
         if (Minecraft.getInstance().level != null
                 && Minecraft.getInstance().level.dimension().location().equals(id)) {
-            return Component.translatable("rsi.progress.step.dimension.current").getString();
+            return Component.translatable("rsi.progress.step.dimension.current");
         }
-        return id.getPath().replace('_', ' ');
+        return Component.literal(id.getPath().replace('_', ' '));
     }
 
     record Selection(List<CraftProgressSnapshot.NodeProgress> nodes, int remaining) {}

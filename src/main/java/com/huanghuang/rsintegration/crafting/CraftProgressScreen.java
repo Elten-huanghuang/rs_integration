@@ -300,10 +300,7 @@ public final class CraftProgressScreen extends Screen {
         UIRenderer.pillBadge(graphics, font, x + width - badgeWidth - 7, y + 5,
                 badgeWidth, 15, UIRenderer.alpha(color, 0.2f), color,
                 font.plainSubstrByWidth(state, badgeWidth - 8));
-        Component machine = CraftProgressPresentation.machine(node);
-        Component detail = node.reason() == CraftProgressSnapshot.Reason.NONE
-                ? machine : machine.copy().append(Component.literal(" · "))
-                .append(Component.translatable(node.reason().translationKey()));
+        Component detail = CraftProgressPresentation.machineWithReason(node);
         graphics.drawString(font, font.plainSubstrByWidth(detail.getString(), width - (textX - x) - 10),
                 textX, y + 20, MUTED, false);
         if (!output.isEmpty() && inside(mouseX, mouseY, x + 8, y + 6, 21, 21)) {

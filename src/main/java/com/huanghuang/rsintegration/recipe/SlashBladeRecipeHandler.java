@@ -5,8 +5,8 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
-import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
 import net.minecraft.Util;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.nbt.CompoundTag;
@@ -56,10 +56,19 @@ public final class SlashBladeRecipeHandler extends AbstractRecipeHandler {
 
     private static final String SB_INGREDIENT_CLASS =
             "mods.flammpfeil.slashblade.recipe.SlashBladeIngredient";
+    private static final String SB_INGREDIENT_TYPE = "slashblade:blade";
 
-    /** Check if this ingredient is a SlashBladeIngredient (reflection-free guard). */
+    /** Check by implementation class first, then by the stable Forge serializer id. */
     public static boolean isSlashBladeIngredient(Ingredient ingredient) {
-        return ingredient.getClass().getName().equals(SB_INGREDIENT_CLASS);
+        if (ingredient.getClass().getName().equals(SB_INGREDIENT_CLASS)) return true;
+        try {
+            JsonElement json = ingredient.toJson();
+            return json.isJsonObject()
+                    && json.getAsJsonObject().has("type")
+                    && SB_INGREDIENT_TYPE.equals(json.getAsJsonObject().get("type").getAsString());
+        } catch (Exception ignored) {
+            return false;
+        }
     }
 
     /**
@@ -143,10 +152,18 @@ public final class SlashBladeRecipeHandler extends AbstractRecipeHandler {
      *
      * @return true if the key's NBT satisfies the ingredient's request thresholds
      */
-    public static boolean matchesStackKey(Ingredient ingredient, StackKey key) {
+    public static boolean matchesMaterialKey(Ingredient ingredient, MaterialKey key) {
         if (!isSlashBladeIngredient(ingredient)) return false;
         String tag = key.tag();
-        if (tag == null || tag.isEmpty()) return false;
+        if (tag == null || tag.isEmpty()) {
+            // Some storage providers expose the blade item but not its capability-backed
+            // state. Preserve the resolver's historical item-only fallback in every graph
+            // validation path instead of accepting it only during inventory scanning.
+            for (ItemStack template : ingredient.getItems()) {
+                if (!template.isEmpty() && template.getItem() == key.item()) return true;
+            }
+            return false;
+        }
 
         try {
             CompoundTag fullTag = TagParser.parseTag(tag);

@@ -473,7 +473,7 @@ public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
             }
             if (pick.isEmpty()) return null;
             avail.merge(MaterialKey.of(pick), -spec.count(), Integer::sum);
-            fixedSpecs.add(new IngredientSpec(concreteIngredient(pick), spec.count()));
+            fixedSpecs.add(new IngredientSpec(concreteIngredient(pick), spec.count(), spec.role()));
             fixedStacks.add(pick.copyWithCount(spec.count()));
             usedSlots += spec.count();
         }

@@ -138,10 +138,16 @@ public final class CraftProgressOverlay {
         if (cancellable(snapshot.result())) {
             graphics.fill(contentX, cy, right, cy + 1, DIVIDER);
             cy += 7;
-            Component hint = Component.translatable("rsi.progress.manage_hint");
-            graphics.drawString(font, hint, contentX, cy, DIM, false);
-            UIRenderer.pillBadge(graphics, font, right - 20, cy - 3, 20, 15,
-                    0x663C5664, 0xFFD9E4EA, "P");
+            Component key = CraftProgressKeybind.translatedKeyMessage();
+            Component hint = Component.translatable("rsi.progress.manage_hint", key);
+            String keyText = key.getString();
+            int badgeWidth = Math.min(72, Math.max(20, font.width(keyText) + 10));
+            int hintWidth = Math.max(24, innerWidth - badgeWidth - 6);
+            graphics.drawString(font, font.plainSubstrByWidth(hint.getString(), hintWidth),
+                    contentX, cy, DIM, false);
+            UIRenderer.pillBadge(graphics, font, right - badgeWidth, cy - 3,
+                    badgeWidth, 15, 0x663C5664, 0xFFD9E4EA,
+                    font.plainSubstrByWidth(keyText, badgeWidth - 8));
         }
         RenderSystem.disableBlend();
     }

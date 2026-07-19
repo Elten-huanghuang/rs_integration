@@ -25,6 +25,8 @@ public final class BrickFurnaceCompat {
     private static Field cookTimeFactor;
     private static Method isRecipeNotBlacklisted;
     private static Method getRecipe;
+    private static Field currentRecipe;
+    private static Field failedMatch;
 
     private BrickFurnaceCompat() {}
 
@@ -71,6 +73,17 @@ public final class BrickFurnaceCompat {
         }
     }
 
+    /** Clear Brick Furnace's identity-based recipe cache after automation changes slot 0. */
+    public static void invalidateRecipeCache(BlockEntity be) {
+        if (!isBrickFurnace(be) || !probe()) return;
+        try {
+            currentRecipe.set(be, null);
+            failedMatch.set(be, ItemStack.EMPTY);
+        } catch (ReflectiveOperationException | RuntimeException exception) {
+            RSIntegrationMod.LOGGER.warn("[RSI-BrickFurnace] Recipe cache reset failed", exception);
+        }
+    }
+
     public static int effectiveCookTicks(BlockEntity be, AbstractCookingRecipe recipe) {
         if (!isBrickFurnace(be)) return recipe.getCookingTime();
         ResourceLocation typeId = recipe.getType() != null
@@ -109,11 +122,9 @@ public final class BrickFurnaceCompat {
     }
 
     private static boolean probe() {
-        if (probed) return vanillaRecipesEnabled != null && cookTimeFactor != null
-                && isRecipeNotBlacklisted != null && getRecipe != null;
+        if (probed) return probeComplete();
         synchronized (BrickFurnaceCompat.class) {
-            if (probed) return vanillaRecipesEnabled != null && cookTimeFactor != null
-                    && isRecipeNotBlacklisted != null && getRecipe != null;
+            if (probed) return probeComplete();
             try {
                 ClassLoader loader = BrickFurnaceCompat.class.getClassLoader();
                 Class<?> config = Class.forName(CONFIG, false, loader);
@@ -122,14 +133,23 @@ public final class BrickFurnaceCompat {
                 cookTimeFactor = config.getField("COOK_TIME_FACTOR");
                 isRecipeNotBlacklisted = config.getMethod("isRecipeNotBlacklisted", ResourceLocation.class);
                 getRecipe = beBase.getMethod("getRecipe");
+                currentRecipe = beBase.getDeclaredField("curRecipe");
+                currentRecipe.setAccessible(true);
+                failedMatch = beBase.getDeclaredField("failedMatch");
+                failedMatch.setAccessible(true);
             } catch (ReflectiveOperationException | LinkageError exception) {
                 RSIntegrationMod.LOGGER.warn("[RSI-BrickFurnace] Compatibility probe failed", exception);
             } finally {
                 probed = true;
             }
         }
+        return probeComplete();
+    }
+
+    private static boolean probeComplete() {
         return vanillaRecipesEnabled != null && cookTimeFactor != null
-                && isRecipeNotBlacklisted != null && getRecipe != null;
+                && isRecipeNotBlacklisted != null && getRecipe != null
+                && currentRecipe != null && failedMatch != null;
     }
 
     public record Eligibility(boolean allowed, String detail) {

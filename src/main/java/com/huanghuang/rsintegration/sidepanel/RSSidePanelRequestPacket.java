@@ -1,11 +1,10 @@
 package com.huanghuang.rsintegration.sidepanel;
 
-import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
-
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.storage.cache.IStorageCache;
+import com.refinedmods.refinedstorage.api.util.StackListEntry;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
@@ -58,13 +57,22 @@ public final class RSSidePanelRequestPacket {
         }
         try {
             RSSidePanelNetworkHandler.registerListener(player, network);
-            IStorageCache<?> cache = network.getItemStorageCache();
-            var list = cache == null ? null : cache.getList();
+            IStorageCache<ItemStack> cache = network.getItemStorageCache();
+            if (cache == null) {
+                RSSidePanelNetworkHandler.sendSync(player, Collections.emptyList(), Collections.emptyList(), Collections.emptyList(), Collections.emptyList(), 0, true, "");
+                return;
+            }
+            var list = cache.getList();
             if (list == null) {
                 RSSidePanelNetworkHandler.sendSync(player, Collections.emptyList(), Collections.emptyList(), Collections.emptyList(), Collections.emptyList(), 0, true, "");
                 return;
             }
-            REFRESH_TASKS.put(id, new RefreshTask(player, network, list.getStacks().iterator()));
+            // Snapshot both the collection and each mutable stack before the
+            // refresh is spread across later server ticks.
+            List<StackListEntry<ItemStack>> snapshot = list.getStacks().stream()
+                    .map(entry -> new StackListEntry<>(entry.getId(), entry.getStack().copy()))
+                    .toList();
+            REFRESH_TASKS.put(id, new RefreshTask(player, network, snapshot.iterator()));
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI] SidePanel refresh setup failed", e);
             RSSidePanelNetworkHandler.sendSync(player, Collections.emptyList(), Collections.emptyList(), Collections.emptyList(), Collections.emptyList(), 0, true, "");
@@ -88,7 +96,7 @@ public final class RSSidePanelRequestPacket {
         final UUID playerId;
         final ServerPlayer player;
         final INetwork network;
-        final java.util.Iterator<?> entries;
+        final java.util.Iterator<StackListEntry<ItemStack>> entries;
         final List<UUID> ids = new ArrayList<>();
         final List<ItemStack> items = new ArrayList<>();
         final List<Long> timestamps = new ArrayList<>();
@@ -97,7 +105,8 @@ public final class RSSidePanelRequestPacket {
         final Set<String> craftableKeys = new HashSet<>();
         final String networkName;
 
-        RefreshTask(ServerPlayer player, INetwork network, java.util.Iterator<?> entries) {
+        RefreshTask(ServerPlayer player, INetwork network,
+                    java.util.Iterator<StackListEntry<ItemStack>> entries) {
             this.player = player; this.playerId = player.getUUID(); this.network = network; this.entries = entries;
             this.networkName = resolveNetworkName(network);
             try {
@@ -119,18 +128,18 @@ public final class RSSidePanelRequestPacket {
             int processed = 0;
             var tracker = network.getItemStorageTracker();
             while (entries.hasNext() && processed++ < ENTRIES_PER_TICK) {
-                Object entry = entries.next();
+                StackListEntry<ItemStack> entry = entries.next();
                 try {
-                    ItemStack stored = (ItemStack) entry.getClass().getMethod("getStack").invoke(entry);
+                    ItemStack stored = entry.getStack();
                     if (stored == null || stored.isEmpty()) continue;
                     total++;
-                    UUID id = (UUID) entry.getClass().getMethod("getId").invoke(entry);
+                    UUID id = entry.getId();
                     ids.add(id); items.add(stored.copy());
                     var tracked = tracker != null ? tracker.get(stored) : null;
                     timestamps.add(tracked != null ? tracked.getTime() : 0L);
                     var itemKey = net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(stored.getItem());
                     craftable.add(itemKey != null && craftableKeys.contains(itemKey.toString()));
-                } catch (ReflectiveOperationException | ClassCastException ignored) {
+                } catch (RuntimeException ignored) {
                     RSIntegrationMod.LOGGER.debug("[RSI] Invalid storage entry during refresh");
                 }
             }

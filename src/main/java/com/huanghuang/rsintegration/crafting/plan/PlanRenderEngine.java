@@ -327,16 +327,13 @@ public final class PlanRenderEngine {
     private static final java.util.Map<String, String> MOD_LABEL_CACHE = new java.util.concurrent.ConcurrentHashMap<>();
 
     public static String formatModTypeLabel(String modTypeId) {
-        String cached = MOD_LABEL_CACHE.get(modTypeId);
-        if (cached != null) return cached;
-
         // 1. Explicit translation key (optional override)
         String key = "rsi.batch.mod." + modTypeId;
         if (net.minecraft.client.resources.language.I18n.exists(key)) {
-            String label = net.minecraft.client.resources.language.I18n.get(key);
-            MOD_LABEL_CACHE.put(modTypeId, label);
-            return label;
+            return net.minecraft.client.resources.language.I18n.get(key);
         }
+        String cached = MOD_LABEL_CACHE.get(modTypeId);
+        if (cached != null) return cached;
         // 2. Forge mod display name
         String forgeName = net.minecraftforge.fml.ModList.get()
                 .getModContainerById(modTypeId)

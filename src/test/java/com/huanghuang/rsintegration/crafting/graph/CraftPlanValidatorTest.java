@@ -1,18 +1,25 @@
 package com.huanghuang.rsintegration.crafting.graph;
 
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
 import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.crafting.IngredientMatcher;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Ingredient;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class CraftPlanValidatorTest extends BootstrapTest {
 
@@ -330,6 +337,37 @@ class CraftPlanValidatorTest extends BootstrapTest {
     }
 
     @Test
+    void acceptsSerializedSlashBladeMaterialForInputAndRootAllocations() {
+        NodeId nodeId = new NodeId(0);
+        InputPortId inputId = new InputPortId(nodeId, 0);
+        Ingredient bladeIngredient = slashBladeIngredient(Items.DIAMOND);
+
+        CompoundTag bladeState = new CompoundTag();
+        bladeState.putString("translationKey", "item.minecraft.diamond");
+        bladeState.putInt("killCount", 400);
+        bladeState.putInt("RepairCounter", 4);
+        CompoundTag fullTag = new CompoundTag();
+        fullTag.put("bladeState", bladeState);
+        ItemStack bladeStack = new ItemStack(Items.DIAMOND);
+        bladeStack.setTag(fullTag);
+        MaterialKey blade = MaterialKey.of(bladeStack);
+
+        assertFalse(IngredientMatcher.test(bladeIngredient, blade.toStack(1)));
+        assertTrue(IngredientMatcher.test(bladeIngredient, blade));
+
+        CraftNode node = node(nodeId, "slashblade", List.of(new InputDemand(inputId,
+                bladeIngredient, 1, DemandRole.CONSUMED, new ItemStack(Items.DIAMOND))), List.of());
+        CraftPlanGraph graph = new CraftPlanGraph(1, List.of(node), List.of(
+                new MaterialAllocation(new AllocationId(0), inputId,
+                        new MaterialSource.InitialPool(blade), blade, 1)),
+                List.of(new RootDemand(bladeIngredient, 1, 0, new ItemStack(Items.DIAMOND),
+                        List.of(new RootAllocation(new MaterialSource.InitialPool(blade), blade, 1)))),
+                List.of(), List.of(nodeId));
+
+        CraftPlanValidator.validate(graph);
+    }
+
+    @Test
     void rejectsMissingAndDuplicateTopologicalNodes() {
         NodeId first = new NodeId(0);
         NodeId second = new NodeId(1);
@@ -355,6 +393,36 @@ class CraftPlanValidatorTest extends BootstrapTest {
         tag.putString("variant", variant);
         stack.setTag(tag);
         return MaterialKey.of(stack);
+    }
+
+    private static Ingredient slashBladeIngredient(Item item) {
+        JsonObject request = new JsonObject();
+        request.addProperty("name", "minecraft:diamond");
+        request.addProperty("kill", 400);
+        request.addProperty("refine", 4);
+        JsonObject json = new JsonObject();
+        json.addProperty("type", "slashblade:blade");
+        json.add("request", request);
+        return new SerializedIngredient(item, json);
+    }
+
+    private static final class SerializedIngredient extends Ingredient {
+        private final JsonObject json;
+
+        private SerializedIngredient(Item item, JsonObject json) {
+            super(Stream.of(new ItemValue(new ItemStack(item))));
+            this.json = json;
+        }
+
+        @Override
+        public boolean test(ItemStack stack) {
+            return false;
+        }
+
+        @Override
+        public JsonElement toJson() {
+            return json;
+        }
     }
 
     private static CraftNode node(NodeId id, String path, List<InputDemand> inputs,

@@ -145,8 +145,19 @@ public interface IBatchDelegate {
     default List<MaterialReservationScope> getMaterialReservationScopes() {
         List<IngredientSpec> specs = getRequiredMaterials();
         if (specs == null || specs.isEmpty()) return List.of();
-        return Collections.nCopies(specs.size(), MaterialReservationScope.PER_OPERATION);
+        return specs.stream()
+                .map(spec -> spec.role() == com.huanghuang.rsintegration.crafting.graph.DemandRole.CATALYST
+                        ? MaterialReservationScope.PER_WORKER_REUSABLE
+                        : MaterialReservationScope.PER_OPERATION)
+                .toList();
     }
+
+    /**
+     * Return reusable materials that were intentionally left installed between
+     * operations. Called once after a standalone node or parallel worker group
+     * reaches successful terminal completion.
+     */
+    default void releaseReusableMaterials(@Nonnull ServerPlayer player) {}
 
     /**
      * The portion of {@link #getRequiredMaterials()} that the graph planner

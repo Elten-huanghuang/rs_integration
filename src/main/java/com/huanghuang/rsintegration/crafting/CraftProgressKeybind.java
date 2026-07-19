@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.mojang.blaze3d.platform.InputConstants;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.KeyMapping;
+import net.minecraft.network.chat.Component;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import net.minecraftforge.client.event.RegisterKeyMappingsEvent;
@@ -36,6 +37,12 @@ public final class CraftProgressKeybind {
         RSIntegrationMod.MOD_BUS.addListener(
                 (RegisterKeyMappingsEvent event) -> event.register(TOGGLE_PROGRESS));
         MinecraftForge.EVENT_BUS.register(CraftProgressKeybind.class);
+    }
+
+    public static Component translatedKeyMessage() {
+        return TOGGLE_PROGRESS == null
+                ? InputConstants.UNKNOWN.getDisplayName()
+                : TOGGLE_PROGRESS.getTranslatedKeyMessage();
     }
 
     @SubscribeEvent

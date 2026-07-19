@@ -345,6 +345,7 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
         if (delegate != null) {
             try {
                 delegate.onBatchFinished(player);
+                delegate.releaseReusableMaterials(player);
             } catch (Exception ignored) {
                 // Best-effort
             }

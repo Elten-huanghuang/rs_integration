@@ -173,13 +173,14 @@ public final class CraftPacketUtils {
                         virtualInventory.stream().map(s -> net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(s.getItem()) + "x" + s.getCount()).toList());
 
                 if (recipe instanceof CraftingRecipe craftingRecipe) {
-                    List<Ingredient> ingredients = craftingRecipe.getIngredients();
-                    ItemStack[] consumed = new ItemStack[ingredients.size()];
-                    for (int idx = 0; idx < ingredients.size(); idx++) {
-                        Ingredient ing = ingredients.get(idx);
-                        if (ing.isEmpty()) continue;
+                    List<IngredientSpec> specs = extractCraftingIngredientSpecs(craftingRecipe);
+                    ItemStack[] consumed = new ItemStack[Math.min(specs.size(), 9)];
+                    for (int idx = 0; idx < specs.size(); idx++) {
+                        IngredientSpec spec = specs.get(idx);
+                        if (spec.isEmpty()) continue;
+                        Ingredient ing = spec.ingredient();
 
-                        int stillNeeded = executions;
+                        int stillNeeded = requiredCount(spec, executions);
                         var iter = virtualInventory.iterator();
                         while (iter.hasNext() && stillNeeded > 0) {
                             ItemStack vItem = iter.next();
@@ -211,6 +212,10 @@ public final class CraftPacketUtils {
                     }
 
                     ItemStack result = assembleCraftingOutput(craftingRecipe, consumed, player);
+                    if (result.isEmpty()) {
+                        result = ModRecipeHandlers.tryGetResultItem(
+                                craftingRecipe, player.serverLevel().registryAccess());
+                    }
                     if (!result.isEmpty()) {
                         addToVirtual(virtualInventory, result.copyWithCount(StepExecutor.mulCount(result.getCount(), executions)));
                         RSIntegrationMod.LOGGER.debug(ctx.format("Step {}/{} {}: produced {} to virtual"),
@@ -222,7 +227,9 @@ public final class CraftPacketUtils {
                     // handles all remainders correctly — reflection-based scanning
                     // would duplicate them, causing a dupe exploit with buckets etc.
                     for (ItemStack remainder : getRecipeRemainders(craftingRecipe, consumed)) {
-                        addToVirtual(virtualInventory, remainder.copyWithCount(StepExecutor.mulCount(remainder.getCount(), executions)));
+                        int remainderExecutions = remainderExecutions(remainder, specs, executions);
+                        addToVirtual(virtualInventory, remainder.copyWithCount(
+                                StepExecutor.mulCount(remainder.getCount(), remainderExecutions)));
                     }
                 } else {
                     // Non-crafting recipe (sawmill, custom mod type, etc.)
@@ -235,7 +242,7 @@ public final class CraftPacketUtils {
 
                     for (IngredientSpec spec : specs) {
                         if (spec.isEmpty()) continue;
-                        int stillNeeded = StepExecutor.mulCount(spec.count(), executions);
+                        int stillNeeded = requiredCount(spec, executions);
                         var iter = virtualInventory.iterator();
                         while (iter.hasNext() && stillNeeded > 0) {
                             ItemStack vItem = iter.next();
@@ -353,20 +360,20 @@ public final class CraftPacketUtils {
      * @param consumed the items that were actually placed in the crafting grid
      */
     public static List<ItemStack> getRecipeRemainders(CraftingRecipe recipe, ItemStack[] consumed) {
-        List<Ingredient> ingredients = recipe.getIngredients();
+        List<IngredientSpec> specs = extractCraftingIngredientSpecs(recipe);
         AbstractContainerMenu dummyMenu = new AbstractContainerMenu(null, -1) {
             @Override public ItemStack quickMoveStack(net.minecraft.world.entity.player.Player p, int i) { return ItemStack.EMPTY; }
             @Override public boolean stillValid(net.minecraft.world.entity.player.Player p) { return false; }
         };
         var container = new net.minecraft.world.inventory.TransientCraftingContainer(dummyMenu, 3, 3);
-        int slots = Math.min(ingredients.size(), 9);
+        int slots = Math.min(specs.size(), 9);
         for (int i = 0; i < slots; i++) {
-            if (consumed[i] != null && !consumed[i].isEmpty()) {
-                container.setItem(i, consumed[i].copy());
-            } else if (!ingredients.get(i).isEmpty()) {
-                ItemStack[] items = ingredients.get(i).getItems();
+            if (i < consumed.length && consumed[i] != null && !consumed[i].isEmpty()) {
+                container.setItem(craftingGridSlot(recipe, i), consumed[i].copy());
+            } else if (!specs.get(i).isEmpty()) {
+                ItemStack[] items = specs.get(i).ingredient().getItems();
                 if (items.length > 0 && !items[0].isEmpty()) {
-                    container.setItem(i, items[0].copy());
+                    container.setItem(craftingGridSlot(recipe, i), items[0].copy());
                 }
             }
         }
@@ -384,18 +391,18 @@ public final class CraftPacketUtils {
      * actual consumed items are available, to correctly handle durability.
      */
     public static List<ItemStack> getRecipeRemainders(CraftingRecipe recipe) {
-        List<Ingredient> ingredients = recipe.getIngredients();
+        List<IngredientSpec> specs = extractCraftingIngredientSpecs(recipe);
         AbstractContainerMenu dummyMenu = new AbstractContainerMenu(null, -1) {
             @Override public ItemStack quickMoveStack(net.minecraft.world.entity.player.Player p, int i) { return ItemStack.EMPTY; }
             @Override public boolean stillValid(net.minecraft.world.entity.player.Player p) { return false; }
         };
         var container = new net.minecraft.world.inventory.TransientCraftingContainer(dummyMenu, 3, 3);
-        for (int i = 0; i < Math.min(ingredients.size(), 9); i++) {
-            Ingredient ing = ingredients.get(i);
+        for (int i = 0; i < Math.min(specs.size(), 9); i++) {
+            Ingredient ing = specs.get(i).ingredient();
             if (!ing.isEmpty()) {
                 ItemStack[] items = ing.getItems();
                 if (items.length > 0 && !items[0].isEmpty()) {
-                    container.setItem(i, items[0].copy());
+                    container.setItem(craftingGridSlot(recipe, i), items[0].copy());
                 }
             }
         }
@@ -423,10 +430,20 @@ public final class CraftPacketUtils {
         var container = new net.minecraft.world.inventory.TransientCraftingContainer(dummyMenu, 3, 3);
         for (int i = 0; i < consumed.length && i < 9; i++) {
             if (consumed[i] != null && !consumed[i].isEmpty()) {
-                container.setItem(i, consumed[i].copy());
+                container.setItem(craftingGridSlot(recipe, i), consumed[i].copy());
             }
         }
         return recipe.assemble(container, player.serverLevel().registryAccess());
+    }
+
+    static int craftingGridSlot(CraftingRecipe recipe, int ingredientIndex) {
+        if (recipe instanceof net.minecraft.world.item.crafting.ShapedRecipe shaped) {
+            int width = shaped.getWidth();
+            if (width > 0 && width <= 3) {
+                return (ingredientIndex / width) * 3 + ingredientIndex % width;
+            }
+        }
+        return ingredientIndex;
     }
 
     /**
@@ -860,6 +877,9 @@ public final class CraftPacketUtils {
     @Nullable
     @SuppressWarnings("unchecked")
     public static List<IngredientSpec> extractIngredientSpecs(Object recipe) {
+        List<IngredientSpec> craftTweakerSpecs = tryExtractCraftTweakerSpecs(recipe);
+        if (craftTweakerSpecs != null) return craftTweakerSpecs;
+
         // Try registered handler first (explicit per-mod logic)
         if (recipe instanceof net.minecraft.world.item.crafting.Recipe<?> r) {
             var handler = ModRecipeHandlers.handlerFor(r);
@@ -882,6 +902,90 @@ public final class CraftPacketUtils {
         return ingredients.stream()
                 .map(ing -> new IngredientSpec(ing, 1))
                 .collect(Collectors.toList());
+    }
+
+    public static List<IngredientSpec> extractCraftingIngredientSpecs(CraftingRecipe recipe) {
+        List<IngredientSpec> craftTweakerSpecs = tryExtractCraftTweakerSpecs(recipe);
+        if (craftTweakerSpecs != null) return craftTweakerSpecs;
+        return recipe.getIngredients().stream()
+                .map(ingredient -> ingredient.isEmpty()
+                        ? IngredientSpec.EMPTY : new IngredientSpec(ingredient, 1))
+                .toList();
+    }
+
+    public static int requiredCount(IngredientSpec spec, int executions) {
+        return spec.role() == com.huanghuang.rsintegration.crafting.graph.DemandRole.CATALYST
+                ? spec.count() : mulCount(spec.count(), Math.max(1, executions));
+    }
+
+    public static int remainderExecutions(ItemStack remainder, List<IngredientSpec> specs,
+                                          int executions) {
+        for (IngredientSpec spec : specs) {
+            if (spec.role() == com.huanghuang.rsintegration.crafting.graph.DemandRole.CATALYST
+                    && IngredientMatcher.test(spec.ingredient(), remainder)) {
+                return 1;
+            }
+        }
+        return Math.max(1, executions);
+    }
+
+    @Nullable
+    private static List<IngredientSpec> tryExtractCraftTweakerSpecs(Object recipe) {
+        if (recipe == null || !recipe.getClass().getName()
+                .startsWith("com.blamejared.crafttweaker.api.recipe.type.CT")) {
+            return null;
+        }
+        try {
+            Object ingredients = recipe.getClass().getMethod("getCtIngredients").invoke(recipe);
+            List<IngredientSpec> result = new ArrayList<>();
+            collectCraftTweakerSpecs(ingredients, result);
+            return result.stream().anyMatch(spec -> !spec.isEmpty()) ? result : null;
+        } catch (ReflectiveOperationException e) {
+            RSIntegrationMod.LOGGER.debug("[RSI] CraftTweaker ingredient metadata unavailable for {}",
+                    recipe.getClass().getName(), e);
+            return null;
+        }
+    }
+
+    private static void collectCraftTweakerSpecs(Object value, List<IngredientSpec> result)
+            throws ReflectiveOperationException {
+        if (value == null) {
+            result.add(IngredientSpec.EMPTY);
+            return;
+        }
+        Class<?> type = value.getClass();
+        if (type.isArray()) {
+            int length = java.lang.reflect.Array.getLength(value);
+            for (int i = 0; i < length; i++) {
+                collectCraftTweakerSpecs(java.lang.reflect.Array.get(value, i), result);
+            }
+            return;
+        }
+
+        Object vanilla = type.getMethod("asVanillaIngredient").invoke(value);
+        if (!(vanilla instanceof Ingredient ingredient) || ingredient.isEmpty()) {
+            result.add(IngredientSpec.EMPTY);
+            return;
+        }
+
+        com.huanghuang.rsintegration.crafting.graph.DemandRole role =
+                com.huanghuang.rsintegration.crafting.graph.DemandRole.CONSUMED;
+        try {
+            Object transformer = type.getMethod("getTransformer").invoke(value);
+            if (transformer != null) {
+                String transformerName = transformer.getClass().getName();
+                if (transformerName.endsWith(".TransformReuse")) {
+                    role = com.huanghuang.rsintegration.crafting.graph.DemandRole.CATALYST;
+                } else if (transformerName.endsWith(".TransformReplace")) {
+                    role = com.huanghuang.rsintegration.crafting.graph.DemandRole.CONTAINER_RETURNING;
+                } else {
+                    role = com.huanghuang.rsintegration.crafting.graph.DemandRole.TRANSFORMED;
+                }
+            }
+        } catch (NoSuchMethodException ignored) {
+            // Plain CraftTweaker ingredients are consumed normally.
+        }
+        result.add(new IngredientSpec(ingredient, 1, role));
     }
 
     @Nullable
@@ -1228,7 +1332,8 @@ public final class CraftPacketUtils {
         if (repeats > 1) {
             List<IngredientSpec> scaled = new ArrayList<>(specs.size());
             for (IngredientSpec spec : specs) {
-                scaled.add(new IngredientSpec(spec.ingredient(), mulCount(spec.count(), repeats)));
+                int count = requiredCount(spec, repeats);
+                scaled.add(new IngredientSpec(spec.ingredient(), count, spec.role()));
             }
             specs = scaled;
         }
