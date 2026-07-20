@@ -94,6 +94,29 @@ class PlanTreeModelGraphTest extends BootstrapTest {
     }
 
     @Test
+    void grossDemandUsesGraphQuantitiesWithoutRescalingReusableRoots() {
+        PlanGraphView.SourceView initial = new PlanGraphView.SourceView(true, -1, -1);
+        PlanGraphView graph = new PlanGraphView(1, List.of(), List.of(), List.of(
+                new PlanGraphView.RootView(new ItemStack(Items.IRON_BLOCK), 1, 0,
+                        List.of(new PlanGraphView.RootEdgeView(
+                                initial, new ItemStack(Items.IRON_BLOCK), 1))),
+                new PlanGraphView.RootView(new ItemStack(Items.WHEAT_SEEDS), 3, 0,
+                        List.of(new PlanGraphView.RootEdgeView(
+                                initial, new ItemStack(Items.WHEAT_SEEDS), 3)))),
+                List.of(), List.of());
+        PlanResponse plan = new PlanResponse(true, "root", new ItemStack(Items.IRON_NUGGET, 9),
+                List.of(), Map.of(), List.of(), "test:root", null, null, 0, 0, 0,
+                List.of(), 3, null, null, null, 0, false, false, false, null,
+                Set.of(), Map.of(), null, graph);
+
+        Map<IngredientKey, Integer> gross = PlanTreeModel.grossDemandByKey(
+                PlanTreeModel.from(plan));
+
+        assertEquals(1, gross.get(IngredientKey.of(new ItemStack(Items.IRON_BLOCK))));
+        assertEquals(3, gross.get(IngredientKey.of(new ItemStack(Items.WHEAT_SEEDS))));
+    }
+
+    @Test
     void collapseStateUsesNodeIdForSameItemRecipes() {
         ResourceLocation sharedRecipe = new ResourceLocation("test", "same_recipe");
         PlanTreeNode first = new PlanTreeNode(IngredientKey.of(new ItemStack(Items.IRON_INGOT)),

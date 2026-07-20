@@ -540,6 +540,31 @@ public final class GenericCraftPacket {
         return true;
     }
 
+    static ResolutionStep genericTerminalStep(ResourceLocation recipeId, int repeatCount) {
+        return new ResolutionStep(recipeId, ModType.GENERIC,
+                new ResourceLocation("minecraft:crafting"), List.of(), List.of(), false,
+                Math.max(1, repeatCount));
+    }
+
+    static ResolutionStep smithingTerminalStep(ResourceLocation recipeId, int repeatCount) {
+        // Smithing tables are virtual in the execution model. Keeping the
+        // terminal generic lets the chain consume the freshly produced base
+        // item without requiring a second machine binding.
+        return new ResolutionStep(recipeId, ModType.GENERIC,
+                new ResourceLocation("minecraft:smithing"), List.of(), List.of(), false,
+                Math.max(1, repeatCount));
+    }
+
+    static List<ResolutionStep> smithingAsyncSteps(
+            List<ResolutionStep> intermediateSteps, ResourceLocation recipeId, int repeatCount) {
+        if (intermediateSteps.stream().allMatch(step -> step.modType() == ModType.GENERIC)) {
+            return List.of();
+        }
+        List<ResolutionStep> chain = new ArrayList<>(intermediateSteps);
+        chain.add(smithingTerminalStep(recipeId, repeatCount));
+        return List.copyOf(chain);
+    }
+
     private static void tryResolve(ServerPlayer player, ResourceLocation recipeId,
                                    Map<String, String> forcedRecipes,
                                    @Nullable ResourceLocation dim,
@@ -683,9 +708,10 @@ public final class GenericCraftPacket {
                     }
                 }
                 RSIntegrationMod.LOGGER.info(
-                        "[RSI-Craft] terminal graph fallback recipe={} reason={}", recipeId,
+                        "[RSI-Craft] terminal graph fallback recipe={} reason={} repeatCount={} terminalExecutions={}", recipeId,
                         inferMode ? "infer-mode" : repeatCount > 1 ? "repeat-count" :
-                                graphSpecs.isEmpty() ? "dynamic-inputs" : "unknown-output");
+                                graphSpecs.isEmpty() ? "dynamic-inputs" : "unknown-output",
+                        repeatCount, terminalStep.executions());
                 AsyncCraftChain fallback = new AsyncCraftChain(player.getUUID(), player.getServer(), network,
                         inputGraph, terminalStep, repeatCount);
                 fallback.setTargetOutput(targetOutput);
@@ -721,8 +747,7 @@ public final class GenericCraftPacket {
                 }
                 // All GENERIC steps → execute sync chain
                 List<ResolutionStep> execSteps = new ArrayList<>(allSteps);
-                execSteps.add(new ResolutionStep(recipeId, ModType.GENERIC,
-                        new ResourceLocation("minecraft:crafting")));
+                execSteps.add(genericTerminalStep(recipeId, repeatCount));
                 executeSyncLoop(player, execSteps, network, recipeId, repeatCount, "Intermediate crafting failed");
                 return;
             }
@@ -753,8 +778,7 @@ public final class GenericCraftPacket {
                     return;
                 }
                 List<ResolutionStep> execSteps2 = new ArrayList<>(planSteps);
-                execSteps2.add(new ResolutionStep(recipeId, ModType.GENERIC,
-                        new ResourceLocation("minecraft:crafting")));
+                execSteps2.add(genericTerminalStep(recipeId, repeatCount));
                 executeSyncLoop(player, execSteps2, network, recipeId, repeatCount, "Intermediate crafting failed");
                 return;
             }
@@ -795,22 +819,26 @@ public final class GenericCraftPacket {
         // (e.g. diamond from diamond block) would not be crafted otherwise.
         if (modType == ModType.byId("smithing") && network != null
                 && RSIntegrationConfig.ENABLE_MULTIBLOCK_AUTO_CRAFTING.get()) {
-            List<Ingredient> smithingIngredients = new ArrayList<>();
-            for (IngredientSpec spec : specs) {
-                if (!spec.isEmpty()) smithingIngredients.add(spec.ingredient());
-            }
-            if (!smithingIngredients.isEmpty()) {
+            List<IngredientSpec> smithingSpecs = scaleIngredientSpecs(specs, repeatCount);
+            if (!smithingSpecs.isEmpty()) {
                 Map<StackKey, Integer> avail = MaterialSources.listAllAvailable(player, network);
                 List<String> missing = new ArrayList<>();
-                List<ResolutionStep> interSteps = CraftingResolver.resolveStepsForIngredientsWithTypes(
-                        smithingIngredients, avail, player.serverLevel(), player, network, missing, forcedOverrides);
+                List<ResolutionStep> interSteps = CraftingResolver.resolveStepsForSpecsWithTypes(
+                        smithingSpecs, avail, player.serverLevel(), player, network, missing,
+                        forcedOverrides, false);
                 if (interSteps != null && !interSteps.isEmpty() && missing.isEmpty()) {
-                    if (interSteps.stream().allMatch(s -> s.modType() == ModType.GENERIC)) {
+                    List<ResolutionStep> asyncSteps = smithingAsyncSteps(
+                            interSteps, recipeId, repeatCount);
+                    if (asyncSteps.isEmpty()) {
                         if (!CraftPacketUtils.executeCraftingSteps(player, interSteps, network)) {
                             player.sendSystemMessage(Component.translatable(
                                     "rsi.generic.error.craft_failed", "Smithing intermediate failed"));
                             return;
                         }
+                    } else {
+                        launchAsyncChain(player, asyncSteps, network, repeatCount, recipeId,
+                                forcedRecipes, dim, pos, inferMode, baseItem, targetOutput);
+                        return;
                     }
                 }
             }
@@ -1028,6 +1056,25 @@ public final class GenericCraftPacket {
         return tag != null ? key + "#" + tag : key;
     }
 
+    private static List<IngredientSpec> scaleIngredientSpecs(
+            List<IngredientSpec> specs, int executions) {
+        List<IngredientSpec> scaled = new ArrayList<>(specs.size());
+        for (IngredientSpec spec : specs) {
+            if (spec.isEmpty()) continue;
+            scaled.add(new IngredientSpec(spec.ingredient(),
+                    CraftPacketUtils.requiredCount(spec, executions), spec.role()));
+        }
+        return List.copyOf(scaled);
+    }
+
+    private static List<Ingredient> expandIngredientSpecs(List<IngredientSpec> specs) {
+        List<Ingredient> expanded = new ArrayList<>();
+        for (IngredientSpec spec : specs) {
+            for (int i = 0; i < spec.count(); i++) expanded.add(spec.ingredient());
+        }
+        return expanded;
+    }
+
     private static void tryBuildPlan(ServerPlayer player, ResourceLocation recipeId,
                                       Map<String, String> forcedRecipes,
                                       @Nullable ResourceLocation dim,
@@ -1058,6 +1105,7 @@ public final class GenericCraftPacket {
 
         // Determine ingredients, output, and mod type for both vanilla and mod recipes
         List<Ingredient> recipeIngredients;
+        List<IngredientSpec> recipeSpecs;
         ItemStack targetOutput;
         ModType recipeModType = null;
 
@@ -1089,16 +1137,13 @@ public final class GenericCraftPacket {
                 if (!addition.isEmpty()) specs.add(new IngredientSpec(addition, 1));
 
                 List<Ingredient> perRecipe = new ArrayList<>();
-                List<Ingredient> expanded = new ArrayList<>();
                 for (IngredientSpec spec : specs) {
                     if (spec.isEmpty()) continue;
                     perRecipe.add(spec.ingredient());
-                    for (int i = 0; i < CraftPacketUtils.requiredCount(spec, repeatCount); i++) {
-                        expanded.add(spec.ingredient());
-                    }
                 }
                 displayIngredients = perRecipe;
-                recipeIngredients = expanded;
+                recipeSpecs = scaleIngredientSpecs(specs, repeatCount);
+                recipeIngredients = expandIngredientSpecs(recipeSpecs);
                 // Apply modifier to the JEI-provided base item so the plan
                 // shows the actual modified output (e.g. sword + eternal),
                 // not the unmodified base material.
@@ -1134,9 +1179,11 @@ public final class GenericCraftPacket {
         } else if (recipe instanceof CraftingRecipe cr) {
             List<Ingredient> raw = cr.getIngredients();
             displayIngredients = raw;
-            recipeIngredients = new ArrayList<>(raw.size() * repeatCount);
-            for (int r = 0; r < repeatCount; r++) recipeIngredients.addAll(raw);
-            targetOutput = cr.getResultItem(player.serverLevel().registryAccess());
+            recipeSpecs = scaleIngredientSpecs(
+                    CraftPacketUtils.extractCraftingIngredientSpecs(cr), repeatCount);
+            recipeIngredients = expandIngredientSpecs(recipeSpecs);
+            targetOutput = ModRecipeHandlers.tryGetResultItem(
+                    cr, player.serverLevel().registryAccess());
         } else {
             List<IngredientSpec> specs = CraftPacketUtils.extractIngredientSpecs(recipe);
             boolean crockCategory = CrockPotRecipeHandler.hasCategoryConstraints(recipe);
@@ -1163,16 +1210,13 @@ public final class GenericCraftPacket {
                 return;
             }
             List<Ingredient> perRecipe = new ArrayList<>();
-            List<Ingredient> expanded = new ArrayList<>();
             for (IngredientSpec spec : specs) {
                 if (spec.isEmpty()) continue;
                 perRecipe.add(spec.ingredient());
-                for (int i = 0; i < CraftPacketUtils.requiredCount(spec, repeatCount); i++) {
-                    expanded.add(spec.ingredient());
-                }
             }
             displayIngredients = perRecipe;
-            recipeIngredients = expanded;
+            recipeSpecs = scaleIngredientSpecs(specs, repeatCount);
+            recipeIngredients = expandIngredientSpecs(recipeSpecs);
             targetOutput = ModRecipeHandlers.tryGetResultItem(recipe, player.serverLevel().registryAccess());
             recipeModType = ModType.classifyRecipe(recipe);
             RSIntegrationMod.LOGGER.debug("[RSI-tryBuildPlan] targetOutput: recipeId={} class={} result={}x{} isEmpty={} modType={}",
@@ -1295,7 +1339,7 @@ public final class GenericCraftPacket {
 
         if (RSIntegrationConfig.ENABLE_MULTIBLOCK_AUTO_CRAFTING.get() && network != null) {
             planGraph = CraftingResolver.resolveGraphForSpecsWithTypes(
-                    recipeIngredients.stream().map(ingredient -> new IngredientSpec(ingredient, 1)).toList(),
+                    recipeSpecs,
                     available, player.serverLevel(),
                     player, network, missing, forcedOverrides, true);
             Map<NodeId,
@@ -1906,9 +1950,12 @@ public final class GenericCraftPacket {
         // 用的是 step.batches()（净/封顶批次），逐支路会偏小、且和库存交互后偶尔偏大；这里用客户端
         // 同一套 PlanTreeModel 重算毛需求并覆盖 materials 的 needed，保证「总需求条 == 树」永不漂移。
         // available 仍是 RS 网络实际库存；feasible（上面按净需求判定）不动，不影响启动门控。
+        PlanGraphView planGraphView = planGraph != null ? PlanGraphView.from(planGraph) : null;
         PlanResponse treeSource = new PlanResponse(true, "", targetOutput, steps,
                 Collections.emptyMap(), Collections.emptyList(), "",
-                null, null, 0, 0, 0, Collections.emptyList(), repeatCount);
+                null, null, 0, 0, 0, Collections.emptyList(), repeatCount,
+                null, null, null, 0, false, false, false, null,
+                Collections.emptySet(), Collections.emptyMap(), null, planGraphView);
         Map<IngredientKey, Integer> grossDemand = PlanTreeModel.grossDemandByKey(PlanTreeModel.from(treeSource));
         // Re-key the UI material bill from the NBT-aware tree, not merely replace
         // counts on the old Item-keyed entries. This is what preserves an existing
@@ -2036,7 +2083,7 @@ public final class GenericCraftPacket {
                 boundMachineTypes,
                 leftovers,
                 clickedOutput,
-                planGraph != null ? PlanGraphView.from(planGraph) : null
+                planGraphView
         );
 
         PLAN_CACHE.put(cacheKey, new CachedPlan(plan, System.nanoTime()));

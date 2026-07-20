@@ -49,6 +49,7 @@ final class ResolutionContext {
     final Map<CraftingResolver.StackKey, Integer> counts;
     final List<CraftingResolver.ResolutionStep> steps;
     final Set<String> resolving;
+    final Set<CraftingResolver.StackKey> resolvingOutputs;
     final long deadlineNanos;
     int ensureCalls;
     final Deque<UndoEntry> undoStack = new ArrayDeque<>();
@@ -95,6 +96,7 @@ final class ResolutionContext {
         this.counts = new LinkedHashMap<>();
         this.steps = new ArrayList<>();
         this.resolving = new HashSet<>();
+        this.resolvingOutputs = new HashSet<>();
         this.preferredRecipes = preferredRecipes;
         this.player = player;
         this.network = network;
@@ -129,6 +131,7 @@ final class ResolutionContext {
         this.counts = new LinkedHashMap<>(keyedCounts);
         this.steps = new ArrayList<>();
         this.resolving = new HashSet<>();
+        this.resolvingOutputs = new HashSet<>();
         this.preferredRecipes = preferredRecipes;
         this.player = player;
         this.network = network;

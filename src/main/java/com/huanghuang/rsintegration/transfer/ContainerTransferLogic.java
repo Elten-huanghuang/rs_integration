@@ -27,6 +27,10 @@ import java.util.List;
 
 final class ContainerTransferLogic {
 
+    private static final String TETRA_WORKBENCH_MENU =
+            "se.mickelus.tetra.blocks.workbench.WorkbenchContainer";
+    private static final int PLAYER_MAIN_INVENTORY_SLOTS = 36;
+
     private ContainerTransferLogic() {}
 
     // 0 = RS Network, 1 = Backpack
@@ -70,8 +74,9 @@ final class ContainerTransferLogic {
         // Furnace output is also a ResultSlot and should still be extractable.
         boolean hasCrafting = hasCraftingContainer(menu);
 
-        for (Slot slot : menu.slots) {
-            if (slot.container == player.getInventory()) continue;
+        for (int slotIndex = 0; slotIndex < menu.slots.size(); slotIndex++) {
+            Slot slot = menu.slots.get(slotIndex);
+            if (isPlayerInventorySlot(player, menu, slotIndex, slot)) continue;
             if (hasCrafting && isResultSlot(slot)) continue;
             if (slot.container instanceof CraftingContainer) continue;
 
@@ -144,8 +149,9 @@ final class ContainerTransferLogic {
 
         boolean hasCrafting = hasCraftingContainer(menu);
 
-        for (Slot slot : menu.slots) {
-            if (slot.container == player.getInventory()) continue;
+        for (int slotIndex = 0; slotIndex < menu.slots.size(); slotIndex++) {
+            Slot slot = menu.slots.get(slotIndex);
+            if (isPlayerInventorySlot(player, menu, slotIndex, slot)) continue;
             if (hasCrafting && isResultSlot(slot)) continue;
             if (slot.container instanceof CraftingContainer) continue;
 
@@ -340,6 +346,22 @@ final class ContainerTransferLogic {
     private static boolean isBackpackMenu(AbstractContainerMenu menu) {
         String name = menu.getClass().getName();
         return name.contains(ModIds.SOPHISTICATED_BACKPACKS) || name.contains("sophisticated");
+    }
+
+    private static boolean isPlayerInventorySlot(ServerPlayer player, AbstractContainerMenu menu,
+                                                 int slotIndex, Slot slot) {
+        if (slot.container == player.getInventory()) return true;
+
+        // Tetra wraps the player's inventory in InvWrapper, so container identity cannot
+        // distinguish it from workbench storage. WorkbenchContainer always appends the
+        // 27 main-inventory and 9 hotbar slots after its own slots.
+        return isTetraWorkbenchPlayerSlot(menu.getClass().getName(), slotIndex, menu.slots.size());
+    }
+
+    static boolean isTetraWorkbenchPlayerSlot(String menuClassName, int slotIndex, int slotCount) {
+        return TETRA_WORKBENCH_MENU.equals(menuClassName)
+                && slotCount >= PLAYER_MAIN_INVENTORY_SLOTS
+                && slotIndex >= slotCount - PLAYER_MAIN_INVENTORY_SLOTS;
     }
 
     // Skip result/output slots so containers where input and output

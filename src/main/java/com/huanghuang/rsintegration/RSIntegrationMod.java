@@ -420,6 +420,9 @@ public final class RSIntegrationMod {
                 () -> () -> MinecraftForge.EVENT_BUS.register(BindingTooltipHandler.class));
         // Crafting
         BatchCraftNetworkHandler.register();
+        com.huanghuang.rsintegration.villager.VillagerRestockNetworkHandler.register();
+        DistExecutor.safeRunWhenOn(Dist.CLIENT,
+                () -> com.huanghuang.rsintegration.villager.client.VillagerRestockClient::init);
         ConfigSyncPacket.register();
 
         // Altar binding registry (BINDINGS cache + scan caches)

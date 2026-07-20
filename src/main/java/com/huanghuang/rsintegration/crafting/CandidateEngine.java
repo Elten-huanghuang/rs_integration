@@ -155,20 +155,7 @@ final class CandidateEngine {
         result.sort((a, b) -> {
             ResourceLocation idA = a.recipe().getId();
             ResourceLocation idB = b.recipe().getId();
-
-            int cmp = Integer.compare(scoreCache.get(idB), scoreCache.get(idA));
-            if (cmp != 0) return cmp;
-
-            // Tiebreak: prefer recipes whose ingredients are available
-            cmp = Integer.compare(availCache.get(idB), availCache.get(idA));
-            if (cmp != 0) return cmp;
-
-            // Final tiebreak: prefer vanilla/minecraft recipes
-            boolean aMc = "minecraft".equals(idA.getNamespace());
-            boolean bMc = "minecraft".equals(idB.getNamespace());
-            if (aMc && !bMc) return -1;
-            if (bMc && !aMc) return 1;
-            return 0;
+            return compareCandidateIds(idA, idB, scoreCache, availCache);
         });
 
         if (isTag) {
@@ -187,6 +174,26 @@ final class CandidateEngine {
         }
 
         return result;
+    }
+
+    static int compareCandidateIds(ResourceLocation idA, ResourceLocation idB,
+                                   Map<ResourceLocation, Integer> scoreCache,
+                                   Map<ResourceLocation, Integer> availCache) {
+        // Scoring intentionally stops on timeout. Keep the unscored tail
+        // neutral instead of unboxing a missing cache value and throwing NPE.
+        int cmp = Integer.compare(scoreCache.getOrDefault(idB, 0),
+                scoreCache.getOrDefault(idA, 0));
+        if (cmp != 0) return cmp;
+
+        cmp = Integer.compare(availCache.getOrDefault(idB, 0),
+                availCache.getOrDefault(idA, 0));
+        if (cmp != 0) return cmp;
+
+        boolean aMc = "minecraft".equals(idA.getNamespace());
+        boolean bMc = "minecraft".equals(idB.getNamespace());
+        if (aMc && !bMc) return -1;
+        if (bMc && !aMc) return 1;
+        return 0;
     }
 
     private static void logDiag(List<CandidateDiagnostic> diag, @javax.annotation.Nullable Item item,

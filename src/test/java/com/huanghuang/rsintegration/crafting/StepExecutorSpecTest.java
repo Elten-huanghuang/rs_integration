@@ -53,4 +53,21 @@ class StepExecutorSpecTest extends BootstrapTest {
                         .map(i -> CraftPacketUtils.craftingGridSlot(recipe, i))
                         .boxed().toList());
     }
+
+    @Test
+    void rootResolutionCoalescesSlotsAndKeepsCatalystsUnscaled() {
+        Ingredient nuggets = Ingredient.of(Items.IRON_NUGGET);
+        Ingredient block = Ingredient.of(Items.IRON_BLOCK);
+        List<IngredientSpec> roots = new java.util.ArrayList<>();
+        for (int i = 0; i < 9; i++) roots.add(new IngredientSpec(nuggets, 1));
+        roots.add(new IngredientSpec(block, 1, DemandRole.CATALYST));
+
+        List<IngredientSpec> merged = CraftingResolver.coalesceRootSpecs(roots);
+
+        assertEquals(2, merged.size());
+        assertEquals(9, merged.get(0).count());
+        assertEquals(DemandRole.CONSUMED, merged.get(0).role());
+        assertEquals(1, CraftPacketUtils.requiredCount(merged.get(1), 64));
+        assertEquals(DemandRole.CATALYST, merged.get(1).role());
+    }
 }

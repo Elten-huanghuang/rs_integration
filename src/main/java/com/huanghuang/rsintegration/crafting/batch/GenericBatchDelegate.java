@@ -2,8 +2,6 @@ package com.huanghuang.rsintegration.crafting.batch;
 
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 
-import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
-
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
@@ -88,14 +86,9 @@ public final class GenericBatchDelegate extends AbstractBatchDelegate {
             return false;
         }
 
-        // Capture secondary outputs early.
-        // For CraftingRecipe, getRecipeRemainders (Forge API) handles all
-        // remainders — reflection-based scanning would duplicate them.
-        if (recipe instanceof net.minecraft.world.item.crafting.CraftingRecipe cr) {
-            for (ItemStack remainder : CraftPacketUtils.getRecipeRemainders(cr)) {
-                if (!remainder.isEmpty()) this.pendingSecondary.add(remainder.copy());
-            }
-        } else {
+        // Non-crafting secondaries do not depend on a crafting grid. Crafting
+        // remainders are captured after the actual NBT-bearing inputs exist.
+        if (!(recipe instanceof net.minecraft.world.item.crafting.CraftingRecipe)) {
             this.pendingSecondary.addAll(
                     ModRecipeHandlers.tryGetSecondaryOutputs(
                             recipe, player.serverLevel().registryAccess()));
@@ -104,7 +97,10 @@ public final class GenericBatchDelegate extends AbstractBatchDelegate {
         // Phase 2: reserve all ingredients via ledger
         List<ItemStack> templates = new ArrayList<>();
         for (IngredientSpec spec : specs) {
-            if (spec.isEmpty()) continue;
+            if (spec.isEmpty()) {
+                templates.add(ItemStack.EMPTY);
+                continue;
+            }
             ItemStack stack = CraftPacketUtils.ensureMaterialAvailable(player, myDim, myPos,
                     spec.ingredient(), spec.count(), ledger);
             if (stack.isEmpty()) {
@@ -126,11 +122,7 @@ public final class GenericBatchDelegate extends AbstractBatchDelegate {
         // a bare template — any NBT from inputs (backpack contents, blade stats,
         // enchantments) would be silently discarded.
         if (recipe instanceof net.minecraft.world.item.crafting.CraftingRecipe cr) {
-            ItemStack[] consumed = templates.toArray(new ItemStack[0]);
-            ItemStack assembled = CraftPacketUtils.assembleCraftingOutput(cr, consumed, player);
-            if (!assembled.isEmpty()) {
-                this.pendingResult = assembled;
-            }
+            captureActualCraftingOutputs(cr, templates, player);
         }
 
         // Extracted items have been consumed — discard templates
@@ -172,15 +164,11 @@ public final class GenericBatchDelegate extends AbstractBatchDelegate {
             return false;
         }
 
-        // Capture secondary outputs (remainders, extra products) so they
-        // are not voided.  The chain collects them via getPendingSecondary().
-        // For CraftingRecipe, getRecipeRemainders (Forge API) handles all
-        // remainders — reflection-based scanning would duplicate them.
+        // Materials are in exact spec order, including empty shaped slots.
+        // Use them for NBT-dependent assembly and durability/reuse remainders.
         if (player != null) {
             if (recipe instanceof net.minecraft.world.item.crafting.CraftingRecipe cr) {
-                for (ItemStack remainder : CraftPacketUtils.getRecipeRemainders(cr)) {
-                    if (!remainder.isEmpty()) this.pendingSecondary.add(remainder.copy());
-                }
+                captureActualCraftingOutputs(cr, materials, player);
             } else {
                 this.pendingSecondary.addAll(
                         ModRecipeHandlers.tryGetSecondaryOutputs(
@@ -193,6 +181,23 @@ public final class GenericBatchDelegate extends AbstractBatchDelegate {
         // collects the result via collectResult().
         this.craftDone = true;
         return true;
+    }
+
+    private void captureActualCraftingOutputs(
+            net.minecraft.world.item.crafting.CraftingRecipe craftingRecipe,
+            List<ItemStack> materials, ServerPlayer player) {
+        ItemStack[] consumed = materials.stream()
+                .map(stack -> stack == null ? ItemStack.EMPTY : stack.copy())
+                .toArray(ItemStack[]::new);
+        ItemStack assembled = CraftPacketUtils.assembleCraftingOutput(
+                craftingRecipe, consumed, player);
+        if (!assembled.isEmpty()) pendingResult = assembled;
+        for (ItemStack remainder : CraftPacketUtils.getRecipeRemainders(
+                craftingRecipe, consumed)) {
+            if (remainder != null && !remainder.isEmpty()) {
+                pendingSecondary.add(remainder.copy());
+            }
+        }
     }
 
     @Override

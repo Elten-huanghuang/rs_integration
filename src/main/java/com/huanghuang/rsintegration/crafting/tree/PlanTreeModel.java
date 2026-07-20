@@ -41,7 +41,8 @@ public final class PlanTreeModel {
      * PlanResponse assigns reuse materials (e.g. iron ingot) an ambiguous depth.
      */
     public static PlanTreeModel from(PlanResponse plan) {
-        if (plan.graph() != null && !plan.graph().nodes().isEmpty()) {
+        if (plan.graph() != null
+                && (!plan.graph().nodes().isEmpty() || !plan.graph().roots().isEmpty())) {
             return fromGraph(plan);
         }
         return fromLegacySteps(plan);

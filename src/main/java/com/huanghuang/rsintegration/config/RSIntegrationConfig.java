@@ -295,7 +295,7 @@ public final class RSIntegrationConfig {
                 .comment("Whether the backpack's Deposit Upgrade can push items into the RS network.",
                         "Enabled (true): deposit upgrade interacts with RS grids.",
                         "Disabled (false): deposit upgrade works as vanilla Sophisticated Backpacks.")
-                .define("depositUpgradeRS", false);
+                .define("depositUpgradeRS", true);
         ENABLE_MAJ_ACCESSORY_COMPRESSION = c
                 .comment("Enable Majrusz's Accessories compression via the Compacting Upgrade.",
                         "When enabled, the Compacting Upgrade also auto-combines MAJ accessories",

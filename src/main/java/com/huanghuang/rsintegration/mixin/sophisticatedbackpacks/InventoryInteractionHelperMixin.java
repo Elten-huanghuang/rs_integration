@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.mixin.sophisticatedbackpacks;
 
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.refinedmods.refinedstorage.api.network.INetwork;
+import com.refinedmods.refinedstorage.api.network.security.Permission;
 import com.refinedmods.refinedstorage.api.util.Action;
 import com.refinedmods.refinedstorage.apiimpl.network.node.GridNetworkNode;
 import com.refinedmods.refinedstorage.blockentity.grid.GridBlockEntity;
@@ -51,24 +52,28 @@ public class InventoryInteractionHelperMixin {
             return;
         }
         INetwork network = node.getNetwork();
-        if (network == null && !world.isClientSide) {
+        if (!world.isClientSide && (network == null || !network.canRun()
+                || network.getSecurityManager() != null
+                && !network.getSecurityManager().hasPermission(Permission.INSERT, player))) {
             cir.setReturnValue(false);
             return;
         }
         Boolean b = backpack.getCapability(CapabilityBackpackWrapper.getCapabilityInstance()).map(wrapper -> {
-            List<IItemHandlerInteractionUpgrade> wrappers =
+            List<IItemHandlerInteractionUpgrade> interactionUpgrades =
                     wrapper.getUpgradeHandler().getWrappersThatImplement(IItemHandlerInteractionUpgrade.class);
-            if (wrappers.isEmpty()) {
+            List<DepositUpgradeWrapper> depositUpgrades = interactionUpgrades.stream()
+                    .filter(DepositUpgradeWrapper.class::isInstance)
+                    .map(DepositUpgradeWrapper.class::cast)
+                    .filter(DepositUpgradeWrapper::isEnabled)
+                    .toList();
+            if (depositUpgrades.isEmpty()) {
                 return false;
             }
-            wrappers.forEach(upgrade -> {
-                if (upgrade instanceof DepositUpgradeWrapper) {
-                    DepositUpgradeWrapper depositUpgradeWrapper = (DepositUpgradeWrapper) upgrade;
-                    if (world instanceof ServerLevel) {
-                        handleAutoOutput(network, wrapper, depositUpgradeWrapper, player);
-                    }
+            if (world instanceof ServerLevel) {
+                for (DepositUpgradeWrapper depositUpgrade : depositUpgrades) {
+                    handleAutoOutput(network, wrapper, depositUpgrade, player);
                 }
-            });
+            }
             return true;
         }).orElse(false);
         cir.setReturnValue(b);
@@ -84,11 +89,23 @@ public class InventoryInteractionHelperMixin {
         for (int i = 0; i < backpackHandler.getSlots(); ++i) {
             ItemStack stack = backpackHandler.getStackInSlot(i);
             if (stack.isEmpty() || !upgrade.getFilterLogic().matchesFilter(stack)) continue;
-            network.getItemStorageTracker().changed(player, stack.copy());
-            ItemStack remainder = network.insertItem(stack, stack.getCount(), Action.PERFORM);
-            if (remainder.getCount() == stack.getCount()) continue;
-            s2 += stack.getCount() - remainder.getCount();
-            backpackHandler.extractItem(i, stack.getCount() - remainder.getCount(), false);
+            int originalCount = stack.getCount();
+            ItemStack input = stack.copy();
+            ItemStack simulatedRemainder = network.insertItem(
+                    input.copy(), originalCount, Action.SIMULATE);
+            int accepted = originalCount - simulatedRemainder.getCount();
+            if (accepted <= 0) continue;
+
+            // RS updates its own tracker before insertion, so cache listeners see
+            // the new timestamp while processing the synchronous storage delta.
+            var tracker = network.getItemStorageTracker();
+            if (tracker != null) tracker.changed(player, input.copyWithCount(accepted));
+
+            ItemStack remainder = network.insertItem(input, originalCount, Action.PERFORM);
+            int inserted = originalCount - remainder.getCount();
+            if (inserted <= 0) continue;
+            s2 += inserted;
+            backpackHandler.extractItem(i, inserted, false);
             ++s1;
             transferred = true;
         }
