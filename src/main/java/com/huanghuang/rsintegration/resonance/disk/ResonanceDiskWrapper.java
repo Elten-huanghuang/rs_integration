@@ -8,6 +8,8 @@ import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.ai.attributes.Attributes;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -28,6 +30,27 @@ public final class ResonanceDiskWrapper implements IStorageDisk<ItemStack> {
         this.delegate = delegate;
     }
 
+    public static boolean isLogicallyNonStackable(ItemStack stack) {
+        if (stack.isEmpty()) return false;
+        if (stack.getMaxStackSize() <= 1 || stack.isDamageableItem()) return true;
+
+        // Some modded weapons incorrectly advertise a stack size above one.
+        // Main-hand combat attributes are a more reliable cross-mod signal.
+        try {
+            var modifiers = stack.getAttributeModifiers(EquipmentSlot.MAINHAND);
+            if (modifiers.containsKey(Attributes.ATTACK_DAMAGE)
+                    || modifiers.containsKey(Attributes.ATTACK_SPEED)) return true;
+        } catch (RuntimeException ignored) {
+            // A broken third-party attribute provider must not break disk access.
+        }
+
+        // SlashBlade can expose its combat state through capabilities instead of
+        // vanilla attributes, so retain an explicit hierarchy fallback.
+        for (Class<?> type = stack.getItem().getClass(); type != null; type = type.getSuperclass()) {
+            if ("mods.flammpfeil.slashblade.item.ItemSlashBlade".equals(type.getName())) return true;
+        }
+        return false;
+    }
     public IStorageDisk<ItemStack> delegate() {
         return delegate;
     }
@@ -66,6 +89,14 @@ public final class ResonanceDiskWrapper implements IStorageDisk<ItemStack> {
     public ItemStack manualExtract(int slot, ItemStack template, int size, int flags, Action action) {
         ItemStack tagged = template.copy();
         tagged.getOrCreateTag().putInt(RSI_SLOT_TAG, slot);
+        for (ItemStack stored : delegate.getStacks()) {
+            CompoundTag tag = stored.getTag();
+            if (tag != null && tag.getInt(RSI_SLOT_TAG) == slot) {
+                ItemStack probe = stored.copy();
+                rsi$stripSlotTag(probe);
+                if (ItemStack.isSameItemSameTags(probe, template)) { tagged = stored.copy(); break; }
+            }
+        }
         ItemStack result = delegate.extract(tagged, size, flags, action);
         if (!result.isEmpty()) rsi$stripSlotTag(result);
         return result;
@@ -88,6 +119,8 @@ public final class ResonanceDiskWrapper implements IStorageDisk<ItemStack> {
         ItemStack oldStack = sanitized(previous);
         ItemStack newStack = sanitized(requested);
         if (sameStack(oldStack, newStack)) return SlotMutationResult.SUCCESS;
+        if (!newStack.isEmpty() && newStack.getCount() > (isLogicallyNonStackable(newStack) ? 1 : newStack.getMaxStackSize()))
+            return SlotMutationResult.REJECTED;
 
         if (!oldStack.isEmpty() && !newStack.isEmpty()
                 && ItemStack.isSameItemSameTags(oldStack, newStack)) {

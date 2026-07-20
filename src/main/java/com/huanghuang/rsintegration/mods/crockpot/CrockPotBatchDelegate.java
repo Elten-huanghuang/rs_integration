@@ -471,9 +471,23 @@ public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
                     break;
                 }
             }
+            boolean availableNow = !pick.isEmpty();
+            if (!availableNow) {
+                for (ItemStack option : spec.ingredient().getItems()) {
+                    if (!option.isEmpty() && option.getItem() != Items.AIR) {
+                        pick = option;
+                        break;
+                    }
+                }
+            }
             if (pick.isEmpty()) return null;
-            avail.merge(MaterialKey.of(pick), -spec.count(), Integer::sum);
-            fixedSpecs.add(new IngredientSpec(concreteIngredient(pick), spec.count(), spec.role()));
+            if (availableNow) {
+                avail.merge(MaterialKey.of(pick), -spec.count(), Integer::sum);
+                fixedSpecs.add(new IngredientSpec(concreteIngredient(pick), spec.count(), spec.role()));
+            } else {
+                // Preserve the requirement so CraftingResolver can recursively produce it.
+                fixedSpecs.add(spec);
+            }
             fixedStacks.add(pick.copyWithCount(spec.count()));
             usedSlots += spec.count();
         }
@@ -522,8 +536,26 @@ public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
                                        Map<Item, Integer> neededCounts,
                                        int repeatCount) {
         if (!"crockpot".equals(recipeModTypeId)) return;
-        CraftPacketUtils.addFuelToMaterials(
-                itemAvailable, itemSource, neededCounts, repeatCount);
+
+        // Match recursive-plan fuel selection to runtime auto-refueling.
+        Item preferred = null;
+        for (String id : RSIntegrationConfig.CROCKPOT_FUEL_PRIORITY.get()) {
+            ResourceLocation rl = ResourceLocation.tryParse(id);
+            if (rl == null) continue;
+            Item item = net.minecraftforge.registries.ForgeRegistries.ITEMS.getValue(rl);
+            if (item != null && item != Items.AIR && itemAvailable.getOrDefault(item, 0) > 0
+                    && new ItemStack(item).getBurnTime(null) > 0) {
+                preferred = item;
+                break;
+            }
+        }
+        if (preferred != null) {
+            int fuelNeeded = Math.max(1, repeatCount / 4);
+            neededCounts.merge(preferred, fuelNeeded, Integer::sum);
+            itemSource.putIfAbsent(preferred, net.minecraft.world.item.crafting.Ingredient.of(preferred));
+            return;
+        }
+        CraftPacketUtils.addFuelToMaterials(itemAvailable, itemSource, neededCounts, repeatCount);
     }
 
     public static List<String> getPlanWarnings(ServerPlayer player, Recipe<?> recipe,

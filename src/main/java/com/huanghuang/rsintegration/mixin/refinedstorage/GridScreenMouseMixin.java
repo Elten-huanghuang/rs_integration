@@ -37,8 +37,20 @@ public abstract class GridScreenMouseMixin {
     private final List<ItemStack> rsi$swipedItems = new ArrayList<>();
 
     static {
+        MinecraftForge.EVENT_BUS.addListener(EventPriority.HIGHEST,
+                GridScreenMouseMixin::onMousePressedPre);
         MinecraftForge.EVENT_BUS.addListener(EventPriority.HIGH,
                 GridScreenMouseMixin::onMouseDraggedPre);
+    }
+
+    @Unique
+    private static void onMousePressedPre(ScreenEvent.MouseButtonPressed.Pre event) {
+        if (!(event.getScreen() instanceof GridScreen)) return;
+        if (!MachineHubInputHandler.isConsumingInput()) return;
+        if (!MachineHub.isWithinBounds((int) event.getMouseX(), (int) event.getMouseY())) return;
+
+        MachineHubInputHandler.mouseClicked(event.getMouseX(), event.getMouseY(), event.getButton());
+        event.setCanceled(true);
     }
 
     @Unique

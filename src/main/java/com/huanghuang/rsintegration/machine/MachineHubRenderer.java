@@ -152,6 +152,8 @@ public final class MachineHubRenderer {
         MachineHub.setScrollOffset(scrollOffset);
 
         int hovered = -1;
+        // Clear stale hit target when the mouse leaves a machine slot.
+        MachineHub.setHoveredIndex(-1);
 
         for (int i = 0; i < machines.size(); i++) {
             BindingInfo info = machines.get(i);

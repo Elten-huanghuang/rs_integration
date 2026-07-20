@@ -14,6 +14,7 @@ public class ResonanceDiskInventory implements Container {
     private final ResonanceDiskWrapper disk;
     private final ItemStack[] slots = new ItemStack[SLOTS];
     private final ItemStack[] committed = new ItemStack[SLOTS];
+    private final int[] backingSlots = new int[SLOTS];
     private boolean reconciling;
     private boolean reloadedAfterRecoveryFailure;
 
@@ -22,6 +23,7 @@ public class ResonanceDiskInventory implements Container {
         for (int i = 0; i < SLOTS; i++) {
             slots[i] = ItemStack.EMPTY;
             committed[i] = ItemStack.EMPTY;
+            backingSlots[i] = i;
         }
         loadFromDisk();
     }
@@ -38,7 +40,8 @@ public class ResonanceDiskInventory implements Container {
             ResonanceDiskWrapper.rsi$stripSlotTag(display);
 
             int slot = designated;
-            if (slot < 0 || slot >= SLOTS || !slots[slot].isEmpty()) {
+            boolean remapped = slot < 0 || slot >= SLOTS || !slots[slot].isEmpty();
+            if (remapped) {
                 slot = nextEmpty();
                 migrated++;
             }
@@ -48,6 +51,7 @@ public class ResonanceDiskInventory implements Container {
                         disk.delegate().getStacks().size(), SLOTS);
                 break;
             }
+            backingSlots[slot] = designated >= 0 && designated < SLOTS ? designated : slot;
             slots[slot] = display.copy();
             committed[slot] = display.copy();
             loaded++;
@@ -81,7 +85,8 @@ public class ResonanceDiskInventory implements Container {
     public ItemStack removeItem(int index, int count) {
         if (count <= 0 || slots[index].isEmpty()) return ItemStack.EMPTY;
         ItemStack previous = committed[index].copy();
-        int removedCount = Math.min(count, previous.getCount());
+        int removedCount = ResonanceDiskWrapper.isLogicallyNonStackable(previous) ? 1
+                : Math.min(count, previous.getCount());
         ItemStack requested = previous.copy();
         requested.shrink(removedCount);
         if (requested.isEmpty()) requested = ItemStack.EMPTY;
@@ -107,7 +112,8 @@ public class ResonanceDiskInventory implements Container {
     @Override
     public void setItem(int index, ItemStack stack) {
         ItemStack requested = sanitize(stack);
-        int limit = Math.min(getMaxStackSize(), requested.getMaxStackSize());
+        int limit = ResonanceDiskWrapper.isLogicallyNonStackable(requested) ? 1
+                : Math.min(getMaxStackSize(), requested.getMaxStackSize());
         if (!requested.isEmpty() && requested.getCount() > limit) requested.setCount(limit);
 
         ItemStack previous = committed[index].copy();
@@ -156,6 +162,7 @@ public class ResonanceDiskInventory implements Container {
             if (commit(i, previous, ItemStack.EMPTY)) {
                 slots[i] = ItemStack.EMPTY;
                 committed[i] = ItemStack.EMPTY;
+            backingSlots[i] = i;
             }
         }
     }
@@ -164,7 +171,10 @@ public class ResonanceDiskInventory implements Container {
         if (stack.isEmpty()) return 0;
         ItemStack current = committed[index];
         if (!current.isEmpty() && !ItemStack.isSameItemSameTags(current, sanitize(stack))) return 0;
-        int stackSpace = stack.getMaxStackSize() - current.getCount();
+        // Non-stackable items (e.g. SlashBlade) must occupy one logical slot each.
+        if (!current.isEmpty() && ResonanceDiskWrapper.isLogicallyNonStackable(stack)) return 0;
+        int stackSpace = (ResonanceDiskWrapper.isLogicallyNonStackable(stack) ? 1 : stack.getMaxStackSize())
+                - current.getCount();
         int capacitySpace = disk.getCapacity() - disk.getStored();
         int request = Math.min(stack.getCount(), Math.min(stackSpace, capacitySpace));
         return disk.simulateInsertCount(index, stack, Math.max(0, request));
@@ -178,7 +188,7 @@ public class ResonanceDiskInventory implements Container {
         reloadedAfterRecoveryFailure = false;
         if (sameStack(previous, requested)) return true;
         ResonanceDiskWrapper.SlotMutationResult result =
-                disk.reconcileSlot(index, previous, requested);
+                disk.reconcileSlot(backingSlots[index], previous, requested);
         if (result == ResonanceDiskWrapper.SlotMutationResult.RECOVERY_FAILED) {
             RSIntegrationMod.LOGGER.error("[RSI-Backpack] Slot {} mutation and recovery failed: {} x{} -> {} x{}; reloading disk state",
                     index, previous.getItem(), previous.getCount(), requested.getItem(), requested.getCount());
@@ -195,6 +205,7 @@ public class ResonanceDiskInventory implements Container {
         for (int i = 0; i < SLOTS; i++) {
             slots[i] = ItemStack.EMPTY;
             committed[i] = ItemStack.EMPTY;
+            backingSlots[i] = i;
         }
         loadFromDisk();
     }

@@ -271,7 +271,7 @@ nineSwordMaxCount = 9                   # 九剑书最大有效剑数上限
 enableContainerTransfer = true
 
 [autoEat]
-requiredEffect = "crockpot:gnaws_gift"     # 自动进食需要的药水效果（空字符串 = 无需效果）
+requiredEffect = ""     # 自动进食需要的药水效果（空字符串 = 无需效果）
 perItemCost = 1                            # 每次进食从网络中消耗的物品数量
 
 [sidePanel]

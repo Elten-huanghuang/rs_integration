@@ -1,9 +1,8 @@
 package com.huanghuang.rsintegration.mods.farmingforblockheads;
 
-import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
-
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
+import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.mods.farmingforblockheads.MarketRecipeWrapper;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
@@ -114,8 +113,14 @@ public final class MarketBatchDelegate extends AbstractBatchDelegate {
         this.player = player;
         this.done = false;
 
-        // Check that the block at pos is a Market
-        ServerLevel level = player.serverLevel();
+        // Resolve the bound Market in its recorded dimension.
+        ServerLevel level = CraftPacketUtils.resolveLevel(player.server, dim, player);
+        if (level == null) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Market] validateAndInit: dimension unavailable: {}", dim);
+            return false;
+        }
+        setMachineDim(level.dimension().location());
+        setMachineServer(player.server);
         if (pos == null) {
             RSIntegrationMod.LOGGER.warn("[RSI-Market] validateAndInit: pos is null");
             return false;
