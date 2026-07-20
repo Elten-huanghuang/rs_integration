@@ -630,6 +630,8 @@
   "rsi.youkaishomecoming.steamer_water_warning": "§7Steamer pot must contain water to steam items.",
   "rsi.youkaishomecoming.rack_invalid": "§cSteamer rack structure is invalid or missing the lid. Place racks and a lid on top of the steamer pot.",
   "rsi.youkaishomecoming.steamer_rack_warning": "§7Requires steamer racks and a steamer lid on top of the pot.",
+  "rsi.youkaishomecoming.lid_missing": "§cNo steamer lid detected. Place a steamer lid above the top rack.",
+  "rsi.youkaishomecoming.lid_warning": "§7Requires a steamer lid above the top rack during operation.",
   "rsi.youkaishomecoming.steamer_full": "§cAll steamer slots are full — wait for items to finish steaming first.",
   "rsi.batch.mod.youkaishomecoming_moka": "Moka Pot",
   "rsi.batch.mod.youkaishomecoming_steamer": "Steamer Pot",

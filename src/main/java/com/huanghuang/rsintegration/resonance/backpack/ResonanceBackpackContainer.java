@@ -87,13 +87,22 @@ public class ResonanceBackpackContainer extends AbstractContainerMenu {
 
         ItemStack original = stack.copy();
         if (index < DISK_SLOTS) {
-            if (!moveItemStackTo(stack, DISK_SLOTS, DISK_SLOTS + INV_SLOTS, true))
-                return ItemStack.EMPTY;
-        } else {
-            if (!moveItemStackTo(stack, 0, DISK_SLOTS, false))
-                return ItemStack.EMPTY;
+            // Debit the disk before crediting the player. Mutating the live slot stack
+            // first lets a rejected disk write duplicate everything already moved.
+            Slot source = this.slots.get(index);
+            int debitCount = ResonanceDiskWrapper.isLogicallyNonStackable(original)
+                    ? 1 : original.getCount();
+            ItemStack debited = source.remove(debitCount);
+            if (debited.isEmpty()) return ItemStack.EMPTY;
+            ItemStack remainder = debited.copy();
+            moveItemStackTo(remainder, DISK_SLOTS, DISK_SLOTS + INV_SLOTS, true);
+            if (!remainder.isEmpty()) source.set(remainder);
+            if (remainder.getCount() == debited.getCount()) return ItemStack.EMPTY;
+            source.setChanged();
+            return debited.copyWithCount(debited.getCount() - remainder.getCount());
         }
 
+        if (!moveItemStackTo(stack, 0, DISK_SLOTS, false)) return ItemStack.EMPTY;
         if (stack.isEmpty()) this.slots.get(index).set(ItemStack.EMPTY);
         else this.slots.get(index).setChanged();
         return original;

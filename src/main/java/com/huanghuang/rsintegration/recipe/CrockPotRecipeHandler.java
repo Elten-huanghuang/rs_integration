@@ -43,6 +43,19 @@ public final class CrockPotRecipeHandler extends AbstractRecipeHandler {
 
     @Override
     public ItemStack getResultItem(Recipe<?> recipe, RegistryAccess access) {
+        // CrockPotCookingRecipe exposes its real output through getResult();
+        try {
+            Method getResult = recipe.getClass().getMethod("getResult");
+            Object value = getResult.invoke(recipe);
+            if (value instanceof ItemStack stack && !stack.isEmpty()) return stack.copy();
+            ResourceLocation id = value instanceof ResourceLocation rl ? rl : value instanceof String text ? ResourceLocation.tryParse(text) : null;
+            if (id != null) {
+                Item item = ForgeRegistries.ITEMS.getValue(id);
+                if (item != null && item != Items.AIR) return new ItemStack(item);
+            }
+        } catch (ReflectiveOperationException ignored) {
+            // Fall through for older CrockPot builds.
+        }
         return ModRecipeHandlers.tryGetResultItem(recipe, access);
     }
 

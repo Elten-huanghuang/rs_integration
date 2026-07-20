@@ -639,6 +639,8 @@
   "rsi.youkaishomecoming.steamer_water_warning": "§7蒸锅中需要有水才能蒸制物品",
   "rsi.youkaishomecoming.rack_invalid": "§c蒸笼结构不完整或缺少蒸笼盖，请在蒸锅上方放置蒸笼和蒸笼盖",
   "rsi.youkaishomecoming.steamer_rack_warning": "§7需要在蒸锅上方放置蒸笼和蒸笼盖",
+  "rsi.youkaishomecoming.lid_missing": "§c未检测到蒸笼盖，请在最上层蒸笼上方放置蒸笼盖。",
+  "rsi.youkaishomecoming.lid_warning": "§7蒸锅运行时需要在最上层蒸笼上方放置蒸笼盖。",
   "rsi.youkaishomecoming.steamer_full": "§c蒸锅和蒸笼所有槽位已满 — 请等待蒸制完成后再试",
   "rsi.batch.mod.youkaishomecoming_moka": "摩卡壶",
   "rsi.batch.mod.youkaishomecoming_steamer": "蒸锅",

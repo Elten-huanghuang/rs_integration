@@ -320,8 +320,11 @@ public final class CraftingResolver {
     }
 
     private static ItemStack firstDisplayStack(Ingredient ingredient) {
-        ItemStack[] display = ingredient.getItems();
-        return display.length == 0 ? ItemStack.EMPTY : display[0].copyWithCount(1);
+        for (ItemStack stack : ingredient.getItems()) {
+            if (stack != null && !stack.isEmpty() && stack.getItem() != net.minecraft.world.item.Items.AIR)
+                return stack.copyWithCount(1);
+        }
+        return ItemStack.EMPTY;
     }
 
     /** Vanilla-only variant that returns flat recipe-id list. */
