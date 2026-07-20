@@ -85,10 +85,13 @@ public final class FtbQuestSubmissionExecutor {
                 ItemStack remainder = task.insert(data, entry.stack(), false);
                 long accepted = data.getProgress(task) - before;
                 long consumed = entry.stack().getCount() - remainder.getCount();
+                // insert() has already mutated progress and consumed its accepted
+                // portion. Settle the physical outcome before validating it so
+                // an invariant failure cannot refund already-consumed items.
+                escrow.settle(entry, remainder);
                 if (accepted <= 0L || consumed != accepted) {
                     throw new IllegalStateException("FTB Quest task rejected escrowed items: " + task.getId());
                 }
-                escrow.settle(entry, remainder);
             }
         }
 

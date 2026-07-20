@@ -708,4 +708,10 @@
   "rsi.autoeat.error.network_unavailable": "The RS network is not ready",
   "rsi.autoeat.error.diet_tracker_missing": "Diet tracker not found",
   "rsi.autoeat.error.diet_no_groups": "No Diet nutrition groups"
+,
+  "rsi.villager.restock.complete": "Restocked to maximum (inventory: %s, RS: %s)",
+  "rsi.villager.restock.partial": "Partially restocked; missing items added to JEI bookmarks",
+  "rsi.villager.restock.no_network": "No RS network; missing items added to JEI bookmarks",
+  "rsi.villager.restock.no_permission": "No RS extract permission; missing items added to JEI bookmarks",
+  "rsi.villager.restock.invalid": "The selected trade is no longer available"
 }

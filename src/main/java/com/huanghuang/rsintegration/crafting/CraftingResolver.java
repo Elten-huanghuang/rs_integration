@@ -268,7 +268,7 @@ public final class CraftingResolver {
                 missingOut);
 
         EdgeTracker edges = new EdgeTracker();
-        for (IngredientSpec spec : needed) {
+        for (IngredientSpec spec : coalesceRootSpecs(needed)) {
             if (spec.isEmpty()) continue;
             if (!ensureIngredient(spec.ingredient(), spec.count(), ctx, 0, edges)) {
                 if (missingOut != null) {
@@ -294,8 +294,9 @@ public final class CraftingResolver {
         EdgeTracker edges = new EdgeTracker();
         List<RootDemand> roots = new ArrayList<>();
 
-        for (int rootIndex = 0; rootIndex < needed.size(); rootIndex++) {
-            IngredientSpec spec = needed.get(rootIndex);
+        List<IngredientSpec> rootsToResolve = coalesceRootSpecs(needed);
+        for (int rootIndex = 0; rootIndex < rootsToResolve.size(); rootIndex++) {
+            IngredientSpec spec = rootsToResolve.get(rootIndex);
             if (spec.isEmpty()) continue;
             List<ResolutionContext.SupplySlice> consumed = new ArrayList<>();
             boolean resolved = ensureIngredient(spec.ingredient(), spec.count(), ctx, 0, edges, null, consumed);
@@ -336,7 +337,7 @@ public final class CraftingResolver {
                 buildPreferredRecipes(level));
 
         EdgeTracker edges = new EdgeTracker();
-        for (IngredientSpec spec : needed) {
+        for (IngredientSpec spec : coalesceRootSpecs(needed)) {
             if (spec.isEmpty()) continue;
             if (!ensureIngredient(spec.ingredient(), spec.count(), ctx, 0, edges)) {
                 if (missingOut != null) {
@@ -534,6 +535,13 @@ public final class CraftingResolver {
                 continue;
             }
 
+            StackKey outKey = StackKey.of(a.output, a.output.hasTag());
+            if (ctx.resolvingOutputs.contains(outKey)) {
+                ctx.diag("ensureIngredient SKIP " + a.entry.recipe().getId()
+                        + ": ancestor output cycle detected");
+                continue;
+            }
+
             if (requiresMissingSelfInput(a.entry, a.output, ctx)) {
                 ctx.diag("ensureIngredient SKIP " + a.entry.recipe().getId() + ": self-input missing");
                 continue;
@@ -542,7 +550,6 @@ public final class CraftingResolver {
             // Ping-pong guard using StackKey (Item + NBT) to correctly distinguish
             // NBT-differentiated items like TACZ attachments (all tacz:attachment).
             Set<StackKey> inKeys = getRecipeInputKeys(a.entry.recipe(), ctx.level.registryAccess());
-            StackKey outKey = StackKey.of(a.output, a.output.hasTag());
             boolean isPingPong = false;
             for (StackKey inKey : inKeys) {
                 if (edges.containsReverse(inKey, outKey)) {
@@ -561,14 +568,19 @@ public final class CraftingResolver {
             ctx.beginUndo();
             edges.beginUndo();
             ctx.resolving.add(bk);
+            ctx.resolvingOutputs.add(outKey);
 
-            for (StackKey inKey : inKeys) {
-                edges.addEdge(inKey, outKey);
+            boolean allOk;
+            try {
+                for (StackKey inKey : inKeys) {
+                    edges.addEdge(inKey, outKey);
+                }
+                allOk = StepExecutor.craftBatched(
+                        a.entry, ctx, depth, altIds, altModTypes, edges, batches);
+            } finally {
+                ctx.resolving.remove(bk);
+                ctx.resolvingOutputs.remove(outKey);
             }
-
-            boolean allOk = StepExecutor.craftBatched(a.entry, ctx, depth, altIds, altModTypes, edges, batches);
-
-            ctx.resolving.remove(bk);
 
             if (!allOk) {
                 ctx.diag("ensureIngredient SKIP " + a.entry.recipe().getId() + ": craftOnce failed");
@@ -613,6 +625,10 @@ public final class CraftingResolver {
             return true;
         }
         return false;
+    }
+
+    static List<IngredientSpec> coalesceRootSpecs(List<IngredientSpec> specs) {
+        return StepExecutor.coalesceSpecsForGraph(specs);
     }
 
     static boolean recordBestEffortUnresolved(ResolutionContext ctx,

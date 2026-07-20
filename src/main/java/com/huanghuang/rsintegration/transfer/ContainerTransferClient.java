@@ -12,6 +12,10 @@ import net.minecraft.client.gui.screens.inventory.CreativeModeInventoryScreen;
 import net.minecraft.client.gui.screens.inventory.InventoryScreen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import net.minecraftforge.client.event.InputEvent;
@@ -20,6 +24,10 @@ import net.minecraftforge.client.event.ScreenEvent;
 import net.minecraftforge.client.settings.KeyConflictContext;
 import net.minecraftforge.client.event.RenderGuiEvent;
 import net.minecraftforge.common.MinecraftForge;
+import net.minecraftforge.eventbus.api.EventPriority;
+import net.minecraftforge.registries.ForgeRegistries;
+import net.minecraftforge.eventbus.api.EventPriority;
+import net.minecraftforge.registries.ForgeRegistries;
 
 import net.minecraftforge.fml.loading.FMLPaths;
 import org.lwjgl.glfw.GLFW;
@@ -84,6 +92,10 @@ public final class ContainerTransferClient {
         MinecraftForge.EVENT_BUS.addListener(ContainerTransferClient::onScreenKeyPressed);
         MinecraftForge.EVENT_BUS.addListener(ContainerTransferClient::onKeyInput);
         MinecraftForge.EVENT_BUS.addListener(ContainerTransferClient::onRenderGui);
+        MinecraftForge.EVENT_BUS.addListener(EventPriority.LOWEST, false,
+                ScreenEvent.Render.Post.class, ContainerTransferClient::onRenderScreen);
+        MinecraftForge.EVENT_BUS.addListener(EventPriority.LOWEST, false,
+                ScreenEvent.Render.Post.class, ContainerTransferClient::onRenderScreen);
 
         loadMode();
     }
@@ -135,11 +147,46 @@ public final class ContainerTransferClient {
     private static void onRenderGui(RenderGuiEvent.Post event) {
         if (modeMessage == null || System.currentTimeMillis() > modeMessageUntil) return;
         Minecraft mc = Minecraft.getInstance();
-        if (mc.screen == null) return;
-        GuiGraphics graphics = event.getGuiGraphics();
-        int width = mc.getWindow().getGuiScaledWidth();
-        int x = (width - mc.font.width(modeMessage)) / 2;
-        graphics.drawString(mc.font, modeMessage, x, 12, 0xFFFFFF, true);
+        if (mc.screen != null) return;
+        renderModeBanner(event.getGuiGraphics(), mc.getWindow().getGuiScaledWidth());
+    }
+
+    private static void onRenderScreen(ScreenEvent.Render.Post event) {
+        if (modeMessage == null || System.currentTimeMillis() > modeMessageUntil) return;
+        renderModeBanner(event.getGuiGraphics(), event.getScreen().width);
+    }
+
+    private static void renderModeBanner(GuiGraphics graphics, int screenWidth) {
+        Minecraft mc = Minecraft.getInstance();
+        ItemStack icon = modeIcon();
+        int width = Math.max(180, mc.font.width(modeMessage) + (icon.isEmpty() ? 28 : 48));
+        int x = (screenWidth - width) / 2;
+        int y = 8;
+        int background = currentMode == MODE_RS ? 0xE01E4778 : 0xE01C6038;
+        int accent = currentMode == MODE_RS ? 0xFF55A8FF : 0xFF67E096;
+
+        graphics.pose().pushPose();
+        graphics.pose().translate(0, 0, 1000);
+        com.mojang.blaze3d.systems.RenderSystem.disableDepthTest();
+        graphics.fill(x - 1, y - 1, x + width + 1, y + 29, 0xFF000000);
+        graphics.fill(x, y, x + width, y + 28, background);
+        graphics.fill(x, y, x + 4, y + 28, accent);
+        int textX = x + 12;
+        if (!icon.isEmpty()) {
+            graphics.renderItem(icon, textX, y + 6);
+            textX += 22;
+        }
+        graphics.drawString(mc.font, modeMessage, textX, y + 10, 0xFFFFFFFF, true);
+        com.mojang.blaze3d.systems.RenderSystem.enableDepthTest();
+        graphics.pose().popPose();
+    }
+
+    private static ItemStack modeIcon() {
+        String id = currentMode == MODE_RS
+                ? "refinedstorage:grid"
+                : "sophisticatedbackpacks:backpack";
+        var item = ForgeRegistries.ITEMS.getValue(new ResourceLocation(id));
+        return item == null ? ItemStack.EMPTY : new ItemStack(item);
     }
 
     /**

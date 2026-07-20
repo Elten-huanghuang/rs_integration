@@ -60,6 +60,8 @@
     "jei.RecipeGuiLayoutsMixin",
     "jei.RecipesGuiMixin",
     "jei.RecipeBookmarkMixin",
+    "jei.BookmarkOverlayAccessor",
+    "minecraft.MerchantScreenAccessor",
     "minecraft.MinecraftMixin",
     "refinedstorage.GridScreenMachineTabMixin",
     "refinedstorage.GridScreenMouseMixin",

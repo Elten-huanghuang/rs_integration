@@ -649,6 +649,7 @@ public final class RSSidePanelNetworkHandler {
             unregisterListener(pid);
             lastPushedStatuses.remove(pid);
             dirtyMachinePlayers.remove(pid);
+            syncGenerations.remove(pid);
             RemoteGuiAuth.onPlayerLogout(pid);
             GuiOpenRateLimiter.onPlayerLogout(pid);
             com.huanghuang.rsintegration.crafting.PreviewRateLimiter.onPlayerLogout(pid);

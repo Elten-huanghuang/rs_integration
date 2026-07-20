@@ -82,4 +82,8 @@ public final class NetworkPacketIds {
     // ── Distant Worlds Lithum Altar (110-119) ──────────────────────
     public static final int LITHUM_ALTAR_STATUS_REQUEST = 110;
     public static final int LITHUM_ALTAR_STATUS_SYNC = 111;
+
+    // Villager trade restock (120-129)
+    public static final int VILLAGER_RESTOCK_REQUEST = 120;
+    public static final int VILLAGER_RESTOCK_RESULT = 121;
 }

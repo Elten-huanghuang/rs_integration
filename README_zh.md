@@ -190,7 +190,7 @@ Sophisticated Backpacks 现有升级，通过 NBT 绑定 RS Grid 后，将行为
 | **喂食升级（RS）** | 从 RS 网络自动消耗食物 |
 | **补货升级（RS）** | 从 RS 网络补充快捷栏消耗物品 |
 | **重存升级（RS）** | 从 RS 网络补满身上物品 |
-| **存款升级（RS）** | 对准 RS Grid 时将背包物品存入 RS 网络（需开启配置 `depositUpgradeRS`） |
+| **卸货升级（RS）** | 对准 RS 访问器或合成访问器时，将背包物品自动卸入 RS 网络（配置 `depositUpgradeRS`，默认开启） |
 | **压制升级（RS）** | 从 RS 网络自动合并可压缩物品，同时支持 Majrusz's Accessories 饰品自动合成 |
 
 
@@ -260,7 +260,7 @@ enableConfluence = true
 enableMultiblockAutoCrafting = true    # 允许多方块机器作为中间合成步骤
 
 [sophisticated_backpacks]
-depositUpgradeRS = false               # 背包存款升级与 RS 网络互通
+depositUpgradeRS = true                # 卸货升级可向 RS 访问器 / 合成访问器卸货
 
 [passiveEffects]
 enableRSPassiveEffects = true           # RS 被动效果系统总开关

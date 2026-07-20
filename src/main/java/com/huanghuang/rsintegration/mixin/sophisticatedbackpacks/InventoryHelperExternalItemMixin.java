@@ -2,6 +2,8 @@ package com.huanghuang.rsintegration.mixin.sophisticatedbackpacks;
 
 import com.huanghuang.rsintegration.util.ExternalItemProgressSuppression;
 import com.huanghuang.rsintegration.util.InsertedStackDelta;
+import com.llamalad7.mixinextras.sugar.Share;
+import com.llamalad7.mixinextras.sugar.ref.LocalRef;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
@@ -23,7 +25,11 @@ public abstract class InventoryHelperExternalItemMixin {
     private static void rsi$beginExternalPickup(Level level, Player player,
                                                 UpgradeHandler upgrades, ItemStack input,
                                                 boolean simulate,
-                                                CallbackInfoReturnable<ItemStack> cir) {
+                                                CallbackInfoReturnable<ItemStack> cir,
+                                                @Share("originalInput") LocalRef<ItemStack> originalInput) {
+        // InventoryHelper overwrites the input parameter's local-variable slot with
+        // each upgrade remainder. Capture it before the call so accepted = input - remainder.
+        originalInput.set(input.copy());
         ExternalItemProgressSuppression.beginOperation();
     }
 
@@ -33,11 +39,12 @@ public abstract class InventoryHelperExternalItemMixin {
     private static void rsi$reportExternalPickup(Level level, Player player,
                                                  UpgradeHandler upgrades, ItemStack input,
                                                  boolean simulate,
-                                                 CallbackInfoReturnable<ItemStack> cir) {
+                                                 CallbackInfoReturnable<ItemStack> cir,
+                                                 @Share("originalInput") LocalRef<ItemStack> originalInput) {
         if (simulate || !(player instanceof ServerPlayer serverPlayer)) {
             ExternalItemProgressSuppression.consume();
             return;
         }
-        InsertedStackDelta.report(serverPlayer, input, cir.getReturnValue());
+        InsertedStackDelta.report(serverPlayer, originalInput.get(), cir.getReturnValue());
     }
 }

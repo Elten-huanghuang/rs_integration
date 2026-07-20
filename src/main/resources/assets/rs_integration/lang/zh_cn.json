@@ -717,4 +717,10 @@
   "rsi.autoeat.error.network_unavailable": "RS 网络尚未就绪",
   "rsi.autoeat.error.diet_tracker_missing": "未检测到 Diet 营养追踪器",
   "rsi.autoeat.error.diet_no_groups": "Diet 营养组为空"
+,
+  "rsi.villager.restock.complete": "已补货至最大数量（物品栏：%s，RS：%s）",
+  "rsi.villager.restock.partial": "部分补货，缺少的物品已加入 JEI 收藏",
+  "rsi.villager.restock.no_network": "未找到 RS 网络，缺少的物品已加入 JEI 收藏",
+  "rsi.villager.restock.no_permission": "没有 RS 提取权限，缺少的物品已加入 JEI 收藏",
+  "rsi.villager.restock.invalid": "当前交易已失效"
 }

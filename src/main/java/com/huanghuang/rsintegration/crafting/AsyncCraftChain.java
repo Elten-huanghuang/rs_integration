@@ -1771,7 +1771,8 @@ public final class AsyncCraftChain {
             return step.syntheticOutput().copy();
         }
         return server.getRecipeManager().byKey(step.recipeId())
-                .map(recipe -> recipe.getResultItem(server.overworld().registryAccess()).copy())
+                .map(recipe -> ModRecipeHandlers.tryGetResultItem(
+                        recipe, server.overworld().registryAccess()))
                 .orElse(ItemStack.EMPTY);
     }
 

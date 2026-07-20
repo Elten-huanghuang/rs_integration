@@ -188,7 +188,7 @@ Existing Sophisticated Backpacks upgrades that, when bound to an RS Grid (via NB
 | **Feeding Upgrade (RS)** | Auto-consumes food from the RS network |
 | **Refill Upgrade (RS)** | Refills hotbar items from the RS network |
 | **Restock Upgrade (RS)** | Restocks player inventory on interact from the RS network |
-| **Deposit Upgrade (RS)** | When targeting an RS Grid, pushes backpack contents into the RS network (config `depositUpgradeRS`, default off) |
+| **Deposit Upgrade (RS)** | When targeting an RS Grid or Crafting Grid, pushes backpack contents into the RS network (config `depositUpgradeRS`, default on) |
 | **Compacting Upgrade (RS)** | Auto-compresses compactable items from the RS network; also auto-combines Majrusz's Accessories matching the whitelist filter |
 
 ## Embers Alchemy
@@ -257,7 +257,7 @@ enableConfluence = true
 enableMultiblockAutoCrafting = true    # Allow multi-block machines as intermediate steps
 
 [sophisticated_backpacks]
-depositUpgradeRS = false               # Deposit upgrade pushes items into RS network
+depositUpgradeRS = true                # Deposit upgrade pushes items into RS Grid / Crafting Grid
 
 [passiveEffects]
 enableRSPassiveEffects = true           # Master switch for RS passive effects system

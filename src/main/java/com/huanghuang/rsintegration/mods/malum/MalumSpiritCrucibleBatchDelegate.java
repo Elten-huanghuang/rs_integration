@@ -251,6 +251,11 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
     @Override
     public List<IngredientSpec> getRequiredMaterials() {
         if (recipe == null) return null;
+        var handler = ModRecipeHandlers.handlerFor(recipe);
+        if (handler != null) {
+            List<IngredientSpec> specs = handler.getIngredients(recipe);
+            if (specs != null && !specs.isEmpty()) return specs;
+        }
         ensureIWCFields();
         List<IngredientSpec> result = new ArrayList<>();
 
@@ -396,37 +401,17 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
         }
 
         // ── 2. Place spirits ──
-        Reflect.findField(recipe.getClass(), "spirits").ifPresent(f -> {
-            try {
-                List<?> spirits = (List<?>) f.get(recipe);
-                if (spirits == null) return;
-                int slot = 0;
-                for (Object swc : spirits) {
-                    if (slot >= invSpirits.getSlots()) break;
-                    int count = Reflect.getIntField(swc, "count").orElse(1);
-                    Object itemObj = Reflect.invoke(swc, "getItem").orElse(null);
-                    if (itemObj instanceof net.minecraft.world.item.Item it && count > 0) {
-                        net.minecraft.world.item.crafting.Ingredient si =
-                                net.minecraft.world.item.crafting.Ingredient.of(it);
-                        for (int c = 0; c < count && slot < invSpirits.getSlots(); c++) {
-                            ItemStack extracted = extractFromRS(player, si, 1,
-                                    localLedger, usingSharedLedger);
-                            if (!extracted.isEmpty()) {
-                                setSlot(invSpirits, slot, extracted);
-                            }
-                        }
-                    }
-                    slot++;
-                }
-            } catch (Exception e) {
-                RSIntegrationMod.LOGGER.debug("[RSI-Crucible] spirits extract failed", e);
-            }
-        });
+        if (!placeSpiritStacks(player, localLedger, usingSharedLedger)) {
+            clearUncommittedPlacements();
+            player.sendSystemMessage(net.minecraft.network.chat.Component.translatable(
+                    "rsi.generic.error.missing_materials", recipe.getId().toString()));
+            return false;
+        }
 
         // ── Commit ──
         if (!usingSharedLedger) {
             if (!localLedger.commit(this.network, player)) {
-                clearAllSlots();
+                clearUncommittedPlacements();
                 player.sendSystemMessage(net.minecraft.network.chat.Component.translatable(
                         "rsi.generic.error.craft_failed", "Ledger commit failed"));
                 return false;
@@ -442,6 +427,37 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
             if (ownsLedger) {
                 localLedger.close();
             }
+        }
+    }
+
+    private boolean placeSpiritStacks(ServerPlayer player, ExtractionLedger ledger,
+                                      boolean useShared) {
+        Field field = Reflect.findField(recipe.getClass(), "spirits").orElse(null);
+        if (field == null) return true;
+        try {
+            field.setAccessible(true);
+            List<?> spirits = (List<?>) field.get(recipe);
+            if (spirits == null || spirits.isEmpty()) return true;
+            if (spirits.size() > invSpirits.getSlots()) return false;
+            int slot = 0;
+            for (Object swc : spirits) {
+                int count = Reflect.getIntField(swc, "count").orElse(1);
+                Object itemObj = Reflect.invoke(swc, "getItem").orElse(null);
+                if (!(itemObj instanceof net.minecraft.world.item.Item item) || count <= 0) {
+                    return false;
+                }
+                ItemStack extracted = extractFromRS(player,
+                        net.minecraft.world.item.crafting.Ingredient.of(item), count,
+                        ledger, useShared);
+                if (extracted.isEmpty() || extracted.getCount() < count) return false;
+                // Malum stores one spirit type per slot. The requirement count
+                // is that slot's stack size, not repeated writes to one slot.
+                setSlot(invSpirits, slot++, extracted);
+            }
+            return true;
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-Crucible] spirits extract failed", e);
+            return false;
         }
     }
 
@@ -667,6 +683,21 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
         if (crucibleBE instanceof net.minecraft.world.level.block.entity.BlockEntity be) {
             be.setChanged();
         }
+    }
+
+    /** Remove templates placed before commit without minting refunds. */
+    private void clearUncommittedPlacements() {
+        if (invCatalyst != null) {
+            for (int i = 0; i < invCatalyst.getSlots(); i++) {
+                setSlot(invCatalyst, i, ItemStack.EMPTY);
+            }
+        }
+        if (invSpirits != null) {
+            for (int i = 0; i < invSpirits.getSlots(); i++) {
+                setSlot(invSpirits, i, ItemStack.EMPTY);
+            }
+        }
+        if (crucibleBE instanceof BlockEntity be) be.setChanged();
     }
 
     private void returnCrucibleItem(ItemStack stack) {
