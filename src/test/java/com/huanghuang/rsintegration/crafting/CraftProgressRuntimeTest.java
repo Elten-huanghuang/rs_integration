@@ -73,6 +73,13 @@ class CraftProgressRuntimeTest extends BootstrapTest {
         assertEquals(detail, runtime.failureReason());
     }
 
+    @Test
+    void flatBatchProgressReportsSettledOperationsBetweenBatches() {
+        assertEquals(0, AsyncCraftChain.completedFlatOperations(11, 11));
+        assertEquals(8, AsyncCraftChain.completedFlatOperations(11, 3));
+        assertEquals(11, AsyncCraftChain.completedFlatOperations(11, 0));
+    }
+
     private static final class StubDelegate implements IBatchDelegate {
         private final CraftPhase phase;
         private final String detail;

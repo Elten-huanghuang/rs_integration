@@ -34,6 +34,13 @@ public final class GoetyRSModule implements IModIntegration {
 
     @Override
     public void registerModType() {
+        ModType.register("goety_cursed_infuser",
+                new String[]{"com.Polarice3.Goety.common.crafting.CursedInfuserRecipes"},
+                new String[]{"goety"}, new String[]{"goety_cursed_infuser"},
+                ModType.delegateSupplier("com.huanghuang.rsintegration.mods.goety.CursedInfuserBatchDelegate"));
+        ModType.configureJei("goety_cursed_infuser",
+                new String[][]{{"goety:cursed_infuser"}},
+                new String[][]{{"com.Polarice3.Goety.common.crafting.CursedInfuserRecipes", "goety:cursed_infuser"}}, null);
         ModType.register("goety",
                 new String[]{
                         "com.Polarice3.Goety.common.crafting.RitualRecipe",
@@ -51,6 +58,10 @@ public final class GoetyRSModule implements IModIntegration {
 
     @Override
     public void registerBindingTargets() {
+        BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
+                "goety", ModType.byId("goety_cursed_infuser"), RSIntegrationConfig.ENABLE_GOETY,
+                List.of("com.Polarice3.Goety.common.blocks.CursedInfuserBlock"),
+                List.of("goety:cursed_infuser"), "goety_cursed_infuser", false));
         // NecroBrazier is an in-world ritual block, no container GUI.
         BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
                 "goety", ModType.byId("goety"), RSIntegrationConfig.ENABLE_GOETY, List.of(
@@ -71,6 +82,7 @@ public final class GoetyRSModule implements IModIntegration {
 
     @Override
     public void registerRecipeHandler() {
+        ModRecipeHandlers.register(new com.huanghuang.rsintegration.recipe.CursedInfuserRecipeHandler());
         ModRecipeHandlers.register(new GoetyRecipeHandler());
     }
 

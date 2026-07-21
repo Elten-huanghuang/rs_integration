@@ -1,4 +1,9 @@
 {
+  "rsi.goety.cursed_infuser.spawner_required": "\u8bc5\u5492\u6ce8\u9b54\u5668\u6b63\u4e0b\u65b9\u5fc5\u987b\u653e\u7f6e\u5237\u602a\u7b3c",
+  "rsi.batch.mod.goety_cursed_infuser": "\u8bc5\u5492\u6ce8\u9b54\u5668",
+  "rsi.plan.output.label": "产物去向",
+  "rsi.plan.output.rs": "RS \u7f51\u7edc",
+  "rsi.plan.output.player": "\u73a9\u5bb6\u80cc\u5305",
   "itemGroup.rs_integration.main": "RS 集成",
   "gui.sophisticatedcore.upgrades.rs_pickup": "次元拾取",
   "gui.sophisticatedcore.upgrades.rs_pickup.tooltip": "次元拾取设置",

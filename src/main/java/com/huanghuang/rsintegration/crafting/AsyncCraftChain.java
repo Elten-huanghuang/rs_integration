@@ -138,6 +138,7 @@ public final class AsyncCraftChain {
      */
     @Nullable
     private ItemStack targetOutput;
+    private OutputDestination outputDestination = OutputDestination.RS_NETWORK;
 
     /** Active execution session for the current flat physical-machine step. */
     @Nullable
@@ -353,6 +354,10 @@ public final class AsyncCraftChain {
      */
     public void setTargetOutput(@Nullable ItemStack target) {
         this.targetOutput = target != null && !target.isEmpty() ? target.copy() : null;
+    }
+
+    public void setOutputDestination(@Nullable OutputDestination destination) {
+        this.outputDestination = destination == null ? OutputDestination.RS_NETWORK : destination;
     }
 
     @Nullable
@@ -1741,6 +1746,10 @@ public final class AsyncCraftChain {
             }
             int totalOps = Math.max(1, step.executions());
             int completedOps = i < currentStepIdx || state == State.COMPLETED ? totalOps : 0;
+            if (i == currentStepIdx && stepRemaining > 0
+                    && !(currentDelegate instanceof ParallelCraftGroup)) {
+                completedOps = completedFlatOperations(totalOps, stepRemaining);
+            }
             int runningOps = i == currentStepIdx && currentDelegate != null
                     ? Math.min(totalOps, currentDelegate instanceof ParallelCraftGroup group
                             ? group.getRunningOperations() : 1) : 0;
@@ -1757,6 +1766,11 @@ public final class AsyncCraftChain {
                             && group.isDraining()));
         }
         return List.copyOf(result);
+    }
+
+    static int completedFlatOperations(int totalOperations, int remainingOperations) {
+        int total = Math.max(1, totalOperations);
+        return Math.max(0, Math.min(total, total - Math.max(0, remainingOperations)));
     }
 
     private static ItemStack displayOutput(@Nullable CraftNode node) {
@@ -3165,10 +3179,16 @@ public final class AsyncCraftChain {
         if (network != null) {
             for (ItemStack vi : virtualInventory) {
                 if (!vi.isEmpty()) {
-                    ItemStack leftover = network.insertItem(vi.copy(), vi.getCount(),
-                            com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                    boolean playerOutput = outputDestination == OutputDestination.PLAYER_INVENTORY
+                            && matchesFinalTarget(vi);
+                    ItemStack leftover = playerOutput ? insertIntoPlayerInventory(online, vi) : vi.copy();
+                    ItemStack rsCandidate = leftover.copy();
+                    if (!leftover.isEmpty()) {
+                        leftover = network.insertItem(rsCandidate.copy(), rsCandidate.getCount(),
+                                com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                    }
                     var tracker = network.getItemStorageTracker();
-                    if (tracker != null) tracker.changed(online, vi.copy());
+                    if (!rsCandidate.isEmpty() && tracker != null) tracker.changed(online, rsCandidate);
                     ItemStack inserted = InsertedStackDelta.between(vi, leftover);
                     if (targetOutput != null && vi.is(targetOutput.getItem())) {
                         ExternalItemProgressBridge.enqueueCrafted(
@@ -3187,6 +3207,21 @@ public final class AsyncCraftChain {
                 online.getName().getString(), steps.size());
         sendTerminalProgress(online);
         fireOnDone();
+    }
+
+    private boolean matchesFinalTarget(ItemStack stack) {
+        if (targetOutput == null || targetOutput.isEmpty() || stack.isEmpty()) return false;
+        return targetOutput.hasTag()
+                ? ItemStack.isSameItemSameTags(stack, targetOutput)
+                : ItemStack.isSameItem(stack, targetOutput);
+    }
+
+    private ItemStack insertIntoPlayerInventory(ServerPlayer player, ItemStack stack) {
+        ItemStack remainder = stack.copy();
+        player.getInventory().add(remainder);
+        player.getInventory().setChanged();
+        player.inventoryMenu.broadcastChanges();
+        return remainder;
     }
 
     private void fireOnDone() {

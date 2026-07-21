@@ -37,6 +37,10 @@ public final class GraphConcurrencyEligibility {
             return capability(BatchConcurrencyCapabilities.OutputOwnership.OWNED_WORLD_CAPTURE,
                     BatchConcurrencyCapabilities.SideEffects.INFER, 3);
         }
+        if ("eidolon_worktable".equals(type)) {
+            return capability(BatchConcurrencyCapabilities.OutputOwnership.DELEGATE_RESULT,
+                    BatchConcurrencyCapabilities.SideEffects.MACHINE_LOCAL, 0);
+        }
         if ("eidolon".equals(type)) {
             if (recipeClass.endsWith("WorktableRecipe")) return null;
             if (!recipeClass.endsWith("ItemRitualRecipe")
@@ -74,7 +78,8 @@ public final class GraphConcurrencyEligibility {
     static boolean isRecipeAwareType(String modTypeId) {
         String type = normalize(modTypeId);
         return WORLD_CAPTURE_TYPES.contains(type) || RITUAL_TYPES.contains(type)
-                || "eidolon".equals(type) || "wizards_reborn".equals(type);
+                || "eidolon".equals(type) || "eidolon_worktable".equals(type)
+                || "wizards_reborn".equals(type);
     }
 
     private static BatchConcurrencyCapabilities capability(

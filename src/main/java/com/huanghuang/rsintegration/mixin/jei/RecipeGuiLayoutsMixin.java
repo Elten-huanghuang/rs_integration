@@ -1413,27 +1413,57 @@ public class RecipeGuiLayoutsMixin {
 
     @Unique
     private static String rsi$botaniaManaCatalystFilter(Object recipe) {
-        if (!(recipe instanceof vazkii.botania.api.recipe.ManaInfusionRecipe manaRecipe)) {
+        if (!rsi$implementsNamedType(recipe, "vazkii.botania.api.recipe.ManaInfusionRecipe")) {
             RSIntegrationMod.LOGGER.warn("[RSI-JEI-Mixin] Botania mana recipe has unexpected class {}; refusing fallback binding",
                     recipe == null ? "null" : recipe.getClass().getName());
             return null;
         }
-        vazkii.botania.api.recipe.StateIngredient catalyst = manaRecipe.getRecipeCatalyst();
-        if (catalyst == null) return "mana_pool";
-        for (var state : catalyst.getDisplayed()) {
-            ResourceLocation id = net.minecraftforge.registries.ForgeRegistries.BLOCKS.getKey(state.getBlock());
-            if (id == null) continue;
-            if ("botania".equals(id.getNamespace()) && "conjuration_catalyst".equals(id.getPath())) {
-                return "conjuration_catalyst";
+        try {
+            Object catalyst = recipe.getClass().getMethod("getRecipeCatalyst").invoke(recipe);
+            if (catalyst == null) return "mana_pool";
+            Object displayed = catalyst.getClass().getMethod("getDisplayed").invoke(catalyst);
+            if (displayed instanceof Iterable<?> states) {
+                for (Object value : states) {
+                    if (!(value instanceof net.minecraft.world.level.block.state.BlockState state)) continue;
+                    ResourceLocation id = net.minecraftforge.registries.ForgeRegistries.BLOCKS.getKey(state.getBlock());
+                    if (id == null) continue;
+                    if ("botania".equals(id.getNamespace()) && "conjuration_catalyst".equals(id.getPath())) {
+                        return "conjuration_catalyst";
+                    }
+                    if ("botania".equals(id.getNamespace()) && "alchemy_catalyst".equals(id.getPath())) {
+                        return "alchemy_catalyst";
+                    }
+                }
             }
-            if ("botania".equals(id.getNamespace()) && "alchemy_catalyst".equals(id.getPath())) {
-                return "alchemy_catalyst";
-            }
+        } catch (ReflectiveOperationException exception) {
+            RSIntegrationMod.LOGGER.warn("[RSI-JEI-Mixin] Failed to inspect Botania mana catalyst", exception);
         }
         RSIntegrationMod.LOGGER.warn("[RSI-JEI-Mixin] Unsupported Botania mana catalyst for recipe {}; hiding RSI button",
                 getRecipeIdSafe(recipe));
         return null;
     }
+
+    @Unique
+    private static boolean rsi$implementsNamedType(Object value, String typeName) {
+        if (value == null) return false;
+        for (Class<?> type = value.getClass(); type != null; type = type.getSuperclass()) {
+            if (type.getName().equals(typeName)) return true;
+            for (Class<?> contract : type.getInterfaces()) {
+                if (rsi$namedInterface(contract, typeName)) return true;
+            }
+        }
+        return false;
+    }
+
+    @Unique
+    private static boolean rsi$namedInterface(Class<?> type, String typeName) {
+        if (type.getName().equals(typeName)) return true;
+        for (Class<?> parent : type.getInterfaces()) {
+            if (rsi$namedInterface(parent, typeName)) return true;
+        }
+        return false;
+    }
+
     @Unique
     private static AbstractContainerMenu getParentContainer() {
         var player = Minecraft.getInstance().player;

@@ -8,6 +8,7 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
 import com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket;
+import com.huanghuang.rsintegration.crafting.OutputDestination;
 import com.huanghuang.rsintegration.crafting.tree.IngredientKey;
 import com.huanghuang.rsintegration.crafting.tree.JeiSubtreeBuilder;
 import com.huanghuang.rsintegration.crafting.tree.PlanTreeLayout;
@@ -137,6 +138,8 @@ public final class CraftingPlanScreen extends Screen {
     private int foldAllHitX, foldAllHitY, foldAllHitW, foldAllHitH;
     private boolean foldAllHovered;
     // Tree-view [Expand All] / [Collapse All] toolbar button hitbox (top-right of the viewport).
+    private OutputDestination outputDestination = OutputDestination.RS_NETWORK;
+    private int outputSelectorX, outputSelectorY, outputSegmentW, outputSelectorH;
     private int treeFoldAllHitX, treeFoldAllHitY, treeFoldAllHitW, treeFoldAllHitH;
     // Alternative-recipe dropdown (screen space); open node + row hitboxes.
     private PlanTreeNode dropdownNode;
@@ -412,6 +415,17 @@ public final class CraftingPlanScreen extends Screen {
         int btnW = 80;
         int btnY = height - 24;
 
+        boolean questSubmission = QuestSubmissionTargetIds.isQuestSubmission(
+                ResourceLocation.tryParse(plan.recipeId()));
+        if (!questSubmission) {
+            outputSegmentW = 132;
+            outputSelectorH = 20;
+            outputSelectorX = width / 2 - outputSegmentW / 2;
+            outputSelectorY = btnY - 27;
+        } else {
+            outputSelectorH = 0;
+        }
+
         // "Open Machine" button — only when a bound machine position is known
         // AND the execution machine actually supports remote GUI.
         boolean hasMachineGui = plan.executionModTypeId() != null
@@ -456,6 +470,10 @@ public final class CraftingPlanScreen extends Screen {
     private Component viewToggleLabel() {
         return Component.translatable(
                 viewMode == ViewMode.TREE ? "rsi.plan.view_tree" : "rsi.plan.view_card");
+    }
+
+    private void selectOutputDestination(OutputDestination destination) {
+        outputDestination = destination;
     }
 
     private void onConfirm() {
@@ -510,7 +528,8 @@ public final class CraftingPlanScreen extends Screen {
         BatchCraftNetworkHandler.CHANNEL.sendToServer(
                 new GenericCraftPacket(rid, preview, forced, execDim, execPos,
                         repeatCount, inferMode, plan.baseItem(),
-                        executionTarget(plan.clickedOutput(), plan.targetResult()), requestId));
+                        executionTarget(plan.clickedOutput(), plan.targetResult()), requestId,
+                        outputDestination));
     }
 
     /** Open JEI for a specific recipe id. No-op when JEI is unavailable. */
@@ -611,7 +630,7 @@ public final class CraftingPlanScreen extends Screen {
         int bottomReserved = embersPedestalH > 0 ? embersPedestalY
                 : (missingAreaHeight > 0 ? missingAreaTop : materialAreaTop);
         int areaBottom = bottomReserved - 4;
-        if (embersPedestalH == 0 && missingAreaHeight == 0 && materialAreaHeight == 0) areaBottom = height - 30;
+        if (embersPedestalH == 0 && missingAreaHeight == 0 && materialAreaHeight == 0) areaBottom = height - 53;
 
         if (viewMode == ViewMode.TREE) {
             cardBar.active = false; // card list not shown in tree mode
@@ -752,11 +771,44 @@ public final class CraftingPlanScreen extends Screen {
         // tree-view dropdown preview). Drawn here, post-scissor, so it's not clipped.
         renderCardPreview(gfx, font);
 
+        renderOutputDestinationSelector(gfx, font, mouseX, mouseY);
+
         // Deferred tooltip — rendered AFTER all scissors, so Legendary
         // Tooltips' boundary avoidance works without scissor clipping.
         renderDeferredTooltip(gfx, font);
     }
 
+    private void renderOutputDestinationSelector(GuiGraphics gfx, Font font, int mouseX, int mouseY) {
+        if (outputSelectorH <= 0) return;
+
+        String label = I18n.get("rsi.plan.output.label");
+        int labelW = font.width(label);
+        int gap = 8;
+        int totalW = labelW + gap + outputSegmentW;
+        int labelX = width / 2 - totalW / 2;
+        outputSelectorX = labelX + labelW + gap;
+
+        int textY = outputSelectorY + (outputSelectorH - font.lineHeight) / 2;
+        gfx.drawString(font, label, labelX, textY, 0xFF99AA99, false);
+
+        boolean hovered = mouseX >= outputSelectorX && mouseX < outputSelectorX + outputSegmentW
+                && mouseY >= outputSelectorY && mouseY < outputSelectorY + outputSelectorH;
+        int background = hovered ? 0xCC3B5948 : 0xCC2F7D4A;
+        int textColor = hovered ? 0xFFFFFFFF : 0xFFF0FFF4;
+        UIRenderer.rounded(gfx, outputSelectorX, outputSelectorY,
+                outputSegmentW, outputSelectorH, 4f, 0xDD101512);
+        UIRenderer.rounded(gfx, outputSelectorX + 1, outputSelectorY + 1,
+                outputSegmentW - 2, outputSelectorH - 2, 3f, background);
+        gfx.fill(outputSelectorX + 10, outputSelectorY + outputSelectorH - 2,
+                outputSelectorX + outputSegmentW - 10, outputSelectorY + outputSelectorH - 1, 0xFF69D98A);
+
+        Component destination = Component.translatable(outputDestination == OutputDestination.RS_NETWORK
+                ? "rsi.plan.output.rs" : "rsi.plan.output.player");
+        String value = destination.getString();
+        int arrowW = font.width(" ↔");
+        gfx.drawString(font, value + " ↔", outputSelectorX + (outputSegmentW - font.width(value + " ↔")) / 2,
+                textY, textColor, false);
+    }
     /** Card view: JEI recipe preview for the alternative-recipe badge under the mouse. */
     private void renderCardPreview(GuiGraphics gfx, Font font) {
         if (viewMode != ViewMode.CARD) return;
@@ -1792,7 +1844,7 @@ public final class CraftingPlanScreen extends Screen {
      */
     private void layoutBottomStack() {
         int repeatAreaH = 38;
-        repeatRowY = height - 28 - repeatAreaH;
+        repeatRowY = height - 51 - repeatAreaH;
         int effMaterialH = (viewMode == ViewMode.CARD) ? materialAreaHeight : 0;
         materialAreaTop = repeatRowY - effMaterialH;
         missingAreaTop = materialAreaTop - missingAreaHeight;
@@ -1944,7 +1996,13 @@ public final class CraftingPlanScreen extends Screen {
 
     @Override
     public boolean mouseClicked(double mx, double my, int button) {
-        // Scrollbar thumbs first (both view modes) — grab the thumb, or click the track to jump.
+        if (button == 0 && outputSelectorH > 0
+                && mx >= outputSelectorX && mx < outputSelectorX + outputSegmentW
+                && my >= outputSelectorY && my < outputSelectorY + outputSelectorH) {
+            selectOutputDestination(outputDestination == OutputDestination.RS_NETWORK
+                    ? OutputDestination.PLAYER_INVENTORY : OutputDestination.RS_NETWORK);
+            return true;
+        }        // Scrollbar thumbs first (both view modes) — grab the thumb, or click the track to jump.
         if (button == 0) {
             for (ScrollbarUI bar : new ScrollbarUI[]{cardBar, materialBar}) {
                 if (bar.overThumb(mx, my)) {

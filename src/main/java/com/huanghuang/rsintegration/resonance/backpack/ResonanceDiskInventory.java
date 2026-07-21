@@ -170,7 +170,7 @@ public class ResonanceDiskInventory implements Container {
     int simulateAccept(int index, ItemStack stack) {
         if (stack.isEmpty()) return 0;
         ItemStack current = committed[index];
-        if (!current.isEmpty() && !ItemStack.isSameItemSameTags(current, sanitize(stack))) return 0;
+        if (!current.isEmpty() && !ResonanceDiskWrapper.isSameVariant(current, sanitize(stack))) return 0;
         // Non-stackable items (e.g. SlashBlade) must occupy one logical slot each.
         if (!current.isEmpty() && ResonanceDiskWrapper.isLogicallyNonStackable(stack)) return 0;
         int stackSpace = (ResonanceDiskWrapper.isLogicallyNonStackable(stack) ? 1 : stack.getMaxStackSize())
@@ -219,6 +219,7 @@ public class ResonanceDiskInventory implements Container {
 
     private static boolean sameStack(ItemStack first, ItemStack second) {
         if (first.isEmpty() || second.isEmpty()) return first.isEmpty() && second.isEmpty();
-        return first.getCount() == second.getCount() && ItemStack.isSameItemSameTags(first, second);
+        return first.getCount() == second.getCount()
+                && ResonanceDiskWrapper.isSameVariant(first, second);
     }
 }

@@ -51,6 +51,11 @@ public final class ResonanceDiskWrapper implements IStorageDisk<ItemStack> {
         }
         return false;
     }
+
+    /** Item identity used by logical backpack slots; NBT variants must never merge. */
+    public static boolean isSameVariant(ItemStack first, ItemStack second) {
+        return ResonanceStackIdentity.isSameVariant(first, second);
+    }
     public IStorageDisk<ItemStack> delegate() {
         return delegate;
     }
@@ -94,7 +99,7 @@ public final class ResonanceDiskWrapper implements IStorageDisk<ItemStack> {
             if (tag != null && tag.getInt(RSI_SLOT_TAG) == slot) {
                 ItemStack probe = stored.copy();
                 rsi$stripSlotTag(probe);
-                if (ItemStack.isSameItemSameTags(probe, template)) { tagged = stored.copy(); break; }
+                if (isSameVariant(probe, template)) { tagged = stored.copy(); break; }
             }
         }
         ItemStack result = delegate.extract(tagged, size, flags, action);
@@ -123,7 +128,7 @@ public final class ResonanceDiskWrapper implements IStorageDisk<ItemStack> {
             return SlotMutationResult.REJECTED;
 
         if (!oldStack.isEmpty() && !newStack.isEmpty()
-                && ItemStack.isSameItemSameTags(oldStack, newStack)) {
+                && isSameVariant(oldStack, newStack)) {
             int delta = newStack.getCount() - oldStack.getCount();
             return delta > 0
                     ? insertExact(slot, newStack, delta)
@@ -212,7 +217,7 @@ public final class ResonanceDiskWrapper implements IStorageDisk<ItemStack> {
 
     private static boolean sameStack(ItemStack first, ItemStack second) {
         if (first.isEmpty() || second.isEmpty()) return first.isEmpty() && second.isEmpty();
-        return first.getCount() == second.getCount() && ItemStack.isSameItemSameTags(first, second);
+        return first.getCount() == second.getCount() && isSameVariant(first, second);
     }
 
     @Override

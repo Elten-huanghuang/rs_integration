@@ -38,8 +38,13 @@ public abstract class LithumCoreUpdateTickProcedureMixin {
         }
         BlockEntity core = level.getBlockEntity(BlockPos.containing(x, y, z));
         if (core != null && core.getPersistentData().getString("CurrentRecipe").startsWith("firon_")) {
-            return 0.0D;
+            // Distant Worlds fails the craft when Math.random() is below its failure threshold.
+            return rsi$disabledFailureRoll();
         }
         return Math.random();
+    }
+
+    static double rsi$disabledFailureRoll() {
+        return 1.0D;
     }
 }

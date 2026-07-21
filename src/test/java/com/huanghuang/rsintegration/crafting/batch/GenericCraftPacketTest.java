@@ -2,7 +2,10 @@ package com.huanghuang.rsintegration.crafting.batch;
 
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.CraftingResolver;
+import com.huanghuang.rsintegration.crafting.OutputDestination;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
+import io.netty.buffer.Unpooled;
+import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
 import org.junit.jupiter.api.Test;
 
@@ -47,5 +50,16 @@ class GenericCraftPacketTest extends BootstrapTest {
         assertTrue(GenericCraftPacket.smithingAsyncSteps(
                 List.of(intermediate), new ResourceLocation("test", "divine_gold_helmet"), 1)
                 .isEmpty());
+    }
+
+    @Test
+    void outputDestinationRoundTripsAndInvalidOrdinalsDefaultToRs() {
+        FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.buffer());
+        OutputDestination.PLAYER_INVENTORY.write(buffer);
+
+        assertEquals(OutputDestination.PLAYER_INVENTORY,
+                OutputDestination.read(buffer));
+        assertEquals(OutputDestination.RS_NETWORK, OutputDestination.byOrdinal(-1));
+        assertEquals(OutputDestination.RS_NETWORK, OutputDestination.byOrdinal(99));
     }
 }
