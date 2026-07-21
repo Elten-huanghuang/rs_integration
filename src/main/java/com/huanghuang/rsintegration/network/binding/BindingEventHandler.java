@@ -97,6 +97,14 @@ public final class BindingEventHandler {
 
         BlockPos pos = event.getPos();
         BlockPos bindingPos = resolveRootPos(event.getLevel(), pos, block, className);
+        if ("goety_cursed_infuser".equals(matched.modType.id())
+                && !event.getLevel().getBlockState(bindingPos.below())
+                .is(net.minecraft.world.level.block.Blocks.SPAWNER)) {
+            player.displayClientMessage(Component.translatable(
+                    "rsi.goety.cursed_infuser.spawner_required"), true);
+            event.setCanceled(true);
+            return;
+        }
         if ("forbidden_arcanus_clibano".equals(matched.modType.id())
                 && bindingPos.equals(pos)
                 && !className.equals("com.stal111.forbidden_arcanus.common.block.ClibanoMainPartBlock")) {

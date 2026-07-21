@@ -1,4 +1,9 @@
 {
+  "rsi.goety.cursed_infuser.spawner_required": "The Cursed Infuser requires a spawner directly below it",
+  "rsi.batch.mod.goety_cursed_infuser": "Cursed Infuser",
+  "rsi.plan.output.label": "Output",
+  "rsi.plan.output.rs": "RS Network",
+  "rsi.plan.output.player": "Backpack",
   "itemGroup.rs_integration.main": "RS Integration",
   "gui.sophisticatedcore.upgrades.rs_pickup": "RS Pickup",
   "gui.sophisticatedcore.upgrades.rs_pickup.tooltip": "RS Pickup Settings",

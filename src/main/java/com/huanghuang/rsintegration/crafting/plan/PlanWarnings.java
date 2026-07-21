@@ -36,19 +36,43 @@ public final class PlanWarnings {
     private PlanWarnings() {}
 
     public static int botaniaManaCost(Recipe<?> recipe) {
-        if (recipe instanceof vazkii.botania.api.recipe.ManaInfusionRecipe manaInfusion) {
-            return manaInfusion.getManaToConsume();
+        int cost = botaniaInt(recipe, "vazkii.botania.api.recipe.ManaInfusionRecipe", "getManaToConsume");
+        if (cost >= 0) return cost;
+        cost = botaniaInt(recipe, "vazkii.botania.api.recipe.RunicAltarRecipe", "getManaUsage");
+        if (cost >= 0) return cost;
+        cost = botaniaInt(recipe, "vazkii.botania.api.recipe.TerrestrialAgglomerationRecipe", "getMana");
+        if (cost >= 0) return cost;
+        cost = botaniaInt(recipe, "vazkii.botania.api.recipe.BotanicalBreweryRecipe", "getManaUsage");
+        return Math.max(0, cost);
+    }
+
+    private static int botaniaInt(Object recipe, String typeName, String methodName) {
+        if (!implementsNamedType(recipe, typeName)) return -1;
+        try {
+            Object value = recipe.getClass().getMethod(methodName).invoke(recipe);
+            return value instanceof Number number ? Math.max(0, number.intValue()) : 0;
+        } catch (ReflectiveOperationException exception) {
+            return 0;
         }
-        if (recipe instanceof vazkii.botania.api.recipe.RunicAltarRecipe runicAltar) {
-            return runicAltar.getManaUsage();
+    }
+
+    private static boolean implementsNamedType(Object value, String typeName) {
+        if (value == null) return false;
+        for (Class<?> type = value.getClass(); type != null; type = type.getSuperclass()) {
+            if (type.getName().equals(typeName)) return true;
+            for (Class<?> contract : type.getInterfaces()) {
+                if (namedInterface(contract, typeName)) return true;
+            }
         }
-        if (recipe instanceof vazkii.botania.api.recipe.TerrestrialAgglomerationRecipe terraPlate) {
-            return terraPlate.getMana();
+        return false;
+    }
+
+    private static boolean namedInterface(Class<?> type, String typeName) {
+        if (type.getName().equals(typeName)) return true;
+        for (Class<?> parent : type.getInterfaces()) {
+            if (namedInterface(parent, typeName)) return true;
         }
-        if (recipe instanceof vazkii.botania.api.recipe.BotanicalBreweryRecipe brewery) {
-            return brewery.getManaUsage();
-        }
-        return 0;
+        return false;
     }
 
     public static List<String> collect(String typeId, ServerPlayer player, Recipe<?> recipe,

@@ -99,6 +99,12 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
+    public boolean acceptsMachineWithoutBlockEntity(ServerLevel level, BlockPos pos) {
+        return EidolonReflection.worktableBlockClass != null
+                && EidolonReflection.worktableBlockClass.isInstance(level.getBlockState(pos).getBlock());
+    }
+
+    @Override
     public boolean validateAndInit(ServerPlayer player, ResourceLocation recipeId,
                                    @Nullable ResourceLocation dim, BlockPos pos) {
 
