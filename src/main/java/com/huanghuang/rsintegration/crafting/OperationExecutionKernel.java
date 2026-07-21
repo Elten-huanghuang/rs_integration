@@ -146,6 +146,10 @@ public final class OperationExecutionKernel {
             return scope != null && scope.hasCaptured();
         }
 
+        public List<ItemStack> capturedSnapshot() {
+            return scope == null ? List.of() : scope.capturedSnapshot();
+        }
+
         public List<ItemStack> drainCapture() {
             return scope == null ? List.of() : scope.drainCapture();
         }

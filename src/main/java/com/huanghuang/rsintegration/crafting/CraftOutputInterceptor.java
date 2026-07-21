@@ -73,6 +73,14 @@ public final class CraftOutputInterceptor {
             ActiveZone zone = dimZones == null ? null : dimZones.get(id);
             return zone != null && !zone.buffer.isEmpty();
         }
+
+        /** Non-destructive view used to verify that the full graph output was captured. */
+        public List<ItemStack> snapshot() {
+            Map<UUID, ActiveZone> dimZones = ZONES.get(dimension);
+            ActiveZone zone = dimZones == null ? null : dimZones.get(id);
+            if (closed.get() || zone == null) return List.of();
+            return zone.buffer.stream().map(ItemStack::copy).toList();
+        }
     }
 
     private static final Map<ResourceKey<Level>, Map<UUID, ActiveZone>> ZONES =

@@ -251,7 +251,13 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
                 failureReason = observation.detail();
                 return ConcurrentNodeExecutor.Observation.FAILED;
             }
-            if (observation.phase() == IBatchDelegate.CraftPhase.DONE) {
+            List<ItemStack> capturedSnapshot = new java.util.ArrayList<>();
+            if (operationSession != null) capturedSnapshot.addAll(operationSession.capturedSnapshot());
+            if (capture != null) capturedSnapshot.addAll(capture.snapshot());
+            boolean capturedWorldOutput = !capturedSnapshot.isEmpty()
+                    && delegate.getExpectedOutput() != null && !delegate.getExpectedOutput().isEmpty()
+                    && (outputs == null || outputs.canCompleteWith(capturedSnapshot));
+            if (observation.phase() == IBatchDelegate.CraftPhase.DONE || capturedWorldOutput) {
                 doSucceed();
                 return ConcurrentNodeExecutor.Observation.SUCCEEDED;
             }

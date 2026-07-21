@@ -39,6 +39,10 @@ public final class CaptureSession implements AutoCloseable {
         return !closed.get() && handle.hasCaptured();
     }
 
+    public List<ItemStack> snapshot() {
+        return closed.get() ? List.of() : handle.snapshot();
+    }
+
     @Override
     public void close() {
         drainAndClose();

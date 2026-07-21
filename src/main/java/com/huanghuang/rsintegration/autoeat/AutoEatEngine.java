@@ -247,7 +247,7 @@ public final class AutoEatEngine {
         if (foodList_get == null) {
             NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
                     new AutoEatSyncPacket(AutoEatMode.DIVERSITY, 0,
-                            Component.literal("§cSolCarrot not installed")));
+                            Component.translatable("rsi.autoeat.error.solcarrot_missing")));
             return;
         }
 
@@ -474,7 +474,7 @@ public final class AutoEatEngine {
         if (dietCapability_get == null) {
             NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
                     new AutoEatSyncPacket(AutoEatMode.DIET, 0,
-                            Component.literal("§cDiet mod not installed")));
+                            Component.translatable("rsi.autoeat.error.diet_missing")));
             return;
         }
 

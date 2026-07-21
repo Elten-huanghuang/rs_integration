@@ -78,6 +78,10 @@ public interface IBatchDelegate {
         }
     }
 
+    /** Number of repeated flat-plan operations this delegate can execute as one physical batch. */
+    default int prepareFlatBatch(int remainingOperations) {
+        return remainingOperations > 0 ? 1 : 0;
+    }
     boolean validateAndInit(@Nonnull ServerPlayer player, @Nonnull ResourceLocation recipeId,
                             @Nullable ResourceLocation dim, @Nonnull BlockPos pos);
 

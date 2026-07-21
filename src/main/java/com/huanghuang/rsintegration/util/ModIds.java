@@ -25,6 +25,7 @@ public final class ModIds {
     public static final String IRON_FURNACES = "ironfurnaces";
     public static final String DISTANT_WORLDS = "distant_worlds";
     public static final String MAJRUSZS_ACCESSORIES = "majruszsaccessories";
+    public static final String BOTANIA = "botania";
 
     // Dependencies
     public static final String REFINED_STORAGE = "refinedstorage";
@@ -40,7 +41,7 @@ public final class ModIds {
     public static final String CRABBERS_DELIGHT = "crabbersdelight";
     public static final String APOTHEOSIS = "apotheosis";
 
-    // Composite ModType IDs (one mod → multiple machine types)
+    // Composite ModType IDs (one mod 鈫?multiple machine types)
     public static final String ID_EMBERS_ALCHEMY = "embers_alchemy";
     public static final String ID_AETHERWORKS_ANVIL = "aetherworks_anvil";
     public static final String ID_AETHERWORKS_TOOL_STATION = "aetherworks_tool_station";

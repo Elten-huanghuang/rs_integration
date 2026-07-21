@@ -624,6 +624,13 @@ public class RecipeGuiLayoutsMixin {
         try {
             ResourceLocation uid = recipeLayout.getRecipeCategory().getRecipeType().getUid();
 
+            // Botania ManaInfusion recipes carry their catalyst in the recipe itself.
+            // Use that catalyst to keep pool, alchemy catalyst, and conjuration catalyst distinct.
+            if ("botania:mana_pool".equals(uid.toString())) {
+                String catalyst = rsi$botaniaManaCatalystFilter(recipe);
+                if (catalyst != null) return catalyst;
+            }
+
             // 1. ModType UID → filter lookup (replaces per-mod if/else chain)
             String uidStr = uid.toString();
             String filter = ModType.filterForJeiUid(uidStr);
@@ -700,7 +707,6 @@ public class RecipeGuiLayoutsMixin {
 
     @Unique
     private static ResourceLocation getRecipeId(Object recipe) {
-        if (rsi$isGoetyRitual(recipe)) return ((com.Polarice3.Goety.common.crafting.RitualRecipe) recipe).getId();
         String className = recipe.getClass().getName();
 
         // Standard Recipe.getId() / m_6423_()
@@ -1404,6 +1410,30 @@ public class RecipeGuiLayoutsMixin {
         return true;
     }
 
+
+    @Unique
+    private static String rsi$botaniaManaCatalystFilter(Object recipe) {
+        if (!(recipe instanceof vazkii.botania.api.recipe.ManaInfusionRecipe manaRecipe)) {
+            RSIntegrationMod.LOGGER.warn("[RSI-JEI-Mixin] Botania mana recipe has unexpected class {}; refusing fallback binding",
+                    recipe == null ? "null" : recipe.getClass().getName());
+            return null;
+        }
+        vazkii.botania.api.recipe.StateIngredient catalyst = manaRecipe.getRecipeCatalyst();
+        if (catalyst == null) return "mana_pool";
+        for (var state : catalyst.getDisplayed()) {
+            ResourceLocation id = net.minecraftforge.registries.ForgeRegistries.BLOCKS.getKey(state.getBlock());
+            if (id == null) continue;
+            if ("botania".equals(id.getNamespace()) && "conjuration_catalyst".equals(id.getPath())) {
+                return "conjuration_catalyst";
+            }
+            if ("botania".equals(id.getNamespace()) && "alchemy_catalyst".equals(id.getPath())) {
+                return "alchemy_catalyst";
+            }
+        }
+        RSIntegrationMod.LOGGER.warn("[RSI-JEI-Mixin] Unsupported Botania mana catalyst for recipe {}; hiding RSI button",
+                getRecipeIdSafe(recipe));
+        return null;
+    }
     @Unique
     private static AbstractContainerMenu getParentContainer() {
         var player = Minecraft.getInstance().player;

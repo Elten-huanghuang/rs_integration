@@ -43,6 +43,7 @@ public final class LithumAltarBatchDelegate extends AbstractBatchDelegate {
     private boolean staffFromNetwork;
     private ItemStack networkStaff = ItemStack.EMPTY;
     private ItemStack pendingResult = ItemStack.EMPTY;
+    private int clearedRecipeTicks;
     private final LithumAltarFuelHelper fuelHelper = new LithumAltarFuelHelper();
 
     @Override
@@ -52,6 +53,7 @@ public final class LithumAltarBatchDelegate extends AbstractBatchDelegate {
         this.pos = pos;
         this.started = false;
         this.pendingResult = ItemStack.EMPTY;
+        this.clearedRecipeTicks = 0;
         this.ownedSlots.clear();
         this.definition = LithumAltarRecipeResolver.resolve(recipeId);
         if (!LithumAltarRecipeResolver.isComplete(definition)) return false;
@@ -345,6 +347,7 @@ public final class LithumAltarBatchDelegate extends AbstractBatchDelegate {
         String current = be.getPersistentData().getString("CurrentRecipe");
         if (!started) return new CraftObservation(CraftPhase.WAITING_FOR_START);
         if (!current.isEmpty()) {
+            clearedRecipeTicks = 0;
             if (!definition.currentRecipe().equals(current)) {
                 return failObservation("Lithum Altar recipe ownership changed");
             }
@@ -366,7 +369,29 @@ public final class LithumAltarBatchDelegate extends AbstractBatchDelegate {
             phase = CraftPhase.DONE;
             return new CraftObservation(phase);
         }
+        if (++clearedRecipeTicks <= 10) {
+            phase = CraftPhase.WORKING;
+            return new CraftObservation(phase);
+        }
+        if (wereOwnedMaterialsConsumed()) {
+            pendingResult = definition.output().copy();
+            phase = CraftPhase.DONE;
+            return new CraftObservation(phase,
+                    "Lithum Altar consumed all inputs but exposed no output stack; recovered deterministic recipe output");
+        }
         return failObservation("Lithum Altar cleared CurrentRecipe without the expected output");
+    }
+
+    private boolean wereOwnedMaterialsConsumed() {
+        if (level == null || ownedSlots.isEmpty()) return false;
+        for (OwnedSlot owned : ownedSlots) {
+            BlockEntity ownedEntity = level.getBlockEntity(owned.pos());
+            if (ownedEntity == null) return false;
+            ItemStack current = getSlot(ownedEntity, 0);
+            if (ItemStack.isSameItemSameTags(current, owned.stack())) return false;
+            if (!owned.pos().equals(pos) && !current.isEmpty()) return false;
+        }
+        return true;
     }
 
     @Override
@@ -409,6 +434,7 @@ public final class LithumAltarBatchDelegate extends AbstractBatchDelegate {
         fuelHelper.refundUnused(level, network, player);
         releaseNetworkStaff();
         pendingResult = ItemStack.EMPTY;
+        clearedRecipeTicks = 0;
         ownedSlots.clear();
         resetState();
     }
