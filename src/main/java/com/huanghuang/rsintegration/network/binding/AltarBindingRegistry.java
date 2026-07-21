@@ -815,6 +815,10 @@ public final class AltarBindingRegistry {
         if (ModIds.ID_FR_KETTLE.equals(type.id())) {
             return null;
         }
+        // Botania recipe paths are data-pack folders, not machine sub-types.
+        if (type.id().startsWith("botania_")) {
+            return null;
+        }
         // farmersdelight_skillet handles both skillet and campfire blocks —
         // sub-type filtering by recipe path (e.g. "campfire_cooking") would
         // reject skillet bindings even though they accept the recipe.

@@ -141,6 +141,10 @@ public final class OperationResourceCoordinator {
             return capture != null && capture.hasCaptured();
         }
 
+        public List<ItemStack> capturedSnapshot() {
+            return capture == null ? List.of() : capture.snapshot();
+        }
+
         public List<ItemStack> drainCapture() {
             CaptureSession current = capture;
             capture = null;

@@ -2057,6 +2057,21 @@ public final class GenericCraftPacket {
             }
         }
 
+        long totalBotaniaMana = 0L;
+        for (PlanStep step : steps) {
+            Recipe<?> stepRecipe = player.serverLevel().getRecipeManager()
+                    .byKey(step.recipeId()).orElse(null);
+            int manaPerBatch = stepRecipe == null ? 0 : PlanWarnings.botaniaManaCost(stepRecipe);
+            if (manaPerBatch > 0) {
+                totalBotaniaMana = Math.min(Long.MAX_VALUE,
+                        totalBotaniaMana + (long) manaPerBatch * Math.max(1, step.batches()));
+            }
+        }
+        if (totalBotaniaMana > 0) {
+            modWarnings.add(net.minecraft.network.chat.Component.translatable(
+                    "rsi.botania.warn.total_mana_required", totalBotaniaMana).getString());
+        }
+
         PlanResponse plan = new PlanResponse(
                 feasible,
                 targetName,

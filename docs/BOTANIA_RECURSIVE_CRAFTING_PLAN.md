@@ -1,225 +1,170 @@
-# Botania 递归合成集成计划
+# Botania 448 递归合成集成方案
 
-## 1. 范围与依据
+## 1. 调研结论
 
-```text
-Minecraft: 1.20.1
-Forge: 47.x
-Mod: Botania 448 Forge
-JAR: libs/[植物魔法] Botania-1.20.1-448-FORGE.jar
-Mod ID: botania
-```
+目标环境：Minecraft 1.20.1、Forge 47.x、Botania `1.20.1-448-FORGE`，目标 JAR 为 `libs/[植物魔法] Botania-1.20.1-448-FORGE.jar`。
 
-目标 JAR 已通过项目 `libs/` 的 compile-only 依赖进入开发类路径，但当前没有 Botania 专用
-module、recipe handler 或 batch delegate。Botania 的多数机器通过世界 ItemEntity、魔力网络、
-多方块状态或方块转换执行，不能直接交给 `GenericBatchDelegate`。
+本方案已直接检查 JAR 中公开 API、配方实现和方块实体字节码。结论为：Mana Pool、Alchemy/Conjuration Catalyst、Petal Apothecary、Runic Altar、Botanical Brewery、Elven Trade 可以纳入一个完整交付；Terrestrial Agglomeration Plate 也作为正式支持项；Pure Daisy 作为专用世界方块转换正式支持；Mana Enchanter 本次不实现；Orechid 和其他随机魔力花不进入物品递归索引。
 
-## 2. 配方族可行性
+这不是分阶段方案。所有支持项一次性建立模块、索引、绑定、执行、恢复和测试，高风险项用配置开关控制。
 
-| 配方族 | 第一版结论 | 核心原因 |
+## 2. JAR 已确认的 API
+
+| 系统 | 配方接口/实现 | 关键公开信息 |
 |---|---|---|
-| Mana Infusion | Phase 1 | 确定输入/输出，但使用 Mana Pool 和世界物品实体 |
-| Runic Altar | Phase 1 | 确定材料/产物/魔力，需显式完成动作和真实状态轮询 |
-| Petal Apothecary | Phase 1 | 确定材料，需水、种子收尾及世界物品交互 |
-| Botanical Brewery | Phase 2 | 需要容器/配方材料/魔力，输出与容器语义需单独建模 |
-| Elven Trade | Phase 2 | 通过 Alfheim Portal 接收/生成世界物品，存在多输出 |
-| Terrestrial Agglomeration | 暂缓 | 多方块结构、巨量魔力、世界实体和完成时序复杂 |
-| Pure Daisy | 暂不支持 | 原地转换世界方块，不是可回滚的物品机器 |
-| Orechid | 暂不支持 | 世界方块随机转换，输出及位置均非确定物品槽 |
+| 魔力池 | `ManaInfusionRecipe` | `matches(ItemStack)`、`getRecipeOutput(RegistryAccess, ItemStack)`、`getRecipeCatalyst()`、`getManaToConsume()` |
+| 花药台 | `PetalApothecaryRecipe` / `RecipeWithReagent` | `getIngredients()`、`getReagent()`、`assemble()`；流体状态为 `EMPTY/WATER/LAVA` |
+| 符文祭坛 | `RunicAltarRecipe` / `RecipeWithReagent` | `getIngredients()`、默认 reagent、`getManaUsage()`、`assemble()` |
+| 植物酿造台 | `BotanicalBreweryRecipe` | `getBrew()`、`getManaUsage()`、`getOutput(containerStack)` |
+| 精灵门 | `ElvenTradeRecipe` | `match(List<ItemStack>)`、`getIngredients()`、`getOutputs()`、动态 `getOutputs(inputs)`、`isReturnRecipe()` |
+| 泰拉凝聚板 | `TerrestrialAgglomerationRecipe` | `getIngredients()`、`getMana()`、`assemble()` |
+| 白雏菊 | `PureDaisyRecipe` | `getInput()`、`getOutputState()`、`getTime()`、`matches(...)`、`set(...)` |
 
-## 3. 已确认的执行特征
+`BotaniaRecipeTypes` 暴露 `MANA_INFUSION_TYPE`、`PETAL_TYPE`、`RUNE_TYPE`、`BREW_TYPE`、`ELVEN_TRADE_TYPE`、`TERRA_PLATE_TYPE`，可以通过 RecipeManager 稳定枚举，不需要猜测私有 output 字段。
 
-- Mana Pool 和 Petal Apothecary 接收投入世界的 `ItemEntity`。
-- Runic Altar 与 Botanical Brewery 具有内部材料集合，但正常交互依赖玩家/物品添加逻辑。
-- Alfheim Portal 校验世界物品实体并在世界中生成交换结果。
-- Terrestrial Agglomeration Plate 从世界收集材料并依赖结构与魔力。
-- Pure Daisy 原地变换周围方块。
-- Botania 魔力通过 `ManaReceiver`、Spark 或相邻网络提供，不是普通物品材料。
+## 3. 支持矩阵
 
-因此，所有第一阶段 delegate 都必须拥有 world-capture lease，并收集真实产物；禁止直接按 recipe
-模板向 RS 补发结果。
+| 机器 | 结论 | 真实执行与边界 |
+|---|---|---|
+| Mana Pool | 支持 | `collideEntityItem` 检查实体、配方和 mana，消耗一个输入并生成带 `manaInfusionSpawned` 标记的新实体。必须捕获真实实体。 |
+| Alchemy Catalyst | 支持，魔力池子类型 | 下方 `BlockState` 匹配 `StateIngredient`。同一输入存在催化配方时，催化配方优先于普通配方。 |
+| Conjuration Catalyst | 支持，魔力池子类型 | 同上；输出数量可大于输入数量，必须使用 `getRecipeOutput` 的实际 stack count。 |
+| Petal Apothecary | 支持 | 先保证 `WATER`，无序投料，最后投入 `getReagent()`（通常为种子），由 `collideEntityItem` 完成并生成掉落物。 |
+| Runic Altar | 支持 | 通过 `addItem` 无序投料，等待 `mana >= manaToGet`，投入活石，再调用 `onUsedByWand` 的完成入口。自动化无需真实法杖物品，但不能跳过活石或祭坛完成逻辑。 |
+| Botanical Brewery | 支持 | 0 号槽必须先放实现 `BrewContainer` 的容器且尚无有效 Brew，之后加入材料；达到 `getManaCost()` 后由真实 tick 调用 `getOutput(container)`。 |
+| Elven Trade | 保守支持 | Portal 保存 `stacksIn`，匹配后生成一个或多个实体。必须使用动态 `getOutputs(inputs)`，处理 return recipe，并持续校验结构、pylon 和 mana。 |
+| Terra Plate | 支持 | 方块实体每 tick 从世界实体重建 inventory，结构有效才工作；材料被吸走会使 recipe 消失/中断。需要长时 capture lease。 |
+| Pure Daisy | 支持，专用方块执行器 | 独立处理周围 8 格；放置输入方块，等待原生 `tickFlower` 调用 recipe `set`，再受控采集输出方块。仅索引可安全物品化的确定转换。 |
+| Orechid/Marimorphosis | 禁用 | 随机、权重和环境相关的世界方块转换。 |
+| 魔力花 | 不属于配方 | 不进入递归索引。 |
 
-## 4. 模块结构
+## 4. 模块与路由
 
-建议新增：
-
-```text
-BotaniaRSModule
-BotaniaReflection
-BotaniaRecipeTypes
-BotaniaWorldItemHelper
-BotaniaManaProbe
-
-ManaInfusionRecipeHandler
-ManaPoolBatchDelegate
-
-RunicAltarRecipeHandler
-RunicAltarBatchDelegate
-
-PetalApothecaryRecipeHandler
-PetalApothecaryBatchDelegate
-```
-
-Phase 2 再新增：
+新增：
 
 ```text
-BotanicalBreweryRecipeHandler
-BotanicalBreweryBatchDelegate
-ElvenTradeRecipeHandler
-ElvenTradeBatchDelegate
+mods/botania/
+  BotaniaRSModule.java
+  BotaniaRecipeHandler.java
+  BotaniaRecipeTypes.java
+  BotaniaMachineProbe.java
+  BotaniaWorldCapture.java
+  BotaniaContainerResolver.java
+  ManaPoolBatchDelegate.java
+  PetalApothecaryBatchDelegate.java
+  RunicAltarBatchDelegate.java
+  BotanicalBreweryBatchDelegate.java
+  ElvenTradeBatchDelegate.java
+  TerraPlateBatchDelegate.java
+  PureDaisyBlockConversionDelegate.java
 ```
 
-每个机器使用独立 `ModType` 和绑定类型，不能用一个 `botania` 类型让任意配方路由到错误机器。
+注册独立 `ModType`：`botania_mana_pool`、`botania_alchemy_catalyst`、`botania_conjuration_catalyst`、`botania_apothecary`、`botania_runic_altar`、`botania_brewery`、`botania_elven_trade`、`botania_terra_plate`、`botania_pure_daisy`。所有类型（包括 `botania_terra_plate`）进入正式注册。不能使用单一 `botania` 类型，否则同一物品可能被路由到错误的魔力池变种。
 
-## 5. 配方索引与结果提取
+`BotaniaRecipeHandler` 直接按上述 RecipeType 分派。Mana Infusion 的索引 key 必须包含 catalyst `StateIngredient`；无 catalyst 为普通池，有 catalyst 的条目按可显示 BlockState 映射到具体绑定类型。无法唯一映射的第三方 catalyst 条目不进入自动执行索引，并记录诊断日志。
 
-### 5.1 显式类型注册
+## 5. 容器、NBT 与材料角色
 
-module 注册时按 Botania recipe type 添加 handler。handler 必须：
+输入角色：
 
-- 使用目标 JAR 的公开 recipe 接口读取 ingredients、reagent、mana usage 和结果；
-- 正确处理一个配方的多个输出；
-- 排除世界方块转换、随机结果和无法枚举的结果；
-- 为容器、种子、符文返还物等设置正确角色；
-- 不通过反射猜测任意 `output/result` 字段。
+- `CONSUMED`：花瓣、符文材料、精灵交易材料、活石、种子等 reagent。
+- `CATALYST`：只用于配方匹配且不被机器消耗的世界催化方块。
+- `CONTAINER_RETURNING`：水桶等补水容器，消耗内容后返回空容器。
+- `TRANSFORMED`：Brewery 容器；输入 stack 被转换为带 NBT 的输出。
 
-### 5.2 索引规则
+Botanical Brewery 不能预先固定一个输出物品。handler 必须针对每个可接受的 `BrewContainer` 调用 `getOutput(containerStack)` 生成精确输出声明。若存在多种容器，则每种容器产生独立候选，使用 Item+NBT 的 `MaterialKey` 去重。未知第三方容器只有在实现 `BrewContainer` 且 `getOutput` 返回稳定非空结果时才可索引。
 
-- 确定主输出进入普通候选索引。
-- Elven Trade 多输出需要全部声明为 `OutputDeclaration`，不能把第一项之外的结果丢弃。
-- Pure Daisy/Orechid 不进入物品递归索引。
-- 相同 recipe ID 只产生一个 entry，主输出和次要输出反向查找后由 CandidateEngine 去重。
-- reload 后清理 Botania recipe cache、mana probe cache 和 binding capability cache。
+## 6. 花药台自动补水
 
-## 6. 需求角色与魔力
+`PetalApothecary` API 只暴露 `setFluid(State)`/`getFluid()`，状态包括 WATER 和 LAVA。自动执行前：
 
-物品需求使用统一模型：
+1. 若状态为 WATER，直接继续。
+2. 若为 EMPTY，按 `virtualWater` 配置决定补水策略：
+   - `virtualWater=false`（默认）：从 RS 网络预扣一个已配置的有效水容器，优先通过 `PetalApothecaryBlock` 的真实 use 路径交互，并结算空桶/容器返回。
+   - `virtualWater=true`：允许 delegate 调用 `setFluid(WATER, false)` 直接补水，不生成或消耗水桶；该操作记录为机器配置提供的虚拟资源，不伪造物品产出。
+3. 两种策略都必须触发方块实体同步并确认 `getFluid()==WATER` 后才投料。虚拟水只改变水源前置条件，不改变配方材料、产物和 mana。
+4. 若状态为 LAVA，不覆盖，返回机器占用错误。
+5. 真实补水没有有效水容器时进入 WAITING；虚拟补水则直接继续。
 
-```text
-CONSUMED            花瓣、符文材料、交易材料等
-CATALYST            配方明确不消耗且批量期间可复用的物品
-CONTAINER_RETURNING 容器参与后返还或替换
-TRANSFORMED         输入容器/NBT 被 Botania 修改为结果
-```
+重复上次配方的 `trySetLastRecipe` 是玩家便利功能，不作为自动化主路径。delegate 已持有确定 recipe，应逐项投料并验证容器 inventory，避免依赖方块实体短时保存的 `lastRecipe`。
 
-魔力、水和结构状态不 flatten 成普通材料：
+## 7. 符文祭坛完成协议
 
-- Mana cost 属于机器资源需求；
-- Apothecary 的水属于机器状态；
-- Runic Altar 的完成动作属于执行协议；
-- Portal 是否开启属于结构和资源前置条件。
+JAR 的 `onUsedByWand` 实际完成条件为：存在当前 recipe、`manaToGet > 0`、mana 已满、祭坛周围存在活石实体。随后它扣 mana、调用 recipe `assemble`、生成带 `runicAltarSpawned` 标记的产物并消耗材料/活石。
 
-预览可显示这些警告，但最大制作次数只由会被永久消耗的物品决定。魔力不足应进入 WAITING，
-而不是把一个“魔力物品”加入缺失材料。
+因此“法杖可以跳过”的正确实现是：不从网络申请或消耗森林法杖，delegate 在充能完成并投放活石后直接调用祭坛的完成入口。不得在 delegate 中自行调用 `assemble()` 和生成结果，否则会绕过材料清理、返回物、mana 扣除、事件与实体标记。空手右键重复配方同样不作为主路径。
 
-## 7. Mana Pool 生命周期
+## 8. 通用执行与守恒
 
-1. 验证绑定方块是可接收魔力的 Mana Pool，且区块已加载。
-2. 读取配方输入、输出、mana cost 和可能的 catalyst。
-3. 获取机器独占 lease 和 world-capture lease。
-4. 预扣真实输入，但尚不 settle。
-5. 在受控捕获区域生成或交给 Botania 输入实体。
-6. 观察 pool 接受输入、魔力下降及结果实体生成。
-7. 捕获并核对真实结果，之后 settle 输入。
-8. 捕获失败或结果被外部提取时进入 draining，不得模板补发。
+每次 operation 保存 recipe id、类型、维度/位置、下方 BlockState、结构快照、预扣输入、预期输出、容器 key、operation token、capture lease 和当前状态。
 
-外部磁铁、漏斗和玩家拾取属于竞争消费者。捕获区必须与项目现有
-`CraftOutputInterceptor`/operation token 集成，并在成功、失败后及时关闭。
+执行顺序：
 
-## 8. Runic Altar 生命周期
+1. 验证绑定、区块、机器空闲、结构和 recipe variant。
+2. 先满足非物品状态；花药台先自动补水，Portal/泰拉板先验证多方块。
+3. 创建独占 token 和捕获区域，预扣材料但不 settle。
+4. 通过机器自己的 `collideEntityItem`、`addItem` 或完成入口投料。
+5. 观察 mana/水/内部 inventory/实体，捕获带 Botania 标记或 operation 所有权的真实输出。
+6. 与动态 `ExpectedProduction`（数量和 NBT）完全匹配后 settle。
+7. 失败区分未接受、已接受未产出、已产出未捕获、外部吸走；只有未接受允许完整退款。
 
-1. 验证 altar 空闲、魔力接收可用且没有他人材料。
-2. 预扣每个配方材料，保留真实 NBT。
-3. 通过 Botania 自己的 add-item 路径逐项放入，验证每项被接受。
-4. 等待 altar 达到可完成状态。
-5. 按 Botania 协议提供完成动作所需物品/交互，不直接调用 `assemble()` 跳过状态机。
-6. 捕获真实符文产物和返还物。
-7. 对照 `ExpectedProduction` 后 settle，清理 altar 和 capture lease。
+每台物理机器并发度为 1。共享 Portal、Spark 网络或捕获 AABB 时互斥。WAITING 只更新状态，不刷聊天消息。
 
-批量执行默认串行。同一 altar 同时一个 operation；除非能证明材料集合和完成动作完全隔离，
-否则不能跨节点并发复用。
+## 9. 泰拉凝聚板执行协议
 
-## 9. Petal Apothecary 生命周期
+`TerrestrialAgglomerationPlateBlockEntity` 每 tick 获取平台上方的 `ItemEntity`，把 stack 展平为临时 inventory，再通过 `TERRA_PLATE_TYPE` 匹配 recipe；只有 `hasValidPlatform()` 成立时才积累 mana。配方提供确定的 `getIngredients()`、`getMana()` 和 `assemble()`，因此能够进入普通递归图。
 
-1. 验证 Apothecary 空闲且装有配方所需液体。
-2. 水状态只检查一次启动条件，不作为免费可伪造的物品产出。
-3. 获取独占 lease，预扣花瓣和最终触发物。
-4. 依次通过 Botania 接口投入材料，每次验证内部集合。
-5. 最后提供触发物，捕获真实输出实体。
-6. 成功后 settle；拒绝、中止时恢复仍可回收的投入物。
+执行时先验证多方块和唯一绑定，随后取得覆盖平台材料区域的独占 world-capture lease，再一次性投放本次 recipe 的精确材料实体。delegate 保存所有投入实体 UUID、原始 stack、recipe id、目标 mana 和 `getCompletion()`；充能期间禁止漏斗、磁铁、玩家和其他 operation 提取或追加实体。每 tick 重新确认 recipe 仍匹配、结构仍有效且实体集合未变化。
 
-若液体会在合成后消耗，delegate 必须观察真实液体状态。没有可靠补水和回滚协议前，缺水只返回
-可本地化错误，不自动消耗水桶伪造状态。
+完成必须由 Botania 自己的 `serverTick` 消耗材料并生成真实产物，delegate 只捕获和结算。结构破坏、实体缺失或 recipe 改变时立即停止投入并进入 draining：仍存在且归属于本 operation 的材料可回收；已经被外部提取的材料不得补发；已生成的产物只收集一次。区块卸载和服务端停止时持久化 UUID/stack/mana 快照，恢复后以世界实体和方块实体实际状态为准，快照只用于核对，不能据此生成物品。
 
-## 10. Phase 2 约束
+批量执行严格串行，每次只投一份配方材料，上一份产物捕获和 settle 完成后才能开始下一份。巨额 mana 仅造成 WAITING/长时间运行，不影响递归可行性。
 
-### Botanical Brewery
+## 10. 暂不支持的系统
 
-- 容器必须作为 `TRANSFORMED` 或 `CONTAINER_RETURNING` 建模。
-- 输出必须来自真实 brewery 状态。
-- potion/brew NBT 必须使用精确 `MaterialKey`，不可只比较 Item。
-- 批量时容器数量按每次消耗或转换放大，不得错误视作永久催化剂。
+Mana Enchanter（魔力附魔台）本次不实现、不注册 `ModType`、不建立候选，也不进入递归图。Orechid/Marimorphosis 等随机世界转换同样不支持。
 
-### Elven Trade
+## 11. 白雏菊方块转换协议
 
-- 必须验证 Portal 结构、开启状态和持续魔力。
-- 支持多输入、多输出和输出倍数。
-- 所有结果实体必须由同一 capture token 归属和收集。
-- Portal 关闭、区块卸载或捕获不完整时进入 draining。
+`PureDaisyBlockEntity` 固定扫描同一高度周围 8 个位置，每个位置有独立 `ticksRemaining`。发现 `PURE_DAISY_TYPE` 匹配后使用 recipe `getTime()` 计时；输入状态持续匹配到倒计时结束时，由 Botania 调用 recipe `set(level, pos, flower)` 完成真实方块转换。`StateCopyingPureDaisyRecipe` 还可能复制输入方块状态，因此不能假定输出永远是默认 BlockState。
 
-## 11. 暂不支持的原因
+为了接入物品递归，使用专用 `PureDaisyBlockConversionDelegate`，不复用 ItemEntity delegate：
 
-### Pure Daisy
+1. 绑定白雏菊并取得其周围 8 格的独占 block lease；只使用空气且允许放置/破坏的位置。
+2. 从 `getInput().getDisplayedStacks()` 建立可放置输入候选，但执行前必须用实际放置后的 BlockState 再调用 recipe `matches(...)` 验证。
+3. 从 RS 预扣方块物品，通过受控 fake player 的正常放置路径放入空位；禁止直接 `setBlock` 伪造输入或绕过保护事件。
+4. 等待白雏菊自己的 tick 完成，逐格核对实际 BlockState。玩家破坏、活塞移动、其他方块覆盖或区块卸载时停止该格操作。
+5. 转换完成后通过受控 fake player 和配置工具正常采集，使用实际 loot/drop 进入 capture token；活石/活木等掉落自身的方块可直接支持。
+6. 只有实际掉落与索引声明一致才 settle。输出没有对应物品、需要特定工具/附魔、掉落随机、带 BlockEntity 数据或执行 success function 会产生额外不可枚举副作用的配方，保留世界转换但不进入物品递归索引。
 
-输入和输出是世界方块状态。自动化需要选址、保护校验、方块恢复、区块票和长时间 tick 所有权，
-无法使用现有物品 ledger 给出可靠原子性。
+8 格可并行承载同一 operation 的独立执行，但为简化守恒，默认一次填满不超过计划数量，逐格拥有独立 token/状态；批量剩余数量在空位释放后继续。恢复时以实际方块状态为准：仍是输入则继续等待，已是输出则进入采集，其他状态视为外部干预，绝不按快照补发。
 
-### Orechid
+原版原石到活石、原木到活木属于确定输出且正常掉落自身，可正式进入递归图。这里的“魔力花转化活石”应在 UI/文档中显示为“白雏菊方块转换”，避免与产 mana 的产能花混淆。
 
-存在随机世界方块转换和环境依赖，不能在计划阶段声明确定产物，也不能对失败做物品级退款。
+## 12. 索引、恢复与测试
 
-### Terrestrial Agglomeration
+- Elven Trade 声明全部输出，使用动态输出处理保留/返回输入的配方。
+- 魔力池输出使用输入 stack 调用 `getRecipeOutput`，保留 NBT 与倍率。
+- reload 清除 Botania recipe、catalyst 映射、容器、mana probe 和 binding cache。
+- operation 持久化后恢复前重新验证实体 UUID、机器状态和结构；不能仅凭旧快照补发结果。
+- Terra Plate 正式进入索引；只有结构无效或无法取得独占捕获 lease 时才标记当前机器不可执行。
+- Pure Daisy 的确定且可安全放置/采集配方进入专用方块转换索引；Orechid 永不进入普通索引。
 
-虽然最终产物可枚举，但涉及多方块结构、世界实体聚合、长时间巨量魔力供给和外部拾取竞争。
-第一版接入会显著扩大物品守恒风险，应在 Phase 1 的 world-capture 协议经实机验证后单独研究。
+单元测试覆盖 RecipeType 路由、催化器优先级、动态输出、容器枚举、NBT、reagent、mana、批量倍率、自动补水及空桶返回、祭坛无实体法杖完成、多输出和 exactly-once settle。游戏内测试覆盖外部漏斗/磁铁/玩家拾取、魔力不足、LAVA 花药台、结构破坏、区块卸载、重启恢复、第三方 BrewContainer，以及白雏菊 8 格并行/外部改块/重启恢复。
 
-## 12. 并发、失败和防刷屏
+验收要求：`test`、`build`、`verifyReleaseJar` 通过；所有开启机器从真实 Botania 状态产出；任何失败路径不复制、不吞物；禁用系统不会被 Generic handler 误索引。
 
-- 每个物理机器默认并发度 1。
-- 共享 Portal、Spark 网络或捕获区域默认互斥。
-- WAITING 状态只更新进度快照；玩家消息使用现有去重/限频设施。
-- 所有失败路径必须区分：未接受输入、已接受未产出、已产出未捕获、结果已被外部提取。
-- 只有“未接受输入”允许完整退款；已产出路径必须 settle 已消费材料并保存捕获到的残余结果。
-- 区块卸载、玩家下线和服务器停止都要关闭 capture lease，并保留可恢复状态。
+## 13. 最终可行性
 
-## 13. 测试矩阵
+魔力池含两种催化器、花药台、符文祭坛、酿造台、精灵门的可行性高。泰拉凝聚板同样可正式支持，但必须独占平台上方实体区域直到完成，并把长时间充能状态持久化。白雏菊的原石到活石、原木到活木也可正式支持，但必须占用 8 格区域并通过真实放置、原生转换和真实采集完成物品守恒。魔力附魔台留待单独设计，本次不实现。自动补水和跳过实体法杖均可实现。花药台支持默认真实水容器模式，也支持显式 `virtualWater` 虚空补水模式；后者只提供水状态，不产生物品。法杖跳过仍必须调用祭坛原生完成入口而不是模板补发。
+## 新增反编译验证：凝矿兰与火凝矿兰
 
-单元测试：
+从 Botania 1.20.1-448 JAR 逐项读取了 `orechid` 与 `orechid_ignem` 配方。它们不是普通的确定性机器配方：同一输入方块对应多个输出，每次由权重随机选择；输入还区分石头、深板岩和下界岩。例如：
 
-- 每个 handler 的输入、输出、mana cost、角色提取；
-- 多输出端口数量和批次放大；
-- catalyst 最低数量不随 executions 翻倍；
-- 精确 NBT brew 输出不会与普通物品合并；
-- 不支持配方不会进入 RecipeIndex；
-- settle/refund 和 capture token 恰好一次。
+- 凝矿兰：石头 -> 煤矿 67415（57.478%）、铁矿 29371（25.042%）、红石矿 7654（6.526%）、铜矿 7000（5.968%）、金矿 2647（2.257%）、绿宝石矿 1239（1.056%）、青金石矿 1079（0.920%）、钻石矿 883（0.753%）。
+- 凝矿兰：深板岩 -> 深层铁矿 250（25%）、深层青金石矿 175（17.5%）、深层红石矿 150（15%）、深层金矿 125（12.5%）、深层钻石矿 100（10%）等。
+- 火凝矿兰：下界岩 -> 下界石英矿 19600（83.822%）、下界金矿 3635（15.545%）、远古残骸 148（0.633%）。
 
-游戏内测试：
+因此凝矿兰/火凝矿兰不能安全转换成单一递归输出：如果把“石头 -> 钻石矿”登记为确定性配方，会产生错误产物率；如果把所有可能输出都登记，又会让递归规划器把随机结果当成必得资源。当前实现明确排除 `orechid` 和 `orechid_ignem`，只保留确定性 Mana Pool、花药台、符文祭坛、植物酿造台、精灵门、泰拉凝聚板、白雏菊等机器。
 
-- Mana Pool 单次、批量、递归中间产物；
-- Runic Altar 魔力不足等待、补足后继续；
-- Apothecary 缺水、材料拒绝、成功收集；
-- 玩家拾取、磁铁、漏斗竞争时不复制结果；
-- 合成中途破坏机器、卸载区块、退出服务器后物品守恒；
-- 配方树、总需求条、实际预扣数量一致；
-- 等待状态不向聊天栏刷屏。
-
-## 14. 验收顺序
-
-1. 完成目标 JAR recipe/type API 的稳定探针测试。
-2. 实现 Mana Infusion handler + delegate，并验证 world capture。
-3. 实现 Runic Altar。
-4. 实现 Petal Apothecary。
-5. 完整测试与 `verifyReleaseJar` 通过后发布 Phase 1。
-6. 单独评审 Brewery 与 Elven Trade，再决定 Phase 2。
-
-实现中不得使用 recipe ID 特判，也不得用模板产物掩盖真实机器没有完成的问题。
+另外验证了精灵贸易的 `diamond_return` 是钻石输入、钻石输出的原样返回配方，不能作为资源生产配方；魔力池 `coal_dupe` 则是催化器下煤炭 1 -> 2 的确定性复制配方，会由魔力池催化器支持。

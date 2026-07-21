@@ -16,6 +16,7 @@ public final class FtbQuestJeiRuntime {
     private static final List<QuestSubmissionSnapshot> REGISTERED = new ArrayList<>();
     private static IJeiRuntime runtime;
     private static boolean waiting;
+    private static int refreshTicker;
 
     private FtbQuestJeiRuntime() {}
 
@@ -33,7 +34,11 @@ public final class FtbQuestJeiRuntime {
 
     @SubscribeEvent
     public static void onClientTick(TickEvent.ClientTickEvent event) {
-        if (event.phase == TickEvent.Phase.END && waiting) refreshIfReady();
+        if (event.phase != TickEvent.Phase.END || runtime == null) return;
+        if (waiting || ++refreshTicker >= 40) {
+            refreshTicker = 0;
+            refreshIfReady();
+        }
     }
 
     public static void requestRefresh() {
@@ -47,15 +52,21 @@ public final class FtbQuestJeiRuntime {
         if (file == null || data == null) return;
 
         List<QuestSubmissionSnapshot> snapshots = FtbQuestSubmissionScanner.scan(file, data, true);
+        if (snapshots.equals(REGISTERED)) {
+            waiting = false;
+            return;
+        }
+
         var manager = runtime.getRecipeManager();
         if (!REGISTERED.isEmpty()) {
             manager.hideRecipes(FtbQuestSubmissionRecipe.TYPE, REGISTERED);
         }
         manager.addRecipes(FtbQuestSubmissionRecipe.TYPE, snapshots);
+        manager.unhideRecipes(FtbQuestSubmissionRecipe.TYPE, snapshots);
         REGISTERED.clear();
         REGISTERED.addAll(snapshots);
         waiting = false;
-        RSIntegrationMod.LOGGER.info("[RSI-JEI] Registered {} FTB Quest submission entries",
+        RSIntegrationMod.LOGGER.info("[RSI-JEI] Refreshed FTB Quest submission entries: {}",
                 snapshots.size());
     }
 }

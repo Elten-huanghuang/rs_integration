@@ -35,6 +35,22 @@ import java.util.List;
 public final class PlanWarnings {
     private PlanWarnings() {}
 
+    public static int botaniaManaCost(Recipe<?> recipe) {
+        if (recipe instanceof vazkii.botania.api.recipe.ManaInfusionRecipe manaInfusion) {
+            return manaInfusion.getManaToConsume();
+        }
+        if (recipe instanceof vazkii.botania.api.recipe.RunicAltarRecipe runicAltar) {
+            return runicAltar.getManaUsage();
+        }
+        if (recipe instanceof vazkii.botania.api.recipe.TerrestrialAgglomerationRecipe terraPlate) {
+            return terraPlate.getMana();
+        }
+        if (recipe instanceof vazkii.botania.api.recipe.BotanicalBreweryRecipe brewery) {
+            return brewery.getManaUsage();
+        }
+        return 0;
+    }
+
     public static List<String> collect(String typeId, ServerPlayer player, Recipe<?> recipe,
                                         @Nullable ResourceLocation dim, @Nullable BlockPos pos) {
         List<String> warnings = new ArrayList<>();

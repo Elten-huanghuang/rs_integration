@@ -102,7 +102,7 @@ public final class AsyncCraftChain {
     private final List<ItemStack> virtualInventory = new ArrayList<>();
     /**
      * Snapshot of {@link #virtualInventory} at the last <i>settled</i> commit
-     * boundary — i.e. the set of intermediate products whose backing inputs were
+     * boundary 鈥?i.e. the set of intermediate products whose backing inputs were
      * already irreversibly consumed (a committed vanilla batch, a started mod
      * step, or a completed mod step). On abort this is the exact set owed to the
      * player: it excludes in-flight products from reservations that get rolled
@@ -361,7 +361,7 @@ public final class AsyncCraftChain {
     }
 
     /**
-     * True for the step that produces the chain's primary (final) output — i.e.
+     * True for the step that produces the chain's primary (final) output 鈥?i.e.
      * the last step, whose recipe matches the recipe id the player clicked.
      * {@link #targetOutput} only applies to this step; intermediate steps craft
      * their own generic outputs and must not inherit the final target.
@@ -380,7 +380,7 @@ public final class AsyncCraftChain {
         }
     }
 
-    // ── player resolution ──────────────────────────────────────────
+    // 鈹€鈹€ player resolution 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
     /**
      * Look up the player by UUID. Returns null if the player is offline
@@ -391,7 +391,7 @@ public final class AsyncCraftChain {
         return server.getPlayerList().getPlayer(playerId);
     }
 
-    // ── tick ────────────────────────────────────────────────────
+    // 鈹€鈹€ tick 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
     /**
      * Advance the chain by one tick. Returns true when the chain is done
@@ -409,10 +409,10 @@ public final class AsyncCraftChain {
             return tickEarthHeartTaint(online);
         }
 
-        // Dynamic player lookup — null means player disconnected
+        // Dynamic player lookup 鈥?null means player disconnected
         ServerPlayer online = resolvePlayer();
 
-        // Use graph scheduler when available — serial mode by default
+        // Use graph scheduler when available 鈥?serial mode by default
         if (useGraphExecution) {
             if (online == null) {
                 abortSilently("Player disconnected");
@@ -427,9 +427,9 @@ public final class AsyncCraftChain {
 
         // First tick transition
         if (state == State.PENDING) {
-            RSIntegrationMod.LOGGER.debug(ctx.format("PENDING → EXECUTING"));
+            RSIntegrationMod.LOGGER.debug(ctx.format("PENDING 鈫?EXECUTING"));
             state = State.EXECUTING;
-            Diagnostics.record(Diagnostics.Category.CHAIN_STATE, "PENDING→EXECUTING steps=" + steps.size());
+            Diagnostics.record(Diagnostics.Category.CHAIN_STATE, "PENDING鈫扙XECUTING steps=" + steps.size());
             sendStartedPacket(online);
             sendProgressSnapshot(online, buildProgressSnapshot(false));
         }
@@ -438,7 +438,7 @@ public final class AsyncCraftChain {
             return true;
         }
 
-        // Re-validate network each tick — RS controller may have been removed
+        // Re-validate network each tick 鈥?RS controller may have been removed
         if (network != null && !network.canRun()) {
             abortSilently("RS controller removed or network invalidated");
             return true;
@@ -474,7 +474,12 @@ public final class AsyncCraftChain {
                     abort("Machine craft failed: " + observation.detail());
                     return true;
                 }
-                if (observation.phase() == IBatchDelegate.CraftPhase.DONE) {
+                // World-output capture cancels the spawned ItemEntity before the delegate can observe it.
+                // Treat a matching captured output as completion so it settles into the RS inventory.
+                ItemStack expectedCapturedOutput = currentDelegate.getExpectedOutput();
+                boolean capturedWorldOutput = capturedOutput
+                        && hasCapturedExpectedCount(expectedCapturedOutput);
+                if (observation.phase() == IBatchDelegate.CraftPhase.DONE || capturedWorldOutput) {
                     List<ItemStack> actualResults = new ArrayList<>(disarmOutputCapture());
                     closeFlatOperationScope();
                     actualResults.addAll(currentDelegate.collectAllResults(online));
@@ -553,7 +558,7 @@ public final class AsyncCraftChain {
                     if (stepRemaining <= 0) currentStepIdx++;
                     state = State.EXECUTING;
                     snapshotCommittedVirtual();
-                    RSIntegrationMod.LOGGER.debug(ctx.format("WAITING_MOD → EXECUTING (remaining={})"), stepRemaining);
+                    RSIntegrationMod.LOGGER.debug(ctx.format("WAITING_MOD 鈫?EXECUTING (remaining={})"), stepRemaining);
                     return false;
                 }
 
@@ -626,9 +631,9 @@ public final class AsyncCraftChain {
             // rolling back to this baseline delivers only the truly-owed items.
             snapshotCommittedVirtual();
             Diagnostics.record(Diagnostics.Category.CHAIN_STATE,
-                    "EXECUTING→WAITING_MOD step=" + step.recipeId(),
+                    "EXECUTING鈫扺AITING_MOD step=" + step.recipeId(),
                     step.recipeId(), step.modType());
-            RSIntegrationMod.LOGGER.debug(ctx.format("EXECUTING → WAITING_MOD for step {}"),
+            RSIntegrationMod.LOGGER.debug(ctx.format("EXECUTING 鈫?WAITING_MOD for step {}"),
                     step.recipeId());
             waitTicks = 0;
         }
@@ -636,7 +641,7 @@ public final class AsyncCraftChain {
         return false;
     }
 
-    // ── graph-backed tick (multi-node parallel) ──────────────────
+    // 鈹€鈹€ graph-backed tick (multi-node parallel) 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
     private boolean tickGraph(ServerPlayer online) {
         if (graphScheduler == null) {
@@ -644,13 +649,13 @@ public final class AsyncCraftChain {
             return true;
         }
 
-        // First tick — initialise executor
+        // First tick 鈥?initialise executor
         if (state == State.PENDING) {
-            RSIntegrationMod.LOGGER.debug(ctx.format("PENDING → EXECUTING (graph, {} nodes, cap={})"),
+            RSIntegrationMod.LOGGER.debug(ctx.format("PENDING 鈫?EXECUTING (graph, {} nodes, cap={})"),
                     graph.topologicalOrder().size(), graphRunningNodeCap);
             state = State.EXECUTING;
             Diagnostics.record(Diagnostics.Category.CHAIN_STATE,
-                    "PENDING→EXECUTING graph nodes=" + graph.topologicalOrder().size());
+                    "PENDING鈫扙XECUTING graph nodes=" + graph.topologicalOrder().size());
             ConcurrentNodeExecutor.AdmissionWorkerFactory graphWorkers =
                     nodeId -> startAdmittedGraphNode(nodeId, online);
             graphExecutor = new ConcurrentNodeExecutor(graphScheduler,
@@ -700,13 +705,13 @@ public final class AsyncCraftChain {
                 String detail = failedNode == null ? ""
                         : graphFailureDetails.getOrDefault(failedNode, "");
                 abort(detail.isEmpty()
-                        ? "Graph execution failed — no running nodes remain"
+                        ? "Graph execution failed 鈥?no running nodes remain"
                         : "Graph node " + failedNode.value() + " failed: " + detail);
                 return true;
             }
         }
 
-        // All nodes succeeded — deliver
+        // All nodes succeeded 鈥?deliver
         if (graphScheduler.allSucceeded()) {
             state = State.COMPLETING;
             finish(online);
@@ -1861,7 +1866,7 @@ public final class AsyncCraftChain {
         this.taintRemaining = Math.max(1, count);
         this.taintWaitTicks = 0;
         this.state = State.WAITING_PLAYER_TRANSFORMATION;
-        // Heart is now physically in the player's slot, not virtualInventory —
+        // Heart is now physically in the player's slot, not virtualInventory 鈥?
         // snapshot so an abort mid-taint doesn't re-mint it into the network
         // while it also sits in the player's inventory.
         snapshotCommittedVirtual();
@@ -1898,7 +1903,7 @@ public final class AsyncCraftChain {
         }
         currentStepIdx++;
         state = State.EXECUTING;
-        // Tainted heart is back in virtualInventory and this taint step is done —
+        // Tainted heart is back in virtualInventory and this taint step is done 鈥?
         // settled boundary owed to the player on any later abort.
         snapshotCommittedVirtual();
         MaterialSources.invalidateFor(player);
@@ -1921,7 +1926,7 @@ public final class AsyncCraftChain {
         return false;
     }
 
-    // ── vanilla batch execution ──────────────────────────────────
+    // 鈹€鈹€ vanilla batch execution 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
     /**
      * Execute consecutive vanilla steps synchronously in one tick.
@@ -1982,7 +1987,7 @@ public final class AsyncCraftChain {
 
             if (recipe instanceof net.minecraft.world.item.crafting.CraftingRecipe cr) {
                 // Track only the slots actually modified so we can roll back
-                // just those slots on failure — avoids full-inventory snapshot copies.
+                // just those slots on failure 鈥?avoids full-inventory snapshot copies.
                 Map<Integer, ItemStack> modifiedSlots = new HashMap<>();
 
                 // Capture the actual items consumed (with NBT) so assemble()
@@ -2136,7 +2141,7 @@ public final class AsyncCraftChain {
         return true;
     }
 
-    // ── multi-block step execution ───────────────────────────────
+    // 鈹€鈹€ multi-block step execution 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
     private record MachineIdentity(ResourceLocation dimension, long packedPos, ModType modType) {}
 
@@ -2182,7 +2187,7 @@ public final class AsyncCraftChain {
         // Duplicate bindings must never create multiple workers for one logical machine.
         machines = deduplicateMachines(machines);
 
-        // ── Same-dimension priority ──
+        // 鈹€鈹€ Same-dimension priority 鈹€鈹€
         // Prefer machines in the player's current dimension so cross-dimension
         // crafts only fall back to remote dimensions when no local machine exists.
         ResourceLocation playerDim = online.level().dimension().location();
@@ -2193,7 +2198,7 @@ public final class AsyncCraftChain {
             return aSame ? -1 : 1;
         });
 
-        // ── Load-balanced multi-machine dispatch ──
+        // 鈹€鈹€ Load-balanced multi-machine dispatch 鈹€鈹€
         // When multiple machines are bound for this mod type, try to distribute
         // work across them instead of sending everything to one machine.
         // Only parallelize when there are multiple executions to distribute;
@@ -2220,7 +2225,7 @@ public final class AsyncCraftChain {
             // refunds the committed ledger and recovers virtualInventory. Only a
             // clean pre-reservation failure is safe to retry single-machine.
             if (ledger.isCommitted()) {
-                RSIntegrationMod.LOGGER.warn(ctx.format("[LB] parallel failed after commit — aborting instead of single-machine fallback"));
+                RSIntegrationMod.LOGGER.warn(ctx.format("[LB] parallel failed after commit 鈥?aborting instead of single-machine fallback"));
                 return null;
             }
             // Clean failure: undo any pre-reserve drain of virtualInventory and
@@ -2313,9 +2318,19 @@ public final class AsyncCraftChain {
 
         final IBatchDelegate startedDelegate = delegate;
         try {
+            int flatBatch = startedDelegate.prepareFlatBatch(stepRemaining);
+            if (flatBatch <= 0 || flatBatch > stepRemaining) {
+                RSIntegrationMod.LOGGER.warn(ctx.format(
+                        "Delegate selected invalid flat batch size {} for {} remaining operation(s)"),
+                        flatBatch, stepRemaining);
+                return null;
+            }
+            machineCount = flatBatch;
             List<IngredientSpec> specs = startedDelegate.getRequiredMaterials();
             if (specs != null && !specs.isEmpty()) {
-                List<ItemStack> materials = preReserveStepMaterials(specs, online);
+                List<IngredientSpec> batchSpecs = scaleGraphSpecsForExecutions(
+                        specs, startedDelegate.getMaterialReservationScopes(), flatBatch);
+                List<ItemStack> materials = preReserveStepMaterials(batchSpecs, online);
                 if (materials == null) {
                     RSIntegrationMod.LOGGER.warn(ctx.format("Failed to pre-reserve materials for {}"),
                             step.recipeId());
@@ -2379,7 +2394,7 @@ public final class AsyncCraftChain {
                 // Private-ledger path: tryStartSingleCraft's ensureMaterialAvailable
                 // only sees network + player inventory, NOT virtualInventory. In a
                 // multi-step chain, intermediate products from earlier steps live in
-                // virtualInventory and would be invisible here — the craft fails even
+                // virtualInventory and would be invisible here 鈥?the craft fails even
                 // though the material exists (e.g. CrockPot category filler / WR
                 // arcane iterator as a mid-chain step: works alone, fails as a
                 // dependency). Flush them into the network first so this step can
@@ -2389,7 +2404,7 @@ public final class AsyncCraftChain {
                 // on abort returns whatever this step consumed back to the network.
                 if (network != null && !virtualInventory.isEmpty()) {
                     flushVirtualInventory(online);
-                    snapshotCommittedVirtual(); // virtualInventory now empty → empty snapshot
+                    snapshotCommittedVirtual(); // virtualInventory now empty 鈫?empty snapshot
                 }
                 if (!acquireFlatOperationScope(delegate, matchedMachine, step)) {
                     RSIntegrationMod.LOGGER.debug(ctx.format("Physical operation resources busy for {}"),
@@ -2449,7 +2464,7 @@ public final class AsyncCraftChain {
         return delegate;
     }
 
-    // ── generic (no-machine) delegate: shared-ledger pre-reserve flow ──
+    // 鈹€鈹€ generic (no-machine) delegate: shared-ledger pre-reserve flow 鈹€鈹€
 
     private IBatchDelegate startGenericStep(IBatchDelegate delegate,
                                             CraftingResolver.ResolutionStep step,
@@ -2514,7 +2529,7 @@ public final class AsyncCraftChain {
         return delegate;
     }
 
-    // ── parallel (load-balanced) step ──────────────────────────────
+    // 鈹€鈹€ parallel (load-balanced) step 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
     /**
      * Try to dispatch work across multiple bound machines of the same type.
@@ -2529,11 +2544,11 @@ public final class AsyncCraftChain {
         // Filter: chunk loaded, BE present, not busy (resolves per-machine dimension)
         List<BoundMachine> available = LoadBalancer.filterAvailable(machines, server);
         if (available.size() < 2) {
-            RSIntegrationMod.LOGGER.debug(ctx.format("[LB] filterAvailable: {} machines → {} available (<2, abort)"),
+            RSIntegrationMod.LOGGER.debug(ctx.format("[LB] filterAvailable: {} machines 鈫?{} available (<2, abort)"),
                     machines.size(), available.size());
             return null;
         }
-        RSIntegrationMod.LOGGER.debug(ctx.format("[LB] filterAvailable: {} machines → {} available"),
+        RSIntegrationMod.LOGGER.debug(ctx.format("[LB] filterAvailable: {} machines 鈫?{} available"),
                 machines.size(), available.size());
 
         // Apply the same interaction protection gate as the single-machine path.
@@ -2561,7 +2576,7 @@ public final class AsyncCraftChain {
             available = new ArrayList<>(available.subList(0, cap));
         }
 
-        // Build a parallel group — constructor internally creates and validates
+        // Build a parallel group 鈥?constructor internally creates and validates
         // one delegate per machine. Pass the same recipe-aware capability contract
         // used by graph execution; otherwise the operation kernel accepts the group
         // but rejects every child as capability-exclusive after materials are committed.
@@ -2578,7 +2593,7 @@ public final class AsyncCraftChain {
                 capabilityDecision.capabilities());
         if (!PreparationMessageScope.validate(
                 group, online, step.recipeId(), null, BlockPos.ZERO)) {
-            RSIntegrationMod.LOGGER.debug(ctx.format("Parallel group empty — all children failed validateAndInit"));
+            RSIntegrationMod.LOGGER.debug(ctx.format("Parallel group empty 鈥?all children failed validateAndInit"));
             return null;
         }
 
@@ -2876,7 +2891,7 @@ public final class AsyncCraftChain {
         return materials;
     }
 
-    // ── output capture (magnet protection) ───────────────────────
+    // 鈹€鈹€ output capture (magnet protection) 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
     /**
      * Arm {@link CraftOutputInterceptor} only for delegates that explicitly
@@ -2909,6 +2924,20 @@ public final class AsyncCraftChain {
         return flatOperationSession != null
                 ? flatOperationSession.hasCaptured()
                 : captureHandle != null && captureHandle.hasCaptured();
+    }
+
+    private List<ItemStack> capturedOutputSnapshot() {
+        if (flatOperationSession != null) return flatOperationSession.capturedSnapshot();
+        return captureHandle == null ? List.of() : captureHandle.snapshot();
+    }
+
+    private boolean hasCapturedExpectedCount(ItemStack expected) {
+        if (expected == null || expected.isEmpty()) return false;
+        int captured = capturedOutputSnapshot().stream()
+                .filter(stack -> ItemStack.isSameItem(stack, expected))
+                .mapToInt(ItemStack::getCount)
+                .sum();
+        return captured >= expected.getCount();
     }
 
     private boolean acquireFlatOperationScope(IBatchDelegate delegate, BoundMachine machine,
@@ -2972,7 +3001,7 @@ public final class AsyncCraftChain {
         return count;
     }
 
-    // ── virtual inventory ────────────────────────────────────────
+    // 鈹€鈹€ virtual inventory 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
     private void addToVirtualInventory(ItemStack stack) {
         addToInventory(virtualInventory, stack);
@@ -2991,7 +3020,7 @@ public final class AsyncCraftChain {
 
     /**
      * Restore {@link #virtualInventory} to the last settled baseline WITHOUT
-     * flushing — used to undo a failed attempt (e.g. parallel dispatch that
+     * flushing 鈥?used to undo a failed attempt (e.g. parallel dispatch that
      * pre-reserved from virtualInventory then failed) before retrying via a
      * different path. Safe because the baseline equals virtualInventory at every
      * step boundary, so nothing owed is dropped.
@@ -3021,7 +3050,7 @@ public final class AsyncCraftChain {
      * On abort, replace the (possibly polluted) live inventory with the settled
      * baseline and deliver it. Products from rolled-back reservations are dropped;
      * products owed to the player (backed by consumed inputs) are inserted into
-     * the network, given to the player, or dropped at spawn — never silently lost.
+     * the network, given to the player, or dropped at spawn 鈥?never silently lost.
      * Runs after the ledger refund and only once state is already ABORTED, so it
      * cannot re-enter abort() other than via the drop-throttle guard.
      */
@@ -3041,7 +3070,7 @@ public final class AsyncCraftChain {
             } else if (!insertOrDropAtSpawn(owed.copy())) {
                 // Drop throttle tripped (network full/absent, player offline,
                 // >20 drops this chain). insertOrDropAtSpawn already logged the
-                // discard. Do NOT clear the rest silently — surface it as CRITICAL
+                // discard. Do NOT clear the rest silently 鈥?surface it as CRITICAL
                 // so the docstring's "never silently lost" promise isn't a lie.
                 RSIntegrationMod.LOGGER.error(ctx.format(
                         "CRITICAL: drop throttle tripped during committed-product recovery; "
@@ -3067,11 +3096,11 @@ public final class AsyncCraftChain {
                     safeGiveToPlayer(online, leftover);
                 } else if (online == null && !leftover.isEmpty()) {
                     if (!insertOrDropAtSpawn(leftover)) {
-                        // Throttle tripped — stop flushing and abort so
+                        // Throttle tripped 鈥?stop flushing and abort so
                         // remaining items are not silently destroyed.
                         // Leave unconsumed items in virtualInventory for
                         // the abort path to refund.
-                        abort("Drop throttle tripped — RS network full and player offline");
+                        abort("Drop throttle tripped 鈥?RS network full and player offline");
                         return;
                     }
                 }
@@ -3083,7 +3112,7 @@ public final class AsyncCraftChain {
     /**
      * Try to insert into RS, then drop at world spawn as last resort.
      * @return true if the item was handled, false if the chain should abort
-     *         (throttle tripped — further drops would be silently discarded)
+     *         (throttle tripped 鈥?further drops would be silently discarded)
      */
     private boolean insertOrDropAtSpawn(ItemStack stack) {
         if (network != null) {
@@ -3093,14 +3122,14 @@ public final class AsyncCraftChain {
             stack = stillLeft;
         }
         if (dropThrottleTripped) {
-            RSIntegrationMod.LOGGER.warn("[RSI] Drop throttle tripped — discarding {} x{} for player {}",
+            RSIntegrationMod.LOGGER.warn("[RSI] Drop throttle tripped 鈥?discarding {} x{} for player {}",
                     stack.getHoverName().getString(), stack.getCount(), playerId);
             return false;
         }
         dropsThisChain++;
         if (dropsThisChain > MAX_DROPS_PER_CHAIN) {
             dropThrottleTripped = true;
-            RSIntegrationMod.LOGGER.warn("[RSI] Drop throttle tripped ({} drops) — discarding {} x{} and all future drops for player {}. Chain will abort.",
+            RSIntegrationMod.LOGGER.warn("[RSI] Drop throttle tripped ({} drops) 鈥?discarding {} x{} and all future drops for player {}. Chain will abort.",
                     MAX_DROPS_PER_CHAIN, stack.getHoverName().getString(), stack.getCount(), playerId);
             return false;
         }
@@ -3117,7 +3146,7 @@ public final class AsyncCraftChain {
         return true;
     }
 
-    // ── lifecycle ────────────────────────────────────────────────
+    // 鈹€鈹€ lifecycle 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
     private void finish(ServerPlayer online) {
         if (useGraphExecution && graphMaterials != null) {
@@ -3153,7 +3182,7 @@ public final class AsyncCraftChain {
         }
 
         state = State.COMPLETED;
-        Diagnostics.record(Diagnostics.Category.CHAIN_STATE, "→COMPLETED steps=" + steps.size());
+        Diagnostics.record(Diagnostics.Category.CHAIN_STATE, "鈫扖OMPLETED steps=" + steps.size());
         RSIntegrationMod.LOGGER.info(ctx.format("COMPLETED for player {}: {} steps"),
                 online.getName().getString(), steps.size());
         sendTerminalProgress(online);
@@ -3243,7 +3272,10 @@ public final class AsyncCraftChain {
         } else if (currentDelegate != null) {
             try {
                 IBatchDelegate.CraftObservation observation = currentDelegate.observeCraft(server.overworld());
-                if (observation.phase() == IBatchDelegate.CraftPhase.DONE) {
+                // World-output capture cancels the spawned ItemEntity before the delegate can observe it.
+                // Treat a matching captured output as completion so it settles into the RS inventory.
+                boolean capturedWorldOutput = hasCapturedExpectedCount(currentDelegate.getExpectedOutput());
+                if (observation.phase() == IBatchDelegate.CraftPhase.DONE || capturedWorldOutput) {
                     collectCompletedDelegateForShutdown(resolvePlayer());
                 }
             } catch (RuntimeException exception) {
@@ -3280,9 +3312,9 @@ public final class AsyncCraftChain {
      * funnel through here; {@code policy} selects the refund/delivery/silence
      * behaviour. Idempotent: a chain already in a terminal state is a no-op.
      *
-     * <p>Fixed order (identical to the pre-merge variants): delegate cleanup →
-     * captured outputs → graph-node cleanup → ledger refund/rollback → recover
-     * earlier settled products → close ledger → notify → fire terminal listeners.
+     * <p>Fixed order (identical to the pre-merge variants): delegate cleanup 鈫?
+     * captured outputs 鈫?graph-node cleanup 鈫?ledger refund/rollback 鈫?recover
+     * earlier settled products 鈫?close ledger 鈫?notify 鈫?fire terminal listeners.
      * {@code committedVirtual} is disjoint from both the ledger (this step's
      * reserved inputs) and the captured outputs (this step's world drop), so
      * recovery never duplicates; in-flight products from rolled-back
@@ -3308,12 +3340,12 @@ public final class AsyncCraftChain {
         RSIntegrationMod.LOGGER.warn(ctx.format("Aborting chain (state={}, policy={}) for {}: {}"),
                 state, policy, online != null ? online.getName().getString() : playerId, reason);
         Diagnostics.record(Diagnostics.Category.CHAIN_STATE,
-                "→ABORTED policy=" + policy + " reason=" + reason + " atStep=" + currentStepIdx + "/" + steps.size());
+                "鈫扐BORTED policy=" + policy + " reason=" + reason + " atStep=" + currentStepIdx + "/" + steps.size());
         state = State.ABORTED;
         terminalCause = cause;
         abortReason = reason;
 
-        // Delegate cleanup — works even when player is offline
+        // Delegate cleanup 鈥?works even when player is offline
         if (currentDelegate != null) {
             try {
                 currentDelegate.onBatchFailed(online, reason);
@@ -3485,7 +3517,7 @@ public final class AsyncCraftChain {
         }
     }
 
-    // ── progress packets ─────────────────────────────────────────
+    // 鈹€鈹€ progress packets 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
     private void maybeSendProgress(ServerPlayer online, boolean terminal) {
         if (terminal) {
@@ -3535,7 +3567,7 @@ public final class AsyncCraftChain {
         }
     }
 
-    // ── delegate factory ─────────────────────────────────────────
+    // 鈹€鈹€ delegate factory 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
     private static IBatchDelegate createDelegate(ModType type) {
         // 1. Check version-specific delegate registry first
@@ -3553,13 +3585,13 @@ public final class AsyncCraftChain {
         return type.createDelegate();
     }
 
-    // ── safe item give ───────────────────────────────────────────
+    // 鈹€鈹€ safe item give 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
     private void safeGiveToPlayer(ServerPlayer player, ItemStack stack) {
         PlayerUtils.safeGiveToPlayer(player, stack, network);
     }
 
-    // ── debug helpers ────────────────────────────────────────────
+    // 鈹€鈹€ debug helpers 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
     private static String describeIngredientSafe(Ingredient ing) {
         for (ItemStack stack : ing.getItems()) {
@@ -3570,7 +3602,7 @@ public final class AsyncCraftChain {
 
     private void logMissingIngredient(Ingredient ing, ResourceLocation stepId) {
         StringBuilder sb = new StringBuilder(ctx.format("Missing ingredient for step "));
-        sb.append(stepId).append(" — options: ");
+        sb.append(stepId).append(" 鈥?options: ");
         for (ItemStack stack : ing.getItems()) {
             if (!stack.isEmpty()) {
                 net.minecraft.resources.ResourceLocation rl =

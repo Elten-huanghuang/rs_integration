@@ -26,6 +26,7 @@ import com.huanghuang.rsintegration.mods.goety.GoetyRSModule;
 import com.huanghuang.rsintegration.mods.immortalersdelight.ImmortalersDelightRSModule;
 import com.huanghuang.rsintegration.mods.ironfurnaces.IronFurnacesRSModule;
 import com.huanghuang.rsintegration.mods.malum.MalumRSModule;
+import com.huanghuang.rsintegration.mods.botania.BotaniaRSModule;
 import com.huanghuang.rsintegration.mods.slashblade.SlashBladeRSModule;
 import com.huanghuang.rsintegration.mods.tacz.TaczRSModule;
 import com.huanghuang.rsintegration.mods.touhoulittlemaid.TlmRSModule;
@@ -87,14 +88,14 @@ public final class RSIntegrationMod {
     public static final Logger LOGGER = LogManager.getLogger(MOD_NAME);
     public static final int[] RS_FLOW_COLORS = {0x3355FF, 0x7733FF, 0xCC33FF, 0x3355FF};
 
-    // Cached boolean — avoids per-tick ConfigValue.get() Map lookup + sync overhead
+    // Cached boolean 閳?avoids per-tick ConfigValue.get() Map lookup + sync overhead
     private static boolean verboseLogging;
 
     public static void refreshConfigCache() {
         verboseLogging = RSIntegrationConfig.DIAGNOSTIC_VERBOSE_LOGGING.get();
     }
 
-    /** Guarded debug — only emits when diagnostic verbose logging is enabled in config. */
+    /** Guarded debug 閳?only emits when diagnostic verbose logging is enabled in config. */
     public static void debug(String format, Object... args) {
         if (verboseLogging) {
             LOGGER.debug(format, args);
@@ -120,6 +121,8 @@ public final class RSIntegrationMod {
                     () -> GoetyRSModule.INSTANCE),
             new ModuleEntry(ModIds.MALUM, RSIntegrationConfig.ENABLE_MALUM,
                     () -> MalumRSModule.INSTANCE),
+            new ModuleEntry(ModIds.BOTANIA, RSIntegrationConfig.ENABLE_BOTANIA,
+                    () -> BotaniaRSModule.INSTANCE),
             new ModuleEntry(ModIds.EIDOLON, RSIntegrationConfig.ENABLE_EIDOLON,
                     () -> EidolonRSModule.INSTANCE),
             new ModuleEntry(ModIds.FORBIDDEN_ARCANUS, RSIntegrationConfig.ENABLE_FORBIDDEN_ARCANUS,
@@ -212,7 +215,7 @@ public final class RSIntegrationMod {
         if (enabled(RSIntegrationConfig.ENABLE_FARMINGFORBLOCKHEADS, ModIds.FARMINGFORBLOCKHEADS))
             FarmingForBlockheadsRSModule.initCommon();
 
-        // --- Confluence Workshop — binding target registered by the module;
+        // --- Confluence Workshop 閳?binding target registered by the module;
         //     this fallback ensures it works even when the full module is disabled ---
         if (ModList.get().isLoaded("confluence")) {
             BindingEventHandler.registerTarget(
@@ -247,7 +250,7 @@ public final class RSIntegrationMod {
             String delegateClass = "com.huanghuang.rsintegration.mods.vanilla.VanillaMachineBatchDelegate";
             String cookingDelegateClass = "com.huanghuang.rsintegration.mods.vanilla.CookingMachineBatchDelegate";
 
-            // ── Furnace ────────────────────────────────────────────
+            // 閳光偓閳光偓 Furnace 閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓
             ModType.register("vanilla_furnace",
                     new String[]{
                             "net.minecraft.world.item.crafting.SmeltingRecipe",
@@ -273,7 +276,7 @@ public final class RSIntegrationMod {
                             List.of("net.minecraft.world.level.block.FurnaceBlock"),
                             "vanilla_furnace"));
 
-            // ── Blast Furnace ──────────────────────────────────────
+            // 閳光偓閳光偓 Blast Furnace 閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓
             ModType.register("vanilla_blast_furnace",
                     new String[]{
                             "net.minecraft.world.item.crafting.BlastingRecipe",
@@ -299,7 +302,7 @@ public final class RSIntegrationMod {
                             List.of("net.minecraft.world.level.block.BlastFurnaceBlock"),
                             "vanilla_blast_furnace"));
 
-            // ── Smoker ─────────────────────────────────────────────
+            // 閳光偓閳光偓 Smoker 閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓
             ModType.register("vanilla_smoker",
                     new String[]{
                             "net.minecraft.world.item.crafting.SmokingRecipe",
@@ -325,10 +328,10 @@ public final class RSIntegrationMod {
                             List.of("net.minecraft.world.level.block.SmokerBlock"),
                             "vanilla_smoker"));
 
-            // ── Campfire (no GUI) ──────────────────────────────────
+            // 閳光偓閳光偓 Campfire (no GUI) 閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓
             // When FD is loaded, farmersdelight_skillet handles all
             // CampfireCookingRecipe classification and campfire binding.
-            // Avoid registering vanilla_campfire at all — if both it and
+            // Avoid registering vanilla_campfire at all 閳?if both it and
             // farmersdelight_skillet are registered with the same recipe
             // prefix, classifyRecipe's >= tiebreaker picks whichever was
             // registered last (vanilla, since modules run first in
@@ -353,7 +356,7 @@ public final class RSIntegrationMod {
                                 "vanilla_campfire", false));
             }
 
-            // ── Stonecutter ────────────────────────────────────────
+            // 閳光偓閳光偓 Stonecutter 閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓
             ModType.register("vanilla_stonecutter",
                     new String[]{"net.minecraft.world.item.crafting.StonecutterRecipe"},
                     new String[]{"stonecutter"},
@@ -370,7 +373,7 @@ public final class RSIntegrationMod {
                             List.of("net.minecraft.world.level.block.StonecutterBlock"),
                             "vanilla_stonecutter"));
 
-            // ── Anvil (JEI-only, opens remote GUI) ─────────────────
+            // 閳光偓閳光偓 Anvil (JEI-only, opens remote GUI) 閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓
             ModType.register("vanilla_anvil",
                     new String[0],
                     new String[]{"anvil"},
@@ -486,8 +489,10 @@ public final class RSIntegrationMod {
                 net.minecraftforge.common.MinecraftForge.EVENT_BUS.register(
                         com.huanghuang.rsintegration.autoeat.client.AutoEatClientEvents.class));
         DistExecutor.safeRunWhenOn(Dist.CLIENT, () -> () -> {
-            net.minecraftforge.common.MinecraftForge.EVENT_BUS.register(
-                    com.huanghuang.rsintegration.compat.ftbquests.client.FtbQuestJeiRuntime.class);
+            if (ModList.get().isLoaded(ModIds.FTB_QUESTS)) {
+                net.minecraftforge.common.MinecraftForge.EVENT_BUS.register(
+                        com.huanghuang.rsintegration.compat.ftbquests.client.FtbQuestJeiRuntime.class);
+            }
             net.minecraftforge.common.MinecraftForge.EVENT_BUS.addListener(
                     CraftProgressClientEvents::onClientLogin);
             net.minecraftforge.common.MinecraftForge.EVENT_BUS.addListener(
@@ -502,7 +507,7 @@ public final class RSIntegrationMod {
                         (net.minecraftforge.client.event.ClientPlayerNetworkEvent.LoggingOut e) ->
                                 com.huanghuang.rsintegration.sidepanel.RSSidePanelClient.clearOnLogout()));
 
-        // Resonance disk factory — register with RS storage disk registry
+        // Resonance disk factory 閳?register with RS storage disk registry
         if (RSIntegrationConfig.ENABLE_RS_PASSIVE_EFFECTS.get()) {
             ResonanceNetworkHandler.register();
             API.instance().getStorageDiskRegistry().add(

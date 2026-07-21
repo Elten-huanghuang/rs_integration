@@ -47,6 +47,15 @@ public final class NodeOutputAccumulator {
         return List.copyOf(publications);
     }
 
+    /** Checks prospective outputs without consuming or publishing the live accumulator. */
+    public boolean canCompleteWith(List<ItemStack> actual) {
+        NodeOutputAccumulator probe = new NodeOutputAccumulator(declarations);
+        probe.published.clear();
+        probe.published.putAll(published);
+        for (ItemStack stack : pending) probe.pending.add(stack.copy());
+        probe.add(actual);
+        return probe.isComplete();
+    }
     public boolean isComplete() {
         return shortages().isEmpty();
     }

@@ -358,7 +358,8 @@ public final class ParallelCraftGroup implements IBatchDelegate {
                 beginDraining(worker.machine.pos() + ": " + observation.detail());
                 continue;
             }
-            if (observation.phase() == CraftPhase.DONE) {
+            boolean capturedWorldOutput = hasCapturedExpectedOutput(worker);
+            if (observation.phase() == CraftPhase.DONE || capturedWorldOutput) {
                 settleCompletedOperation(worker);
             }
         }
@@ -690,6 +691,29 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         if (handle == null) return;
         worker.operationSession = null;
         legacyCaptureHandles.put(worker.id, handle);
+    }
+
+    private boolean hasCapturedExpectedOutput(WorkerSlot worker) {
+        ItemStack expected = worker.delegate.getExpectedOutput();
+        if (expected == null || expected.isEmpty()) return false;
+        List<ItemStack> captured;
+        if (worker.operationSession != null) {
+            captured = worker.operationSession.capturedSnapshot();
+        } else {
+            CraftOutputInterceptor.CaptureHandle handle = legacyCaptureHandles.get(worker.id);
+            captured = handle == null ? List.of() : handle.snapshot();
+        }
+        return containsExpectedWorldOutput(captured, expected);
+    }
+
+    static boolean containsExpectedWorldOutput(List<ItemStack> captured, ItemStack expected) {
+        if (expected == null || expected.isEmpty()) return false;
+        int count = captured.stream()
+                .filter(stack -> stack != null && !stack.isEmpty()
+                        && ItemStack.isSameItemSameTags(stack, expected))
+                .mapToInt(ItemStack::getCount)
+                .sum();
+        return count >= expected.getCount();
     }
 
     private List<ItemStack> drainCapture(WorkerSlot worker) {

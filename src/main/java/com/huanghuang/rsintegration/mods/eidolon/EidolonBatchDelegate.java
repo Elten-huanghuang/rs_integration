@@ -998,7 +998,8 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public BlockPos getMachinePos() {
-        return myPos;
+        // Eidolon worktables have no BlockEntity and complete instantly.
+        return isWorktable ? null : myPos;
     }
 
     @Override
