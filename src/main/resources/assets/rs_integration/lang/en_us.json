@@ -352,6 +352,8 @@
   "rsi.plan.status_fail": "Some materials are missing",
   "rsi.plan.failure.missing_materials": "Failure reason: missing materials or incompatible item data",
   "rsi.plan.failure.no_bound_machine": "Failure reason: no bound machine is available",
+  "rsi.plan.failure.machines_leased": "Failure reason: all bound machines are occupied by active crafting orders",
+  "rsi.plan.failure.nbt_mismatch": "Failure reason: the item exists, but its data does not match the recipe",
   "rsi.plan.missing_header": "Unavailable:",
   "rsi.plan.missing_more": "... (+%s more)",
   

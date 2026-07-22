@@ -27,7 +27,7 @@ Deep integration between [Refined Storage](https://www.curseforge.com/minecraft/
 |---|---|---|
 | Forge | Yes | 47+ (Minecraft 1.20.1) |
 | Refined Storage | Yes | 1.12+ |
-| JEI | Recommended | Enables `+` buttons in recipe views and remote crafting plans |
+| JEI | Required on client | Provides recipe views, `+` buttons, and remote crafting plans |
 | Curios | Optional | Backpack detection in Curios slots |
 | Sophisticated Backpacks | Optional | Backpack transfer, RS-custom upgrades integration |
 | Sophisticated Core | Optional | Required with Sophisticated Backpacks |

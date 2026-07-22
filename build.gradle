@@ -178,8 +178,34 @@ tasks.register('verifyReleaseJar') {
         def archive = tasks.named('jarJar', Jar).get().archiveFile.get().asFile
         def zip = new java.util.zip.ZipFile(archive)
         try {
-            if (zip.getEntry('rs_integration.refmap.json') == null) {
-                throw new GradleException("Release jar is missing rs_integration.refmap.json: ${archive}")
+            def requiredEntries = [
+                    'META-INF/MANIFEST.MF',
+                    'META-INF/mods.toml',
+                    'META-INF/jarjar/metadata.json',
+                    'META-INF/jarjar/jpinyin-1.1.8.jar',
+                    'META-INF/jarjar/mixinextras-forge-0.3.6.jar',
+                    'rs_integration.mixins.json',
+                    'rs_integration.refmap.json'
+            ]
+            requiredEntries.each { entryName ->
+                if (zip.getEntry(entryName) == null) {
+                    throw new GradleException("Release jar is missing ${entryName}: ${archive}")
+                }
+            }
+
+            def modsEntry = zip.getEntry('META-INF/mods.toml')
+            def modsToml = zip.getInputStream(modsEntry).getText('UTF-8')
+            if (!modsToml.contains("modId = \"${mod_id}\"")
+                    || !modsToml.contains("version = \"${project.version}\"")) {
+                throw new GradleException("Release mods.toml has unexpanded or incorrect identity: ${archive}")
+            }
+
+            def manifestEntry = zip.getEntry('META-INF/MANIFEST.MF')
+            def manifest = new java.util.jar.Manifest(zip.getInputStream(manifestEntry))
+            def attributes = manifest.mainAttributes
+            if (attributes.getValue('Implementation-Version') != project.version.toString()
+                    || attributes.getValue('MixinConfigs') != 'rs_integration.mixins.json') {
+                throw new GradleException("Release manifest has incorrect version or MixinConfigs: ${archive}")
             }
 
             def classEntry = zip.getEntry('com/huanghuang/rsintegration/ModItems.class')

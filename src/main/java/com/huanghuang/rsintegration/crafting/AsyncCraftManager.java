@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.graph.CaptureLeaseRegistry;
 import com.huanghuang.rsintegration.crafting.graph.MachineLeaseRegistry;
 import com.huanghuang.rsintegration.crafting.graph.OperationBudget;
+import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.command.PerformanceMonitor;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
@@ -59,6 +60,19 @@ public final class AsyncCraftManager {
 
     MachineLeaseRegistry machineLeases() {
         return operationServices.machines();
+    }
+
+    /** True only when every supplied execution machine is leased by an active RSI operation. */
+    public boolean areAllMachinesLeased(List<AltarBindingRegistry.BoundMachine> machines,
+                                        String modTypeId) {
+        if (machines == null || machines.isEmpty()) return false;
+        MachineLeaseRegistry leases = operationServices.machines();
+        for (AltarBindingRegistry.BoundMachine machine : machines) {
+            MachineLeaseRegistry.MachineKey key = new MachineLeaseRegistry.MachineKey(
+                    machine.dim(), machine.pos(), modTypeId);
+            if (!leases.isLeased(key)) return false;
+        }
+        return true;
     }
 
     CaptureLeaseRegistry captureLeases() {

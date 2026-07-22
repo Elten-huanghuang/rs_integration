@@ -27,7 +27,7 @@
 |---|---|---|
 | Forge | 是 | 47+（Minecraft 1.20.1） |
 | Refined Storage | 是 | 1.12+ |
-| JEI | 推荐 | 启用配方上的 `+` 按钮和远程合成计划 |
+| JEI | 客户端必需 | 提供配方查看、`+` 按钮和远程合成计划 |
 | Curios | 可选 | 支持 Curios 饰品栏中背包的检测 |
 | Sophisticated Backpacks | 可选 | 背包传输、存款升级 RS 集成 |
 | Sophisticated Core | 可选 | 使用 Sophisticated Backpacks 时必需 |

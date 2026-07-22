@@ -45,6 +45,7 @@ import com.huanghuang.rsintegration.crafting.ChainRepeatController;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
 import com.huanghuang.rsintegration.crafting.graph.TerminalGraphComposer;
+import com.huanghuang.rsintegration.crafting.loadbalancer.LoadBalancer;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.MaterialSources;
 import com.huanghuang.rsintegration.crafting.PreviewRateLimiter;
@@ -55,6 +56,7 @@ import com.huanghuang.rsintegration.recipe.CrockPotRecipeHandler;
 import com.huanghuang.rsintegration.recipe.WRRecipeHandler;
 import com.huanghuang.rsintegration.util.TextBuilder;
 import com.huanghuang.rsintegration.util.ModIds;
+import com.huanghuang.rsintegration.util.LogSampler;
 import com.huanghuang.rsintegration.util.Reflect;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.network.FriendlyByteBuf;
@@ -88,13 +90,16 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 public final class GenericCraftPacket {
+    private static final LogSampler FAILURE_LOG_SAMPLER = new LogSampler(2_000);
 
     // Time-based plan cache — serves both dedup and compute-avoidance.
     // On cache hit within TTL: reply with cached plan immediately (no silent drop).
     // Key: "playerUUID:recipeId:forcedHash:repeatCount"
     private static final java.util.concurrent.ConcurrentHashMap<String, CachedPlan> PLAN_CACHE =
             new java.util.concurrent.ConcurrentHashMap<>();
-    private static final long PLAN_CACHE_TTL_NANOS = 5_000_000_000L; // 5 seconds
+    // This is a request-coalescing window, not a world-state cache. Keeping it
+    // short prevents stale RS inventory and machine-lease previews.
+    private static final long PLAN_CACHE_TTL_NANOS = 500_000_000L;
 
     private static final class CachedPlan {
         final PlanResponse plan;
@@ -833,8 +838,10 @@ public final class GenericCraftPacket {
             }
             // planSteps=0 with missing=[] means everything is directly available; not a failure
             if (!missingCheck.isEmpty()) {
-                RSIntegrationMod.LOGGER.warn("[RSI-Generic] Unified resolver failed for {}: planSteps={} missing={}",
-                        recipeId, planSteps != null ? planSteps.size() : "null", missingCheck);
+                if (FAILURE_LOG_SAMPLER.allow("resolve:" + recipeId)) {
+                    RSIntegrationMod.LOGGER.warn("[RSI-Generic] Unified resolver failed for {}: planSteps={} missing={}",
+                            recipeId, planSteps != null ? planSteps.size() : "null", missingCheck);
+                }
                 player.sendSystemMessage(Component.translatable(
                         "rsi.generic.error.missing_materials", CraftPacketUtils.formatMissingSummary(missingCheck)));
                 return;
@@ -905,11 +912,14 @@ public final class GenericCraftPacket {
                             player, player.serverLevel().dimension(),
                             player.blockPosition(), need.ingredient, need.count, ledger);
                     if (reserved.isEmpty()) {
-                        RSIntegrationMod.LOGGER.warn("[RSI-Generic] Grouped extraction failed for {}: missing {} (needed {}) (iteration {}/{})",
-                                recipeId, CraftPacketUtils.describeIngredient(need.ingredient), need.count, r + 1, repeatCount);
+                        String missingName = CraftPacketUtils.describeIngredient(need.ingredient).getString();
+                        if (FAILURE_LOG_SAMPLER.allow("extract:" + recipeId + ":" + missingName)) {
+                            RSIntegrationMod.LOGGER.warn("[RSI-Generic] Grouped extraction failed for {}: missing {} (needed {}) (iteration {}/{})",
+                                    recipeId, missingName, need.count, r + 1, repeatCount);
+                        }
                         player.sendSystemMessage(Component.translatable(
                                 "rsi.generic.error.missing_materials",
-                                CraftPacketUtils.describeIngredient(need.ingredient)));
+                                missingName));
                         extractionIncomplete = true;
                         break;
                     }
@@ -2116,8 +2126,25 @@ public final class GenericCraftPacket {
             }
         }
 
+        boolean allExecutionMachinesLeased = false;
+        if (recipeModType != null && boundMachineTypes.contains(recipeModType.id())) {
+            List<AltarBindingRegistry.BoundMachine> executionMachines =
+                    AltarBindingRegistry.getBoundMachinesForType(player, recipeModType);
+            executionMachines = LoadBalancer.filterAvailable(executionMachines, player.getServer());
+            allExecutionMachinesLeased = AsyncCraftManager.getInstance()
+                    .areAllMachinesLeased(executionMachines, recipeModType.id());
+            if (allExecutionMachinesLeased) feasible = false;
+        }
+
         if (!feasible) {
-            if (!dedupedMissing.isEmpty() || materials.values().stream()
+            boolean nbtMismatch = hasNbtMismatch(materials, itemAvailable);
+            if (allExecutionMachinesLeased) {
+                modWarnings.add(Component.translatable(
+                        "rsi.plan.failure.machines_leased").getString());
+            } else if (nbtMismatch) {
+                modWarnings.add(Component.translatable(
+                        "rsi.plan.failure.nbt_mismatch").getString());
+            } else if (!dedupedMissing.isEmpty() || materials.values().stream()
                     .anyMatch(a -> !a.isEnough())) {
                 modWarnings.add(Component.translatable(
                         "rsi.plan.failure.missing_materials").getString());
@@ -2185,6 +2212,18 @@ public final class GenericCraftPacket {
                 PacketDistributor.PLAYER.with(() -> player),
                 new PlanResponsePacket(plan, requestId));
         RSIntegrationMod.debug("[RSI-tryBuildPlan] PlanResponsePacket SENT: recipeId={}", recipeId);
+    }
+
+    static boolean hasNbtMismatch(Map<IngredientKey, PlanResponse.Availability> materials,
+                                  Map<Item, Integer> itemAvailable) {
+        for (Map.Entry<IngredientKey, PlanResponse.Availability> entry : materials.entrySet()) {
+            PlanResponse.Availability availability = entry.getValue();
+            if (availability.isEnough() || !entry.getKey().stack(1).hasTag()) continue;
+            if (itemAvailable.getOrDefault(entry.getKey().item(), 0) >= availability.needed()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
