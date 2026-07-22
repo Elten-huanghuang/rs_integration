@@ -95,7 +95,8 @@ public final class BindingEventHandler {
             return;
         }
 
-        BlockPos pos = event.getPos();
+        BlockPos clickedPos = event.getPos();
+        BlockPos pos = clickedPos;
         BlockPos bindingPos = resolveRootPos(event.getLevel(), pos, block, className);
         if ("goety_cursed_infuser".equals(matched.modType.id())
                 && !event.getLevel().getBlockState(bindingPos.below())
@@ -121,6 +122,8 @@ public final class BindingEventHandler {
             Block rootBlock = rootState.getBlock();
             block = rootBlock;
             className = rootBlock.getClass().getName();
+            MachineBindingTarget rootTarget = findTarget(rootBlock);
+            if (rootTarget != null) matched = rootTarget;
             pos = bindingPos;
         }
 
@@ -163,6 +166,14 @@ public final class BindingEventHandler {
         Component blockName = resolveBlockName(blockKey, blockRegKey, displayStack);
 
         synchronized (BINDING_LOCK) {
+            // Migrate bindings created before a multi-block part was taught to
+            // resolve to its root. This prevents duplicate part/core entries.
+            if (!clickedPos.equals(bindingPos)
+                    && BindingStorage.hasBinding(held, dim, clickedPos)) {
+                BindingStorage.removeBinding(held, dim, clickedPos);
+                AltarBindingRegistry.unbind(
+                        event.getLevel().dimension(), clickedPos, AltarBinding.RS_NETWORK);
+            }
             if (BindingStorage.hasBinding(held, dim, bindingPos)) {
                 BindingStorage.removeBinding(held, dim, bindingPos);
                 AltarBindingRegistry.unbind(event.getLevel().dimension(), bindingPos, AltarBinding.RS_NETWORK);
@@ -612,7 +623,7 @@ public final class BindingEventHandler {
         }
     }
 
-    private static BlockPos resolveRootPos(Level level, BlockPos pos, Block block, String className) {
+    static BlockPos resolveRootPos(Level level, BlockPos pos, Block block, String className) {
         // Forbidden & Arcanus Clibano: visible shell parts resolve the hidden
         // main-part POI through the mod's own public structure contract.
         if (className.equals("com.stal111.forbidden_arcanus.common.block.ClibanoCenterBlock")
@@ -656,6 +667,18 @@ public final class BindingEventHandler {
         // TLM: 3×8×6 altar — every block is BlockAltar with a BE.
         // Compute the canonical centre so all clicks on the same altar
         // resolve to one binding, preventing duplicates.
+        // Malum Spirit Crucible: the visible component occupies the block
+        // above the core. Both halves must resolve to one binding position.
+        ResourceLocation blockKey = ForgeRegistries.BLOCKS.getKey(block);
+        if (blockKey != null && blockKey.toString().equals("malum:spirit_crucible_component")) {
+            BlockPos corePos = pos.below();
+            ResourceLocation coreKey = ForgeRegistries.BLOCKS.getKey(
+                    level.getBlockState(corePos).getBlock());
+            if (coreKey != null && coreKey.toString().equals("malum:spirit_crucible")) {
+                return corePos;
+            }
+        }
+
         if (className.equals("com.github.tartaricacid.touhoulittlemaid.block.BlockAltar")) {
             BlockEntity be = level.getBlockEntity(pos);
             if (be != null) {

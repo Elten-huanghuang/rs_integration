@@ -127,10 +127,12 @@ public final class ContainerTransferClient {
     private static void onKeyInput(InputEvent.Key event) {
         var mc = Minecraft.getInstance();
         if (mc.player == null) return;
+        if (event.getAction() != GLFW.GLFW_PRESS) return;
+        if (mc.screen != null
+                && (isAnyTextInputFocused(mc.screen) || isRecipeViewerFocused())) return;
 
         if (KEY_TOGGLE_MODE.isActiveAndMatches(
-                InputConstants.getKey(event.getKey(), event.getScanCode()))
-                && event.getAction() == GLFW.GLFW_PRESS) {
+                InputConstants.getKey(event.getKey(), event.getScanCode()))) {
 
             currentMode = (currentMode == MODE_RS) ? MODE_BACKPACK : MODE_RS;
             saveMode();

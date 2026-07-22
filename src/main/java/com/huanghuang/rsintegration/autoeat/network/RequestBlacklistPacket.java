@@ -24,7 +24,7 @@ public class RequestBlacklistPacket {
             if (sender != null && !(sender instanceof net.minecraftforge.common.util.FakePlayer)) {
                 Set<ResourceLocation> blacklist = AutoEatEngine.getBlacklist(sender);
                 NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> sender),
-                        new BlacklistSyncPacket(blacklist));
+                        new BlacklistSyncPacket(blacklist, AutoEatEngine.getEffectBlacklist(sender)));
             }
         });
         ctx.get().setPacketHandled(true);

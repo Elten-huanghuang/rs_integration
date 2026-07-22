@@ -113,6 +113,11 @@ public final class BrewingStandBatchDelegate extends AbstractBatchDelegate {
                 || IngredientMatcher.matchesWaterBottleIgnoringPurity(recipe.input(), input);
     }
 
+    private boolean matchesOutput(ItemStack output) {
+        return ItemStack.isSameItemSameTags(output, recipe.outputUnit())
+                || IngredientMatcher.matchesPotionIgnoringPurity(recipe.outputUnit(), output);
+    }
+
     private static boolean isEmpty(BrewingStandBlockEntity stand) {
         for (int slot = 0; slot <= 4; slot++) {
             if (!stand.getItem(slot).isEmpty()) return false;
@@ -128,9 +133,8 @@ public final class BrewingStandBatchDelegate extends AbstractBatchDelegate {
         boolean allOutput = true;
         for (int slot = 0; slot < 3; slot++) {
             ItemStack bottle = current.getItem(slot);
-            allOutput &= ItemStack.isSameItemSameTags(bottle, recipe.outputUnit());
-            if (bottle.isEmpty() || (!ItemStack.isSameItemSameTags(bottle, recipe.input())
-                    && !ItemStack.isSameItemSameTags(bottle, recipe.outputUnit()))) {
+            allOutput &= matchesOutput(bottle);
+            if (bottle.isEmpty() || (!matchesInput(bottle) && !matchesOutput(bottle))) {
                 return failObservation("brewing bottle was externally changed");
             }
         }
@@ -142,7 +146,7 @@ public final class BrewingStandBatchDelegate extends AbstractBatchDelegate {
     protected boolean isMachineCraftFinished(ServerLevel level, BlockEntity be) {
         if (!(be instanceof BrewingStandBlockEntity current)) return false;
         for (int slot = 0; slot < 3; slot++) {
-            if (!ItemStack.isSameItemSameTags(current.getItem(slot), recipe.outputUnit())) return false;
+            if (!matchesOutput(current.getItem(slot))) return false;
         }
         return true;
     }

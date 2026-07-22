@@ -61,4 +61,21 @@ class VanillaBrewingRecipeDefinitionTest extends BootstrapTest {
         awkward.getOrCreateTag().putInt("Purity", 2);
         assertFalse(IngredientMatcher.matchesWaterBottleIgnoringPurity(bottle, awkward));
     }
+
+    @Test
+    void brewedPotionOutputMayRetainPurityWithoutLookingExternallyChanged() {
+        ItemStack expected = PotionUtils.setPotion(new ItemStack(Items.SPLASH_POTION), Potions.AWKWARD);
+        ItemStack actual = expected.copy();
+        actual.getOrCreateTag().putInt("Purity", 2);
+
+        assertTrue(IngredientMatcher.matchesPotionIgnoringPurity(expected, actual));
+
+        ItemStack wrongPotion = PotionUtils.setPotion(new ItemStack(Items.SPLASH_POTION), Potions.HEALING);
+        wrongPotion.getOrCreateTag().putInt("Purity", 2);
+        assertFalse(IngredientMatcher.matchesPotionIgnoringPurity(expected, wrongPotion));
+
+        ItemStack wrongContainer = PotionUtils.setPotion(new ItemStack(Items.LINGERING_POTION), Potions.AWKWARD);
+        wrongContainer.getOrCreateTag().putInt("Purity", 2);
+        assertFalse(IngredientMatcher.matchesPotionIgnoringPurity(expected, wrongContainer));
+    }
 }

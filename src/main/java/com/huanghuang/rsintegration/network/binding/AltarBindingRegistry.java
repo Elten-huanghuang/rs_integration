@@ -591,38 +591,60 @@ public final class AltarBindingRegistry {
         if (!(event.getLevel() instanceof Level level)) return;
         ResourceKey<Level> dim = level.dimension();
         BlockPos pos = event.getPos();
-        if (!isBound(dim, pos)) return;
+        var state = level.getBlockState(pos);
+        BlockPos rootPos = BindingEventHandler.resolveRootPos(
+                level, pos, state.getBlock(), state.getBlock().getClass().getName());
+        Set<BlockPos> bindingPositions = rootPos.equals(pos)
+                ? Set.of(pos) : Set.of(pos, rootPos);
 
-        unbindAll(dim, pos);
-        SCAN_CACHE.clear();
-        RSIntegrationMod.LOGGER.debug("[RSI-Bind] Auto-cleaned binding at dim={} pos={} (block broken)",
-                dim.location(), pos);
+        boolean cachedBinding = bindingPositions.stream().anyMatch(candidate -> isBound(dim, candidate));
 
         // Clean up all online players' NBT and sync their side panels.
         // Only cleaning the breaker would leave stale bindings on other
         // players' items and out-of-date MachineHub tabs on their clients.
         net.minecraft.server.MinecraftServer server = level.getServer();
+        int removedEntries = 0;
         if (server != null) {
             for (ServerPlayer p : server.getPlayerList().getPlayers()) {
-                cleanupPlayerNBT(p, dim.location(), pos);
+                for (BlockPos candidate : bindingPositions) {
+                    removedEntries += cleanupPlayerNBT(p, dim.location(), candidate);
+                }
+            }
+        }
+        if (!cachedBinding && removedEntries == 0) return;
+
+        for (BlockPos candidate : bindingPositions) unbindAll(dim, candidate);
+        SCAN_CACHE.clear();
+        RSIntegrationMod.LOGGER.debug(
+                "[RSI-Bind] Auto-cleaned binding at dim={} brokenPos={} rootPos={} nbtEntries={} (block broken)",
+                dim.location(), pos, rootPos, removedEntries);
+
+        if (server != null) {
+            for (ServerPlayer p : server.getPlayerList().getPlayers()) {
                 RSIntegrationNetwork.invalidateNetworkResolution(p.getUUID());
                 RSSidePanelNetworkHandler.sendBindingSync(p);
             }
         }
     }
 
-    private static void cleanupPlayerNBT(ServerPlayer player, ResourceLocation dim, BlockPos pos) {
+    private static int cleanupPlayerNBT(ServerPlayer player, ResourceLocation dim, BlockPos pos) {
+        int[] removed = {0};
         forEachInventoryGroup(player, stacks -> {
-            for (ItemStack stack : stacks) cleanupBindingEntry(stack, dim, pos);
+            for (ItemStack stack : stacks) {
+                if (cleanupBindingEntry(stack, dim, pos)) removed[0]++;
+            }
         });
+        return removed[0];
     }
 
-    private static void cleanupBindingEntry(ItemStack stack, ResourceLocation dim, BlockPos pos) {
-        if (stack.isEmpty()) return;
+    private static boolean cleanupBindingEntry(ItemStack stack, ResourceLocation dim, BlockPos pos) {
+        if (stack.isEmpty()) return false;
         if (BindingStorage.hasBinding(stack, dim, pos)) {
             BindingStorage.removeBinding(stack, dim, pos);
             RSIntegrationMod.LOGGER.debug("[RSI-Bind] Removed stale NBT binding: dim={} pos={}", dim, pos);
+            return true;
         }
+        return false;
     }
 
     /**

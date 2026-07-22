@@ -17,6 +17,8 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.effect.MobEffect;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.food.FoodProperties;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.common.MinecraftForge;
@@ -33,6 +35,7 @@ import java.util.*;
 public final class AutoEatEngine {
 
     private static final String NBT_KEY = "rsi:food_blacklist";
+    private static final String EFFECT_NBT_KEY = "rsi:food_effect_blacklist";
     private static final int MAX_BLACKLIST_SIZE = 512;
     private static final Set<UUID> runningTasks = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
@@ -156,9 +159,16 @@ public final class AutoEatEngine {
 
 
     public static Set<ResourceLocation> getBlacklist(net.minecraft.world.entity.player.Player player) {
+        return readResourceLocations(player.getPersistentData(), NBT_KEY);
+    }
+
+    public static Set<ResourceLocation> getEffectBlacklist(net.minecraft.world.entity.player.Player player) {
+        return readResourceLocations(player.getPersistentData(), EFFECT_NBT_KEY);
+    }
+
+    private static Set<ResourceLocation> readResourceLocations(CompoundTag data, String key) {
         Set<ResourceLocation> set = new HashSet<>();
-        CompoundTag data = player.getPersistentData();
-        ListTag list = data.getList(NBT_KEY, 8);
+        ListTag list = data.getList(key, 8);
         for (int i = 0; i < list.size(); i++) {
             ResourceLocation rl = ResourceLocation.tryParse(list.getString(i));
             if (rl != null) set.add(rl);
@@ -168,7 +178,17 @@ public final class AutoEatEngine {
 
     public static void updateBlacklist(net.minecraft.world.entity.player.Player player,
                                         Set<ResourceLocation> added, Set<ResourceLocation> removed) {
-        Set<ResourceLocation> current = getBlacklist(player);
+        updateResourceLocations(player, NBT_KEY, getBlacklist(player), added, removed);
+    }
+
+    public static void updateEffectBlacklist(net.minecraft.world.entity.player.Player player,
+                                              Set<ResourceLocation> added, Set<ResourceLocation> removed) {
+        updateResourceLocations(player, EFFECT_NBT_KEY, getEffectBlacklist(player), added, removed);
+    }
+
+    private static void updateResourceLocations(net.minecraft.world.entity.player.Player player,
+                                                String key, Set<ResourceLocation> current,
+                                                Set<ResourceLocation> added, Set<ResourceLocation> removed) {
         current.addAll(added);
         current.removeAll(removed);
         if (current.size() > MAX_BLACKLIST_SIZE) {
@@ -178,7 +198,21 @@ public final class AutoEatEngine {
         for (ResourceLocation rl : current) {
             list.add(StringTag.valueOf(rl.toString()));
         }
-        player.getPersistentData().put(NBT_KEY, list);
+        player.getPersistentData().put(key, list);
+    }
+
+    public static boolean hasBlacklistedEffect(ItemStack stack, LivingEntity consumer,
+                                               Set<ResourceLocation> effectBlacklist) {
+        if (stack.isEmpty() || effectBlacklist.isEmpty()) return false;
+        try {
+            FoodProperties properties = stack.getFoodProperties(consumer);
+            return FoodEffectBlacklist.matches(properties, effectBlacklist);
+        } catch (RuntimeException | LinkageError error) {
+            ResourceLocation itemId = ForgeRegistries.ITEMS.getKey(stack.getItem());
+            RSIntegrationMod.debug("[RSI-AutoEat] Failed to inspect food effects for {}: {}",
+                    itemId, error.toString());
+            return false;
+        }
     }
 
     // ── Inner execution ─────────────────────────────────────────
@@ -258,6 +292,7 @@ public final class AutoEatEngine {
         if (foodList == null) return;
 
         Set<ResourceLocation> blacklist = getBlacklist(player);
+        Set<ResourceLocation> effectBlacklist = getEffectBlacklist(player);
         int maxPerBatch = RSIntegrationConfig.AUTO_EAT_MAX_PER_BATCH.get();
         int eaten = 0;
 
@@ -282,6 +317,7 @@ public final class AutoEatEngine {
 
             ResourceLocation key = ForgeRegistries.ITEMS.getKey(item);
             if (key != null && blacklist.contains(key)) continue;
+            if (hasBlacklistedEffect(stack, player, effectBlacklist)) continue;
 
             ItemStack taken = network.extractItem(stack.copy(), 1, Action.PERFORM);
             if (taken.isEmpty()) continue;
@@ -380,6 +416,10 @@ public final class AutoEatEngine {
                     break;
                 }
             }
+        }
+        if (hasBlacklistedEffect(template, player, getEffectBlacklist(player))) {
+            sendFailure(player, AutoEatMode.STACK, "rsi.autoeat.effect_blacklisted");
+            return;
         }
         ItemStack extracted = network.extractItem(template, toExtract,
                 com.refinedmods.refinedstorage.api.util.IComparer.COMPARE_NBT, Action.PERFORM);
@@ -510,6 +550,7 @@ public final class AutoEatEngine {
         }
 
         Set<ResourceLocation> blacklist = getBlacklist(player);
+        Set<ResourceLocation> effectBlacklist = getEffectBlacklist(player);
         int maxPerBatch = RSIntegrationConfig.AUTO_EAT_MAX_PER_BATCH.get();
         int eaten = 0;
 
@@ -534,6 +575,7 @@ public final class AutoEatEngine {
                 if (!stack.getItem().isEdible()) continue;
                 ResourceLocation key = ForgeRegistries.ITEMS.getKey(stack.getItem());
                 if (key != null && blacklist.contains(key)) continue;
+                if (hasBlacklistedEffect(stack, player, effectBlacklist)) continue;
 
                 try {
                     @SuppressWarnings("unchecked")
