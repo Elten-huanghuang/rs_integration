@@ -1247,9 +1247,20 @@ public final class GenericCraftPacket {
             }
         } else if (recipe instanceof CraftingRecipe cr) {
             List<Ingredient> raw = cr.getIngredients();
-            displayIngredients = raw;
-            recipeSpecs = scaleIngredientSpecs(
-                    CraftPacketUtils.extractCraftingIngredientSpecs(cr), repeatCount);
+            List<IngredientSpec> extractedSpecs = extractPlanIngredientSpecs(cr);
+            if (cr instanceof net.minecraft.world.item.crafting.ShapedRecipe) {
+                // Preserve empty slots for the shaped-grid renderer.
+                displayIngredients = raw;
+            } else {
+                // Some mod recipes implement CraftingRecipe for JEI integration but
+                // their handler supplies semantic inputs absent from getIngredients(),
+                // such as Goety's activation item or Botania's reagent.
+                displayIngredients = extractedSpecs.stream()
+                        .filter(spec -> !spec.isEmpty())
+                        .map(IngredientSpec::ingredient)
+                        .toList();
+            }
+            recipeSpecs = scaleIngredientSpecs(extractedSpecs, repeatCount);
             recipeIngredients = expandIngredientSpecs(recipeSpecs);
             targetOutput = ModRecipeHandlers.tryGetResultItem(
                     cr, player.serverLevel().registryAccess());
@@ -2224,6 +2235,13 @@ public final class GenericCraftPacket {
             }
         }
         return false;
+    }
+
+    static List<IngredientSpec> extractPlanIngredientSpecs(CraftingRecipe recipe) {
+        List<IngredientSpec> specs = CraftPacketUtils.extractIngredientSpecs(recipe);
+        return specs == null || specs.isEmpty()
+                ? CraftPacketUtils.extractCraftingIngredientSpecs(recipe)
+                : specs;
     }
 
     /**
