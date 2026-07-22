@@ -65,10 +65,9 @@ public final class FarmersDelightRSModule implements IModIntegration {
                 new String[]{"farmersdelight"},
                 new String[0],
                 GenericBatchDelegate::new);
-        ModType.configureJei("farmersdelight",
-                new String[][]{{"farmersdelight:cooking", "farmersdelight_cooking_pot"}},
-                new String[][]{{"vectorwing.farmersdelight.", "farmersdelight"}},
-                null);
+        // The generic fallback has no bindable machine. Do not expose it to JEI:
+        // a broad class-prefix mapping would put cooking-pot buttons on cutting
+        // board and decomposition recipes even when those machines are unbound.
     }
 
     @Override

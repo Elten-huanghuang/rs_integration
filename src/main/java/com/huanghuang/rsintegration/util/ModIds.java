@@ -41,7 +41,7 @@ public final class ModIds {
     public static final String CRABBERS_DELIGHT = "crabbersdelight";
     public static final String APOTHEOSIS = "apotheosis";
 
-    // Composite ModType IDs (one mod 鈫?multiple machine types)
+    // Composite ModType IDs (one mod ->multiple machine types)
     public static final String ID_EMBERS_ALCHEMY = "embers_alchemy";
     public static final String ID_AETHERWORKS_ANVIL = "aetherworks_anvil";
     public static final String ID_AETHERWORKS_TOOL_STATION = "aetherworks_tool_station";

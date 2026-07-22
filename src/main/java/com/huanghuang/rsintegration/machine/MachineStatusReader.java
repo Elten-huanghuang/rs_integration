@@ -95,6 +95,29 @@ public final class MachineStatusReader {
 
     private static MachineStatus readIronFurnace(BlockEntity be) {
         try {
+            if ((boolean) be.getClass().getMethod("isFactory").invoke(be)) {
+                net.minecraft.world.Container container = (net.minecraft.world.Container) be;
+                ItemStack input = ItemStack.EMPTY;
+                ItemStack output = ItemStack.EMPTY;
+                int progress = 0;
+                int total = 0;
+                int[] lanes = {7, 8, 9, 10, 11, 12};
+                for (int lane : lanes) {
+                    ItemStack laneInput = container.getItem(lane);
+                    ItemStack laneOutput = container.getItem(lane + 6);
+                    if (input.isEmpty() && !laneInput.isEmpty()) input = laneInput.copy();
+                    if (output.isEmpty() && !laneOutput.isEmpty()) output = laneOutput.copy();
+                }
+                int[] cook = (int[]) be.getClass().getField("factoryCookTime").get(be);
+                int[] cookTotal = (int[]) be.getClass().getField("factoryTotalCookTime").get(be);
+                for (int i = 0; i < cook.length; i++) {
+                    progress = Math.max(progress, cook[i]);
+                    total = Math.max(total, cookTotal[i]);
+                }
+                MachineState state = !output.isEmpty() ? MachineState.HAS_OUTPUT
+                        : (progress > 0 || !input.isEmpty() ? MachineState.WORKING : MachineState.IDLE);
+                return new MachineStatus(state, progress, total > 0 ? total : 200, input, output, ItemStack.EMPTY);
+            }
             boolean ordinary = (boolean) be.getClass().getMethod("isFurnace").invoke(be);
             if (!ordinary) return MachineStatus.UNKNOWN;
             ItemStack input = ((net.minecraft.world.Container) be).getItem(0).copy();

@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.mods.crockpot.CrockPotBatchDelegate;
 import com.huanghuang.rsintegration.mods.farmersdelight.CookingPotBatchDelegate;
+import com.huanghuang.rsintegration.mods.vanilla.brewing.BrewingStandBatchDelegate;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
@@ -68,6 +69,18 @@ class GraphConcurrencyPolicyTest {
                 farmersDelight.capabilities().sideEffects());
         assertTrue(crockPot.exclusive());
         assertEquals("delegate has no concurrency capability", crockPot.reason());
+    }
+
+    @Test
+    void vanillaBrewingStandCanUseIndependentMachineSlotsConcurrently() {
+        GraphConcurrencyPolicy.Decision decision = GraphConcurrencyPolicy.decide(
+                null, new BrewingStandBatchDelegate(), List.of(), List.of());
+
+        assertFalse(decision.exclusive());
+        assertEquals(BatchConcurrencyCapabilities.OutputOwnership.MACHINE_SLOT,
+                decision.capabilities().outputOwnership());
+        assertEquals(BatchConcurrencyCapabilities.SideEffects.MACHINE_LOCAL,
+                decision.capabilities().sideEffects());
     }
 
     @Test

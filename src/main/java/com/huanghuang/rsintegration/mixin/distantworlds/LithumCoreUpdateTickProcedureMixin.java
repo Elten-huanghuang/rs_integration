@@ -44,7 +44,7 @@ public abstract class LithumCoreUpdateTickProcedureMixin {
         return Math.random();
     }
 
-    static double rsi$disabledFailureRoll() {
+    private static double rsi$disabledFailureRoll() {
         return 1.0D;
     }
 }

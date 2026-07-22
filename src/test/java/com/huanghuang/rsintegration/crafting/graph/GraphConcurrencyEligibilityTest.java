@@ -4,7 +4,9 @@ import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class GraphConcurrencyEligibilityTest {
 
@@ -50,6 +52,13 @@ class GraphConcurrencyEligibilityTest {
                 "crockpot", "pkg.CrockPotRecipe", false)));
         assertNull(GraphConcurrencyEligibility.capabilities(new GraphConcurrencyEligibility.Context(
                 "immortalers_delight", "pkg.CoolerRecipe", false)));
+    }
+
+    @Test
+    void oneSafeMachineQueuesMultipleOperationsSequentially() {
+        assertTrue(GraphConcurrencyEligibility.shouldQueueOperations(3, 1, 1, true));
+        assertFalse(GraphConcurrencyEligibility.shouldQueueOperations(1, 1, 1, true));
+        assertFalse(GraphConcurrencyEligibility.shouldQueueOperations(3, 1, 1, false));
     }
 
     private static BatchConcurrencyCapabilities capability(

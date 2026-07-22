@@ -42,6 +42,7 @@
     "sophisticatedbackpacks.StorageContainerMenuBaseMixin",
     "sophisticatedbackpacks.CompactingUpgradeWrapperMixin",
     "crockpot.CrockPotMenuMixin",
+    "goetydelight.BlockFinderCompatMixin",
     "distantworlds.LithumCoreUpdateTickProcedureMixin",
     "reliquary.PyromancerStaffMixin",
     "enigmaticaddons.AvariceRingMixin",

@@ -28,7 +28,7 @@ import java.util.UUID;
 public final class RSIntegrationNetwork {
 
     private static final PlayerNetworkResolutionCache<INetwork> RESOLUTION_CACHE =
-            new PlayerNetworkResolutionCache<>();
+            new PlayerNetworkResolutionCache<>(20);
 
     private RSIntegrationNetwork() {}
 
@@ -65,7 +65,6 @@ public final class RSIntegrationNetwork {
         // Do not guess a network from spatial proximity.  A nearby node may
         // belong to another player's network; callers performing extraction
         // or insertion must use an explicit container, item, terminal, or binding.
-        RSIntegrationMod.LOGGER.debug("[RSI] resolveNetworkFromPlayer: no explicit network source");
         return null;
     }
 

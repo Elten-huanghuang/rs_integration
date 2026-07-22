@@ -83,6 +83,7 @@
   "gui.rs_integration.jei.botania_terra_plate_craft": "通过泰拉凝聚板远程合成",
   "gui.rs_integration.jei.botania_pure_daisy_craft": "通过白雏菊远程转化",
   "gui.rs_integration.jei.vanilla_furnace_craft": "通过熔炉远程烧制",
+  "gui.rs_integration.jei.vanilla_brewing_stand_craft": "通过炼药台远程炼制（每次3瓶）",
   "gui.rs_integration.jei.vanilla_blast_furnace_craft": "通过高炉远程烧制",
   "gui.rs_integration.jei.vanilla_smoker_craft": "通过烟熏炉远程熏制",
   "gui.rs_integration.jei.vanilla_campfire_craft": "通过营火远程烹饪",
@@ -353,6 +354,8 @@
   "rsi.plan.candidates_more": "还有 %s 个…",
   "rsi.plan.status_ok": "所有材料充足",
   "rsi.plan.status_fail": "部分材料不足",
+  "rsi.plan.failure.missing_materials": "失败原因：缺少材料或物品数据不匹配",
+  "rsi.plan.failure.no_bound_machine": "失败原因：没有可用的已绑定机器",
   "rsi.plan.missing_header": "无法获取:",
   "rsi.plan.missing_more": "... (+%s 更多)",
   
@@ -746,5 +749,6 @@
   "rsi.villager.restock.no_network": "未找到 RS 网络，缺少的物品已加入 JEI 收藏",
   "rsi.villager.restock.no_permission": "没有 RS 提取权限，缺少的物品已加入 JEI 收藏",
   "rsi.villager.restock.invalid": "当前交易已失效",
-  "rsi.botania.warn.total_mana_required": "递归合成预计共需要 %s 魔力"
+  "rsi.botania.warn.total_mana_required": "递归合成预计共需要 %s 魔力",
+  "rsi.batch.mod.vanilla_brewing_stand": "原版炼药台"
 }

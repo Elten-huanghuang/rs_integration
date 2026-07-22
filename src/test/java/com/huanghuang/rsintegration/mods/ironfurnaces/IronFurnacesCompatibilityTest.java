@@ -5,6 +5,8 @@ import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.network.binding.BindingStorage;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.BlastingRecipe;
 import net.minecraft.world.item.crafting.RecipeType;
 import net.minecraft.world.item.crafting.SmeltingRecipe;
@@ -14,6 +16,23 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 class IronFurnacesCompatibilityTest extends BootstrapTest {
+
+    @Test
+    void factoryBatchSplitsAStackAcrossSixLanes() {
+        var lanes = IronFurnacesBatchDelegate.splitFactoryMaterials(
+                java.util.List.of(new ItemStack(Items.IRON_ORE, 6)));
+
+        assertEquals(6, lanes.size());
+        assertTrue(lanes.stream().allMatch(stack -> stack.is(Items.IRON_ORE) && stack.getCount() == 1));
+    }
+
+    @Test
+    void factoryBatchRejectsInvalidLaneCounts() {
+        assertTrue(IronFurnacesBatchDelegate.splitFactoryMaterials(
+                java.util.List.of(ItemStack.EMPTY)).isEmpty());
+        assertTrue(IronFurnacesBatchDelegate.splitFactoryMaterials(
+                java.util.List.of(new ItemStack(Items.IRON_ORE, 7))).isEmpty());
+    }
 
     @Test
     void bindingModesOnlyMatchTheirCorrespondingCookingType() {

@@ -5,6 +5,9 @@ import com.huanghuang.rsintegration.recipe.SlashBladeRecipeHandler;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.item.alchemy.PotionUtils;
+import net.minecraft.world.item.alchemy.Potions;
 import net.minecraftforge.registries.ForgeRegistries;
 
 import java.util.Objects;
@@ -33,6 +36,9 @@ public final class IngredientMatcher {
     }
 
     public static boolean test(Ingredient ingredient, ItemStack actual) {
+        for (ItemStack template : ingredient.getItems()) {
+            if (matchesWaterBottleIgnoringPurity(template, actual)) return true;
+        }
         if (ingredient.test(actual)) return true;
         if (actual.isEmpty() || !EARTH_HEART.equals(ForgeRegistries.ITEMS.getKey(actual.getItem()))) {
             return false;
@@ -50,5 +56,18 @@ public final class IngredientMatcher {
             }
         }
         return false;
+    }
+
+    /** Thirst Was Taken adds a non-brewing "Purity" tag to water bottles. */
+    public static boolean matchesWaterBottleIgnoringPurity(ItemStack expected, ItemStack actual) {
+        if (expected.isEmpty() || actual.isEmpty()
+                || expected.getItem() != Items.POTION || actual.getItem() != Items.POTION
+                || PotionUtils.getPotion(expected) != Potions.WATER
+                || PotionUtils.getPotion(actual) != Potions.WATER) return false;
+        var expectedTag = expected.getTag() == null ? null : expected.getTag().copy();
+        var actualTag = actual.getTag() == null ? null : actual.getTag().copy();
+        if (expectedTag != null) expectedTag.remove("Purity");
+        if (actualTag != null) actualTag.remove("Purity");
+        return java.util.Objects.equals(expectedTag, actualTag);
     }
 }

@@ -64,6 +64,17 @@ public final class RecipeIndex {
             Set<ResourceLocation> seen = new HashSet<>();
             int skippedUnknown = 0, skippedEmptyResult = 0, skippedNoHandler = 0, skippedIdentity = 0;
 
+            // Prefer ordinary crafting over Goety's legacy cursed-infuser path
+            // whenever both produce the same item. Newer Goety data supplies
+            // crafting alternatives for many old infuser recipes.
+            Set<Item> craftingOutputs = new HashSet<>();
+            for (Recipe<?> candidate : rm.getRecipes()) {
+                if (candidate instanceof CraftingRecipe crafting) {
+                    ItemStack output = crafting.getResultItem(level.registryAccess());
+                    if (!output.isEmpty()) craftingOutputs.add(output.getItem());
+                }
+            }
+
             for (Recipe<?> recipe : rm.getRecipes()) {
                 if (!seen.add(recipe.getId())) continue;
 
@@ -87,6 +98,13 @@ public final class RecipeIndex {
 
                 if (result.isEmpty()) {
                     skippedEmptyResult++;
+                    continue;
+                }
+
+                if ("com.Polarice3.Goety.common.crafting.CursedInfuserRecipes"
+                        .equals(recipe.getClass().getName())
+                        && craftingOutputs.contains(result.getItem())) {
+                    skippedUnknown++;
                     continue;
                 }
 
@@ -124,6 +142,8 @@ public final class RecipeIndex {
 
             // ── Distant Worlds Firon Lithum Altar definitions ─────────
             int distantWorldsIndexed = indexDistantWorldsFiron(idx, seen);
+            int brewingIndexed = com.huanghuang.rsintegration.mods.vanilla.brewing
+                    .VanillaBrewingCatalog.index(level, idx, seen);
 
             index = idx;
             source = rm;
@@ -136,7 +156,8 @@ public final class RecipeIndex {
                     + " empty-result, " + skippedIdentity + " identity"
                     + ", " + faIndexed + " FA rituals"
                     + ", " + marketIndexed + " market"
-                    + ", " + distantWorldsIndexed + " Distant Worlds Firon");
+                    + ", " + distantWorldsIndexed + " Distant Worlds Firon"
+                    + ", " + brewingIndexed + " brewing");
             RSIntegrationMod.LOGGER.info("[RecipeIndex] built: {} items, {} entries in {}ms"
                             + " (skipped: {} unknown, {} empty-result, {} identity"
                             + ", {} FA rituals, {} market, {} Distant Worlds Firon)",

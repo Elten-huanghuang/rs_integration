@@ -59,6 +59,7 @@ public final class ModRecipeHandlers {
         HANDLERS.add(new GenericRecipeHandler());
         HANDLERS.add(new VanillaMachineRecipeHandler());
         HANDLERS.add(new SmithingRecipeHandler());
+        HANDLERS.add(new com.huanghuang.rsintegration.mods.vanilla.brewing.VanillaBrewingRecipeHandler());
         HANDLERS.add(new MarketRecipeHandler());
     }
 

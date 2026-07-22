@@ -12,7 +12,7 @@ class PlayerNetworkResolutionCacheTest {
 
     @Test
     void cachesPositiveAndNegativeResultsForSameTickAndContext() {
-        PlayerNetworkResolutionCache<Object> cache = new PlayerNetworkResolutionCache<>();
+        PlayerNetworkResolutionCache<Object> cache = new PlayerNetworkResolutionCache<>(20);
         UUID player = UUID.randomUUID();
         Object server = new Object();
         Object dimension = "overworld";
@@ -29,7 +29,7 @@ class PlayerNetworkResolutionCacheTest {
 
     @Test
     void rejectsDifferentTickServerDimensionOrMenu() {
-        PlayerNetworkResolutionCache<Object> cache = new PlayerNetworkResolutionCache<>();
+        PlayerNetworkResolutionCache<Object> cache = new PlayerNetworkResolutionCache<>(20);
         UUID player = UUID.randomUUID();
         Object server = new Object();
         Object menu = new Object();
@@ -42,8 +42,22 @@ class PlayerNetworkResolutionCacheTest {
     }
 
     @Test
+    void negativeResultSurvivesBrieflyButExpiresAndNeverCrossesContext() {
+        PlayerNetworkResolutionCache<Object> cache = new PlayerNetworkResolutionCache<>(20);
+        UUID player = UUID.randomUUID();
+        Object server = new Object();
+        Object menu = new Object();
+        cache.put(player, server, "overworld", menu, 100, null);
+
+        assertNull(cache.get(player, server, "overworld", menu, 120).value());
+        assertNull(cache.get(player, server, "overworld", menu, 121));
+        assertNull(cache.get(player, server, "nether", menu, 101));
+        assertNull(cache.get(player, server, "overworld", new Object(), 101));
+    }
+
+    @Test
     void explicitInvalidationAndClearRemoveEntries() {
-        PlayerNetworkResolutionCache<Object> cache = new PlayerNetworkResolutionCache<>();
+        PlayerNetworkResolutionCache<Object> cache = new PlayerNetworkResolutionCache<>(20);
         UUID first = UUID.randomUUID();
         UUID second = UUID.randomUUID();
         Object server = new Object();

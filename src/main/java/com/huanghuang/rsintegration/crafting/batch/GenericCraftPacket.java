@@ -336,7 +336,7 @@ public final class GenericCraftPacket {
     }
 
     public static void handle(GenericCraftPacket packet, Supplier<NetworkEvent.Context> contextSupplier) {
-        RSIntegrationMod.LOGGER.debug("[RSI-Generic] handle() ENTRY: recipeId={} preview={} dim={} pos={} repeat={}",
+        RSIntegrationMod.debug("[RSI-Generic] handle() ENTRY: recipeId={} preview={} dim={} pos={} repeat={}",
                 packet.recipeId, packet.preview, packet.dim, packet.pos, packet.repeatCount);
         NetworkEvent.Context context = contextSupplier.get();
         ServerPlayer player = context.getSender();
@@ -359,7 +359,7 @@ public final class GenericCraftPacket {
             return;
         }
         if (packet.preview && PreviewRateLimiter.isRateLimited(player.getUUID())) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Generic] handle() DROP: rate-limited, recipeId={} player={}",
+            RSIntegrationMod.debug("[RSI-Generic] handle() DROP: rate-limited, recipeId={} player={}",
                     packet.recipeId, player.getGameProfile().getName());
             context.setPacketHandled(true);
             return;
@@ -370,7 +370,7 @@ public final class GenericCraftPacket {
                     + clickedOutputCacheToken(packet.targetOutput);
             CachedPlan cached = PLAN_CACHE.get(cacheKey);
             if (cached != null && System.nanoTime() - cached.createdNanos < PLAN_CACHE_TTL_NANOS) {
-                RSIntegrationMod.LOGGER.warn("[RSI-Generic] handle() CACHE HIT: replying with cached plan, recipeId={} player={} ageMs={}",
+                RSIntegrationMod.debug("[RSI-Generic] handle() CACHE HIT: replying with cached plan, recipeId={} player={} ageMs={}",
                         packet.recipeId, player.getGameProfile().getName(),
                         (System.nanoTime() - cached.createdNanos) / 1_000_000L);
                 BatchCraftNetworkHandler.CHANNEL.send(
@@ -380,16 +380,16 @@ public final class GenericCraftPacket {
                 return;
             }
         }
-        RSIntegrationMod.LOGGER.debug("[RSI-Generic] handle() enqueueWork: recipeId={} preview={}",
+        RSIntegrationMod.debug("[RSI-Generic] handle() enqueueWork: recipeId={} preview={}",
                 packet.recipeId, packet.preview);
         context.enqueueWork(() -> {
             try {
                 if (packet.preview) {
-                    RSIntegrationMod.LOGGER.debug("[RSI-Generic] handle() → tryBuildPlan: recipeId={}", packet.recipeId);
+                    RSIntegrationMod.debug("[RSI-Generic] handle() → tryBuildPlan: recipeId={}", packet.recipeId);
                     tryBuildPlan(player, packet.recipeId, packet.forcedRecipes,
                             packet.dim, packet.pos, packet.repeatCount, packet.baseItem, packet.targetOutput, packet.requestId);
                 } else {
-                    RSIntegrationMod.LOGGER.debug("[RSI-Generic] handle() → tryResolve: recipeId={} forced={}", packet.recipeId, packet.forcedRecipes.size());
+                    RSIntegrationMod.debug("[RSI-Generic] handle() → tryResolve: recipeId={} forced={}", packet.recipeId, packet.forcedRecipes.size());
                     tryResolve(player, packet.recipeId, packet.forcedRecipes, packet.dim, packet.pos,
                             packet.repeatCount, packet.inferMode, packet.baseItem, packet.targetOutput,
                             packet.outputDestination);
@@ -420,6 +420,15 @@ public final class GenericCraftPacket {
         recipeId = unwrapJeiId(recipeId);
         Recipe<?> recipe = level.getRecipeManager().byKey(recipeId).orElse(null);
         if (recipe != null) return recipe;
+
+        if ("rs_integration".equals(recipeId.getNamespace())
+                && recipeId.getPath().startsWith("vanilla_brewing/")) {
+            com.huanghuang.rsintegration.mods.vanilla.brewing.VanillaBrewingCatalog
+                    .ensureBuilt(level);
+            recipe = com.huanghuang.rsintegration.mods.vanilla.brewing.VanillaBrewingCatalog
+                    .byId(recipeId);
+            if (recipe != null) return recipe;
+        }
 
         // FA ApplyModifierRecipe lives under smithing/ subdirectory in
         // RecipeManager (e.g. forbidden_arcanus:smithing/apply_eternal_modifier)
@@ -456,7 +465,7 @@ public final class GenericCraftPacket {
     private static Recipe<?> resolveFARitual(ServerLevel level, ResourceLocation recipeId) {
         Object ritual = FaRitualHelper.getRitualById(recipeId, level);
         if (ritual == null) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Generic] FA ritual not found in registry: {}", recipeId);
+            RSIntegrationMod.debug("[RSI-Generic] FA ritual not found in registry: {}", recipeId);
             return null;
         }
         return FaRitualHelper.wrapFaRitual(recipeId, ritual);
@@ -761,7 +770,7 @@ public final class GenericCraftPacket {
                 && recipe instanceof CraftingRecipe cr && forcedRecipes.isEmpty()) {
             List<ResolutionStep> allSteps = CraftPacketUtils.resolveIntermediateSteps(player, network, cr, repeatCount);
             if (allSteps == null || allSteps.isEmpty()) {
-                RSIntegrationMod.LOGGER.debug("[RSI-Generic] resolveIntermediateSteps returned null/empty for {}, falling through", recipeId);
+                RSIntegrationMod.debug("[RSI-Generic] resolveIntermediateSteps returned null/empty for {}, falling through", recipeId);
             }
             if (allSteps != null && !allSteps.isEmpty()) {
                 if (allSteps.stream().anyMatch(s -> s.modType() != ModType.GENERIC
@@ -831,7 +840,7 @@ public final class GenericCraftPacket {
                 return;
             }
 
-            RSIntegrationMod.LOGGER.debug("[RSI-Generic] Unified resolver: nothing to resolve for {}, falling through to direct extraction", recipeId);
+            RSIntegrationMod.debug("[RSI-Generic] Unified resolver: nothing to resolve for {}, falling through to direct extraction", recipeId);
         }
 
         // Guard: non-CraftingRecipe mod recipes REQUIRE a bound machine.
@@ -1044,7 +1053,7 @@ public final class GenericCraftPacket {
                             "rsi.generic.error.craft_failed", "Result unavailable"));
                     break;
                 }
-                RSIntegrationMod.LOGGER.debug("[RSI-Generic] Crafted {} (iteration {}/{}) for {}",
+                RSIntegrationMod.debug("[RSI-Generic] Crafted {} (iteration {}/{}) for {}",
                         result.getCount(), r + 1, repeatCount, recipeId);
             }
         }
@@ -1269,7 +1278,7 @@ public final class GenericCraftPacket {
             recipeIngredients = expandIngredientSpecs(recipeSpecs);
             targetOutput = ModRecipeHandlers.tryGetResultItem(recipe, player.serverLevel().registryAccess());
             recipeModType = ModType.classifyRecipe(recipe);
-            RSIntegrationMod.LOGGER.debug("[RSI-tryBuildPlan] targetOutput: recipeId={} class={} result={}x{} isEmpty={} modType={}",
+            RSIntegrationMod.debug("[RSI-tryBuildPlan] targetOutput: recipeId={} class={} result={}x{} isEmpty={} modType={}",
                     recipeId,
                     recipe.getClass().getSimpleName(),
                     targetOutput.isEmpty() ? "EMPTY"
@@ -1315,7 +1324,7 @@ public final class GenericCraftPacket {
                 if (ok) {
                     levelBooks = books;
                     targetOutput = books[targetLevel - 1].copy();
-                    RSIntegrationMod.LOGGER.debug("[RSI-tryBuildPlan] ArcaneIterator per-level chain: recipeId={} targetLevel={}",
+                    RSIntegrationMod.debug("[RSI-tryBuildPlan] ArcaneIterator per-level chain: recipeId={} targetLevel={}",
                             recipeId, targetLevel);
                 }
             }
@@ -1344,7 +1353,7 @@ public final class GenericCraftPacket {
                 + repeatCount + ":" + clickedOutputCacheToken(clickedOutput);
         CachedPlan cached = PLAN_CACHE.get(cacheKey);
         if (cached != null && System.nanoTime() - cached.createdNanos < PLAN_CACHE_TTL_NANOS) {
-            RSIntegrationMod.LOGGER.debug("[RSI-tryBuildPlan] Cache hit: recipeId={}", recipeId);
+            RSIntegrationMod.debug("[RSI-tryBuildPlan] Cache hit: recipeId={}", recipeId);
             BatchCraftNetworkHandler.CHANNEL.send(
                     PacketDistributor.PLAYER.with(() -> player),
                     new PlanResponsePacket(cached.plan, requestId));
@@ -1376,7 +1385,7 @@ public final class GenericCraftPacket {
                     break;
                 }
             }
-            RSIntegrationMod.LOGGER.debug("[RSI-tryBuildPlan] ArcaneIterator start level: {}/{}",
+            RSIntegrationMod.debug("[RSI-tryBuildPlan] ArcaneIterator start level: {}/{}",
                     iteratorStartLevel, levelBooks.length);
         }
 
@@ -1405,7 +1414,7 @@ public final class GenericCraftPacket {
         boolean usedTypedResolver = resolutionSteps != null && !resolutionSteps.isEmpty();
 
         // ── OR debug: log resolution results ──
-        RSIntegrationMod.LOGGER.debug("[RSI-OR] tryBuildPlan recipe={} typedResolver={} steps={} alts={}",
+        RSIntegrationMod.debug("[RSI-OR] tryBuildPlan recipe={} typedResolver={} steps={} alts={}",
                 recipeId, usedTypedResolver,
                 resolutionSteps != null ? resolutionSteps.size() : -1,
                 resolutionSteps != null ? resolutionSteps.stream()
@@ -1413,7 +1422,7 @@ public final class GenericCraftPacket {
         if (resolutionSteps != null) {
             for (ResolutionStep rs : resolutionSteps) {
                 if (!rs.alternativeIds().isEmpty()) {
-                    RSIntegrationMod.LOGGER.debug("[RSI-OR]   step {} has {} alternatives: {}",
+                    RSIntegrationMod.debug("[RSI-OR]   step {} has {} alternatives: {}",
                             rs.recipeId(), rs.alternativeIds().size(), rs.alternativeIds());
                 }
             }
@@ -1437,7 +1446,7 @@ public final class GenericCraftPacket {
         // Diagnostic: log stepId distribution before dedup
         Map<ResourceLocation, Integer> diagStepCounts = new LinkedHashMap<>();
         for (ResourceLocation id : stepIds) diagStepCounts.merge(id, 1, Integer::sum);
-        RSIntegrationMod.LOGGER.debug("[RSI-plan] stepIds: total={} unique={} | {}",
+        RSIntegrationMod.debug("[RSI-plan] stepIds: total={} unique={} | {}",
                 stepIds.size(), diagStepCounts.size(), diagStepCounts);
 
         // Build modType lookup from typed resolution results and recipe dimensions
@@ -1470,7 +1479,7 @@ public final class GenericCraftPacket {
 
         if (RSIntegrationMod.LOGGER.isDebugEnabled()) {
             int totalItems = itemAvailable.values().stream().mapToInt(Integer::intValue).sum();
-            RSIntegrationMod.LOGGER.debug("[RSI-Generic] itemAvailable: {} types, {} total items",
+            RSIntegrationMod.debug("[RSI-Generic] itemAvailable: {} types, {} total items",
                     itemAvailable.size(), totalItems);
         }
 
@@ -1539,7 +1548,7 @@ public final class GenericCraftPacket {
             ItemStack output = RecipeIndex.tryGetResultItem(
                     stepRecipe, player.serverLevel().registryAccess());
             if (output.isEmpty()) {
-                RSIntegrationMod.LOGGER.debug("[RSI-Generic] Plan step output empty: {} ({})",
+                RSIntegrationMod.debug("[RSI-Generic] Plan step output empty: {} ({})",
                         stepId, stepRecipe.getClass().getSimpleName());
                 continue;
             }
@@ -1599,7 +1608,7 @@ public final class GenericCraftPacket {
             List<ResourceLocation> alternatives = new ArrayList<>();
             List<String> alternativeModTypes = new ArrayList<>();
             ResolutionStep rs = stepByRecipe.get(stepId);
-            RSIntegrationMod.LOGGER.debug("[RSI-OR] buildStep {}: stepByRecipe has rs={} alternatives={}",
+            RSIntegrationMod.debug("[RSI-OR] buildStep {}: stepByRecipe has rs={} alternatives={}",
                     stepId, rs != null,
                     rs != null ? rs.alternativeIds().size() : -1);
             if (rs != null && !rs.alternativeIds().isEmpty()) {
@@ -1610,7 +1619,7 @@ public final class GenericCraftPacket {
                             : rs.modType().id();
                     Recipe<?> altRecipe = resolveRecipe(player.serverLevel(), altId);
                     if (altRecipe == null) {
-                        RSIntegrationMod.LOGGER.debug("[RSI-OR]   alt {} NOT FOUND in recipe manager", altId);
+                        RSIntegrationMod.debug("[RSI-OR]   alt {} NOT FOUND in recipe manager", altId);
                         continue;
                     }
                     List<Ingredient> altIngs;
@@ -1641,7 +1650,7 @@ public final class GenericCraftPacket {
                     // refined_beeswax_bar), leaving only the stonecutter step with no
                     // switch button even though the resolver could use either.
                     boolean hasMachine = hasMats && AltarBindingRegistry.hasBindingForRecipe(player, altRecipe);
-                    RSIntegrationMod.LOGGER.debug("[RSI-OR]   alt {}: ingCount={} hasMaterials={} hasMachine={}",
+                    RSIntegrationMod.debug("[RSI-OR]   alt {}: ingCount={} hasMaterials={} hasMachine={}",
                             altId, altIngs != null ? altIngs.size() : -1, hasMats, hasMachine);
                     if (hasMats && hasMachine) {
                         alternatives.add(altId);
@@ -1659,7 +1668,7 @@ public final class GenericCraftPacket {
         }
 
         if (RSIntegrationMod.LOGGER.isDebugEnabled()) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Generic] Plan intermediate steps:");
+            RSIntegrationMod.debug("[RSI-Generic] Plan intermediate steps:");
             for (PlanStep s : steps) {
                 StringBuilder sb = new StringBuilder("  ").append(s.recipeId())
                         .append(" -> ")
@@ -1817,7 +1826,7 @@ public final class GenericCraftPacket {
                 }
             }
             if (targetAlts.isEmpty()) { targetAlts = Collections.emptyList(); targetAltModTypes = Collections.emptyList(); }
-            RSIntegrationMod.LOGGER.debug("[RSI-OR] target step {}: {} alternatives from index",
+            RSIntegrationMod.debug("[RSI-OR] target step {}: {} alternatives from index",
                     recipeId, targetAlts.size());
 
             // Collect plan-time mod warnings (Goety research/structure, FA essences).
@@ -2033,7 +2042,7 @@ public final class GenericCraftPacket {
 
         if (RSIntegrationMod.LOGGER.isDebugEnabled()) {
             long shortageCount = materials.values().stream().filter(a -> !a.isEnough()).count();
-            RSIntegrationMod.LOGGER.debug("[RSI-Generic] Plan for {}: {} steps, feasible={}, resolver={}, missing={}, shortages={}",
+            RSIntegrationMod.debug("[RSI-Generic] Plan for {}: {} steps, feasible={}, resolver={}, missing={}, shortages={}",
                     recipeId, steps.size(), feasible, usedTypedResolver ? "typed" : "fallback",
                     missing.size(), shortageCount);
         }
@@ -2107,6 +2116,18 @@ public final class GenericCraftPacket {
             }
         }
 
+        if (!feasible) {
+            if (!dedupedMissing.isEmpty() || materials.values().stream()
+                    .anyMatch(a -> !a.isEnough())) {
+                modWarnings.add(Component.translatable(
+                        "rsi.plan.failure.missing_materials").getString());
+            } else if (recipeModType != null
+                    && !boundMachineTypes.contains(recipeModType.id())) {
+                modWarnings.add(Component.translatable(
+                        "rsi.plan.failure.no_bound_machine").getString());
+            }
+        }
+
         long totalBotaniaMana = 0L;
         for (PlanStep step : steps) {
             Recipe<?> stepRecipe = player.serverLevel().getRecipeManager()
@@ -2158,12 +2179,12 @@ public final class GenericCraftPacket {
             PLAN_CACHE.values().removeIf(e -> e.createdNanos < cutoff);
         }
 
-        RSIntegrationMod.LOGGER.debug("[RSI-tryBuildPlan] SENDING PlanResponsePacket: recipeId={} steps={} feasible={} player={}",
+        RSIntegrationMod.debug("[RSI-tryBuildPlan] SENDING PlanResponsePacket: recipeId={} steps={} feasible={} player={}",
                 recipeId, steps.size(), feasible, player.getGameProfile().getName());
         BatchCraftNetworkHandler.CHANNEL.send(
                 PacketDistributor.PLAYER.with(() -> player),
                 new PlanResponsePacket(plan, requestId));
-        RSIntegrationMod.LOGGER.debug("[RSI-tryBuildPlan] PlanResponsePacket SENT: recipeId={}", recipeId);
+        RSIntegrationMod.debug("[RSI-tryBuildPlan] PlanResponsePacket SENT: recipeId={}", recipeId);
     }
 
     /**

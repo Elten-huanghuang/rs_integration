@@ -143,7 +143,7 @@ public final class LoadBalancer {
 
             // Busy check via Mixin interface (no-op when Mixin not yet implemented)
             if (be instanceof RSIMachineAccessor acc && acc.rsi$isBusy()) {
-                RSIntegrationMod.LOGGER.debug("[RSI-LoadBalancer] Machine at {} is busy, skipping", pos);
+                RSIntegrationMod.debug("[RSI-LoadBalancer] Machine at {} is busy, skipping", pos);
                 continue;
             }
 

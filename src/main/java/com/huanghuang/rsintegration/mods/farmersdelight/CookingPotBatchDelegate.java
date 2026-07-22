@@ -85,10 +85,7 @@ public final class CookingPotBatchDelegate extends AbstractBatchDelegate {
     @Nullable
     @Override
     public List<IngredientSpec> getRequiredMaterials() {
-        var handler = ModRecipeHandlers.handlerFor(recipe);
-        List<IngredientSpec> specs = handler != null
-                ? handler.getIngredients(recipe)
-                : CraftPacketUtils.extractIngredientSpecs(recipe);
+        List<IngredientSpec> specs = getRecipeIngredientSpecs();
         if (specs == null) specs = new ArrayList<>();
         else specs = new ArrayList<>(specs);
 
@@ -97,6 +94,28 @@ public final class CookingPotBatchDelegate extends AbstractBatchDelegate {
             specs.add(new IngredientSpec(Ingredient.of(container), 1));
         }
         return specs.isEmpty() ? null : specs;
+    }
+
+    @Override
+    public List<IngredientSpec> getGraphSpecs() {
+        List<IngredientSpec> specs = getRecipeIngredientSpecs();
+        return specs != null ? specs : List.of();
+    }
+
+    @Override
+    public List<IngredientSpec> getSupplementalSpecs() {
+        ItemStack container = getContainerItem(recipe, myLevel != null ? myLevel.registryAccess() : null);
+        return container.isEmpty()
+                ? List.of()
+                : List.of(new IngredientSpec(Ingredient.of(container), 1));
+    }
+
+    @Nullable
+    private List<IngredientSpec> getRecipeIngredientSpecs() {
+        var handler = ModRecipeHandlers.handlerFor(recipe);
+        return handler != null
+                ? handler.getIngredients(recipe)
+                : CraftPacketUtils.extractIngredientSpecs(recipe);
     }
 
     @Override
@@ -164,6 +183,10 @@ public final class CookingPotBatchDelegate extends AbstractBatchDelegate {
         }
         if (!itemHandler.getStackInSlot(OUTPUT_SLOT).isEmpty()) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-CookingPot] Output slot occupied at {}", myPos);
+            return false;
+        }
+        if (!itemHandler.getStackInSlot(MEAL_DISPLAY_SLOT).isEmpty()) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Batch-CookingPot] Meal display slot occupied at {}", myPos);
             return false;
         }
 
@@ -263,7 +286,16 @@ public final class CookingPotBatchDelegate extends AbstractBatchDelegate {
         if (itemHandler == null) return false;
 
         ItemStack output = itemHandler.getStackInSlot(OUTPUT_SLOT);
-        return !output.isEmpty();
+        if (!output.isEmpty()) return matchesRecipeOutput(output);
+
+        ItemStack declared = getDeclaredContainerItem(recipe);
+        if (!declared.isEmpty()) return false;
+        ItemStack inferred = getContainerItem(recipe, level.registryAccess());
+        ItemStack storedContainer = itemHandler.getStackInSlot(CONTAINER_SLOT);
+        ItemStack meal = itemHandler.getStackInSlot(MEAL_DISPLAY_SLOT);
+        return !inferred.isEmpty()
+                && ItemStack.isSameItemSameTags(inferred, storedContainer)
+                && matchesRecipeOutput(meal);
     }
 
     @Override
@@ -275,6 +307,18 @@ public final class CookingPotBatchDelegate extends AbstractBatchDelegate {
         if (itemHandler == null) return ItemStack.EMPTY;
 
         ItemStack result = itemHandler.extractItem(OUTPUT_SLOT, 64, false);
+        if (result.isEmpty()) {
+            ItemStack meal = itemHandler.getStackInSlot(MEAL_DISPLAY_SLOT);
+            ItemStack declared = getDeclaredContainerItem(recipe);
+            ItemStack inferred = getContainerItem(recipe, myLevel.registryAccess());
+            ItemStack storedContainer = itemHandler.getStackInSlot(CONTAINER_SLOT);
+            if (declared.isEmpty() && !inferred.isEmpty()
+                    && ItemStack.isSameItemSameTags(inferred, storedContainer)
+                    && matchesRecipeOutput(meal)) {
+                result = itemHandler.extractItem(MEAL_DISPLAY_SLOT, meal.getCount(), false);
+                itemHandler.extractItem(CONTAINER_SLOT, 1, false);
+            }
+        }
         be.setChanged();
         craftDone = true;
         return result;
@@ -363,7 +407,7 @@ public final class CookingPotBatchDelegate extends AbstractBatchDelegate {
         }
     }
 
-    private static ItemStack getContainerItem(Recipe<?> recipe, @Nullable RegistryAccess access) {
+    private static ItemStack getDeclaredContainerItem(Recipe<?> recipe) {
         try {
             Method m = recipe.getClass().getMethod("getOutputContainer");
             Object result = m.invoke(recipe);
@@ -383,6 +427,12 @@ public final class CookingPotBatchDelegate extends AbstractBatchDelegate {
         // the meal stays stuck in the display slot and never reaches OUTPUT_SLOT
         // — the product is silently never recovered into RS. Derive the required
         // container from the result item's crafting remainder.
+        return ItemStack.EMPTY;
+    }
+
+    public static ItemStack getContainerItem(Recipe<?> recipe, @Nullable RegistryAccess access) {
+        ItemStack declared = getDeclaredContainerItem(recipe);
+        if (!declared.isEmpty()) return declared;
         try {
             ItemStack result = getRecipeResult(recipe, access);
             if (!result.isEmpty() && result.hasCraftingRemainingItem()) {
@@ -391,6 +441,13 @@ public final class CookingPotBatchDelegate extends AbstractBatchDelegate {
             }
         } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-CookingPot] meal-container fallback failed", e); }
         return ItemStack.EMPTY;
+    }
+
+    private boolean matchesRecipeOutput(ItemStack stack) {
+        ItemStack expected = getRecipeResult(recipe, myLevel != null ? myLevel.registryAccess() : null);
+        return !stack.isEmpty() && !expected.isEmpty()
+                && ItemStack.isSameItemSameTags(stack, expected)
+                && stack.getCount() >= expected.getCount();
     }
 
     /** SRG-safe recipe result using the active level's registry access. */

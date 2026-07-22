@@ -162,6 +162,10 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
 
         this.soulCost = Reflect.<Integer>invoke(ritualRecipe, GoetyReflection.M_GET_SOUL_COST).orElse(0);
         RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] validateAndInit [6/9] soulCost={}", soulCost);
+        // Machine selection probes every bound altar before reserving materials.
+        // Reject an altar whose own cage cannot fund the ritual here, otherwise
+        // the graph can choose it and discover the shortage only after commit.
+        if (!validateSoulsAvailable(soulCost, false)) return false;
 
         Object ritualObj = Reflect.invoke(ritualRecipe, GoetyReflection.M_GET_RITUAL).orElse(null);
         if (ritualObj == null) {
@@ -323,7 +327,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
 
         this.filledPedestals = new ArrayList<>();
 
-        if (!validateSoulsAvailable(soulCost)) return false;
+        if (!validateSoulsAvailable(soulCost, true)) return false;
 
         Object ritual = Reflect.invoke(ritualRecipe, GoetyReflection.M_GET_RITUAL).orElse(null);
         if (ritual == null) {
@@ -705,7 +709,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
 
         this.filledPedestals = new ArrayList<>();
 
-        if (!validateSoulsAvailable(soulCost)) return false;
+        if (!validateSoulsAvailable(soulCost, true)) return false;
 
         Object ritual = Reflect.invoke(ritualRecipe, GoetyReflection.M_GET_RITUAL).orElse(null);
         if (ritual == null) {
@@ -1175,10 +1179,13 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
 
     // ── Soul energy ──────────────────────────────────────────────
 
-    private boolean validateSoulsAvailable(int cost) {
+    private boolean validateSoulsAvailable(int cost, boolean notifyPlayer) {
         if (cost <= 0) return true;
         try {
-            var cageOpt = Reflect.getField(altar, GoetyReflection.F_CURSED_CAGE_TILE);
+            ServerLevel level = resolveMachineLevel(player);
+            BlockPos cagePos = myPos.below();
+            BlockEntity cageEntity = level.isLoaded(cagePos) ? level.getBlockEntity(cagePos) : null;
+            var cageOpt = Optional.ofNullable(cageEntity);
             if (cageOpt.isEmpty() || cageOpt.get() == null) {
                 RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] No cursedCageTile — assuming link gem/Arca, skipping soul check");
                 return true;
@@ -1186,10 +1193,26 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             Object cage = cageOpt.get();
             if (GoetyReflection.cursedCageBEClass == null || !GoetyReflection.cursedCageBEClass.isInstance(cage)) return true;
 
-            int available = (int) GoetyReflection.cursedCageBEClass.getMethod(GoetyReflection.M_GET_SOULS).invoke(cage);
+            // Automation bypasses activate(), where Goety normally refreshes this cache.
+            Reflect.setField(altar, GoetyReflection.F_CURSED_CAGE_TILE, cage);
+            int available = (int) GoetyReflection.cursedCageBEClass
+                    .getMethod(GoetyReflection.M_GET_SOULS).invoke(cage);
+            // Some Goety builds do not refresh getSouls() until the altar's
+            // native activation path runs. Read the contained totem directly
+            // as a compatibility fallback during automated preparation.
+            if (available <= 0) {
+                Object contained = Reflect.invoke(cage, "getItem").orElse(null);
+                if (contained instanceof ItemStack stack && stack.getTag() != null) {
+                    available = Math.max(available, stack.getTag().getInt("Souls"));
+                }
+            }
+            RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] Soul probe: altar={} cage={} required={} available={}",
+                    myPos, cagePos, cost, available);
             if (available < cost) {
-                player.sendSystemMessage(Component.translatable(
-                        "rsi.goety.error.insufficient_souls", cost, available));
+                if (notifyPlayer) {
+                    player.sendSystemMessage(Component.translatable(
+                            "rsi.goety.error.insufficient_souls", cost, available));
+                }
                 return false;
             }
             return true;
