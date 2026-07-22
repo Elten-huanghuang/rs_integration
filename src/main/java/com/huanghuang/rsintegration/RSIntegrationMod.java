@@ -373,6 +373,23 @@ public final class RSIntegrationMod {
                             List.of("net.minecraft.world.level.block.StonecutterBlock"),
                             "vanilla_stonecutter"));
 
+            ModType.register("vanilla_brewing_stand",
+                    new String[]{"com.huanghuang.rsintegration.mods.vanilla.brewing.VanillaBrewingRecipeDefinition"},
+                    new String[]{"brewing_stand"},
+                    new String[]{"vanilla_brewing_stand"},
+                    ModType.delegateSupplier("com.huanghuang.rsintegration.mods.vanilla.brewing.BrewingStandBatchDelegate"));
+            ModType.configureJei("vanilla_brewing_stand",
+                    new String[][]{{"minecraft:brewing", "vanilla_brewing_stand"}},
+                    new String[][]{{"com.huanghuang.rsintegration.mods.vanilla.brewing.VanillaBrewingRecipeDefinition",
+                            "vanilla_brewing_stand"}},
+                    "gui.rs_integration.jei.vanilla_brewing_stand_craft");
+            BindingEventHandler.registerTarget(
+                    new BindingEventHandler.MachineBindingTarget(
+                            "minecraft", ModType.byId("vanilla_brewing_stand"),
+                            RSIntegrationConfig.ENABLE_VANILLA_MACHINES,
+                            List.of("net.minecraft.world.level.block.BrewingStandBlock"),
+                            "vanilla_brewing_stand"));
+
             // 閳光偓閳光偓 Anvil (JEI-only, opens remote GUI) 閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓
             ModType.register("vanilla_anvil",
                     new String[0],

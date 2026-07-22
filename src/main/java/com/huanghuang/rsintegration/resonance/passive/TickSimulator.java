@@ -2,7 +2,6 @@ package com.huanghuang.rsintegration.resonance.passive;
 
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.resonance.disk.ResonanceDiskWrapper;
-import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
@@ -22,28 +21,30 @@ public final class TickSimulator {
         refreshWhitelist();
         if (whitelist.isEmpty()) return;
 
-        // Use delegate stacks directly to preserve RSISlot tag for NBT-exact extract/insert.
-        for (ItemStack stack : new ArrayList<>(disk.delegate().getStacks())) {
+        // The delegate owns mutable ItemStack instances. Extraction and reinsertion may
+        // mutate or reuse them, so each tick must work from an exact, detached snapshot.
+        for (ItemStack stack : snapshotStacks(disk.delegate().getStacks())) {
             if (stack.isEmpty()) continue;
             ResourceLocation key = BuiltInRegistries.ITEM.getKey(stack.getItem());
             if (key == null) continue;
 
             WhitelistEntry entry = findEntry(key.toString());
             if (entry == null) continue;
-
             if (entry.mutates) {
                 int originalSlot = getSlot(stack);
-                ItemStack extracted = disk.manualExtractExact(stack, 1, 0, Action.PERFORM);
-                if (!extracted.isEmpty()) {
-                    extracted.getItem().inventoryTick(
-                            extracted, player.level(), player, -1, false);
-                    if (!extracted.isEmpty()) {
-                        ItemStack remainder = disk.manualInsert(
-                                originalSlot, extracted, extracted.getCount(), Action.PERFORM);
-                        if (!remainder.isEmpty()) {
-                            player.drop(remainder, false);
-                        }
-                    }
+                ItemStack before = stack.copy();
+                ResonanceDiskWrapper.rsi$stripSlotTag(before);
+                ItemStack after = before.copy();
+                after.getItem().inventoryTick(after, player.level(), player, -1, false);
+                if ("apotheosis:potion_charm".equals(entry.itemId) && !after.isEmpty()) {
+                    after = PotionCharmMutationPolicy.preserveIdentity(before, after);
+                }
+                ResonanceDiskWrapper.SlotMutationResult result =
+                        disk.reconcileSlot(originalSlot, before, after);
+                if (result != ResonanceDiskWrapper.SlotMutationResult.SUCCESS) {
+                    com.huanghuang.rsintegration.RSIntegrationMod.LOGGER.warn(
+                            "[RSI-Passive] Rejected mutation for {} in slot {}: {}",
+                            entry.itemId, originalSlot, result);
                 }
             } else {
                 ItemStack snapshot = stack.copy();
@@ -51,6 +52,10 @@ public final class TickSimulator {
                         snapshot, player.level(), player, -1, false);
             }
         }
+    }
+
+    static List<ItemStack> snapshotStacks(Collection<ItemStack> stacks) {
+        return stacks.stream().map(ItemStack::copy).toList();
     }
 
     private static int getSlot(ItemStack stack) {

@@ -11,7 +11,7 @@ import net.minecraftforge.eventbus.api.SubscribeEvent;
 
 /**
  * Client-side RS-binding hints for Goety blocks. Adds a tooltip to the Dark Altar
- * and its binding blocks (Necro Brazier / Cursed Cage / Soul Candlestick) telling
+ * and the Necro Brazier telling
  * the player they can be bound to a Refined Storage network.
  */
 @OnlyIn(Dist.CLIENT)
@@ -36,8 +36,7 @@ public final class GoetyGuiClientEventHandler {
     }
 
     private static boolean isGoetyBindingBlock(Block block) {
-        return (GoetyReflection.necroBrazierBlockClass != null && GoetyReflection.necroBrazierBlockClass.isInstance(block))
-                || (GoetyReflection.cursedCageBlockClass != null && GoetyReflection.cursedCageBlockClass.isInstance(block))
-                || (GoetyReflection.soulCandlestickBlockClass != null && GoetyReflection.soulCandlestickBlockClass.isInstance(block));
+        return GoetyReflection.necroBrazierBlockClass != null
+                && GoetyReflection.necroBrazierBlockClass.isInstance(block);
     }
 }

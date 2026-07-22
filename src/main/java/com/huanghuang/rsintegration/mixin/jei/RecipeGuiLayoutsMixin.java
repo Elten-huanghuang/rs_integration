@@ -290,7 +290,9 @@ public class RecipeGuiLayoutsMixin {
             Runnable handler = createHandler(recipe, recipeId, bindingDim, machinePos, filter, faSmithingBase, wrTargetOutput);
             if (handler == null) continue;
 
-            ModType modType = computeModType(recipe);
+            ModType modType = "vanilla_brewing_stand".equals(filter)
+                    ? ModType.byId("vanilla_brewing_stand")
+                    : computeModType(recipe);
 
             String tooltipKey;
             if (rsi$isGoetyRitual(recipe)) {
@@ -767,8 +769,72 @@ public class RecipeGuiLayoutsMixin {
             if (uid != null) return uid;
         }
 
+        // JEI's vanilla brewing display is not a Recipe and has no stable ID.
+        // Resolve it against the server-side Forge brewing catalog by exact
+        // input, reagent and output stacks (including potion NBT).
+        if (className.toLowerCase(java.util.Locale.ROOT).contains("brewing")) {
+            ResourceLocation brewingId = rsi$findBrewingCatalogId(recipe);
+            if (brewingId != null) return brewingId;
+        }
+
         RSIntegrationMod.LOGGER.warn("[RSI-JEI-Mixin] getRecipeId failed for {} — no strategy succeeded", className);
         return null;
+    }
+
+    @Unique
+    private static ResourceLocation rsi$findBrewingCatalogId(Object display) {
+        try {
+            if (display instanceof mezz.jei.api.recipe.vanilla.IJeiBrewingRecipe brewing) {
+                ItemStack output = brewing.getPotionOutput();
+                for (ItemStack input : brewing.getPotionInputs()) {
+                    for (ItemStack reagent : brewing.getIngredients()) {
+                        ResourceLocation id = rsi$findBrewingCatalogId(input, reagent, output);
+                        if (id != null) return id;
+                    }
+                }
+                for (ItemStack input : brewing.getPotionInputs()) {
+                    for (ItemStack reagent : brewing.getIngredients()) {
+                        ResourceLocation id = com.huanghuang.rsintegration.mods.vanilla.brewing
+                                .VanillaBrewingCatalog.registerExact(input, reagent, output);
+                        if (id != null) return id;
+                    }
+                }
+                return null;
+            }
+            ItemStack input = rsi$firstStack(display, "getInput", "getInputs");
+            ItemStack reagent = rsi$firstStack(display, "getIngredient", "getReagent");
+            ItemStack output = rsi$firstStack(display, "getOutput", "getResult");
+            return rsi$findBrewingCatalogId(input, reagent, output);
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] brewing catalog ID lookup failed", e);
+            return null;
+        }
+    }
+
+    @Unique
+    private static ResourceLocation rsi$findBrewingCatalogId(ItemStack input, ItemStack reagent,
+                                                               ItemStack output) {
+        if (input.isEmpty() || reagent.isEmpty() || output.isEmpty()) return null;
+        if (Minecraft.getInstance().level != null) {
+            com.huanghuang.rsintegration.mods.vanilla.brewing.VanillaBrewingCatalog
+                    .ensureBuilt(Minecraft.getInstance().level);
+        }
+        return com.huanghuang.rsintegration.mods.vanilla.brewing.VanillaBrewingCatalog
+                .findId(input, reagent, output);
+    }
+
+    @Unique
+    private static ItemStack rsi$firstStack(Object object, String... methods) throws Exception {
+        for (String name : methods) {
+            try {
+                Object value = object.getClass().getMethod(name).invoke(object);
+                if (value instanceof ItemStack stack) return stack;
+                if (value instanceof Iterable<?> iterable) {
+                    for (Object element : iterable) if (element instanceof ItemStack stack) return stack;
+                }
+            } catch (NoSuchMethodException ignored) {}
+        }
+        return ItemStack.EMPTY;
     }
 
     // ── FA fingerprint cache (built once, like betterjei) ──────────────

@@ -33,6 +33,10 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
         // @Mixin TARGET class is absent; a body reference to another absent mod
         // class would instead NoClassDefFoundError at apply/runtime. Probe that
         // second class here so the whole mixin is skipped when it is missing.
+        if (mixinClassName.contains("goetydelight.BlockFinderCompatMixin")) {
+            return isClassPresent("com.Polarice3.Goety.utils.BlockFinder")
+                    && isClassPresent("net.v_black_cat.goetydelight.effect.ModEffects");
+        }
         if (mixinClassName.contains("distantworlds.LithumCoreUpdateTickProcedureMixin")) {
             return isClassPresent("net.mcreator.distantworlds.procedures.LithumCoreUpdateTickProcedure");
         }

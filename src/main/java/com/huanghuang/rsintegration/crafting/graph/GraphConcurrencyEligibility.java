@@ -82,6 +82,11 @@ public final class GraphConcurrencyEligibility {
                 || "wizards_reborn".equals(type);
     }
 
+    public static boolean shouldQueueOperations(
+            int executions, int machines, int availableCapacity, boolean concurrencySafe) {
+        return executions >= 2 && machines >= 1 && availableCapacity >= 1 && concurrencySafe;
+    }
+
     private static BatchConcurrencyCapabilities capability(
             BatchConcurrencyCapabilities.OutputOwnership output,
             BatchConcurrencyCapabilities.SideEffects sideEffects,

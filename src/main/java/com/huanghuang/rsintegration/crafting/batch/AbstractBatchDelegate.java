@@ -198,6 +198,7 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
         }
         BlockEntity be = level.getBlockEntity(pos);
         if (be != null) clearMachineState(be, player);
+        else clearMissingMachineState(player);
     }
 
     /**
@@ -288,6 +289,10 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
      */
     protected void clearMachineState(BlockEntity be, ServerPlayer player) {
         // no-op; subclasses with inventory-based machines should override
+    }
+
+    /** Release delegate-owned state when the prepared block entity no longer exists. */
+    protected void clearMissingMachineState(@Nullable ServerPlayer player) {
     }
 
     // ── Shared state lifecycle ─────────────────────────────────────

@@ -143,14 +143,14 @@ public final class ParallelCraftGroup implements IBatchDelegate {
             if (representativePos.equals(BlockPos.ZERO)) representativePos = machine.pos();
         }
         if (!workers.isEmpty()) baseSpecs = workers.get(0).delegate.getRequiredMaterials();
-        RSIntegrationMod.LOGGER.debug("[RSI-ParallelGroup] Created {}/{} workers for {} operations of {}",
+        RSIntegrationMod.debug("[RSI-ParallelGroup] Created {}/{} workers for {} operations of {}",
                 workers.size(), machines.size(), totalOperations, recipeId);
     }
 
     @Override
     public boolean validateAndInit(ServerPlayer player, ResourceLocation recipeId,
                                    @Nullable ResourceLocation dim, BlockPos pos) {
-        return workers.size() >= 2;
+        return !workers.isEmpty();
     }
 
     @Nullable

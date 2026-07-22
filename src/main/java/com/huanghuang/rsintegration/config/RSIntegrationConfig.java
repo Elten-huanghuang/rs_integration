@@ -18,7 +18,7 @@ public final class RSIntegrationConfig {
     public static final ForgeConfigSpec CLIENT_SPEC;
     private static ModConfig clientModConfig;
 
-    // 閳光偓閳光偓 master switches 閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓
+    //  master switches
     public static ForgeConfigSpec.BooleanValue ENABLE_BINDING;
     public static ForgeConfigSpec.BooleanValue ENABLE_AUTO_CRAFTING;
     public static ForgeConfigSpec.BooleanValue ENABLE_MULTIBLOCK_AUTO_CRAFTING;
@@ -28,7 +28,7 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.ConfigValue<List<? extends String>> MULTIBLOCK_RECIPE_BLACKLIST;
     public static ForgeConfigSpec.ConfigValue<List<? extends String>> MULTIBLOCK_RECIPE_ALLOWLIST;
 
-    // 閳光偓閳光偓 per-mod integration 閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓
+    //  per-mod integration
     public static ForgeConfigSpec.BooleanValue ENABLE_GOETY;
     public static ForgeConfigSpec.BooleanValue ENABLE_MALUM;
     public static ForgeConfigSpec.BooleanValue ENABLE_BOTANIA;
@@ -69,7 +69,7 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.BooleanValue DEPOSIT_UPGRADE_RS;
     public static ForgeConfigSpec.BooleanValue ENABLE_MAJ_ACCESSORY_COMPRESSION;
     public static ForgeConfigSpec.BooleanValue ENABLE_MACHINE_GUI_TABS;
-    // 閳光偓閳光偓 auto-eat 閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓
+    //  auto-eat
     public static ForgeConfigSpec.BooleanValue ENABLE_AUTO_EAT;
     public static ForgeConfigSpec.ConfigValue<String> AUTO_EAT_REQUIRED_EFFECT;
     public static ForgeConfigSpec.ConfigValue<String> AUTO_EAT_COST_ITEM;
@@ -83,7 +83,7 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.IntValue NINE_SWORD_MAX_COUNT;
     public static ForgeConfigSpec.BooleanValue DIAGNOSTIC_VERBOSE_LOGGING;
 
-    // 閳光偓閳光偓 per-mod tuning (server, per-world) 閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓
+    //  per-mod tuning (server, per-world)
     public static ForgeConfigSpec.ConfigValue<String> CROCKPOT_FILLER_ITEM;
     public static ForgeConfigSpec.ConfigValue<List<? extends String>> CROCKPOT_FUEL_PRIORITY;
     public static ForgeConfigSpec.ConfigValue<List<? extends String>> VANILLA_FURNACE_FUEL_PRIORITY;
@@ -92,7 +92,7 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.IntValue EMBERS_LOCK_TIMEOUT_MINUTES;
     public static ForgeConfigSpec.IntValue EMBERS_PROGRESS_TIMEOUT_TICKS;
 
-    // 閳光偓閳光偓 numeric params 閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓
+    //  numeric params
     public static ForgeConfigSpec.IntValue MACHINE_TAB_THRESHOLD;
     public static ForgeConfigSpec.IntValue MACHINE_HUB_TOGGLE_KEY;
     public static ForgeConfigSpec.ConfigValue<List<? extends String>> CUSTOM_GUI_MACHINE_MODS;
@@ -120,7 +120,7 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.IntValue RECIPE_TREE_BATCH_DEBOUNCE_MS;
     public static ForgeConfigSpec.IntValue RECIPE_TREE_MAX_CANDIDATES;
 
-    // 閳光偓閳光偓 client-only 閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓
+    //  client-only
     public static ForgeConfigSpec.IntValue RS_SIDE_PANEL_X;
     public static ForgeConfigSpec.IntValue RS_SIDE_PANEL_Y;
     public static ForgeConfigSpec.IntValue RS_SIDE_PANEL_WIDTH;
@@ -133,7 +133,7 @@ public final class RSIntegrationConfig {
         ForgeConfigSpec.Builder c = new ForgeConfigSpec.Builder();
         ForgeConfigSpec.Builder s = new ForgeConfigSpec.Builder();
 
-        // 閳光偓閳光偓 COMMON: feature toggles 閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓
+        //  COMMON: feature toggles
 
         c.push("general");
         ENABLE_BINDING = c
@@ -242,7 +242,7 @@ public final class RSIntegrationConfig {
                 .comment("Enable RS integration with Embers Rekindled (Alchemy Tablet remote crafting).")
                 .define("enableEmbersAlchemy", true);
         ENABLE_EMBERS_ALCHEMY_CALC = c
-                .comment("Enable Calculate mode for Embers Alchemy 閳?shows the deterministic pedestal layout.",
+                .comment("Enable Calculate mode for Embers Alchemy -shows the deterministic pedestal layout.",
                         "When disabled, only Infer (trial-and-error) mode is available.",
                         "Requires enableEmbersAlchemy=true.")
                 .define("enableEmbersAlchemyCalculate", false);
@@ -314,15 +314,15 @@ public final class RSIntegrationConfig {
                         "that say \"works from inventory/hotbar\" will grant their passive effects",
                         "to the player as if carried in the inventory.",
                         "Three layers:",
-                        "  Phase 1 閳?Attribute modifiers (zero-config, ~50-70% of items),",
-                        "  Phase 2 閳?inventoryTick simulation (JSON whitelist, ~20-35% of items),",
-                        "  Phase 3 閳?event-driven Mixin redirect (per-item, ~5-15% of items).",
+                        "  Phase 1 -Attribute modifiers (zero-config, ~50-70% of items),",
+                        "  Phase 2 -inventoryTick simulation (JSON whitelist, ~20-35% of items),",
+                        "  Phase 3 -event-driven Mixin redirect (per-item, ~5-15% of items).",
                         "Disable this if you prefer vanilla inventory-only passive mechanics.")
                 .define("enableRSPassiveEffects", true);
         PASSIVE_TICK_ITEMS = c
                 .comment("Items whose inventoryTick should be simulated from the resonance disk.",
                         "Format: \"modid:item_id\" or \"modid:item_id|mutates\".",
-                        "Items marked |mutates will use extract閳姲ick閳姕nsert to persist NBT changes.",
+                        "Items marked |mutates will use extract-tick-insert to persist NBT changes.",
                         "Items without |mutates will be ticked on a snapshot copy (read-only).")
                 .defineList("passiveTickItems",
                         List.of("reliquary:pyromancer_staff|mutates", "enigmaticaddons:artificial_flower|mutates", "forbidden_arcanus:spectral_eye_amulet|mutates", "apotheosis:potion_charm|mutates"),
@@ -372,7 +372,7 @@ public final class RSIntegrationConfig {
 
         c.push("sidePanel");
         ENABLE_RS_SIDE_PANEL = c
-                .comment("Enable the RS Side Panel 閳?a foldable, draggable overlay showing RS network items on any screen.",
+                .comment("Enable the RS Side Panel -a foldable, draggable overlay showing RS network items on any screen.",
                         "Toggle with the configured hotkey while in-game.")
                 .define("enableRSSidePanel", true);
         c.pop();
@@ -385,9 +385,9 @@ public final class RSIntegrationConfig {
         CUSTOM_GUI_MACHINE_MODS = c
                 .comment("Mod IDs to register as GUI-type machines without writing any Java code.",
                         "Machines from these mods appear in the Machine Hub, can be remotely opened,",
-                        "and do NOT support batch-crafting 閳?this is purely for remote GUI access.",
+                        "and do NOT support batch-crafting -this is purely for remote GUI access.",
                         "Mods that already have full module support (aether, crockpot, tacz, etc.)",
-                        "should NOT be listed here 閳?their modules handle binding automatically.",
+                        "should NOT be listed here -their modules handle binding automatically.",
                         "Example: [\"crabbersdelight\", \"metalbarrels\"]")
                 .defineList("customGuiMachineMods", List.of("crabbersdelight", "metalbarrels", "pgp", "emxarms", "ancientreforging"),
                         obj -> obj instanceof String);
@@ -402,7 +402,7 @@ public final class RSIntegrationConfig {
 
         COMMON_SPEC = c.build();
 
-        // 閳光偓閳光偓 SERVER: per-world tuning 閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓
+        //  SERVER: per-world tuning
 
         s.push("integrations");
         CROCKPOT_FILLER_ITEM = s
@@ -624,7 +624,7 @@ public final class RSIntegrationConfig {
 
         SERVER_SPEC = s.build();
 
-        // 閳光偓閳光偓 CLIENT 閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓
+        //  CLIENT
 
         ForgeConfigSpec.Builder cl = new ForgeConfigSpec.Builder();
         cl.push("sidePanel");

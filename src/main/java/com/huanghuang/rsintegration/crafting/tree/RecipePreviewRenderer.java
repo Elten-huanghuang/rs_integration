@@ -279,6 +279,10 @@ public final class RecipePreviewRenderer {
      */
     public boolean drawCategoryIcon(GuiGraphics gfx, ResourceLocation recipeId,
                                     int x, int y, int size) {
+        if (isSyntheticBrewingRecipe(recipeId)) {
+            gfx.renderItem(new ItemStack(net.minecraft.world.item.Items.BREWING_STAND), x, y);
+            return true;
+        }
         IDrawable icon = iconCache.computeIfAbsent(recipeId, this::lookupCategoryIcon).orElse(null);
         if (icon == null) return false;
         try {
@@ -309,6 +313,11 @@ public final class RecipePreviewRenderer {
         } catch (Exception e) {
             return Optional.empty();
         }
+    }
+
+    private static boolean isSyntheticBrewingRecipe(ResourceLocation recipeId) {
+        return "rs_integration".equals(recipeId.getNamespace())
+                && recipeId.getPath().startsWith("vanilla_brewing/");
     }
 
     /**

@@ -7,6 +7,7 @@ import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;
 import com.huanghuang.rsintegration.network.packet.ResonanceSyncPacket;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
+import com.huanghuang.rsintegration.resonance.backpack.ResonanceBackpackContainer;
 import com.huanghuang.rsintegration.resonance.disk.ResonanceDiskWrapper;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.storage.IStorage;
@@ -59,7 +60,11 @@ public final class PassiveEffectEngine {
         }
 
         ResonanceDiskWrapper cachedDisk = DISK_CACHE.get(player.getUUID());
-        if (cachedDisk != null) {
+        // The backpack menu owns a slot snapshot and reconciles user changes
+        // against it. Mutating NBT in the delegate while that menu is open can
+        // make the snapshot stale and overwrite a different NBT variant when
+        // the player takes an item (notably Apotheosis potion charms).
+        if (cachedDisk != null && !(player.containerMenu instanceof ResonanceBackpackContainer)) {
             TickSimulator.simulate(player, cachedDisk);
         }
     }

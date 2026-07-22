@@ -5,6 +5,7 @@ import com.refinedmods.refinedstorage.api.storage.disk.IStorageDisk;
 import com.refinedmods.refinedstorage.api.storage.disk.IStorageDiskContainerContext;
 import com.refinedmods.refinedstorage.api.storage.disk.IStorageDiskListener;
 import com.refinedmods.refinedstorage.api.util.Action;
+import com.refinedmods.refinedstorage.api.util.IComparer;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
@@ -14,7 +15,9 @@ import net.minecraft.world.entity.ai.attributes.Attributes;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 public final class ResonanceDiskWrapper implements IStorageDisk<ItemStack> {
@@ -33,6 +36,13 @@ public final class ResonanceDiskWrapper implements IStorageDisk<ItemStack> {
     public static boolean isLogicallyNonStackable(ItemStack stack) {
         if (stack.isEmpty()) return false;
         if (stack.getMaxStackSize() <= 1 || stack.isDamageableItem()) return true;
+
+        // Equipment and capability-backed items can advertise a normal stack
+        // size while their persistent NBT represents an individual state.
+        // Keeping every NBT-bearing variant in its own logical slot prevents
+        // equal-state equipment from being merged and later duplicated on take.
+        if (stack.getTag() != null && stack.getTag().getAllKeys().stream()
+                .anyMatch(key -> !RSI_SLOT_TAG.equals(key))) return true;
 
         // Some modded weapons incorrectly advertise a stack size above one.
         // Main-hand combat attributes are a more reliable cross-mod signal.
@@ -96,19 +106,86 @@ public final class ResonanceDiskWrapper implements IStorageDisk<ItemStack> {
         tagged.getOrCreateTag().putInt(RSI_SLOT_TAG, slot);
         for (ItemStack stored : delegate.getStacks()) {
             CompoundTag tag = stored.getTag();
-            if (tag != null && tag.getInt(RSI_SLOT_TAG) == slot) {
+            if (tag != null && tag.contains(RSI_SLOT_TAG) && tag.getInt(RSI_SLOT_TAG) == slot) {
                 ItemStack probe = stored.copy();
                 rsi$stripSlotTag(probe);
                 if (isSameVariant(probe, template)) { tagged = stored.copy(); break; }
             }
         }
-        ItemStack result = delegate.extract(tagged, size, flags, action);
+        // Slot-tagged stacks are still vulnerable to RS's default item-only
+        // comparison when callers pass flags=0.  A disk can contain several
+        // variants of the same item (e.g. Apotheosis potion charms), so an
+        // extraction must include the complete NBT identity or RS may debit a
+        // different variant and the slot mutation will be rejected.
+        ItemStack result = delegate.extract(tagged, size, flags | IComparer.COMPARE_NBT, action);
         if (!result.isEmpty()) rsi$stripSlotTag(result);
         return result;
     }
 
+    /** Moves one exact stored variant to a different logical slot identity. */
+    public boolean moveSlot(ItemStack exactStoredStack, int newSlot) {
+        if (exactStoredStack.isEmpty()) return false;
+        ItemStack simulated = delegate.extract(
+                exactStoredStack, exactStoredStack.getCount(), 0, Action.SIMULATE);
+        if (!sameExactTaggedStack(exactStoredStack, simulated)) return false;
+        ItemStack removed = delegate.extract(exactStoredStack, exactStoredStack.getCount(), 0, Action.PERFORM);
+        if (!sameExactTaggedStack(exactStoredStack, removed)) {
+            if (!removed.isEmpty()) delegate.insert(removed, removed.getCount(), Action.PERFORM);
+            return false;
+        }
+        removed.getOrCreateTag().putInt(RSI_SLOT_TAG, newSlot);
+        ItemStack remainder = delegate.insert(removed, removed.getCount(), Action.PERFORM);
+        if (remainder.isEmpty()) return true;
+
+        // Best-effort rollback under the original exact identity.
+        int inserted = removed.getCount() - remainder.getCount();
+        if (inserted > 0) delegate.extract(removed, inserted, 0, Action.PERFORM);
+        delegate.insert(exactStoredStack, exactStoredStack.getCount(), Action.PERFORM);
+        return false;
+    }
+
+    /** Repairs legacy stacks of items that must occupy one logical slot per item. */
+    public int splitLogicallyNonStackableStacks() {
+        List<ItemStack> snapshot = new ArrayList<>();
+        Set<Integer> usedSlots = new HashSet<>();
+        for (ItemStack stored : delegate.getStacks()) {
+            ItemStack exact = stored.copy();
+            snapshot.add(exact);
+            CompoundTag tag = exact.getTag();
+            if (tag != null && tag.contains(RSI_SLOT_TAG)) usedSlots.add(tag.getInt(RSI_SLOT_TAG));
+        }
+
+        int split = 0;
+        int nextSlot = 0;
+        for (ItemStack exact : snapshot) {
+            if (exact.getCount() <= 1 || !isLogicallyNonStackable(exact)) continue;
+            ItemStack removed = delegate.extract(exact, exact.getCount(), 0, Action.PERFORM);
+            if (removed.getCount() != exact.getCount()) {
+                if (!removed.isEmpty()) delegate.insert(removed, removed.getCount(), Action.PERFORM);
+                continue;
+            }
+
+            for (int i = 0; i < removed.getCount(); i++) {
+                while (usedSlots.contains(nextSlot)) nextSlot++;
+                ItemStack single = removed.copyWithCount(1);
+                single.getOrCreateTag().putInt(RSI_SLOT_TAG, nextSlot);
+                ItemStack remainder = delegate.insert(single, 1, Action.PERFORM);
+                if (remainder.isEmpty()) {
+                    usedSlots.add(nextSlot++);
+                } else {
+                    // Preserve the item even if the delegate unexpectedly rejects
+                    // the repaired identity.
+                    ItemStack fallback = exact.copyWithCount(1);
+                    delegate.insert(fallback, 1, Action.PERFORM);
+                }
+            }
+            split += removed.getCount() - 1;
+        }
+        return split;
+    }
+
     public ItemStack manualExtractExact(ItemStack exactTaggedStack, int size, int flags, Action action) {
-        ItemStack result = delegate.extract(exactTaggedStack, size, flags, action);
+        ItemStack result = delegate.extract(exactTaggedStack, size, flags | IComparer.COMPARE_NBT, action);
         if (!result.isEmpty()) rsi$stripSlotTag(result);
         return result;
     }
@@ -137,7 +214,7 @@ public final class ResonanceDiskWrapper implements IStorageDisk<ItemStack> {
 
         if (!oldStack.isEmpty()) {
             ItemStack simulated = manualExtract(slot, oldStack, oldStack.getCount(), 0, Action.SIMULATE);
-            if (simulated.getCount() != oldStack.getCount()) return SlotMutationResult.REJECTED;
+            if (!sameExtractedVariant(oldStack, simulated)) return SlotMutationResult.REJECTED;
         }
         if (!newStack.isEmpty()
                 && getCapacity() - getStored() + oldStack.getCount() < newStack.getCount()) {
@@ -147,7 +224,7 @@ public final class ResonanceDiskWrapper implements IStorageDisk<ItemStack> {
         ItemStack removed = ItemStack.EMPTY;
         if (!oldStack.isEmpty()) {
             removed = manualExtract(slot, oldStack, oldStack.getCount(), 0, Action.PERFORM);
-            if (removed.getCount() != oldStack.getCount()) {
+            if (!sameExtractedVariant(oldStack, removed)) {
                 return restore(slot, removed)
                         ? SlotMutationResult.REJECTED : SlotMutationResult.RECOVERY_FAILED;
             }
@@ -190,16 +267,17 @@ public final class ResonanceDiskWrapper implements IStorageDisk<ItemStack> {
     private SlotMutationResult extractExact(int slot, ItemStack template, int count) {
         if (count <= 0) return SlotMutationResult.SUCCESS;
         ItemStack simulated = manualExtract(slot, template, count, 0, Action.SIMULATE);
-        if (simulated.getCount() != count) return SlotMutationResult.REJECTED;
+        ItemStack expected = template.copyWithCount(count);
+        if (!sameExtractedVariant(expected, simulated)) return SlotMutationResult.REJECTED;
         ItemStack extracted = manualExtract(slot, template, count, 0, Action.PERFORM);
-        if (extracted.getCount() == count) return SlotMutationResult.SUCCESS;
+        if (sameExtractedVariant(expected, extracted)) return SlotMutationResult.SUCCESS;
         return restore(slot, extracted)
                 ? SlotMutationResult.REJECTED : SlotMutationResult.RECOVERY_FAILED;
     }
 
     private boolean extractedExactly(int slot, ItemStack template, int count) {
         ItemStack extracted = manualExtract(slot, template, count, 0, Action.PERFORM);
-        return extracted.getCount() == count;
+        return sameExtractedVariant(template.copyWithCount(count), extracted);
     }
 
     private boolean restore(int slot, ItemStack stack) {
@@ -218,6 +296,15 @@ public final class ResonanceDiskWrapper implements IStorageDisk<ItemStack> {
     private static boolean sameStack(ItemStack first, ItemStack second) {
         if (first.isEmpty() || second.isEmpty()) return first.isEmpty() && second.isEmpty();
         return first.getCount() == second.getCount() && isSameVariant(first, second);
+    }
+
+    private static boolean sameExtractedVariant(ItemStack expected, ItemStack extracted) {
+        return expected.getCount() == extracted.getCount() && isSameVariant(expected, extracted);
+    }
+
+    private static boolean sameExactTaggedStack(ItemStack expected, ItemStack extracted) {
+        return expected.getCount() == extracted.getCount()
+                && ItemStack.isSameItemSameTags(expected, extracted);
     }
 
     @Override

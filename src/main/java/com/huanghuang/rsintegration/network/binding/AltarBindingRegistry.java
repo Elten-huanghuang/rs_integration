@@ -733,7 +733,7 @@ public final class AltarBindingRegistry {
      *  crystal ritual recipes executed on the same Wissen Crystallizer.
      *  Malum names its recipe category "spirit_infusion" but the
      *  machine prefix used during binding is "spirit_altar". */
-    private static String normalizeSubType(String hint, ModType type) {
+    static String normalizeSubType(String hint, ModType type) {
         if (hint == null) return null;
         if (type == null) return hint;
         // These vanilla ModTypes each represent exactly one machine. A slash in a
@@ -757,6 +757,15 @@ public final class AltarBindingRegistry {
             return "spirit_altar";
         }
         if (ModIds.ID_FA_CLIBANO.equals(type.id())) {
+            return null;
+        }
+        // Cursed Infuser is also a leaf machine type. Goety organizes recipe
+        // IDs in content folders such as shade/shade_stone; "shade" describes
+        // the recipe family, not a different machine binding.
+        if ("goety_cursed_infuser".equals(type.id())) {
+            return null;
+        }
+        if ("vanilla_brewing_stand".equals(type.id())) {
             return null;
         }
         // malum_spirit_crucible is a leaf type — all recipes are Spirit Crucible

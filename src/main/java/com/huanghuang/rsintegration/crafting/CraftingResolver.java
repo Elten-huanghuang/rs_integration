@@ -457,7 +457,7 @@ public final class CraftingResolver {
         List<RecipeIndex.Entry> candidates = CandidateEngine.findCandidates(ingredient, ctx);
         long candMs = (System.nanoTime() - candStart) / 1_000_000;
         ctx.diag("ensureIngredient candidates=" + candidates.size() + " remaining=" + remaining + " depth=" + depth);
-        RSIntegrationMod.LOGGER.debug("[RSI-ensure] countMatch/consume={}ms, findCandidates={}ms, {} candidates for {}",
+        RSIntegrationMod.debug("[RSI-ensure] countMatch/consume={}ms, findCandidates={}ms, {} candidates for {}",
                 consumeMs, candMs, candidates.size(), describeFirstItem(ingredient));
         if (candidates.isEmpty()) {
             ctx.diag("ensureIngredient FAILED: no candidates for " + describeFirstItem(ingredient));
@@ -473,7 +473,7 @@ public final class CraftingResolver {
         for (RecipeIndex.Entry candidate : candidates) {
             if (ctx.timedOut()) {
                 long aliveMs = (System.nanoTime() - aliveStart) / 1_000_000;
-                RSIntegrationMod.LOGGER.debug("[RSI-ensure] alive-building timed out after {}ms, keeping {}/{} candidates",
+                RSIntegrationMod.debug("[RSI-ensure] alive-building timed out after {}ms, keeping {}/{} candidates",
                         aliveMs, alive.size(), candidates.size());
                 PerformanceMonitor.recordResolveTimeout();
                 break;
@@ -502,7 +502,7 @@ public final class CraftingResolver {
         if (alive.isEmpty()) {
             ctx.diag("ensureIngredient FAILED: no viable candidates (total=" + candidates.size()
                     + ", all rejected) for " + describeFirstItem(ingredient));
-            RSIntegrationMod.LOGGER.debug("[RSI-ensure] no viable candidates for {} ({} total candidates rejected, alive-building took {}ms)",
+            RSIntegrationMod.debug("[RSI-ensure] no viable candidates for {} ({} total candidates rejected, alive-building took {}ms)",
                     describeFirstItem(ingredient), candidates.size(), aliveMs);
             if (recordBestEffortUnresolved(ctx, consumer, ingredient, count, "no-viable-candidates")) {
                 return true;
@@ -516,7 +516,7 @@ public final class CraftingResolver {
             for (AliveCandidate a : alive) {
                 sb.append(" [").append(a.entry.recipe().getId()).append(" netGain=").append(a.netGain).append("]");
             }
-            RSIntegrationMod.LOGGER.debug(sb.toString());
+            RSIntegrationMod.debug(sb.toString());
         }
 
         for (AliveCandidate a : alive) {

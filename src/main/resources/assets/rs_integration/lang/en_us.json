@@ -83,6 +83,7 @@
   "gui.rs_integration.jei.botania_terra_plate_craft": "Remote Craft via Terrestrial Plate",
   "gui.rs_integration.jei.botania_pure_daisy_craft": "Remote Convert via Pure Daisy",
   "gui.rs_integration.jei.vanilla_furnace_craft": "Remote Smelt via Furnace",
+  "gui.rs_integration.jei.vanilla_brewing_stand_craft": "Remote Brew via Brewing Stand (3 bottles)",
   "gui.rs_integration.jei.vanilla_blast_furnace_craft": "Remote Smelt via Blast Furnace",
   "gui.rs_integration.jei.vanilla_smoker_craft": "Remote Smoke via Smoker",
   "gui.rs_integration.jei.vanilla_campfire_craft": "Remote Cook via Campfire",
@@ -349,6 +350,8 @@
   "rsi.plan.candidates_more": "+%s more…",
   "rsi.plan.status_ok": "All materials available",
   "rsi.plan.status_fail": "Some materials are missing",
+  "rsi.plan.failure.missing_materials": "Failure reason: missing materials or incompatible item data",
+  "rsi.plan.failure.no_bound_machine": "Failure reason: no bound machine is available",
   "rsi.plan.missing_header": "Unavailable:",
   "rsi.plan.missing_more": "... (+%s more)",
   
@@ -737,5 +740,6 @@
   "rsi.villager.restock.no_network": "No RS network; missing items added to JEI bookmarks",
   "rsi.villager.restock.no_permission": "No RS extract permission; missing items added to JEI bookmarks",
   "rsi.villager.restock.invalid": "The selected trade is no longer available",
-  "rsi.botania.warn.total_mana_required": "Recursive crafting requires approximately %s mana in total"
+  "rsi.botania.warn.total_mana_required": "Recursive crafting requires approximately %s mana in total",
+  "rsi.batch.mod.vanilla_brewing_stand": "Vanilla Brewing Stand"
 }

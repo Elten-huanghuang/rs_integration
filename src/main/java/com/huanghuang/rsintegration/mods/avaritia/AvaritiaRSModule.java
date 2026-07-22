@@ -102,24 +102,8 @@ public final class AvaritiaRSModule implements IModIntegration {
                 List.of("committee.nova.mods.avaritia.common.block.extreme.ExtremeSmithingTableBlock"),
                 ModIds.ID_AVARITIA_SMITHING));
 
-        // ── Neutron Collector (no GUI, passive output only) ──
-        BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
-                "avaritia", ModType.byId("avaritia_gui"),
-                RSIntegrationConfig.ENABLE_AVARITIA,
-                List.of("committee.nova.mods.avaritia.common.block.collector.NeutronCollectorBlock"),
-                "avaritia_gui", false));
-
-        // ── GUI-only machines ──
-        BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
-                "avaritia", ModType.byId("avaritia_gui"),
-                RSIntegrationConfig.ENABLE_AVARITIA,
-                List.of(
-                        "committee.nova.mods.avaritia.common.block.chest.CompressedChestBlock",
-                        "committee.nova.mods.avaritia.common.block.chest.InfinityChestBlock",
-                        "committee.nova.mods.avaritia.common.block.chest.TesseractBlock",
-                        "committee.nova.mods.avaritia.common.block.extreme.ExtremeAnvilBlock"
-                ),
-                "avaritia_gui"));
+        // GUI-only storage, collectors, and anvils do not execute recipes and are
+        // intentionally not exposed as bindable crafting machines.
     }
 
     @Override

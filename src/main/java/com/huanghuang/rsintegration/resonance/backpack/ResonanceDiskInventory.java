@@ -31,7 +31,10 @@ public class ResonanceDiskInventory implements Container {
     private void loadFromDisk() {
         int loaded = 0;
         int migrated = 0;
-        for (ItemStack stored : disk.delegate().getStacks()) {
+        int split = disk.splitLogicallyNonStackableStacks();
+        java.util.List<ItemStack> storedStacks = new java.util.ArrayList<>();
+        for (ItemStack stored : disk.delegate().getStacks()) storedStacks.add(stored.copy());
+        for (ItemStack stored : storedStacks) {
             if (stored.isEmpty()) continue;
             ItemStack display = stored.copy();
             net.minecraft.nbt.CompoundTag tag = display.getTag();
@@ -51,14 +54,20 @@ public class ResonanceDiskInventory implements Container {
                         disk.delegate().getStacks().size(), SLOTS);
                 break;
             }
-            backingSlots[slot] = designated >= 0 && designated < SLOTS ? designated : slot;
+            int backingSlot = designated >= 0 && designated < SLOTS && !remapped ? designated : slot;
+            if (backingSlot != designated && !disk.moveSlot(stored, backingSlot)) {
+                // Keep the original identity if migration was rejected; exact variant
+                // matching still makes the current session safe to use.
+                backingSlot = designated >= 0 ? designated : slot;
+            }
+            backingSlots[slot] = backingSlot;
             slots[slot] = display.copy();
             committed[slot] = display.copy();
             loaded++;
         }
         if (loaded > 0) {
-            RSIntegrationMod.LOGGER.info("[RSI-Backpack] Loaded {} stacks ({} remapped), diskStored={}",
-                    loaded, migrated, disk.getStored());
+            RSIntegrationMod.LOGGER.info("[RSI-Backpack] Loaded {} stacks ({} remapped, {} non-stackable items split), diskStored={}",
+                    loaded, migrated, split, disk.getStored());
         }
     }
 

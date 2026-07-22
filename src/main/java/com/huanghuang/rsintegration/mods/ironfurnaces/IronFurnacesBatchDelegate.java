@@ -35,6 +35,8 @@ import org.jetbrains.annotations.NotNull;
 import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /** Batch delegate for Iron Furnaces ordinary furnace mode. */
 public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
@@ -42,6 +44,8 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
     private static final int INPUT = 0;
     private static final int FUEL = 1;
     private static final int OUTPUT = 2;
+    private static final int[] FACTORY_INPUT = {7, 8, 9, 10, 11, 12};
+    private static final Map<String, boolean[]> FACTORY_LEASES = new ConcurrentHashMap<>();
 
     private ServerPlayer player;
     private ServerLevel level;
@@ -54,6 +58,17 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
     private ItemStack initialFuel = ItemStack.EMPTY;
     private int suppliedFuelCount;
     private boolean inputPlaced;
+    private int factorySlot = -1;
+    private boolean factoryMode;
+    private String factoryLeaseKey;
+    private final boolean[] ownedFactoryLanes = new boolean[FACTORY_INPUT.length];
+
+    @Override
+    public int prepareFlatBatch(int remainingOperations) {
+        // One physical factory can run exactly six independent lanes.
+        return factoryMode ? Math.min(FACTORY_INPUT.length, Math.max(0, remainingOperations))
+                : super.prepareFlatBatch(remainingOperations);
+    }
 
     @Override
     public PreparationResult prepare(@NotNull ServerPlayer player, @NotNull ResourceLocation recipeId,
@@ -72,7 +87,13 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
         }
         PreparationResult state = validateMachine(ironFurnace, cooking);
         if (state.state() != PreparationState.READY) return state;
-        if (!ironFurnace.getItem(INPUT).isEmpty() || !ironFurnace.getItem(OUTPUT).isEmpty()) {
+        this.network = CraftPacketUtils.resolveNetworkForCraft(player, target.dimension(), pos);
+        this.factoryMode = ironFurnace.isFactory();
+        if (factoryMode) {
+            factoryLeaseKey = target.dimension().location() + ":" + pos.asLong();
+            factorySlot = reserveFactorySlot(factoryLeaseKey, ironFurnace);
+            if (factorySlot < 0) return PreparationResult.retry("Iron Furnace factory has no free slot");
+        } else if (!ironFurnace.getItem(INPUT).isEmpty() || !ironFurnace.getItem(OUTPUT).isEmpty()) {
             return PreparationResult.retry("Iron Furnace input or output is occupied");
         }
 
@@ -101,8 +122,8 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
 
     private static PreparationResult validateMachine(BlockIronFurnaceTileBase furnace,
                                                        AbstractCookingRecipe recipe) {
-        if (furnace.isFactory() || furnace.isGenerator() || !furnace.isFurnace()) {
-            return PreparationResult.fatal("Iron Furnace Factory/Generator mode is not supported");
+        if (furnace.isGenerator() || (!furnace.isFactory() && !furnace.isFurnace())) {
+            return PreparationResult.fatal("Iron Furnace mode is not supported");
         }
         RecipeType<?> expected = recipeType(recipe);
         if (expected == null || furnace.recipeType != expected) {
@@ -164,22 +185,59 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
         this.sharedLedger = sharedLedger;
         this.usingSharedLedger = true;
         resolveNetwork(player);
+        if (factoryMode && !materials.isEmpty()) {
+            if (!refreshMachine() || furnace.getEnergy() <= 0) return false;
+            List<ItemStack> laneInputs = splitFactoryMaterials(materials);
+            if (laneInputs.isEmpty()) return false;
+            int placed = 0;
+            for (ItemStack laneInput : laneInputs) {
+                int slot = placed == 0 && factorySlot >= 0 && ownedFactoryLanes[factorySlot]
+                        ? factorySlot : reserveFactorySlot(factoryLeaseKey, furnace);
+                if (slot < 0) {
+                    rollbackFactoryPlacement(furnace);
+                    return false;
+                }
+                furnace.setItem(FACTORY_INPUT[slot], laneInput);
+                if (placed++ == 0) {
+                    factorySlot = slot;
+                    inputPlaced = true;
+                    initialInputCount = 1;
+                }
+            }
+            furnace.setChanged();
+            observedWorking = false;
+            markCraftStarted();
+            return true;
+        }
         return !materials.isEmpty() && startWithMaterial(materials.get(0));
+    }
+
+    static List<ItemStack> splitFactoryMaterials(List<ItemStack> materials) {
+        List<ItemStack> lanes = new ArrayList<>(FACTORY_INPUT.length);
+        for (ItemStack material : materials) {
+            if (material.isEmpty()) return List.of();
+            for (int remaining = material.getCount(); remaining > 0; remaining--) {
+                if (lanes.size() == FACTORY_INPUT.length) return List.of();
+                lanes.add(material.copyWithCount(1));
+            }
+        }
+        return lanes;
     }
 
     private boolean startWithMaterial(ItemStack material) {
         if (material.isEmpty() || !refreshMachine()) return false;
         PreparationResult state = validateMachine(furnace, recipe);
-        if (state.state() != PreparationState.READY
-                || !furnace.getItem(INPUT).isEmpty()
-                || !furnace.getItem(OUTPUT).isEmpty()) return false;
+        int in = factoryMode ? FACTORY_INPUT[factorySlot] : INPUT;
+        int out = factoryMode ? in + 6 : OUTPUT;
+        if (state.state() != PreparationState.READY || !furnace.getItem(in).isEmpty() || !furnace.getItem(out).isEmpty()) return false;
+        if (factoryMode && furnace.getEnergy() <= 0) return false;
 
         ItemStack placed = material.copy();
-        furnace.setItem(INPUT, placed);
+        furnace.setItem(in, placed);
         inputPlaced = true;
         initialInputCount = placed.getCount();
-        if (!ensureFuel()) {
-            furnace.setItem(INPUT, ItemStack.EMPTY);
+        if (!factoryMode && !ensureFuel()) {
+            furnace.setItem(in, ItemStack.EMPTY);
             inputPlaced = false;
             furnace.setChanged();
             player.sendSystemMessage(Component.translatable("rsi.ironfurnaces.error.no_fuel"));
@@ -265,11 +323,13 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
             return failObservation("Iron Furnace mode changed during crafting");
         }
         furnace = current;
-        ItemStack output = current.getItem(OUTPUT);
-        ItemStack input = current.getItem(INPUT);
+        int inSlot = factoryMode ? FACTORY_INPUT[factorySlot] : INPUT;
+        int outSlot = factoryMode ? inSlot + 6 : OUTPUT;
+        ItemStack output = current.getItem(outSlot);
+        ItemStack input = current.getItem(inSlot);
         boolean inputConsumed = inputPlaced && initialInputCount > 0 && input.getCount() < initialInputCount;
         if (inputConsumed) inputPlaced = false;
-        if (current.isBurning() || current.cookTime > 0 || inputConsumed) observedWorking = true;
+        if (current.isBurning() || (factoryMode && current.factoryCookTime[factorySlot] > 0) || inputConsumed) observedWorking = true;
         if (!observedWorking) return workingObservation();
         if (!output.isEmpty() || (inputConsumed && input.isEmpty() && current.cookTime == 0)) {
             return doneObservation();
@@ -286,10 +346,22 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
     @Override
     public ItemStack collectResult(@NotNull ServerPlayer player) {
         if (!refreshMachine()) return ItemStack.EMPTY;
-        ItemStack result = furnace.getItem(OUTPUT).copy();
+        int outSlot = factoryMode ? FACTORY_INPUT[factorySlot] + 6 : OUTPUT;
+        ItemStack result = furnace.getItem(outSlot).copy();
         if (!result.isEmpty()) {
-            furnace.setItem(OUTPUT, ItemStack.EMPTY);
+            furnace.setItem(outSlot, ItemStack.EMPTY);
             furnace.setChanged();
+        }
+        if (factoryMode) {
+            int next = findNextFactoryLane(furnace, factorySlot);
+            if (next >= 0) {
+                factorySlot = next;
+                ItemStack nextInput = furnace.getItem(FACTORY_INPUT[next]);
+                inputPlaced = !nextInput.isEmpty();
+                initialInputCount = nextInput.getCount();
+                observedWorking = !furnace.getItem(FACTORY_INPUT[next] + 6).isEmpty()
+                        || furnace.factoryCookTime[next] > 0;
+            }
         }
         return result;
     }
@@ -305,31 +377,59 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
     @Override
     protected void clearMachineState(BlockEntity be, @Nullable ServerPlayer player) {
         if (!(be instanceof BlockIronFurnaceTileBase current)) {
+            releaseFactoryLease();
             resetState();
             return;
         }
         boolean refundPhysical = player == null;
-        if (inputPlaced) {
-            ItemStack input = current.getItem(INPUT);
+        if (factoryMode) {
+            for (int lane = 0; lane < FACTORY_INPUT.length; lane++) {
+                if (!ownedFactoryLanes[lane]) continue;
+                int inSlot = FACTORY_INPUT[lane];
+                ItemStack input = current.getItem(inSlot);
+                if (!input.isEmpty()) {
+                    current.setItem(inSlot, ItemStack.EMPTY);
+                    if (refundPhysical) refund(input);
+                }
+                ItemStack output = current.getItem(inSlot + 6);
+                if (!output.isEmpty() && observedWorking) {
+                    current.setItem(inSlot + 6, ItemStack.EMPTY);
+                    if (refundPhysical) refund(output);
+                }
+            }
+            inputPlaced = false;
+        } else if (inputPlaced) {
+            int inSlot = INPUT;
+            ItemStack input = current.getItem(inSlot);
             if (!input.isEmpty()) {
-                current.setItem(INPUT, ItemStack.EMPTY);
+                current.setItem(inSlot, ItemStack.EMPTY);
                 if (refundPhysical) refund(input);
             }
             inputPlaced = false;
         }
-        ItemStack output = current.getItem(OUTPUT);
-        if (!output.isEmpty() && observedWorking) {
-            current.setItem(OUTPUT, ItemStack.EMPTY);
-            if (refundPhysical) refund(output);
+        if (!factoryMode) {
+            ItemStack output = current.getItem(OUTPUT);
+            if (!output.isEmpty() && observedWorking) {
+                current.setItem(OUTPUT, ItemStack.EMPTY);
+                if (refundPhysical) refund(output);
+            }
         }
         refundFuel(current);
         current.setChanged();
+        releaseFactoryLease();
+        resetState();
+    }
+
+    @Override
+    protected void clearMissingMachineState(@Nullable ServerPlayer player) {
+        releaseFactoryLease();
         resetState();
     }
 
     @Override
     public void onBatchFinished(@NotNull ServerPlayer player) {
         if (refreshMachine()) refundFuel(furnace);
+        releaseFactoryLease();
         resetState();
     }
 
@@ -363,4 +463,62 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
     public BlockPos getMachinePos() {
         return pos;
     }
+
+    private int findFactorySlot(BlockIronFurnaceTileBase f) {
+        for (int i = 0; i < FACTORY_INPUT.length; i++)
+            if (f.getItem(FACTORY_INPUT[i]).isEmpty() && f.getItem(FACTORY_INPUT[i] + 6).isEmpty()) return i;
+        return -1;
+    }
+
+    private int reserveFactorySlot(String key, BlockIronFurnaceTileBase f) {
+        boolean[] leases = FACTORY_LEASES.computeIfAbsent(key, ignored -> new boolean[FACTORY_INPUT.length]);
+        synchronized (leases) {
+            for (int i = 0; i < FACTORY_INPUT.length; i++) {
+                if (!leases[i] && f.getItem(FACTORY_INPUT[i]).isEmpty()
+                        && f.getItem(FACTORY_INPUT[i] + 6).isEmpty()) {
+                    leases[i] = true;
+                    ownedFactoryLanes[i] = true;
+                    return i;
+                }
+            }
+        }
+        return -1;
+    }
+
+    private void releaseFactoryLease() {
+        if (factoryLeaseKey == null) return;
+        boolean[] leases = FACTORY_LEASES.get(factoryLeaseKey);
+        if (leases != null) synchronized (leases) {
+            for (int i = 0; i < ownedFactoryLanes.length; i++) {
+                if (ownedFactoryLanes[i]) leases[i] = false;
+                ownedFactoryLanes[i] = false;
+            }
+            boolean empty = true;
+            for (boolean lease : leases) empty &= !lease;
+            if (empty) FACTORY_LEASES.remove(factoryLeaseKey, leases);
+        }
+        factoryLeaseKey = null;
+        factorySlot = -1;
+    }
+
+    private void rollbackFactoryPlacement(BlockIronFurnaceTileBase f) {
+        for (int i = 0; i < ownedFactoryLanes.length; i++) {
+            if (!ownedFactoryLanes[i]) continue;
+            f.setItem(FACTORY_INPUT[i], ItemStack.EMPTY);
+        }
+        releaseFactoryLease();
+        inputPlaced = false;
+        f.setChanged();
+    }
+
+    private int findNextFactoryLane(BlockIronFurnaceTileBase f, int current) {
+        for (int offset = 1; offset < FACTORY_INPUT.length; offset++) {
+            int lane = (current + offset) % FACTORY_INPUT.length;
+            int input = FACTORY_INPUT[lane];
+            if (!f.getItem(input).isEmpty() || !f.getItem(input + 6).isEmpty()
+                    || f.factoryCookTime[lane] > 0) return lane;
+        }
+        return -1;
+    }
+
 }

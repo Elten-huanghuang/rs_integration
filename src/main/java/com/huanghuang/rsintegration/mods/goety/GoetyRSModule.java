@@ -46,7 +46,7 @@ public final class GoetyRSModule implements IModIntegration {
                         "com.Polarice3.Goety.common.crafting.RitualRecipe",
                         "com.Polarice3.Goety.common.crafting.BrazierRecipe"},
                 new String[]{"goety"},
-                new String[]{"goety", "goety_altar", "goety_component"},
+                new String[]{"goety", "goety_altar"},
                 ModType.delegateSupplier("com.huanghuang.rsintegration.mods.goety.GoetyBatchDelegate"));
         ModType.configureJei("goety",
                 new String[][]{{"goety:brazier"}},
@@ -72,12 +72,6 @@ public final class GoetyRSModule implements IModIntegration {
                 "goety", ModType.byId("goety"), RSIntegrationConfig.ENABLE_GOETY, List.of(
                 "com.Polarice3.Goety.common.blocks.DarkAltarBlock"
         ), "goety_altar", false));
-        // Multi-block components with no GUI of their own.
-        BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
-                "goety", ModType.byId("goety"), RSIntegrationConfig.ENABLE_GOETY, List.of(
-                "com.Polarice3.Goety.common.blocks.CursedCageBlock",
-                "com.Polarice3.Goety.common.blocks.SoulCandlestickBlock"
-        ), "goety_component", false));
     }
 
     @Override

@@ -1207,7 +1207,7 @@ public final class CraftingPlanScreen extends Screen {
         }
         LAST_FORCED.clear();
         LAST_FORCED.putAll(forced);
-        RSIntegrationMod.LOGGER.debug("[RSI-OR-UI] selectAlternative itemKey={} index={} forced={} root={}",
+        RSIntegrationMod.debug("[RSI-OR-UI] selectAlternative itemKey={} index={} forced={} root={}",
                 itemKey, selected, forced, rid);
         sendCraftPacket(rid, true, forced, currentRepeat, false);
     }
