@@ -65,6 +65,19 @@ public final class IngredientMatcher {
                 || !isVanillaPotionContainer(expected)
                 || PotionUtils.getPotion(expected) != Potions.WATER
                 || PotionUtils.getPotion(actual) != Potions.WATER) return false;
+        return potionTagsEqualIgnoringPurity(expected, actual);
+    }
+
+    /** Match an exact vanilla potion state while ignoring Thirst's non-brewing Purity metadata. */
+    public static boolean matchesPotionIgnoringPurity(ItemStack expected, ItemStack actual) {
+        if (expected.isEmpty() || actual.isEmpty()
+                || expected.getItem() != actual.getItem()
+                || !isVanillaPotionContainer(expected)
+                || PotionUtils.getPotion(expected) != PotionUtils.getPotion(actual)) return false;
+        return potionTagsEqualIgnoringPurity(expected, actual);
+    }
+
+    private static boolean potionTagsEqualIgnoringPurity(ItemStack expected, ItemStack actual) {
         var expectedTag = expected.getTag() == null ? null : expected.getTag().copy();
         var actualTag = actual.getTag() == null ? null : actual.getTag().copy();
         if (expectedTag != null) expectedTag.remove("Purity");

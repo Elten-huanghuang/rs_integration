@@ -10,19 +10,26 @@ import java.util.Set;
 public class UpdateBlacklistPacket {
     public final Set<ResourceLocation> added;
     public final Set<ResourceLocation> removed;
+    public final Set<ResourceLocation> addedEffects;
+    public final Set<ResourceLocation> removedEffects;
 
-    public UpdateBlacklistPacket(Set<ResourceLocation> added, Set<ResourceLocation> removed) {
+    public UpdateBlacklistPacket(Set<ResourceLocation> added, Set<ResourceLocation> removed,
+                                 Set<ResourceLocation> addedEffects, Set<ResourceLocation> removedEffects) {
         this.added = added;
         this.removed = removed;
+        this.addedEffects = addedEffects;
+        this.removedEffects = removedEffects;
     }
 
     public static void encode(UpdateBlacklistPacket packet, FriendlyByteBuf buf) {
         writeSet(buf, packet.added);
         writeSet(buf, packet.removed);
+        writeSet(buf, packet.addedEffects);
+        writeSet(buf, packet.removedEffects);
     }
 
     public static UpdateBlacklistPacket decode(FriendlyByteBuf buf) {
-        return new UpdateBlacklistPacket(readSet(buf), readSet(buf));
+        return new UpdateBlacklistPacket(readSet(buf), readSet(buf), readSet(buf), readSet(buf));
     }
 
     public static void handle(UpdateBlacklistPacket packet, java.util.function.Supplier<net.minecraftforge.network.NetworkEvent.Context> ctx) {
@@ -30,6 +37,7 @@ public class UpdateBlacklistPacket {
             var sender = ctx.get().getSender();
             if (sender != null && !(sender instanceof net.minecraftforge.common.util.FakePlayer)) {
                 AutoEatEngine.updateBlacklist(sender, packet.added, packet.removed);
+                AutoEatEngine.updateEffectBlacklist(sender, packet.addedEffects, packet.removedEffects);
             }
         });
         ctx.get().setPacketHandled(true);

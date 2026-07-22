@@ -9,32 +9,44 @@ import java.util.Set;
 
 public class BlacklistSyncPacket {
     public final Set<ResourceLocation> blacklist;
+    public final Set<ResourceLocation> effectBlacklist;
 
-    public BlacklistSyncPacket(Set<ResourceLocation> blacklist) {
+    public BlacklistSyncPacket(Set<ResourceLocation> blacklist, Set<ResourceLocation> effectBlacklist) {
         this.blacklist = blacklist;
+        this.effectBlacklist = effectBlacklist;
     }
 
     public static void encode(BlacklistSyncPacket packet, FriendlyByteBuf buf) {
-        buf.writeVarInt(packet.blacklist.size());
-        for (ResourceLocation rl : packet.blacklist) {
-            buf.writeResourceLocation(rl);
-        }
+        writeSet(buf, packet.blacklist);
+        writeSet(buf, packet.effectBlacklist);
     }
 
     public static BlacklistSyncPacket decode(FriendlyByteBuf buf) {
-        int size = Math.max(0, Math.min(buf.readVarInt(), 4096));
-        Set<ResourceLocation> set = new HashSet<>(size);
-        for (int i = 0; i < size; i++) {
-            set.add(buf.readResourceLocation());
-        }
-        return new BlacklistSyncPacket(set);
+        return new BlacklistSyncPacket(readSet(buf), readSet(buf));
     }
 
     public static void handle(BlacklistSyncPacket packet, java.util.function.Supplier<net.minecraftforge.network.NetworkEvent.Context> ctx) {
         ctx.get().enqueueWork(() -> {
             ClientState.blacklistedItems.clear();
             ClientState.blacklistedItems.addAll(packet.blacklist);
+            ClientState.blacklistedEffects.clear();
+            ClientState.blacklistedEffects.addAll(packet.effectBlacklist);
         });
         ctx.get().setPacketHandled(true);
+    }
+
+    private static void writeSet(FriendlyByteBuf buf, Set<ResourceLocation> set) {
+        buf.writeVarInt(set.size());
+        for (ResourceLocation rl : set) buf.writeResourceLocation(rl);
+    }
+
+    private static Set<ResourceLocation> readSet(FriendlyByteBuf buf) {
+        int size = buf.readVarInt();
+        if (size < 0 || size > 4096) {
+            throw new io.netty.handler.codec.DecoderException("effect blacklist size out of range: " + size);
+        }
+        Set<ResourceLocation> set = new HashSet<>(Math.min(size, 256));
+        for (int i = 0; i < size; i++) set.add(buf.readResourceLocation());
+        return set;
     }
 }

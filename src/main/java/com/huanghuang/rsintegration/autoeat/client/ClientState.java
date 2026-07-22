@@ -16,6 +16,7 @@ public final class ClientState {
     public static AutoEatMode currentMode = AutoEatMode.DIVERSITY;
     public static ResourceLocation selectedItem;
     public static final Set<ResourceLocation> blacklistedItems = new HashSet<>();
+    public static final Set<ResourceLocation> blacklistedEffects = new HashSet<>();
 
     public static void cycleMode() {
         currentMode = currentMode.next();
@@ -26,5 +27,6 @@ public final class ClientState {
         currentMode = AutoEatMode.DIVERSITY;
         selectedItem = null;
         blacklistedItems.clear();
+        blacklistedEffects.clear();
     }
 }
