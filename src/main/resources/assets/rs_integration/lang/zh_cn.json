@@ -356,6 +356,8 @@
   "rsi.plan.status_fail": "部分材料不足",
   "rsi.plan.failure.missing_materials": "失败原因：缺少材料或物品数据不匹配",
   "rsi.plan.failure.no_bound_machine": "失败原因：没有可用的已绑定机器",
+  "rsi.plan.failure.machines_leased": "失败原因：所有已绑定机器都被其他合成订单占用",
+  "rsi.plan.failure.nbt_mismatch": "失败原因：物品存在，但物品数据与配方要求不匹配",
   "rsi.plan.missing_header": "无法获取:",
   "rsi.plan.missing_more": "... (+%s 更多)",
   

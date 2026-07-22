@@ -61,7 +61,8 @@ public final class IngredientMatcher {
     /** Thirst Was Taken adds a non-brewing "Purity" tag to water bottles. */
     public static boolean matchesWaterBottleIgnoringPurity(ItemStack expected, ItemStack actual) {
         if (expected.isEmpty() || actual.isEmpty()
-                || expected.getItem() != Items.POTION || actual.getItem() != Items.POTION
+                || expected.getItem() != actual.getItem()
+                || !isVanillaPotionContainer(expected)
                 || PotionUtils.getPotion(expected) != Potions.WATER
                 || PotionUtils.getPotion(actual) != Potions.WATER) return false;
         var expectedTag = expected.getTag() == null ? null : expected.getTag().copy();
@@ -69,5 +70,10 @@ public final class IngredientMatcher {
         if (expectedTag != null) expectedTag.remove("Purity");
         if (actualTag != null) actualTag.remove("Purity");
         return java.util.Objects.equals(expectedTag, actualTag);
+    }
+
+    private static boolean isVanillaPotionContainer(ItemStack stack) {
+        return stack.is(Items.POTION) || stack.is(Items.SPLASH_POTION)
+                || stack.is(Items.LINGERING_POTION);
     }
 }
