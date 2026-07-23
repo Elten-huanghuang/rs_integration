@@ -26,9 +26,11 @@ import net.minecraftforge.fml.util.ObfuscationReflectionHelper;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Startup-time validation of all registered {@link ReflectionContract} entries.
@@ -77,6 +79,7 @@ public final class ContractValidation {
         ensureProbeClassesLoaded();
         ClassLoader cl = ContractValidation.class.getClassLoader();
         int ok = 0, failed = 0, skipped = 0;
+        Set<Class<?>> invalidProbes = new HashSet<>();
 
         for (ReflectionContract c : CONTRACTS) {
             if (!ModList.get().isLoaded(c.modId())) { skipped++; continue; }
@@ -107,7 +110,7 @@ public final class ContractValidation {
 
                 // Validate methods (precise signature)
                 for (ReflectionContract.MethodContract mc : c.methods()) {
-                    Method m = clazz.getDeclaredMethod(mc.name(), mc.parameterTypes());
+                    Method m = resolveMethod(clazz, mc);
                     m.setAccessible(true);
                 }
 
@@ -120,10 +123,12 @@ public final class ContractValidation {
                 RSIntegrationMod.LOGGER.debug("[RSI-Contract] OK: {} — {}",
                         c.modId(), c.description());
                 ok++;
-            } catch (Exception e) {
+            } catch (Exception | LinkageError e) {
                 String msg = "[RSI-Contract] {} 反射契约失败: {} — {}";
                 if (c.required()) {
                     failed++;
+                    Field target = TARGET_FIELDS.get(c.description());
+                    if (target != null) invalidProbes.add(target.getDeclaringClass());
                     RSIntegrationMod.LOGGER.error(msg, c.modId(), c.description(),
                             c.className(), e);
                 } else {
@@ -131,6 +136,21 @@ public final class ContractValidation {
                     RSIntegrationMod.LOGGER.debug(
                             "[RSI-Contract] Optional contract unavailable: {} — {} ({})",
                             c.modId(), c.description(), c.className());
+                }
+            }
+        }
+
+        // A probe's isAvailable() generally checks one representative field.
+        // If any required contract in that probe failed, clear every resolved
+        // target in the probe so partial resolution cannot enable a broken adapter.
+        for (Class<?> probe : invalidProbes) {
+            for (Field target : TARGET_FIELDS.values()) {
+                if (target.getDeclaringClass() != probe) continue;
+                try {
+                    target.set(null, null);
+                } catch (IllegalAccessException e) {
+                    RSIntegrationMod.LOGGER.error(
+                            "[RSI-Contract] Failed to disable invalid probe {}", probe.getName(), e);
                 }
             }
         }
@@ -178,6 +198,15 @@ public final class ContractValidation {
             return ObfuscationReflectionHelper.findField(clazz, fc.name());
         }
         return clazz.getDeclaredField(fc.name());
+    }
+
+    private static Method resolveMethod(Class<?> clazz,
+                                        ReflectionContract.MethodContract mc)
+            throws NoSuchMethodException {
+        if (mc.origin() == ReflectionContract.MemberOrigin.VANILLA) {
+            return ObfuscationReflectionHelper.findMethod(clazz, mc.name(), mc.parameterTypes());
+        }
+        return clazz.getDeclaredMethod(mc.name(), mc.parameterTypes());
     }
 
     /** Number of registered contracts (for diagnostics). */

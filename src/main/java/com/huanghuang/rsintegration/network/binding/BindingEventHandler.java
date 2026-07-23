@@ -462,6 +462,21 @@ public final class BindingEventHandler {
         return target != null && target.supportsGui;
     }
 
+    /** Client-side read-only target lookup shared by the binding HUD. */
+    @Nullable
+    public static BlockPos bindingTargetPos(net.minecraft.world.level.Level level, BlockPos clickedPos) {
+        if (level == null || clickedPos == null) return null;
+        Block block = level.getBlockState(clickedPos).getBlock();
+        MachineBindingTarget target = findTarget(block);
+        if (target == null) {
+            ResourceLocation id = ForgeRegistries.BLOCKS.getKey(block);
+            if (id == null || !RSIntegrationConfig.CUSTOM_GUI_MACHINE_MODS.get().contains(id.getNamespace())) {
+                return null;
+            }
+        }
+        return resolveRootPos(level, clickedPos, block, block.getClass().getName());
+    }
+
     @Nullable
     private static MachineBindingTarget findTarget(Block block) {
         String className = block.getClass().getName();

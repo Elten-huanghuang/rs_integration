@@ -19,6 +19,39 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 class PlanTreeModelGraphTest extends BootstrapTest {
 
     @Test
+    void separateNodesOfSameRecipeFoldIntoOneVisualBranch() {
+        ResourceLocation unpack = new ResourceLocation("minecraft", "iron_block");
+        PlanGraphView.NodeView first = new PlanGraphView.NodeView(20, unpack, "generic", 1,
+                new ItemStack(Items.IRON_INGOT, 9), List.of(), List.of(
+                new PlanGraphView.OutputView(0, new ItemStack(Items.IRON_INGOT), 9, 0)));
+        PlanGraphView.NodeView second = new PlanGraphView.NodeView(21, unpack, "generic", 1,
+                new ItemStack(Items.IRON_INGOT, 9), List.of(), List.of(
+                new PlanGraphView.OutputView(0, new ItemStack(Items.IRON_INGOT), 9, 0)));
+        PlanGraphView.NodeView gun = new PlanGraphView.NodeView(22,
+                new ResourceLocation("tacz", "gun/test"), "tacz", 1,
+                new ItemStack(Items.DIAMOND), List.of(), List.of(
+                new PlanGraphView.OutputView(0, new ItemStack(Items.DIAMOND), 1, 0)));
+        PlanGraphView graph = new PlanGraphView(1, List.of(first, second, gun), List.of(
+                new PlanGraphView.EdgeView(22, 0, new PlanGraphView.SourceView(false, 20, 0),
+                        new ItemStack(Items.IRON_INGOT), 9),
+                new PlanGraphView.EdgeView(22, 0, new PlanGraphView.SourceView(false, 21, 0),
+                        new ItemStack(Items.IRON_INGOT), 1)),
+                List.of(new PlanGraphView.RootView(new ItemStack(Items.DIAMOND), 1, 0,
+                        List.of(new PlanGraphView.RootEdgeView(
+                                new PlanGraphView.SourceView(false, 22, 0),
+                                new ItemStack(Items.DIAMOND), 1)))), List.of(), List.of(20, 21, 22));
+        PlanResponse plan = new PlanResponse(true, "root", new ItemStack(Items.DIAMOND),
+                List.of(), Map.of(), List.of(), "test:root", null, null, 0, 0, 0,
+                List.of(), 1, null, null, null, 0, false, false, false, null,
+                Set.of(), Map.of(), null, graph);
+
+        PlanTreeNode gunTree = PlanTreeModel.from(plan).root.children.get(0);
+        assertEquals(1, gunTree.children.size());
+        assertEquals(10, gunTree.children.get(0).amount);
+        assertEquals(10, gunTree.children.get(0).edgeQuantity);
+    }
+
+    @Test
     void repeatedProducerReferencesShareLogicalNodeId() {
         PlanGraphView.NodeView producer = new PlanGraphView.NodeView(0,
                 new ResourceLocation("test", "iron"), "generic", 1,

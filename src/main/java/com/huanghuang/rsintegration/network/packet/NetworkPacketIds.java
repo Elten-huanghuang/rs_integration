@@ -86,4 +86,6 @@ public final class NetworkPacketIds {
     // Villager trade restock (120-129)
     public static final int VILLAGER_RESTOCK_REQUEST = 120;
     public static final int VILLAGER_RESTOCK_RESULT = 121;
+    public static final int REFORGING_RESTOCK_REQUEST = 122;
+    public static final int REFORGING_RESTOCK_RESULT = 123;
 }

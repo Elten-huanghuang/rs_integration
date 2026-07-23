@@ -71,6 +71,8 @@ final class ResolutionContext {
     @Nullable final ServerPlayer player;
     @Nullable final INetwork network;
     final boolean bestEffort;
+    boolean strictCandidatePass;
+    boolean bestEffortFallbackPass;
     @Nullable final List<String> missingOut;
     @Nullable final List<String> diagLog;
 

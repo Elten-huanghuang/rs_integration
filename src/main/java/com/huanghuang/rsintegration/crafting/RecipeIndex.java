@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.crafting;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.mods.farmingforblockheads.MarketRecipeWrapper;
+import com.huanghuang.rsintegration.mods.apotheosis.ApotheosisGemCuttingCatalog;
 import com.huanghuang.rsintegration.mods.forbidden.FaRitualWrapper;
 import com.huanghuang.rsintegration.mods.distantworlds.LithumAltarRecipeResolver;
 import com.huanghuang.rsintegration.mods.distantworlds.LithumAltarRecipeDefinition;
@@ -118,7 +119,14 @@ public final class RecipeIndex {
 
                 ResourceLocation typeId = recipe.getType() != null
                         ? ForgeRegistries.RECIPE_TYPES.getKey(recipe.getType())
-                        : new ResourceLocation("minecraft:crafting");
+                        : null;
+                // Runtime recipes can expose a stable RecipeType without
+                // registering it in Forge's frozen registry. Preserve that ID
+                // instead of flattening every synthetic machine recipe to
+                // minecraft:crafting.
+                if (typeId == null && recipe.getType() != null) {
+                    typeId = ResourceLocation.tryParse(recipe.getType().toString());
+                }
                 if (typeId == null) typeId = new ResourceLocation("minecraft:crafting");
 
                 Entry entry = new Entry(recipe, type, typeId);
@@ -139,6 +147,7 @@ public final class RecipeIndex {
 
             // ── Market entries (MarketRegistry, not RecipeManager) ────
             int marketIndexed = indexMarketEntries(idx, seen);
+            int gemCuttingIndexed = indexGemCutting(level, idx, seen);
 
             // ── Distant Worlds Firon Lithum Altar definitions ─────────
             int distantWorldsIndexed = indexDistantWorldsFiron(idx, seen);
@@ -165,6 +174,20 @@ public final class RecipeIndex {
                     skippedIdentity, faIndexed, marketIndexed, distantWorldsIndexed);
             return idx;
         }
+    }
+
+    private static int indexGemCutting(Level level, Map<Item, List<Entry>> idx, Set<ResourceLocation> seen) {
+        if (!net.minecraftforge.fml.ModList.get().isLoaded("apotheosis")) return 0;
+        int count = 0;
+        for (var recipe : ApotheosisGemCuttingCatalog.allRecipes()) {
+            if (!seen.add(recipe.getId())) continue;
+            ItemStack output = recipe.getResultItem(level.registryAccess());
+            idx.computeIfAbsent(output.getItem(), key -> new ArrayList<>()).add(new Entry(
+                    recipe, ModType.byId("apotheosis_gem_cutting"),
+                    new ResourceLocation("apotheosis", "gem_cutting"), true));
+            count++;
+        }
+        return count;
     }
 
     // ── FA ritual indexing ──────────────────────────────────────
@@ -451,7 +474,7 @@ public final class RecipeIndex {
      * therefore transformative, even if the output item type happens to
      * match one of the input slots.</p>
      */
-    private static boolean isIdentityRecipe(Recipe<?> recipe, ItemStack result,
+    static boolean isIdentityRecipe(Recipe<?> recipe, ItemStack result,
                                             ModRecipeHandler handler) {
         // NBT-bearing results indicate a transformation (charge, repair, clean,
         // compress-with-NBT, etc.) — not a trivial identity recipe.
@@ -472,14 +495,14 @@ public final class RecipeIndex {
         for (var ing : ingredients) {
             if (ing.isEmpty()) continue;
             anyNonEmpty = true;
-            boolean found = false;
+            boolean hasDistinctInput = false;
+            boolean hasCandidate = false;
             for (ItemStack opt : ing.getItems()) {
-                if (opt.getItem() == resultItem) {
-                    found = true;
-                    break;
-                }
+                if (opt.isEmpty()) continue;
+                hasCandidate = true;
+                if (opt.getItem() != resultItem) hasDistinctInput = true;
             }
-            if (!found) return false; // distinct ingredient → transformative, not identity
+            if (!hasCandidate || hasDistinctInput) return false;
         }
         return anyNonEmpty;
     }
@@ -528,6 +551,14 @@ public final class RecipeIndex {
             // Handler exists and returned EMPTY — don't fall through
             // to the reflection probe (same reason as ModRecipeHandlers).
             return ItemStack.EMPTY;
+        }
+        // This interface call is remapped by ForgeGradle in production. Looking
+        // it up by the development name "getResultItem" fails under SRG names.
+        try {
+            ItemStack result = recipe.getResultItem(access);
+            if (!result.isEmpty()) return result.copy();
+        } catch (RuntimeException e) {
+            RSIntegrationMod.LOGGER.debug("[RSI] Recipe result lookup failed", e);
         }
         Class<?> clazz = recipe.getClass();
         Method m = resultMethodCache.get(clazz);
@@ -666,6 +697,10 @@ public final class RecipeIndex {
                 // separately (tryGetResultItem), drop the first stack equal to the
                 // primary so it isn't duplicated into the RS network.
                 ItemStack primary = tryGetResultItem(recipe, access);
+                if (!primary.isEmpty() && !primary.hasTag()) {
+                    ItemStack hiddenPrimary = CraftingResolver.extractHiddenOutput(recipe);
+                    if (!hiddenPrimary.isEmpty()) primary = hiddenPrimary;
+                }
                 boolean primaryDropped = false;
                 List<ItemStack> fromGetOutputs = new ArrayList<>();
                 if (obj instanceof List<?> list) {

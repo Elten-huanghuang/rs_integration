@@ -21,10 +21,16 @@ import net.minecraftforge.client.event.ScreenEvent;
 import net.minecraftforge.eventbus.api.EventPriority;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 
+import java.util.Collections;
+import java.util.Set;
+import java.util.WeakHashMap;
+
 public final class VillagerRestockClient {
     private static VillagerRestockResultPacket last;
     private static long visibleUntil;
     private static boolean initialized;
+    private static final Set<MerchantScreen> SELECTED_SCREENS =
+            Collections.newSetFromMap(new WeakHashMap<>());
 
     private VillagerRestockClient() {}
 
@@ -44,6 +50,10 @@ public final class VillagerRestockClient {
                 ? SoundEvents.EXPERIENCE_ORB_PICKUP : SoundEvents.NOTE_BLOCK_BASS.value(), 0.8F, 1.0F);
     }
 
+    public static void markTradeSelected(MerchantScreen screen) {
+        SELECTED_SCREENS.add(screen);
+    }
+
     @SuppressWarnings({"rawtypes", "unchecked"})
     private static void bookmark(ItemStack stack) {
         var runtime=RSJeiPlugin.getRuntime();
@@ -54,14 +64,14 @@ public final class VillagerRestockClient {
         ((BookmarkOverlayAccessor) overlay).rsIntegration$getBookmarkList().add(bookmark);
     }
 
-    @SubscribeEvent(priority=EventPriority.HIGHEST)
+    @SubscribeEvent(priority=EventPriority.LOWEST)
     public static void keyPressed(ScreenEvent.KeyPressed.Pre event) {
         if (!(event.getScreen() instanceof MerchantScreen screen)
                 || event.getKeyCode() != org.lwjgl.glfw.GLFW.GLFW_KEY_SPACE
-                || event.getModifiers() != 0) return;
+                || event.getModifiers() != 0
+                || !SELECTED_SCREENS.contains(screen)) return;
         int offer=((MerchantScreenAccessor) screen).rsIntegration$getShopItem();
         NetworkHandler.CHANNEL.sendToServer(new VillagerRestockRequestPacket(offer));
-        event.setCanceled(true);
     }
     @SubscribeEvent(priority=EventPriority.LOWEST)
     public static void render(ScreenEvent.Render.Post event) {

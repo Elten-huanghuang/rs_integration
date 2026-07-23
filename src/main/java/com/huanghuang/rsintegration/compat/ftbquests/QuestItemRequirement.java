@@ -26,4 +26,22 @@ public record QuestItemRequirement(
     public long remaining() {
         return Math.max(0L, required - progress);
     }
+
+    public boolean contentEquals(QuestItemRequirement other) {
+        if (other == null || taskId != other.taskId
+                || required != other.required || progress != other.progress
+                || consumesResources != other.consumesResources
+                || onlyFromCrafting != other.onlyFromCrafting
+                || taskScreenOnly != other.taskScreenOnly || optional != other.optional
+                || !ItemStack.matches(displayStack, other.displayStack)
+                || validDisplayItems.size() != other.validDisplayItems.size()) {
+            return false;
+        }
+        for (int i = 0; i < validDisplayItems.size(); i++) {
+            if (!ItemStack.matches(validDisplayItems.get(i), other.validDisplayItems.get(i))) {
+                return false;
+            }
+        }
+        return true;
+    }
 }

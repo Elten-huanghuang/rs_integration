@@ -616,6 +616,9 @@ public class RecipeGuiLayoutsMixin {
 
     @Unique
     private static String getBindingFilter(Object recipe, IRecipeLayoutDrawable<?> recipeLayout) {
+        if (recipe instanceof com.huanghuang.rsintegration.mods.apotheosis.ApotheosisGemCuttingRecipe) {
+            return "apotheosis_gem_cutting";
+        }
         if (rsi$isGoetyRitual(recipe)) return ModIds.GOETY;
 
         // YHK cooking pot recipes: 3 ModTypes share 1 JEI UID, so we use
@@ -711,6 +714,14 @@ public class RecipeGuiLayoutsMixin {
     private static ResourceLocation getRecipeId(Object recipe) {
         String className = recipe.getClass().getName();
 
+        if (className.equals("dev.shadowsoffire.apotheosis.adventure.compat.GemCuttingCategory$GemCuttingRecipe")) {
+            ItemStack output = rsi$readGemCuttingOutput(recipe);
+            var virtualRecipe = output.isEmpty() ? null
+                    : com.huanghuang.rsintegration.mods.apotheosis.ApotheosisGemCuttingCatalog
+                    .recipeForTarget(output);
+            return virtualRecipe == null ? null : virtualRecipe.getId();
+        }
+
         // Standard Recipe.getId() / m_6423_()
         try {
             Method getId = Reflect.findMethod(recipe.getClass(), "getId", new Class<?>[0]);
@@ -779,6 +790,31 @@ public class RecipeGuiLayoutsMixin {
 
         RSIntegrationMod.LOGGER.warn("[RSI-JEI-Mixin] getRecipeId failed for {} — no strategy succeeded", className);
         return null;
+    }
+
+    @Unique
+    private static ItemStack rsi$readGemCuttingOutput(Object recipe) {
+        try {
+            java.lang.reflect.Field output = recipe.getClass().getDeclaredField("out");
+            output.setAccessible(true);
+            Object value = output.get(recipe);
+            if (value instanceof ItemStack stack && !stack.isEmpty()) return stack.copy();
+        } catch (ReflectiveOperationException ignored) {
+        }
+        for (java.lang.reflect.Field field : recipe.getClass().getDeclaredFields()) {
+            if (!ItemStack.class.isAssignableFrom(field.getType())) continue;
+            try {
+                field.setAccessible(true);
+                ItemStack stack = (ItemStack) field.get(recipe);
+                if (stack != null && !stack.isEmpty()) {
+                    var instance = dev.shadowsoffire.apotheosis.adventure.socket.gem.GemInstance
+                            .unsocketed(stack);
+                    if (instance.isValidUnsocketed()) return stack.copy();
+                }
+            } catch (ReflectiveOperationException ignored) {
+            }
+        }
+        return ItemStack.EMPTY;
     }
 
     @Unique
@@ -1325,7 +1361,7 @@ public class RecipeGuiLayoutsMixin {
         } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] Reflection probe failed", e); }
 
         if (debug) {
-            RSIntegrationMod.LOGGER.warn("[RSI-JEI-Mixin] findBinding(filter={}) found no match. All blockKeys in inv: {}",
+            RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] findBinding(filter={}) found no match. All blockKeys in inv: {}",
                     filter, allBlockKeys.isEmpty() ? "<none>" : String.join(", ", allBlockKeys));
         }
 
@@ -1456,6 +1492,8 @@ public class RecipeGuiLayoutsMixin {
             ModType mt = ModType.classifyRecipe(r);
             if (mt != null) return mt;
         }
+        ModType jeiType = ModType.findByRecipeClass(className);
+        if (jeiType != null) return jeiType;
         return ModType.GENERIC;
     }
 

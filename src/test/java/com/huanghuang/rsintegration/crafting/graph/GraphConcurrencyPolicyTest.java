@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.mods.crockpot.CrockPotBatchDelegate;
 import com.huanghuang.rsintegration.mods.farmersdelight.CookingPotBatchDelegate;
 import com.huanghuang.rsintegration.mods.vanilla.brewing.BrewingStandBatchDelegate;
+import com.huanghuang.rsintegration.mods.vanilla.VanillaMachineBatchDelegate;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
@@ -81,6 +82,16 @@ class GraphConcurrencyPolicyTest {
                 decision.capabilities().outputOwnership());
         assertEquals(BatchConcurrencyCapabilities.SideEffects.MACHINE_LOCAL,
                 decision.capabilities().sideEffects());
+    }
+
+    @Test
+    void vanillaMachineDelegateHasStructuredConcurrencyContract() {
+        GraphConcurrencyPolicy.Decision decision = GraphConcurrencyPolicy.decide(
+                "vanilla_stonecutter", new VanillaMachineBatchDelegate(), List.of(), List.of());
+
+        assertFalse(decision.exclusive());
+        assertEquals(BatchConcurrencyCapabilities.OutputOwnership.MACHINE_SLOT,
+                decision.capabilities().outputOwnership());
     }
 
     @Test

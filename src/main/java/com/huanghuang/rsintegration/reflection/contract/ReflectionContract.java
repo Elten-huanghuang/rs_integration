@@ -53,6 +53,10 @@ public record ReflectionContract(
         }
     }
 
-    /** Verifies a method exists with an exact parameter-type signature. */
-    public record MethodContract(String name, Class<?>... parameterTypes) {}
+    /** Verifies a method exists with an exact signature and name origin. */
+    public record MethodContract(String name, MemberOrigin origin, Class<?>... parameterTypes) {
+        public MethodContract(String name, Class<?>... parameterTypes) {
+            this(name, MemberOrigin.MOD, parameterTypes);
+        }
+    }
 }

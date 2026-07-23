@@ -248,7 +248,7 @@ public final class CraftingPlanScreen extends Screen {
     private final List<ORHitbox> orHitboxes = new ArrayList<>();
     private final Set<String> orRendered = new HashSet<>();
 
-    private record ORHitbox(int x, int y, int w, int h, String itemKey, int altIndex) {}
+    private record ORHitbox(int x, int y, int w, int h, String selectionKey, int altIndex) {}
 
     // Deferred tooltip — set during draw, rendered after all scissors disabled
     private ItemStack hoveredItemForTooltip = ItemStack.EMPTY;
@@ -500,7 +500,10 @@ public final class CraftingPlanScreen extends Screen {
     private Map<String, String> exportForcedSelections() {
         Map<String, String> forced = new LinkedHashMap<>();
         for (Map.Entry<IngredientKey, ResourceLocation> entry : selectedPath.exportSelections().entrySet()) {
-            forced.put(entry.getKey().stack(1).getItem().builtInRegistryHolder().key().location().toString(),
+            ResourceLocation preferenceKey = com.huanghuang.rsintegration.crafting.CraftingResolver
+                    .preferenceKey(entry.getKey().stack(1));
+            if (preferenceKey == null) continue;
+            forced.put(preferenceKey.toString(),
                     entry.getValue().toString());
         }
         return forced;
@@ -1055,9 +1058,11 @@ public final class CraftingPlanScreen extends Screen {
         }
 
         // ── OR alternative badges ─────────────────────────────
-        if (orBadgeH > 0 && orRendered.add(BuiltInRegistries.ITEM.getKey(step.output().getItem()).toString())) {
-            String itemKey = BuiltInRegistries.ITEM.getKey(step.output().getItem()).toString();
-            List<AltChoice> choices = altChoices.computeIfAbsent(itemKey, k -> new ArrayList<>());
+        // The target card intentionally passes step == null; only intermediate
+        // cards can expose alternative-recipe badges.
+        String selectionKey = step == null ? null : selectionKey(step.output());
+        if (orBadgeH > 0 && selectionKey != null && orRendered.add(selectionKey)) {
+            List<AltChoice> choices = altChoices.computeIfAbsent(selectionKey, k -> new ArrayList<>());
 
             String curModType = step.modType() != null ? step.modType().id() : "generic";
             AltChoice curChoice = new AltChoice(step.recipeId(), curModType);
@@ -1071,13 +1076,13 @@ public final class CraftingPlanScreen extends Screen {
                 if (!choices.contains(ac)) choices.add(ac);
             }
 
-            int curIdx = altSelection.getOrDefault(itemKey, 0);
-            String persisted = LAST_FORCED.get(itemKey);
+            int curIdx = altSelection.getOrDefault(selectionKey, 0);
+            String persisted = LAST_FORCED.get(selectionKey);
             if (persisted != null) {
                 for (int i = 0; i < choices.size(); i++) {
                     if (choices.get(i).recipeId.toString().equals(persisted)) {
                         curIdx = i;
-                        altSelection.put(itemKey, i);
+                        altSelection.put(selectionKey, i);
                         break;
                     }
                 }
@@ -1109,7 +1114,7 @@ public final class CraftingPlanScreen extends Screen {
                     cardPreviewId = ac.recipeId;
                 }
 
-                orHitboxes.add(new ORHitbox(badgeX, badgeY, bw, badgeH, itemKey, i));
+                orHitboxes.add(new ORHitbox(badgeX, badgeY, bw, badgeH, selectionKey, i));
                 badgeX += bw + 4;
             }
         }
@@ -1186,48 +1191,56 @@ public final class CraftingPlanScreen extends Screen {
 
     // ── Alternative selection ─────────────────────────────────────
 
-    private void selectAlternative(String itemKey, int index) {
-        List<AltChoice> choices = altChoices.get(itemKey);
+    private void selectAlternative(String selectionKey, int index) {
+        List<AltChoice> choices = altChoices.get(selectionKey);
         if (choices == null || index < 0 || index >= choices.size()) return;
-        IngredientKey selectionKey = findTreeKey(itemKey);
-        if (selectionKey == null) return;
-        int oldIdx = selectedPath.selectedIndex(selectionKey);
+        IngredientKey treeKey = findTreeKey(selectionKey);
+        if (treeKey == null) return;
+        int oldIdx = selectedPath.selectedIndex(treeKey);
         if (oldIdx < 0) oldIdx = 0;
         int selected = oldIdx == index && index != 0 ? 0 : index;
-        altSelection.put(itemKey, selected);
-        selectedPath.selectBranch(selectionKey, selected, choices.get(selected).recipeId);
+        altSelection.put(selectionKey, selected);
+        selectedPath.selectBranch(treeKey, selected, choices.get(selected).recipeId);
 
         Map<String, String> forced = exportForcedSelections();
         boolean isTarget = plan.targetResult() != null
-                && itemKey.equals(BuiltInRegistries.ITEM.getKey(plan.targetResult().getItem()).toString());
+                && IngredientKey.of(plan.targetResult()).equals(treeKey);
         ResourceLocation rid = ResourceLocation.tryParse(plan.recipeId());
         if (isTarget && selected != 0) {
             rid = choices.get(selected).recipeId;
-            forced.remove(itemKey);
+            forced.remove(com.huanghuang.rsintegration.crafting.CraftingResolver
+                    .preferenceKey(treeKey.stack(1)).toString());
         }
         LAST_FORCED.clear();
         LAST_FORCED.putAll(forced);
         RSIntegrationMod.debug("[RSI-OR-UI] selectAlternative itemKey={} index={} forced={} root={}",
-                itemKey, selected, forced, rid);
+                selectionKey, selected, forced, rid);
         sendCraftPacket(rid, true, forced, currentRepeat, false);
     }
 
     @Nullable
-    private IngredientKey findTreeKey(String itemKey) {
+    private IngredientKey findTreeKey(String selectionKey) {
         if (treeModel == null) return null;
-        return findTreeKey(treeModel.root, itemKey);
+        return findTreeKey(treeModel.root, selectionKey);
     }
 
     @Nullable
-    private IngredientKey findTreeKey(PlanTreeNode node, String itemKey) {
-        if (BuiltInRegistries.ITEM.getKey(node.displayStack.getItem()).toString().equals(itemKey)) {
+    private IngredientKey findTreeKey(PlanTreeNode node, String selectionKey) {
+        if (selectionKey.equals(selectionKey(node.displayStack))) {
             return node.key;
         }
         for (PlanTreeNode child : node.children) {
-            IngredientKey key = findTreeKey(child, itemKey);
+            IngredientKey key = findTreeKey(child, selectionKey);
             if (key != null) return key;
         }
         return null;
+    }
+
+    @Nullable
+    private static String selectionKey(ItemStack stack) {
+        ResourceLocation key = com.huanghuang.rsintegration.crafting.CraftingResolver
+                .preferenceKey(stack);
+        return key == null ? null : key.toString();
     }
 
     // ── Slot drawing ──────────────────────────────────────────────
@@ -1687,15 +1700,13 @@ public final class CraftingPlanScreen extends Screen {
 
         Map<String, String> forced = exportForcedSelections();
         ResourceLocation rootRid = ResourceLocation.tryParse(plan.recipeId());
-        String itemKey = BuiltInRegistries.ITEM.getKey(node.displayStack.getItem()).toString();
-
         boolean isTarget = plan.targetResult() != null
-                && node.displayStack.getItem() == plan.targetResult().getItem();
+                && IngredientKey.of(plan.targetResult()).equals(node.key);
         if (isTarget) {
             rootRid = recipeId;
-            forced.remove(itemKey);
-        } else {
-            forced.put(itemKey, recipeId.toString());
+            ResourceLocation preferenceKey = com.huanghuang.rsintegration.crafting.CraftingResolver
+                    .preferenceKey(node.key.stack(1));
+            if (preferenceKey != null) forced.remove(preferenceKey.toString());
         }
 
         LAST_FORCED.clear();
@@ -2140,7 +2151,7 @@ public final class CraftingPlanScreen extends Screen {
                 for (ORHitbox hb : orHitboxes) {
                     if (mx >= hb.x && mx <= hb.x + hb.w
                             && my >= hb.y && my <= hb.y + hb.h) {
-                        selectAlternative(hb.itemKey, hb.altIndex);
+                        selectAlternative(hb.selectionKey, hb.altIndex);
                         return true;
                     }
                 }

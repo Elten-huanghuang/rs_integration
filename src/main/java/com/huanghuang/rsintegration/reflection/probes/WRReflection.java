@@ -32,7 +32,7 @@ public final class WRReflection {
         register("mod.maxbogomol.wizards_reborn.common.block.crystal_ritual.CrystalRitualBlockEntity",
                 "crystalRitualBEClass", false);
         register("mod.maxbogomol.wizards_reborn.common.block.crystal.CrystalBlockEntity",
-                "crystalRitualBEClass");
+                "crystalRitualBEClass", false);
         register("mod.maxbogomol.wizards_reborn.api.crystalritual.CrystalRitual",
                 "crystalRitualClass");
         register("mod.maxbogomol.wizards_reborn.api.crystalritual.CrystalRitualArea",

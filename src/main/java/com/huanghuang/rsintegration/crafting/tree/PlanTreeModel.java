@@ -128,6 +128,7 @@ public final class PlanTreeModel {
             applyAvailability(missing, plan, missingRef.display());
             root.children.add(missing);
         }
+        mergeEquivalentProducedChildren(root);
         return new PlanTreeModel(root);
     }
 
@@ -200,9 +201,46 @@ public final class PlanTreeModel {
             applyAvailability(missing, plan, missingRef.display());
             node.children.add(missing);
         }
+        mergeEquivalentProducedChildren(node);
         path.remove(producer.nodeId());
         return node;
     }
+
+    /**
+     * Fold separate execution nodes of the same recipe into one visual row.
+     * The server graph remains unchanged; this only aggregates the tree view.
+     */
+    private static void mergeEquivalentProducedChildren(PlanTreeNode parent) {
+        Map<VisualRecipeKey, PlanTreeNode> merged = new LinkedHashMap<>();
+        List<PlanTreeNode> result = new java.util.ArrayList<>();
+        for (PlanTreeNode child : parent.children) {
+            if (child.step == null || child.cycle || child.unresolved > 0) {
+                result.add(child);
+                continue;
+            }
+            VisualRecipeKey key = new VisualRecipeKey(child.step.recipeId(),
+                    child.step.modType() == null ? "" : child.step.modType().id(),
+                    child.key, child.outputKindOrdinal);
+            PlanTreeNode existing = merged.get(key);
+            if (existing == null) {
+                merged.put(key, child);
+                result.add(child);
+                continue;
+            }
+            existing.amount += child.amount;
+            existing.edgeQuantity += child.edgeQuantity;
+            existing.available += child.available;
+            existing.needed += child.needed;
+            existing.children.addAll(child.children);
+            mergeEquivalentProducedChildren(existing);
+        }
+        parent.children.clear();
+        parent.children.addAll(result);
+    }
+
+    private record VisualRecipeKey(net.minecraft.resources.ResourceLocation recipeId,
+                                   String modType, IngredientKey output,
+                                   int outputKindOrdinal) {}
 
     private static List<GraphReference> mergeRootEdges(List<PlanGraphView.RootEdgeView> edges) {
         Map<GraphReferenceKey, GraphReference> merged = new LinkedHashMap<>();

@@ -13,8 +13,19 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AsyncCraftChainMachineDedupTest {
+    @Test
+    void exclusiveMultiExecutionNodeUsesOneSerialWorker() {
+        assertTrue(AsyncCraftChain.shouldUseGraphOperationGroup(2, 4));
+        assertEquals(1, AsyncCraftChain.graphOperationWorkerCount(2, 4, 3, false));
+    }
+
+    @Test
+    void concurrentMultiExecutionNodeMayUseSeveralWorkers() {
+        assertEquals(2, AsyncCraftChain.graphOperationWorkerCount(2, 4, 3, true));
+    }
 
     @Test
     void deduplicatesOnlyMatchingDimensionPositionAndModType() {
@@ -49,5 +60,15 @@ class AsyncCraftChainMachineDedupTest {
                 List.of(busy, idle), leases, ModType.GENERIC.id());
 
         assertEquals(List.of(idle), result);
+    }
+
+    @Test
+    void classifiesLeaseAvailabilityWithoutTreatingBusyAsMissing() {
+        assertEquals(AsyncCraftChain.MachineLeaseAvailability.NONE_BOUND,
+                AsyncCraftChain.classifyLeaseAvailability(0, 0));
+        assertEquals(AsyncCraftChain.MachineLeaseAvailability.ALL_LEASED,
+                AsyncCraftChain.classifyLeaseAvailability(2, 0));
+        assertEquals(AsyncCraftChain.MachineLeaseAvailability.AVAILABLE,
+                AsyncCraftChain.classifyLeaseAvailability(2, 1));
     }
 }
