@@ -175,6 +175,20 @@ class ResolutionContextSupplyTest extends BootstrapTest {
     }
 
     @Test
+    void strictCandidatePassDoesNotAcceptBestEffortUnresolved() {
+        ResolutionContext context = new ResolutionContext(null, Map.of(), Map.of(), null,
+                true, null);
+        context.strictCandidatePass = true;
+        InputPortId input = new InputPortId(new NodeId(0), 0);
+
+        boolean resolved = CraftingResolver.recordBestEffortUnresolved(context, input,
+                Ingredient.of(Items.IRON_INGOT), 1, "strict-candidate");
+
+        assertFalse(resolved);
+        assertTrue(context.graphUnresolved.isEmpty());
+    }
+
+    @Test
     void bestEffortClosesMultipleIndependentWrStylePorts() {
         ResolutionContext context = new ResolutionContext(null, Map.of(), Map.of(), null,
                 true, null);

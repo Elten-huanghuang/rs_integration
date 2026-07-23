@@ -27,6 +27,7 @@ public final class ApotheosisRSModule implements IModIntegration {
 
     public static final String FLETCHING_TYPE = "apotheosis_fletching";
     public static final String LIBRARY_TYPE = "apotheosis_library";
+    public static final String GEM_CUTTING_TYPE = "apotheosis_gem_cutting";
 
     private ApotheosisRSModule() {}
 
@@ -55,6 +56,12 @@ public final class ApotheosisRSModule implements IModIntegration {
                 new String[]{"library", "ender_library"},
                 new String[]{LIBRARY_TYPE},
                 () -> null);
+        ModType.register(
+                GEM_CUTTING_TYPE,
+                new String[]{ApotheosisGemCuttingRecipe.class.getName()},
+                new String[]{"gem_cutting_table", "gem_cutting"},
+                new String[]{GEM_CUTTING_TYPE},
+                ModType.delegateSupplier("com.huanghuang.rsintegration.mods.apotheosis.ApotheosisGemCuttingBatchDelegate"));
         // Apotheosis 7.4.3 exposes FletchingCategory.TYPE as apotheosis:fletching.
         ModType.configureJei(
                 "apotheosis_fletching",
@@ -64,6 +71,14 @@ public final class ApotheosisRSModule implements IModIntegration {
                         "apotheosis_fletching"
                 }},
                 "gui.rs_integration.jei.apotheosis_fletching");
+        ModType.configureJei(
+                GEM_CUTTING_TYPE,
+                new String[][]{{"apotheosis:gem_cutting", GEM_CUTTING_TYPE}},
+                new String[][]{{
+                        "dev.shadowsoffire.apotheosis.adventure.compat.GemCuttingCategory$GemCuttingRecipe",
+                        GEM_CUTTING_TYPE
+                }},
+                "gui.rs_integration.jei.apotheosis_gem_cutting");
     }
 
     @Override
@@ -74,6 +89,12 @@ public final class ApotheosisRSModule implements IModIntegration {
                 List.of("dev.shadowsoffire.apotheosis.village.fletching.ApothFletchingBlock"),
                 List.of("minecraft:fletching_table"),
                 FLETCHING_TYPE, true));
+
+        BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
+                "apotheosis", ModType.byId(GEM_CUTTING_TYPE),
+                RSIntegrationConfig.ENABLE_APOTHEOSIS,
+                List.of("dev.shadowsoffire.apotheosis.adventure.socket.gem.cutting.GemCuttingBlock"),
+                List.of("apotheosis:gem_cutting_table"), GEM_CUTTING_TYPE, true));
 
         BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
                 "apotheosis", ModType.byId(LIBRARY_TYPE),
@@ -94,6 +115,7 @@ public final class ApotheosisRSModule implements IModIntegration {
     @Override
     public void registerRecipeHandler() {
         ModRecipeHandlers.register(new ApotheosisFletchingRecipeHandler());
+        ModRecipeHandlers.register(new ApotheosisGemCuttingRecipeHandler());
     }
 
     @Override

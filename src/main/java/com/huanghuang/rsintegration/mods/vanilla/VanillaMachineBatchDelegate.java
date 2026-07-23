@@ -9,6 +9,7 @@ import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import net.minecraft.core.BlockPos;
@@ -96,7 +97,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
     private static final java.lang.reflect.Field LIT_TIME_FIELD = resolveLitTimeField();
 
     private static java.lang.reflect.Field resolveLitTimeField() {
-        for (String name : new String[]{"litTime", "f_58315_"}) {
+        for (String name : new String[]{"litTime", "f_58316_"}) {
             try {
                 java.lang.reflect.Field f = AbstractFurnaceBlockEntity.class.getDeclaredField(name);
                 f.setAccessible(true);
@@ -309,6 +310,11 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
     @Override
     public List<IngredientSpec> getRequiredMaterials() {
         return CraftPacketUtils.extractIngredientSpecs(recipe);
+    }
+
+    @Override
+    public BatchConcurrencyCapabilities concurrencyCapabilities() {
+        return BatchConcurrencyCapabilities.machineSlot();
     }
 
     @Override

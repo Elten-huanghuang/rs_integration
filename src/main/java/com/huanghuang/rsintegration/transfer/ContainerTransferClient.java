@@ -53,6 +53,24 @@ public final class ContainerTransferClient {
     private static final Path MODE_FILE =
             FMLPaths.CONFIGDIR.get().resolve("rs_integration_transfer_mode.txt");
 
+    // EMI's search-focus probe, resolved once. Reflecting on every keypress
+    // would spam ClassNotFoundException when EMI is absent (the common case).
+    // State: null = not yet resolved, present = usable, absent = EMI not present.
+    private static java.util.Optional<java.lang.reflect.Method> emiSearchFocusedMethod;
+
+    private static java.lang.reflect.Method resolveEmiSearchFocused() {
+        if (emiSearchFocusedMethod == null) {
+            try {
+                Class<?> emiApi = Class.forName("dev.emi.emi.api.EmiApi");
+                emiSearchFocusedMethod =
+                        java.util.Optional.of(emiApi.getMethod("isSearchFocused"));
+            } catch (ReflectiveOperationException | LinkageError e) {
+                emiSearchFocusedMethod = java.util.Optional.empty();
+            }
+        }
+        return emiSearchFocusedMethod.orElse(null);
+    }
+
     private ContainerTransferClient() {}
 
     /**
@@ -94,8 +112,6 @@ public final class ContainerTransferClient {
         MinecraftForge.EVENT_BUS.addListener(ContainerTransferClient::onRenderGui);
         MinecraftForge.EVENT_BUS.addListener(EventPriority.LOWEST, false,
                 ScreenEvent.Render.Post.class, ContainerTransferClient::onRenderScreen);
-        MinecraftForge.EVENT_BUS.addListener(EventPriority.LOWEST, false,
-                ScreenEvent.Render.Post.class, ContainerTransferClient::onRenderScreen);
 
         loadMode();
     }
@@ -129,7 +145,7 @@ public final class ContainerTransferClient {
         if (mc.player == null) return;
         if (event.getAction() != GLFW.GLFW_PRESS) return;
         if (mc.screen != null
-                && (isAnyTextInputFocused(mc.screen) || isRecipeViewerFocused())) return;
+                && (isAnyTextInputFocusedSafe(mc.screen) || isRecipeViewerFocused())) return;
 
         if (KEY_TOGGLE_MODE.isActiveAndMatches(
                 InputConstants.getKey(event.getKey(), event.getScanCode()))) {
@@ -195,6 +211,17 @@ public final class ContainerTransferClient {
      * Detect whether a text input widget is currently focused. Handles vanilla
      * {@code EditBox}, mods that subclass it, and known text-field wrappers.
      */
+    private static boolean isAnyTextInputFocusedSafe(Screen screen) {
+        try {
+            return isAnyTextInputFocused(screen);
+        } catch (LinkageError | SecurityException e) {
+            // A transformed third-party widget may expose inconsistent class
+            // metadata. Focus detection must never crash a keyboard event.
+            RSIntegrationMod.LOGGER.debug("[RSI-Transfer] text-input probe skipped", e);
+            return false;
+        }
+    }
+
     private static boolean isAnyTextInputFocused(Screen screen) {
         // Check the top-level focused widget first
         var focused = screen.getFocused();
@@ -227,8 +254,9 @@ public final class ContainerTransferClient {
         // mods like Sophisticated Backpacks, JEI, EMI, REI, etc.
         Class<?> clazz = widget.getClass();
         do {
-            String name = clazz.getSimpleName().toLowerCase();
             String fqn = clazz.getName().toLowerCase();
+            int separator = Math.max(fqn.lastIndexOf('.'), fqn.lastIndexOf('$'));
+            String name = separator >= 0 ? fqn.substring(separator + 1) : fqn;
             if (name.contains("editbox") || name.contains("textfield")
                     || name.contains("textinput") || name.contains("searchbox")
                     || name.contains("searchbar") || name.contains("textbox")
@@ -236,12 +264,13 @@ public final class ContainerTransferClient {
                     || (fqn.contains("jei") && (name.contains("search") || name.contains("input") || name.contains("text") || name.contains("field")))
                     || (fqn.contains("emi.") && (name.contains("search") || name.contains("input") || name.contains("text") || name.contains("field")))
                     || (fqn.contains("roughlyenoughitems") && (name.contains("search") || name.contains("input") || name.contains("text") || name.contains("field")))) {
-                // Only count it as a text input if it appears to have focus
-                try {
-                    var m = clazz.getMethod("isFocused");
-                    if (Boolean.TRUE.equals(m.invoke(widget))) return true;
-                } catch (Exception e) {
-                    RSIntegrationMod.LOGGER.debug("[RSI-Transfer] reflection probe failed", e);
+                // Only count it as a text input if it appears to have focus.
+                // isFocused() comes from GuiEventListener; call it directly —
+                // reflecting on it fails under runtime SRG remapping and would
+                // spam NoSuchMethodException on every keypress.
+                if (widget instanceof net.minecraft.client.gui.components.events.GuiEventListener listener
+                        && listener.isFocused()) {
+                    return true;
                 }
             }
             clazz = clazz.getSuperclass();
@@ -259,47 +288,31 @@ public final class ContainerTransferClient {
      */
     private static boolean isRecipeViewerFocused() {
         // --- JEI ---
+        // IIngredientListOverlay#hasKeyboardFocus() is part of the JEI API, so
+        // call it directly. Reflection here would spam NoSuchMethodException on
+        // every keypress for method names the API doesn't expose.
         try {
             var runtime = RSJeiPlugin.getRuntime();
             if (runtime != null) {
                 var overlay = runtime.getIngredientListOverlay();
-                if (overlay != null) {
-                    // Try hasKeyboardFocus() → isSearchFocused() → getSearchBox() chain
-                    for (String methodName : new String[]{
-                            "hasKeyboardFocus", "isSearchFocused",
-                            "hasFocus", "isFocused"}) {
-                        try {
-                            java.lang.reflect.Method m = overlay.getClass().getMethod(methodName);
-                            if (Boolean.TRUE.equals(m.invoke(overlay))) return true;
-                        } catch (Exception e) {
-                            RSIntegrationMod.LOGGER.debug("[RSI-Transfer] reflection probe failed", e);
-                        }
-                    }
-                }
+                if (overlay != null && overlay.hasKeyboardFocus()) return true;
             }
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Transfer] reflection probe failed", e);
+        } catch (LinkageError | RuntimeException e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-Transfer] JEI focus probe skipped", e);
         }
 
         // --- EMI ---
-        try {
-            Class<?> emiApi = Class.forName("dev.emi.emi.api.EmiApi");
-            java.lang.reflect.Method isSearchFocused =
-                    emiApi.getMethod("isSearchFocused");
-            if (Boolean.TRUE.equals(isSearchFocused.invoke(null))) return true;
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Transfer] reflection probe failed", e);
+        java.lang.reflect.Method emiSearchFocused = resolveEmiSearchFocused();
+        if (emiSearchFocused != null) {
+            try {
+                if (Boolean.TRUE.equals(emiSearchFocused.invoke(null))) return true;
+            } catch (ReflectiveOperationException | LinkageError e) {
+                RSIntegrationMod.LOGGER.debug("[RSI-Transfer] EMI focus probe skipped", e);
+            }
         }
 
-        // --- REI ---
-        try {
-            Class<?> reiOverlay = Class.forName(
-                    "me.shedaniel.rei.impl.client.gui.widgets.basewidgets.TextFieldWidget");
-            // REI's search field is rendered on top; check via ScreenEvent
-            // interceptors — if any REI widget anywhere in the JVM is focused
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Transfer] reflection probe failed", e);
-        }
+        // REI does not expose a stable global search-focus query here; its own
+        // ScreenEvent handling already consumes typed input before this event.
 
         return false;
     }

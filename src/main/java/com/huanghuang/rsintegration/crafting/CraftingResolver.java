@@ -41,6 +41,20 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 public final class CraftingResolver {
+    /** Stable preference key that preserves NBT identity while remaining wire-compatible. */
+    public static ResourceLocation preferenceKey(ItemStack stack) {
+        ResourceLocation itemId = ForgeRegistries.ITEMS.getKey(stack.getItem());
+        if (itemId == null || !stack.hasTag()) return itemId;
+        String identity = itemId + "|" + stack.getTag();
+        java.util.UUID hash = java.util.UUID.nameUUIDFromBytes(
+                identity.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        return new ResourceLocation("rs_integration", "stack/" + hash.toString().replace("-", ""));
+    }
+
+    public static boolean isStackPreferenceKey(ResourceLocation key) {
+        return key != null && "rs_integration".equals(key.getNamespace())
+                && key.getPath().startsWith("stack/");
+    }
 
     /** Synthetic async step: let Enigmatic Legacy taint an Earth Heart in the
      * player's inventory, then return that exact instance to the chain. */
@@ -519,7 +533,21 @@ public final class CraftingResolver {
             RSIntegrationMod.debug(sb.toString());
         }
 
-        for (AliveCandidate a : alive) {
+        boolean ownsTwoPhase = ctx.bestEffort
+                && !ctx.strictCandidatePass && !ctx.bestEffortFallbackPass;
+        int candidatePasses = ownsTwoPhase ? 2 : 1;
+        for (int candidatePass = 0; candidatePass < candidatePasses; candidatePass++) {
+            boolean previousStrict = ctx.strictCandidatePass;
+            boolean previousFallback = ctx.bestEffortFallbackPass;
+            if (ownsTwoPhase) {
+                ctx.strictCandidatePass = candidatePass == 0;
+                ctx.bestEffortFallbackPass = candidatePass == 1;
+                ctx.diag(candidatePass == 0
+                        ? "ensureIngredient candidate pass=strict"
+                        : "ensureIngredient candidate pass=best-effort-fallback");
+            }
+            try {
+                for (AliveCandidate a : alive) {
             // Don't check timedOut() before the first candidate — the alive-building
             // loop may have exhausted the deadline with expensive result-item probes
             // for mod recipes. The first candidate is the highest-scored and is near-
@@ -620,6 +648,11 @@ public final class CraftingResolver {
                 }
                 return false;
             }
+                }
+            } finally {
+                ctx.strictCandidatePass = previousStrict;
+                ctx.bestEffortFallbackPass = previousFallback;
+            }
         }
 
         ctx.diag("ensureIngredient FAILED: exhausted " + alive.size() + " viable candidates for "
@@ -639,7 +672,7 @@ public final class CraftingResolver {
                                               Ingredient ingredient,
                                               int quantity,
                                               String reason) {
-        if (!ctx.bestEffort) return false;
+        if (!ctx.bestEffort || ctx.strictCandidatePass) return false;
         ctx.diag("ensureIngredient UNRESOLVED: reason=" + reason + " consumer=" + consumer
                 + " quantity=" + quantity + " ingredient=" + describeFirstItem(ingredient));
         recordUnresolved(ctx, consumer, ingredient, quantity);

@@ -60,10 +60,19 @@ public final class PlayerUtils {
             return;
         }
         if (network != null) {
-            network.insertItem(stack, stack.getCount(), com.refinedmods.refinedstorage.api.util.Action.PERFORM);
-            RSIntegrationMod.LOGGER.warn("[RSI] Refund redirected to RS network (player chunk unloaded): {} x{}",
-                stack.getHoverName().getString(), stack.getCount());
-        } else {
+            // insertItem returns whatever the network could not store; if we
+            // discard it (RS full / no matching storage) those items are voided.
+            ItemStack remainder = network.insertItem(stack, stack.getCount(),
+                com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+            int stored = stack.getCount() - remainder.getCount();
+            if (stored > 0) {
+                RSIntegrationMod.LOGGER.warn("[RSI] Refund redirected to RS network (player chunk unloaded): {} x{}",
+                    stack.getHoverName().getString(), stored);
+            }
+            // Fall through to world-spawn drop for anything the network rejected.
+            stack = remainder;
+        }
+        if (!stack.isEmpty()) {
             var spawnLevel = player.getServer().overworld();
             if (spawnLevel == null) return;
             var spawnPos = spawnLevel.getSharedSpawnPos();

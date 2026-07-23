@@ -283,6 +283,14 @@ public final class RecipePreviewRenderer {
             gfx.renderItem(new ItemStack(net.minecraft.world.item.Items.BREWING_STAND), x, y);
             return true;
         }
+        if (isSyntheticGemCuttingRecipe(recipeId)) {
+            net.minecraft.world.item.Item table = net.minecraftforge.registries.ForgeRegistries.ITEMS
+                    .getValue(new ResourceLocation("apotheosis", "gem_cutting_table"));
+            if (table != null && table != net.minecraft.world.item.Items.AIR) {
+                gfx.renderItem(new ItemStack(table), x, y);
+                return true;
+            }
+        }
         IDrawable icon = iconCache.computeIfAbsent(recipeId, this::lookupCategoryIcon).orElse(null);
         if (icon == null) return false;
         try {
@@ -318,6 +326,11 @@ public final class RecipePreviewRenderer {
     private static boolean isSyntheticBrewingRecipe(ResourceLocation recipeId) {
         return "rs_integration".equals(recipeId.getNamespace())
                 && recipeId.getPath().startsWith("vanilla_brewing/");
+    }
+
+    private static boolean isSyntheticGemCuttingRecipe(ResourceLocation recipeId) {
+        return "rs_integration".equals(recipeId.getNamespace())
+                && recipeId.getPath().startsWith("gem_cutting/");
     }
 
     /**

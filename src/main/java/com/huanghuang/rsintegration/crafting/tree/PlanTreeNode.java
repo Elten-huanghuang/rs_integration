@@ -20,7 +20,7 @@ import java.util.List;
 public final class PlanTreeNode {
     public final IngredientKey key;
     public final ItemStack displayStack;
-    public final int amount;
+    public int amount;
     public final int depth;
     @Nullable
     public final PlanStep step;    // null = leaf (raw material)

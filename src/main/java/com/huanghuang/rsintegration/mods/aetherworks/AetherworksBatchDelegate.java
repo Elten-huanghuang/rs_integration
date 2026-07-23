@@ -22,6 +22,7 @@ import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraftforge.items.ItemHandlerHelper;
 import org.jetbrains.annotations.NotNull;
 
 import javax.annotation.Nullable;
@@ -337,13 +338,28 @@ public final class AetherworksBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     protected void clearMachineState(BlockEntity be, ServerPlayer player) {
+        // Clear the machine slot to prevent item duplication.
+        // In the shared-ledger (chain) path the chain already refunded materials
+        // via refundCommitted(), so we just void the machine slot. Refunding here
+        // too would double-count the input back into RS.
         Object inv = Reflect.getField(be, "inventory").orElse(null);
         if (inv != null) {
             ItemStack leftover = Reflect.invoke(inv, "extractItem", 0, 64, false)
                     .map(o -> (ItemStack) o).orElse(ItemStack.EMPTY);
-            if (!leftover.isEmpty() && network != null) {
-                network.insertItem(leftover, leftover.getCount(), Action.PERFORM);
+            if (!leftover.isEmpty() && !usingSharedLedger) {
+                refundToRSNetwork(leftover, player);
             }
+        }
+    }
+
+    private void refundToRSNetwork(ItemStack stack, ServerPlayer player) {
+        if (network != null) {
+            ItemStack remainder = network.insertItem(stack.copy(), stack.getCount(), Action.PERFORM);
+            if (!remainder.isEmpty() && player != null) {
+                ItemHandlerHelper.giveItemToPlayer(player, remainder);
+            }
+        } else if (player != null) {
+            ItemHandlerHelper.giveItemToPlayer(player, stack.copy());
         }
     }
 

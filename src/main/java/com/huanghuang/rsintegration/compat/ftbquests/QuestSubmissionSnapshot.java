@@ -27,4 +27,23 @@ public record QuestSubmissionSnapshot(
     public boolean eligible() {
         return eligibility == QuestSubmissionEligibility.ELIGIBLE;
     }
+
+    public boolean contentEquals(QuestSubmissionSnapshot other) {
+        if (other == null || questId != other.questId || !title.equals(other.title)
+                || repeatable != other.repeatable || sequential != other.sequential
+                || eligibility != other.eligibility || rewardCount != other.rewardCount
+                || hasChoiceReward != other.hasChoiceReward
+                || !ItemStack.matches(icon, other.icon)
+                || requirements.size() != other.requirements.size()
+                || itemRewards.size() != other.itemRewards.size()) {
+            return false;
+        }
+        for (int i = 0; i < requirements.size(); i++) {
+            if (!requirements.get(i).contentEquals(other.requirements.get(i))) return false;
+        }
+        for (int i = 0; i < itemRewards.size(); i++) {
+            if (!itemRewards.get(i).contentEquals(other.itemRewards.get(i))) return false;
+        }
+        return true;
+    }
 }

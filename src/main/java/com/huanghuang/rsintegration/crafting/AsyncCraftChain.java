@@ -126,6 +126,8 @@ public final class AsyncCraftChain {
     private TerminationCoordinator.Cause terminalCause;
     private final TerminalListeners terminalListeners;
     private int machineCount = 1;
+    private boolean waitingForMachineLease;
+    private int machineLeaseWaitTicks;
     private int dropsThisChain;
     private boolean dropThrottleTripped;
     private static final int MAX_DROPS_PER_CHAIN = 20;
@@ -628,9 +630,21 @@ public final class AsyncCraftChain {
             }
             currentDelegate = startModStep(step, online);
             if (currentDelegate == null) {
+                if (waitingForMachineLease) {
+                    machineLeaseWaitTicks++;
+                    int timeoutTicks = RSIntegrationConfig.MULTIBLOCK_CRAFT_TIMEOUT_SECONDS.get() * 20;
+                    if (machineLeaseWaitTicks > timeoutTicks) {
+                        abort("Timeout waiting for an available multi-block machine: " + step.recipeId());
+                        return true;
+                    }
+                    maybeSendProgress(online, false);
+                    return false;
+                }
                 abort("Failed to start multi-block craft: " + step.recipeId());
                 return true;
             }
+            waitingForMachineLease = false;
+            machineLeaseWaitTicks = 0;
             state = State.WAITING_MOD;
             // Settled boundary: step's inputs are committed and any materials
             // pulled from virtualInventory have been removed by pre-reserve. If
@@ -1090,13 +1104,22 @@ public final class AsyncCraftChain {
         int desiredOperations = Math.max(1, step.executions());
         int availableOperations = Math.min(craftOperationBudget.availableCapacity(),
                 globalOperationBudget.availableCapacity());
-        boolean parallelGroup = GraphConcurrencyEligibility.shouldQueueOperations(
-                desiredOperations, eligible.size(), availableOperations,
-                !concurrencyDecision(step, delegate).exclusive());
-        int operationCost = parallelGroup
-                ? Math.min(Math.min(desiredOperations, availableOperations), eligible.size()) : 1;
+        boolean operationGroup = shouldUseGraphOperationGroup(desiredOperations, availableOperations);
+        boolean concurrencySafe = !concurrencyDecision(step, delegate).exclusive();
+        int operationCost = graphOperationWorkerCount(desiredOperations, availableOperations,
+                eligible.size(), concurrencySafe);
         return PreparationResult.ready(
-                new PreparedGraphNode(step, delegate, eligible, operationCost, parallelGroup));
+                new PreparedGraphNode(step, delegate, eligible, operationCost, operationGroup));
+    }
+
+    static boolean shouldUseGraphOperationGroup(int executions, int availableOperations) {
+        return executions >= 2 && availableOperations >= 1;
+    }
+
+    static int graphOperationWorkerCount(int executions, int availableOperations,
+                                         int eligibleMachines, boolean concurrencySafe) {
+        if (!shouldUseGraphOperationGroup(executions, availableOperations) || !concurrencySafe) return 1;
+        return Math.max(1, Math.min(Math.min(executions, availableOperations), eligibleMachines));
     }
 
     private GraphDispatchResult dispatchPreparedGraphNode(
@@ -1661,7 +1684,8 @@ public final class AsyncCraftChain {
         if (graphScheduler != null && graphScheduler.isStopping()) {
             return CraftProgressSnapshot.Result.STOPPING;
         }
-        if (state == State.WAITING_MOD || state == State.WAITING_PLAYER_TRANSFORMATION) {
+        if (state == State.WAITING_MOD || state == State.WAITING_PLAYER_TRANSFORMATION
+                || waitingForMachineLease) {
             return CraftProgressSnapshot.Result.WAITING;
         }
         return CraftProgressSnapshot.Result.RUNNING;
@@ -1696,7 +1720,7 @@ public final class AsyncCraftChain {
         if (result == CraftProgressSnapshot.Result.FAILED) {
             return CraftProgressSnapshot.Reason.UNKNOWN;
         }
-        if (state == State.WAITING_MOD && currentDelegate != null) {
+        if ((state == State.WAITING_MOD && currentDelegate != null) || waitingForMachineLease) {
             return CraftProgressSnapshot.Reason.MACHINE_BUSY;
         }
         return CraftProgressSnapshot.Reason.NONE;
@@ -2073,13 +2097,12 @@ public final class AsyncCraftChain {
                     addToInventory(workingInventory,
                             result.copyWithCount(StepExecutor.mulCount(result.getCount(), executions)));
                 }
-                for (ItemStack secondary : ModRecipeHandlers.tryGetSecondaryOutputs(cr, server.overworld().registryAccess())) {
-                    addToInventory(workingInventory,
-                            secondary.copyWithCount(StepExecutor.mulCount(secondary.getCount(), executions)));
-                }
                 // Compute remainders from the actual stacks placed in the recipe,
                 // not ingredient templates. CraftTweaker copy/container recipes
-                // may derive the returned stack from NBT or durability.
+                // may derive the returned stack from NBT or durability. Do not
+                // also run the generic secondary-output probe for CraftingRecipe:
+                // Forge's remainder API is authoritative here and probing both
+                // paths can count the same container item twice.
                 for (ItemStack remainder : CraftPacketUtils.getRecipeRemainders(cr, consumed)) {
                     int remainderExecutions = CraftPacketUtils.remainderExecutions(
                             remainder, specs, executions);
@@ -2185,6 +2208,18 @@ public final class AsyncCraftChain {
         return available;
     }
 
+    enum MachineLeaseAvailability {
+        NONE_BOUND,
+        ALL_LEASED,
+        AVAILABLE
+    }
+
+    static MachineLeaseAvailability classifyLeaseAvailability(int boundCount, int availableCount) {
+        if (boundCount <= 0) return MachineLeaseAvailability.NONE_BOUND;
+        if (availableCount <= 0) return MachineLeaseAvailability.ALL_LEASED;
+        return MachineLeaseAvailability.AVAILABLE;
+    }
+
     private IBatchDelegate startModStep(CraftingResolver.ResolutionStep step, ServerPlayer online) {
         // Extract machine sub-type from recipe ID (e.g. "wissen_crystallizer"
         // from "wizards_reborn:wissen_crystallizer/earth_crystal_seed") so we
@@ -2196,6 +2231,7 @@ public final class AsyncCraftChain {
         List<BoundMachine> machines = AltarBindingRegistry.getBoundMachinesForType(
                 online, step.modType(), subTypeHint);
         if (machines.isEmpty()) {
+            waitingForMachineLease = false;
             // Diagnostic: also check how many bindings exist for this mod type
             // (without sub-type filter) so we can tell if sub-type mismatch or
             // no binding at all.
@@ -2216,12 +2252,19 @@ public final class AsyncCraftChain {
 
         // Duplicate bindings must never create multiple workers for one logical machine.
         machines = deduplicateMachines(machines);
+        int boundMachineCount = machines.size();
         machines = filterUnleasedMachines(machines, machineLeases, step.modType().id());
-        if (machines.isEmpty()) {
-            RSIntegrationMod.LOGGER.debug(ctx.format(
-                    "All bound machines for {} are leased by active operations"), step.modType());
+        if (classifyLeaseAvailability(boundMachineCount, machines.size())
+                == MachineLeaseAvailability.ALL_LEASED) {
+            if (!waitingForMachineLease) {
+                RSIntegrationMod.LOGGER.debug(ctx.format(
+                        "All bound machines for {} are leased by active operations; waiting to retry"),
+                        step.modType());
+            }
+            waitingForMachineLease = true;
             return null;
         }
+        waitingForMachineLease = false;
 
         //  Same-dimension priority
         // Prefer machines in the player's current dimension so cross-dimension

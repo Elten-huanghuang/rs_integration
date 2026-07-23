@@ -215,9 +215,10 @@ final class CandidateEngine {
         if (ctx.preferredRecipes == null) return false;
         ItemStack output = ModRecipeHandlers.tryGetResultItem(entry.recipe(), ctx.level.registryAccess());
         if (output.isEmpty()) return false;
-        ResourceLocation itemKey = ForgeRegistries.ITEMS.getKey(output.getItem());
+        ResourceLocation itemKey = CraftingResolver.preferenceKey(output);
         if (itemKey == null) return false;
         ResourceLocation pref = ctx.preferredRecipes.get(itemKey);
+        if (pref == null) pref = ctx.preferredRecipes.get(ForgeRegistries.ITEMS.getKey(output.getItem()));
         return pref != null && pref.equals(entry.recipe().getId());
     }
 
@@ -231,15 +232,15 @@ final class CandidateEngine {
         if (nbtStrict && entry.nbtSensitive()) score += 5;
         List<IngredientSpec> specs = CraftPacketUtils.extractIngredientSpecs(entry.recipe());
         if (specs != null) {
-            int nonEmpty = 0;
-            for (IngredientSpec spec : specs) {
-                if (spec.isEmpty()) continue;
-                nonEmpty++;
-                if (cachedCountMatching(ctx, spec.ingredient(), matchCache) > 0) {
-                    score += 10;
+            Map<String, IngredientDemand> demands = specDemands(specs);
+            for (IngredientDemand demand : demands.values()) {
+                int available = cachedCountMatching(ctx, demand.ingredient(), matchCache);
+                if (available >= demand.required()) score += 10;
+                else if (available > 0) {
+                    score += Math.max(0, 10 - (demand.required() - available) * 5);
                 }
             }
-            score -= nonEmpty;
+            score -= demands.values().stream().mapToInt(IngredientDemand::required).sum();
         }
         ItemStack output = ModRecipeHandlers.tryGetResultItem(entry.recipe(), ctx.level.registryAccess());
         if (!output.isEmpty()) {
@@ -262,22 +263,24 @@ final class CandidateEngine {
                                      @javax.annotation.Nullable Map<Ingredient, Integer> matchCache) {
         int score = 0;
         ItemStack output = ModRecipeHandlers.tryGetResultItem(recipe, ctx.level.registryAccess());
-        ResourceLocation outputKey = ForgeRegistries.ITEMS.getKey(output.getItem());
+        ResourceLocation outputKey = CraftingResolver.preferenceKey(output);
         if (outputKey != null && ctx.preferredRecipes != null) {
             ResourceLocation preferred = ctx.preferredRecipes.get(outputKey);
+            if (preferred == null) preferred = ctx.preferredRecipes.get(
+                    ForgeRegistries.ITEMS.getKey(output.getItem()));
             if (preferred != null && preferred.equals(recipe.getId())) {
                 score += PREFERRED_RECIPE_BONUS;
             }
         }
 
-        for (Ingredient ing : recipe.getIngredients()) {
-            if (ing.isEmpty()) continue;
-            if (cachedCountMatching(ctx, ing, matchCache) > 0) {
-                score += 10;
-            }
+        Map<String, IngredientDemand> demands = craftingDemands(recipe);
+        for (IngredientDemand demand : demands.values()) {
+            int available = cachedCountMatching(ctx, demand.ingredient(), matchCache);
+            if (available >= demand.required()) score += 10;
+            else if (available > 0) score += Math.max(0, 10 - (demand.required() - available) * 5);
         }
 
-        score -= recipe.getIngredients().size();
+        score -= demands.values().stream().mapToInt(IngredientDemand::required).sum();
 
         if (output.getCount() > 1) {
             // Gate output bonus behind ingredient availability for the same
@@ -317,36 +320,73 @@ final class CandidateEngine {
     private static boolean allIngredientsAvailable(RecipeIndex.Entry entry, ResolutionContext ctx,
                                                     @javax.annotation.Nullable Map<Ingredient, Integer> matchCache) {
         if (entry.recipe() instanceof CraftingRecipe cr) {
-            for (Ingredient ing : cr.getIngredients()) {
-                if (!ing.isEmpty() && cachedCountMatching(ctx, ing, matchCache) <= 0) return false;
+            for (IngredientDemand demand : craftingDemands(cr).values()) {
+                if (cachedCountMatching(ctx, demand.ingredient(), matchCache) < demand.required()) {
+                    return false;
+                }
             }
             return true;
         }
         List<IngredientSpec> specs = CraftPacketUtils.extractIngredientSpecs(entry.recipe());
         if (specs == null) return false;
-        for (IngredientSpec spec : specs) {
-            if (!spec.isEmpty() && cachedCountMatching(ctx, spec.ingredient(), matchCache) <= 0) return false;
+        for (IngredientDemand demand : specDemands(specs).values()) {
+            if (cachedCountMatching(ctx, demand.ingredient(), matchCache) < demand.required()) return false;
         }
         return true;
     }
 
     /** Count how many distinct ingredients of a recipe have matching items available. */
     private static int countAvailableIngredients(RecipeIndex.Entry entry, ResolutionContext ctx,
-                                                   @javax.annotation.Nullable Map<Ingredient, Integer> matchCache) {
+                                                    @javax.annotation.Nullable Map<Ingredient, Integer> matchCache) {
         if (entry.recipe() instanceof CraftingRecipe cr) {
-            int c = 0;
-            for (Ingredient ing : cr.getIngredients()) {
-                if (!ing.isEmpty() && cachedCountMatching(ctx, ing, matchCache) > 0) c++;
-            }
-            return c;
+            return (int) craftingDemands(cr).values().stream()
+                    .filter(demand -> cachedCountMatching(ctx, demand.ingredient(), matchCache)
+                            >= demand.required())
+                    .count();
         }
         List<IngredientSpec> specs = CraftPacketUtils.extractIngredientSpecs(entry.recipe());
         if (specs == null) return 0;
-        int c = 0;
-        for (IngredientSpec spec : specs) {
-            if (!spec.isEmpty() && cachedCountMatching(ctx, spec.ingredient(), matchCache) > 0) c++;
+        Map<String, IngredientDemand> demands = specDemands(specs);
+        return (int) demands.values().stream()
+                .filter(demand -> cachedCountMatching(ctx, demand.ingredient(), matchCache)
+                        >= demand.required())
+                .count();
+    }
+
+    record IngredientDemand(Ingredient ingredient, int required) {}
+
+    static Map<String, IngredientDemand> craftingDemands(CraftingRecipe recipe) {
+        Map<String, IngredientDemand> demands = new LinkedHashMap<>();
+        for (Ingredient ingredient : recipe.getIngredients()) {
+            if (ingredient.isEmpty()) continue;
+            String key = ingredientKey(ingredient);
+            IngredientDemand old = demands.get(key);
+            demands.put(key, new IngredientDemand(ingredient,
+                    (old == null ? 0 : old.required()) + 1));
         }
-        return c;
+        return demands;
+    }
+
+    static Map<String, IngredientDemand> specDemands(List<IngredientSpec> specs) {
+        Map<String, IngredientDemand> demands = new LinkedHashMap<>();
+        for (IngredientSpec spec : specs) {
+            if (spec.isEmpty()) continue;
+            String key = spec.role() + ":" + ingredientKey(spec.ingredient());
+            IngredientDemand old = demands.get(key);
+            demands.put(key, new IngredientDemand(spec.ingredient(),
+                    (old == null ? 0 : old.required()) + spec.count()));
+        }
+        return demands;
+    }
+
+    private static String ingredientKey(Ingredient ingredient) {
+        StringBuilder key = new StringBuilder();
+        for (ItemStack stack : ingredient.getItems()) {
+            if (stack.isEmpty()) continue;
+            key.append(ForgeRegistries.ITEMS.getKey(stack.getItem())).append('|')
+                    .append(stack.getTag()).append(';');
+        }
+        return key.toString();
     }
 
     private static boolean passesOutputCheck(RecipeIndex.Entry entry, ItemStack output,
@@ -368,10 +408,9 @@ final class CandidateEngine {
                 return false;
             }
         }
-        if (ingredientAllNbt && output.hasTag() && !anyIngredientItemMatchesNbt(ingredient, output)) {
-            if (diag != null) logDiag(diag, null, entry, 0, entry.modType(), true, "Output NBT does not match ingredient");
-            return false;
-        }
+        // ingredient.test(output) is authoritative. Forge partial-NBT
+        // ingredients intentionally accept extra runtime state; TACZ guns
+        // carry more NBT than the GunId required by soul-stone recipes.
         return true;
     }
 

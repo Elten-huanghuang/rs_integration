@@ -52,7 +52,7 @@ public final class FtbQuestJeiRuntime {
         if (file == null || data == null) return;
 
         List<QuestSubmissionSnapshot> snapshots = FtbQuestSubmissionScanner.scan(file, data, true);
-        if (snapshots.equals(REGISTERED)) {
+        if (sameContent(snapshots, REGISTERED)) {
             waiting = false;
             return;
         }
@@ -68,5 +68,14 @@ public final class FtbQuestJeiRuntime {
         waiting = false;
         RSIntegrationMod.LOGGER.info("[RSI-JEI] Refreshed FTB Quest submission entries: {}",
                 snapshots.size());
+    }
+
+    private static boolean sameContent(List<QuestSubmissionSnapshot> left,
+                                       List<QuestSubmissionSnapshot> right) {
+        if (left.size() != right.size()) return false;
+        for (int i = 0; i < left.size(); i++) {
+            if (!left.get(i).contentEquals(right.get(i))) return false;
+        }
+        return true;
     }
 }

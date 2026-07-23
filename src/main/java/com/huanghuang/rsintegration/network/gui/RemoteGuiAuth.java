@@ -200,6 +200,20 @@ public final class RemoteGuiAuth {
         return isAuthorized(player, player.containerMenu);
     }
 
+    /**
+     * Distance checks may be used by modded menus instead of the vanilla
+     * AbstractContainerMenu helper. Only bypass checks aimed at the authorized
+     * machine; unrelated entity/AI distance queries must retain vanilla values.
+     */
+    public static boolean isAuthorizedDistanceTarget(ServerPlayer player, double x, double y, double z) {
+        Authorization auth = ACTIVE.get(player.getUUID());
+        if (auth == null || !isAuthorizedCurrentMenu(player)) return false;
+        double dx = x - (auth.pos().getX() + 0.5D);
+        double dy = y - (auth.pos().getY() + 0.5D);
+        double dz = z - (auth.pos().getZ() + 0.5D);
+        return dx * dx + dy * dy + dz * dz <= 4.0D;
+    }
+
     /** Check whether a player has any pending/active authorization. */
     public static boolean hasActiveAuthorization(UUID playerId) {
         return hasActiveAuthorizationForBlock(playerId, null);

@@ -438,11 +438,17 @@ public final class RSIntegrationMod {
         // Binding tooltip handler
         DistExecutor.safeRunWhenOn(Dist.CLIENT,
                 () -> () -> MinecraftForge.EVENT_BUS.register(BindingTooltipHandler.class));
+        DistExecutor.safeRunWhenOn(Dist.CLIENT,
+                () -> () -> MinecraftForge.EVENT_BUS.register(
+                        com.huanghuang.rsintegration.network.binding.BindingHintOverlay.class));
         // Crafting
         BatchCraftNetworkHandler.register();
         com.huanghuang.rsintegration.villager.VillagerRestockNetworkHandler.register();
         DistExecutor.safeRunWhenOn(Dist.CLIENT,
                 () -> com.huanghuang.rsintegration.villager.client.VillagerRestockClient::init);
+        com.huanghuang.rsintegration.reforging.ReforgingRestockNetworkHandler.register();
+        DistExecutor.safeRunWhenOn(Dist.CLIENT,
+                () -> com.huanghuang.rsintegration.reforging.client.ReforgingRestockClient::init);
         ConfigSyncPacket.register();
 
         // Altar binding registry (BINDINGS cache + scan caches)

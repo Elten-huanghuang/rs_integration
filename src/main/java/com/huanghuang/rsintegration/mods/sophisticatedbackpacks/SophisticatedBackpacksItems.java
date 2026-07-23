@@ -1,13 +1,9 @@
 package com.huanghuang.rsintegration.mods.sophisticatedbackpacks;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
-import net.minecraft.client.renderer.block.model.BakedQuad;
-import net.minecraft.client.resources.model.BakedModel;
-import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
 import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.client.event.ModelEvent;
 import net.minecraftforge.client.event.RegisterColorHandlersEvent;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.fml.DistExecutor;
@@ -31,10 +27,7 @@ import net.p3pp3rf1y.sophisticatedcore.upgrades.magnet.MagnetUpgradeItem;
 import net.p3pp3rf1y.sophisticatedcore.upgrades.magnet.MagnetUpgradeWrapper;
 import net.p3pp3rf1y.sophisticatedcore.upgrades.pickup.PickupUpgradeWrapper;
 
-import java.util.List;
 import java.util.Objects;
-
-import java.util.ArrayList;
 
 public final class SophisticatedBackpacksItems {
 
@@ -170,21 +163,6 @@ public final class SophisticatedBackpacksItems {
                RS_REFILL_UPGRADE.get(), RS_FEEDING_UPGRADE.get());
         });
 
-        // Set tintIndex=0 on baked quads so ItemColor is applied
-        modBus.addListener((ModelEvent.BakingCompleted event) -> {
-            ResourceLocation[] modelIds = {
-                    new ResourceLocation(RSIntegrationMod.MOD_ID, "rs_magnet_upgrade"),
-                    new ResourceLocation(RSIntegrationMod.MOD_ID, "rs_pickup_upgrade"),
-                    new ResourceLocation(RSIntegrationMod.MOD_ID, "rs_refill_upgrade"),
-                    new ResourceLocation(RSIntegrationMod.MOD_ID, "rs_feeding_upgrade"),
-            };
-            for (ResourceLocation id : modelIds) {
-                BakedModel original = event.getModels().get(id);
-                if (original != null && !(original instanceof TintedItemModel)) {
-                    event.getModels().put(id, new TintedItemModel(original));
-                }
-            }
-        });
     }
 
     private static int hslToRgb(float h, float s, float l) {
@@ -201,38 +179,5 @@ public final class SophisticatedBackpacksItems {
         return 0xFF000000 | ((int)((r + m) * 255f) << 16)
                 | ((int)((g + m) * 255f) << 8)
                 | (int)((b + m) * 255f);
-    }
-
-    /** Wraps a BakedModel so all quads have tintIndex=0 for ItemColor support. */
-    private static class TintedItemModel implements BakedModel {
-        private final BakedModel delegate;
-
-        TintedItemModel(BakedModel delegate) { this.delegate = delegate; }
-
-        @Override
-        public List<BakedQuad> getQuads(@javax.annotation.Nullable net.minecraft.world.level.block.state.BlockState state,
-                                         @javax.annotation.Nullable net.minecraft.core.Direction side,
-                                         net.minecraft.util.RandomSource rand) {
-            List<BakedQuad> quads = delegate.getQuads(state, side, rand);
-            List<BakedQuad> tinted = new ArrayList<>(quads.size());
-            for (BakedQuad q : quads) {
-                if (q.isTinted()) {
-                    tinted.add(q);
-                } else {
-                    tinted.add(new BakedQuad(
-                            q.getVertices().clone(), 0, q.getDirection(),
-                            q.getSprite(), q.isShade()));
-                }
-            }
-            return tinted;
-        }
-
-        @Override public boolean useAmbientOcclusion() { return delegate.useAmbientOcclusion(); }
-        @Override public boolean isGui3d() { return delegate.isGui3d(); }
-        @Override public boolean usesBlockLight() { return delegate.usesBlockLight(); }
-        @Override public boolean isCustomRenderer() { return delegate.isCustomRenderer(); }
-        @Override public net.minecraft.client.renderer.texture.TextureAtlasSprite getParticleIcon() { return delegate.getParticleIcon(); }
-        @Override public net.minecraft.client.renderer.block.model.ItemTransforms getTransforms() { return delegate.getTransforms(); }
-        @Override public net.minecraft.client.renderer.block.model.ItemOverrides getOverrides() { return delegate.getOverrides(); }
     }
 }

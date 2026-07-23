@@ -168,7 +168,7 @@ public final class GenericBatchDelegate extends AbstractBatchDelegate {
         // Use them for NBT-dependent assembly and durability/reuse remainders.
         if (player != null) {
             if (recipe instanceof net.minecraft.world.item.crafting.CraftingRecipe cr) {
-                captureActualCraftingOutputs(cr, materials, player);
+                if (!captureRepeatedCraftingOutputs(cr, materials, player)) return false;
             } else {
                 this.pendingSecondary.addAll(
                         ModRecipeHandlers.tryGetSecondaryOutputs(
@@ -183,7 +183,70 @@ public final class GenericBatchDelegate extends AbstractBatchDelegate {
         return true;
     }
 
-    private void captureActualCraftingOutputs(
+    /**
+     * Graph nodes that cannot be parallelized receive one material list whose
+     * per-slot counts are scaled by the node execution count. Execute the
+     * crafting recipe once per represented batch instead of assembling only
+     * the first result from the aggregated grid.
+     */
+    private boolean captureRepeatedCraftingOutputs(
+            net.minecraft.world.item.crafting.CraftingRecipe craftingRecipe,
+            List<ItemStack> materials, ServerPlayer player) {
+        List<IngredientSpec> specs = getRequiredMaterials();
+        if (specs == null || specs.size() != materials.size()) return false;
+
+        int executions = -1;
+        for (int i = 0; i < specs.size(); i++) {
+            IngredientSpec spec = specs.get(i);
+            if (spec.isEmpty()) continue;
+            ItemStack material = materials.get(i);
+            if (material == null || material.isEmpty() || spec.count() <= 0
+                    || material.getCount() % spec.count() != 0) return false;
+            int slotExecutions = material.getCount() / spec.count();
+            if (executions < 0) executions = slotExecutions;
+            else if (executions != slotExecutions) return false;
+        }
+        if (executions <= 0) return false;
+
+        ItemStack combinedResult = ItemStack.EMPTY;
+        for (int operation = 0; operation < executions; operation++) {
+            List<ItemStack> operationMaterials = new ArrayList<>(materials.size());
+            for (int i = 0; i < specs.size(); i++) {
+                IngredientSpec spec = specs.get(i);
+                ItemStack material = materials.get(i);
+                operationMaterials.add(spec.isEmpty() || material == null || material.isEmpty()
+                        ? ItemStack.EMPTY : material.copyWithCount(spec.count()));
+            }
+            // Require a real assemble() output each iteration. If assemble()
+            // returns empty, pendingResult would still hold the computeResult
+            // template (or the previous iteration's output) — accumulating that
+            // ×N would fabricate items the recipe never produced.
+            if (!captureActualCraftingOutputs(craftingRecipe, operationMaterials, player)) {
+                return false;
+            }
+            ItemStack operationResult = pendingResult.copy();
+            if (operationResult.isEmpty()) return false;
+            if (combinedResult.isEmpty()) {
+                combinedResult = operationResult;
+            } else if (ItemStack.isSameItemSameTags(combinedResult, operationResult)) {
+                combinedResult.grow(operationResult.getCount());
+            } else {
+                return false;
+            }
+        }
+        pendingResult = combinedResult;
+        return true;
+    }
+
+    /**
+     * Assemble the actual NBT-bearing output for one crafting operation and
+     * capture its remainders. Returns {@code true} if assemble() produced a
+     * non-empty result (and {@code pendingResult} was updated), {@code false}
+     * if assemble() returned empty — in which case {@code pendingResult} is
+     * left untouched. Callers that repeat operations must treat {@code false}
+     * as a failure rather than reusing the stale {@code pendingResult}.
+     */
+    private boolean captureActualCraftingOutputs(
             net.minecraft.world.item.crafting.CraftingRecipe craftingRecipe,
             List<ItemStack> materials, ServerPlayer player) {
         ItemStack[] consumed = materials.stream()
@@ -198,6 +261,7 @@ public final class GenericBatchDelegate extends AbstractBatchDelegate {
                 pendingSecondary.add(remainder.copy());
             }
         }
+        return !assembled.isEmpty();
     }
 
     @Override

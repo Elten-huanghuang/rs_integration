@@ -34,6 +34,7 @@ import com.huanghuang.rsintegration.mods.immortalersdelight.EnchantalCoolerBatch
 import com.huanghuang.rsintegration.mods.youkaishomecoming.moka.MokaPotBatchDelegate;
 import com.huanghuang.rsintegration.mods.embers.EmbersPlanInfo;
 import com.huanghuang.rsintegration.mods.farmingforblockheads.MarketBatchDelegate;
+import com.huanghuang.rsintegration.mods.apotheosis.ApotheosisGemCuttingCatalog;
 import com.huanghuang.rsintegration.mods.forbidden.FaRitualHelper;
 import com.huanghuang.rsintegration.mods.forbidden.FaRitualWrapper;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
@@ -450,6 +451,8 @@ public final class GenericCraftPacket {
         if (recipe != null) return recipe;
         recipe = MarketBatchDelegate.resolveMarketEntry(recipeId);
         if (recipe != null) return recipe;
+        recipe = ApotheosisGemCuttingCatalog.byId(recipeId);
+        if (recipe != null) return recipe;
         recipe = CrabTrapRecipeResolver.resolveRecipe(level, recipeId);
         if (recipe != null) return recipe;
         var firon = LithumAltarRecipeResolver.resolve(recipeId);
@@ -621,7 +624,8 @@ public final class GenericCraftPacket {
                 ResourceLocation itemKey = ResourceLocation.tryParse(e.getKey());
                 ResourceLocation forcedId = ResourceLocation.tryParse(e.getValue());
                 if (itemKey == null || forcedId == null
-                        || !net.minecraft.core.registries.BuiltInRegistries.ITEM.containsKey(itemKey)
+                        || (!CraftingResolver.isStackPreferenceKey(itemKey)
+                        && !net.minecraft.core.registries.BuiltInRegistries.ITEM.containsKey(itemKey))
                         || resolveRecipe(player.serverLevel(), forcedId) == null) {
                     player.sendSystemMessage(Component.literal("Invalid forced recipe selection: "
                             + e.getKey() + " -> " + e.getValue()));
@@ -1359,7 +1363,8 @@ public final class GenericCraftPacket {
                 ResourceLocation itemKey = ResourceLocation.tryParse(e.getKey());
                 ResourceLocation forcedId = ResourceLocation.tryParse(e.getValue());
                 if (itemKey == null || forcedId == null
-                        || !net.minecraft.core.registries.BuiltInRegistries.ITEM.containsKey(itemKey)
+                        || (!CraftingResolver.isStackPreferenceKey(itemKey)
+                        && !net.minecraft.core.registries.BuiltInRegistries.ITEM.containsKey(itemKey))
                         || resolveRecipe(player.serverLevel(), forcedId) == null) {
                     player.sendSystemMessage(Component.literal("Invalid forced recipe selection: "
                             + e.getKey() + " -> " + e.getValue()));
@@ -1751,6 +1756,15 @@ public final class GenericCraftPacket {
 
         // ── Add the target recipe itself as the last step so its grid is visible ──
         List<String> modWarnings = new ArrayList<>();
+        // Items the plan's intermediate steps actually produce. When the target's
+        // ingredient is a tag with no member in stock (e.g. a wood-tag gun slot),
+        // the display representative should be whichever member the plan crafts
+        // (oak_log via the timber chain) so the target card matches the tree below,
+        // instead of the arbitrary first tag entry (dark_oak_log).
+        Set<Item> plannedOutputs = new HashSet<>();
+        for (PlanStep s : steps) {
+            if (!s.output().isEmpty()) plannedOutputs.add(s.output().getItem());
+        }
         {
             List<ItemStack> targetInputs = new ArrayList<>();
             int targetW = 0, targetH = 0;
@@ -1760,7 +1774,7 @@ public final class GenericCraftPacket {
                 // item is visible in the target step's input grid.
                 for (Ingredient ing : displayIngredients) {
                     if (ing.isEmpty()) continue;
-                    ItemStack matched = matchAndConsume(ing, displayAvailable);
+                    ItemStack matched = matchAndConsume(ing, displayAvailable, plannedOutputs);
                     ItemStack display = matched != null ? matched.copy() : firstValidDisplayItem(ing);
                     targetInputs.add(display);
                 }
@@ -1771,7 +1785,7 @@ public final class GenericCraftPacket {
                     if (ing.isEmpty()) {
                         targetInputs.add(ItemStack.EMPTY);
                     } else {
-                        ItemStack matched = matchAndConsume(ing, displayAvailable);
+                        ItemStack matched = matchAndConsume(ing, displayAvailable, plannedOutputs);
                         targetInputs.add(matched != null ? matched
                                 : firstValidDisplayItem(ing));
                     }
@@ -1784,7 +1798,7 @@ public final class GenericCraftPacket {
                 else { targetW = 3; targetH = 3; }
                 for (Ingredient ing : displayIngredients) {
                     if (ing.isEmpty()) continue;
-                    ItemStack matched = matchAndConsume(ing, displayAvailable);
+                    ItemStack matched = matchAndConsume(ing, displayAvailable, plannedOutputs);
                     targetInputs.add(matched != null ? matched
                             : firstValidDisplayItem(ing));
                 }
@@ -1796,10 +1810,12 @@ public final class GenericCraftPacket {
                     for (IngredientSpec spec : targetSpecs) {
                         if (spec.isEmpty()) continue;
                         int cnt = spec.count();
-                        ItemStack matched = matchAndConsume(spec.ingredient(), displayAvailable);
+                        ItemStack matched = matchAndConsume(spec.ingredient(), displayAvailable, plannedOutputs);
                         ItemStack display = matched != null ? matched.copy() : firstValidDisplayItem(spec.ingredient());
                         display.setCount(cnt);
-                        for (int c = 1; c < cnt; c++) matchAndConsume(spec.ingredient(), displayAvailable);
+                        for (int c = 1; c < cnt; c++) {
+                            matchAndConsume(spec.ingredient(), displayAvailable, plannedOutputs);
+                        }
                         targetInputs.add(display);
                     }
                 }
@@ -1988,14 +2004,22 @@ public final class GenericCraftPacket {
             if (source != null && source.getItems().length > 1) {
                 String tagKey = source.toJson().toString();
                 if (!mergedTagKeys.add(tagKey)) continue; // already merged
-                int totalNeeded = 0;
+                // Sum the NET demand across every tag member (needs minus what the
+                // plan itself produces). A wood-tag slot whose representative resolved
+                // to dark_oak_log (nothing in stock → first tag member) but is actually
+                // satisfied by a crafted oak_log must not be counted short: oak_log's
+                // production surfaces as a negative neededCounts entry for the SAME tag,
+                // which offsets the dark_oak_log need. Clamping each member at 0 first
+                // would discard that offset and falsely fail the plan.
+                int netNeeded = 0;
                 int totalHave = 0;
                 for (ItemStack opt : source.getItems()) {
                     if (opt.isEmpty()) continue;
                     Item optItem = opt.getItem();
-                    totalNeeded += Math.max(0, neededCounts.getOrDefault(optItem, 0));
+                    netNeeded += neededCounts.getOrDefault(optItem, 0);
                     totalHave += itemAvailable.getOrDefault(optItem, 0);
                 }
+                int totalNeeded = Math.max(0, netNeeded);
                 materials.put(IngredientKey.of(new ItemStack(displayItem)), new PlanResponse.Availability(totalNeeded, totalHave));
             } else {
                 // NBT-strict ingredients (e.g. a charged Totem of Souls declared
@@ -2279,7 +2303,20 @@ public final class GenericCraftPacket {
      * Preserves NBT so TACZ/Applied Armorer items display with correct attachments.
      * Strips BlockEntityTag/BlockId to avoid purple-black block entity rendering.
      */
-    private static ItemStack matchBestAvailable(Ingredient ingredient, Map<Item, Integer> itemAvailable) {        ItemStack best = null;
+    private static ItemStack matchBestAvailable(Ingredient ingredient, Map<Item, Integer> itemAvailable) {
+        return matchBestAvailable(ingredient, itemAvailable, java.util.Collections.emptySet());
+    }
+
+    /**
+     * Collapse a (possibly tag) ingredient to a single representative for display.
+     * Prefers the tag member with the most stock. When NO member is in stock, a
+     * {@code preferred} member — one the plan actually produces — wins over the
+     * arbitrary first tag entry, so a wood-tag gun slot shows the crafted oak_log
+     * instead of dark_oak_log while the tree below builds oak_log.
+     */
+    private static ItemStack matchBestAvailable(Ingredient ingredient, Map<Item, Integer> itemAvailable,
+                                                java.util.Set<Item> preferred) {
+        ItemStack best = null;
         int bestCount = -1;
         for (ItemStack stack : ingredient.getItems()) {
             if (stack.isEmpty()) continue;
@@ -2287,6 +2324,16 @@ public final class GenericCraftPacket {
             if (count > bestCount) {
                 bestCount = count;
                 best = stack;
+            }
+        }
+        // Real stock wins outright.
+        if (best != null && bestCount > 0) return cleanDisplayNbt(best.copy());
+        // Nothing in stock: prefer a member the plan actually produces.
+        if (!preferred.isEmpty()) {
+            for (ItemStack stack : ingredient.getItems()) {
+                if (!stack.isEmpty() && preferred.contains(stack.getItem())) {
+                    return cleanDisplayNbt(stack.copy());
+                }
             }
         }
         if (best != null) return cleanDisplayNbt(best.copy());
@@ -2327,7 +2374,12 @@ public final class GenericCraftPacket {
      * spread across different valid items instead of always picking the same one.
      */
     private static ItemStack matchAndConsume(Ingredient ingredient, Map<Item, Integer> available) {
-        ItemStack matched = matchBestAvailable(ingredient, available);
+        return matchAndConsume(ingredient, available, java.util.Collections.emptySet());
+    }
+
+    private static ItemStack matchAndConsume(Ingredient ingredient, Map<Item, Integer> available,
+                                             java.util.Set<Item> preferred) {
+        ItemStack matched = matchBestAvailable(ingredient, available, preferred);
         if (matched != null) {
             available.merge(matched.getItem(), -1, Integer::sum);
         }

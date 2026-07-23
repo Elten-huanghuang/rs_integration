@@ -28,6 +28,7 @@ public final class SelectedPath {
 
     // Only nodes with alternatives (hasOrSiblings) appear here.
     private final Map<IngredientKey, Selection> branchSelections = new LinkedHashMap<>();
+    private final Set<IngredientKey> explicitSelections = new LinkedHashSet<>();
 
     @Nullable
     private PlanTreeModel tree;
@@ -64,6 +65,7 @@ public final class SelectedPath {
     /** User picked an alternative. Marks dirty when it differs from the prior choice. */
     public void selectBranch(IngredientKey nodeKey, int alternativeIndex, ResourceLocation recipeId) {
         Selection prev = branchSelections.put(nodeKey, new Selection(alternativeIndex, recipeId));
+        explicitSelections.add(nodeKey);
         if (prev == null || prev.index() != alternativeIndex || !prev.recipeId().equals(recipeId)) {
             dirty = true;
         }
@@ -100,8 +102,9 @@ public final class SelectedPath {
     /** Chosen recipe per node key, for the {@code selectedBranches} confirm packet (Phase 4). */
     public Map<IngredientKey, ResourceLocation> exportSelections() {
         Map<IngredientKey, ResourceLocation> out = new LinkedHashMap<>();
-        for (Map.Entry<IngredientKey, Selection> e : branchSelections.entrySet()) {
-            out.put(e.getKey(), e.getValue().recipeId());
+        for (IngredientKey key : explicitSelections) {
+            Selection selection = branchSelections.get(key);
+            if (selection != null) out.put(key, selection.recipeId());
         }
         return Collections.unmodifiableMap(out);
     }
