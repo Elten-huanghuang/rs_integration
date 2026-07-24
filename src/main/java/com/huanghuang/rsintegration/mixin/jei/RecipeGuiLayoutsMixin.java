@@ -256,13 +256,6 @@ public class RecipeGuiLayoutsMixin {
             //   2. Vanilla minecraft:smithing category → isFa=false for
             //      SmithingTransformRecipe, but recipeId namespace is
             //      forbidden_arcanus.  Check that so we don't miss it.
-            // FA smithing: ApplyModifierRecipe has no fixed base ingredient,
-            // so extract the displayed base from JEI's visual slots instead.
-            // Two paths reach here:
-            //   1. FA's own hephaestus_smithing category → isFa=true (Ritual class)
-            //   2. Vanilla minecraft:smithing category → isFa=false for
-            //      SmithingTransformRecipe, but recipeId namespace is
-            //      forbidden_arcanus.  Check that so we don't miss it.
             ItemStack faSmithingBase = null;
             boolean isSmithingFilter = filter.equals("block.minecraft.smithing_table");
             boolean isForgeFilter = filter.equals("hephaestus_forge");
