@@ -213,7 +213,7 @@ public final class ArsApparatusBatchDelegate extends AbstractBatchDelegate {
         // Call attemptCraft(catalyst, null) via reflection
         boolean craftStarted = Reflect.invoke(be, "attemptCraft",
                 new Class<?>[]{ItemStack.class, net.minecraft.world.entity.player.Player.class},
-                reagent.copy(), null).orElse(false);
+                reagent.copy(), null).isPresent();
 
         if (!craftStarted) {
             RSIntegrationMod.LOGGER.warn("[RSI-ArsApparatus] attemptCraft returned false");
@@ -240,16 +240,15 @@ public final class ArsApparatusBatchDelegate extends AbstractBatchDelegate {
 
     @Nonnull
     @Override
-    public CraftObservation observeCraft(@Nonnull ServerLevel level) {
-        BlockEntity be = level.getBlockEntity(machinePos);
-        if (be == null || !ArsTileAccess.isApparatus(be)) {
-            return new CraftObservation(CraftPhase.FAILED, "Machine disappeared");
+    protected CraftObservation observeMachineCraft(@Nonnull ServerLevel level, @Nonnull BlockEntity be) {
+        if (!ArsTileAccess.isApparatus(be)) {
+            return failObservation("Machine disappeared");
         }
 
         // Check timeout
         long elapsed = level.getGameTime() - craftStartTick;
         if (elapsed > CRAFT_TIMEOUT_TICKS) {
-            return new CraftObservation(CraftPhase.FAILED, "Craft timeout");
+            return failObservation("Craft timeout");
         }
 
         // Read crafting state
@@ -258,15 +257,14 @@ public final class ArsApparatusBatchDelegate extends AbstractBatchDelegate {
 
         if (counter < 0) {
             // Reflection failed
-            return new CraftObservation(CraftPhase.FAILED, "Cannot read craft state");
+            return failObservation("Cannot read craft state");
         }
 
         // Crafting cycle: counter goes from 0 to 210+, then isCrafting becomes false
         if (isCrafting && counter <= ArsTileAccess.APPARATUS_CRAFT_LENGTH) {
             // Still crafting
             int progress = (counter * 100) / ArsTileAccess.APPARATUS_CRAFT_LENGTH;
-            return new CraftObservation(CraftPhase.WORKING,
-                    "Crafting: " + progress + "% (tick " + counter + "/" + ArsTileAccess.APPARATUS_CRAFT_LENGTH + ")");
+            return workingObservation();
         }
 
         if (!isCrafting && counter == 0) {
@@ -275,23 +273,38 @@ public final class ArsApparatusBatchDelegate extends AbstractBatchDelegate {
             if (be instanceof Container container) {
                 ItemStack result = container.getItem(0);
                 if (!result.isEmpty() && ItemStack.isSameItem(result, expectedOutput)) {
-                    return new CraftObservation(CraftPhase.DONE);
+                    return doneObservation();
                 } else {
-                    return new CraftObservation(CraftPhase.FAILED,
-                            "Expected output not found after craft");
+                    return failObservation("Expected output not found after craft");
                 }
             }
-            return new CraftObservation(CraftPhase.DONE);
+            return doneObservation();
         }
 
         // Intermediate state: counter > 210 but isCrafting still true (settling)
-        return new CraftObservation(CraftPhase.WORKING, "Settling craft");
+        return workingObservation();
     }
 
     @Override
-    public boolean isCraftComplete(@Nonnull ServerLevel level) {
-        CraftObservation obs = observeCraft(level);
-        return obs.phase() == CraftPhase.DONE;
+    protected boolean isMachineCraftFinished(@Nonnull ServerLevel level, @Nonnull BlockEntity be) {
+        if (!ArsTileAccess.isApparatus(be)) return false;
+
+        boolean isCrafting = ArsTileAccess.isApparatusCrafting(be);
+        int counter = ArsTileAccess.apparatusCounter(be);
+
+        if (!isCrafting && counter == 0 && be instanceof Container container) {
+            ItemStack result = container.getItem(0);
+            return !result.isEmpty() && ItemStack.isSameItem(result, expectedOutput);
+        }
+
+        return false;
+    }
+
+    @Override
+    public boolean tryStartSingleCraft(@Nonnull ServerPlayer player) {
+        // This delegate uses tryStartWithMaterials for chain integration
+        // Single-craft mode is not supported for Ars Nouveau
+        return false;
     }
 
     @Nonnull
@@ -317,23 +330,22 @@ public final class ArsApparatusBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public void onBatchFailed(@Nonnull ServerPlayer player, @Nonnull String reason) {
-        ServerLevel level = getLevel();
-        if (level == null) return;
-
-        RSIntegrationMod.LOGGER.debug("[RSI-ArsApparatus] Batch failed: {}", reason);
+    protected void clearMachineState(BlockEntity be, ServerPlayer player) {
+        RSIntegrationMod.LOGGER.debug("[RSI-ArsApparatus] Clearing machine state");
 
         // Try to recover items
-        BlockEntity be = level.getBlockEntity(machinePos);
         if (be instanceof Container container) {
             ItemStack remaining = container.removeItem(0, 64);
-            if (!remaining.isEmpty()) {
+            if (!remaining.isEmpty() && player != null) {
                 player.addItem(remaining);
             }
         }
 
         // Clear pedestals
-        clearPedestalItems(level);
+        ServerLevel level = resolveMachineLevel(player);
+        if (level != null) {
+            clearPedestalItems(level);
+        }
     }
 
     @Override
@@ -360,11 +372,11 @@ public final class ArsApparatusBatchDelegate extends AbstractBatchDelegate {
         }
 
         return new BatchConcurrencyCapabilities(
-                BatchConcurrencyCapabilities.ReservationModel.CHAIN_RESERVED,
-                BatchConcurrencyCapabilities.AnchorModel.MACHINE_SLOT,
-                BatchConcurrencyCapabilities.StructuralSafety.SEPARABLE_OFFLINE,
-                BatchConcurrencyCapabilities.PhysicalRefundScope.MACHINE_LOCAL,
-                BatchConcurrencyCapabilities.RetryProfile.RETRY_SAFE,
+                BatchConcurrencyCapabilities.MaterialOwnership.CHAIN_RESERVED,
+                BatchConcurrencyCapabilities.OutputOwnership.MACHINE_SLOT,
+                BatchConcurrencyCapabilities.CleanupContract.SEPARABLE_OFFLINE,
+                BatchConcurrencyCapabilities.SideEffects.MACHINE_LOCAL,
+                BatchConcurrencyCapabilities.PreparationContract.RETRY_SAFE,
                 supportOffsets
         );
     }
