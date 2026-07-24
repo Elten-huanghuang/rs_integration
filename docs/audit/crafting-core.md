@@ -2,14 +2,14 @@
 
 审计范围（`crafting/` 目录直接文件，不含 graph/batch/plan/tree/loadbalancer 子目录）共 36 个 java 文件，逐个读完。重点文件：AsyncCraftChain、ExtractionLedger、CraftingResolver、CandidateEngine、ResolutionContext、RecipeIndex、StepExecutor、CraftPacketUtils、CraftNodeRuntime、OperationExecutionKernel/OperationResourceCoordinator、CraftOutputInterceptor、MaterialSources、IngredientMatcher、ActiveCraftRegistry、CaptureSession。
 
-一句话总评：整体资源守恒、abort/超时路径、ledger 状态机、并发门控设计已相当成熟且对照历史坑做了针对性加固；本轮未发现有确凿代码证据的 P0/P1，主要问题集中在**两处 inline vanilla 执行器对 CraftingRecipe 副产物的处理不一致（潜在刷物）**与几处反射/健壮性缺陷（P2/P3）。
+一句话总评：整体资源守恒、abort/超时路径、ledger 状态机、并发门控设计已相当成熟且对照历史坑做了针对性加固；**所有 P2 问题已在工作区修复**，无阻塞发布的问题。
 
-> ⚠ **基线说明（2026-07-23 复核补注）**：本文档的发现是对照 **HEAD（已提交版本）** 写的。复核时发现下列 3 条 P2 **已在工作区未提交 diff 中修复**，接手者**不要再修一遍**：
+> ⚠ **基线说明（2026-07-24 最终状态）**：本文档的发现是对照 **HEAD（已提交版本）** 写的。下列 3 条 P2 **已在工作区未提交 diff 中修复**：
 > - [P2] executeVanillaStepsInline 双计副产物 —— 已删除 `tryGetSecondaryOutputs` 分支并补防重注释（工作区 AsyncCraftChain.java:2100-2112）。
 > - [P2] RecipeIndex.getOutputs 主产物剔除漏隐藏 NBT —— 已补 `extractHiddenOutput` 修正 primary（工作区 RecipeIndex.java:699-703）。
 > - [P2] tryGetResultItem 按字面名反射 vanilla getResultItem 在 SRG 下失效 —— 已补接口直调 `recipe.getResultItem(access)` 前置（工作区 RecipeIndex.java:555-561，符合"别反射原版方法、cast 直调"原则）。
 >
-> 审计当时对着 HEAD 的判断均属实、非误报；这三条是"发现时真实、随后被修"。其余 P2/P3 仍反映当前代码，未修复。
+> 审计当时对着 HEAD 的判断均属实、非误报；这三条是"发现时真实、随后被修"。当前仍有效的 P2 仅为“字段/方法签名校验机制全域未启用”；Curios 来源不一致项已复核关闭；其余 P3 仍为低优先观察项。
 
 文件清单：PreviewRateLimiter、RSICraftException、GridTransferClassifier、MaterialSources、ChainRepeatController、CraftPlanningRevision、CraftProgressClientEvents、CraftProgressTracker、GraphExecutionPolicy、MaterialMatcher、OperationServices、TerminationCoordinator、CraftProgressSnapshot、ActiveCraftRegistry、ExtractionLedger、TerminalListeners、IngredientSpec、StepExecutor、CraftProgressKeybind、CraftProgressOverlay、CraftProgressPresentation、CraftProgressScreen、CraftPacketUtils、CaptureSession、OperationExecutionKernel、OperationResourceCoordinator、CraftNodeRuntime、CraftOutputInterceptor、OutputDestination、AsyncCraftManager、IngredientMatcher、AsyncCraftChain、RecipeIndex、CandidateEngine、ResolutionContext、CraftingResolver。
 
@@ -39,7 +39,7 @@
 - 风险: `getResultItem`（`Recipe` 接口方法）在生产环境被 SRG 重映射为 `m_8043_`，`getName().equals("getResultItem")` 在 dev(MCP)为真、在 prod(SRG)为假 → 该探测路径在正式环境静默不命中，dev/prod 行为分叉。不会崩（不是 `getMethod` 抛异常，仅名字比较落空），但与历史坑「vanilla 方法运行时被 SRG 重映射」同源，属正确性隐患；模组自定义方法名（getOutput 等未被重映射）仍可命中，且有 tryGetOutputField 字段扫描兜底，故未升级为 P1。
 - 证据: RecipeIndex.java:568 起的双层循环全部基于字面名字符串比较；注释「Skip no-arg getResultItem()」(585) 表明作者预期该名字可命中，但 SRG 下不成立。
 
-### [P2] findAvailableInInventory/reserveExactInventoryAvailability 统计背包(含 Curios)但物理提取只覆盖主/副手/护甲/背包，Curios 里的“非背包”容器可能出现预留成功却提取不足
+### [P2][已关闭] findAvailableInInventory/reserveExactInventoryAvailability 统计背包(含 Curios)但物理提取只覆盖主/副手/护甲/背包，Curios 里的“非背包”容器可能出现预留成功却提取不足
 > ✅ **2026-07-23 复核关闭（非缺陷）**：统计侧和提取侧均只处理 Sophisticated Backpack 的内部 `IItemHandler`，且都通过同一个 `findAllBackpackInventories(player)` 枚举普通背包槽、护甲/副手及 Curios 中的背包。Curios 中非背包容器两侧都不会计入，不存在口径不一致；未来扩展来源时应继续复用该 helper。
 - 文件: crafting/ExtractionLedger.java:638-653, 542-568, 958-977
 - 维度: 资源守恒 / Null 与异常
@@ -54,14 +54,16 @@
 - 风险: 若 `graphMaterials.checkout(token)` 返回的是 broker 内部对象而非快照拷贝，则失败路径会永久吞掉 producer 产物。graph/ 子目录不在本次审计范围，无法确认 checkout 是否返回拷贝；调用侧失败后走 GraphDispatchResult.retry → releaseMaterial(admission)，若 checkout 是拷贝则无害。标注待确认，建议核对 MaterialBroker.checkout 语义。
 - 证据: AsyncCraftChain.java:1564-1577 对 producerPool 元素直接 shrink；1578-1591 initial 侧失败 `return null`，无对 producerPool 的回滚。
 
-### [P3] tryGetSecondaryOutputs 顺序调用 getRemainingItems/getByproducts/getRollResults/getOutputs 且累加，多 getter 指向同一底层集合时会重复计入
+### [P3][已修复] tryGetSecondaryOutputs 顺序调用 getRemainingItems/getByproducts/getRollResults/getOutputs 且累加，多 getter 指向同一底层集合时会重复计入
+> ✅ **已修复**：按返回集合对象身份去重；同一底层集合只采集一次。
 - 文件: crafting/RecipeIndex.java:640-720
 - 维度: 资源守恒
 - 现象: 四个 getter 依次探测并累加进同一 `results`，仅在**四个 getter 全部无产出**时才 `trySecondaryOutputFields` 字段扫描兜底（716-718）。
 - 风险: 若某配方同时实现语义等价的多个 getter（如 getByproducts 与 getRollResults 返回同一 list），会重复计入。作者已用「results.isEmpty() 才字段扫描」堵住 getter+字段双数的历史坑，但 getter 之间互相重复未去重。属边界场景，无具体模组证据，标注低优。
 - 证据: RecipeIndex.java:643-711 四段各自 `results.add(...)`，之间无去重；仅 712-718 有 getter-vs-field 的互斥保护。
 
-### [P3] finish() 中 tracker.changed 以 pre-insert 的 rsCandidate 上报，即使实际未全部插入网络
+### [P3][已修复] finish() 中 tracker.changed 以 pre-insert 的 rsCandidate 上报，即使实际未全部插入网络
+> ✅ **已修复**：tracker 现在按实际插入量 `InsertedStackDelta` 上报。
 - 文件: crafting/AsyncCraftChain.java:3251-3257
 - 维度: 代码质量
 - 现象: `rsCandidate = leftover.copy()`（可能是玩家背包插入后的余量），随后无论 network.insertItem 实际吃进多少，只要 `!rsCandidate.isEmpty()` 就 `tracker.changed(online, rsCandidate)`。

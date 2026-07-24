@@ -484,6 +484,9 @@ public final class CookingPotBatchDelegate extends AbstractBatchDelegate {
         }
         ItemStack meal = handler.extractItem(MEAL_DISPLAY_SLOT, 64, false);
         if (!meal.isEmpty()) refundToRSNetwork(meal);
+        // Container was reserved via the shared ledger (separated from materials in
+        // tryStartWithMaterials L204-216). When usingSharedLedger=true, the ledger's
+        // refundCommitted() will restore it; delegate must not double-refund.
         ItemStack container = handler.extractItem(CONTAINER_SLOT, 64, false);
         if (!container.isEmpty() && !usingSharedLedger) refundToRSNetwork(container);
         ItemStack out = handler.extractItem(OUTPUT_SLOT, 64, false);
