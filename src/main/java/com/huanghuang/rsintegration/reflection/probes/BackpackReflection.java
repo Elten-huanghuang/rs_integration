@@ -4,7 +4,8 @@ import com.huanghuang.rsintegration.reflection.contract.ContractValidation;
 import com.huanghuang.rsintegration.reflection.contract.ReflectionContract;
 import com.huanghuang.rsintegration.util.ModIds;
 
-@ModReflection(modId = ModIds.SOPHISTICATED_BACKPACKS, description = "Sophisticated Backpacks + Better Combat")
+@ModReflection(modId = ModIds.SOPHISTICATED_BACKPACKS + "+" + ModIds.BETTER_COMBAT,
+               description = "Sophisticated Backpacks + Better Combat integration")
 public final class BackpackReflection {
 
     private static final String MOD = ModIds.SOPHISTICATED_BACKPACKS;

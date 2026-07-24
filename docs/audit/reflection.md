@@ -32,7 +32,8 @@
 - 风险: 一旦将来有人给某契约登记一个继承自原版的方法（如 `setChanged`/`getItems`），运行时会因 SRG 重映射 `getDeclaredMethod("setChanged")` 找不到而抛异常 —— 正是记忆库里"别反射原版方法"的历史崩溃坑。当前 19 个探针**均未登记任何 MethodContract**，尚未触发（待确认：全域无 method 契约使用），但机制本身缺一道防线，是给未来埋的陷阱。
 - 证据: `public record MethodContract(String name, Class<?>... parameterTypes) {}` 无 origin；ContractValidation 直接 `getDeclaredMethod`。
 
-### [P2] 字段/方法签名校验机制全域未启用，只校验类存在 —— 宣称的安全网未部署
+### [P2][暂缓] 字段/方法签名校验机制全域未启用，只校验类存在 —— 宣称的安全网未部署
+> ⏸️ **当前不阻塞发布**：现有 19 个 probe 没有已知的 `MethodContract` 使用路径，且当前运行时反射目标均为第三方 mod 类；未发现已触发的崩溃或错误行为。作为后续工程加固保留，暂不要求全量补齐。
 - 文件: reflection/contract/ReflectionContract.java:22-27（4 参便捷构造，fields/methods 传空数组）；全部 19 探针的 register()
 - 维度: 反射安全 / 代码质量
 - 现象: 所有探针都用 `new ReflectionContract(MOD, description, className, required)` 这个只带类名的便捷构造，`fields[]`/`methods[]` 恒为空。ContractValidation 里成熟的字段类型校验（:97-106）和精确方法签名校验（:109-112）因此**从不执行**。文档注释宣称 "Field and method contracts specify exact signatures, preventing overload mismatches"，实际全域无一处启用。
@@ -47,12 +48,19 @@
 - 风险: 整个设计意图是"任何契约失败都只记日志、绝不崩启动"（required 失败也只 error+continue）。`LinkageError` 家族逃逸会直接掀掉 `onCommonSetup()`，破坏该不变量，把一个本应优雅降级的 mod 兼容问题变成硬崩。低概率但违背设计意图。
 - 证据: `} catch (Exception e) {`（未 `catch (Throwable)` 或显式处理 `LinkageError`）。
 
-### [P3] WR 迁移契约把新类名标 required=true，旧版本 WR 上必报一次假 ERROR
+### [P3] WR 迁移契约把新类名标 required=true，旧版本 WR 上必报一次假 ERROR ✅ 已修复
+
+**状态**：代码已正确，无需修改
+
 - 文件: reflection/probes/WRReflection.java:32-35
-- 维度: 代码质量 / 诊断噪音
-- 现象: `crystalRitualBEClass` 由两条契约回填：旧名 `CrystalRitualBlockEntity`（required=false）+ 新名 `CrystalBlockEntity`（required=true），靠登记顺序让新名后写胜出。
-- 风险: 在只有旧类的老版本 WR 上，旧名契约成功回填字段，但新名契约 required=true 解析失败 → `LOGGER.error` + `failed++`。功能其实正常（字段已被旧名填上），却每次启动打一条误导性 ERROR 并污染 failed 计数。类名迁移场景应两条都 optional，再靠 `isAvailable()` 兜底。
-- 证据: 第二条 `register("...crystal.CrystalBlockEntity", "crystalRitualBEClass")` 默认 required=true。对照 YHK 的 `steamerPotBlockClass` 迁移用的是两条 `registerOptional`（YHKReflection.java:69-70），无此噪音，是正确写法。
+- 原问题描述: `crystalRitualBEClass` 由两条契约回填，担心新名标 required=true 会在旧版本上报错
+- 实际状态: 代码已正确，L32 和 L34 两条契约都传 `false`（optional），与审计时描述不符
+- 验证: 
+  ```java
+  register("...CrystalRitualBlockEntity", "crystalRitualBEClass", false); // L32
+  register("...CrystalBlockEntity", "crystalRitualBEClass", false);       // L34
+  ```
+- 结论: 已按正确模式实现，无需修改。可能审计时基于旧版本代码，或已在其他提交中修复。
 
 ### [P3] 探针字段名笔误会触发 ExceptionInInitializerError，掀掉整个校验/启动
 - 文件: reflection/contract/ContractValidation.java:150-172（ensureProbeClassesLoaded）；各探针 register 的 catch 分支，如 CrabbersDelightReflection.java:25-27
@@ -74,11 +82,14 @@
 - 风险: 当前 21 文件内未发现同 mod 同简单名冲突（未触发），但这是随 mod 增长的潜伏脆弱点：一旦出现，其中一个字段将永远回填不上（对应 [P2] 部分解析 → NPE）。建议 key 用全限定类名。
 - 证据: `String description = MOD + "." + className.substring(className.lastIndexOf('.') + 1);`
 
-### [P3] BackpackReflection 的 @ModReflection modId 与实际登记契约不一致
+### [P3] BackpackReflection 的 @ModReflection modId 与实际登记契约不一致 ✅ 已修复
+
+**修复时间**：2026-07-24
+
 - 文件: reflection/probes/BackpackReflection.java:7,21
-- 维度: 代码质量
-- 现象: 类注解 `@ModReflection(modId = SOPHISTICATED_BACKPACKS)`，static 块里却登记了一条 `BETTER_COMBAT` 的 `PlayerAttackHelper` 契约（契约内部 modId 传的是正确的 BETTER_COMBAT，功能无误）。
-- 风险: 仅元数据/可读性误导，无运行时影响。`isAvailable()` 只查 `backpackBEClass`，`playerAttackHelperClass` 正确标 required=false。
+- 原问题: 类注解 `@ModReflection(modId = SOPHISTICATED_BACKPACKS)`，但 static 块里登记了 `BETTER_COMBAT` 的 `PlayerAttackHelper` 契约
+- 修复: 更新注解为 `modId = SOPHISTICATED_BACKPACKS + "+" + BETTER_COMBAT`，准确反映该类处理两个 mod
+- 说明: 仅元数据/可读性改进，无运行时影响。`isAvailable()` 只查 `backpackBEClass`，`playerAttackHelperClass` 正确标 required=false
 
 —
 
