@@ -1,7 +1,6 @@
 package com.huanghuang.rsintegration.machine;
 
-import com.github.stuxuhai.jpinyin.PinyinFormat;
-import com.github.stuxuhai.jpinyin.PinyinHelper;
+import com.huanghuang.rsintegration.autoeat.client.PinyinUtil;
 import com.huanghuang.rsintegration.config.ClientSyncedConfig;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
@@ -186,12 +185,8 @@ public final class MachineHub {
 
     private static boolean matchesPinyin(String text, String lowerQuery) {
         try {
-            String pinyin = PinyinHelper.convertToPinyinString(text, "",
-                    PinyinFormat.WITHOUT_TONE);
-            if (pinyin.toLowerCase().contains(lowerQuery)) return true;
-            String shortPinyin = PinyinHelper.getShortPinyin(text);
-            if (shortPinyin != null && shortPinyin.toLowerCase().contains(lowerQuery))
-                return true;
+            if (PinyinUtil.toPinyin(text).contains(lowerQuery)) return true;
+            if (PinyinUtil.toPinyinInitials(text).contains(lowerQuery)) return true;
             return false;
         } catch (Exception e) {
             return false;

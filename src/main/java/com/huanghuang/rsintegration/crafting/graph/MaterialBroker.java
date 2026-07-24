@@ -84,6 +84,7 @@ public final class MaterialBroker {
 
     private final Map<Long, AssetLot> lots = new LinkedHashMap<>();
     private final Map<ReservationToken, Reservation> reservations = new HashMap<>();
+    private final Thread ownerThread = Thread.currentThread();
     private long nextLotId;
     private long nextToken;
 
@@ -94,6 +95,7 @@ public final class MaterialBroker {
 
     /** Publish the exact runtime fragment owned by this source. */
     public long publishActual(MaterialSource source, MaterialKey material, ItemStack stack) {
+        requireOwnerThread();
         Objects.requireNonNull(source, "source");
         Objects.requireNonNull(material, "material");
         Objects.requireNonNull(stack, "stack");
@@ -109,11 +111,13 @@ public final class MaterialBroker {
     }
 
     public boolean canReserve(List<Request> requests) {
+        requireOwnerThread();
         Objects.requireNonNull(requests, "requests");
         return plan(List.copyOf(requests)) != null;
     }
 
     public ReservationToken reserve(NodeId owner, List<Request> requests) {
+        requireOwnerThread();
         Objects.requireNonNull(owner, "owner");
         List<Request> immutableRequests = List.copyOf(requests);
         if (immutableRequests.isEmpty()) {
@@ -138,6 +142,7 @@ public final class MaterialBroker {
     }
 
     public void commit(ReservationToken token) {
+        requireOwnerThread();
         Reservation reservation = require(token, ReservationState.RESERVED);
         for (Claim claim : reservation.claims) {
             AssetLot lot = lots.get(claim.lotId);
@@ -148,6 +153,7 @@ public final class MaterialBroker {
     }
 
     public void release(ReservationToken token) {
+        requireOwnerThread();
         Reservation reservation = require(token, ReservationState.RESERVED);
         for (Claim claim : reservation.claims) {
             AssetLot lot = lots.get(claim.lotId);
@@ -158,6 +164,7 @@ public final class MaterialBroker {
     }
 
     public void settle(ReservationToken token) {
+        requireOwnerThread();
         Reservation reservation = require(token, ReservationState.COMMITTED);
         for (Claim claim : reservation.claims) {
             AssetLot lot = lots.get(claim.lotId);
@@ -168,6 +175,7 @@ public final class MaterialBroker {
     }
 
     public void refund(ReservationToken token) {
+        requireOwnerThread();
         Reservation reservation = require(token, ReservationState.COMMITTED);
         for (Claim claim : reservation.claims) {
             AssetLot lot = lots.get(claim.lotId);
@@ -182,6 +190,7 @@ public final class MaterialBroker {
      * Remaining committed claims stay owned by in-flight/consumed operations.
      */
     public void refundCommittedProducerFragments(ReservationToken token, List<ItemStack> fragments) {
+        requireOwnerThread();
         Reservation reservation = require(token, ReservationState.COMMITTED);
         List<ItemStack> remaining = new ArrayList<>();
         for (ItemStack stack : fragments) {
@@ -227,6 +236,7 @@ public final class MaterialBroker {
     }
 
     public Checkout checkout(ReservationToken token) {
+        requireOwnerThread();
         Objects.requireNonNull(token, "token");
         Reservation reservation = reservations.get(token);
         if (reservation == null) throw new IllegalArgumentException("unknown reservation token " + token.value());
@@ -244,11 +254,13 @@ public final class MaterialBroker {
     }
 
     public ReservationState state(ReservationToken token) {
+        requireOwnerThread();
         Reservation reservation = reservations.get(token);
         return reservation == null ? null : reservation.state;
     }
 
     public int available(MaterialSource source, MaterialKey material) {
+        requireOwnerThread();
         int total = 0;
         for (AssetLot lot : lots.values()) {
             if (lot.source.equals(source) && lot.material.equals(material)) total += lot.available;
@@ -257,6 +269,7 @@ public final class MaterialBroker {
     }
 
     public int heldBy(NodeId owner) {
+        requireOwnerThread();
         int total = 0;
         for (Reservation reservation : reservations.values()) {
             if (!reservation.owner.equals(owner)) continue;
@@ -282,6 +295,7 @@ public final class MaterialBroker {
      * settled units are excluded by construction.
      */
     public List<ItemStack> drainAvailable(MaterialSource source, MaterialKey material, int quantity) {
+        requireOwnerThread();
         Objects.requireNonNull(source, "source");
         Objects.requireNonNull(material, "material");
         if (quantity <= 0) throw new IllegalArgumentException("take quantity must be positive");
@@ -302,6 +316,7 @@ public final class MaterialBroker {
 
     /** Exact producer fragments owned by a reservation. */
     public List<ItemStack> producerFragments(ReservationToken token) {
+        requireOwnerThread();
         Objects.requireNonNull(token, "token");
         Reservation reservation = reservations.get(token);
         if (reservation == null) throw new IllegalArgumentException("unknown reservation token " + token.value());
@@ -321,6 +336,7 @@ public final class MaterialBroker {
 
     /** Drain every currently available producer fragment exactly once. */
     public List<ItemStack> drainAvailableProducerAssets() {
+        requireOwnerThread();
         List<ItemStack> drained = new ArrayList<>();
         for (AssetLot lot : lots.values()) {
             if (!(lot.source instanceof MaterialSource.ProducerOutput) || lot.available <= 0) continue;
@@ -332,7 +348,14 @@ public final class MaterialBroker {
     }
 
     public int totalAvailable() {
+        requireOwnerThread();
         return lots.values().stream().mapToInt(lot -> lot.available).sum();
+    }
+
+    private void requireOwnerThread() {
+        if (Thread.currentThread() != ownerThread) {
+            throw new IllegalStateException("MaterialBroker accessed outside its owner server thread");
+        }
     }
 
     private Reservation require(ReservationToken token, ReservationState expected) {

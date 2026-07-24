@@ -208,7 +208,7 @@ public final class GenericBatchDelegate extends AbstractBatchDelegate {
         }
         if (executions <= 0) return false;
 
-        ItemStack combinedResult = ItemStack.EMPTY;
+        RepeatedCraftingOutputAccumulator outputs = new RepeatedCraftingOutputAccumulator();
         for (int operation = 0; operation < executions; operation++) {
             List<ItemStack> operationMaterials = new ArrayList<>(materials.size());
             for (int i = 0; i < specs.size(); i++) {
@@ -224,17 +224,9 @@ public final class GenericBatchDelegate extends AbstractBatchDelegate {
             if (!captureActualCraftingOutputs(craftingRecipe, operationMaterials, player)) {
                 return false;
             }
-            ItemStack operationResult = pendingResult.copy();
-            if (operationResult.isEmpty()) return false;
-            if (combinedResult.isEmpty()) {
-                combinedResult = operationResult;
-            } else if (ItemStack.isSameItemSameTags(combinedResult, operationResult)) {
-                combinedResult.grow(operationResult.getCount());
-            } else {
-                return false;
-            }
+            if (!outputs.add(pendingResult)) return false;
         }
-        pendingResult = combinedResult;
+        pendingResult = outputs.result();
         return true;
     }
 

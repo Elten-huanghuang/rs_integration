@@ -86,6 +86,17 @@ class ExtractionLedgerTest {
     }
 
     @Test
+    void cancelReservationsSinceRejectsInvalidMarkAndAcceptsCurrentEnd() {
+        ExtractionLedger ledger = new ExtractionLedger();
+
+        ledger.cancelReservationsSince(0);
+
+        assertEquals(0, ledger.size());
+        assertThrows(IllegalArgumentException.class, () -> ledger.cancelReservationsSince(-1));
+        assertThrows(IllegalArgumentException.class, () -> ledger.cancelReservationsSince(1));
+    }
+
+    @Test
     void settleCommittedRejectedWhenNotCommitted() {
         ExtractionLedger ledger = new ExtractionLedger();
         ExtractionLedger.ReservationToken token =

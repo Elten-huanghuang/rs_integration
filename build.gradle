@@ -56,9 +56,12 @@ repositories {
 dependencies {
     minecraft "net.minecraftforge:forge:1.20.1-47.3.22"
 
-    // Pinyin search — jarJar so it stays bundled without split-package risk.
-    implementation(jarJar("com.github.stuxuhai:jpinyin:1.1.8")) {
-        jarJar.ranged(it, "[1.1.8,)")
+    // Pinyin search. TinyPinyin and its runtime trie are Apache-2.0 licensed.
+    implementation(jarJar("io.github.biezhi:TinyPinyin:2.0.3.RELEASE")) {
+        jarJar.ranged(it, "[2.0.3.RELEASE,)")
+    }
+    implementation(jarJar("org.ahocorasick:ahocorasick:0.4.0")) {
+        jarJar.ranged(it, "[0.4.0,)")
     }
 
     // All mod jars in libs — must go through fg.deobf() so ForgeGradle
@@ -130,6 +133,11 @@ processResources {
                 "mod_name": mod_name
         )
     }
+
+    from("LICENSE") {
+        into "META-INF"
+        rename { "LICENSE_RS_INTEGRATION" }
+    }
 }
 
 jar {
@@ -181,8 +189,12 @@ tasks.register('verifyReleaseJar') {
             def requiredEntries = [
                     'META-INF/MANIFEST.MF',
                     'META-INF/mods.toml',
+                    'META-INF/LICENSE_RS_INTEGRATION',
+                    'META-INF/licenses/Apache-2.0.txt',
+                    'META-INF/licenses/MIT-MixinExtras.txt',
                     'META-INF/jarjar/metadata.json',
-                    'META-INF/jarjar/jpinyin-1.1.8.jar',
+                    'META-INF/jarjar/TinyPinyin-2.0.3.RELEASE.jar',
+                    'META-INF/jarjar/ahocorasick-0.4.0.jar',
                     'META-INF/jarjar/mixinextras-forge-0.3.6.jar',
                     'rs_integration.mixins.json',
                     'rs_integration.refmap.json'

@@ -1111,6 +1111,15 @@ public final class ExtractionLedger implements AutoCloseable {
         });
     }
 
+    /** Undo every uncommitted reservation created after the supplied mark. */
+    public void cancelReservationsSince(int mark) {
+        requireState(State.IDLE, State.RESERVING);
+        if (mark < 0 || mark > entries.size()) {
+            throw new IllegalArgumentException("reservation mark out of range: " + mark);
+        }
+        while (entries.size() > mark) cancelLastReservation();
+    }
+
     public void releaseReservations(List<ItemStack> stacks) {
         removeMatchingEntries(stacks, true);
     }

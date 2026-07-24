@@ -1,8 +1,7 @@
 package com.huanghuang.rsintegration.sidepanel;
 
-import com.github.stuxuhai.jpinyin.PinyinFormat;
-import com.github.stuxuhai.jpinyin.PinyinHelper;
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.autoeat.client.PinyinUtil;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
@@ -139,12 +138,8 @@ final class DisplayListManager {
     static boolean matchesPinyin(String itemName, String query) {
         try {
             String lowerQuery = query.toLowerCase();
-            String pinyin = PinyinHelper.convertToPinyinString(itemName, "",
-                    PinyinFormat.WITHOUT_TONE);
-            if (pinyin.toLowerCase().contains(lowerQuery)) return true;
-            String shortPinyin = PinyinHelper.getShortPinyin(itemName);
-            if (shortPinyin != null && shortPinyin.toLowerCase().contains(lowerQuery))
-                return true;
+            if (PinyinUtil.toPinyin(itemName).contains(lowerQuery)) return true;
+            if (PinyinUtil.toPinyinInitials(itemName).contains(lowerQuery)) return true;
             return false;
         } catch (Exception e) {
             return false;
