@@ -47,12 +47,17 @@
 - 风险: 两侧口径基本对齐（都只认 Sophisticated Backpacks 的内部库存），暂无直接刷/丢证据；但一旦 `findAllBackpackInventories` 后续纳入更多来源而提取侧未同步，会出现“预留通过、提取不足”→ commit 阶段 `extractOne` 返回不足 → 走 rollbackExtractedPhases 清账（干净失败，不刷物）。目前为一致性脆弱点，标注待确认。
 - 证据: 统计侧 ExtractionLedger.java:643-648 遍历 `findAllBackpackInventories`；提取侧 extractOne PLAYER_INVENTORY 分支(542-568)与 extractFromBackpackSlots(958-977)来源集合需与之严格同源，靠约定维系，无编译期保证。
 
-### [P3] reserveGraphMaterials 消费失败返回 null 前，已对本地 producerPool 做了 shrink，依赖 MaterialBroker.checkout 为非破坏性拷贝
+### [P3] reserveGraphMaterials 消费失败返回 null 前，已对本地 producerPool 做了 shrink，依赖 MaterialBroker.checkout 为非破坏性拷贝 ✅ 已验证安全
+
+**验证时间**：2026-07-24
+
 - 文件: crafting/AsyncCraftChain.java:1562-1596
-- 维度: 资源守恒（待确认）
-- 现象: 循环里对 `producerPool` 元素 `produced.shrink(take)` 消费产物；若随后 initial 池 `takeExactMatching`/`reserveExact` 失败即 `return null`，此时 producerPool 已被局部扣减。
-- 风险: 若 `graphMaterials.checkout(token)` 返回的是 broker 内部对象而非快照拷贝，则失败路径会永久吞掉 producer 产物。graph/ 子目录不在本次审计范围，无法确认 checkout 是否返回拷贝；调用侧失败后走 GraphDispatchResult.retry → releaseMaterial(admission)，若 checkout 是拷贝则无害。标注待确认，建议核对 MaterialBroker.checkout 语义。
-- 证据: AsyncCraftChain.java:1564-1577 对 producerPool 元素直接 shrink；1578-1591 initial 侧失败 `return null`，无对 producerPool 的回滚。
+- 原问题: 循环里对 `producerPool` 元素 `produced.shrink(take)` 消费产物；若随后 initial 池失败即 `return null`，此时 producerPool 已被局部扣减，担心会影响 broker 内部状态
+- 验证结果: `MaterialBroker.checkout(token)` 返回的是**深拷贝**：
+  - `Checkout` 构造函数 `fragments = List.copyOf(fragments)`（不可变列表）
+  - `Fragment` 构造函数 `stack = stack.copy()`（ItemStack 副本）
+  - `checkout` 方法内 `lot.stack.copyWithCount(claim.quantity)`（再次拷贝）
+- 结论: producerPool 是 checkout 返回的副本，对其 shrink 不影响 broker 内部状态；失败路径返回 null 后，caller 执行 `releaseMaterial(admission)` 正确释放预留资源。**无风险，设计正确。**
 
 ### [P3][已修复] tryGetSecondaryOutputs 顺序调用 getRemainingItems/getByproducts/getRollResults/getOutputs 且累加，多 getter 指向同一底层集合时会重复计入
 > ✅ **已修复**：按返回集合对象身份去重；同一底层集合只采集一次。

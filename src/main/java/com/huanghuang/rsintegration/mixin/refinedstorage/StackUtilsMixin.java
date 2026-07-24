@@ -26,12 +26,16 @@ public abstract class StackUtilsMixin {
         if (current == null) return;
         if (!ResonanceDiskWrapper.FACTORY_ID.equals(current.getFactoryId())) return;
 
+        // If another slot already has a resonance disk, disable the current slot.
+        // Only clear the itemDisks entry; leave fluidDisks untouched since the
+        // current slot might hold a separate fluid disk that should remain active.
         for (int i = 0; i < itemDisks.length; i++) {
             if (i == slotIndex) continue;
             IStorageDisk<ItemStack> other = itemDisks[i];
             if (other != null && ResonanceDiskWrapper.FACTORY_ID.equals(other.getFactoryId())) {
                 itemDisks[slotIndex] = null;
-                fluidDisks[slotIndex] = null;
+                // fluidDisks[slotIndex] intentionally NOT cleared — resonance disk
+                // is item-only; a separate fluid disk in this slot should stay active.
                 return;
             }
         }

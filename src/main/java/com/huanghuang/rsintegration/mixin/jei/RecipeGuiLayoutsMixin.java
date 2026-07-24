@@ -717,10 +717,11 @@ public class RecipeGuiLayoutsMixin {
             return virtualRecipe == null ? null : virtualRecipe.getId();
         }
 
-        // Standard Recipe.getId() / m_6423_()
+        // Standard Recipe.getId() / m_6423_() — use ObfuscationReflectionHelper
+        // for vanilla methods to handle SRG remapping correctly
         try {
-            Method getId = Reflect.findMethod(recipe.getClass(), "getId", new Class<?>[0]);
-            if (getId == null) getId = Reflect.findMethod(recipe.getClass(), "m_6423_", new Class<?>[0]);
+            Method getId = net.minecraftforge.fml.util.ObfuscationReflectionHelper.findMethod(
+                    recipe.getClass(), "m_6423_" /* getId SRG */);
             if (getId != null) {
                 Object result = getId.invoke(recipe);
                 if (result instanceof ResourceLocation id) return unwrapJeiId(id);

@@ -59,17 +59,23 @@
 
 ## P3
 
-### [P3] StackUtilsMixin “只允许一块共振盘”的判定依赖 createStorages 的逐槽调用顺序
-- 文件: src/main/java/com/huanghuang/rsintegration/mixin/refinedstorage/StackUtilsMixin.java:25-38
-- 维度: 算法正确性
-- 现象: TAIL 注入里遍历其余槽位，发现已有另一块共振盘就把当前槽 `itemDisks[slotIndex]=null; fluidDisks[slotIndex]=null;`。
-- 风险: 结果“保留哪一块”取决于 createStorages 对各槽的调用先后（先建的槽会成为保留者）；行为上仍能保证“最多一块生效”，但被禁用的槽同时把 `fluidDisks[slotIndex]` 也置空（即便共振盘是 item 盘），若该槽存在独立 fluid 盘会被误清。属边界健壮性，非丢数据（盘 NBT 未动，仅本次不激活）。
+### [P3] StackUtilsMixin “只允许一块共振盘”的判定依赖 createStorages 的逐槽调用顺序 ✅ 已修复
 
-### [P3] RecipeGuiLayoutsMixin 中对 vanilla 方法按 dev 名反射（getId），靠 SRG 名兜底
-- 文件: src/main/java/com/huanghuang/rsintegration/mixin/jei/RecipeGuiLayoutsMixin.java:726-733
-- 维度: 反射安全
-- 现象: `Reflect.findMethod(recipe.getClass(), "getId", ...)`，失败再 `findMethod(..., "m_6423_", ...)`。
-- 风险: 生产环境 vanilla `Recipe.getId` 实为 `m_6423_`，“getId”探针恒失败，永远靠第二次 `m_6423_` 命中——正是记忆里“别反射原版方法”的坑，只是此处有 SRG 兜底未致命。若未来 vanilla 方法签名/映射变化，兜底也会失效。属可接受但需留意。
+**修复时间**：2026-07-24
+
+- 文件: src/main/java/com/huanghuang/rsintegration/mixin/refinedstorage/StackUtilsMixin.java:25-38
+- 原问题: TAIL 注入发现已有另一块共振盘时，同时清空 `itemDisks[slotIndex]` 和 `fluidDisks[slotIndex]`，即使该槽的 fluid 盘可能是独立的非共振盘
+- 修复: 只清空 `itemDisks[slotIndex]`，不再清空 `fluidDisks[slotIndex]`，因为共振盘是 item-only，该槽可能有独立的 fluid 盘应保持激活
+- 效果: 禁用重复共振盘不再误伤同槽的独立 fluid 盘
+
+### [P3] RecipeGuiLayoutsMixin 中对 vanilla 方法按 dev 名反射（getId），靠 SRG 名兜底 ✅ 已修复
+
+**修复时间**：2026-07-24
+
+- 文件: src/main/java/com/huanghuang/rsintegration/mixin/jei/RecipeGuiLayoutsMixin.java:720-728
+- 原问题: 先尝试 dev 名 “getId”，失败再尝试 SRG 名 “m_6423_”，生产环境第一次总是失败
+- 修复: 直接使用 `ObfuscationReflectionHelper.findMethod(recipe.getClass(), “m_6423_”)` 处理 SRG 重映射
+- 效果: 避免不必要的失败尝试，正确处理 vanilla 方法反射
 
 ### [P3] 生产 SRG 方法名 + remap=false 的注入在 deobf 开发环境不生效 ✅ 已接受设计
 
@@ -109,11 +115,22 @@
 - 现象: newScreen==null 时若 `popRestoreTarget(closing)` 返回非空，`ci.cancel()` 后在 HEAD 注入内再次 `setScreen(restore)`。
 - 风险: 若 restore==closing（同一实例），会重入死循环。当前依赖 GuiNavStack 语义保证 restore≠closing 且不为 null；建议加一道 `restore != closing` 自防护。
 
-### [P3] ServerPlayerMessageMixin 在 silent 作用域内抑制该玩家全部系统消息
+### [P3] ServerPlayerMessageMixin 在 silent 作用域内抑制该玩家全部系统消息 ✅ 已验证安全
+
+**验证时间**：2026-07-24
+
 - 文件: src/main/java/com/huanghuang/rsintegration/mixin/minecraft/ServerPlayerMessageMixin.java:19-22
-- 维度: Null 与异常 / 状态一致性
-- 现象: `sendSystemMessage(Component,boolean)` HEAD 注入，`if (PreparationMessageScope.isSilent()) ci.cancel();`——静默期抑制**所有**系统消息，非仅 preparation 消息。
-- 风险: 依赖 PreparationMessageScope 在 finally 中复位；若作用域泄漏（异常路径未复位），玩家将持续收不到任何系统消息。需确认 scope 用 try/finally 严格配对（源不在本域）。
+- 原问题: `sendSystemMessage` HEAD 注入，`if (PreparationMessageScope.isSilent()) ci.cancel();` 静默期抑制所有系统消息，担心作用域泄漏会导致玩家持续收不到消息
+- 验证结果: `PreparationMessageScope.callSilently()` 有正确的 try-finally 保护：
+  ```java
+  try {
+      return action.get();
+  } finally {
+      if (previous == 0) DEPTH.remove();
+      else DEPTH.set(previous);
+  }
+  ```
+- 结论: ThreadLocal DEPTH 计数器严格配对，异常路径也会复位。**无泄漏风险，设计正确。**
 
 ### [P3] CraftingGridBehaviorMixin 的 NBT 无关抽取兜底可能取到错误 NBT 变体
 - 文件: src/main/java/com/huanghuang/rsintegration/mixin/refinedstorage/CraftingGridBehaviorMixin.java:26-31
