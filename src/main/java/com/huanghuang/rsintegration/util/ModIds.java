@@ -26,6 +26,7 @@ public final class ModIds {
     public static final String DISTANT_WORLDS = "distant_worlds";
     public static final String MAJRUSZS_ACCESSORIES = "majruszsaccessories";
     public static final String BOTANIA = "botania";
+    public static final String ARS_NOUVEAU = "ars_nouveau";
 
     // Dependencies
     public static final String REFINED_STORAGE = "refinedstorage";
@@ -53,6 +54,10 @@ public final class ModIds {
     public static final String ID_FD_COOKING_POT = "farmersdelight_cooking_pot";
     public static final String ID_FR_KETTLE = "farmersrespite_kettle";
     public static final String ID_FA_CLIBANO = "forbidden_arcanus_clibano";
+
+    // Ars Nouveau (one mod -> two automatable machine types)
+    public static final String ID_ARS_IMBUEMENT = "ars_nouveau_imbuement";
+    public static final String ID_ARS_APPARATUS = "ars_nouveau_apparatus";
 
     // Youkai's Homecoming
     public static final String YOUKAISHOMECOMING = "youkaishomecoming";

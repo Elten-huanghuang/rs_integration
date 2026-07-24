@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.reflection.contract;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.api.VersionRange;
 import com.huanghuang.rsintegration.reflection.probes.AetherworksReflection;
+import com.huanghuang.rsintegration.reflection.probes.ArsNouveauReflection;
 import com.huanghuang.rsintegration.reflection.probes.BackpackReflection;
 import com.huanghuang.rsintegration.reflection.probes.CrabbersDelightReflection;
 import com.huanghuang.rsintegration.reflection.probes.CrockPotReflection;
@@ -178,11 +179,13 @@ public final class ContractValidation {
      */
     private static void ensureProbeClassesLoaded() {
         tryLoadProbe("Aetherworks", () -> AetherworksReflection.anvilBEClass);
+        tryLoadProbe("ArsNouveau", () -> ArsNouveauReflection.imbuementTileClass);
         tryLoadProbe("Backpack", () -> BackpackReflection.backpackBEClass);
         tryLoadProbe("CrabbersDelight", () -> CrabbersDelightReflection.crabTrapBEClass);
         tryLoadProbe("CrockPot", () -> CrockPotReflection.crockPotBEClass);
         tryLoadProbe("DistantWorlds", () -> DistantWorldsReflection.lithumCoreBlockClass);
         tryLoadProbe("Eidolon", () -> EidolonReflection.crucibleTileEntityClass);
+        tryLoadProbe("ArsNouveau", () -> ArsNouveauReflection.imbuementTileClass);
         tryLoadProbe("Embers", () -> EmbersReflection.alchemyTabletBEClass);
         tryLoadProbe("FA", () -> FAReflection.hephaestusForgeBEClass);
         tryLoadProbe("FarmersDelight", () -> FarmersDelightReflection.cookingPotBEClass);

@@ -39,6 +39,7 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.BooleanValue ENABLE_EMBERS_ALCHEMY;
     public static ForgeConfigSpec.BooleanValue ENABLE_AETHERWORKS;
     public static ForgeConfigSpec.BooleanValue ENABLE_AETHER;
+    public static ForgeConfigSpec.BooleanValue ENABLE_ARS_NOUVEAU;
     public static ForgeConfigSpec.BooleanValue ENABLE_CROCKPOT;
     public static ForgeConfigSpec.BooleanValue ENABLE_TACZ;
     public static ForgeConfigSpec.BooleanValue ENABLE_FARMINGFORBLOCKHEADS;
@@ -232,6 +233,11 @@ public final class RSIntegrationConfig {
         ENABLE_AETHER = c
                 .comment("Enable RS integration with Aether (Freezer, Incubator, Altar).")
                 .define("enableAether", true);
+        ENABLE_ARS_NOUVEAU = c
+                .comment("Enable RS integration with Ars Nouveau (Imbuement Chamber and Enchanting Apparatus",
+                        "recursive crafting). Only the imbuement and enchanting_apparatus recipe types are",
+                        "automated; enchantment/glyph/reactive/dye/etc. remain manual (NBT or world interaction).")
+                .define("enableArsNouveau", true);
         ENABLE_CROCKPOT = c
                 .comment("Enable RS integration with CrockPot (Crock Pot and Portable Crock Pot).")
                 .define("enableCrockPot", true);

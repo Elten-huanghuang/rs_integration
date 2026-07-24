@@ -35,6 +35,7 @@ public final class NetworkPacketIds {
     public static final int FA_CRAFT = 21;
     public static final int EIDOLON_CRAFT = 22;
     public static final int WR_WAND_CRAFT = 23;
+    // 24: formerly ARS_NOUVEAU_CRAFT (now uses GenericCraftPacket via IBatchDelegate)
 
     // ── Goety ritual GUI (30-39) ───────────────────────────────────
     public static final int GOETY_CHECK_RS = 30;
