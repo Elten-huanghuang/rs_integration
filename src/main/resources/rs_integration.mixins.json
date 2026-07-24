@@ -12,7 +12,7 @@
     "minecraft.FurnaceMenuMixin",
     "minecraft.InventoryAccessor",
     "minecraft.ItemEntityAccessor",
-    "minecraft.MajruszTreasureBagItemEntityMixin",
+    "majruszsdifficulty.MajruszTreasureBagItemEntityMixin",
     "minecraft.ServerPlayerTickMixin",
     "minecraft.ServerPlayerMessageMixin",
     "minecraft.ServerGamePacketListenerMixin",

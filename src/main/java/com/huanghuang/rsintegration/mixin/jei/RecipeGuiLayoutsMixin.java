@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.mixin.jei;
 import com.huanghuang.rsintegration.compat.ftbquests.QuestSubmissionRequestPacket;
 import com.huanghuang.rsintegration.compat.ftbquests.QuestSubmissionSnapshot;
 import com.huanghuang.rsintegration.compat.ftbquests.QuestSubmissionTargetIds;
+import com.huanghuang.rsintegration.compat.jei.StandardRecipeIdResolver;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.util.Reflect;
@@ -717,16 +718,10 @@ public class RecipeGuiLayoutsMixin {
             return virtualRecipe == null ? null : virtualRecipe.getId();
         }
 
-        // Standard Recipe.getId() / m_6423_() — use ObfuscationReflectionHelper
-        // for vanilla methods to handle SRG remapping correctly
-        try {
-            Method getId = net.minecraftforge.fml.util.ObfuscationReflectionHelper.findMethod(
-                    recipe.getClass(), "m_6423_" /* getId SRG */);
-            if (getId != null) {
-                Object result = getId.invoke(recipe);
-                if (result instanceof ResourceLocation id) return unwrapJeiId(id);
-            }
-        } catch (Exception e) { /* falls through to mod-specific handlers */ }
+        // Third-party recipes commonly expose an unmapped getId(), while
+        // vanilla recipes may expose the SRG/mapped name in production.
+        ResourceLocation standardId = StandardRecipeIdResolver.resolve(recipe);
+        if (standardId != null) return unwrapJeiId(standardId);
 
         // getResourceLocation() fallback (common in non-Recipe objects)
         try {

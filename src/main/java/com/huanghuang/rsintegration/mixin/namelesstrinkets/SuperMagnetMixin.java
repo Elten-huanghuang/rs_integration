@@ -17,7 +17,7 @@ import org.spongepowered.asm.mixin.injection.Redirect;
 public abstract class SuperMagnetMixin {
 
     @Redirect(method = "curioTick", at = @At(value = "INVOKE",
-            target = "Lnet/minecraft/world/entity/item/ItemEntity;m_32061_()V"), require = 1)
+            target = "Lnet/minecraft/world/entity/item/ItemEntity;m_32061_()V"), require = 0)
     private void rsi$preserveCaptureZonePickupDelay(ItemEntity instance) {
         if (!CraftOutputInterceptor.isInActiveZone(instance.level(), instance.position())) {
             instance.setNoPickUpDelay();
@@ -25,7 +25,7 @@ public abstract class SuperMagnetMixin {
     }
 
     @Redirect(method = "curioTick", at = @At(value = "INVOKE",
-            target = "Lnet/minecraft/world/entity/item/ItemEntity;m_6034_(DDD)V"), require = 1)
+            target = "Lnet/minecraft/world/entity/item/ItemEntity;m_6034_(DDD)V"), require = 0)
     private void rsi$blockCaptureZoneTeleport(ItemEntity instance, double x, double y, double z) {
         if (!CraftOutputInterceptor.isInActiveZone(instance.level(), instance.position())) {
             instance.moveTo(x, y, z);

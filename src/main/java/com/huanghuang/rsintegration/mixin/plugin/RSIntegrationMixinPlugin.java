@@ -1,9 +1,11 @@
 package com.huanghuang.rsintegration.mixin.plugin;
 
 import org.objectweb.asm.tree.ClassNode;
+import org.objectweb.asm.ClassReader;
 import org.spongepowered.asm.mixin.extensibility.IMixinConfigPlugin;
 import org.spongepowered.asm.mixin.extensibility.IMixinInfo;
 
+import java.io.InputStream;
 import java.util.List;
 import java.util.Set;
 
@@ -41,13 +43,18 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
             return isClassPresent("net.mcreator.distantworlds.procedures.LithumCoreUpdateTickProcedure");
         }
         if (mixinClassName.contains("apotheosis.EnchLibraryScreenMixin")) {
-            return isClassPresent("dev.shadowsoffire.apotheosis.ench.library.EnchLibraryScreen");
+            return isClassPresent("dev.shadowsoffire.apotheosis.ench.library.EnchLibraryScreen")
+                    && hasField(targetClassName, "filter");
+        }
+        if (mixinClassName.contains("crockpot.CrockPotMenuMixin")) {
+            return hasField(targetClassName, "blockEntity");
         }
         if (mixinClassName.contains("ironfurnaces.BlockIronFurnaceTileBaseMixin")) {
             return isClassPresent("ironfurnaces.tileentity.furnaces.BlockIronFurnaceTileBase");
         }
         if (mixinClassName.contains("forbidden.ClibanoMainBlockEntityAccessor")) {
-            return isClassPresent("com.stal111.forbidden_arcanus.common.block.entity.clibano.ClibanoMainBlockEntity");
+            return isClassPresent("com.stal111.forbidden_arcanus.common.block.entity.clibano.ClibanoMainBlockEntity")
+                    && hasMethod(targetClassName, "getBurnDuration");
         }
         if (mixinClassName.contains("CraftingManagerMixin")
                 || mixinClassName.contains("CraftingTaskMixin")
@@ -63,7 +70,8 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
                     && isClassPresent("dev.ftb.mods.ftbquests.quest.task.ItemTask");
         }
         if (mixinClassName.contains("namelesstrinkets")) {
-            return isClassPresent("com.cozary.nameless_trinkets.items.trinkets.SuperMagnet");
+            return isClassPresent("com.cozary.nameless_trinkets.items.trinkets.SuperMagnet")
+                    && hasMethod(targetClassName, "curioTick");
         }
         if (mixinClassName.contains("YuushaNineSwordBooks")) {
             // Target is Chapter of Yuusha; body uses SlashBlade's ItemSlashBlade.
@@ -80,7 +88,43 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
         if (mixinClassName.contains("terraequipment.AutoPotionTickerMixin")) {
             return isClassPresent("com.inolia_zaicek.terra_equipment.util.AutoPotionTicker")
                     && isClassPresent("com.inolia_zaicek.terra_equipment.item.EffectPotionItem")
-                    && isClassPresent("com.inolia_zaicek.terra_equipment.config.TEConfig");
+                    && isClassPresent("com.inolia_zaicek.terra_equipment.config.TEConfig")
+                    && hasMethod(targetClassName, "onPlayerTick");
+        }
+        if (mixinClassName.contains("sophisticatedbackpacks.StorageUpgradeSlotMixin")) {
+            return hasField(targetClassName, "slotIndex");
+        }
+        if (mixinClassName.contains("sophisticatedbackpacks.StorageContainerMenuBaseMixin")) {
+            return hasMethod(targetClassName, "getOpenContainer");
+        }
+        if (mixinClassName.contains("sophisticatedbackpacks.RestockUpgradeWrapperMixin")
+                || mixinClassName.contains("sophisticatedbackpacks.RefillUpgradeWrapperMixin")
+                || mixinClassName.contains("sophisticatedbackpacks.FeedingUpgradeWrapperMixin")
+                || mixinClassName.contains("sophisticatedbackpacks.CompactingUpgradeWrapperMixin")
+                || mixinClassName.contains("sophisticatedbackpacks.PickupUpgradeWrapperMixin")) {
+            return hasMethod(targetClassName, "getFilterLogic");
+        }
+        if (mixinClassName.contains("sophisticatedbackpacks.MagnetUpgradeWrapperMixin")) {
+            return hasMethod(targetClassName, "getFilterLogic")
+                    && hasMethod(targetClassName, "shouldPickupItems");
+        }
+        if (mixinClassName.contains("jei.BookmarkOverlayAccessor")) {
+            return hasField(targetClassName, "bookmarkList");
+        }
+        if (mixinClassName.contains("jei.GuiIconToggleButtonAccessor")) {
+            return hasField(targetClassName, "button");
+        }
+        if (mixinClassName.contains("jei.RecipeGuiLayoutsMixin")) {
+            return hasField(targetClassName, "recipeLayoutsWithButtons");
+        }
+        if (mixinClassName.contains("jei.RecipesGuiMixin")) {
+            return hasMethod(targetClassName, "updateLayout");
+        }
+        if (mixinClassName.contains("refinedstorage.CraftingTaskAccessor")) {
+            return hasField(targetClassName, "network");
+        }
+        if (mixinClassName.contains("refinedstorage.GridTransferMessageAccessor")) {
+            return hasField(targetClassName, "recipe");
         }
         if (mixinClassName.contains("majruszsdifficulty.MajruszItemHelperMixin")) {
             return isClassPresent("com.majruszlibrary.item.ItemHelper");
@@ -110,5 +154,32 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
         // shouldApplyMixin causes ReEntrantTransformerError.
         String resource = className.replace('.', '/') + ".class";
         return RSIntegrationMixinPlugin.class.getClassLoader().getResource(resource) != null;
+    }
+
+    private static boolean hasField(String className, String fieldName) {
+        return readClass(className, node -> node.fields.stream()
+                .anyMatch(field -> fieldName.equals(field.name)));
+    }
+
+    private static boolean hasMethod(String className, String methodName) {
+        return readClass(className, node -> node.methods.stream()
+                .anyMatch(method -> methodName.equals(method.name)));
+    }
+
+    private interface ClassPredicate {
+        boolean test(ClassNode node);
+    }
+
+    private static boolean readClass(String className, ClassPredicate predicate) {
+        String resource = className.replace('.', '/') + ".class";
+        try (InputStream input = RSIntegrationMixinPlugin.class.getClassLoader()
+                .getResourceAsStream(resource)) {
+            if (input == null) return false;
+            ClassNode node = new ClassNode();
+            new ClassReader(input).accept(node, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+            return predicate.test(node);
+        } catch (Exception ignored) {
+            return false;
+        }
     }
 }

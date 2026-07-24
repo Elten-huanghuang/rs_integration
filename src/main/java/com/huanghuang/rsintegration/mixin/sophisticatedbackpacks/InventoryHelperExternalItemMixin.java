@@ -21,7 +21,7 @@ public abstract class InventoryHelperExternalItemMixin {
 
     @Inject(
             method = "runPickupOnPickupResponseUpgrades(Lnet/minecraft/world/level/Level;Lnet/minecraft/world/entity/player/Player;Lnet/p3pp3rf1y/sophisticatedcore/upgrades/UpgradeHandler;Lnet/minecraft/world/item/ItemStack;Z)Lnet/minecraft/world/item/ItemStack;",
-            at = @At("HEAD"), remap = false, require = 1)
+            at = @At("HEAD"), remap = false, require = 0)
     private static void rsi$beginExternalPickup(Level level, Player player,
                                                 UpgradeHandler upgrades, ItemStack input,
                                                 boolean simulate,
@@ -35,7 +35,7 @@ public abstract class InventoryHelperExternalItemMixin {
 
     @Inject(
             method = "runPickupOnPickupResponseUpgrades(Lnet/minecraft/world/level/Level;Lnet/minecraft/world/entity/player/Player;Lnet/p3pp3rf1y/sophisticatedcore/upgrades/UpgradeHandler;Lnet/minecraft/world/item/ItemStack;Z)Lnet/minecraft/world/item/ItemStack;",
-            at = @At("RETURN"), remap = false, require = 1)
+            at = @At("RETURN"), remap = false, require = 0)
     private static void rsi$reportExternalPickup(Level level, Player player,
                                                  UpgradeHandler upgrades, ItemStack input,
                                                  boolean simulate,
