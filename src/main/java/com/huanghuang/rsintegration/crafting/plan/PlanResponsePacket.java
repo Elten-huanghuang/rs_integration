@@ -362,6 +362,10 @@ public final class PlanResponsePacket {
 
     static PlanGraphView readGraph(FriendlyByteBuf buf) {
         int version = buf.readVarInt();
+        if (version != com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph.CURRENT_VERSION) {
+            throw new DecoderException("Unsupported graph protocol version: " + version
+                    + ", expected: " + com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph.CURRENT_VERSION);
+        }
         List<PlanGraphView.NodeView> nodes = new ArrayList<>();
         for (int i = 0, n = readBoundedCount(buf); i < n; i++) {
             int nodeId = readNonNegativeVarInt(buf, "graph node id");
