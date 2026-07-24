@@ -214,7 +214,8 @@ public class RecipeGuiLayoutsMixin {
 
             // Skip Goety rituals that don't produce items:
             // - requiresSacrifice() (entity sacrifice rituals)
-            // - SummonRitual / ConvertRitual / TeleportRitual (no item output)
+            // - ConvertRitual / TeleportRitual (no item output)
+            // Note: SummonRitual is kept (returns false) to allow remote triggering
             if (rsi$isGoetyRitual(recipe)
                     && (rsi$isGoetySacrificial(recipe) || rsi$isGoetyNonItemRitual(recipe))) {
                 continue;
@@ -1465,8 +1466,10 @@ public class RecipeGuiLayoutsMixin {
             Object ritual = getRitual.invoke(recipe);
             if (ritual == null) return false;
             String name = ritual.getClass().getName();
+            // Item-producing rituals: keep these (return false = not a non-item ritual)
             if (name.equals("com.Polarice3.Goety.common.ritual.CraftItemRitual")) return false;
             if (name.equals("com.Polarice3.Goety.common.ritual.EnchantItemRitual")) return false;
+            // SummonRitual: kept to allow remote triggering even though no item output
             if (name.equals("com.Polarice3.Goety.common.ritual.SummonRitual")) return false;
             // ConvertRitual, TeleportRitual — no item output, potentially destructive
             return true;

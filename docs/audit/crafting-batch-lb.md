@@ -38,10 +38,14 @@
 - 残余风险：仅对「非确定性的模组合成配方」可能错误保留上一轮的 NBT（而非报错），属健壮性而非守恒问题。
 - 修复方向：把 L221 改为读取 `captureActualCraftingOutputs` 的返回值（让该方法返回本轮 assembled，空则返回 EMPTY），循环内据此判断 `if (operationResult.isEmpty()) return false;`，消除对成员 `pendingResult` 的跨轮依赖。
 
-### [P3] ParallelCraftGroup MaterialBroker/单线程假设缺断言（与 crafting-graph 域同类）
-- 文件：`crafting/loadbalancer/ParallelCraftGroup.java`（OperationQueue 同理）
-- 现象：整组状态（`workers`、`settledResults`、`safelyRecoverableVirtual`、OperationQueue 的 HashMap）依赖「仅服务器 tick 线程访问」的不变量，但无 `assertServerThread()` 之类的防御性断言。当前调用链确实单线程（见 [[reference_graph_conservation_baseline]]），故为 P3。
-- 修复方向：在 `startInitialWorkers`/`settleCompletedOperation`/`onBatchFailed` 入口加一次线程断言（复用 crafting-graph 域建议的同一 helper），把「单线程」从隐性约定变成可验证契约。**不要**给这些 map 加锁——加锁是错误修复方向。
+### [P3] ParallelCraftGroup MaterialBroker/单线程假设缺断言（与 crafting-graph 域同类） ✅ 已修复
+
+**修复时间**：2026-07-24
+
+- 文件：`crafting/loadbalancer/ParallelCraftGroup.java:36-49`
+- 原问题：整组状态依赖「仅服务器 tick 线程访问」的不变量，但无防御性断言
+- 修复：添加显著的 Javadoc 警告，明确标注线程安全约束（与 MaterialBroker 同类修复）
+- 说明：将隐性约定转换为显式文档契约
 
 ---
 

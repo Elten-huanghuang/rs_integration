@@ -28,7 +28,12 @@ public class RecipeBookmarkMixin {
             Field f = recipe.getClass().getField("rsIntegration$recipeId");
             result = (ResourceLocation) f.get(recipe);
             if (result != null) return result;
-        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-JEI-Bookmark] reflection probe failed", e); }
+        } catch (NoSuchFieldException ignored) {
+            // Most JEI recipes do not carry RSI's optional injected id field.
+        } catch (ReflectiveOperationException | ClassCastException e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-JEI-Bookmark] recipe id probe failed: {}",
+                    recipe.getClass().getName());
+        }
 
         // universal fallback: pseudo-ID so the bookmark works in-session.
         // Serialization won't survive a restart, but the bookmark button

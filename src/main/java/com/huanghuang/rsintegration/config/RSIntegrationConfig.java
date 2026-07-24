@@ -211,7 +211,7 @@ public final class RSIntegrationConfig {
                 .define("allowDistantWorldsFuelAutomation", true);
         DISTANT_WORLDS_FUEL_SEARCH_RADIUS = c
                 .comment("Maximum block radius used to find a Lithum Furnace for an altar craft.")
-                .defineInRange("distantWorldsFuelSearchRadius", 8, 1, 32);
+                .defineInRange("distantWorldsFuelSearchRadius", 8, 1, 16);
         DISTANT_WORLDS_FUEL_BATCH_SIZE = c
                 .comment("Maximum fuel items inserted into the selected Lithum Furnace per refill.")
                 .defineInRange("distantWorldsFuelBatchSize", 4, 1, 64);

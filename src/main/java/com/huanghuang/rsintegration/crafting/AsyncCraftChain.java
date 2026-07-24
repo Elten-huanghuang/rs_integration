@@ -3253,8 +3253,8 @@ public final class AsyncCraftChain {
                                 com.refinedmods.refinedstorage.api.util.Action.PERFORM);
                     }
                     var tracker = network.getItemStorageTracker();
-                    if (!rsCandidate.isEmpty() && tracker != null) tracker.changed(online, rsCandidate);
                     ItemStack inserted = InsertedStackDelta.between(vi, leftover);
+                    if (!inserted.isEmpty() && tracker != null) tracker.changed(online, inserted.copy());
                     if (targetOutput != null && vi.is(targetOutput.getItem())) {
                         ExternalItemProgressBridge.enqueueCrafted(
                                 online, inserted);

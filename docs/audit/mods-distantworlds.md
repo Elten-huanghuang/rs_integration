@@ -32,18 +32,21 @@ staff 可来自玩家背包/副手（原地耐久损耗）或 RS 网络（`acqui
 
 ## 发现清单
 
-### [P3] LithumAltarFuelHelper.ensureFuel 内部两处 refund 丢弃 remainder（与本域主退款路径不一致）
+### [P3][已关闭] LithumAltarFuelHelper.ensureFuel 内部两处 refund 丢弃 remainder（与本域主退款路径不一致）
+> ✅ **复核当前代码已修复**：`ensureFuel` 已接住 `refund()` 返回的 remainder；无法回插的燃料不再静默丢弃。以下为修复前历史存档。
 - 文件：`mods/distantworlds/LithumAltarFuelHelper.java:83, 88`
 - 现象：`ensureFuel` 里 `refund(network, extracted)`（L83，插槽失败回退分支）与 `refund(network, remainder)`（L88，部分插入后的余量）都**不接收** `refund()` 的返回值。`refund`（L124-127）本身返回 `network.insertItem` 的 remainder；若 RS 网络此刻已满，这两处的燃料会被静默 void。
 - 对比：本域主退款 `refundUnused`（L97-115）正确处理 remainder（回插失败 → 给玩家 → 掉落）。仅 ensureFuel 内联两处遗漏。属同类 [[]] 于 infra-util 域 PlayerUtils P1 的「insertItem 忽略 remainder 丢物」，但触发面窄（仅燃料自动化开启 + 网络满 + 恰在插入失败瞬间），故 P3 而非 P1。
 - 修复方向：把 L83/L88 改为捕获返回值并走 `refundUnused` 同款兜底（给玩家/掉落），或抽一个「保证不丢」的 helper 统一三处。
 
-### [P3] 燃料搜索为立方体半径三重循环，半径可配无硬上限
+### [P3][已修复] 燃料搜索为立方体半径三重循环，半径可配无硬上限
+> ✅ **已修复**：配置上限收紧为 16，避免误配置造成过大的立方体扫描。
 - 文件：`mods/distantworlds/LithumAltarFuelHelper.java:34-45`
 - 现象：`findAndLock` 按 `DISTANT_WORLDS_FUEL_SEARCH_RADIUS` 做 `(2r+1)^3` 的 `getBlockEntity` 扫描。若管理员把半径配得很大（如 32 → 27 万次 BE 查询），单次锁定会造成明显卡顿。findAndLock 仅在 start 时调用一次，非每 tick，故非 P1。
 - 修复方向：给该 config 加合理上界校验（如 ≤8），或改为只扫描已加载区块的 BE 集合而非逐坐标 getBlockEntity。
 
-### [P3] isStaff 对 getKey 结果未判空
+### [P3][已修复] isStaff 对 getKey 结果未判空
+> ✅ **已修复**：注册表 key 现在先判空再比较。
 - 文件：`mods/distantworlds/LithumAltarBatchDelegate.java:314-317`
 - 现象：`ForgeRegistries.ITEMS.getKey(stack.getItem()).toString()` 未判空。理论上非空 stack 的 item 都已注册，getKey 极难返回 null，但同域其他地方（如 selectFuel L137-142）都做了判空。属健壮性一致性，P3。
 - 修复方向：与 selectFuel 对齐，getKey 为 null 时视作非 staff。

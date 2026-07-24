@@ -82,6 +82,9 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
                     && isClassPresent("com.inolia_zaicek.terra_equipment.item.EffectPotionItem")
                     && isClassPresent("com.inolia_zaicek.terra_equipment.config.TEConfig");
         }
+        if (mixinClassName.contains("majruszsdifficulty.MajruszItemHelperMixin")) {
+            return isClassPresent("com.majruszlibrary.item.ItemHelper");
+        }
         return true;
     }
 

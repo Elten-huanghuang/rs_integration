@@ -312,8 +312,8 @@ public final class LithumAltarBatchDelegate extends AbstractBatchDelegate {
     }
 
     private boolean isStaff(ItemStack stack) {
-        return !stack.isEmpty() && "distant_worlds:dalite_staff".equals(
-                net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(stack.getItem()).toString());
+        var key = net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(stack.getItem());
+        return !stack.isEmpty() && key != null && "distant_worlds:dalite_staff".equals(key.toString());
     }
 
     private List<BlockPos> pedestalPositions() {
