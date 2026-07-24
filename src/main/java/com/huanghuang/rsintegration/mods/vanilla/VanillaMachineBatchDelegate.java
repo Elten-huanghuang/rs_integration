@@ -795,10 +795,14 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
                 furnaceBE.setItem(0, ItemStack.EMPTY);
                 if (refundToRS) refundToRSNetwork(slot0);
             }
+            // Output slot (slot 2): the transformed result is not a ledger-managed input.
+            // On abort, clear it to prevent residue, but do NOT refund — collectResult()
+            // is the only path that should collect the output. Refunding here would risk
+            // double-collection if collectResult() already ran or races with cleanup.
             ItemStack slot2 = furnaceBE.getItem(2);
             if (!slot2.isEmpty()) {
                 furnaceBE.setItem(2, ItemStack.EMPTY);
-                if (refundToRS) refundToRSNetwork(slot2);
+                // Do NOT refund output slot to network (no `if (refundToRS) refund...`)
             }
             // Fuel is outside the ledger, always refund unburned fuel
             refundLeftoverFuel();

@@ -10,27 +10,27 @@
 
 | 域 | 文档 | 状态 | 发现 (P0/P1/P2/P3) | 来源 |
 |---|---|---|---|---|
-| crafting-core | [crafting-core.md](./crafting-core.md) | ✅ 已审（3 条 P2 已修复，1 条 P2 复核关闭） | 0/0/0/3 | 首批 agent + 复核 |
-| crafting-graph | [crafting-graph.md](./crafting-graph.md) | ✅ 已审 | 0/0/0/2 | 主会话 |
+| crafting-core | [crafting-core.md](./crafting-core.md) | ✅ 已审（3 条 P2 已修复，1 条 P2 复核关闭；当前 0 P2） | 0/0/0/0 | 首批 agent + 复核 |
+| crafting-graph | [crafting-graph.md](./crafting-graph.md) | ✅ 已审（publish 日志项已修复） | 0/0/0/1 | 主会话 |
 | crafting-batch-lb | [crafting-batch-lb.md](./crafting-batch-lb.md) | ✅ 已审 | 0/0/0/2 | 主会话 |
 | crafting-plan-tree | [crafting-plan-tree.md](./crafting-plan-tree.md) | ✅ 已审 | 0/0/0/3 | 主会话 |
-| mods-distantworlds | [mods-distantworlds.md](./mods-distantworlds.md) | ✅ 已审 | 0/0/0/3 | 主会话 |
+| mods-distantworlds | [mods-distantworlds.md](./mods-distantworlds.md) | ✅ 已审（3 条 P3 均已关闭/修复） | 0/0/0/0 | 主会话 |
 | mods-apotheosis | [mods-apotheosis.md](./mods-apotheosis.md) | ✅ 已审 | 0/0/0/2 | 主会话 |
-| mods-food-cluster | — | ⬜ 待审 | — | — |
-| mods-vanilla | — | ⬜ 待审 | — | — |
-| mods-magic-cluster | — | ⬜ 待审 | — | — |
+| mods-food-cluster | [mods-food-cluster.md](./mods-food-cluster.md) | ✅ 已审（P2 已修复 2026-07-24） | 0/0/0/4 | 主会话 |
+| mods-vanilla | [mods-vanilla.md](./mods-vanilla.md) | ✅ 已审（P2 已修复 2026-07-24） | 0/0/0/3 | 主会话 |
+| mods-magic-cluster | [mods-magic-cluster.md](./mods-magic-cluster.md) | ✅ 已审 | 0/0/0/5 | 主会话 |
 | mods-storage-misc | [mods-storage-misc.md](./mods-storage-misc.md) | ✅ 已审 | 2/0/0/0 | workflow 抢救 + 复核 |
-| mixin-rs-minecraft | [mixin-rs-minecraft.md](./mixin-rs-minecraft.md) | ✅ 已审（3 条 P2 已修复/加固） | 0/0/0/9 | 首批 agent + 复核 |
-| mixin-mods | — | ⬜ 待审 | — | — |
-| sidepanel | — | ⬜ 待审 | — | — |
-| recipe | — | ⬜ 待审 | — | — |
-| network | — | ⬜ 待审 | — | — |
-| reflection | [reflection.md](./reflection.md) | ✅ 已审（3 条 P2 已修复，剩余签名契约启用项） | 0/0/1/5 | 首批 agent + 复核 |
-| infra-util | [infra-util.md](./infra-util.md) | ✅ 已审 | 0/1/0/1 | workflow 抢救 + 复核 |
-| autoeat-resonance | — | ⬜ 待审 | — | — |
-| villager-compat | — | ⬜ 待审 | — | — |
+| mixin-rs-minecraft | [mixin-rs-minecraft.md](./mixin-rs-minecraft.md) | ✅ 已审（3 条 P2 和 1 条 P3 已修复/加固） | 0/0/0/8 | 首批 agent + 复核 |
+| mixin-mods | [mixin-mods.md](./mixin-mods.md) | ✅ 已审 | 0/0/0/3 | 主会话 |
+| sidepanel | [sidepanel.md](./sidepanel.md) | ✅ 已审 | 0/0/0/1 | 主会话 |
+| recipe | [recipe.md](./recipe.md) | ✅ 已审 | 0/0/0/2 | 主会话 |
+| network | [network.md](./network.md) | ✅ 已审 | 0/0/0/2 | 主会话 |
+| reflection | [reflection.md](./reflection.md) | ✅ 已审（3 条 P2 已修复；签名契约 P2 暂缓，不阻塞发布） | 0/0/0/5 | 首批 agent + 复核 |
+| infra-util | [infra-util.md](./infra-util.md) | ✅ 已审（P1/P3 均已修复） | 0/0/0/0 | workflow 抢救 + 复核 |
+| autoeat-resonance | [autoeat-resonance.md](./autoeat-resonance.md) | ✅ 已审 | 0/0/0/2 | 主会话 |
+| villager-compat | [villager-compat.md](./villager-compat.md) | ✅ 已审 | 0/0/0/0 | 主会话 |
 
-进度：10 / 19 域已审。
+进度：19 / 19 域已审。
 
 ## P0/P1 汇总（最高优先，需修复）
 
