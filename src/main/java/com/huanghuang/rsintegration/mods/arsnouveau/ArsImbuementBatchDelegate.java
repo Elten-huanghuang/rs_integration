@@ -226,20 +226,19 @@ public final class ArsImbuementBatchDelegate extends AbstractBatchDelegate {
 
     @Nonnull
     @Override
-    public CraftObservation observeCraft(@Nonnull ServerLevel level) {
-        BlockEntity be = level.getBlockEntity(machinePos);
-        if (be == null || !ArsTileAccess.isImbuement(be)) {
-            return new CraftObservation(CraftPhase.FAILED, "Machine disappeared");
+    protected CraftObservation observeMachineCraft(@Nonnull ServerLevel level, @Nonnull BlockEntity be) {
+        if (!ArsTileAccess.isImbuement(be)) {
+            return failObservation("Machine disappeared");
         }
 
         if (!(be instanceof Container container)) {
-            return new CraftObservation(CraftPhase.FAILED, "Machine is not a container");
+            return failObservation("Machine is not a container");
         }
 
         // Check timeout
         long elapsed = level.getGameTime() - craftStartTick;
         if (elapsed > CRAFT_TIMEOUT_TICKS) {
-            return new CraftObservation(CraftPhase.FAILED, "Craft timeout");
+            return failObservation("Craft timeout");
         }
 
         // Read current slot 0
@@ -251,29 +250,44 @@ public final class ArsImbuementBatchDelegate extends AbstractBatchDelegate {
             int craftTicks = ArsTileAccess.imbuementCraftTicks(be);
             if (craftTicks <= 0 || craftTicks >= ArsTileAccess.IMBUEMENT_CRAFT_TICKS) {
                 // craftTicks at 0 means done, >= 100 means not started or reset
-                return new CraftObservation(CraftPhase.DONE);
+                return doneObservation();
             }
         }
 
         // Check if slot is empty (stolen by external hopper/magnet)
         if (currentStack.isEmpty()) {
-            return new CraftObservation(CraftPhase.FAILED, "Input stolen from machine");
+            return failObservation("Input stolen from machine");
         }
 
         // Check Source availability (informational, not blocking)
         int currentSource = ArsTileAccess.getSource(be);
         if (currentSource < sourceCost && currentSource >= 0) {
-            return new CraftObservation(CraftPhase.WORKING,
-                    "Accumulating Source: " + currentSource + "/" + sourceCost);
+            return workingObservation();
         }
 
-        return new CraftObservation(CraftPhase.WORKING);
+        return workingObservation();
     }
 
     @Override
-    public boolean isCraftComplete(@Nonnull ServerLevel level) {
-        CraftObservation obs = observeCraft(level);
-        return obs.phase() == CraftPhase.DONE;
+    protected boolean isMachineCraftFinished(@Nonnull ServerLevel level, @Nonnull BlockEntity be) {
+        if (!ArsTileAccess.isImbuement(be) || !(be instanceof Container container)) {
+            return false;
+        }
+
+        ItemStack currentStack = container.getItem(0);
+        if (!currentStack.isEmpty() && ItemStack.isSameItem(currentStack, expectedOutput)) {
+            int craftTicks = ArsTileAccess.imbuementCraftTicks(be);
+            return craftTicks <= 0 || craftTicks >= ArsTileAccess.IMBUEMENT_CRAFT_TICKS;
+        }
+
+        return false;
+    }
+
+    @Override
+    public boolean tryStartSingleCraft(@Nonnull ServerPlayer player) {
+        // This delegate uses tryStartWithMaterials for chain integration
+        // Single-craft mode is not supported for Ars Nouveau
+        return false;
     }
 
     @Nonnull
@@ -298,23 +312,21 @@ public final class ArsImbuementBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public void onBatchFailed(@Nonnull ServerPlayer player, @Nonnull String reason) {
-        ServerLevel level = getLevel();
-        if (level == null) return;
-
-        RSIntegrationMod.LOGGER.debug("[RSI-ArsImbuement] Batch failed: {}", reason);
+    protected void clearMachineState(BlockEntity be, ServerPlayer player) {
+        RSIntegrationMod.LOGGER.debug("[RSI-ArsImbuement] Clearing machine state");
 
         // Try to recover items if craft didn't start or failed early
-        BlockEntity be = level.getBlockEntity(machinePos);
         if (be instanceof Container container) {
             ItemStack remaining = container.removeItem(0, 64);
-            if (!remaining.isEmpty()) {
-                // Return to player or drop
+            if (!remaining.isEmpty() && player != null) {
                 player.addItem(remaining);
             }
         }
 
-        clearPedestalItems(level);
+        ServerLevel level = resolveMachineLevel(player);
+        if (level != null) {
+            clearPedestalItems(level);
+        }
     }
 
     @Override
@@ -341,11 +353,11 @@ public final class ArsImbuementBatchDelegate extends AbstractBatchDelegate {
         }
 
         return new BatchConcurrencyCapabilities(
-                BatchConcurrencyCapabilities.ReservationModel.CHAIN_RESERVED,
-                BatchConcurrencyCapabilities.AnchorModel.MACHINE_SLOT,
-                BatchConcurrencyCapabilities.StructuralSafety.SEPARABLE_OFFLINE,
-                BatchConcurrencyCapabilities.PhysicalRefundScope.MACHINE_LOCAL,
-                BatchConcurrencyCapabilities.RetryProfile.RETRY_SAFE,
+                BatchConcurrencyCapabilities.MaterialOwnership.CHAIN_RESERVED,
+                BatchConcurrencyCapabilities.OutputOwnership.MACHINE_SLOT,
+                BatchConcurrencyCapabilities.CleanupContract.SEPARABLE_OFFLINE,
+                BatchConcurrencyCapabilities.SideEffects.MACHINE_LOCAL,
+                BatchConcurrencyCapabilities.PreparationContract.RETRY_SAFE,
                 supportOffsets
         );
     }
