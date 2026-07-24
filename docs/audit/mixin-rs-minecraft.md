@@ -132,11 +132,20 @@
   ```
 - 结论: ThreadLocal DEPTH 计数器严格配对，异常路径也会复位。**无泄漏风险，设计正确。**
 
-### [P3] CraftingGridBehaviorMixin 的 NBT 无关抽取兜底可能取到错误 NBT 变体
+### [P3] CraftingGridBehaviorMixin 的 NBT 无关抽取兜底可能取到错误 NBT 变体 ✅ 已接受为设计权衡
+
+**决策时间**：2026-07-24
+
 - 文件: src/main/java/com/huanghuang/rsintegration/mixin/refinedstorage/CraftingGridBehaviorMixin.java:26-31
-- 维度: 算法语义
-- 现象: 精确抽取返回空时，回退到 `flags & ~COMPARE_NBT` 再抽取一次。
-- 风险: 忽略 NBT 抽取可能把非目标 NBT 变体（如另一本附魔书）塞进合成网格。已由 `ENABLE_BINDING` 门控且仅作兜底，属可接受的设计取舍，记录备查。
+- 现象: 精确抽取返回空时，回退到 `flags & ~COMPARE_NBT` 再抽取一次，可能取到非目标 NBT 变体
+- 设计权衡:
+  - **优点**: 提升用户体验，精确匹配失败时仍能完成合成（如配方要求普通木棍，网络里只有附魔木棍）
+  - **风险**: 可能取到错误变体（如配方要求任意附魔书，取到了不合适的附魔）
+- 防护措施:
+  - 由 `ENABLE_BINDING` 配置门控（默认关闭）
+  - 仅在精确匹配失败后作为兜底
+  - 用户可通过配置选择严格模式（禁用此特性）
+- 结论: **接受此设计权衡**，配置默认值和门控机制已提供足够灵活性
 
 ### [P3] 重复注释块 / 冗余 cir.cancel() ✅ 已修复
 
