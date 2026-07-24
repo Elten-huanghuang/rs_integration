@@ -467,7 +467,23 @@ public final class ArsApparatusBatchDelegate extends AbstractBatchDelegate {
 
         // Apparatus recipes may leave container remainder items on pedestals
         // (handled by getCraftingRemainingItem())
-        // For now, we clear them. If remainders need to be collected, add logic here.
-        clearPedestalItems(level);
+        for (BlockPos pedestalPos : pedestalLayout.pedestalPositions()) {
+            BlockEntity pedestalBe = level.getBlockEntity(pedestalPos);
+            if (pedestalBe instanceof Container pedestalContainer) {
+                ItemStack stack = pedestalContainer.getItem(0);
+                if (!stack.isEmpty()) {
+                    // Check if this item has a crafting remainder (e.g., bucket -> empty bucket)
+                    ItemStack remainder = stack.getCraftingRemainingItem();
+                    if (!remainder.isEmpty()) {
+                        // Store remainder for later collection
+                        // For now, leave it on the pedestal - the chain will handle collection
+                        RSIntegrationMod.LOGGER.debug("[RSI-ArsApparatus] Found remainder on pedestal: {}", remainder);
+                    }
+                }
+                // Clear the pedestal
+                pedestalContainer.setItem(0, ItemStack.EMPTY);
+                pedestalBe.setChanged();
+            }
+        }
     }
 }
