@@ -1,8 +1,11 @@
 # Ars Nouveau 集成状态
 
-## 当前进度：Phase 1A 已完成 ✅
+## 当前进度：Phase 1A 完成 ✅ + i18n 完成 ✅
 
-**提交**: ef252a8 "Ars Nouveau 集成 Phase 1A：Imbuement Chamber 与 Enchanting Apparatus 基础实现"
+**提交**: 
+- ef252a8 "Ars Nouveau 集成 Phase 1A：Imbuement Chamber 与 Enchanting Apparatus 基础实现"
+- 488487a "添加 Ars Nouveau 集成状态文档"
+- ff64233 "修复 Ars Nouveau 批处理委托并添加 i18n 翻译"
 
 ### 已实现的核心功能
 
@@ -70,15 +73,16 @@
 
 ### 高优先级（核心功能）
 
-⏳ **i18n 翻译键** - 必须在 release 前完成
+✅ **i18n 翻译键** - 已完成
 - `en_us.json` / `zh_cn.json`:
-  - `modtype.rs_integration.ars_nouveau_imbuement` = "Ars Nouveau Imbuement Chamber"
-  - `modtype.rs_integration.ars_nouveau_apparatus` = "Ars Nouveau Enchanting Apparatus"
-  - `gui.rs_integration.jei.ars_nouveau_imbuement_craft` = "Imbuement crafting via RS"
-  - `gui.rs_integration.jei.ars_nouveau_apparatus_craft` = "Apparatus crafting via RS"
-  - `rsi.ars_nouveau.waiting.accumulating_source` = "Accumulating Source: %s/%s"
-  - `rsi.ars_nouveau.error.machine_busy` = "Machine is busy"
-  - `rsi.ars_nouveau.error.no_pedestals` = "No pedestals found"
+  - ✅ `gui.rs_integration.jei.ars_nouveau_imbuement_craft` = "Remote Craft via Imbuement Chamber"
+  - ✅ `gui.rs_integration.jei.ars_nouveau_apparatus_craft` = "Remote Craft via Enchanting Apparatus"
+  - ✅ `rsi.ars_nouveau.waiting.accumulating_source` = "Accumulating Source: %s/%s"
+  - ✅ `rsi.ars_nouveau.error.machine_busy` = "The machine is already crafting"
+  - ✅ `rsi.ars_nouveau.error.no_pedestals` = "No pedestals found around the machine"
+  - ✅ `rsi.ars_nouveau.error.recipe_not_active` = "Recipe did not activate after material placement"
+  - ✅ `rsi.ars_nouveau.error.input_stolen` = "Input was removed from the machine"
+  - ✅ 中文翻译：浸润仪/附魔装置/积累魔源等
 
 ⏳ **游戏内验收测试**
 - [ ] Imbuement 单次合成（无基座配方，如 Amethyst）
