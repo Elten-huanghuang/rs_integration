@@ -16,6 +16,7 @@ public abstract class EntityMixin {
         if ((Object) this instanceof ServerPlayer player
                 && RemoteGuiAuth.isAuthorizedDistanceTarget(player, x, y, z)) {
             cir.setReturnValue(0.0D);
+            cir.cancel();
         }
     }
 
@@ -24,6 +25,7 @@ public abstract class EntityMixin {
         if ((Object) this instanceof ServerPlayer player
                 && RemoteGuiAuth.isAuthorizedDistanceTarget(player, vec.x, vec.y, vec.z)) {
             cir.setReturnValue(0.0D);
+            cir.cancel();
         }
     }
 
@@ -33,6 +35,7 @@ public abstract class EntityMixin {
                 && RemoteGuiAuth.isAuthorizedDistanceTarget(player,
                         entity.getX(), entity.getY(), entity.getZ())) {
             cir.setReturnValue(0.0D);
+            cir.cancel();
         }
     }
 
@@ -42,6 +45,7 @@ public abstract class EntityMixin {
                 && RemoteGuiAuth.isAuthorizedDistanceTarget(player,
                         entity.getX(), entity.getY(), entity.getZ())) {
             cir.setReturnValue(0.0F);
+            cir.cancel();
         }
     }
 }

@@ -115,10 +115,18 @@
 - 现象: 精确抽取返回空时，回退到 `flags & ~COMPARE_NBT` 再抽取一次。
 - 风险: 忽略 NBT 抽取可能把非目标 NBT 变体（如另一本附魔书）塞进合成网格。已由 `ENABLE_BINDING` 门控且仅作兜底，属可接受的设计取舍，记录备查。
 
-### [P3] 重复注释块 / 冗余 cir.cancel()
-- 文件: RecipeGuiLayoutsMixin.java:251-264（FA smithing 注释整段重复一次）；EntityMixin.java:47-55（`distanceTo(Entity)F` 只调用 `setReturnValue` 未 `cancel()`，而另三处 `setReturnValue`+`cancel` 并存）
-- 维度: 代码质量
-- 现象/风险: 前者为复制粘贴留下的重复注释；后者因 Mixin `CallbackInfoReturnable.setReturnValue` 本身即隐含 cancel，功能无差异，仅风格不一致。均为可维护性问题，无功能风险。
+### [P3] 重复注释块 / 冗余 cir.cancel() ✅ 已修复
+
+**修复时间**：2026-07-24
+
+- 文件1: RecipeGuiLayoutsMixin.java:251-265
+- 问题1: FA smithing 注释整段重复（复制粘贴遗留）
+- 修复1: 删除重复的注释块（L259-265）
+
+- 文件2: EntityMixin.java:13-45
+- 问题2: `distanceTo(Entity)F` 只调用 `setReturnValue` 未 `cancel()`，而另三处 `setReturnValue`+`cancel` 并存
+- 修复2: 为所有四个方法统一添加显式 `cancel()` 调用，保持风格一致
+- 说明: `CallbackInfoReturnable.setReturnValue` 本身隐含 cancel，功能无差异，此修复仅为代码风格一致性
 
 ---
 
