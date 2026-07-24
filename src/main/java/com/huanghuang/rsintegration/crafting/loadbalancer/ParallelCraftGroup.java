@@ -38,6 +38,11 @@ import java.util.List;
  * A dynamic pool of physical machines executing one recipe operation at a time.
  * A worker that finishes immediately collects its output and claims the next
  * operation without waiting for slower siblings.
+ *
+ * <p><b>THREAD SAFETY:</b> This class is <b>NOT</b> thread-safe.
+ * All methods must be called from the server tick thread only.
+ * Internal state (workers, settledResults, etc.) is not synchronized;
+ * calling from worker threads will cause data races.
  */
 public final class ParallelCraftGroup implements IBatchDelegate {
 

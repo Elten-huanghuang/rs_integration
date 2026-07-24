@@ -647,12 +647,13 @@ public final class RecipeIndex {
 
     public static List<ItemStack> tryGetSecondaryOutputs(Recipe<?> recipe, RegistryAccess access) {
         List<ItemStack> results = new ArrayList<>();
+        Set<Object> seenOutputContainers = Collections.newSetFromMap(new IdentityHashMap<>());
         if (recipe == null) return results;
         try {
             Method m = Reflect.findMethod(recipe.getClass(), "getRemainingItems", new Class<?>[0]);
             if (m != null) {
                 Object obj = m.invoke(recipe);
-                if (obj instanceof List<?> list) {
+                if (seenOutputContainers.add(obj) && obj instanceof List<?> list) {
                     for (Object e : list) {
                         if (e instanceof ItemStack s && !s.isEmpty()) results.add(s.copy());
                     }
@@ -667,7 +668,7 @@ public final class RecipeIndex {
             Method m = Reflect.findMethod(recipe.getClass(), "getByproducts", new Class<?>[0]);
             if (m != null) {
                 Object obj = m.invoke(recipe);
-                if (obj instanceof List<?> list) {
+                if (seenOutputContainers.add(obj) && obj instanceof List<?> list) {
                     for (Object e : list) {
                         if (e instanceof ItemStack s && !s.isEmpty()) results.add(s.copy());
                     }
@@ -678,7 +679,7 @@ public final class RecipeIndex {
             Method m = Reflect.findMethod(recipe.getClass(), "getRollResults", new Class<?>[0]);
             if (m != null) {
                 Object obj = m.invoke(recipe);
-                if (obj instanceof List<?> list) {
+                if (seenOutputContainers.add(obj) && obj instanceof List<?> list) {
                     for (Object e : list) {
                         if (e instanceof ItemStack s && !s.isEmpty()) results.add(s.copy());
                     }
@@ -703,7 +704,7 @@ public final class RecipeIndex {
                 }
                 boolean primaryDropped = false;
                 List<ItemStack> fromGetOutputs = new ArrayList<>();
-                if (obj instanceof List<?> list) {
+                if (seenOutputContainers.add(obj) && obj instanceof List<?> list) {
                     for (Object e : list) {
                         if (e instanceof ItemStack s && !s.isEmpty()) fromGetOutputs.add(s.copy());
                     }

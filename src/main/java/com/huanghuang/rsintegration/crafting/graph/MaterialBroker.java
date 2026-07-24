@@ -13,6 +13,14 @@ import java.util.Objects;
 /**
  * Server-thread material arbiter for graph node assets.
  * Reservations are atomic across every request in a node.
+ *
+ * <p><b>THREAD SAFETY:</b> This class is <b>NOT</b> thread-safe.
+ * All methods must be called from the server tick thread only.
+ * The internal HashMaps are not synchronized; calling from worker threads
+ * or async callbacks will cause data races leading to item duplication or loss.
+ *
+ * <p>Do not convert to ConcurrentHashMap without also synchronizing
+ * multi-step operations (reserve + commit is not atomic).
  */
 public final class MaterialBroker {
 

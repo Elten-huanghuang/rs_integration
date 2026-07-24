@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.crafting.graph;
 
+import com.huanghuang.rsintegration.RSIntegrationMod;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -197,6 +198,7 @@ public final class ConcurrentNodeExecutor {
             try {
                 publications.publish(result.nodeId, result.worker);
             } catch (RuntimeException exception) {
+                RSIntegrationMod.LOGGER.error("Graph node publication failed: {}", result.nodeId, exception);
                 observation = Observation.FAILED;
             }
             published.add(new Result(result.nodeId, result.worker, result.epoch, observation));

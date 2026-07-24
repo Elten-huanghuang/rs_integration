@@ -13,6 +13,9 @@ import com.huanghuang.rsintegration.mods.apotheosis.network.ApotheosisLibraryImp
 import com.huanghuang.rsintegration.mods.apotheosis.network.ApotheosisLibraryLevelPacket;
 import com.huanghuang.rsintegration.mods.apotheosis.network.ApotheosisLibraryScanRequestPacket;
 import com.huanghuang.rsintegration.mods.apotheosis.network.ApotheosisLibraryScanResponsePacket;
+import com.huanghuang.rsintegration.mods.apotheosis.network.ApothSpawnerExecutePacket;
+import com.huanghuang.rsintegration.mods.apotheosis.network.ApothSpawnerRefreshPacket;
+import com.huanghuang.rsintegration.mods.apotheosis.network.ApothSpawnerStatePacket;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import net.minecraftforge.common.ForgeConfigSpec;
 import net.minecraftforge.common.MinecraftForge;
@@ -151,10 +154,24 @@ public final class ApotheosisRSModule implements IModIntegration {
                 ApotheosisLibraryImportResultPacket::decode,
                 ApotheosisLibraryImportResultPacket::handle,
                 java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_CLIENT));
+        channel.registerMessage(NetworkPacketIds.APOTHEOSIS_SPAWNER_STATE,
+                ApothSpawnerStatePacket.class, ApothSpawnerStatePacket::encode,
+                ApothSpawnerStatePacket::decode, ApothSpawnerStatePacket::handle,
+                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_CLIENT));
+        channel.registerMessage(NetworkPacketIds.APOTHEOSIS_SPAWNER_EXECUTE,
+                ApothSpawnerExecutePacket.class, ApothSpawnerExecutePacket::encode,
+                ApothSpawnerExecutePacket::decode, ApothSpawnerExecutePacket::handle,
+                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_SERVER));
+        channel.registerMessage(NetworkPacketIds.APOTHEOSIS_SPAWNER_REFRESH,
+                ApothSpawnerRefreshPacket.class, ApothSpawnerRefreshPacket::encode,
+                ApothSpawnerRefreshPacket::decode, ApothSpawnerRefreshPacket::handle,
+                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_SERVER));
     }
 
     @Override
-    public void initCommon() {}
+    public void initCommon() {
+        MinecraftForge.EVENT_BUS.register(ApothSpawnerInteractionHandler.class);
+    }
 
     @Override
     public Supplier<DistExecutor.SafeRunnable> clientInitSupplier() {

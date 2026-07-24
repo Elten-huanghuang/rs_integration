@@ -32,11 +32,16 @@ LibraryService 反射的 `BlockEntityMenu.pos/tile`（Placebo）、`EnchLibraryT
 
 ## 发现清单
 
-### [P3] LibraryService.refund 的 DROPPED 计入 ImportStats 但玩家无明确提示
-- 文件：`mods/apotheosis/ApotheosisLibraryService.java:348-355` + 统计回传 L218
-- 现象：refund 三级兜底最终 `player.drop(inventoryCopy, false)` 时返回 DROPPED 并计入 `dropped` 计数，但该计数是否在客户端 UI 明确告知玩家「有 N 本书掉在脚下」取决于 ImportResultPacket 的展示。若未展示，玩家可能在网络+背包都满时不知书被丢到地上（虽未丢失，但体验差）。
-- 说明：**非守恒问题**（物品确实掉落到世界，未 void），纯 UX/可发现性。
-- 修复方向：确认 `ApotheosisLibraryImportResultPacket` 客户端展示了 dropped 计数并给出「已掉落到脚下」提示。
+### [P3] LibraryService.refund 的 DROPPED 计入 ImportStats 但玩家无明确提示 ✅ 已修复
+
+**修复时间**：2026-07-24
+
+- 文件：`mods/apotheosis/ApotheosisLibraryService.java:348-355` + 语言文件
+- 原问题：refund 三级兜底最终掉落到地面时，消息显示 "dropped %s" 没有明确说明掉落在脚下
+- 修复：更新语言文件使提示更清晰：
+  - 英文：`"dropped at feet %s"`
+  - 中文：`"掉落在脚下 %s"`
+- 说明：**非守恒问题**（物品确实掉落到世界，未 void），纯 UX 改进。
 
 ### [P3] 燃料/宝石台 isTable 等 getKey 结果一致性（getBlockState().getBlock() 的 getKey 判空）
 - 文件：`mods/apotheosis/ApotheosisGemCuttingBatchDelegate.java:186-190`（`isTable`）

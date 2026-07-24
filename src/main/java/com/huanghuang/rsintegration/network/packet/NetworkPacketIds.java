@@ -78,6 +78,9 @@ public final class NetworkPacketIds {
     public static final int APOTHEOSIS_LIBRARY_SCAN_RESPONSE = 102;
     public static final int APOTHEOSIS_LIBRARY_IMPORT_REQUEST = 103;
     public static final int APOTHEOSIS_LIBRARY_IMPORT_RESULT = 104;
+    public static final int APOTHEOSIS_SPAWNER_STATE = 105;
+    public static final int APOTHEOSIS_SPAWNER_EXECUTE = 106;
+    public static final int APOTHEOSIS_SPAWNER_REFRESH = 107;
 
     // ── Distant Worlds Lithum Altar (110-119) ──────────────────────
     public static final int LITHUM_ALTAR_STATUS_REQUEST = 110;

@@ -6,7 +6,7 @@
 
 ---
 
-### [P1] PlayerUtils.safeGiveToPlayer 忽略 network.insertItem 返回的 remainder，网络满时静默吞物
+### [P1][已关闭] PlayerUtils.safeGiveToPlayer 忽略 network.insertItem 返回的 remainder，网络满时静默吞物
 > ✅ **已于 2026-07-23 在工作区修复**：接住 `insertItem` 余量，未存入部分 fall through 到 world-spawn drop 分支；已过 `./gradlew compileJava`。以下为修复前的发现存档。
 - 文件: util/PlayerUtils.java:62
 - 维度: 资源守恒
@@ -15,7 +15,7 @@
 - 证据: :62-65 `network.insertItem(stack, stack.getCount(), Action.PERFORM); RSIntegrationMod.LOGGER.warn(...)` 后直接返回，无 remainder 处理。对比 :66-75 的第三兜底（network==null 时 world-spawn drop）逻辑完整。
 - 修复方向: 接住 `ItemStack remainder = network.insertItem(...)`，若 `!remainder.isEmpty()` 则落到 world-spawn drop 分支，保证不丢物。
 
-### [P3] ContainerTransferClient.init 重复注册同一 ScreenEvent.Render.Post 监听
+### [P3][已关闭] ContainerTransferClient.init 重复注册同一 ScreenEvent.Render.Post 监听
 > ✅ **已于 2026-07-23 在工作区修复**：删除重复的第二个 `addListener`。以下为修复前的发现存档。
 - 文件: transfer/ContainerTransferClient.java:113-116
 - 维度: 代码质量 / 性能

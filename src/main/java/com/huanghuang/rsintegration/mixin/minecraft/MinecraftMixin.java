@@ -16,7 +16,7 @@ public abstract class MinecraftMixin {
         if (newScreen == null) {
             Screen closing = ((Minecraft) (Object) this).screen;
             Screen restore = GuiNavStack.popRestoreTarget(closing);
-            if (restore != null) {
+            if (restore != null && restore != closing) {
                 ci.cancel();
                 ((Minecraft) (Object) this).setScreen(restore);
             }
