@@ -30,7 +30,10 @@
 
 ## 发现清单
 
-### [P3] GenericBatchDelegate.captureRepeatedCraftingOutputs 中途 assemble 返回空时读取上一轮 pendingResult（仅影响 NBT，不影响计数）
+### [P3] GenericBatchDelegate.captureRepeatedCraftingOutputs 中途 assemble 返回空时读取上一轮 pendingResult（仅影响 NBT，不影响计数） ✅ 已修复
+
+**修复时间**：2026-07-23（本次会话验证）
+
 > ✅ **已于 2026-07-23 在工作区修复**（采用本条给出的修复方向）：`captureActualCraftingOutputs` 改为返回 boolean（assemble 是否真产出），循环内 `if (!captureActualCraftingOutputs(...)) return false;` 消除跨轮 `pendingResult` 依赖；单次路径 `tryStartSingleCraft` 忽略返回值、保留 computeResult 模板降级。补充：本条定级 P3（"仅 NBT、计数守恒"）在"模板==真实产物"的常规配方下准确；理论反例是「`getResultItem` 非空但 `assemble` 对该网格返回空」的自定义配方——那种情况旧逻辑会把 computeResult 模板 ×N 当产物刷出（真刷物），修复一并堵住。已过 `./gradlew compileJava`。以下为修复前的发现存档。
 - 文件：`crafting/batch/GenericBatchDelegate.java:220-222`
 - 现象：重复执行循环里 `captureActualCraftingOutputs`（L235-243）只在 `!assembled.isEmpty()` 时覆盖 `pendingResult`；随后 L221 `pendingResult.copy()` 读取。若某轮 `assembleCraftingOutput` 返回空，会读到上一轮的结果而非失败。
