@@ -120,6 +120,7 @@ public class RecipeGuiLayoutsMixin {
 
         AbstractContainerMenu container = getParentContainer();
         var player = Minecraft.getInstance().player;
+        if (player == null) return;  // Unlikely but possible during screen transitions
 
         // Compute once: RS available = mod loaded (server handler fails gracefully if no network)
         boolean rsAvailable = ModList.get().isLoaded(ModIds.REFINED_STORAGE);

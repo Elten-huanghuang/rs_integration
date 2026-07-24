@@ -77,11 +77,18 @@
 - 现象: 对 RS/JEI 屏幕继承自 vanilla Screen 的方法用 SRG 名（`m_6375_`/`m_6348_`/`m_7979_`/`m_6050_`/`m_7933_`/`m_5534_`/`m_280003_`）+ 类级 `remap=false`。
 - 风险: 生产（obf/SRG）正确；deobf 开发环境这些方法名为 `mouseClicked` 等，注入找不到目标 → dev 下功能缺失。属团队既定“面向生产”取舍，统一记录一次。
 
-### [P3] RecipeGuiLayoutsMixin.setRecipeLayoutsWithButtons(RETURN) 未空判 Minecraft.player
-- 文件: src/main/java/com/huanghuang/rsintegration/mixin/jei/RecipeGuiLayoutsMixin.java:122,166,311
-- 维度: Null 与异常
-- 现象: `var player = Minecraft.getInstance().player;`（122）后，quest 分支直接 `player.level()`（166）及后续多处使用 player，均未空判；该 RETURN 注入未包 try/catch。
-- 风险: 正常打开 JEI GUI 时 player 必然存在，触发概率极低；但一旦为 null 会 NPE 冒泡进 JEI 的 setRecipeLayoutsWithButtons，可能破坏配方 GUI。低概率潜在 NPE。
+### [P3] RecipeGuiLayoutsMixin.setRecipeLayoutsWithButtons(RETURN) 未空判 Minecraft.player ✅ 已修复
+
+**修复时间**：2026-07-24
+
+- 文件：src/main/java/com/huanghuang/rsintegration/mixin/jei/RecipeGuiLayoutsMixin.java:122-123
+- 原现象：`var player = Minecraft.getInstance().player;`（122）后，quest 分支直接 `player.level()`（166）及后续多处使用 player，均未空判；该 RETURN 注入未包 try/catch。
+- 修复：添加早期返回守卫：
+  ```java
+  var player = Minecraft.getInstance().player;
+  if (player == null) return;  // Unlikely but possible during screen transitions
+  ```
+- 风险：正常打开 JEI GUI 时 player 必然存在，触发概率极低；但一旦为 null 会 NPE 冒泡进 JEI 的 setRecipeLayoutsWithButtons，可能破坏配方 GUI。低概率潜在 NPE。
 
 ### [P3] Goety SummonRitual 的“跳过/保留”与注释自相矛盾（待确认）
 - 文件: src/main/java/com/huanghuang/rsintegration/mixin/jei/RecipeGuiLayoutsMixin.java:214-219,1476
@@ -89,7 +96,8 @@
 - 现象: 循环处注释（214-216）称要跳过 `SummonRitual`（无物品产出）；但 `rsi$isGoetyNonItemRitual` 对 `SummonRitual` `return false`（=不视为非物品仪式=保留），故只要非 sacrificial 就不会被跳过，会给它生成“+”按钮。
 - 风险: 为无物品产出的召唤仪式生成合成按钮，点击可能无效或报错（UX 不一致）。是否有意保留召唤仪式的远程触发，需确认。
 
-### [P3] MinecraftMixin.setScreen 拦截依赖 GuiNavStack 不回传同一关闭屏，无自防护
+### [P3][已修复] MinecraftMixin.setScreen 拦截依赖 GuiNavStack 不回传同一关闭屏，无自防护
+> ✅ **已修复**：增加 `restore != closing` 防递归保护。
 - 文件: src/main/java/com/huanghuang/rsintegration/mixin/minecraft/MinecraftMixin.java:14-26
 - 维度: 递归/栈安全
 - 现象: newScreen==null 时若 `popRestoreTarget(closing)` 返回非空，`ci.cancel()` 后在 HEAD 注入内再次 `setScreen(restore)`。
