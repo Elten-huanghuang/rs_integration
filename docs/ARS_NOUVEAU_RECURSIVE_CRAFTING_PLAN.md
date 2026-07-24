@@ -2,6 +2,14 @@
 
 > 本文已按 4.12.6 目标 JAR 的反编译源码逐条核对。所有"已确认"条目均能在
 > 对应 tile/recipe 类中定位到证据。带 ⚠ 的条目是对旧版计划中错误或缺失的修正。
+>
+> **2026-07-24 二次复核修正**（重新用 ForgeFlower 反编译 + 逐行核对，纠正了原稿几处与源码不符处）：
+> 1. Apparatus 基座搜索半径是 **3**（`EnchantingApparatusTile.pedestalList()` 传 `3`），不是 1；半径 1 的是 Imbuement（`ImbuementTile.getNearbyPedestals()` 传 `1`）。原稿把两台机器搞反了。
+> 2. `RecipeRegistry` 实际注册 **16** 种 RecipeType（`grep -c RECIPE_TYPES.register`=16），不是 15。
+> 3. `reactive` 的真实 RecipeType id 是 **`reactive_enchantment`**。
+> 4. `ModType.register(...)` 中间两个 `String[]` 是 `blockKeyKeywords`/`blockKeyPrefixes`，JEI 由独立的 `configureJei(...)` 接线，不进 register()。
+>
+> 逐字确认无误的核心事实（不改）：`craftingLength=210`、`counter>210` 结算、`m_8020_` 在 `isCrafting` 时返回空栈、`attemptCraft(ItemStack,@Nullable Player)` 接受 null、Imbuement 的 `craftTicks=100`/`%20==0`/`takeSource(pos,level,2,min(200,cost))`/无源 `addSource(10)` 兜底/`getMaxSource()==10_000_000`、Source 取用非原子、配方子类 `instanceof` 陷阱、`ImbuementRecipe.getResult(tile)` 共享实例须 `.copy()`。
 
 ## 1. 范围与依据
 
@@ -18,7 +26,7 @@ Mod ID: ars_nouveau
 反编译核对覆盖：`EnchantingApparatusTile`、`ImbuementTile`、`ArcanePedestalTile`、
 `SingleItemTile`、`AbstractSourceMachine`、`SourceManager`/`SourceUtil`、
 `IEnchantingRecipe` 全部实现、`IImbuementRecipe`/`ImbuementRecipe`、以及
-`setup/registry/RecipeRegistry` 中注册的全部 15 种配方类型。
+`setup/registry/RecipeRegistry` 中注册的全部 16 种配方类型。
 
 现有 RSI 框架契约以 `crafting/batch/IBatchDelegate.java`、`AbstractBatchDelegate`、
 `BatchConcurrencyCapabilities` 为准，命名与生命周期对齐 `mods/eidolon`、`mods/malum`
@@ -29,11 +37,16 @@ Mod ID: ars_nouveau
 ### 2.1 Enchanting Apparatus
 
 - 中央 `EnchantingApparatusTile extends SingleItemTile`，单槽保存核心输入或结果。
-- 四周 `ArcanePedestalTile`（同样 `extends SingleItemTile`，单槽）提供配方材料，
-  `pedestalList()` 半径固定为 1。
+- 四周 `ArcanePedestalTile`（同样 `extends SingleItemTile`，单槽）提供配方材料。
+  ⚠ **修正**：`pedestalList()`（位于 `EnchantingApparatusTile:134`）实际是
+  `pedestalList(pos, 3, level)`——**半径 3**，非 1。半径 1 的是 Imbuement
+  （见 §2.2）。`ArsPedestalLayout` 与独占域的 `supportOffsets` 必须按半径 3 覆盖
+  Apparatus 的基座，否则会漏扫外圈、配方永不匹配。
 - ⚠ 触发方法确实是 `attemptCraft(ItemStack catalyst, @Nullable Player)`，**player 可传
-  null**（tile 内部 `tick()` 就以 null 调用 `getRecipe`）。因此"需要玩家"并不是障碍，
-  RSI 可在无玩家上下文时直接调用。
+  null**（`getRecipe`/`craftingPossible` 也接受 null）。因此"需要玩家"并不是障碍，
+  RSI 可在无玩家上下文时直接调用。修正：以 null player 调 `attemptCraft` 的实际调用点是
+  `m_6836_`（setItem 覆盖，`EnchantingApparatusTile:234`），`tick()` 本身只对 `getRecipe`
+  传 null，不直接调 `attemptCraft`——但这不影响"null 合法"的结论。
 - ⚠ 完成检测不能读中央槽：`m_8020_(int)` 在 `isCrafting` 为真时**返回空栈**。必须观测
   `public boolean isCrafting` 与 `private int counter`（`counter > craftingLength(=210)`
   时结算），结算瞬间把结果写回中央槽并置 `isCrafting=false`。
@@ -78,7 +91,8 @@ Mod ID: ars_nouveau
 
 ## 3. 配方类型全景与可自动化判定
 
-`setup/registry/RecipeRegistry` 注册了 15 种自定义 `RecipeType`。旧版计划只覆盖 2 种，
+`setup/registry/RecipeRegistry` 注册了 **16** 种自定义 `RecipeType`（原稿正文误写为 15，
+但下表本身列全了 16 行——已核对 `grep -c RECIPE_TYPES.register`=16）。旧版计划只覆盖 2 种，
 这是"写不全"的主因。下表是权威覆盖矩阵——**只有确定物品产物、无随机、无实体/世界上下文
 的类型才进自动合成候选索引**。
 
@@ -89,7 +103,7 @@ Mod ID: ars_nouveau
 | `enchantment` | `EnchantmentRecipe extends EnchantingApparatusRecipe` | Apparatus | 对输入附魔（NBT 变换） | ⚠ TRANSFORMED，见 §4.1 |
 | `armor_upgrade` | `ArmorUpgradeRecipe extends …, ITextOutput` | Apparatus | 对护甲改 perk（NBT 变换）+ 聊天输出 | ❌ 排除（NBT 变换 + ITextOutput） |
 | `spell_write` | `SpellWriteRecipe extends …, ITextOutput` | Apparatus | 写法术到卷轴（NBT 变换） | ❌ 排除 |
-| `reactive` | `ReactiveEnchantmentRecipe extends EnchantmentRecipe` | Apparatus | 反应附魔（NBT 变换） | ❌ 排除 |
+| `reactive_enchantment` | `ReactiveEnchantmentRecipe extends EnchantmentRecipe` | Apparatus | 反应附魔（NBT 变换） | ❌ 排除 |
 | `crush` | `CrushRecipe` | Crushing 相关 | **随机** `getRolledOutputs(RandomSource)`，逐项 chance/maxRange | ❌ 排除（随机） |
 | `glyph` | `GlyphRecipe` (Recipe\<ScribesTile\>) | Scribes Table | 确定物品 | ⏳ Phase 2 候选，需先验 Scribes 生命周期 |
 | `dye` | `DyeRecipe extends ShapelessRecipe` | 工作台类 | 依赖输入染色（NBT/颜色变换） | ❌ 排除 |
@@ -103,7 +117,7 @@ Mod ID: ars_nouveau
 
 结论：第一阶段可自动化的只有 **Imbuement** 与 **Enchanting Apparatus 的普通
 `enchanting_apparatus` 子类型**。`glyph`（Scribes Table）是 Phase 2 唯一现实候选，但需
-先完成 Scribes 生命周期反编译验证。其余 12 种默认排除，并在索引层给出排除原因。
+先完成 Scribes 生命周期反编译验证。其余 13 种默认排除，并在索引层给出排除原因。
 
 ## 4. 支持阶段
 
@@ -154,10 +168,11 @@ ArsApparatusBatchDelegate
 - ⚠ **`ImbuementRecipe` 的 `assemble()` 与 `getResultItem()` 都返回 `ItemStack.EMPTY`**。
   必须调用 `getResult(tile)`（返回固定 `output` 字段的**共享实例**，须 `.copy()` 再用，
   且 `output` 无 NBT、count 来自 JSON）。这直接验证了"不得只依赖通用 getResultItem"。
-- ⚠ **子类型陷阱**：`EnchantmentRecipe`/`ArmorUpgradeRecipe`/`SpellWriteRecipe`/
-  `ReactiveEnchantmentRecipe` 全部 `extends EnchantingApparatusRecipe`。因此分类**不能用
-  `instanceof EnchantingApparatusRecipe`**（会把 NBT 变换子类型一起吞进来）。必须用
-  `recipe.getClass()` 精确类名或 `RecipeType` 精确匹配来区分普通合成与变换子类型。
+- ⚠ **子类型陷阱**：`EnchantmentRecipe`/`ArmorUpgradeRecipe`/`SpellWriteRecipe` 直接
+  `extends EnchantingApparatusRecipe`，`ReactiveEnchantmentRecipe` 则 `extends EnchantmentRecipe`
+  （**间接**继承 `EnchantingApparatusRecipe`）。四者都是 `EnchantingApparatusRecipe` 的实例，
+  因此分类**不能用 `instanceof EnchantingApparatusRecipe`**（会把 NBT 变换子类型一起吞进来）。
+  必须用 `recipe.getClass()` 精确类名或 `RecipeType` 精确匹配来区分普通合成与变换子类型。
 - handler 职责：校验具体 recipe class / recipe type；从权威字段读产物；返回准确
   `IngredientSpec`；标记容器返还物/可复用物/普通消耗物；对空产物、随机产物（Crush）、
   实体产物（summon/dispel）关闭自动化。
@@ -206,8 +221,13 @@ Source 只限制启动/继续速度，不让 `available / requiredPerCraft` 参�
 须实现：`configFlag()`、`modId()`、`registerModType()`、`registerBindingTargets()`、
 `registerRecipeHandler()`、`registerNetworkPackets()`、`initCommon()`。
 
-两个独立 `ModType`（`ModType.register(id, recipePrefixes[], jeiCategories[], guiKeys[],
-delegateSupplier)`）：
+两个独立 `ModType`。⚠ **修正真实签名**（`ModType.java:104`）：
+`ModType.register(String id, String[] recipePrefixes, String[] blockKeyKeywords,
+String[] blockKeyPrefixes, Supplier<IBatchDelegate> delegateFactory)`——中间两个
+`String[]` 是 **blockKeyKeywords / blockKeyPrefixes**（供 `fromBlockKey` 方块描述匹配），
+**不是** jeiCategories/guiKeys。JEI 由 register 之后单独调用
+`configureJei(id, jeiUidToFilter[][], jeiRecipePrefixes[][], jeiTooltipKey)`（`ModType.java:141`）
+接线，绝不进 register()。另有一个 6 参重载（多一个 `@Nullable Supplier inferDelegateFactory`）。
 
 ```text
 ars_nouveau_imbuement  -> ArsImbuementBatchDelegate
@@ -254,7 +274,7 @@ world 磁铁拦截），`concurrencyCapabilities()` 返回 `machineSlot()`。
 
 ## 9. Apparatus 执行生命周期
 
-1. `validateAndInit`：捕获并排序 `pedestalList()`（半径 1）生成稳定 pedestal layout，
+1. `validateAndInit`：捕获并排序 `pedestalList()`（Apparatus 半径 **3**，见 §2.1）生成稳定 pedestal layout，
    读配方（用 §5.1 精确类型判定，排除 enchantment/spell_write/armor/reactive 子类型）、
    Source cost、槽占用。
 2. `getRequiredMaterials`：中央 reagent + 各基座 ingredient（保留 NBT）。

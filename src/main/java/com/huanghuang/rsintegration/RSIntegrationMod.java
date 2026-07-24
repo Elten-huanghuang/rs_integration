@@ -12,6 +12,7 @@ import com.huanghuang.rsintegration.mods.aether.AetherRSModule;
 import com.huanghuang.rsintegration.mods.apotheosis.ApotheosisRSModule;
 import com.huanghuang.rsintegration.mods.aetherworks.AetherworksRSModule;
 import com.huanghuang.rsintegration.mods.aetherworks.client.AetherworksClientSetup;
+import com.huanghuang.rsintegration.mods.arsnouveau.ArsNouveauRSModule;
 import com.huanghuang.rsintegration.mods.avaritia.AvaritiaRSModule;
 import com.huanghuang.rsintegration.mods.confluence.ConfluenceRSModule;
 import com.huanghuang.rsintegration.mods.crockpot.CrockPotRSModule;
@@ -137,6 +138,8 @@ public final class RSIntegrationMod {
                     () -> AetherworksRSModule.INSTANCE),
             new ModuleEntry(ModIds.AETHER, RSIntegrationConfig.ENABLE_AETHER,
                     () -> AetherRSModule.INSTANCE),
+            new ModuleEntry(ModIds.ARS_NOUVEAU, RSIntegrationConfig.ENABLE_ARS_NOUVEAU,
+                    () -> ArsNouveauRSModule.INSTANCE),
             new ModuleEntry(ModIds.APOTHEOSIS, RSIntegrationConfig.ENABLE_APOTHEOSIS,
                     () -> ApotheosisRSModule.INSTANCE),
             new ModuleEntry(ModIds.CROCKPOT, RSIntegrationConfig.ENABLE_CROCKPOT,

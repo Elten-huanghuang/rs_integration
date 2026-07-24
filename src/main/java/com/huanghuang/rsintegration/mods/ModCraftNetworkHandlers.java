@@ -49,4 +49,9 @@ public final class ModCraftNetworkHandlers {
         wrWandRegistered = true;
     }
 
+    public static void registerArsNouveau() {
+        // Ars Nouveau uses the GenericCraftPacket system via IBatchDelegate
+        // No custom packet registration needed
+    }
+
 }
