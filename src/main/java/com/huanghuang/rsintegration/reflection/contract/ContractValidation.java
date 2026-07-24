@@ -68,7 +68,12 @@ public final class ContractValidation {
      */
     public static void registerTarget(String contractDescription, Field targetField) {
         targetField.setAccessible(true);
-        TARGET_FIELDS.put(contractDescription, targetField);
+        Field existing = TARGET_FIELDS.put(contractDescription, targetField);
+        if (existing != null && existing != targetField) {
+            RSIntegrationMod.LOGGER.warn(
+                    "[RSI-Contract] Contract description collision: '{}' was already bound to {}, now overwritten by {}",
+                    contractDescription, existing, targetField);
+        }
     }
 
     /**
@@ -166,29 +171,46 @@ public final class ContractValidation {
      * (JLS §12.4.1); without this, the static blocks that call
      * {@link #register} and {@link #registerTarget} never run and
      * {@link #validateAll()} finds zero contracts.
+     * <p>
+     * Each probe is loaded individually with its own try-catch to prevent
+     * a single probe's initialization failure (field name typo, etc.) from
+     * cascading and breaking all other probes.
      */
     private static void ensureProbeClassesLoaded() {
-        Object o;
-        o = AetherworksReflection.anvilBEClass;
-        o = BackpackReflection.backpackBEClass;
-        o = CrabbersDelightReflection.crabTrapBEClass;
-        o = CrockPotReflection.crockPotBEClass;
-        o = DistantWorldsReflection.lithumCoreBlockClass;
-        o = EidolonReflection.crucibleTileEntityClass;
-        o = EmbersReflection.alchemyTabletBEClass;
-        o = FAReflection.hephaestusForgeBEClass;
-        o = FarmersDelightReflection.cookingPotBEClass;
-        o = FarmingForBlockheadsReflection.marketBEClass;
-        o = FRReflection.kettleBEClass;
-        o = GoetyReflection.darkAltarBEClass;
-        o = ImmersalsDelightReflection.enchantalCoolerBEClass;
-        o = JEIReflection.ingredientListOverlayClass;
-        o = MalumReflection.spiritAltarBEClass;
-        o = TLMReflection.altarBEClass;
-        o = WRReflection.arcaneWorkbenchBEClass;
-        o = YHKReflection.cookingBEClass;
-        // suppress "unused" warning — the reads above are the whole point
-        if (o == null) { /* probe fields start null; contracts populate them */ }
+        tryLoadProbe("Aetherworks", () -> AetherworksReflection.anvilBEClass);
+        tryLoadProbe("Backpack", () -> BackpackReflection.backpackBEClass);
+        tryLoadProbe("CrabbersDelight", () -> CrabbersDelightReflection.crabTrapBEClass);
+        tryLoadProbe("CrockPot", () -> CrockPotReflection.crockPotBEClass);
+        tryLoadProbe("DistantWorlds", () -> DistantWorldsReflection.lithumCoreBlockClass);
+        tryLoadProbe("Eidolon", () -> EidolonReflection.crucibleTileEntityClass);
+        tryLoadProbe("Embers", () -> EmbersReflection.alchemyTabletBEClass);
+        tryLoadProbe("FA", () -> FAReflection.hephaestusForgeBEClass);
+        tryLoadProbe("FarmersDelight", () -> FarmersDelightReflection.cookingPotBEClass);
+        tryLoadProbe("FarmingForBlockheads", () -> FarmingForBlockheadsReflection.marketBEClass);
+        tryLoadProbe("FR", () -> FRReflection.kettleBEClass);
+        tryLoadProbe("Goety", () -> GoetyReflection.darkAltarBEClass);
+        tryLoadProbe("ImmersalsDelight", () -> ImmersalsDelightReflection.enchantalCoolerBEClass);
+        tryLoadProbe("JEI", () -> JEIReflection.ingredientListOverlayClass);
+        tryLoadProbe("Malum", () -> MalumReflection.spiritAltarBEClass);
+        tryLoadProbe("TLM", () -> TLMReflection.altarBEClass);
+        tryLoadProbe("WR", () -> WRReflection.arcaneWorkbenchBEClass);
+        tryLoadProbe("YHK", () -> YHKReflection.cookingBEClass);
+    }
+
+    private static void tryLoadProbe(String probeName, java.util.function.Supplier<Object> fieldAccess) {
+        try {
+            Object o = fieldAccess.get();
+            // suppress "unused" warning — the read above is the whole point
+            if (o == null) { /* probe fields start null; contracts populate them */ }
+        } catch (ExceptionInInitializerError e) {
+            RSIntegrationMod.LOGGER.error(
+                    "[RSI-Contract] Failed to load probe {}: initialization error (likely field name typo)",
+                    probeName, e.getCause() != null ? e.getCause() : e);
+        } catch (Throwable t) {
+            RSIntegrationMod.LOGGER.error(
+                    "[RSI-Contract] Failed to load probe {}: unexpected error",
+                    probeName, t);
+        }
     }
 
     private static Field resolveField(Class<?> clazz,

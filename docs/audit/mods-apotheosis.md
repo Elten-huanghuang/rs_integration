@@ -43,9 +43,13 @@ LibraryService 反射的 `BlockEntityMenu.pos/tile`（Placebo）、`EnchLibraryT
   - 中文：`"掉落在脚下 %s"`
 - 说明：**非守恒问题**（物品确实掉落到世界，未 void），纯 UX 改进。
 
-### [P3] 燃料/宝石台 isTable 等 getKey 结果一致性（getBlockState().getBlock() 的 getKey 判空）
+### [P3] 燃料/宝石台 isTable 等 getKey 结果一致性（getBlockState().getBlock() 的 getKey 判空） ✅ 已验证正确
+
+**验证时间**：2026-07-24
+
 - 文件：`mods/apotheosis/ApotheosisGemCuttingBatchDelegate.java:186-190`（`isTable`）
-- 现象：`ForgeRegistries.BLOCKS.getKey(...)` 已判 `id != null`（L189），此处**正确**。记录为对照：Fletching 的 `isFletchingTable`（L313-319）同样判空。本域此项无缺陷，仅作与 distantworlds 域 isStaff 未判空 P3 的横向对照，无需修复。
+- 状态：`ForgeRegistries.BLOCKS.getKey(...)` 已判 `id != null`（L189），此处**正确**
+- 说明：记录为对照，Fletching 的 `isFletchingTable`（L313-319）同样判空。本域此项无缺陷，仅作与 distantworlds 域 isStaff 未判空 P3 的横向对照，无需修复。
 
 ---
 

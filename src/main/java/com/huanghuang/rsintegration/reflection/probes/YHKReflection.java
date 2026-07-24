@@ -10,35 +10,35 @@ public final class YHKReflection {
     private static final String MOD = ModIds.YOUKAISHOMECOMING;
 
     // -- Cooking Pot --
-    public static Class<?> cookingBEClass;
-    public static Class<?> potCookingRecipeClass;
+    public static volatile Class<?> cookingBEClass;
+    public static volatile Class<?> potCookingRecipeClass;
     // -- Kettle --
-    public static Class<?> kettleBEClass;
-    public static Class<?> kettleRecipeClass;
-    public static Class<?> yhFluidClass;
-    public static Class<?> yhFluidHolderClass;
+    public static volatile Class<?> kettleBEClass;
+    public static volatile Class<?> kettleRecipeClass;
+    public static volatile Class<?> yhFluidClass;
+    public static volatile Class<?> yhFluidHolderClass;
     // -- Cuisine Board --
-    public static Class<?> cuisineBoardBEClass;
-    public static Class<?> tableItemClass;
-    public static Class<?> cuisineRecipeClass;
-    public static Class<?> variantTableItemBaseClass;
-    public static Class<?> ingredientTableItemClass;
+    public static volatile Class<?> cuisineBoardBEClass;
+    public static volatile Class<?> tableItemClass;
+    public static volatile Class<?> cuisineRecipeClass;
+    public static volatile Class<?> variantTableItemBaseClass;
+    public static volatile Class<?> ingredientTableItemClass;
     // -- Fermentation Tank --
-    public static Class<?> fermentationTankBEClass;
-    public static Class<?> simpleFermentationRecipeClass;
-    public static Class<?> fluidItemTileClass;
-    public static Class<?> fermentationTankBlockClass;
+    public static volatile Class<?> fermentationTankBEClass;
+    public static volatile Class<?> simpleFermentationRecipeClass;
+    public static volatile Class<?> fluidItemTileClass;
+    public static volatile Class<?> fermentationTankBlockClass;
     // -- Steamer --
-    public static Class<?> steamerBEClass;
-    public static Class<?> rackDataClass;
-    public static Class<?> rackItemDataClass;
-    public static Class<?> steamerPotBlockClass;
+    public static volatile Class<?> steamerBEClass;
+    public static volatile Class<?> rackDataClass;
+    public static volatile Class<?> rackItemDataClass;
+    public static volatile Class<?> steamerPotBlockClass;
     // -- Moka Pot --
-    public static Class<?> mokaMakerBEClass;
-    public static Class<?> mokaRecipeClass;
-    public static Class<?> mokaMakerBlockClass;
+    public static volatile Class<?> mokaMakerBEClass;
+    public static volatile Class<?> mokaRecipeClass;
+    public static volatile Class<?> mokaMakerBlockClass;
     // -- Base (shared parent class) --
-    public static Class<?> timedRecipeBEClass;
+    public static volatile Class<?> timedRecipeBEClass;
 
 
     static {

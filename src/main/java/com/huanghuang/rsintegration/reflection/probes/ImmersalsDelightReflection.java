@@ -9,7 +9,7 @@ public final class ImmersalsDelightReflection {
 
     private static final String MOD = ModIds.IMMORTERS_DELIGHT;
 
-    public static Class<?> enchantalCoolerBEClass;
+    public static volatile Class<?> enchantalCoolerBEClass;
 
 
     static {

@@ -9,12 +9,12 @@ public final class MalumReflection {
 
     private static final String MOD = ModIds.MALUM;
 
-    public static Class<?> spiritAltarBEClass;
-    public static Class<?> crucibleBEClass;
-    public static Class<?> ingredientWithCountClass;
-    public static Class<?> runicWorkbenchBEClass;
-    public static Class<?> altarCraftingHelperClass;
-    public static Class<?> spiritInfusionRecipeClass;
+    public static volatile Class<?> spiritAltarBEClass;
+    public static volatile Class<?> crucibleBEClass;
+    public static volatile Class<?> ingredientWithCountClass;
+    public static volatile Class<?> runicWorkbenchBEClass;
+    public static volatile Class<?> altarCraftingHelperClass;
+    public static volatile Class<?> spiritInfusionRecipeClass;
 
 
     static {

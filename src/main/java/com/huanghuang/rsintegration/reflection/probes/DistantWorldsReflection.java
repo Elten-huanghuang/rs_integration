@@ -8,16 +8,16 @@ import com.huanghuang.rsintegration.util.ModIds;
 public final class DistantWorldsReflection {
     private static final String MOD = ModIds.DISTANT_WORLDS;
 
-    public static Class<?> lithumCoreBlockClass;
-    public static Class<?> lithumCoreBEClass;
-    public static Class<?> lithumPedestalBEClass;
-    public static Class<?> lithumFurnaceBEClass;
-    public static Class<?> structureIntegrityProcedureClass;
-    public static Class<?> recipePickerProcedureClass;
-    public static Class<?> coreUpdateTickProcedureClass;
-    public static Class<?> coreResultProcedureClass;
-    public static Class<?> furnaceUpdateTickProcedureClass;
-    public static Class<?> coreRightClickProcedureClass;
+    public static volatile Class<?> lithumCoreBlockClass;
+    public static volatile Class<?> lithumCoreBEClass;
+    public static volatile Class<?> lithumPedestalBEClass;
+    public static volatile Class<?> lithumFurnaceBEClass;
+    public static volatile Class<?> structureIntegrityProcedureClass;
+    public static volatile Class<?> recipePickerProcedureClass;
+    public static volatile Class<?> coreUpdateTickProcedureClass;
+    public static volatile Class<?> coreResultProcedureClass;
+    public static volatile Class<?> furnaceUpdateTickProcedureClass;
+    public static volatile Class<?> coreRightClickProcedureClass;
 
     static {
         register("net.mcreator.distantworlds.block.LithumCoreBlock", "lithumCoreBlockClass");

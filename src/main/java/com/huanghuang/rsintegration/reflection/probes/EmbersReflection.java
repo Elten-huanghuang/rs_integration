@@ -9,13 +9,13 @@ public final class EmbersReflection {
 
     private static final String MOD = ModIds.EMBERS;
 
-    public static Class<?> alchemyTabletBEClass;
-    public static Class<?> alchemyPedestalTopBEClass;
-    public static Class<?> alchemyPedestalBEClass;
-    public static Class<?> alchemyRecipeClass;
-    public static Class<?> ibinClass;
-    public static Class<?> iemberCapabilityClass;
-    public static Class<?> registryManagerClass;
+    public static volatile Class<?> alchemyTabletBEClass;
+    public static volatile Class<?> alchemyPedestalTopBEClass;
+    public static volatile Class<?> alchemyPedestalBEClass;
+    public static volatile Class<?> alchemyRecipeClass;
+    public static volatile Class<?> ibinClass;
+    public static volatile Class<?> iemberCapabilityClass;
+    public static volatile Class<?> registryManagerClass;
 
 
     static {

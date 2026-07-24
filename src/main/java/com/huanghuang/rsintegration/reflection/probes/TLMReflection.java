@@ -9,11 +9,11 @@ public final class TLMReflection {
 
     private static final String MOD = ModIds.TOUHOU_LITTLE_MAID;
 
-    public static Class<?> altarBEClass;
-    public static Class<?> blockAltarClass;
-    public static Class<?> altarRecipeClass;
-    public static Class<?> powerCapProviderClass;
-    public static Class<?> initRecipesClass;
+    public static volatile Class<?> altarBEClass;
+    public static volatile Class<?> blockAltarClass;
+    public static volatile Class<?> altarRecipeClass;
+    public static volatile Class<?> powerCapProviderClass;
+    public static volatile Class<?> initRecipesClass;
 
 
     static {

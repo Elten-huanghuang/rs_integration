@@ -9,10 +9,10 @@ public final class CrockPotReflection {
 
     private static final String MOD = ModIds.CROCKPOT;
 
-    public static Class<?> crockPotBEClass;
-    public static Class<?> foodCategoryClass;
-    public static Class<?> foodValuesClass;
-    public static Class<?> foodValuesDefinitionClass;
+    public static volatile Class<?> crockPotBEClass;
+    public static volatile Class<?> foodCategoryClass;
+    public static volatile Class<?> foodValuesClass;
+    public static volatile Class<?> foodValuesDefinitionClass;
 
 
     static {

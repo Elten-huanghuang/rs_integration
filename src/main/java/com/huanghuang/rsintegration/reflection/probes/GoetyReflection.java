@@ -9,25 +9,25 @@ public final class GoetyReflection {
 
     private static final String MOD = ModIds.GOETY;
 
-    public static Class<?> darkAltarBEClass;
-    public static Class<?> seHelperClass;
-    public static Class<?> cursedCageBEClass;
-    public static Class<?> necroBrazierBEClass;
-    public static Class<?> pedestalBEClass;
-    public static Class<?> soulCandlestickBEClass;
-    public static Class<?> brazierRecipeClass;
-    public static Class<?> ritualRecipeClass;
-    public static Class<?> ritualClass;
-    public static Class<?> enchantItemRitualClass;
-    public static Class<?> convertRitualClass;
-    public static Class<?> teleportRitualClass;
-    public static Class<?> ritualRequirementsClass;
-    public static Class<?> ritualBlockEntityClass;
-    public static Class<?> researchListClass;
-    public static Class<?> darkAltarBlockClass;
-    public static Class<?> necroBrazierBlockClass;
-    public static Class<?> cursedCageBlockClass;
-    public static Class<?> soulCandlestickBlockClass;
+    public static volatile Class<?> darkAltarBEClass;
+    public static volatile Class<?> seHelperClass;
+    public static volatile Class<?> cursedCageBEClass;
+    public static volatile Class<?> necroBrazierBEClass;
+    public static volatile Class<?> pedestalBEClass;
+    public static volatile Class<?> soulCandlestickBEClass;
+    public static volatile Class<?> brazierRecipeClass;
+    public static volatile Class<?> ritualRecipeClass;
+    public static volatile Class<?> ritualClass;
+    public static volatile Class<?> enchantItemRitualClass;
+    public static volatile Class<?> convertRitualClass;
+    public static volatile Class<?> teleportRitualClass;
+    public static volatile Class<?> ritualRequirementsClass;
+    public static volatile Class<?> ritualBlockEntityClass;
+    public static volatile Class<?> researchListClass;
+    public static volatile Class<?> darkAltarBlockClass;
+    public static volatile Class<?> necroBrazierBlockClass;
+    public static volatile Class<?> cursedCageBlockClass;
+    public static volatile Class<?> soulCandlestickBlockClass;
 
 
     // ── Reflection field/method names (centralized so renames only touch one file) ──

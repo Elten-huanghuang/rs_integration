@@ -9,10 +9,10 @@ public final class FarmersDelightReflection {
 
     private static final String MOD = ModIds.FARMERSDELIGHT;
 
-    public static Class<?> cookingPotBEClass;
-    public static Class<?> cookingPotRecipeClass;
-    public static Class<?> skilletBEClass;
-    public static Class<?> stoveBEClass;
+    public static volatile Class<?> cookingPotBEClass;
+    public static volatile Class<?> cookingPotRecipeClass;
+    public static volatile Class<?> skilletBEClass;
+    public static volatile Class<?> stoveBEClass;
 
 
     static {

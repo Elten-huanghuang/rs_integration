@@ -9,8 +9,8 @@ public final class FarmingForBlockheadsReflection {
 
     private static final String MOD = ModIds.FARMINGFORBLOCKHEADS;
 
-    public static Class<?> marketRegistryClass;
-    public static Class<?> marketBEClass;
+    public static volatile Class<?> marketRegistryClass;
+    public static volatile Class<?> marketBEClass;
 
 
     static {

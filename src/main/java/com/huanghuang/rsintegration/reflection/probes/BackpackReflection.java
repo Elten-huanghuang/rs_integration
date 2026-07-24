@@ -10,8 +10,8 @@ public final class BackpackReflection {
 
     private static final String MOD = ModIds.SOPHISTICATED_BACKPACKS;
 
-    public static Class<?> backpackBEClass;
-    public static Class<?> playerAttackHelperClass;
+    public static volatile Class<?> backpackBEClass;
+    public static volatile Class<?> playerAttackHelperClass;
 
 
     static {
