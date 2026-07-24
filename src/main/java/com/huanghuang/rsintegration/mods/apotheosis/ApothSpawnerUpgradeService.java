@@ -75,32 +75,17 @@ public final class ApothSpawnerUpgradeService {
                 missing, null, false);
         PENDING.put(player.getUUID(), new PendingPlan(dimension, pos, Map.copyOf(selected),
                 System.currentTimeMillis() + PREVIEW_TTL_MS));
-        List<PlanStep> steps = graph == null ? List.of() : graph.nodes().stream().map(node -> {
-            ItemStack output = node.syntheticOutput();
-            if ((output == null || output.isEmpty()) && !node.outputs().isEmpty()) {
-                var declared = node.outputs().get(0);
-                output = declared.material().toStack(declared.quantity());
-            }
-            List<ItemStack> inputs = node.inputs().stream().map(input -> {
-                ItemStack display = input.displayHint().copy();
-                if (display.isEmpty() && input.ingredient().getItems().length > 0) {
-                    display = input.ingredient().getItems()[0].copy();
-                }
-                display.setCount(input.quantity());
-                return display;
-            }).toList();
-            return new PlanStep(node.recipeId(), output == null ? ItemStack.EMPTY : output,
-                    node.executions(), inputs, node.alternativeIds(),
-                    com.huanghuang.rsintegration.ModType.byId(node.modTypeId()), 0, false,
-                    0, 0, node.alternativeModTypeIds());
-        }).toList();
+        PlanGraphView graphView = graph == null ? null : PlanGraphView.from(graph);
+        List<PlanStep> steps = graphView == null ? List.of() : graphView.nodes().stream()
+                .map(PlanGraphView.NodeView::asPlanStep)
+                .toList();
         boolean ok = graph == null || graph.unresolvedDemands().isEmpty();
         ItemStack target = new ItemStack(net.minecraft.world.item.Items.SPAWNER);
         PlanResponse response = new PlanResponse(ok, target.getHoverName().getString(), target,
                 steps, Map.of(), missing, ApothSpawnerPlanTarget.ID.toString(), null,
                 dimension.toString(), pos.getX(), pos.getY(), pos.getZ(), List.of(), 1,
                 null, null, null, 0L, false, false, false, null, Set.of(),
-                Map.<IngredientKey, Integer>of(), null, graph == null ? null : PlanGraphView.from(graph));
+                Map.<IngredientKey, Integer>of(), null, graphView);
         com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler.CHANNEL.send(
                 PacketDistributor.PLAYER.with(() -> player), new PlanResponsePacket(response));
     }

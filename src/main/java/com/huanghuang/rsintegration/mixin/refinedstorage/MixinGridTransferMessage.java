@@ -37,7 +37,7 @@ public abstract class MixinGridTransferMessage {
             target = "Lcom/refinedmods/refinedstorage/api/network/grid/IGrid;onRecipeTransfer(Lnet/minecraft/world/entity/player/Player;[[Lnet/minecraft/world/item/ItemStack;)V",
             shift = At.Shift.AFTER
         ),
-        require = 1,
+        require = 0,
         remap = false
     )
     private static void rsi$redirectCraftingGridToInventory(

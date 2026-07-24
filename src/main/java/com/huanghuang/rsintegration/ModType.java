@@ -62,7 +62,7 @@ public final class ModType {
                 new String[]{"market"},
                 delegateSupplier("com.huanghuang.rsintegration.mods.farmingforblockheads.MarketBatchDelegate"));
         configureJei("farmingforblockheads",
-                new String[][]{{"farmingforblockheads:market"}},
+                new String[][]{{"farmingforblockheads:market", "market"}},
                 new String[][]{{"net.blay09.mods.farmingforblockheads.", "farmingforblockheads"}},
                 "gui.rs_integration.jei.market_craft");
     }

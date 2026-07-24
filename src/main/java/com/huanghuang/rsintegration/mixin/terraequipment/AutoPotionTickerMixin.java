@@ -17,7 +17,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 @Mixin(value = com.inolia_zaicek.terra_equipment.util.AutoPotionTicker.class, remap = false)
 public abstract class AutoPotionTickerMixin {
 
-    @Inject(method = "onPlayerTick", at = @At("RETURN"), require = 1)
+    @Inject(method = "onPlayerTick", at = @At("RETURN"), require = 0)
     private static void rsi$applyDiskPotionEffects(TickEvent.PlayerTickEvent event, CallbackInfo ci) {
         if (event.phase != TickEvent.Phase.END || event.player.level().isClientSide()) return;
         if (event.player.tickCount % 40 != 0) return;

@@ -193,6 +193,17 @@ tasks.register('verifyReleaseJar') {
                 }
             }
 
+            def mixinConfigEntry = zip.getEntry('rs_integration.mixins.json')
+            def mixinConfig = new groovy.json.JsonSlurper().parse(zip.getInputStream(mixinConfigEntry))
+            ['mixins', 'client', 'server'].each { side ->
+                (mixinConfig[side] ?: []).each { mixinName ->
+                    def className = "${mixinConfig.package}.${mixinName}".replace('.', '/') + '.class'
+                    if (zip.getEntry(className) == null) {
+                        throw new GradleException("Mixin config references missing class ${className}: ${archive}")
+                    }
+                }
+            }
+
             def modsEntry = zip.getEntry('META-INF/mods.toml')
             def modsToml = zip.getInputStream(modsEntry).getText('UTF-8')
             if (!modsToml.contains("modId = \"${mod_id}\"")

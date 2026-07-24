@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.crafting.plan;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.graph.CraftNode;
 import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
+import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.crafting.graph.MaterialSource;
 import com.huanghuang.rsintegration.crafting.graph.NodeId;
 import com.huanghuang.rsintegration.crafting.graph.OutputKind;
@@ -123,9 +124,11 @@ public record PlanGraphView(
         }
 
         public PlanStep asPlanStep() {
+            int runCount = Math.max(1, executions);
             List<ItemStack> displayInputs = inputs.stream()
-                    .map(input -> input.display().copyWithCount(input.quantity())).toList();
-            return new PlanStep(recipeId, primaryOutput.copy(), Math.max(1, executions),
+                    .map(input -> input.display().copyWithCount(input.perExecutionQuantity(runCount)))
+                    .toList();
+            return new PlanStep(recipeId, primaryOutput.copy(), runCount,
                     displayInputs, alternativeIds, ModType.byId(modTypeId), 0,
                     !alternativeIds.isEmpty(), 0, 0, alternativeModTypeIds);
         }
@@ -133,6 +136,11 @@ public record PlanGraphView(
 
     public record InputView(int portIndex, ItemStack display, int quantity, int roleOrdinal) {
         public InputView { display = display.copyWithCount(1); }
+
+        private int perExecutionQuantity(int executions) {
+            if (roleOrdinal == DemandRole.CATALYST.ordinal()) return quantity;
+            return Math.max(1, (quantity + executions - 1) / executions);
+        }
     }
 
     public record OutputView(int portIndex, ItemStack display, int quantity, int kindOrdinal) {

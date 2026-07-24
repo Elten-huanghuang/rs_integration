@@ -57,6 +57,33 @@ class PlanGraphViewTest extends BootstrapTest {
     }
 
     @Test
+    void cardStepConvertsGraphTotalsToPerExecutionQuantities() {
+        NodeId nodeId = new NodeId(0);
+        InputPortId inputId = new InputPortId(nodeId, 0);
+        OutputPortId outputId = new OutputPortId(nodeId, 0);
+        MaterialKey clock = MaterialKey.of(new ItemStack(Items.CLOCK));
+        CraftNode node = new CraftNode(nodeId, new ResourceLocation("minecraft", "clock"),
+                ModType.GENERIC.id(), new ResourceLocation("minecraft", "crafting"), 6,
+                List.of(), List.of(), false, null, null,
+                List.of(new InputDemand(inputId, Ingredient.of(Items.REDSTONE), 6,
+                        DemandRole.CONSUMED, new ItemStack(Items.REDSTONE))),
+                List.of(new OutputDeclaration(outputId, clock, 6, OutputKind.PRIMARY)));
+        CraftPlanGraph graph = new CraftPlanGraph(1, List.of(node), List.of(),
+                List.of(new RootDemand(Ingredient.of(Items.CLOCK), 6, 0,
+                        new ItemStack(Items.CLOCK), List.of(new RootAllocation(
+                        new MaterialSource.ProducerOutput(outputId), clock, 6)))),
+                List.of(), List.of(nodeId));
+
+        PlanStep step = PlanGraphView.from(graph).nodes().get(0).asPlanStep();
+
+        assertEquals(6, step.batches());
+        assertEquals(1, step.output().getCount());
+        assertEquals(1, step.inputs().get(0).getCount());
+        assertEquals(6, step.totalOutputCount());
+        assertEquals(6, step.totalInputCount());
+    }
+
+    @Test
     void packetRoundTripPreservesGraphView() {
         PlanGraphView graph = PlanGraphView.from(sharedProducerGraph());
         CompoundTag tag = new CompoundTag();
