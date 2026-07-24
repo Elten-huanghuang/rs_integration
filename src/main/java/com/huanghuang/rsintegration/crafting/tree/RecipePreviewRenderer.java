@@ -34,6 +34,9 @@ public final class RecipePreviewRenderer {
     private final Map<ResourceLocation, Optional<Component>> titleCache = new HashMap<>();
     private final Minecraft mc;
 
+    // Cached items for synthetic recipe icons
+    private net.minecraft.world.item.Item gemCuttingTableItem;
+
     public RecipePreviewRenderer() {
         this.mc = Minecraft.getInstance();
     }
@@ -42,6 +45,7 @@ public final class RecipePreviewRenderer {
         cache.clear();
         iconCache.clear();
         titleCache.clear();
+        gemCuttingTableItem = null;  // Clear cached item on reset
     }
 
     /**
@@ -284,10 +288,12 @@ public final class RecipePreviewRenderer {
             return true;
         }
         if (isSyntheticGemCuttingRecipe(recipeId)) {
-            net.minecraft.world.item.Item table = net.minecraftforge.registries.ForgeRegistries.ITEMS
-                    .getValue(new ResourceLocation("apotheosis", "gem_cutting_table"));
-            if (table != null && table != net.minecraft.world.item.Items.AIR) {
-                gfx.renderItem(new ItemStack(table), x, y);
+            if (gemCuttingTableItem == null) {
+                gemCuttingTableItem = net.minecraftforge.registries.ForgeRegistries.ITEMS
+                        .getValue(new ResourceLocation("apotheosis", "gem_cutting_table"));
+            }
+            if (gemCuttingTableItem != null && gemCuttingTableItem != net.minecraft.world.item.Items.AIR) {
+                gfx.renderItem(new ItemStack(gemCuttingTableItem), x, y);
                 return true;
             }
         }

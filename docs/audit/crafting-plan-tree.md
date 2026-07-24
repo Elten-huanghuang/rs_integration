@@ -29,23 +29,48 @@
 
 ## 发现清单
 
-### [P3] CraftingPlanScreen.selectAlternative 单点 preferenceKey 缺 null 守卫（与同文件其余三处不一致）
-- 文件：`crafting/plan/CraftingPlanScreen.java:1211-1212`
-- 现象：`forced.remove(CraftingResolver.preferenceKey(treeKey.stack(1)).toString())` 直接对 `preferenceKey(...)` 返回值调 `.toString()`。`CraftingResolver.preferenceKey`（CraftingResolver.java:45-52）在 `ForgeRegistries.ITEMS.getKey` 返回 null 时会返回 null → 此处 NPE。
-- 对比：同文件 `exportForcedSelections`（L503）、`selectTreeBranch`（L1707-1709）、`selectionKey`（L1239-1243）三处都做了 null 检查。仅此一处遗漏。
-- 可达性：`treeKey` 源自 `findTreeKey`，其 `node.displayStack` 的 `selectionKey` 已非空才匹配成功，故实际触发需要「未注册物品但恰好前面算出过非空 key」的边界，可达性低 → P3。
-- 修复方向：与其余三处对齐，先取 `ResourceLocation pk = CraftingResolver.preferenceKey(treeKey.stack(1)); if (pk != null) forced.remove(pk.toString());`。
+### [P3] CraftingPlanScreen.selectAlternative 单点 preferenceKey 缺 null 守卫（与同文件其余三处不一致） ✅ 已修复
 
-### [P3] PlanGraphView 协议版本号解码后未校验
-- 文件：`crafting/plan/PlanResponsePacket.java:364`（`readGraph` 读 `version` 后从不比对）+ `PlanGraphView.java:32`
-- 现象：`version` 字段被解码并存入 `PlanGraphView`，但客户端消费路径未对其做兼容性断言。若未来服务端 bump 图协议版本而客户端旧，可能按错误布局解读后续字节（尽管 bounded-count + 尾字节检查会兜住多数畸形，但可能产出语义错误的树而非报错）。
-- 修复方向：`readGraph` 内加 `if (version != PlanGraphView.CURRENT_VERSION) throw new DecoderException(...)`，或至少 debug 日志 + 优雅降级为无图视图。当前 mod 内版本同步发布，风险低 → P3。
+**修复时间**：2026-07-24
 
-### [P3] RecipePreviewRenderer 合成宝石切割图标查找每次都走 ForgeRegistries（未缓存）
-- 文件：`crafting/tree/RecipePreviewRenderer.java:286-291`（未提交 diff 新增）
-- 现象：`isSyntheticGemCuttingRecipe` 分支每帧渲染都 `ForgeRegistries.ITEMS.getValue(new ResourceLocation("apotheosis","gem_cutting_table"))`，而同文件其余类别图标走 `iconCache.computeIfAbsent`。属渲染热路径上的可缓存查找。
-- 影响：仅 apotheosis 宝石切割合成的树卡片，且 ForgeRegistries 查找本身廉价 → 纯性能微优化，P3。
-- 修复方向：把该 `Item` 解析结果缓存进一个静态/成员字段（lazy init），或纳入现有 `iconCache` 机制。
+- 文件：`crafting/plan/CraftingPlanScreen.java:1221-1226`
+- 原现象：`forced.remove(CraftingResolver.preferenceKey(treeKey.stack(1)).toString())` 直接对 `preferenceKey(...)` 返回值调 `.toString()`。`CraftingResolver.preferenceKey`（CraftingResolver.java:45-52）在 `ForgeRegistries.ITEMS.getKey` 返回 null 时会返回 null → 此处 NPE。
+- 修复：添加 null 守卫，与同文件其他三处对齐：
+  ```java
+  ResourceLocation pk = CraftingResolver.preferenceKey(treeKey.stack(1));
+  if (pk != null) forced.remove(pk.toString());
+  ```
+
+### [P3] PlanGraphView 协议版本号解码后未校验 ✅ 已修复
+
+**修复时间**：2026-07-24
+
+- 文件：`crafting/plan/PlanResponsePacket.java:363-368`
+- 原现象：`version` 字段被解码并存入 `PlanGraphView`，但客户端消费路径未对其做兼容性断言。若未来服务端 bump 图协议版本而客户端旧，可能按错误布局解读后续字节。
+- 修复：添加版本校验，不兼容时抛出 DecoderException：
+  ```java
+  int version = buf.readVarInt();
+  if (version != CraftPlanGraph.CURRENT_VERSION) {
+      throw new DecoderException("Unsupported graph protocol version: " + version
+              + ", expected: " + CraftPlanGraph.CURRENT_VERSION);
+  }
+  ```
+
+### [P3] RecipePreviewRenderer 合成宝石切割图标查找每次都走 ForgeRegistries（未缓存） ✅ 已修复
+
+**修复时间**：2026-07-24
+
+- 文件：`crafting/tree/RecipePreviewRenderer.java:286-293`
+- 原现象：`isSyntheticGemCuttingRecipe` 分支每帧渲染都 `ForgeRegistries.ITEMS.getValue(new ResourceLocation("apotheosis","gem_cutting_table"))`，而同文件其余类别图标走 `iconCache.computeIfAbsent`。属渲染热路径上的可缓存查找。
+- 修复：添加缓存字段 `gemCuttingTableItem`，lazy init，避免重复查找：
+  ```java
+  private net.minecraft.world.item.Item gemCuttingTableItem;
+  
+  if (gemCuttingTableItem == null) {
+      gemCuttingTableItem = ForgeRegistries.ITEMS
+              .getValue(new ResourceLocation("apotheosis", "gem_cutting_table"));
+  }
+  ```
 
 ---
 

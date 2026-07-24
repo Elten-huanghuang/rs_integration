@@ -13,7 +13,7 @@
 | crafting-core | [crafting-core.md](./crafting-core.md) | ✅ 已审（3 条 P2 已修复，1 条 P2 复核关闭；当前 0 P2） | 0/0/0/0 | 首批 agent + 复核 |
 | crafting-graph | [crafting-graph.md](./crafting-graph.md) | ✅ 已审（publish 日志项已修复） | 0/0/0/1 | 主会话 |
 | crafting-batch-lb | [crafting-batch-lb.md](./crafting-batch-lb.md) | ✅ 已审 | 0/0/0/2 | 主会话 |
-| crafting-plan-tree | [crafting-plan-tree.md](./crafting-plan-tree.md) | ✅ 已审 | 0/0/0/3 | 主会话 |
+| crafting-plan-tree | [crafting-plan-tree.md](./crafting-plan-tree.md) | ✅ 已审（3 个 P3 已修复 2026-07-24） | 0/0/0/0 | 主会话 |
 | mods-distantworlds | [mods-distantworlds.md](./mods-distantworlds.md) | ✅ 已审（3 条 P3 均已关闭/修复） | 0/0/0/0 | 主会话 |
 | mods-apotheosis | [mods-apotheosis.md](./mods-apotheosis.md) | ✅ 已审 | 0/0/0/2 | 主会话 |
 | mods-food-cluster | [mods-food-cluster.md](./mods-food-cluster.md) | ✅ 已审（P2 已修复 2026-07-24） | 0/0/0/4 | 主会话 |

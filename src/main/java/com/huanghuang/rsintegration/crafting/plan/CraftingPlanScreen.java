@@ -2,6 +2,9 @@ package com.huanghuang.rsintegration.crafting.plan;
 
 import com.huanghuang.rsintegration.compat.ftbquests.QuestSubmissionRequestPacket;
 import com.huanghuang.rsintegration.compat.ftbquests.QuestSubmissionTargetIds;
+import com.huanghuang.rsintegration.mods.apotheosis.ApothSpawnerPlanTarget;
+import com.huanghuang.rsintegration.mods.apotheosis.network.ApothSpawnerExecutePacket;
+import com.huanghuang.rsintegration.network.packet.NetworkHandler;
 import com.huanghuang.rsintegration.network.RSJeiPlugin;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
@@ -485,6 +488,16 @@ public final class CraftingPlanScreen extends Screen {
                     new QuestSubmissionRequestPacket(
                             QuestSubmissionTargetIds
                                     .questId(targetId), false));
+            onClose();
+            return;
+        }
+        if (ApothSpawnerPlanTarget.ID.equals(targetId) && plan.executionDim() != null) {
+            ResourceLocation dimension = ResourceLocation.tryParse(plan.executionDim());
+            if (dimension != null) {
+                NetworkHandler.CHANNEL.sendToServer(new ApothSpawnerExecutePacket(dimension,
+                        new net.minecraft.core.BlockPos(plan.executionPosX(), plan.executionPosY(),
+                                plan.executionPosZ()), Map.of(), false));
+            }
             onClose();
             return;
         }
@@ -1208,8 +1221,9 @@ public final class CraftingPlanScreen extends Screen {
         ResourceLocation rid = ResourceLocation.tryParse(plan.recipeId());
         if (isTarget && selected != 0) {
             rid = choices.get(selected).recipeId;
-            forced.remove(com.huanghuang.rsintegration.crafting.CraftingResolver
-                    .preferenceKey(treeKey.stack(1)).toString());
+            ResourceLocation pk = com.huanghuang.rsintegration.crafting.CraftingResolver
+                    .preferenceKey(treeKey.stack(1));
+            if (pk != null) forced.remove(pk.toString());
         }
         LAST_FORCED.clear();
         LAST_FORCED.putAll(forced);
