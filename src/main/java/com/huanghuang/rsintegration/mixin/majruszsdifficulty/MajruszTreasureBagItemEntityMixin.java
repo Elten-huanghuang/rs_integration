@@ -1,4 +1,4 @@
-package com.huanghuang.rsintegration.mixin.minecraft;
+package com.huanghuang.rsintegration.mixin.majruszsdifficulty;
 
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.player.Player;
