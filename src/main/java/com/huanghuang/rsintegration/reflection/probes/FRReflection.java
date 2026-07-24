@@ -9,9 +9,9 @@ public final class FRReflection {
 
     private static final String MOD = ModIds.FARMERSRESPITE;
 
-    public static Class<?> kettleBEClass;
-    public static Class<?> kettleRecipeClass;
-    public static Class<?> kettlePouringRecipeClass;
+    public static volatile Class<?> kettleBEClass;
+    public static volatile Class<?> kettleRecipeClass;
+    public static volatile Class<?> kettlePouringRecipeClass;
 
 
     static {

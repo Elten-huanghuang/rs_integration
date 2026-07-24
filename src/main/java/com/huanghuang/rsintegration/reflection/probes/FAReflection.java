@@ -9,22 +9,22 @@ public final class FAReflection {
 
     private static final String MOD = ModIds.FORBIDDEN_ARCANUS;
 
-    public static Class<?> hephaestusForgeBEClass;
-    public static Class<?> pedestalBEClass;
-    public static Class<?> ritualClass;
-    public static Class<?> essencesDefinitionClass;
-    public static Class<?> essencesStorageClass;
-    public static Class<?> ritualManagerClass;
-    public static Class<?> booleanConsumerClass;
-    public static Class<?> essenceManagerClass;
-    public static Class<?> createItemResultClass;
-    public static Class<?> upgradeTierResultClass;
-    public static Class<?> ritualStarterItemClass;
-    public static Class<?> enhancerAccessorClass;
-    public static Class<?> enhancerDefinitionClass;
-    public static Class<?> enhancerEffectClass;
-    public static Class<?> essenceModifierClass;
-    public static Class<?> faRegistriesClass;
+    public static volatile Class<?> hephaestusForgeBEClass;
+    public static volatile Class<?> pedestalBEClass;
+    public static volatile Class<?> ritualClass;
+    public static volatile Class<?> essencesDefinitionClass;
+    public static volatile Class<?> essencesStorageClass;
+    public static volatile Class<?> ritualManagerClass;
+    public static volatile Class<?> booleanConsumerClass;
+    public static volatile Class<?> essenceManagerClass;
+    public static volatile Class<?> createItemResultClass;
+    public static volatile Class<?> upgradeTierResultClass;
+    public static volatile Class<?> ritualStarterItemClass;
+    public static volatile Class<?> enhancerAccessorClass;
+    public static volatile Class<?> enhancerDefinitionClass;
+    public static volatile Class<?> enhancerEffectClass;
+    public static volatile Class<?> essenceModifierClass;
+    public static volatile Class<?> faRegistriesClass;
 
 
     static {

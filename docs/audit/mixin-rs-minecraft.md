@@ -71,11 +71,14 @@
 - 现象: `Reflect.findMethod(recipe.getClass(), "getId", ...)`，失败再 `findMethod(..., "m_6423_", ...)`。
 - 风险: 生产环境 vanilla `Recipe.getId` 实为 `m_6423_`，“getId”探针恒失败，永远靠第二次 `m_6423_` 命中——正是记忆里“别反射原版方法”的坑，只是此处有 SRG 兜底未致命。若未来 vanilla 方法签名/映射变化，兜底也会失效。属可接受但需留意。
 
-### [P3] 生产 SRG 方法名 + remap=false 的注入在 deobf 开发环境不生效
+### [P3] 生产 SRG 方法名 + remap=false 的注入在 deobf 开发环境不生效 ✅ 已接受设计
+
+**决策时间**：2026-07-24
+
 - 文件: GridScreenMouseMixin.java:79,131,158,168; GridScreenKeyboardMixin.java:14,46; GridScreenTooltipMixin.java:21; RecipesGuiMixin.java:23
-- 维度: Mixin 正确性
-- 现象: 对 RS/JEI 屏幕继承自 vanilla Screen 的方法用 SRG 名（`m_6375_`/`m_6348_`/`m_7979_`/`m_6050_`/`m_7933_`/`m_5534_`/`m_280003_`）+ 类级 `remap=false`。
-- 风险: 生产（obf/SRG）正确；deobf 开发环境这些方法名为 `mouseClicked` 等，注入找不到目标 → dev 下功能缺失。属团队既定“面向生产”取舍，统一记录一次。
+- 现象: 对 RS/JEI 屏幕继承自 vanilla Screen 的方法用 SRG 名（`m_6375_`/`m_6348_`/`m_7979_`/`m_6050_`/`m_7933_`/`m_5534_`/`m_280003_`）+ 类级 `remap=false`
+- 影响: 生产（obf/SRG）正确；deobf 开发环境这些方法名为 `mouseClicked` 等，注入找不到目标 → dev 下功能缺失
+- 决策: 属团队既定”面向生产”取舍，接受此权衡。生产环境功能完整，开发环境可通过其他方式测试
 
 ### [P3] RecipeGuiLayoutsMixin.setRecipeLayoutsWithButtons(RETURN) 未空判 Minecraft.player ✅ 已修复
 

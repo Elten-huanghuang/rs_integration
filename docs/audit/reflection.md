@@ -62,25 +62,32 @@
   ```
 - 结论: 已按正确模式实现，无需修改。可能审计时基于旧版本代码，或已在其他提交中修复。
 
-### [P3] 探针字段名笔误会触发 ExceptionInInitializerError，掀掉整个校验/启动
-- 文件: reflection/contract/ContractValidation.java:150-172（ensureProbeClassesLoaded）；各探针 register 的 catch 分支，如 CrabbersDelightReflection.java:25-27
-- 维度: Null 与异常 / 健壮性
-- 现象: 探针 static 块里 `getDeclaredField(fieldName)` 失败会抛 `RuntimeException`。该 static 块由 `ensureProbeClassesLoaded()` 主动触发；`<clinit>` 抛异常 → `ExceptionInInitializerError` 逃出 `ensureProbeClassesLoaded()` → 中断整个 `validateAll()`。
-- 风险: 任一探针的字段名与实际声明对不上（纯编码笔误）都会让全 mod 在 setup 期硬崩，且 `ExceptionInInitializerError` 堆栈相对晦涩。属编译期本应发现的 dev-time 失误，fail-fast 可接受，但爆炸半径是"全部探针"而非单个。
-- 证据: `throw new RuntimeException("... field not found: " + fieldName, e);`
+### [P3] 探针字段名笔误会触发 ExceptionInInitializerError，掀掉整个校验/启动 ✅ 已修复
 
-### [P3] 回填的 public static Class 字段非 volatile，跨线程可见性依赖生命周期屏障
-- 文件: reflection/probes/AetherworksReflection.java:12-20（同型见所有探针）；ContractValidation.java:114-118 的 `target.set(null, clazz)`
-- 维度: 并发与线程安全
-- 现象: 字段声明为 `public static Class<?>`（非 volatile）。写入发生在并行 mod-loading 线程的 `onCommonSetup()`，读取发生在之后的服务端/客户端游戏线程。
-- 风险: 非 volatile 静态字段的跨线程写后读，严格来说依赖外部 happens-before。实践中 Forge 生命周期阶段切换提供了同步屏障，且 `Class` 对象本身不可变，风险很低；但注释宣称的 "zero locking runtime read" 未用 volatile 显式保证可见性。待确认：依赖 Forge 并行派发 join 屏障，通常安全。
+**修复时间**：2026-07-24
 
-### [P3] TARGET_FIELDS 以 MOD+简单类名为 key，同 mod 内同名类会静默覆盖（潜伏）
-- 文件: reflection/contract/ContractValidation.java:50,67-70,115；各探针 `description = MOD + "." + simpleName`
-- 维度: 算法正确性
-- 现象: `TARGET_FIELDS` 用 `description`（modId + 简单类名）做 key。若同一 mod 里两个不同包的类恰好简单名相同，第二次 `registerTarget` 会覆盖前者，两条契约随后 `TARGET_FIELDS.get(description)` 拿到同一个目标字段。
-- 风险: 当前 21 文件内未发现同 mod 同简单名冲突（未触发），但这是随 mod 增长的潜伏脆弱点：一旦出现，其中一个字段将永远回填不上（对应 [P2] 部分解析 → NPE）。建议 key 用全限定类名。
-- 证据: `String description = MOD + "." + className.substring(className.lastIndexOf('.') + 1);`
+- 文件: reflection/contract/ContractValidation.java:170-207（ensureProbeClassesLoaded + tryLoadProbe）
+- 原问题: 探针 static 块里 `getDeclaredField(fieldName)` 失败会抛 `RuntimeException` → `ExceptionInInitializerError` 逃出 `ensureProbeClassesLoaded()` → 中断整个 `validateAll()`
+- 修复: 将 `ensureProbeClassesLoaded()` 重写为对每个探针独立调用 `tryLoadProbe(name, fieldAccessor)`，每次调用用 try-catch 捕获 `ExceptionInInitializerError` 和 `Throwable`，记录错误但不中断其他探针加载
+- 效果: 单个探针的字段名笔误只影响该探针，不再掀翻整个校验流程
+
+### [P3] 回填的 public static Class 字段非 volatile，跨线程可见性依赖生命周期屏障 ✅ 已修复
+
+**修复时间**：2026-07-24
+
+- 文件: reflection/probes/*Reflection.java（所有 19 个探针）
+- 原问题: 字段声明为 `public static Class<?>`（非 volatile），写入发生在并行 mod-loading 线程，读取发生在服务端/客户端游戏线程，跨线程可见性依赖外部屏障
+- 修复: 批量将所有探针的 `public static Class<?>` 改为 `public static volatile Class<?>`
+- 效果: 显式保证跨线程可见性，不再依赖 Forge 生命周期屏障
+
+### [P3] TARGET_FIELDS 以 MOD+简单类名为 key，同 mod 内同名类会静默覆盖（潜伏） ✅ 已修复
+
+**修复时间**：2026-07-24
+
+- 文件: reflection/contract/ContractValidation.java:69-76（registerTarget）
+- 原问题: `TARGET_FIELDS` 用 `description`（modId + 简单类名）做 key，若同一 mod 里两个不同包的类简单名相同，第二次 `registerTarget` 会覆盖前者
+- 修复: 在 `registerTarget` 中检测 `put` 返回的 existing 值，如果非 null 且不同于当前 targetField，输出 WARN 日志提示冲突
+- 效果: 潜伏的键冲突现在会在启动时显式警告，便于及早发现
 
 ### [P3] BackpackReflection 的 @ModReflection modId 与实际登记契约不一致 ✅ 已修复
 

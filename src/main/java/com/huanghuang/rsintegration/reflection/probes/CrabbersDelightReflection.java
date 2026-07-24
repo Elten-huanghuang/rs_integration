@@ -9,7 +9,7 @@ public final class CrabbersDelightReflection {
 
     private static final String MOD = ModIds.CRABBERS_DELIGHT;
 
-    public static Class<?> crabTrapBEClass;
+    public static volatile Class<?> crabTrapBEClass;
 
 
     static {

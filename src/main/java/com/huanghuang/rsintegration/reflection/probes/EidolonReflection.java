@@ -9,14 +9,14 @@ public final class EidolonReflection {
 
     private static final String MOD = ModIds.EIDOLON;
 
-    public static Class<?> crucibleRecipeClass;
-    public static Class<?> crucibleRecipeStepClass;
-    public static Class<?> crucibleTileEntityClass;
-    public static Class<?> crucibleStepInnerClass;
-    public static Class<?> worktableBlockClass;
-    public static Class<?> worktableRecipeClass;
-    public static Class<?> ritualRecipeClass;
-    public static Class<?> brazierTileEntityClass;
+    public static volatile Class<?> crucibleRecipeClass;
+    public static volatile Class<?> crucibleRecipeStepClass;
+    public static volatile Class<?> crucibleTileEntityClass;
+    public static volatile Class<?> crucibleStepInnerClass;
+    public static volatile Class<?> worktableBlockClass;
+    public static volatile Class<?> worktableRecipeClass;
+    public static volatile Class<?> ritualRecipeClass;
+    public static volatile Class<?> brazierTileEntityClass;
 
 
     static {

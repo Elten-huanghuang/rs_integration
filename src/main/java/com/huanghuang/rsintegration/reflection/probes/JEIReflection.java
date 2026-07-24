@@ -9,9 +9,9 @@ public final class JEIReflection {
 
     private static final String MOD = ModIds.JEI;
 
-    public static Class<?> ingredientListOverlayClass;
-    public static Class<?> bookmarkOverlayClass;
-    public static Class<?> ingredientBookmarkClass;
+    public static volatile Class<?> ingredientListOverlayClass;
+    public static volatile Class<?> bookmarkOverlayClass;
+    public static volatile Class<?> ingredientBookmarkClass;
 
 
     static {

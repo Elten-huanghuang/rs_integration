@@ -9,14 +9,14 @@ public final class WRReflection {
 
     private static final String MOD = ModIds.WIZARDS_REBORN;
 
-    public static Class<?> wissenCrystallizerBEClass;
-    public static Class<?> arcaneIteratorBEClass;
-    public static Class<?> arcaneWorkbenchBEClass;
-    public static Class<?> crystalRitualBEClass;
-    public static Class<?> crystalRitualClass;
-    public static Class<?> ritualAreaClass;
-    public static Class<?> crystalInfusionRecipeClass;
-    public static Class<?> runicPedestalBEClass;
+    public static volatile Class<?> wissenCrystallizerBEClass;
+    public static volatile Class<?> arcaneIteratorBEClass;
+    public static volatile Class<?> arcaneWorkbenchBEClass;
+    public static volatile Class<?> crystalRitualBEClass;
+    public static volatile Class<?> crystalRitualClass;
+    public static volatile Class<?> ritualAreaClass;
+    public static volatile Class<?> crystalInfusionRecipeClass;
+    public static volatile Class<?> runicPedestalBEClass;
 
 
     static {

@@ -9,15 +9,15 @@ public final class AetherworksReflection {
 
     private static final String MOD = ModIds.AETHERWORKS;
 
-    public static Class<?> anvilBEClass;
-    public static Class<?> forgeBEClass;
-    public static Class<?> anvilRecipeClass;
-    public static Class<?> coolerBEClass;
-    public static Class<?> heaterBEClass;
-    public static Class<?> toolStationBEClass;
-    public static Class<?> toolStationRecipeClass;
-    public static Class<?> iheatCapabilityClass;
-    public static Class<?> awRegistryClass;
+    public static volatile Class<?> anvilBEClass;
+    public static volatile Class<?> forgeBEClass;
+    public static volatile Class<?> anvilRecipeClass;
+    public static volatile Class<?> coolerBEClass;
+    public static volatile Class<?> heaterBEClass;
+    public static volatile Class<?> toolStationBEClass;
+    public static volatile Class<?> toolStationRecipeClass;
+    public static volatile Class<?> iheatCapabilityClass;
+    public static volatile Class<?> awRegistryClass;
 
 
     static {
