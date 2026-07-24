@@ -618,6 +618,16 @@ public final class CuisineBoardBatchDelegate extends AbstractBatchDelegate {
             return;
         }
 
+        // In the shared-ledger (chain) path the chain already refunds the
+        // committed materials via refundOrRollbackLedger(). Returning the board
+        // items to the player here as well would double-refund (dupe), so only
+        // void the board. addToPlayer refunds solely on the private-ledger path.
+        if (usingSharedLedger) {
+            clearModel(be);
+            be.setChanged();
+            return;
+        }
+
         if (player != null && !player.isRemoved()) {
             addToPlayer(be, player);
         }
