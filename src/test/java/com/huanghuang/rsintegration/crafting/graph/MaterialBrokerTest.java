@@ -7,13 +7,34 @@ import net.minecraft.world.item.Items;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class MaterialBrokerTest extends BootstrapTest {
+
+    @Test
+    void accessFromAnotherThreadFailsBeforeStateCanChange() throws InterruptedException {
+        MaterialBroker broker = brokerWithDiamonds(1);
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        Thread otherThread = new Thread(() -> {
+            try {
+                broker.drainAvailableProducerAssets();
+            } catch (Throwable thrown) {
+                failure.set(thrown);
+            }
+        }, "material-broker-contract-test");
+
+        otherThread.start();
+        otherThread.join();
+
+        assertInstanceOf(IllegalStateException.class, failure.get());
+        assertEquals(1, broker.totalAvailable());
+    }
 
     @Test
     void competingNodesCannotReserveTheSameUnits() {

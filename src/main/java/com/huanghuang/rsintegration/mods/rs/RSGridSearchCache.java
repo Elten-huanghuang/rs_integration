@@ -254,7 +254,7 @@ public final class RSGridSearchCache {
                 sb.append(initials.toLowerCase()).append('\n');
             }
         } catch (Throwable t) {
-            // 优雅降级: 即使 jpinyin 缺库或报错也不影响原搜索，更不会崩端
+            // 优雅降级: 即使拼音库缺失或报错也不影响原搜索，更不会崩端
         }
     }
 

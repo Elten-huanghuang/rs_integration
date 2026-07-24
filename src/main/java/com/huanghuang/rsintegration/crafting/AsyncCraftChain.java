@@ -1553,6 +1553,24 @@ public final class AsyncCraftChain {
     private List<ItemStack> reserveGraphMaterials(
             List<IngredientSpec> specs, ServerPlayer online, ExtractionLedger ledger,
             List<ItemStack> initialPool, List<ItemStack> producerPool) {
+        int reservationMark = ledger.reservationMark();
+        List<ItemStack> reserved;
+        try {
+            reserved = StackPoolTransaction.execute(initialPool, producerPool,
+                    (workingInitial, workingProducer) -> reserveGraphMaterialsInPlace(
+                            specs, online, ledger, workingInitial, workingProducer));
+        } catch (RuntimeException e) {
+            ledger.cancelReservationsSince(reservationMark);
+            throw e;
+        }
+        if (reserved == null) ledger.cancelReservationsSince(reservationMark);
+        return reserved;
+    }
+
+    @Nullable
+    private List<ItemStack> reserveGraphMaterialsInPlace(
+            List<IngredientSpec> specs, ServerPlayer online, ExtractionLedger ledger,
+            List<ItemStack> initialPool, List<ItemStack> producerPool) {
         List<ItemStack> materials = new ArrayList<>(specs.size());
         for (IngredientSpec spec : specs) {
             if (spec.isEmpty()) {
