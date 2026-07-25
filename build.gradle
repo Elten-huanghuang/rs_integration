@@ -138,6 +138,16 @@ processResources {
         into "META-INF"
         rename { "LICENSE_RS_INTEGRATION" }
     }
+
+    // Mirror the English lang file into data/ so a DEDICATED SERVER can resolve
+    // our keys. Forge's LanguageHook.loadLanguagesOnServer only reads
+    // data/<ns>/lang/en_us.json; assets/ is client-only, so without this a
+    // server-side Component.getString() yields the raw key. This is a safety
+    // net for log output and any path that slips through — the real fix is to
+    // ship unresolved Components to the client (see PlanResponse.modWarnings).
+    from("src/main/resources/assets/${mod_id}/lang/en_us.json") {
+        into "data/${mod_id}/lang"
+    }
 }
 
 jar {

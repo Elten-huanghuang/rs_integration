@@ -8,7 +8,6 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
@@ -104,10 +103,6 @@ public final class PlanResponsePacket {
             buf.writeVarInt(step.alternativeModTypes().size());
             for (String mt : step.alternativeModTypes()) {
                 buf.writeUtf(mt, MAX_MOD_TYPE_LENGTH);
-            }
-            buf.writeVarInt(step.warnings().size());
-            for (Component w : step.warnings()) {
-                buf.writeComponent(w);
             }
         }
         // Materials
@@ -215,14 +210,8 @@ public final class PlanResponsePacket {
             for (int j = 0; j < altModCount; j++) {
                 alternativeModTypes.add(buf.readUtf(MAX_MOD_TYPE_LENGTH));
             }
-            int warnCount = readBoundedCount(buf);
-            List<Component> warnings = new ArrayList<>(warnCount);
-            for (int j = 0; j < warnCount; j++) {
-                warnings.add(readComponentOrEmpty(buf));
-            }
             steps.add(new PlanStep(rid, output, batches, inputs, alternatives, modType,
-                    depth, hasOrSiblings, recipeWidth, recipeHeight, alternativeModTypes,
-                    warnings));
+                    depth, hasOrSiblings, recipeWidth, recipeHeight, alternativeModTypes));
         }
         // Materials
         int matCount = readBoundedCount(buf);
@@ -506,14 +495,11 @@ public final class PlanResponsePacket {
             int hintStart = name.indexOf(" §");
             String key = hintStart >= 0 ? name.substring(0, hintStart) : name;
             String suffix = hintStart >= 0 ? name.substring(hintStart) : "";
+            // Entries are item descriptionIds (see CraftingResolver.describeItem),
+            // so a direct lookup is enough. Anything unresolvable is shown verbatim
+            // rather than scanning the whole item registry per entry.
             if (net.minecraft.client.resources.language.I18n.exists(key)) {
                 translated = net.minecraft.client.resources.language.I18n.get(key) + suffix;
-            } else for (Item item : net.minecraft.core.registries.BuiltInRegistries.ITEM) {
-                if (item.getDescription().getString().equals(name)
-                        || item.getDescriptionId().equals(name)) {
-                    translated = item.getDescription().getString();
-                    break;
-                }
             }
             localized.add(translated);
         }

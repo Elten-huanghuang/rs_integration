@@ -947,8 +947,6 @@ public final class CraftingPlanScreen extends Screen {
         }
         int orBadgeH = (step != null && !step.alternatives().isEmpty()) ? font.lineHeight + 10 : 0;
         cardH += orBadgeH;
-        int warnH = (step != null && !step.warnings().isEmpty()) ? step.warnings().size() * (font.lineHeight + 3) + 6 : 0;
-        cardH += warnH;
 
         // ── Card entrance animation — slide in from right ──────
         int slideX = renderEngine.animation().getSlideOffset(animIdx, 30);
@@ -1130,21 +1128,6 @@ public final class CraftingPlanScreen extends Screen {
 
                 orHitboxes.add(new ORHitbox(badgeX, badgeY, bw, badgeH, selectionKey, i));
                 badgeX += bw + 4;
-            }
-        }
-
-        // ── Warnings (research, structure, etc.) ──────────────
-        if (step != null && !step.warnings().isEmpty()) {
-            int warnY = y + cardH - warnH + 3;
-            for (Component warnComponent : step.warnings()) {
-                String warn = warnComponent.getString();
-                // Truncate to 2 lines max per warning
-                String display = font.plainSubstrByWidth(warn, cardW - CARD_PAD * 2 - 4);
-                if (display.length() < warn.length()) {
-                    display = display.substring(0, Math.max(0, display.length() - 3)) + "...";
-                }
-                gfx.drawString(font, display, x + CARD_PAD + 2, warnY, 0xFFDDAA00);
-                warnY += font.lineHeight + 3;
             }
         }
 
