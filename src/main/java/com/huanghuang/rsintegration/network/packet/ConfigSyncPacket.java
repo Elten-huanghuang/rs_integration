@@ -20,10 +20,18 @@ public class ConfigSyncPacket {
     public final boolean enableJeiMarquee;
     public final boolean enableJeiBookmarkMarquee;
     public final boolean enableGridSwipeExtract;
+    // Read by client-side screens/overlays but declared COMMON/SERVER, so the
+    // client's own file would otherwise win over the server's setting.
+    public final boolean enableApotheosis;
+    public final boolean enableDistantWorlds;
+    public final boolean enableEmbersAlchemyCalc;
+    public final int recipeTreeMaxCandidates;
 
     public ConfigSyncPacket(boolean enableMachineGuiTabs, int machineTabThreshold,
                             boolean enableAutoEat, boolean enableJei, boolean enableJeiMarquee,
-                            boolean enableJeiBookmarkMarquee, boolean enableGridSwipeExtract) {
+                            boolean enableJeiBookmarkMarquee, boolean enableGridSwipeExtract,
+                            boolean enableApotheosis, boolean enableDistantWorlds,
+                            boolean enableEmbersAlchemyCalc, int recipeTreeMaxCandidates) {
         this.enableMachineGuiTabs = enableMachineGuiTabs;
         this.machineTabThreshold = machineTabThreshold;
         this.enableAutoEat = enableAutoEat;
@@ -31,6 +39,10 @@ public class ConfigSyncPacket {
         this.enableJeiMarquee = enableJeiMarquee;
         this.enableJeiBookmarkMarquee = enableJeiBookmarkMarquee;
         this.enableGridSwipeExtract = enableGridSwipeExtract;
+        this.enableApotheosis = enableApotheosis;
+        this.enableDistantWorlds = enableDistantWorlds;
+        this.enableEmbersAlchemyCalc = enableEmbersAlchemyCalc;
+        this.recipeTreeMaxCandidates = recipeTreeMaxCandidates;
     }
 
     public static ConfigSyncPacket fromServerConfig() {
@@ -41,7 +53,11 @@ public class ConfigSyncPacket {
                 com.huanghuang.rsintegration.config.RSIntegrationConfig.ENABLE_JEI.get(),
                 com.huanghuang.rsintegration.config.RSIntegrationConfig.ENABLE_JEI_MARQUEE_SELECTION.get(),
                 com.huanghuang.rsintegration.config.RSIntegrationConfig.ENABLE_JEI_BOOKMARK_MARQUEE_SELECTION.get(),
-                com.huanghuang.rsintegration.config.RSIntegrationConfig.ENABLE_RS_GRID_SWIPE_EXTRACT.get());
+                com.huanghuang.rsintegration.config.RSIntegrationConfig.ENABLE_RS_GRID_SWIPE_EXTRACT.get(),
+                com.huanghuang.rsintegration.config.RSIntegrationConfig.ENABLE_APOTHEOSIS.get(),
+                com.huanghuang.rsintegration.config.RSIntegrationConfig.ENABLE_DISTANT_WORLDS.get(),
+                com.huanghuang.rsintegration.config.RSIntegrationConfig.ENABLE_EMBERS_ALCHEMY_CALC.get(),
+                com.huanghuang.rsintegration.config.RSIntegrationConfig.RECIPE_TREE_MAX_CANDIDATES.get());
     }
 
     public static void encode(ConfigSyncPacket packet, FriendlyByteBuf buf) {
@@ -52,11 +68,18 @@ public class ConfigSyncPacket {
         buf.writeBoolean(packet.enableJeiMarquee);
         buf.writeBoolean(packet.enableJeiBookmarkMarquee);
         buf.writeBoolean(packet.enableGridSwipeExtract);
+        buf.writeBoolean(packet.enableApotheosis);
+        buf.writeBoolean(packet.enableDistantWorlds);
+        buf.writeBoolean(packet.enableEmbersAlchemyCalc);
+        buf.writeVarInt(packet.recipeTreeMaxCandidates);
     }
 
     public static ConfigSyncPacket decode(FriendlyByteBuf buf) {
         return new ConfigSyncPacket(buf.readBoolean(), Math.max(0, Math.min(buf.readVarInt(), 4096)), buf.readBoolean(),
-                buf.readBoolean(), buf.readBoolean(), buf.readBoolean(), buf.readBoolean());
+                buf.readBoolean(), buf.readBoolean(), buf.readBoolean(), buf.readBoolean(),
+                buf.readBoolean(), buf.readBoolean(), buf.readBoolean(),
+                // Clamp to the config's own declared range (2-32).
+                Math.max(2, Math.min(buf.readVarInt(), 32)));
     }
 
     public static void register() {

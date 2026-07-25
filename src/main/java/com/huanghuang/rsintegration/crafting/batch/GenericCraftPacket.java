@@ -628,8 +628,9 @@ public final class GenericCraftPacket {
                         || (!CraftingResolver.isStackPreferenceKey(itemKey)
                         && !net.minecraft.core.registries.BuiltInRegistries.ITEM.containsKey(itemKey))
                         || resolveRecipe(player.serverLevel(), forcedId) == null) {
-                    player.sendSystemMessage(Component.literal("Invalid forced recipe selection: "
-                            + e.getKey() + " -> " + e.getValue()));
+                    player.sendSystemMessage(Component.translatable(
+                            "rsi.generic.error.invalid_forced_recipe",
+                            String.valueOf(e.getKey()), String.valueOf(e.getValue())));
                     return;
                 }
                 forcedOverrides.put(itemKey, forcedId);
@@ -1403,8 +1404,9 @@ public final class GenericCraftPacket {
                         || (!CraftingResolver.isStackPreferenceKey(itemKey)
                         && !net.minecraft.core.registries.BuiltInRegistries.ITEM.containsKey(itemKey))
                         || resolveRecipe(player.serverLevel(), forcedId) == null) {
-                    player.sendSystemMessage(Component.literal("Invalid forced recipe selection: "
-                            + e.getKey() + " -> " + e.getValue()));
+                    player.sendSystemMessage(Component.translatable(
+                            "rsi.generic.error.invalid_forced_recipe",
+                            String.valueOf(e.getKey()), String.valueOf(e.getValue())));
                     return;
                 }
                 forcedOverrides.put(itemKey, forcedId);

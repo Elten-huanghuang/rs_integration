@@ -104,7 +104,7 @@ public final class CraftPacketUtils {
         for (ItemStack stack : ingredient.getItems()) {
             if (!stack.isEmpty()) return stack.getHoverName();
         }
-        return Component.literal("Unknown Item");
+        return Component.translatable("rsi.plan.unknown_item");
     }
 
     /**

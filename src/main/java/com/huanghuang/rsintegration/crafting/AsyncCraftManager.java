@@ -6,6 +6,7 @@ import com.huanghuang.rsintegration.crafting.graph.MachineLeaseRegistry;
 import com.huanghuang.rsintegration.crafting.graph.OperationBudget;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.command.PerformanceMonitor;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.event.TickEvent;
@@ -166,7 +167,7 @@ public final class AsyncCraftManager {
         }
         for (AsyncCraftChain chain : toAbort) {
             if ("Player disconnected".equals(reason)) chain.abortOffline(reason);
-            else chain.cancel(reason);
+            else chain.cancel(reason, Component.translatable("rsi.async.abort.player_cancelled"));
             RSIntegrationMod.LOGGER.debug("[RSI-AsyncMgr] Cancelled chain for player {}: {}", playerId, reason);
         }
     }
@@ -186,7 +187,8 @@ public final class AsyncCraftManager {
                 RSIntegrationMod.LOGGER.error("[RSI-AsyncMgr] Chain tick error", e);
                 String msg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
                 try {
-                    chain.abort("Internal error: " + msg);
+                    chain.abort("Internal error: " + msg,
+                            Component.translatable("rsi.async.abort.internal_error", msg));
                 } catch (Exception terminationError) {
                     RSIntegrationMod.LOGGER.error(
                             "[RSI-AsyncMgr] Chain termination also failed; keeping craft {} registered for audit",
