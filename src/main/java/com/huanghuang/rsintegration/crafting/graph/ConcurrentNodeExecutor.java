@@ -214,6 +214,8 @@ public final class ConcurrentNodeExecutor {
                         completion = Objects.requireNonNull(
                                 completions.complete(result.nodeId, result.worker), "completion status");
                     } catch (RuntimeException exception) {
+                        RSIntegrationMod.LOGGER.error(
+                                "Graph node completion check failed: {}", result.nodeId, exception);
                         completion = CompletionStatus.FAILED;
                     }
                     if (completion == CompletionStatus.SUCCEEDED
@@ -232,7 +234,10 @@ public final class ConcurrentNodeExecutor {
                 case FAILED -> {
                     running.remove(result.nodeId);
                     try { failures.failed(result.nodeId, result.worker); }
-                    catch (RuntimeException ignored) { }
+                    catch (RuntimeException exception) {
+                        RSIntegrationMod.LOGGER.error(
+                                "Graph node failure handler threw: {}", result.nodeId, exception);
+                    }
                     result.worker.cleanupFailure();
                     if (!scheduler.isStopping()) {
                         scheduler.fail(result.nodeId);
@@ -274,6 +279,8 @@ public final class ConcurrentNodeExecutor {
             try {
                 observation = Objects.requireNonNull(entry.getValue().worker().observe(), "worker observation");
             } catch (RuntimeException exception) {
+                RSIntegrationMod.LOGGER.error(
+                        "Graph node observation failed: {}", entry.getKey(), exception);
                 observation = Observation.FAILED;
             }
             results.add(new Result(entry.getKey(), entry.getValue().worker(),
@@ -303,6 +310,8 @@ public final class ConcurrentNodeExecutor {
             try {
                 start = Objects.requireNonNull(workers.start(nodeId), "worker start result");
             } catch (RuntimeException exception) {
+                RSIntegrationMod.LOGGER.error(
+                        "Graph node start failed: {}", nodeId, exception);
                 start = StartResult.failed();
             }
             switch (start.status()) {
