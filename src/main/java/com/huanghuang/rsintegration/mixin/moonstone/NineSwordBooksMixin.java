@@ -31,7 +31,10 @@ import java.util.List;
 public abstract class NineSwordBooksMixin {
 
     @Unique
-    private static final ThreadLocalStack<RsiContext> rsi$contexts = new ThreadLocalStack<>();
+    private static final ThreadLocalStack<Player> rsi$players = new ThreadLocalStack<>();
+
+    @Unique
+    private static final ThreadLocalStack<Integer> rsi$extraSizes = new ThreadLocalStack<>();
 
     @Inject(method = "curioTick", at = @At("HEAD"))
     private void rsi$onCurioTickHead(SlotContext ctx, ItemStack stack, CallbackInfo ci) {
@@ -42,7 +45,7 @@ public abstract class NineSwordBooksMixin {
 
     @Inject(method = "curioTick", at = @At("RETURN"))
     private void rsi$onCurioTickReturn(SlotContext ctx, ItemStack stack, CallbackInfo ci) {
-        if (ctx.entity() instanceof Player) rsi$contexts.pop();
+        if (ctx.entity() instanceof Player) rsi$popContext();
     }
 
     @Inject(method = "Head", at = @At("HEAD"))
@@ -52,7 +55,7 @@ public abstract class NineSwordBooksMixin {
 
     @Inject(method = "Head", at = @At("RETURN"))
     private void rsi$onHeadReturn(Player player, ItemStack stack, CallbackInfoReturnable<Multimap<Attribute, AttributeModifier>> cir) {
-        rsi$contexts.pop();
+        rsi$popContext();
     }
 
     // 拦截 integers.size()，注入等效后的剑数
@@ -63,12 +66,12 @@ public abstract class NineSwordBooksMixin {
             return originalSize;
         }
 
-        RsiContext context = rsi$contexts.peek();
-        int extra = context == null ? 0 : context.extraSize;
+        Integer cachedExtra = rsi$extraSizes.peek();
+        int extra = cachedExtra == null ? 0 : cachedExtra;
 
         int finalSize = originalSize + extra;
 
-        Player player = context == null ? null : context.player;
+        Player player = rsi$players.peek();
         if (player != null && player.tickCount % 40 == 0 && extra > 0) {
             // 已移除 "Bug-Scaled" 字眼，因为原模组已修复该 Bug，现在是 1:1 绝对公平转换
             RSIntegrationMod.LOGGER.info("[RSI-NineSwords] size() Hack! HotbarSize: {}, DiskSize(Extra): {}, Total: {}", originalSize, extra, finalSize);
@@ -79,17 +82,15 @@ public abstract class NineSwordBooksMixin {
 
     @Unique
     private void rsi$pushContext(Player player) {
-        rsi$contexts.push(new RsiContext(player, rsi$computeExtraSize(player)));
+        int extraSize = rsi$computeExtraSize(player);
+        rsi$players.push(player);
+        rsi$extraSizes.push(extraSize);
     }
 
-    private static final class RsiContext {
-        private final Player player;
-        private final int extraSize;
-
-        private RsiContext(Player player, int extraSize) {
-            this.player = player;
-            this.extraSize = extraSize;
-        }
+    @Unique
+    private static void rsi$popContext() {
+        rsi$extraSizes.pop();
+        rsi$players.pop();
     }
 
     // ========== 核心逻辑：1:1 统计快捷栏与 RS 盘的剑 ==========
