@@ -36,8 +36,11 @@
   ```
 - 说明: 将隐性约定转换为显式文档契约，降低未来维护风险
 
-### [P3][已修复] processTick 中 publish 抛异常被降级为 FAILED，但异常本身被吞无日志
-> ✅ **已修复**：发布异常现在记录节点 ID 和完整堆栈后再降级为 FAILED。
+### [P3] processTick 中异常被降级为 FAILED，但异常本身被吞无日志
+> **2026-07-24 标记为已修复，实为不准确**：当时只有 `publish` 那一处加了日志，
+> `observe` / `workers.start` / `completions.complete` / `failures.failed`
+> 四处仍在静默吞异常（其中一处是 `catch (RuntimeException ignored) { }`）。
+> **2026-07-25 已全部补齐**（提交 a63df7b），每处都记录节点 ID + 完整堆栈。
 - 文件: crafting/graph/ConcurrentNodeExecutor.java:199-201
 - 维度: Null 与异常
 - 现象: `publications.publish` 抛 RuntimeException 时 `observation = Observation.FAILED`（:200），异常对象未记录。同样 `completions.complete` 异常降级 FAILED（:214-215）、`failures.failed` 异常直接 `catch { }`（:232-233）。
