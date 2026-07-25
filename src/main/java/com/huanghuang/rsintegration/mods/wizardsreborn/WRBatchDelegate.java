@@ -1853,14 +1853,36 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         if (network != null) {
             ItemStack leftover = network.insertItem(stack, stack.getCount(),
                     com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+            // The player may be offline (server stop / disconnect abort), so this
+            // must not assume one is present the way the branch below does.
             if (!leftover.isEmpty()) {
-                ItemHandlerHelper.giveItemToPlayer(player, leftover);
+                if (player != null) {
+                    ItemHandlerHelper.giveItemToPlayer(player, leftover);
+                } else {
+                    // Network full and nobody to hand it to: drop at the machine
+                    // rather than NPE or void the stack.
+                    dropAtMachine(leftover);
+                }
             }
         } else if (player != null) {
             if (!player.getInventory().add(stack)) {
                 player.drop(stack, false);
             }
         }
+    }
+
+    /** Last-resort delivery when the RS network is full and no player is online. */
+    private void dropAtMachine(ItemStack stack) {
+        if (stack.isEmpty()) return;
+        ServerLevel level = resolveMachineLevel((ServerLevel) null);
+        if (level == null || myPos == null) {
+            RSIntegrationMod.LOGGER.error(
+                    "[RSI-WR] Cannot place refund {} x{} — no level or machine pos; item retained in machine",
+                    stack.getHoverName().getString(), stack.getCount());
+            return;
+        }
+        net.minecraft.world.Containers.dropItemStack(level,
+                myPos.getX() + 0.5, myPos.getY() + 1, myPos.getZ() + 0.5, stack);
     }
 
     private static ItemStackHandler getWorkbenchItemHandler(Object be) {

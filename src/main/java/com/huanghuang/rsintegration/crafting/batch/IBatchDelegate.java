@@ -296,8 +296,16 @@ public interface IBatchDelegate {
     /** Cleanup and refund on batch failure. */
     void onBatchFailed(@Nonnull ServerPlayer player, @Nonnull String reason);
 
-    /** Cleanup on successful batch completion. */
-    void onBatchFinished(@Nonnull ServerPlayer player);
+    /**
+     * Cleanup on successful batch completion.
+     *
+     * <p>{@code player} is null when the craft finished but its owner is already
+     * offline (server stop). Implementations must not dereference it — pass it
+     * through to the null-tolerant refund helpers instead. Settling still has to
+     * happen in that case, otherwise the ledger refunds inputs for a craft whose
+     * product was already produced.</p>
+     */
+    void onBatchFinished(@Nullable ServerPlayer player);
 
     /** The machine position this delegate is operating on. */
     @Nonnull
