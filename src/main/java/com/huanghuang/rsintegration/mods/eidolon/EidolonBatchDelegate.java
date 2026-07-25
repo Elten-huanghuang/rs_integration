@@ -1138,10 +1138,10 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
 
     // ── Plan warnings ─────────────────────────────────────────────
 
-    public static List<String> getPlanWarnings(ServerPlayer player, Recipe<?> recipe,
+    public static List<Component> getPlanWarnings(ServerPlayer player, Recipe<?> recipe,
                                                @Nullable ResourceLocation dim,
                                                @Nullable BlockPos pos) {
-        List<String> warnings = new ArrayList<>();
+        List<Component> warnings = new ArrayList<>();
 
         boolean isCrucible = EidolonReflection.crucibleRecipeClass != null && EidolonReflection.crucibleRecipeClass.isInstance(recipe);
         boolean isRitual = EidolonReflection.ritualRecipeClass != null && EidolonReflection.ritualRecipeClass.isInstance(recipe);
@@ -1152,11 +1152,11 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
             int water = readWaterAmountStatic(recipe);
             if (water > 0) {
                 warnings.add(Component.translatable(
-                        "rsi.eidolon.warn.water_required", water).getString());
+                        "rsi.eidolon.warn.water_required", water));
             }
 
             // Boiling requirement warning
-            warnings.add(Component.translatable("rsi.eidolon.warn.boiling_required").getString());
+            warnings.add(Component.translatable("rsi.eidolon.warn.boiling_required"));
 
             // If crucible is bound, check current state
             if (dim != null && pos != null) {
@@ -1172,14 +1172,14 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
                                 hasWater = f.getBoolean(be);
                             } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Eidolon] reflection probe failed", e); }
                             if (!hasWater) {
-                                warnings.add(Component.translatable("rsi.eidolon.warn.needs_water_fill").getString());
+                                warnings.add(Component.translatable("rsi.eidolon.warn.needs_water_fill"));
                             }
                             boolean boiling = false;
                             try {
                                 if (boilingField != null) boiling = boilingField.getBoolean(be);
                             } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Eidolon] reflection probe failed", e); }
                             if (!boiling) {
-                                warnings.add(Component.translatable("rsi.eidolon.warn.needs_heat").getString());
+                                warnings.add(Component.translatable("rsi.eidolon.warn.needs_heat"));
                             }
                         }
                     }
@@ -1197,11 +1197,11 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
                 List<Ingredient> pi = (List<Ingredient>) pf.get(recipe);
                 if (pi != null && !pi.isEmpty()) {
                     warnings.add(Component.translatable(
-                            "rsi.eidolon.warn.pedestal_items", pi.size()).getString());
+                            "rsi.eidolon.warn.pedestal_items", pi.size()));
                 }
             } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Eidolon] reflection probe failed", e); }
 
-            warnings.add(Component.translatable("rsi.eidolon.warn.needs_focus").getString());
+            warnings.add(Component.translatable("rsi.eidolon.warn.needs_focus"));
 
             if (dim != null && pos != null) {
                 try {
@@ -1217,7 +1217,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
                                 burning = bf.getBoolean(be);
                             } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Eidolon] reflection probe failed", e); }
                             if (burning) {
-                                warnings.add(Component.translatable("rsi.eidolon.error.ritual_busy").getString());
+                                warnings.add(Component.translatable("rsi.eidolon.error.ritual_busy"));
                             }
                         }
                     }

@@ -27,7 +27,8 @@ public abstract class MajruszItemHelperMixin {
         ItemEntity itemEntity = new ItemEntity(player.level(), player.getX(),
                 player.getY() + 0.5D, player.getZ(), stack);
         itemEntity.getPersistentData().putBoolean(MAGNET_ONLY_TAG, true);
-        itemEntity.setPickUpDelay(Integer.MAX_VALUE);
+        // Set a short delay instead of MAX_VALUE - allows pickup after 20 ticks (1 second)
+        itemEntity.setPickUpDelay(20);
         itemEntity.setDeltaMovement(0.0D, 0.1D, 0.0D);
         player.level().addFreshEntity(itemEntity);
         ci.cancel();

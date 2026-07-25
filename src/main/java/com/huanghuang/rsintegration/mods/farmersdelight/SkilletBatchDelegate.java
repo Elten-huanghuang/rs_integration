@@ -413,11 +413,11 @@ public final class SkilletBatchDelegate extends AbstractBatchDelegate {
                                        Map<Item, Integer> neededCounts,
                                        int repeatCount) {}
 
-    public static List<String> getPlanWarnings(ServerPlayer player, Recipe<?> recipe,
+    public static List<Component> getPlanWarnings(ServerPlayer player, Recipe<?> recipe,
                                                 @Nullable ResourceLocation dim,
                                                 @Nullable BlockPos pos) {
-        List<String> warnings = new ArrayList<>();
-        warnings.add(Component.translatable("rsi.farmersdelight.heat_warning").getString());
+        List<Component> warnings = new ArrayList<>();
+        warnings.add(Component.translatable("rsi.farmersdelight.heat_warning"));
         return warnings;
     }
 

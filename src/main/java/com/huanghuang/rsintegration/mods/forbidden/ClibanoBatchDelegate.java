@@ -314,12 +314,12 @@ public final class ClibanoBatchDelegate extends AbstractBatchDelegate {
         return pos;
     }
 
-    public static List<String> getPlanWarnings(ServerPlayer player, Recipe<?> recipe,
+    public static List<Component> getPlanWarnings(ServerPlayer player, Recipe<?> recipe,
                                                @Nullable ResourceLocation dim, @Nullable BlockPos pos) {
-        List<String> warnings = new ArrayList<>();
-        warnings.add(Component.translatable("rsi.clibano.warn.fuel_required").getString());
+        List<Component> warnings = new ArrayList<>();
+        warnings.add(Component.translatable("rsi.clibano.warn.fuel_required"));
         if (recipe instanceof ClibanoRecipe clibano && clibano.getRequiredFireType().ordinal() > 0) {
-            warnings.add(Component.translatable("rsi.clibano.warn.soul_required").getString());
+            warnings.add(Component.translatable("rsi.clibano.warn.soul_required"));
         }
         return warnings;
     }

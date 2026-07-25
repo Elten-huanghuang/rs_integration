@@ -26,6 +26,12 @@ class OptionalDependencyBytecodeTest {
     }
 
     @Test
+    void sharedJeiMixinDoesNotLinkApotheosisTypes() throws IOException {
+        assertNoTypeReference(RecipeGuiLayoutsMixin.class, "dev/shadowsoffire/apotheosis",
+                "Apotheosis");
+    }
+
+    @Test
     void wizardTerraCuriosMixinSoftFailsAcrossApiVersions() throws IOException {
         byte[] bytecode = classBytes(BuffItemMixin.class);
         AtomicBoolean hasShadow = new AtomicBoolean();
@@ -65,9 +71,14 @@ class OptionalDependencyBytecodeTest {
     }
 
     private static void assertNoBotaniaTypeReference(Class<?> type) throws IOException {
+        assertNoTypeReference(type, "vazkii/botania", "Botania");
+    }
+
+    private static void assertNoTypeReference(Class<?> type, String internalPackage,
+                                              String dependencyName) throws IOException {
         String constantPool = new String(classBytes(type), StandardCharsets.ISO_8859_1);
-        assertFalse(constantPool.contains("vazkii/botania"),
-                () -> type.getName() + " directly links optional Botania bytecode");
+        assertFalse(constantPool.contains(internalPackage),
+                () -> type.getName() + " directly links optional " + dependencyName + " bytecode");
     }
 
     private static byte[] classBytes(Class<?> type) throws IOException {

@@ -42,4 +42,4 @@
 
 ## 后续复核状态
 
-详见 [followup-status.md](./followup-status.md)：Aetherworks 双退款项已复核为已修复；Ars Nouveau 文档是设计计划而非已实现功能；所有 delegate 的异常生命周期仍未完成逐类审计。
+详见 [followup-status.md](./followup-status.md)：Aetherworks 双退款项已复核为已修复；Ars Nouveau 的 Imbuement/Apparatus 已实现且方块绑定表已修正；所有 delegate 的异常生命周期仍未完成逐类审计。

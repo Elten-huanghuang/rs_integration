@@ -347,7 +347,7 @@ public final class CuisineBoardBatchDelegate extends AbstractBatchDelegate {
                                        Map<Item, Integer> neededCounts,
                                        int repeatCount) {}
 
-    public static List<String> getPlanWarnings(ServerPlayer player, Recipe<?> recipe,
+    public static List<Component> getPlanWarnings(ServerPlayer player, Recipe<?> recipe,
                                                 @Nullable ResourceLocation dim,
                                                 @Nullable BlockPos pos) {
         return new ArrayList<>();

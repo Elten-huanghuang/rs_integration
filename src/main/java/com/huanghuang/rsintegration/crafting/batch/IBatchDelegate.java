@@ -304,6 +304,15 @@ public interface IBatchDelegate {
     BlockPos getMachinePos();
 
     /**
+     * Physical machine position used for operation leases. A binding may point at
+     * a support block, such as a Botania catalyst below the actual Mana Pool.
+     */
+    default BlockPos getOperationMachinePos(@Nonnull BlockPos boundPos) {
+        BlockPos machinePos = getMachinePos();
+        return (machinePos == null ? boundPos : machinePos).immutable();
+    }
+
+    /**
      * The concrete output this craft produces, used by {@code CraftOutputInterceptor}
      * to recognise the product the instant it drops as a world item entity.
      * <p>

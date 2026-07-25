@@ -151,8 +151,10 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
         // Verify recipe type -- reject non-altar TLM recipes (e.g. maid crafting)
         if (this.recipe != null && TLMReflection.altarRecipeClass != null && !TLMReflection.altarRecipeClass.isInstance(this.recipe)) {
             RSIntegrationMod.LOGGER.debug("[RSI-Batch-TLM] validateAndInit: recipe {} is not an AltarRecipe", recipeId);
-            player.sendSystemMessage(Component.literal("§c" + Component.translatable("rsi.generic.error.wrong_recipe_type").getString()
-                    + " [" + recipeId + " expected=AltarRecipe got=" + this.recipe.getClass().getSimpleName() + "]"));
+            player.sendSystemMessage(Component.literal("§c")
+                    .append(Component.translatable("rsi.generic.error.wrong_recipe_type"))
+                    .append(" [" + recipeId + " expected=AltarRecipe got="
+                            + this.recipe.getClass().getSimpleName() + "]"));
             return false;
         }
 
@@ -763,10 +765,10 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
      * P-Power comes from two sources: the player's capability bar AND unconsumed
      * power_point items (in inventory / RS network) that can be absorbed on demand.
      */
-    public static List<String> getPlanWarnings(ServerPlayer player, Recipe<?> recipe,
+    public static List<Component> getPlanWarnings(ServerPlayer player, Recipe<?> recipe,
                                                 @Nullable ResourceLocation dim,
                                                 @Nullable BlockPos pos) {
-        List<String> warnings = new ArrayList<>();
+        List<Component> warnings = new ArrayList<>();
         float cost = rsi$staticPowerCost(recipe);
         if (cost <= 0) return warnings;
 
@@ -784,7 +786,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
         float totalPower = capPower + itemPower;
         if (totalPower < cost) {
             warnings.add(Component.translatable("rsi.tlm.warn.insufficient_power_points",
-                    String.format("%.1f", totalPower), String.format("%.1f", cost)).getString());
+                    String.format("%.1f", totalPower), String.format("%.1f", cost)));
         }
         return warnings;
     }

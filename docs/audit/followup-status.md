@@ -1,4 +1,4 @@
-# 后续审计状态（2026-07-23）
+# 后续审计状态（更新于 2026-07-24）
 
 ## Aetherworks 双重退款
 
@@ -12,12 +12,16 @@
 
 ## Ars Nouveau 配方覆盖
 
-`docs/ARS_NOUVEAU_RECURSIVE_CRAFTING_PLAN.md` 是设计与反编译核对计划，不是已完成实现报告。
-当前仓库没有 Ars Nouveau delegate/recipe handler 实现；因此：
+早期审计结论已经过时。当前仓库已实现并注册：
 
-- “约 15 类中仅 2 类支持”是计划中的自动化裁定，不代表已经实现了这 2 类。
-- 其余类型已经按随机产物、NBT 变换、实体产物或世界副作用明确排除，不应当为了追求覆盖率强行接入。
-- 在实际 delegate 与 handler 落地前，Ars Nouveau 应标记为“计划完成、实现未开始”，不能标记 supported。
+- `ArsImbuementBatchDelegate`：支持 `ars_nouveau:imbuement` 配方及
+  `ars_nouveau:imbuement_chamber` 方块绑定；
+- `ArsApparatusBatchDelegate`：支持 `ars_nouveau:enchanting_apparatus` 配方及同名方块绑定；
+- `ArsNouveauRecipeHandler`、JEI 分类和反射探针。
+
+2026-07-24 已修复绑定表误用 `ImbuementTile`/`EnchantingApparatusTile` 的问题：绑定器匹配的是
+方块类，现改为 `ImbuementBlock`/`EnchantingApparatusBlock`，并用稳定注册 ID 作为回退。
+其余 Ars Nouveau 配方类型仍按随机产物、NBT 变换、实体产物或世界副作用明确排除。
 
 ## Delegate 与异常生命周期审计
 

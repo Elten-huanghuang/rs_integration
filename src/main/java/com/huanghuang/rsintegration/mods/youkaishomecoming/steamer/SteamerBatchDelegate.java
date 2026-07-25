@@ -303,13 +303,13 @@ public final class SteamerBatchDelegate extends AbstractBatchDelegate {
                                        Map<Item, Integer> neededCounts,
                                        int repeatCount) {}
 
-    public static List<String> getPlanWarnings(ServerPlayer player, Recipe<?> recipe,
+    public static List<Component> getPlanWarnings(ServerPlayer player, Recipe<?> recipe,
                                                 @Nullable ResourceLocation dim,
                                                 @Nullable BlockPos pos) {
-        List<String> warnings = new ArrayList<>();
-        warnings.add(Component.translatable("rsi.youkaishomecoming.heat_warning").getString());
-        warnings.add(Component.translatable("rsi.youkaishomecoming.steamer_rack_warning").getString());
-        warnings.add(Component.translatable("rsi.youkaishomecoming.lid_warning").getString());
+        List<Component> warnings = new ArrayList<>();
+        warnings.add(Component.translatable("rsi.youkaishomecoming.heat_warning"));
+        warnings.add(Component.translatable("rsi.youkaishomecoming.steamer_rack_warning"));
+        warnings.add(Component.translatable("rsi.youkaishomecoming.lid_warning"));
         return warnings;
     }
 

@@ -2023,10 +2023,10 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         return null;
     }
 
-    public static List<String> getPlanWarnings(ServerPlayer player, Recipe<?> recipe,
+    public static List<Component> getPlanWarnings(ServerPlayer player, Recipe<?> recipe,
                                                @Nullable ResourceLocation dim,
                                                @Nullable BlockPos pos) {
-        List<String> warnings = new ArrayList<>();
+        List<Component> warnings = new ArrayList<>();
         if (recipe == null) return warnings;
 
         // Determine machine type from recipe ID path
@@ -2056,7 +2056,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
                                 warnings.add(Component.translatable(
                                         "rsi.wr.warn.insufficient_wissen_plan",
                                         String.format("%,d", current),
-                                        String.format("%,d", wissenCost)).getString());
+                                        String.format("%,d", wissenCost)));
                             }
                         }
                     }
@@ -2067,7 +2067,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
             // No machine bound or couldn't read — just show the cost
             warnings.add(Component.translatable(
                     "rsi.wr.warn.wissen_cost",
-                    String.format("%,d", wissenCost)).getString());
+                    String.format("%,d", wissenCost)));
         }
 
         return warnings;

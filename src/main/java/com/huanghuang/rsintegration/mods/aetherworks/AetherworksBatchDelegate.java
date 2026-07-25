@@ -378,30 +378,30 @@ public final class AetherworksBatchDelegate extends AbstractBatchDelegate {
     // ── Plan warnings ──────────────────────────────────────────
 
     @SuppressWarnings("unused")
-    public static List<String> getPlanWarnings(ServerPlayer player, Recipe<?> recipe,
+    public static List<Component> getPlanWarnings(ServerPlayer player, Recipe<?> recipe,
                                                @Nullable ResourceLocation dim,
                                                @Nullable BlockPos pos) {
-        List<String> warnings = new ArrayList<>();
+        List<Component> warnings = new ArrayList<>();
         if (AetherworksReflection.anvilRecipeClass == null || !AetherworksReflection.anvilRecipeClass.isInstance(recipe)) return warnings;
 
         try {
             int min = (int) recipe.getClass().getMethod("getTemperatureMin").invoke(recipe);
             int max = (int) recipe.getClass().getMethod("getTemperatureMax").invoke(recipe);
-            warnings.add(Component.translatable("rsi.aetherworks.warn.temp_range", min, max).getString());
+            warnings.add(Component.translatable("rsi.aetherworks.warn.temp_range", min, max));
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] getTemperatureMin/Max reflection failed in plan warnings", e);
         }
 
         try {
             int hits = (int) recipe.getClass().getMethod("getNumberOfHits").invoke(recipe);
-            warnings.add(Component.translatable("rsi.aetherworks.info.hits_required", hits).getString());
+            warnings.add(Component.translatable("rsi.aetherworks.info.hits_required", hits));
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] getNumberOfHits reflection failed in plan warnings", e);
         }
 
         try {
             int ember = (int) recipe.getClass().getMethod("getEmberPerHit").invoke(recipe);
-            warnings.add(Component.translatable("rsi.aetherworks.info.ember_per_hit", ember).getString());
+            warnings.add(Component.translatable("rsi.aetherworks.info.ember_per_hit", ember));
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] getEmberPerHit reflection failed in plan warnings", e);
         }
@@ -413,7 +413,7 @@ public final class AetherworksBatchDelegate extends AbstractBatchDelegate {
                     BlockEntity be = lvl.getBlockEntity(pos);
                     if (be != null && AetherworksReflection.anvilBEClass != null && AetherworksReflection.anvilBEClass.isInstance(be)) {
                         if (findNearbyForge(lvl, pos) == null) {
-                            warnings.add(Component.translatable("rsi.aetherworks.warn.no_forge").getString());
+                            warnings.add(Component.translatable("rsi.aetherworks.warn.no_forge"));
                         }
                     }
                 }

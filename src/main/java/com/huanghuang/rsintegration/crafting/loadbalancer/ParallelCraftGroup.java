@@ -609,6 +609,7 @@ public final class ParallelCraftGroup implements IBatchDelegate {
     public void setTargetOutput(@Nullable ItemStack targetOutput) {
         this.targetOutput = targetOutput == null || targetOutput.isEmpty() ? null : targetOutput.copy();
         for (WorkerSlot worker : workers) configureDelegate(worker.delegate, worker.machine);
+        if (!workers.isEmpty()) baseSpecs = workers.get(0).delegate.getRequiredMaterials();
     }
 
     private ChildPreparation prepareChildDelegate(BoundMachine machine, ServerPlayer player) {
@@ -667,14 +668,15 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         if (expected != null && !expected.isEmpty() && !ownsWorldCapture) return false;
         OperationResourceCoordinator.CaptureRequest capture = ownsWorldCapture
                 && expected != null && !expected.isEmpty() && region != null
-                ? new OperationResourceCoordinator.CaptureRequest(worker.machine.dim(), region, expected)
-                : null;
+                 ? new OperationResourceCoordinator.CaptureRequest(worker.machine.dim(), region, expected)
+                 : null;
         List<MachineLeaseRegistry.MachineKey> machineScope = new ArrayList<>();
+        BlockPos operationMachinePos = delegate.getOperationMachinePos(worker.machine.pos());
         machineScope.add(new MachineLeaseRegistry.MachineKey(
-                worker.machine.dim(), worker.machine.pos(), modType.id()));
+                worker.machine.dim(), operationMachinePos, modType.id()));
         for (BlockPos offset : concurrency.capabilities().supportOffsets()) {
             machineScope.add(new MachineLeaseRegistry.MachineKey(
-                    worker.machine.dim(), worker.machine.pos().offset(offset), modType.id() + ":support"));
+                    worker.machine.dim(), operationMachinePos.offset(offset), modType.id() + ":support"));
         }
         try {
             worker.operationSession = operationKernel.tryPrepare(

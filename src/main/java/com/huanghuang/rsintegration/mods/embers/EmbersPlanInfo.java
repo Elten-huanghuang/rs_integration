@@ -6,6 +6,7 @@ import com.huanghuang.rsintegration.util.ModIds;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.util.Reflect;
 import com.refinedmods.refinedstorage.api.network.INetwork;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
@@ -17,12 +18,17 @@ import java.util.List;
 
 public record EmbersPlanInfo(
     @Nullable int[] code,
-    @Nullable String[] aspectNames,
-    @Nullable String[] inputNames,
+    // Components, not Strings: these are built server-side and rendered on the
+    // client, which is the only side that can resolve item translation keys.
+    @Nullable Component[] aspectNames,
+    @Nullable Component[] inputNames,
     long seed,
     boolean canInfer,
     boolean codeFromCache
 ) {
+    /** Placeholder for a pedestal slot whose ingredient could not be resolved. */
+    private static final Component UNKNOWN_NAME = Component.literal("?");
+
     /**
      * Build plan-time Embers alchemy info: cached codes, display names, and
      * whether the bound tablet is available for inference.
@@ -39,8 +45,8 @@ public record EmbersPlanInfo(
         }
 
         int[] code = null;
-        String[] aspectNames = null;
-        String[] inputNames = null;
+        Component[] aspectNames = null;
+        Component[] inputNames = null;
         long seed = 0;
         boolean codeFromCache = false;
 
@@ -87,25 +93,27 @@ public record EmbersPlanInfo(
                     @SuppressWarnings("unchecked")
                     var inputs = (List<Ingredient>) inputsField.get().get(recipe);
                     if (aspects != null && inputs != null) {
-                        aspectNames = new String[code.length];
+                        aspectNames = new Component[code.length];
                         for (int i = 0; i < code.length; i++) {
                             int idx = code[i];
                             if (idx < aspects.size()) {
                                 Ingredient aspectIng = aspects.get(idx);
                                 ItemStack first = firstDisplayItem(aspectIng);
-                                aspectNames[i] = first.isEmpty() ? "?" : first.getHoverName().getString();
+                                aspectNames[i] = first.isEmpty()
+                                        ? UNKNOWN_NAME : first.getHoverName();
                             } else {
-                                aspectNames[i] = "?";
+                                aspectNames[i] = UNKNOWN_NAME;
                             }
                         }
-                        inputNames = new String[code.length];
+                        inputNames = new Component[code.length];
                         for (int i = 0; i < code.length; i++) {
                             if (i < inputs.size()) {
                                 Ingredient inputIng = inputs.get(i);
                                 ItemStack first = firstDisplayItem(inputIng);
-                                inputNames[i] = first.isEmpty() ? "?" : first.getHoverName().getString();
+                                inputNames[i] = first.isEmpty()
+                                        ? UNKNOWN_NAME : first.getHoverName();
                             } else {
-                                inputNames[i] = "?";
+                                inputNames[i] = UNKNOWN_NAME;
                             }
                         }
                     }

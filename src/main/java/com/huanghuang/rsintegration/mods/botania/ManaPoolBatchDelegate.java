@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
+import com.huanghuang.rsintegration.util.PlayerUtils;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.core.BlockPos;
@@ -19,12 +20,13 @@ import vazkii.botania.api.recipe.ManaInfusionRecipe;
 import vazkii.botania.common.block.block_entity.mana.ManaPoolBlockEntity;
 
 import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 import java.util.List;
 
 /** Real single-input Mana Pool operation. Catalyst matching is performed by Botania. */
 public final class ManaPoolBatchDelegate extends AbstractBatchDelegate {
     private ServerLevel level;
-    private BlockPos pos;
+    private BlockPos bindingPos;
     private BlockPos poolPos;
     private ManaInfusionRecipe recipe;
     private INetwork rsNetwork;
@@ -34,26 +36,64 @@ public final class ManaPoolBatchDelegate extends AbstractBatchDelegate {
     private java.util.UUID inputEntityId;
     private java.util.Set<java.util.UUID> entitiesBefore = java.util.Set.of();
 
-    @Override public boolean validateAndInit(@Nonnull ServerPlayer player, @Nonnull ResourceLocation recipeId,
-                                              ResourceLocation dim, @Nonnull BlockPos pos) {
-        this.pos = pos; this.machineDim = dim; this.machineServer = player.getServer();
+    @Override
+    public boolean validateAndInit(@Nonnull ServerPlayer player, @Nonnull ResourceLocation recipeId,
+                                   ResourceLocation dim, @Nonnull BlockPos pos) {
+        return prepareInternal(player, recipeId, dim, pos).state() == PreparationState.READY;
+    }
+
+    @Override
+    public PreparationResult prepare(@Nonnull ServerPlayer player, @Nonnull ResourceLocation recipeId,
+                                     ResourceLocation dim, @Nonnull BlockPos pos) {
+        return prepareInternal(player, recipeId, dim, pos);
+    }
+
+    private PreparationResult prepareInternal(ServerPlayer player, ResourceLocation recipeId,
+                                              ResourceLocation dim, BlockPos pos) {
+        this.bindingPos = pos.immutable();
+        this.machineDim = dim;
+        this.machineServer = player.getServer();
+        this.level = null;
+        this.poolPos = null;
+        this.recipe = null;
+        this.expected = ItemStack.EMPTY;
+        this.rsNetwork = null;
+
         ServerLevel resolved = dim == null ? player.serverLevel() : player.getServer().getLevel(
                 net.minecraft.resources.ResourceKey.create(net.minecraft.core.registries.Registries.DIMENSION, dim));
-        if (resolved == null) return false;
-        this.poolPos = resolved.getBlockEntity(pos) instanceof ManaPoolBlockEntity ? pos : pos.above();
-        if (!(resolved.getBlockEntity(poolPos) instanceof ManaPoolBlockEntity)) return false;
-        this.level = resolved;
+        if (resolved == null) return PreparationResult.retry("Mana Pool dimension is unavailable");
+
         var found = resolved.getRecipeManager().byKey(recipeId).orElse(null);
-        if (!(found instanceof ManaInfusionRecipe r)) return false;
-        this.recipe = r; this.expected = r.getResultItem(resolved.registryAccess()).copy();
-        this.rsNetwork = CraftPacketUtils.resolveNetworkForCraft(player, resolved.dimension(), poolPos);
-        if (rsNetwork == null || expected.isEmpty() || r.getIngredients().isEmpty()) return false;
-        // Plain recipes belong only to a directly-bound pool. Catalyst recipes belong
-        // only to a binding on the declared catalyst below that pool.
+        if (!(found instanceof ManaInfusionRecipe r)) {
+            return PreparationResult.fatal("Recipe is not a Botania Mana Pool infusion: " + recipeId);
+        }
+        ItemStack result = r.getResultItem(resolved.registryAccess());
+        if (result == null || result.isEmpty()) {
+            return PreparationResult.fatal("Mana Pool recipe has no output: " + recipeId);
+        }
+        if (r.getIngredients().isEmpty() || r.getIngredients().get(0).isEmpty()) {
+            return PreparationResult.fatal("Mana Pool recipe has no input: " + recipeId);
+        }
+
+        boolean directlyBoundPool = resolved.getBlockEntity(bindingPos) instanceof ManaPoolBlockEntity;
+        boolean poolAboveBinding = resolved.getBlockEntity(bindingPos.above()) instanceof ManaPoolBlockEntity;
         var catalyst = r.getRecipeCatalyst();
-        boolean directlyBoundPool = pos.equals(poolPos);
-        if (catalyst == null) return directlyBoundPool;
-        return !directlyBoundPool && catalyst.test(resolved.getBlockState(pos));
+        boolean catalystMatches = catalyst != null && catalyst.test(resolved.getBlockState(bindingPos));
+        ManaPoolBindingRules.Assessment assessment = ManaPoolBindingRules.assess(
+                bindingPos, directlyBoundPool, poolAboveBinding, catalyst != null, catalystMatches);
+        if (assessment.state() == ManaPoolBindingRules.State.RETRY) {
+            return PreparationResult.retry(assessment.detail());
+        }
+        if (assessment.state() == ManaPoolBindingRules.State.FATAL || assessment.poolPos() == null) {
+            return PreparationResult.fatal(assessment.detail());
+        }
+
+        this.level = resolved;
+        this.poolPos = assessment.poolPos();
+        this.recipe = r;
+        this.expected = result.copy();
+        this.rsNetwork = resolveNetwork(player);
+        return PreparationResult.ready();
     }
 
     @Override
@@ -67,9 +107,15 @@ public final class ManaPoolBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override public boolean tryStartSingleCraft(@Nonnull ServerPlayer player) {
-        if (recipe == null || rsNetwork == null || level == null) return false;
+        if (recipe == null || level == null) return false;
+        if (rsNetwork == null) rsNetwork = resolveNetwork(player);
+        if (rsNetwork == null) return false;
         List<ItemStack> extracted = BotaniaDelegateSupport.extractAtomically(rsNetwork, getRequiredMaterials());
-        return !extracted.isEmpty() && startEntity(extracted.get(0));
+        if (extracted.isEmpty()) return false;
+        ItemStack input = extracted.get(0);
+        if (startEntity(input)) return true;
+        refundStandalone(player, input);
+        return false;
     }
 
     @Override public boolean tryStartSingleCraft(@Nonnull ServerPlayer player, @Nonnull ExtractionLedger sharedLedger) {
@@ -91,6 +137,16 @@ public final class ManaPoolBatchDelegate extends AbstractBatchDelegate {
         if (!level.addFreshEntity(entity)) return false;
         inputEntityId = entity.getUUID();
         started = true; startTick = level.getGameTime(); markCraftStarted(); return true;
+    }
+
+    private INetwork resolveNetwork(ServerPlayer player) {
+        if (level == null || bindingPos == null) return null;
+        INetwork resolved = CraftPacketUtils.resolveNetworkForCraft(
+                player, level.dimension(), bindingPos);
+        if (resolved == null && poolPos != null && !poolPos.equals(bindingPos)) {
+            resolved = CraftPacketUtils.resolveNetworkForCraft(player, level.dimension(), poolPos);
+        }
+        return resolved;
     }
 
     @Override protected boolean isMachineCraftFinished(@Nonnull ServerLevel level, @Nonnull BlockEntity be) {
@@ -124,9 +180,26 @@ public final class ManaPoolBatchDelegate extends AbstractBatchDelegate {
         if (entity instanceof ItemEntity item && item.isAlive()) {
             ItemStack stack = item.getItem().copy();
             item.discard();
-            if (!usingSharedLedger && rsNetwork != null && !stack.isEmpty()) {
-                rsNetwork.insertItem(stack, stack.getCount(), Action.PERFORM);
-            }
+            if (!usingSharedLedger) refundStandalone(player, stack);
+        }
+    }
+
+    private void refundStandalone(@Nullable ServerPlayer player, ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return;
+        ItemStack leftover = rsNetwork == null
+                ? stack.copy()
+                : rsNetwork.insertItem(stack.copy(), stack.getCount(), Action.PERFORM);
+        if (leftover.isEmpty()) return;
+        if (player != null) {
+            PlayerUtils.safeGiveToPlayer(player, leftover, rsNetwork);
+            return;
+        }
+        if (level != null && poolPos != null) {
+            ItemEntity drop = new ItemEntity(level,
+                    poolPos.getX() + 0.5, poolPos.getY() + 1.15, poolPos.getZ() + 0.5,
+                    leftover.copy());
+            drop.setDeltaMovement(0, 0.2, 0);
+            level.addFreshEntity(drop);
         }
     }
     @Override
@@ -141,6 +214,6 @@ public final class ManaPoolBatchDelegate extends AbstractBatchDelegate {
     }
     @Override public ItemStack getExpectedOutput() { return expected.isEmpty() ? null : expected; }
     @Override public AABB getOutputCaptureRegion() { return poolPos == null ? null : new AABB(poolPos).inflate(1.5); }
-    @Override public BlockPos getMachinePos() { return pos; }
+    @Override public BlockPos getMachinePos() { return poolPos; }
     @Override public void onBatchFinished(@Nonnull ServerPlayer player) { resetState(); }
 }

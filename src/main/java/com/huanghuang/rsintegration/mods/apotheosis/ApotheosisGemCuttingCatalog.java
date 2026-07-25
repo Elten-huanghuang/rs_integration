@@ -52,6 +52,10 @@ public final class ApotheosisGemCuttingCatalog {
                 .findFirst().orElse(null);
     }
 
+    public static boolean isUnsocketedGem(ItemStack stack) {
+        return GemInstance.unsocketed(stack).isValidUnsocketed();
+    }
+
     private static Map<ResourceLocation, ApotheosisGemCuttingRecipe> build() {
         Map<ResourceLocation, ApotheosisGemCuttingRecipe> result = new LinkedHashMap<>();
         for (Gem gem : GemRegistry.INSTANCE.getValues()) {

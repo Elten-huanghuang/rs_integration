@@ -19,6 +19,7 @@ import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.NonNullList;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
@@ -106,32 +107,51 @@ public final class CraftPacketUtils {
         return Component.literal("Unknown Item");
     }
 
-    /** Merge duplicate item names with counts: "大地精魂, 大地精魂, 大地精魂" → "大地精魂 x3".
-     *  Caps output at ~120 chars to avoid flooding chat with an unreadable wall. */
+    /**
+     * Merge duplicate item names with counts: "大地精魂, 大地精魂, 大地精魂" → "大地精魂 x3".
+     * Caps output at ~24 entries to avoid flooding chat with an unreadable wall.
+     *
+     * <p>Entries are item {@code descriptionId}s, so each name is emitted as a
+     * translatable child rather than resolved here: this runs server-side, where
+     * a dedicated server has no client lang table and {@code getString()} would
+     * yield raw ids like {@code item.malum.earthen_spirit}.</p>
+     */
     @Nonnull
-    public static String formatMissingSummary(@Nonnull List<String> missing) {
+    public static Component formatMissingSummary(@Nonnull List<String> missing) {
         java.util.LinkedHashMap<String, Integer> counts = new java.util.LinkedHashMap<>();
         for (String name : missing) {
             counts.merge(name, 1, Integer::sum);
         }
-        StringBuilder sb = new StringBuilder();
-        boolean first = true;
-        int shown = 0;
         int total = counts.size();
+        int shown = 0;
+        MutableComponent result = Component.empty();
         for (java.util.Map.Entry<String, Integer> entry : counts.entrySet()) {
-            if (!first) sb.append(", ");
-            first = false;
-            sb.append(entry.getKey());
+            if (shown > 0) result.append(", ");
+            // The resolver emits descriptionIds; anything else (a pre-formatted
+            // overflow marker, for instance) is passed through verbatim.
+            String key = entry.getKey();
+            result.append(looksLikeTranslationKey(key)
+                    ? Component.translatable(key)
+                    : Component.literal(key));
             if (entry.getValue() > 1) {
-                sb.append(" x").append(entry.getValue());
+                result.append(" x").append(String.valueOf(entry.getValue()));
             }
             shown++;
-            if (sb.length() > 120 && shown < total) {
-                sb.append(" ").append(Component.translatable("rsi.plan.missing_more", total - shown).getString());
+            if (shown >= MISSING_SUMMARY_LIMIT && shown < total) {
+                result.append(" ").append(Component.translatable(
+                        "rsi.plan.missing_more", total - shown));
                 break;
             }
         }
-        return sb.toString();
+        return result;
+    }
+
+    /** Upper bound on entries listed before collapsing into "+N more". */
+    private static final int MISSING_SUMMARY_LIMIT = 24;
+
+    /** Heuristic: descriptionIds look like "item.mod.path"; free text does not. */
+    private static boolean looksLikeTranslationKey(String value) {
+        return value.indexOf('.') > 0 && value.indexOf(' ') < 0;
     }
 
     /**
