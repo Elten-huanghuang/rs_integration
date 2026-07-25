@@ -74,7 +74,10 @@ public final class ExternalItemProgressBridge {
                                       Map<UUID, Map<MaterialKey, Long>> batch) {
         for (Map.Entry<UUID, Map<MaterialKey, Long>> playerEntry : batch.entrySet()) {
             ServerPlayer player = server.getPlayerList().getPlayer(playerEntry.getKey());
-            if (player == null) continue;
+            if (player == null || !FtbQuestExternalItemDetector.isReady(player)) {
+                requeue(PENDING_EXTERNAL, playerEntry);
+                continue;
+            }
             try {
                 FtbQuestExternalItemDetector.detect(player, playerEntry.getValue());
             } catch (LinkageError | RuntimeException exception) {
@@ -88,7 +91,10 @@ public final class ExternalItemProgressBridge {
                                      Map<UUID, Map<MaterialKey, Long>> batch) {
         for (Map.Entry<UUID, Map<MaterialKey, Long>> playerEntry : batch.entrySet()) {
             ServerPlayer player = server.getPlayerList().getPlayer(playerEntry.getKey());
-            if (player == null) continue;
+            if (player == null || !FtbQuestExternalItemDetector.isReady(player)) {
+                requeue(PENDING_CRAFTED, playerEntry);
+                continue;
+            }
             try {
                 FtbQuestCraftedItemDetector.detect(player, playerEntry.getValue());
                 FtbQuestExternalItemDetector.detect(player, playerEntry.getValue());
@@ -104,6 +110,14 @@ public final class ExternalItemProgressBridge {
         Map<UUID, Map<MaterialKey, Long>> batch = new LinkedHashMap<>(pending);
         pending.clear();
         return batch;
+    }
+
+    private static void requeue(Map<UUID, Map<MaterialKey, Long>> pending,
+                                Map.Entry<UUID, Map<MaterialKey, Long>> playerEntry) {
+        Map<MaterialKey, Long> playerPending = pending.computeIfAbsent(
+                playerEntry.getKey(), ignored -> new LinkedHashMap<>());
+        playerEntry.getValue().forEach((key, amount) ->
+                playerPending.merge(key, amount, ExternalItemProgressBridge::saturatedAdd));
     }
 
     @SubscribeEvent

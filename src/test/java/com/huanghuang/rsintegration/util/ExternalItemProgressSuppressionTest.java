@@ -30,11 +30,22 @@ class ExternalItemProgressSuppressionTest {
     }
 
     @Test
-    void newOperationClearsPreviousSuppression() {
+    void nestedOperationDoesNotClearOuterSuppression() {
         ExternalItemProgressSuppression.beginOperation();
         ExternalItemProgressSuppression.suppress();
         ExternalItemProgressSuppression.beginOperation();
 
+        assertFalse(ExternalItemProgressSuppression.consume());
+        assertTrue(ExternalItemProgressSuppression.consume());
+    }
+
+    @Test
+    void nestedSuppressionIsScopedToInnerOperation() {
+        ExternalItemProgressSuppression.beginOperation();
+        ExternalItemProgressSuppression.beginOperation();
+        ExternalItemProgressSuppression.suppress();
+
+        assertTrue(ExternalItemProgressSuppression.consume());
         assertFalse(ExternalItemProgressSuppression.consume());
     }
 }
