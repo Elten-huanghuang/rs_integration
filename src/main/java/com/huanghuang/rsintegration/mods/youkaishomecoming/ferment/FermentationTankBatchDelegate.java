@@ -499,23 +499,23 @@ public final class FermentationTankBatchDelegate extends AbstractBatchDelegate {
                                        Map<Item, Integer> neededCounts,
                                        int repeatCount) {}
 
-    public static List<String> getPlanWarnings(ServerPlayer player, Recipe<?> recipe,
+    public static List<Component> getPlanWarnings(ServerPlayer player, Recipe<?> recipe,
                                                 @Nullable ResourceLocation dim,
                                                 @Nullable BlockPos pos) {
-        List<String> warnings = new ArrayList<>();
+        List<Component> warnings = new ArrayList<>();
         int water = readRecipeWater(recipe);
         if (water > 0) {
             int perBottle = getYHWaterBottleAmount();
             if (perBottle > 0) {
                 int bottles = (water + perBottle - 1) / perBottle;
                 warnings.add(Component.translatable("rsi.youkaishomecoming.ferment_water_needed",
-                        bottles, water).getString());
+                        bottles, water));
             } else {
                 warnings.add(Component.translatable("rsi.youkaishomecoming.ferment_water_needed_mb",
-                        water).getString());
+                        water));
             }
         }
-        warnings.add(Component.translatable("rsi.youkaishomecoming.ferment_lid_warning").getString());
+        warnings.add(Component.translatable("rsi.youkaishomecoming.ferment_lid_warning"));
         return warnings;
     }
 

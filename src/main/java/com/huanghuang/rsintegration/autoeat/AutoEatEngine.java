@@ -504,7 +504,7 @@ public final class AutoEatEngine {
         NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
                 new AutoEatSyncPacket(AutoEatMode.STACK, eaten,
                         Component.translatable("rsi.autoeat.result.stack", eaten,
-                                targetItem.getDescription().getString())));
+                                targetItem.getDescription())));
     }
 
     // ── Mode 3: Diet ────────────────────────────────────────────

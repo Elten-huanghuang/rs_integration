@@ -35,6 +35,7 @@ import com.huanghuang.rsintegration.mods.youkaishomecoming.moka.MokaPotBatchDele
 import com.huanghuang.rsintegration.mods.embers.EmbersPlanInfo;
 import com.huanghuang.rsintegration.mods.farmingforblockheads.MarketBatchDelegate;
 import com.huanghuang.rsintegration.mods.apotheosis.ApotheosisGemCuttingCatalog;
+import com.huanghuang.rsintegration.mods.arsnouveau.ArsDynamicApparatusRecipe;
 import com.huanghuang.rsintegration.mods.forbidden.FaRitualHelper;
 import com.huanghuang.rsintegration.mods.forbidden.FaRitualWrapper;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
@@ -648,7 +649,19 @@ public final class GenericCraftPacket {
             return;
         }
 
-        List<IngredientSpec> specs = CraftPacketUtils.extractIngredientSpecs(recipe);
+        boolean arsDynamic = ArsDynamicApparatusRecipe.isSupported(recipe);
+        List<IngredientSpec> specs;
+        if (arsDynamic) {
+            ItemStack validated = ArsDynamicApparatusRecipe.validatedOutput(recipe, targetOutput);
+            specs = ArsDynamicApparatusRecipe.buildMaterials(recipe, targetOutput);
+            if (validated.isEmpty() || specs.isEmpty()) {
+                player.sendSystemMessage(Component.translatable(
+                        "rsi.generic.error.unsupported_machine", recipe.getClass().getSimpleName()));
+                return;
+            }
+        } else {
+            specs = CraftPacketUtils.extractIngredientSpecs(recipe);
+        }
         if (specs == null || specs.isEmpty()) {
             // CrockPot pure-category recipes carry no fixed ingredient list — the batch delegate
             // selects items by food value at run time (Phase 2). Let these through with an empty
@@ -729,8 +742,10 @@ public final class GenericCraftPacket {
                 }
                 ResolutionStep terminalStep = new ResolutionStep(recipeId, modType, recipeId,
                         List.of(), List.of(), inferMode, repeatCount);
-                ItemStack recipeOutput = ModRecipeHandlers.tryGetResultItem(
-                        recipe, player.serverLevel().registryAccess());
+                ItemStack recipeOutput = arsDynamic
+                        ? ArsDynamicApparatusRecipe.validatedOutput(recipe, targetOutput)
+                        : ModRecipeHandlers.tryGetResultItem(
+                                recipe, player.serverLevel().registryAccess());
                 if (targetOutput != null && !targetOutput.isEmpty()
                         && !recipeOutput.isEmpty() && targetOutput.getItem() == recipeOutput.getItem()) {
                     recipeOutput = targetOutput.copyWithCount(recipeOutput.getCount());
@@ -1157,7 +1172,7 @@ public final class GenericCraftPacket {
                                       @Nullable ItemStack clickedOutput, long requestId) {
         Recipe<?> recipe = resolveRecipe(player.serverLevel(), recipeId);
         if (recipe == null) {
-            sendPlanError(player, Component.translatable("rsi.generic.error.recipe_not_found", recipeId.toString()).getString());
+            sendPlanError(player, Component.translatable("rsi.generic.error.recipe_not_found", recipeId.toString()));
             return;
         }
 
@@ -1167,12 +1182,18 @@ public final class GenericCraftPacket {
         // smithing table GUI instead.
         boolean faRecipe = OpenBoundMachineGuiPacket.isFaApplyModifier(recipe);
         if (faRecipe && (baseItem == null || baseItem.isEmpty())) {
-            sendPlanError(player, Component.translatable("rsi.generic.error.fa_open_smithing").getString());
+            sendPlanError(player, Component.translatable("rsi.generic.error.fa_open_smithing"));
+            return;
+        }
+        boolean arsDynamic = ArsDynamicApparatusRecipe.isSupported(recipe);
+        if (arsDynamic && (clickedOutput == null || clickedOutput.isEmpty())) {
+            sendPlanError(player, Component.translatable(
+                    "rsi.generic.error.unsupported_machine", recipe.getClass().getSimpleName()));
             return;
         }
 
         if (!RSIntegrationConfig.ENABLE_AUTO_CRAFTING.get()) {
-            sendPlanError(player, "Auto-crafting is disabled in config");
+            sendPlanError(player, Component.translatable("rsi.generic.error.auto_craft_disabled"));
             return;
         }
 
@@ -1246,9 +1267,25 @@ public final class GenericCraftPacket {
                 recipeModType = ModType.byId("smithing");
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.error("[RSI-tryBuildPlan] FA reflection failed", e);
-                sendPlanError(player, Component.translatable("rsi.generic.error.fa_open_smithing").getString());
+                sendPlanError(player, Component.translatable("rsi.generic.error.fa_open_smithing"));
                 return;
             }
+        } else if (arsDynamic) {
+            ItemStack validated = ArsDynamicApparatusRecipe.validatedOutput(recipe, clickedOutput);
+            List<IngredientSpec> specs = ArsDynamicApparatusRecipe.buildMaterials(recipe, clickedOutput);
+            if (validated.isEmpty() || specs.isEmpty()) {
+                sendPlanError(player, Component.translatable(
+                        "rsi.generic.error.unsupported_machine", recipe.getClass().getSimpleName()));
+                return;
+            }
+            displayIngredients = specs.stream()
+                    .filter(spec -> !spec.isEmpty())
+                    .map(IngredientSpec::ingredient)
+                    .toList();
+            recipeSpecs = scaleIngredientSpecs(specs, repeatCount);
+            recipeIngredients = expandIngredientSpecs(recipeSpecs);
+            targetOutput = validated;
+            recipeModType = ModType.classifyRecipe(recipe);
         } else if (recipe instanceof CraftingRecipe cr) {
             List<Ingredient> raw = cr.getIngredients();
             List<IngredientSpec> extractedSpecs = extractPlanIngredientSpecs(cr);
@@ -1285,12 +1322,12 @@ public final class GenericCraftPacket {
                         recipe, cpNetwork, player.serverLevel(), cpPos);
                 if (specs == null || specs.isEmpty()) {
                     sendPlanError(player, Component.translatable(
-                            "rsi.crockpot.error.food_values").getString());
+                            "rsi.crockpot.error.food_values"));
                     return;
                 }
             } else if (specs == null || specs.isEmpty()) {
                 sendPlanError(player, Component.translatable(
-                        "rsi.generic.error.no_ingredients").getString());
+                        "rsi.generic.error.no_ingredients"));
                 return;
             }
             List<Ingredient> perRecipe = new ArrayList<>();
@@ -1320,7 +1357,7 @@ public final class GenericCraftPacket {
                     && !ModIds.ID_YHK_KETTLE.equals(recipeModType.id())
                     && !ModIds.ID_YHK_FERMENT.equals(recipeModType.id())
                     && !ModIds.ID_FR_KETTLE.equals(recipeModType.id())) {
-                sendPlanError(player, Component.translatable("rsi.generic.error.unsupported_machine", recipe.getClass().getSimpleName()).getString());
+                sendPlanError(player, Component.translatable("rsi.generic.error.unsupported_machine", recipe.getClass().getSimpleName()));
                 return;
             }
         }
@@ -1755,7 +1792,8 @@ public final class GenericCraftPacket {
         }
 
         // ── Add the target recipe itself as the last step so its grid is visible ──
-        List<String> modWarnings = new ArrayList<>();
+        // Components, not Strings: a dedicated server cannot resolve rsi.* keys.
+        List<Component> modWarnings = new ArrayList<>();
         // Items the plan's intermediate steps actually produce. When the target's
         // ingredient is a tag with no member in stock (e.g. a wood-tag gun slot),
         // the display representative should be whichever member the plan crafts
@@ -1768,10 +1806,10 @@ public final class GenericCraftPacket {
         {
             List<ItemStack> targetInputs = new ArrayList<>();
             int targetW = 0, targetH = 0;
-            if (faRecipe) {
-                // FA ApplyModifierRecipe: use the pre-built displayIngredients
-                // (template + baseItem + addition) so the JEI-extracted base
-                // item is visible in the target step's input grid.
+            if (faRecipe || arsDynamic) {
+                // Contextual recipes use the already validated concrete input
+                // list so the target card shows the same NBT-bearing item that
+                // execution will extract.
                 for (Ingredient ing : displayIngredients) {
                     if (ing.isEmpty()) continue;
                     ItemStack matched = matchAndConsume(ing, displayAvailable, plannedOutputs);
@@ -2175,18 +2213,18 @@ public final class GenericCraftPacket {
             boolean nbtMismatch = hasNbtMismatch(materials, itemAvailable);
             if (allExecutionMachinesLeased) {
                 modWarnings.add(Component.translatable(
-                        "rsi.plan.failure.machines_leased").getString());
+                        "rsi.plan.failure.machines_leased"));
             } else if (nbtMismatch) {
                 modWarnings.add(Component.translatable(
-                        "rsi.plan.failure.nbt_mismatch").getString());
+                        "rsi.plan.failure.nbt_mismatch"));
             } else if (!dedupedMissing.isEmpty() || materials.values().stream()
                     .anyMatch(a -> !a.isEnough())) {
                 modWarnings.add(Component.translatable(
-                        "rsi.plan.failure.missing_materials").getString());
+                        "rsi.plan.failure.missing_materials"));
             } else if (recipeModType != null
                     && !boundMachineTypes.contains(recipeModType.id())) {
                 modWarnings.add(Component.translatable(
-                        "rsi.plan.failure.no_bound_machine").getString());
+                        "rsi.plan.failure.no_bound_machine"));
             }
         }
 
@@ -2202,7 +2240,25 @@ public final class GenericCraftPacket {
         }
         if (totalBotaniaMana > 0) {
             modWarnings.add(net.minecraft.network.chat.Component.translatable(
-                    "rsi.botania.warn.total_mana_required", totalBotaniaMana).getString());
+                    "rsi.botania.warn.total_mana_required", totalBotaniaMana));
+        }
+
+        long totalArsSource = 0L;
+        for (PlanStep step : steps) {
+            Recipe<?> stepRecipe = player.serverLevel().getRecipeManager()
+                    .byKey(step.recipeId()).orElse(null);
+            int sourcePerBatch = stepRecipe == null ? 0 : PlanWarnings.arsSourceCost(stepRecipe);
+            if (sourcePerBatch > 0) {
+                long stepTotal = (long) sourcePerBatch * Math.max(1, step.batches());
+                totalArsSource = stepTotal > Long.MAX_VALUE - totalArsSource
+                        ? Long.MAX_VALUE
+                        : totalArsSource + stepTotal;
+            }
+        }
+        if (totalArsSource > 0) {
+            modWarnings.add(Component.translatable(
+                    "rsi.ars_nouveau.warn.total_source_required",
+                    String.format("%,d", totalArsSource)));
         }
 
         PlanResponse plan = new PlanResponse(
@@ -2418,13 +2474,23 @@ public final class GenericCraftPacket {
         }
     }
 
-    private static void sendPlanError(ServerPlayer player, String msg) {
+    /**
+     * Reports a plan failure to the client.
+     *
+     * <p>The message rides {@code modWarnings} as an unresolved Component. It must
+     * not go through {@code missing}, which is a translation-key channel the client
+     * feeds to {@code localizeItemNames} — and it must not be pre-rendered with
+     * {@code getString()}, because a dedicated server cannot resolve {@code rsi.*}
+     * keys.</p>
+     */
+    private static void sendPlanError(ServerPlayer player, Component msg) {
         RSIntegrationMod.LOGGER.warn("[RSI-tryBuildPlan] sendPlanError: recipe={} msg={} player={}",
-                "?", msg, player.getGameProfile().getName());
+                "?", msg.getString(), player.getGameProfile().getName());
         BatchCraftNetworkHandler.CHANNEL.send(
                 PacketDistributor.PLAYER.with(() -> player),
                 new PlanResponsePacket(new PlanResponse(false, "", ItemStack.EMPTY,
-                        List.of(), Map.of(), List.of(msg), "", null, null, 0, 0, 0, Collections.emptyList(), 1)));
+                        List.of(), Map.of(), List.of(), "", null, null, 0, 0, 0,
+                        List.of(msg), 1)));
     }
 
 }

@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting.plan;
 
 import com.huanghuang.rsintegration.crafting.tree.IngredientKey;
+import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.ItemStack;
 
 import javax.annotation.Nullable;
@@ -25,12 +26,16 @@ public record PlanResponse(
         int executionPosX,
         int executionPosY,
         int executionPosZ,
-        List<String> modWarnings,  // mod-specific validation warnings (Goety research/structure, FA essences)
+        // Mod-specific validation warnings (Goety research/structure, FA essences).
+        // MUST stay unresolved Components: a dedicated server never loads
+        // assets/rs_integration/lang/*.json, so rendering these to String
+        // server-side yields raw translation keys on the client.
+        List<Component> modWarnings,
         int repeatCount,
         // ── Embers Alchemy pedestal layout (null/missing when not applicable) ──
         @Nullable int[] embersCode,           // code[i] = aspect index for pedestal i
-        @Nullable String[] embersAspectNames,  // translated aspect item names (per code index)
-        @Nullable String[] embersInputNames,   // translated input item names (per pedestal)
+        @Nullable Component[] embersAspectNames, // aspect item names (per code index), resolved client-side
+        @Nullable Component[] embersInputNames,  // input item names (per pedestal), resolved client-side
         long embersSeed,                      // world seed used for calculation (0 = not set)
         boolean embersCanInfer,               // true when a tablet is bound and Mode 1 is available
         boolean embersCodeFromCache,          // true when embersCode was loaded from KnownCodeSavedData (previously inferred)
@@ -85,7 +90,7 @@ public record PlanResponse(
                         @Nullable String executionModTypeId,
                         @Nullable String executionDim,
                         int executionPosX, int executionPosY, int executionPosZ,
-                        List<String> modWarnings, int repeatCount) {
+                        List<Component> modWarnings, int repeatCount) {
         this(success, targetName, targetResult, steps, materials, missing, recipeId,
                 executionModTypeId, executionDim, executionPosX, executionPosY, executionPosZ,
                 modWarnings, repeatCount,

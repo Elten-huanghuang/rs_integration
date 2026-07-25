@@ -759,10 +759,10 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
 
     // ── Plan warnings ─────────────────────────────────────────────
 
-    public static List<String> getPlanWarnings(ServerPlayer player, Recipe<?> recipe,
+    public static List<Component> getPlanWarnings(ServerPlayer player, Recipe<?> recipe,
                                                @Nullable ResourceLocation dim,
                                                @Nullable BlockPos pos) {
-        List<String> warnings = new ArrayList<>();
+        List<Component> warnings = new ArrayList<>();
         if (!MalumReflection.isAvailable()) return warnings;
 
         // Check for spirit requirements on the recipe
@@ -803,7 +803,7 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
                             if (slots < spirits.size()) {
                                 warnings.add(Component.translatable(
                                         "rsi.malum.warn.spirit_slots_insufficient",
-                                        spirits.size(), slots).getString());
+                                        spirits.size(), slots));
                             }
                         }
                     }
@@ -814,7 +814,7 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
         if (!spiritNames.isEmpty()) {
             warnings.add(Component.translatable(
                     "rsi.malum.warn.spirit_required",
-                    String.join(", ", spiritNames)).getString());
+                    String.join(", ", spiritNames)));
         }
 
         return warnings;

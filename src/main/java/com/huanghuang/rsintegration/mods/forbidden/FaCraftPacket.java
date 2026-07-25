@@ -429,9 +429,11 @@ public final class FaCraftPacket {
             FaRitualHelper.consumeRitualStarterUse(starterStack, player, starterNetwork);
 
             Object result = FaRitualHelper.invoke(FaRitualHelper.invoke(ritual, "result"), "getResult");
-            String resultName = "???";
+            // Keep the name as a Component: this is server-side, and the client
+            // is the only side that can resolve the item's translation key.
+            Component resultName = Component.literal("???");
             if (result instanceof ItemStack rs && !rs.isEmpty()) {
-                resultName = rs.getDisplayName().getString();
+                resultName = rs.getDisplayName();
             }
             player.displayClientMessage(Component.translatable("rsi.fa.info.ritual_started", resultName), true);
             RSIntegrationMod.LOGGER.debug("[RSI-FA] Player {} started FA ritual '{}'",

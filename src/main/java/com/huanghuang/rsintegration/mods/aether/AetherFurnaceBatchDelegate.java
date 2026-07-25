@@ -314,14 +314,14 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
 
     // ── plan warnings ──
 
-    public static List<String> getPlanWarnings(ServerPlayer player, Recipe<?> recipe,
+    public static List<Component> getPlanWarnings(ServerPlayer player, Recipe<?> recipe,
                                                 @Nullable ResourceLocation dim,
                                                 @Nullable BlockPos pos) {
-        List<String> warnings = new ArrayList<>();
+        List<Component> warnings = new ArrayList<>();
         if (recipe.getClass().getSimpleName().equals("IncubationRecipe")) {
-            warnings.add(Component.translatable("rsi.aether.incubation_warning").getString());
+            warnings.add(Component.translatable("rsi.aether.incubation_warning"));
         }
-        warnings.add(Component.translatable("rsi.aether.fuel_warning").getString());
+        warnings.add(Component.translatable("rsi.aether.fuel_warning"));
         return warnings;
     }
 

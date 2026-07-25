@@ -129,7 +129,7 @@ extends AbstractBatchDelegate {
                 ItemStack topStack = readInventoryStack(topInv);
                 if (!topStack.isEmpty()) {
                     RSIntegrationMod.LOGGER.warn("[RSI-Embers] Pedestal top at {} still occupied after recycle: {}", (Object)p.pos(), (Object)topStack);
-                    player.sendSystemMessage(Component.translatable("rsi.embers.error.pedestal_top_occupied", p.pos().toShortString(), topStack.getHoverName().getString()));
+                    player.sendSystemMessage(Component.translatable("rsi.embers.error.pedestal_top_occupied", p.pos().toShortString(), topStack.getHoverName()));
                     return false;
                 }
             }
@@ -148,7 +148,7 @@ extends AbstractBatchDelegate {
             ItemStack bottomStack = readInventoryStack(bottomInv);
             if (bottomStack.isEmpty()) continue;
             RSIntegrationMod.LOGGER.warn("[RSI-Embers] Pedestal bottom at {} still occupied after recycle: {}", (Object)p.pos().below(), (Object)bottomStack);
-            player.sendSystemMessage(Component.translatable("rsi.embers.error.pedestal_bottom_occupied", p.pos().below().toShortString(), bottomStack.getHoverName().getString()));
+            player.sendSystemMessage(Component.translatable("rsi.embers.error.pedestal_bottom_occupied", p.pos().below().toShortString(), bottomStack.getHoverName()));
             return false;
         }
         @SuppressWarnings("unchecked")
@@ -381,10 +381,10 @@ extends AbstractBatchDelegate {
         return this.machinePos != null ? this.machinePos : BlockPos.ZERO;
     }
 
-    public static List<String> getPlanWarnings(ServerPlayer player, Recipe<?> recipe, @Nullable ResourceLocation dim, @Nullable BlockPos pos) {
-        ArrayList<String> warnings = new ArrayList<String>();
+    public static List<Component> getPlanWarnings(ServerPlayer player, Recipe<?> recipe, @Nullable ResourceLocation dim, @Nullable BlockPos pos) {
+        ArrayList<Component> warnings = new ArrayList<Component>();
         if (dim == null || pos == null) {
-            warnings.add(Component.translatable("rsi.embers.warn.no_tablet_bound").getString());
+            warnings.add(Component.translatable("rsi.embers.warn.no_tablet_bound"));
             return warnings;
         }
         ServerLevel lvl = CraftPacketUtils.resolveLevel((MinecraftServer)player.server, (ResourceLocation)dim, (ServerPlayer)player);
@@ -403,7 +403,7 @@ extends AbstractBatchDelegate {
             }
             BlockEntity be = lvl.getBlockEntity(pos);
             if (EmbersReflection.alchemyTabletBEClass == null || be == null || !EmbersReflection.alchemyTabletBEClass.isInstance(be)) {
-                warnings.add(Component.translatable("rsi.embers.warn.tablet_missing").getString());
+                warnings.add(Component.translatable("rsi.embers.warn.tablet_missing"));
             } else if (EmbersReflection.alchemyRecipeClass != null && EmbersReflection.alchemyRecipeClass.isInstance(recipe)) {
                 long seed = lvl.getSeed();
                 @SuppressWarnings("unchecked")
@@ -411,12 +411,12 @@ extends AbstractBatchDelegate {
                 int needed = code.size();
                 List<PedestalInfo> nearby = EreAlchemyBatchDelegate.scanPedestals((Level)lvl, pos);
                 if (nearby.size() < needed) {
-                    warnings.add(Component.translatable("rsi.embers.warn.pedestals_insufficient", needed, nearby.size()).getString());
+                    warnings.add(Component.translatable("rsi.embers.warn.pedestals_insufficient", needed, nearby.size()));
                 }
                 for (PedestalInfo p : nearby) {
                     BlockEntity bottomBE = lvl.getBlockEntity(p.pos().below());
                     if (EmbersReflection.alchemyPedestalBEClass != null && bottomBE != null && EmbersReflection.alchemyPedestalBEClass.isInstance(bottomBE)) continue;
-                    warnings.add(Component.translatable("rsi.embers.warn.pedestal_invalid").getString());
+                    warnings.add(Component.translatable("rsi.embers.warn.pedestal_invalid"));
                     break;
                 }
             }
@@ -424,9 +424,9 @@ extends AbstractBatchDelegate {
         if (!((Boolean)RSIntegrationConfig.ENABLE_EMBERS_ALCHEMY_CALC.get()).booleanValue()) {
             KnownCodeSavedData savedData = KnownCodeSavedData.get((ServerLevel)player.serverLevel());
             if (savedData.getCode(recipe.getId().toString()) != null) {
-                warnings.add(Component.translatable("rsi.embers.info.code_cached").getString());
+                warnings.add(Component.translatable("rsi.embers.info.code_cached"));
             } else {
-                warnings.add(Component.translatable("rsi.embers.warn.infer_mode_only").getString());
+                warnings.add(Component.translatable("rsi.embers.warn.infer_mode_only"));
             }
         }
         return warnings;

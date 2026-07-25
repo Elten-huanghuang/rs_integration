@@ -1135,7 +1135,8 @@ public final class CraftingPlanScreen extends Screen {
         // ── Warnings (research, structure, etc.) ──────────────
         if (step != null && !step.warnings().isEmpty()) {
             int warnY = y + cardH - warnH + 3;
-            for (String warn : step.warnings()) {
+            for (Component warnComponent : step.warnings()) {
+                String warn = warnComponent.getString();
                 // Truncate to 2 lines max per warning
                 String display = font.plainSubstrByWidth(warn, cardW - CARD_PAD * 2 - 4);
                 if (display.length() < warn.length()) {
@@ -1317,8 +1318,8 @@ public final class CraftingPlanScreen extends Screen {
         gfx.fill(left + 1, top + 2, left + 4, top + embersPedestalH - 2, 0xFF44AA66);
 
         int[] code = plan.embersCode();
-        String[] aspects = plan.embersAspectNames();
-        String[] inputs = plan.embersInputNames();
+        Component[] aspects = plan.embersAspectNames();
+        Component[] inputs = plan.embersInputNames();
         boolean hasCards = code != null && aspects != null && inputs != null;
 
         int y = top + 4;
@@ -1352,7 +1353,7 @@ public final class CraftingPlanScreen extends Screen {
                 UIRenderer.rounded(gfx, px, py, cardW, cardH, 4f, 0xCC1A221E);
 
                 // Input name (top)
-                String inputName = i < inputs.length ? I18n.get(inputs[i]) : "?";
+                String inputName = i < inputs.length ? inputs[i].getString() : "?";
                 int maxNameW = cardW - 8;
                 if (font.width(inputName) > maxNameW) {
                     inputName = font.plainSubstrByWidth(inputName, maxNameW - font.width("...")) + "...";
@@ -1361,7 +1362,7 @@ public final class CraftingPlanScreen extends Screen {
                 gfx.drawString(font, inputName, nameX, py + 2, 0xFFCCCCCC);
 
                 // Aspect name (bottom)
-                String aspectName = i < aspects.length ? I18n.get(aspects[i]) : "?";
+                String aspectName = i < aspects.length ? aspects[i].getString() : "?";
                 if (font.width(aspectName) > maxNameW) {
                     aspectName = font.plainSubstrByWidth(aspectName, maxNameW - font.width("...")) + "...";
                 }
@@ -1467,8 +1468,8 @@ public final class CraftingPlanScreen extends Screen {
         // Render mod warnings (one per line — they're longer sentences)
         if (hasModWarnings) {
             if (!hasMissing) my += 4;
-            for (String warn : plan.modWarnings()) {
-                String display = font.plainSubstrByWidth(warn, maxLineW);
+            for (Component warn : plan.modWarnings()) {
+                String display = font.plainSubstrByWidth(warn.getString(), maxLineW);
                 UIRenderer.textBackdrop(gfx, font, left + 10, my, display, C_TEXT_BACKDROP);
                 gfx.drawString(font, display, left + 10, my, 0xFFDDAA00);
                 my += font.lineHeight + 4;

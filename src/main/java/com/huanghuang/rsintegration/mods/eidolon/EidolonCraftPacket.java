@@ -122,8 +122,10 @@ public final class EidolonCraftPacket {
             return;
         }
         if (!EidolonReflection.crucibleRecipeClass.isInstance(recipe)) {
-            player.sendSystemMessage(Component.literal("§c" + Component.translatable("rsi.generic.error.wrong_recipe_type").getString()
-                    + " [" + recipeId + " expected=CrucibleRecipe got=" + recipe.getClass().getSimpleName() + "]"));
+            player.sendSystemMessage(Component.literal("§c")
+                    .append(Component.translatable("rsi.generic.error.wrong_recipe_type"))
+                    .append(" [" + recipeId + " expected=CrucibleRecipe got="
+                            + recipe.getClass().getSimpleName() + "]"));
             return;
         }
 

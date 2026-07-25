@@ -6,6 +6,7 @@ import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.mods.aether.AetherFurnaceBatchDelegate;
 import com.huanghuang.rsintegration.mods.aetherworks.AetherworksBatchDelegate;
 import com.huanghuang.rsintegration.mods.aetherworks.AetherworksToolStationBatchDelegate;
+import com.huanghuang.rsintegration.mods.arsnouveau.ArsPlanWarnings;
 import com.huanghuang.rsintegration.mods.crockpot.CrockPotBatchDelegate;
 import com.huanghuang.rsintegration.mods.eidolon.EidolonBatchDelegate;
 import com.huanghuang.rsintegration.mods.farmersdelight.CookingPotBatchDelegate;
@@ -24,6 +25,7 @@ import com.huanghuang.rsintegration.mods.youkaishomecoming.moka.MokaPotBatchDele
 import com.huanghuang.rsintegration.mods.youkaishomecoming.steamer.SteamerBatchDelegate;
 import com.huanghuang.rsintegration.util.ModIds;
 import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.crafting.Recipe;
@@ -44,6 +46,10 @@ public final class PlanWarnings {
         if (cost >= 0) return cost;
         cost = botaniaInt(recipe, "vazkii.botania.api.recipe.BotanicalBreweryRecipe", "getManaUsage");
         return Math.max(0, cost);
+    }
+
+    public static int arsSourceCost(Recipe<?> recipe) {
+        return ArsPlanWarnings.sourceCost(recipe);
     }
 
     private static int botaniaInt(Object recipe, String typeName, String methodName) {
@@ -75,9 +81,14 @@ public final class PlanWarnings {
         return false;
     }
 
-    public static List<String> collect(String typeId, ServerPlayer player, Recipe<?> recipe,
+    /**
+     * Collects mod-specific plan warnings. Returns unresolved {@link Component}s
+     * because this runs server-side, where {@code rsi.*} translation keys cannot
+     * be resolved — see {@link PlanResponse#modWarnings()}.
+     */
+    public static List<Component> collect(String typeId, ServerPlayer player, Recipe<?> recipe,
                                         @Nullable ResourceLocation dim, @Nullable BlockPos pos) {
-        List<String> warnings = new ArrayList<>();
+        List<Component> warnings = new ArrayList<>();
         switch (typeId) {
             case ModIds.AETHER:
             case "aether_freezer":
@@ -96,6 +107,10 @@ public final class PlanWarnings {
                 break;
             case ModIds.WIZARDS_REBORN:
                 warnings.addAll(WRBatchDelegate.getPlanWarnings(player, recipe, dim, pos));
+                break;
+            case ModIds.ID_ARS_IMBUEMENT:
+            case ModIds.ID_ARS_APPARATUS:
+                warnings.addAll(ArsPlanWarnings.getPlanWarnings(player, recipe, dim, pos));
                 break;
             case ModIds.MALUM:
                 warnings.addAll(MalumBatchDelegate.getPlanWarnings(player, recipe, dim, pos));

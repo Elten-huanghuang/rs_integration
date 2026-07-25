@@ -392,11 +392,11 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
                 Ingredient.of(Items.LAPIS_LAZULI, Items.LAPIS_BLOCK));
     }
 
-    public static List<String> getPlanWarnings(ServerPlayer player, Recipe<?> recipe,
+    public static List<Component> getPlanWarnings(ServerPlayer player, Recipe<?> recipe,
                                                 @Nullable ResourceLocation dim,
                                                 @Nullable BlockPos pos) {
-        List<String> warnings = new ArrayList<>();
-        warnings.add(Component.translatable("rsi.cooler.fuel_warning").getString());
+        List<Component> warnings = new ArrayList<>();
+        warnings.add(Component.translatable("rsi.cooler.fuel_warning"));
         return warnings;
     }
 

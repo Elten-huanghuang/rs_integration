@@ -276,14 +276,24 @@ public class RecipeGuiLayoutsMixin {
             // the player clicked from the id alone. Capture the OUTPUT ghost slot
             // (the leveled enchanted book JEI renders) so the server can require the
             // matching (N-1)-level center book and produce level N.
-            ItemStack wrTargetOutput = null;
+            ItemStack concreteTargetOutput = null;
             if (ModIds.WIZARDS_REBORN.equals(recipeId.getNamespace())
                     && recipeId.getPath().startsWith("arcane_iterator/")) {
-                wrTargetOutput = extractOutputStack(recipeLayout);
+                concreteTargetOutput = extractOutputStack(recipeLayout);
                 RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] WR arcane iterator output capture: recipeId={} output={}",
-                        recipeId, wrTargetOutput != null ? wrTargetOutput.getHoverName().getString() : "null");
+                        recipeId, concreteTargetOutput != null ? concreteTargetOutput.getHoverName().getString() : "null");
+            } else if (recipeClassName.equals(
+                    "com.hollingsworth.arsnouveau.api.enchanting_apparatus.EnchantmentRecipe")
+                    || recipeClassName.equals(
+                    "com.hollingsworth.arsnouveau.api.enchanting_apparatus.ArmorUpgradeRecipe")) {
+                concreteTargetOutput = extractOutputStack(recipeLayout);
+                RSIntegrationMod.LOGGER.debug(
+                        "[RSI-JEI-Mixin] Ars dynamic Apparatus output capture: recipeId={} output={}",
+                        recipeId, concreteTargetOutput != null
+                                ? concreteTargetOutput.getHoverName().getString() : "null");
             }
-            Runnable handler = createHandler(recipe, recipeId, bindingDim, machinePos, filter, faSmithingBase, wrTargetOutput);
+            Runnable handler = createHandler(recipe, recipeId, bindingDim, machinePos, filter,
+                    faSmithingBase, concreteTargetOutput);
             if (handler == null) continue;
 
             ModType modType = "vanilla_brewing_stand".equals(filter)
@@ -798,9 +808,8 @@ public class RecipeGuiLayoutsMixin {
                 field.setAccessible(true);
                 ItemStack stack = (ItemStack) field.get(recipe);
                 if (stack != null && !stack.isEmpty()) {
-                    var instance = dev.shadowsoffire.apotheosis.adventure.socket.gem.GemInstance
-                            .unsocketed(stack);
-                    if (instance.isValidUnsocketed()) return stack.copy();
+                    if (com.huanghuang.rsintegration.mods.apotheosis.ApotheosisGemCuttingCatalog
+                            .isUnsocketedGem(stack)) return stack.copy();
                 }
             } catch (ReflectiveOperationException ignored) {
             }

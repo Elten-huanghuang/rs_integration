@@ -558,10 +558,10 @@ public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
         CraftPacketUtils.addFuelToMaterials(itemAvailable, itemSource, neededCounts, repeatCount);
     }
 
-    public static List<String> getPlanWarnings(ServerPlayer player, Recipe<?> recipe,
+    public static List<Component> getPlanWarnings(ServerPlayer player, Recipe<?> recipe,
                                                 @Nullable ResourceLocation dim,
                                                 @Nullable BlockPos pos) {
-        List<String> warnings = new ArrayList<>();
+        List<Component> warnings = new ArrayList<>();
         net.minecraft.server.level.ServerLevel level = CraftPacketUtils.resolveLevel(player.server, dim, player);
         int blockPotLevel = getBlockPotLevel(level, pos);
         // Fall back to the fixed input-slot count (not the recipe's potLevel,
@@ -577,30 +577,30 @@ public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
 
             if (remaining > 0) {
                 warnings.add(Component.translatable("rsi.crockpot.food_value_filler",
-                        remaining).getString());
+                        remaining));
             }
 
             for (int c = 0; c < mins.length; c++) {
                 if (mins[c] > 0) {
                     String catName = getCategoryName(c);
                     warnings.add(Component.translatable("rsi.crockpot.cat_min",
-                            catName, String.format("%.1f", mins[c])).getString());
+                            catName, String.format("%.1f", mins[c])));
                 }
             }
             for (int c = 0; c < maxs.length; c++) {
                 if (maxs[c] < Float.MAX_VALUE) {
                     String catName = getCategoryName(c);
                     warnings.add(Component.translatable("rsi.crockpot.cat_max",
-                            catName, String.format("%.1f", maxs[c])).getString());
+                            catName, String.format("%.1f", maxs[c])));
                 }
             }
         } else if (remaining > 0) {
             String fillerId = RSIntegrationConfig.CROCKPOT_FILLER_ITEM.get();
             warnings.add(Component.translatable("rsi.crockpot.filler_needed",
-                    remaining, fillerId).getString());
+                    remaining, fillerId));
         }
 
-        warnings.add(Component.translatable("rsi.crockpot.fuel_warning").getString());
+        warnings.add(Component.translatable("rsi.crockpot.fuel_warning"));
 
         return warnings;
     }

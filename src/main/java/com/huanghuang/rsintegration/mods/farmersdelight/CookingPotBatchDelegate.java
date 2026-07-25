@@ -361,16 +361,16 @@ public final class CookingPotBatchDelegate extends AbstractBatchDelegate {
         // Container items are added per-craft, accounted via getContainerItem
     }
 
-    public static List<String> getPlanWarnings(ServerPlayer player, Recipe<?> recipe,
+    public static List<Component> getPlanWarnings(ServerPlayer player, Recipe<?> recipe,
                                                 @Nullable ResourceLocation dim,
                                                 @Nullable BlockPos pos) {
-        List<String> warnings = new ArrayList<>();
+        List<Component> warnings = new ArrayList<>();
         ItemStack container = getContainerItem(recipe, player.level().registryAccess());
         if (!container.isEmpty()) {
             warnings.add(Component.translatable("rsi.farmersdelight.container_needed",
-                    container.getHoverName().getString()).getString());
+                    container.getHoverName()));
         }
-        warnings.add(Component.translatable("rsi.farmersdelight.heat_warning").getString());
+        warnings.add(Component.translatable("rsi.farmersdelight.heat_warning"));
         return warnings;
     }
 

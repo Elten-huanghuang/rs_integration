@@ -908,10 +908,10 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
      * When a forge is bound, shows current vs. needed levels.
      * When no forge is bound, lists the required essence types.
      */
-    public static List<String> getPlanWarnings(ServerPlayer player, Recipe<?> recipe,
+    public static List<Component> getPlanWarnings(ServerPlayer player, Recipe<?> recipe,
                                                @Nullable ResourceLocation dim,
                                                @Nullable net.minecraft.core.BlockPos pos) {
-        List<String> warnings = new ArrayList<>();
+        List<Component> warnings = new ArrayList<>();
         if (!(recipe instanceof FaRitualWrapper wrapper)) return warnings;
         if (FAReflection.hephaestusForgeBEClass == null || FAReflection.ritualClass == null || FAReflection.essencesDefinitionClass == null)
             return warnings;
@@ -1026,16 +1026,16 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
 
             if (curAureal >= 0) {
                 if (reqAureal > 0 && curAureal < reqAureal)
-                    warnings.add(Component.translatable("rsi.fa.warn.insufficient_aureal", reqAureal, curAureal).getString());
+                    warnings.add(Component.translatable("rsi.fa.warn.insufficient_aureal", reqAureal, curAureal));
                 if (reqSouls > 0 && curSouls < reqSouls)
-                    warnings.add(Component.translatable("rsi.fa.warn.insufficient_souls", reqSouls, curSouls).getString());
+                    warnings.add(Component.translatable("rsi.fa.warn.insufficient_souls", reqSouls, curSouls));
                 if (reqBlood > 0 && curBlood < reqBlood)
-                    warnings.add(Component.translatable("rsi.fa.warn.insufficient_blood", reqBlood, curBlood).getString());
+                    warnings.add(Component.translatable("rsi.fa.warn.insufficient_blood", reqBlood, curBlood));
                 if (reqExp > 0 && curExp < reqExp)
-                    warnings.add(Component.translatable("rsi.fa.warn.insufficient_experience", reqExp, curExp).getString());
+                    warnings.add(Component.translatable("rsi.fa.warn.insufficient_experience", reqExp, curExp));
             } else if (reqAureal > 0 || reqSouls > 0 || reqBlood > 0 || reqExp > 0) {
                 warnings.add(Component.translatable("rsi.fa.warn.essence_required",
-                        reqAureal, reqSouls, reqBlood, reqExp).getString());
+                        reqAureal, reqSouls, reqBlood, reqExp));
             }
 
             // Check essence input slots
@@ -1077,7 +1077,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
                                             if (slotStack.isEmpty()) {
                                                 warnings.add(Component.translatable(
                                                         "rsi.fa.warn.essence_slot_empty",
-                                                        slot, typeName).getString());
+                                                        slot, typeName));
                                             }
                                         }
                                     }
@@ -1106,12 +1106,12 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
                             if (forgeTier < requiredTier) {
                                 warnings.add(Component.translatable(
                                         "rsi.fa.warn.tier_insufficient",
-                                        requiredTier, forgeTier).getString());
+                                        requiredTier, forgeTier));
                             }
                         }
                     } else {
                         warnings.add(Component.translatable(
-                                "rsi.fa.warn.tier_required", requiredTier).getString());
+                                "rsi.fa.warn.tier_required", requiredTier));
                     }
                 }
             } catch (Exception e) {
@@ -1171,7 +1171,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
                                         if (!found) {
                                             warnings.add(Component.translatable(
                                                     "rsi.fa.warn.missing_enhancer",
-                                                    FaRitualHelper.enhancerDefName(reqDef)).getString());
+                                                    FaRitualHelper.enhancerDefName(reqDef)));
                                         }
                                     }
                                 }
@@ -1180,21 +1180,21 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
                     } else {
                         for (String name : reqNames) {
                             warnings.add(Component.translatable(
-                                    "rsi.fa.warn.enhancer_required", name).getString());
+                                    "rsi.fa.warn.enhancer_required", name));
                         }
                     }
                 } else if (requiredEnhancers == null) {
                     warnings.add(Component.translatable(
-                            "rsi.fa.warn.cant_check_enhancers").getString());
+                            "rsi.fa.warn.cant_check_enhancers"));
                 }
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Plan enhancer check failed");
                 warnings.add(Component.translatable(
-                        "rsi.fa.warn.cant_check_enhancers").getString());
+                        "rsi.fa.warn.cant_check_enhancers"));
             }
         } else {
             warnings.add(Component.translatable(
-                    "rsi.fa.warn.cant_check_enhancers").getString());
+                    "rsi.fa.warn.cant_check_enhancers"));
         }
 
         return warnings;

@@ -41,6 +41,22 @@ class DelegatePreparationContractTest {
         assertEquals("recipe type unsupported", result.detail());
     }
 
+    @Test
+    void operationLeaseUsesDelegatesPhysicalMachinePosition() {
+        IBatchDelegate delegate = new StubDelegate(true);
+        assertEquals(BlockPos.ZERO,
+                delegate.getOperationMachinePos(new BlockPos(8, 64, 8)));
+    }
+
+    @Test
+    void operationLeaseFallsBackToBindingForVirtualDelegate() {
+        BlockPos binding = new BlockPos(8, 64, 8);
+        IBatchDelegate delegate = new StubDelegate(true) {
+            @Override public BlockPos getMachinePos() { return null; }
+        };
+        assertEquals(binding, delegate.getOperationMachinePos(binding));
+    }
+
     private static class StubDelegate implements IBatchDelegate {
         private final boolean valid;
 

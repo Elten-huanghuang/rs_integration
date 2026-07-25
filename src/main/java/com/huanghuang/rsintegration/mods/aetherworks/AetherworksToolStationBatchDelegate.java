@@ -398,15 +398,15 @@ public final class AetherworksToolStationBatchDelegate extends AbstractBatchDele
     }
 
     @SuppressWarnings("unused")
-    public static List<String> getPlanWarnings(ServerPlayer player, Recipe<?> recipe,
+    public static List<Component> getPlanWarnings(ServerPlayer player, Recipe<?> recipe,
                                                @Nullable ResourceLocation dim,
                                                @Nullable BlockPos pos) {
-        List<String> warnings = new ArrayList<>();
+        List<Component> warnings = new ArrayList<>();
         if (AetherworksReflection.toolStationRecipeClass == null || !AetherworksReflection.toolStationRecipeClass.isInstance(recipe)) return warnings;
 
         try {
             int temp = (int) recipe.getClass().getMethod("getTemperature").invoke(recipe);
-            warnings.add(Component.translatable("rsi.aetherworks.warn.temp_target", temp).getString());
+            warnings.add(Component.translatable("rsi.aetherworks.warn.temp_target", temp));
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] ToolStation getTemperature reflection failed in plan warnings", e);
         }
@@ -415,7 +415,7 @@ public final class AetherworksToolStationBatchDelegate extends AbstractBatchDele
             double rate = (double) recipe.getClass().getMethod("getTemperatureRate").invoke(recipe);
             if (rate > 0) {
                 warnings.add(Component.translatable("rsi.aetherworks.info.temp_rate",
-                        String.format("%.1f", rate)).getString());
+                        String.format("%.1f", rate)));
             }
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] ToolStation getTemperatureRate reflection failed in plan warnings", e);
@@ -428,7 +428,7 @@ public final class AetherworksToolStationBatchDelegate extends AbstractBatchDele
                     BlockEntity be = lvl.getBlockEntity(pos);
                     if (be != null && AetherworksReflection.toolStationBEClass != null && AetherworksReflection.toolStationBEClass.isInstance(be)) {
                         if (findNearbyForge(lvl, pos) == null) {
-                            warnings.add(Component.translatable("rsi.aetherworks.warn.no_forge").getString());
+                            warnings.add(Component.translatable("rsi.aetherworks.warn.no_forge"));
                         }
                     }
                 }

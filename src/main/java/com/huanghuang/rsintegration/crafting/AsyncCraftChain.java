@@ -1202,12 +1202,13 @@ public final class AsyncCraftChain {
                     return GraphDispatchResult.fatal("world capture was not declared by delegate capability");
                 }
                 List<MachineLeaseRegistry.MachineKey> machineScope = new ArrayList<>();
+                BlockPos operationMachinePos = delegate.getOperationMachinePos(prepared.machine().pos());
                 machineScope.add(new MachineLeaseRegistry.MachineKey(
-                        prepared.machine().dim(), prepared.machine().pos(), prepared.step().modType().id()));
+                        prepared.machine().dim(), operationMachinePos, prepared.step().modType().id()));
                 if (concurrency.capabilities() != null) {
                     for (BlockPos offset : concurrency.capabilities().supportOffsets()) {
                         machineScope.add(new MachineLeaseRegistry.MachineKey(
-                                prepared.machine().dim(), prepared.machine().pos().offset(offset),
+                                prepared.machine().dim(), operationMachinePos.offset(offset),
                                 prepared.step().modType().id() + ":support"));
                     }
                 }
@@ -2390,10 +2391,17 @@ public final class AsyncCraftChain {
             }
         }
         if (matchedMachine == null) {
+            if (retryableRejection) {
+                waitingForMachineLease = true;
+                RSIntegrationMod.LOGGER.debug(ctx.format(
+                        "All {} unleased machines are temporarily unavailable for {}"),
+                        machines.size(), step.recipeId());
+                return null;
+            }
             RSIntegrationMod.LOGGER.warn(ctx.format(
                     "All {} bound machines failed preparation for mod type {}: recipe={} detail={}"),
                     machines.size(), step.modType(), step.recipeId(),
-                    retryableRejection ? "temporarily unavailable" : fatalDetail);
+                    fatalDetail);
             online.sendSystemMessage(Component.translatable(
                     "rsi.async.error.machine_valid_failed", step.recipeId()));
             return null;
@@ -2444,6 +2452,9 @@ public final class AsyncCraftChain {
                     try { delegate.onBatchFailed(online, "operation resources busy"); } catch (Exception fe) {
                         RSIntegrationMod.LOGGER.error(ctx.format("onBatchFailed threw during resource cleanup"), fe);
                     }
+                    restoreVirtualFromCommitted();
+                    if (ledger.state() != ExtractionLedger.State.IDLE) ledger.reset();
+                    waitingForMachineLease = true;
                     return null;
                 }
                 if (!flatOperationSession.commit(() -> ledger.commit(network, online))) {
@@ -2509,6 +2520,7 @@ public final class AsyncCraftChain {
                     try { delegate.onBatchFailed(online, "operation resources busy"); } catch (Exception fe) {
                         RSIntegrationMod.LOGGER.error(ctx.format("onBatchFailed threw during resource cleanup"), fe);
                     }
+                    waitingForMachineLease = true;
                     return null;
                 }
                 if (!flatOperationSession.commit(() -> {
@@ -3046,8 +3058,9 @@ public final class AsyncCraftChain {
                 && region != null
                 ? new OperationResourceCoordinator.CaptureRequest(machine.dim(), region, expected)
                 : null;
+        BlockPos operationMachinePos = delegate.getOperationMachinePos(machine.pos());
         MachineLeaseRegistry.MachineKey key = new MachineLeaseRegistry.MachineKey(
-                machine.dim(), machine.pos(), step.modType().id());
+                machine.dim(), operationMachinePos, step.modType().id());
         flatOperationSession = operationKernel.tryPrepare(craftId,
                 new NodeId(Math.max(0, currentStepIdx)), 0, craftOperationBudget, key, capture);
         return flatOperationSession != null;

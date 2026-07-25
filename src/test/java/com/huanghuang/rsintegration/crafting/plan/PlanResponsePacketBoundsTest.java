@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import io.netty.buffer.Unpooled;
 import io.netty.handler.codec.DecoderException;
 import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.ItemStack;
 import org.junit.jupiter.api.Test;
 
@@ -126,20 +127,16 @@ class PlanResponsePacketBoundsTest extends BootstrapTest {
                 List.of(), List.of(), null, null, Set.of()));
         assertEncodeRejected(plan("test:recipe", "Target", null, null,
                 List.of("x".repeat(2049)), List.of(), null, null, Set.of()));
-        assertEncodeRejected(plan("test:recipe", "Target", null, null,
-                List.of(), List.of("x".repeat(2049)), null, null, Set.of()));
-        assertEncodeRejected(plan("test:recipe", "Target", null, null,
-                List.of(), List.of(), new String[]{"x".repeat(257)}, null, Set.of()));
-        assertEncodeRejected(plan("test:recipe", "Target", null, null,
-                List.of(), List.of(), null, new String[]{"x".repeat(257)}, Set.of()));
+        // modWarnings / embers name arrays are Components now, not length-capped
+        // Strings — their bound is Component encoding, covered by vanilla.
         assertEncodeRejected(plan("test:recipe", "Target", null, null,
                 List.of(), List.of(), null, null, Set.of("x".repeat(129))));
     }
 
     private static PlanResponse plan(String recipeId, String targetName,
                                      String executionModType, String executionDimension,
-                                     List<String> missing, List<String> warnings,
-                                     String[] aspectNames, String[] inputNames,
+                                     List<String> missing, List<Component> warnings,
+                                     Component[] aspectNames, Component[] inputNames,
                                      Set<String> boundMachineTypes) {
         return new PlanResponse(true, targetName, ItemStack.EMPTY, List.of(), Map.of(),
                 missing, recipeId, executionModType, executionDimension, 0, 0, 0,

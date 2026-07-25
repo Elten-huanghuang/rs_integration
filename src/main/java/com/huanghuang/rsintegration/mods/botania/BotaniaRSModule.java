@@ -17,7 +17,12 @@ public final class BotaniaRSModule implements IModIntegration {
     @Override public String modId() { return "botania"; }
 
     @Override public void registerModType() {
-        register("botania_mana_pool", "ManaInfusionRecipe", "mana_pool", "ManaPoolBatchDelegate");
+        ModType.register("botania_mana_pool",
+                new String[]{"vazkii.botania.common.crafting.ManaInfusionRecipe"},
+                new String[]{"conjuration_catalyst", "alchemy_catalyst", "mana_pool"},
+                new String[]{"conjuration_catalyst", "alchemy_catalyst", "mana_pool"},
+                ModType.delegateSupplier(
+                        "com.huanghuang.rsintegration.mods.botania.ManaPoolBatchDelegate"));
         configureJei("botania_mana_pool", "botania:mana_pool", "ManaInfusionRecipe", "mana_pool", "mana_pool");
         register("botania_apothecary", "PetalsRecipe", "apothecary", "PetalApothecaryBatchDelegate");
         configureJei("botania_apothecary", "botania:petals", "PetalsRecipe", "apothecary", "apothecary");

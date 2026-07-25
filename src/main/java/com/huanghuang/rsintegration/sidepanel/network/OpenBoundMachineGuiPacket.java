@@ -298,8 +298,8 @@ public final class OpenBoundMachineGuiPacket {
                     player.sendSystemMessage(Component.translatable(
                             "rsi.generic.error.missing_materials",
                             input.getItems().length > 0
-                                    ? input.getItems()[0].getHoverName().getString()
-                                    : "?"));
+                                    ? input.getItems()[0].getHoverName()
+                                    : Component.literal("?")));
                     return;
                 }
                 furnace.setItem(0, extracted.copy());

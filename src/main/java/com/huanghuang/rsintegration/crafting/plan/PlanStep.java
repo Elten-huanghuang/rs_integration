@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting.plan;
 
 import com.huanghuang.rsintegration.ModType;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 
@@ -27,7 +28,8 @@ public record PlanStep(
         int recipeWidth,
         int recipeHeight,
         List<String> alternativeModTypes,
-        List<String> warnings
+        /** Unresolved Components — see the note on {@link PlanResponse#modWarnings()}. */
+        List<Component> warnings
 ) {
     public PlanStep {
         inputs = List.copyOf(inputs);
@@ -39,7 +41,8 @@ public record PlanStep(
     public PlanStep(ResourceLocation recipeId, ItemStack output, int batches,
                     List<ItemStack> inputs, List<ResourceLocation> alternatives,
                     @Nullable ModType modType, int depth, boolean hasOrSiblings,
-                    int recipeWidth, int recipeHeight, List<String> alternativeModTypes) {
+                    int recipeWidth, int recipeHeight,
+                    List<String> alternativeModTypes) {
         this(recipeId, output, batches, inputs, alternatives, modType, depth, hasOrSiblings,
                 recipeWidth, recipeHeight, alternativeModTypes, Collections.emptyList());
     }

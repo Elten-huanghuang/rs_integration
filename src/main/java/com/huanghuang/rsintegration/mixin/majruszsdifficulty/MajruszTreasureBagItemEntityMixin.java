@@ -16,7 +16,9 @@ public abstract class MajruszTreasureBagItemEntityMixin {
     @Inject(method = "playerTouch", at = @At("HEAD"), cancellable = true)
     private void rsi$preventTreasureBagPlayerPickup(Player player, CallbackInfo ci) {
         ItemEntity self = (ItemEntity) (Object) this;
-        if (self.getPersistentData().getBoolean(MAGNET_ONLY_TAG)) {
+        // Only block immediate pickup during the pickup delay window
+        // After the delay expires (20 ticks), allow normal pickup
+        if (self.getPersistentData().getBoolean(MAGNET_ONLY_TAG) && self.hasPickUpDelay()) {
             ci.cancel();
         }
     }

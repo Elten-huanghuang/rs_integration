@@ -11,6 +11,7 @@ import com.huanghuang.rsintegration.reflection.probes.FarmingForBlockheadsReflec
 import com.huanghuang.rsintegration.util.Reflect;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
@@ -306,19 +307,20 @@ public final class MarketBatchDelegate extends AbstractBatchDelegate {
 
     // ── Plan-time warnings ─────────────────────────────────────────
 
-    public static List<String> getPlanWarnings(ServerPlayer player, Recipe<?> recipe,
+    public static List<Component> getPlanWarnings(ServerPlayer player, Recipe<?> recipe,
                                                @Nullable ResourceLocation dim,
                                                @Nullable BlockPos pos) {
-        List<String> warnings = new ArrayList<>();
+        List<Component> warnings = new ArrayList<>();
         if (!(recipe instanceof MarketRecipeWrapper mrw)) return warnings;
 
         ItemStack cost = mrw.costItem();
         ItemStack output = mrw.getResultItem(player.serverLevel().registryAccess());
         if (!cost.isEmpty() && !output.isEmpty()) {
-            warnings.add(cost.getCount() + "x "
-                    + cost.getHoverName().getString()
-                    + " → " + output.getCount() + "x "
-                    + output.getHoverName().getString());
+            // Item names stay as Components so the client resolves them; a
+            // dedicated server would otherwise emit raw descriptionIds.
+            warnings.add(Component.translatable("rsi.market.info.trade",
+                    cost.getCount(), cost.getHoverName(),
+                    output.getCount(), output.getHoverName()));
         }
         return warnings;
     }

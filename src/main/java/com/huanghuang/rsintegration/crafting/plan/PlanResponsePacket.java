@@ -6,6 +6,7 @@ import com.huanghuang.rsintegration.crafting.tree.IngredientKey;
 import io.netty.handler.codec.DecoderException;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -35,7 +36,6 @@ public final class PlanResponsePacket {
     private static final int MAX_MOD_TYPE_LENGTH = 128;
     private static final int MAX_DIMENSION_LENGTH = 128;
     private static final int MAX_MESSAGE_LENGTH = 2048;
-    private static final int MAX_DISPLAY_NAME_LENGTH = 256;
 
     /** Reject corrupt counts before allocation or field decoding. */
     private static int readBoundedCount(FriendlyByteBuf buf) {
@@ -50,6 +50,15 @@ public final class PlanResponsePacket {
         int value = buf.readVarInt();
         if (value < 0) throw new DecoderException(field + " must be non-negative: " + value);
         return value;
+    }
+
+    /**
+     * {@link FriendlyByteBuf#readComponent()} returns null for a JSON {@code null}
+     * payload; normalize it so downstream rendering never sees a null element.
+     */
+    private static Component readComponentOrEmpty(FriendlyByteBuf buf) {
+        Component decoded = buf.readComponent();
+        return decoded != null ? decoded : Component.empty();
     }
 
     public PlanResponsePacket(PlanResponse plan) {
@@ -97,8 +106,8 @@ public final class PlanResponsePacket {
                 buf.writeUtf(mt, MAX_MOD_TYPE_LENGTH);
             }
             buf.writeVarInt(step.warnings().size());
-            for (String w : step.warnings()) {
-                buf.writeUtf(w, MAX_MESSAGE_LENGTH);
+            for (Component w : step.warnings()) {
+                buf.writeComponent(w);
             }
         }
         // Materials
@@ -121,9 +130,11 @@ public final class PlanResponsePacket {
         buf.writeVarInt(plan.executionPosX());
         buf.writeVarInt(plan.executionPosY());
         buf.writeVarInt(plan.executionPosZ());
-        // Mod warnings (Goety research/structure, FA essences)
+        // Mod warnings (Goety research/structure, FA essences).
+        // Sent as Components so the client resolves the translation — a dedicated
+        // server has no rs_integration lang table.
         buf.writeVarInt(plan.modWarnings().size());
-        for (String w : plan.modWarnings()) buf.writeUtf(w, MAX_MESSAGE_LENGTH);
+        for (Component w : plan.modWarnings()) buf.writeComponent(w);
         buf.writeVarInt(plan.repeatCount());
         // Embers alchemy pedestal data
         buf.writeBoolean(plan.embersCode() != null);
@@ -134,12 +145,12 @@ public final class PlanResponsePacket {
         buf.writeBoolean(plan.embersAspectNames() != null);
         if (plan.embersAspectNames() != null) {
             buf.writeVarInt(plan.embersAspectNames().length);
-            for (String s : plan.embersAspectNames()) buf.writeUtf(s, MAX_DISPLAY_NAME_LENGTH);
+            for (Component s : plan.embersAspectNames()) buf.writeComponent(s);
         }
         buf.writeBoolean(plan.embersInputNames() != null);
         if (plan.embersInputNames() != null) {
             buf.writeVarInt(plan.embersInputNames().length);
-            for (String s : plan.embersInputNames()) buf.writeUtf(s, MAX_DISPLAY_NAME_LENGTH);
+            for (Component s : plan.embersInputNames()) buf.writeComponent(s);
         }
         buf.writeVarLong(plan.embersSeed());
         buf.writeBoolean(plan.embersCanInfer());
@@ -205,9 +216,9 @@ public final class PlanResponsePacket {
                 alternativeModTypes.add(buf.readUtf(MAX_MOD_TYPE_LENGTH));
             }
             int warnCount = readBoundedCount(buf);
-            List<String> warnings = new ArrayList<>(warnCount);
+            List<Component> warnings = new ArrayList<>(warnCount);
             for (int j = 0; j < warnCount; j++) {
-                warnings.add(buf.readUtf(MAX_MESSAGE_LENGTH));
+                warnings.add(readComponentOrEmpty(buf));
             }
             steps.add(new PlanStep(rid, output, batches, inputs, alternatives, modType,
                     depth, hasOrSiblings, recipeWidth, recipeHeight, alternativeModTypes,
@@ -234,8 +245,8 @@ public final class PlanResponsePacket {
         int execZ = buf.readVarInt();
         // Mod warnings
         int modWarnCount = readBoundedCount(buf);
-        List<String> modWarnings = new ArrayList<>(modWarnCount);
-        for (int i = 0; i < modWarnCount; i++) modWarnings.add(buf.readUtf(MAX_MESSAGE_LENGTH));
+        List<Component> modWarnings = new ArrayList<>(modWarnCount);
+        for (int i = 0; i < modWarnCount; i++) modWarnings.add(readComponentOrEmpty(buf));
         int repeatCount = buf.readVarInt();
         // Embers alchemy pedestal data
         int[] embersCode = null;
@@ -244,17 +255,17 @@ public final class PlanResponsePacket {
             embersCode = new int[len];
             for (int i = 0; i < len; i++) embersCode[i] = buf.readVarInt();
         }
-        String[] embersAspectNames = null;
+        Component[] embersAspectNames = null;
         if (buf.readBoolean()) {
             int len = readBoundedCount(buf);
-            embersAspectNames = new String[len];
-            for (int i = 0; i < len; i++) embersAspectNames[i] = buf.readUtf(MAX_DISPLAY_NAME_LENGTH);
+            embersAspectNames = new Component[len];
+            for (int i = 0; i < len; i++) embersAspectNames[i] = readComponentOrEmpty(buf);
         }
-        String[] embersInputNames = null;
+        Component[] embersInputNames = null;
         if (buf.readBoolean()) {
             int len = readBoundedCount(buf);
-            embersInputNames = new String[len];
-            for (int i = 0; i < len; i++) embersInputNames[i] = buf.readUtf(MAX_DISPLAY_NAME_LENGTH);
+            embersInputNames = new Component[len];
+            for (int i = 0; i < len; i++) embersInputNames[i] = readComponentOrEmpty(buf);
         }
         long embersSeed = buf.readVarLong();
         boolean embersCanInfer = buf.readBoolean();

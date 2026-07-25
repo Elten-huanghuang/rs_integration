@@ -1592,10 +1592,10 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
 
     // ── Plan-time validation ─────────────────────────────────────
 
-    public static List<String> getPlanWarnings(ServerPlayer player, Recipe<?> recipe,
+    public static List<Component> getPlanWarnings(ServerPlayer player, Recipe<?> recipe,
                                                @Nullable ResourceLocation dim,
                                                @Nullable net.minecraft.core.BlockPos pos) {
-        List<String> warnings = new ArrayList<>();
+        List<Component> warnings = new ArrayList<>();
 
         if (GoetyReflection.ritualRecipeClass == null || !GoetyReflection.ritualRecipeClass.isInstance(recipe)) return warnings;
 
@@ -1617,7 +1617,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             if (!hasResearch) {
                 warnings.add(Component.translatable(
                         "rsi.goety.warn.research_missing",
-                        resolveResearchName(researchId)).getString());
+                        resolveResearchName(researchId)));
             }
         }
 
@@ -1635,7 +1635,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
                             boolean valid = (boolean) m.invoke(null, craftType, be, pos, level);
                             if (!valid) {
                                 warnings.add(Component.translatable(
-                                        "rsi.goety.warn.structure_mismatch", resolveCraftTypeName(craftType)).getString());
+                                        "rsi.goety.warn.structure_mismatch", resolveCraftTypeName(craftType)));
                             }
                         }
                     }
@@ -1648,7 +1648,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
                 String craftType = Reflect.<String>invoke(recipe, "getCraftType").orElse(null);
                 if (craftType != null && !craftType.isEmpty()) {
                     warnings.add(Component.translatable(
-                            "rsi.goety.warn.no_bound_altar", resolveCraftTypeName(craftType)).getString());
+                            "rsi.goety.warn.no_bound_altar", resolveCraftTypeName(craftType)));
                 }
             } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] CraftType resolution skipped", e); }
         }
@@ -1656,13 +1656,23 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         return warnings;
     }
 
-    private static String resolveCraftTypeName(String craftType) {
-        String key = "jei.goety.craftType." + craftType;
-        String translated = Component.translatable(key).getString();
-        return translated.equals(key) ? craftType : translated;
+    /**
+     * Goety's craftType label. Returned as a Component with the raw id as fallback
+     * text so the client resolves it: this runs server-side, where neither Goety's
+     * nor our own lang table is loaded.
+     */
+    private static Component resolveCraftTypeName(String craftType) {
+        return Component.translatableWithFallback(
+                "jei.goety.craftType." + craftType, craftType);
     }
 
-    private static String resolveResearchName(String researchId) {
+    /**
+     * Resolves a research id to the matching research-scroll item's name.
+     *
+     * <p>Returns the item's Component rather than its rendered text: this runs
+     * server-side, and only the client can resolve item translation keys.</p>
+     */
+    private static Component resolveResearchName(String researchId) {
         try {
             ResourceLocation rl = ResourceLocation.tryParse(researchId);
             String path = rl != null ? rl.getPath() : researchId;
@@ -1673,19 +1683,19 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             if (ns != null) {
                 Item item = BuiltInRegistries.ITEM.get(new ResourceLocation(ns, scrollPath));
                 if (item != null && item != net.minecraft.world.item.Items.AIR)
-                    return item.getDefaultInstance().getDisplayName().getString();
+                    return item.getDefaultInstance().getDisplayName();
             }
 
             Item item = BuiltInRegistries.ITEM.get(new ResourceLocation(ModIds.GOETY, scrollPath));
             if (item != null && item != net.minecraft.world.item.Items.AIR)
-                return item.getDefaultInstance().getDisplayName().getString();
+                return item.getDefaultInstance().getDisplayName();
 
             for (var entry : BuiltInRegistries.ITEM.entrySet()) {
                 if (entry.getKey().location().getPath().equals(scrollPath)) {
-                    return entry.getValue().getDefaultInstance().getDisplayName().getString();
+                    return entry.getValue().getDefaultInstance().getDisplayName();
                 }
             }
         } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] Research name lookup skipped", e); }
-        return researchId;
+        return Component.literal(researchId);
     }
 }

@@ -12,6 +12,7 @@ import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.util.Reflect;
 import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -730,10 +731,10 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
 
     // ── plan warnings ─────────────────────────────────────────────
 
-    public static List<String> getPlanWarnings(ServerPlayer player, Recipe<?> recipe,
+    public static List<Component> getPlanWarnings(ServerPlayer player, Recipe<?> recipe,
                                                @Nullable ResourceLocation dim,
                                                @Nullable BlockPos pos) {
-        List<String> warnings = new ArrayList<>();
+        List<Component> warnings = new ArrayList<>();
         if (!MalumReflection.isAvailable()) return warnings;
 
         // Spirit requirements
@@ -763,7 +764,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
             if (!names.isEmpty()) {
                 warnings.add(net.minecraft.network.chat.Component.translatable(
                         "rsi.malum_crucible.warn.spirit_required",
-                        String.join(", ", names)).getString());
+                        String.join(", ", names)));
             }
         }
 
@@ -785,7 +786,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
                     if (spiritInv != null && spirits != null && spirits.size() > spiritInv.getSlots()) {
                         warnings.add(net.minecraft.network.chat.Component.translatable(
                                 "rsi.malum_crucible.warn.spirit_slots_insufficient",
-                                spiritInv.getSlots(), spirits.size()).getString());
+                                spiritInv.getSlots(), spirits.size()));
                     }
                 }
             }

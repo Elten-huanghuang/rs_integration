@@ -451,17 +451,17 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
                                        Map<Item, Integer> neededCounts,
                                        int repeatCount) {}
 
-    public static List<String> getPlanWarnings(ServerPlayer player, Recipe<?> recipe,
+    public static List<Component> getPlanWarnings(ServerPlayer player, Recipe<?> recipe,
                                                 @Nullable ResourceLocation dim,
                                                 @Nullable BlockPos pos) {
-        List<String> warnings = new ArrayList<>();
-        warnings.add(Component.translatable("rsi.youkaishomecoming.cookpot_heat_warning").getString());
+        List<Component> warnings = new ArrayList<>();
+        warnings.add(Component.translatable("rsi.youkaishomecoming.cookpot_heat_warning"));
         // Soup-pot recipes are served into bowls; surface the bowl cost so the
         // player knows N bowls will be consumed (auto-crafted if missing).
         ItemStack bowls = computeServeBowls(recipe);
         if (!bowls.isEmpty()) {
             warnings.add(Component.translatable("rsi.youkaishomecoming.cookpot_bowl_warning",
-                    bowls.getCount(), bowls.getHoverName()).getString());
+                    bowls.getCount(), bowls.getHoverName()));
         }
         return warnings;
     }

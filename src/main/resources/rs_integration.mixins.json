@@ -44,6 +44,7 @@
     "crockpot.CrockPotMenuMixin",
     "goetydelight.BlockFinderCompatMixin",
     "distantworlds.LithumCoreUpdateTickProcedureMixin",
+    "distantworlds.DistantWorldsItemHelperMixin",
     "reliquary.PyromancerStaffMixin",
     "enigmaticaddons.AvariceRingMixin",
     "moonstone.NineSwordBooksMixin",

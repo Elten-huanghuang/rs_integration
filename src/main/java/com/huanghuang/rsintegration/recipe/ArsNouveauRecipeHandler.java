@@ -3,9 +3,10 @@ package com.huanghuang.rsintegration.recipe;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.mods.arsnouveau.ArsApparatusMaterials;
+import com.huanghuang.rsintegration.mods.arsnouveau.ArsImbuementMaterials;
 import com.huanghuang.rsintegration.mods.arsnouveau.ArsRecipeClassifier;
 import com.huanghuang.rsintegration.mods.arsnouveau.ArsTileAccess;
-import com.huanghuang.rsintegration.reflection.probes.ArsNouveauReflection;
 import com.huanghuang.rsintegration.util.ModIds;
 import com.huanghuang.rsintegration.util.Reflect;
 import net.minecraft.core.RegistryAccess;
@@ -14,18 +15,16 @@ import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
 
 import javax.annotation.Nullable;
-import java.util.ArrayList;
 import java.util.List;
 
 /**
  * Recipe handler for Ars Nouveau Imbuement and Enchanting Apparatus recipes.
  *
- * <p>Only two of Ars' 16 recipe types are automatable: {@code imbuement} and
- * {@code enchanting_apparatus}. All others (enchantment, glyph, crush, dye,
- * potion_flask, book_upgrade, armor_upgrade, spell_write, reactive_enchantment,
- * caster_tome, summon_ritual, budding_conversion, dispel_entity, scry_ritual)
- * either mutate NBT on an existing item, target entities/world, or have no
- * deterministic item output, and are deliberately excluded.</p>
+ * <p>Imbuement and ordinary Apparatus recipes expose fixed inputs and outputs.
+ * Enchantment and armor-upgrade recipes are also supported, but their concrete
+ * NBT input/output pair is supplied by the JEI request and resolved by
+ * {@code ArsDynamicApparatusRecipe}; they intentionally return no context-free
+ * result or ingredient list here.</p>
  *
  * <p><strong>Key implementation notes:</strong></p>
  * <ul>
@@ -33,10 +32,10 @@ import java.util.List;
  *       return {@code ItemStack.EMPTY}. Must call {@code getResult(tile)} to
  *       read the {@code output} field (which is a shared instance and must be
  *       copied before use).</li>
- *   <li>{@code EnchantingApparatusRecipe} has four NBT-transforming subclasses
- *       (EnchantmentRecipe, ArmorUpgradeRecipe, SpellWriteRecipe,
- *       ReactiveEnchantmentRecipe). Classification MUST use the recipe type
- *       registry ID, NOT {@code instanceof}, to avoid including those subclasses.</li>
+ *   <li>{@code EnchantingApparatusRecipe} has four NBT-transforming subclasses.
+ *       Classification uses the recipe type registry ID so the two supported
+ *       item transformations are admitted without accidentally including
+ *       spell writing or reactive enchantment.</li>
  *   <li>This handler does NOT call back to {@code RecipeIndex.tryGetResultItem}
  *       to avoid recursion (the codebase has a history of
  *       {@code tryGetResultItem} recursion stack overflows).</li>
@@ -73,7 +72,7 @@ public final class ArsNouveauRecipeHandler extends AbstractRecipeHandler {
 
         if (ArsRecipeClassifier.isImbuement(typeId)) {
             return getImbuementResult(recipe);
-        } else if (ArsRecipeClassifier.isApparatus(typeId)) {
+        } else if (ArsRecipeClassifier.TYPE_APPARATUS.equals(typeId)) {
             return getApparatusResult(recipe);
         }
 
@@ -88,7 +87,7 @@ public final class ArsNouveauRecipeHandler extends AbstractRecipeHandler {
 
         if (ArsRecipeClassifier.isImbuement(typeId)) {
             return getImbuementIngredients(recipe);
-        } else if (ArsRecipeClassifier.isApparatus(typeId)) {
+        } else if (ArsRecipeClassifier.TYPE_APPARATUS.equals(typeId)) {
             return getApparatusIngredients(recipe);
         }
 
@@ -107,25 +106,10 @@ public final class ArsNouveauRecipeHandler extends AbstractRecipeHandler {
 
     @Nullable
     private List<IngredientSpec> getImbuementIngredients(Recipe<?> recipe) {
-        List<IngredientSpec> specs = new ArrayList<>();
-
-        // Input item (single ingredient)
-        Reflect.<Ingredient>getField(recipe, "input").ifPresent(ing -> {
-            if (!ing.isEmpty()) {
-                specs.add(new IngredientSpec(ing, 1));
-            }
-        });
-
-        // Pedestal items (for recipes like elemental essences that require pedestals)
-        Reflect.<List<Ingredient>>getField(recipe, "pedestalItems").ifPresent(pedestalList -> {
-            if (pedestalList != null) {
-                for (Ingredient ing : pedestalList) {
-                    if (!ing.isEmpty()) {
-                        specs.add(new IngredientSpec(ing, 1));
-                    }
-                }
-            }
-        });
+        Ingredient input = Reflect.<Ingredient>getField(recipe, "input").orElse(Ingredient.EMPTY);
+        List<Ingredient> pedestalItems = Reflect.<List<Ingredient>>getField(recipe, "pedestalItems")
+                .orElse(List.of());
+        List<IngredientSpec> specs = ArsImbuementMaterials.build(input, pedestalItems);
 
         return specs.isEmpty() ? null : specs;
     }
@@ -141,25 +125,10 @@ public final class ArsNouveauRecipeHandler extends AbstractRecipeHandler {
 
     @Nullable
     private List<IngredientSpec> getApparatusIngredients(Recipe<?> recipe) {
-        List<IngredientSpec> specs = new ArrayList<>();
-
-        // Reagent (central catalyst item)
-        Reflect.<Ingredient>getField(recipe, "reagent").ifPresent(ing -> {
-            if (!ing.isEmpty()) {
-                specs.add(new IngredientSpec(ing, 1));
-            }
-        });
-
-        // Pedestal ingredients
-        Reflect.<List<Ingredient>>getField(recipe, "pedestalItems").ifPresent(pedestalList -> {
-            if (pedestalList != null) {
-                for (Ingredient ing : pedestalList) {
-                    if (!ing.isEmpty()) {
-                        specs.add(new IngredientSpec(ing, 1));
-                    }
-                }
-            }
-        });
+        Ingredient reagent = Reflect.<Ingredient>getField(recipe, "reagent").orElse(Ingredient.EMPTY);
+        List<Ingredient> pedestalItems = Reflect.<List<Ingredient>>getField(recipe, "pedestalItems")
+                .orElse(List.of());
+        List<IngredientSpec> specs = ArsApparatusMaterials.build(reagent, pedestalItems);
 
         return specs.isEmpty() ? null : specs;
     }

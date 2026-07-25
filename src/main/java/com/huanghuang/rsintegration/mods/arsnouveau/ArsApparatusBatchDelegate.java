@@ -6,8 +6,8 @@ import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
-import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.util.ChunkUtils;
+import com.huanghuang.rsintegration.util.PlayerUtils;
 import com.huanghuang.rsintegration.util.Reflect;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceKey;
@@ -45,8 +45,8 @@ import java.util.List;
  *       {@code ItemStack.EMPTY} when {@code isCrafting == true}, so we CANNOT
  *       poll slot 0 to detect completion. Must observe {@code isCrafting} and
  *       {@code counter} via reflection.</li>
- *   <li>Craft is triggered by calling {@code attemptCraft(ItemStack catalyst, @Nullable Player)}.
- *       Player can be null, so RSI calls it with null.</li>
+ *   <li>Writing the reagent through {@code setItem} invokes Ars Nouveau's
+ *       {@code attemptCraft(reagent, null)} override and starts the craft.</li>
  *   <li>Pedestals must be placed in a stable order to match the recipe's
  *       {@code pedestalItems} list. We capture the layout at validation time.</li>
  * </ul>
@@ -62,6 +62,7 @@ public final class ArsApparatusBatchDelegate extends AbstractBatchDelegate {
     private int sourceCost;
     private ArsPedestalLayout pedestalLayout;
     private List<IngredientSpec> requiredMaterials;
+    private final List<BlockPos> activePedestalPositions = new ArrayList<>();
     private boolean craftStarted;
     private long craftStartTick;
 
@@ -127,6 +128,7 @@ public final class ArsApparatusBatchDelegate extends AbstractBatchDelegate {
         this.machinePos = pos;
         this.craftStarted = false;
         this.craftStartTick = 0;
+        this.activePedestalPositions.clear();
 
         ChunkUtils.loadChunk(level, pos);
         BlockEntity be = level.getBlockEntity(pos);
@@ -166,21 +168,34 @@ public final class ArsApparatusBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
+    public void setTargetOutput(@Nullable ItemStack target) {
+        super.setTargetOutput(target);
+        if (recipe == null || !ArsDynamicApparatusRecipe.isSupported(recipe)) return;
+        this.expectedOutput = ArsDynamicApparatusRecipe.validatedOutput(recipe, target);
+        this.requiredMaterials = ArsDynamicApparatusRecipe.buildMaterials(recipe, target);
+    }
+
+    @Override
     public boolean tryStartWithMaterials(@Nonnull ServerPlayer player,
                                         @Nonnull List<ItemStack> materials,
                                         @Nonnull ExtractionLedger sharedLedger) {
         ServerLevel level = getLevel();
-        if (level == null) return false;
+        if (level == null) {
+            refundRejectedStart(player, player.serverLevel(), materials);
+            return false;
+        }
 
         BlockEntity be = level.getBlockEntity(machinePos);
         if (be == null || !(be instanceof Container container)) {
             RSIntegrationMod.LOGGER.warn("[RSI-ArsApparatus] Machine disappeared during start");
+            refundRejectedStart(player, level, materials);
             return false;
         }
 
         // Verify machine is idle
         if (ArsTileAccess.isApparatusCrafting(be)) {
             RSIntegrationMod.LOGGER.warn("[RSI-ArsApparatus] Machine busy at start");
+            refundRejectedStart(player, level, materials);
             return false;
         }
 
@@ -188,6 +203,7 @@ public final class ArsApparatusBatchDelegate extends AbstractBatchDelegate {
         ItemStack centralSlot = container.getItem(0);
         if (!centralSlot.isEmpty()) {
             RSIntegrationMod.LOGGER.warn("[RSI-ArsApparatus] Central slot occupied");
+            refundRejectedStart(player, level, materials);
             return false;
         }
 
@@ -197,12 +213,21 @@ public final class ArsApparatusBatchDelegate extends AbstractBatchDelegate {
         }
 
         // First item is reagent (catalyst), rest are pedestal items
-        ItemStack reagent = materials.get(0);
+        ItemStack reagent = ArsDynamicApparatusRecipe.isSupported(recipe)
+                ? ArsDynamicApparatusRecipe.prepareMachineInput(
+                        recipe, materials.get(0), expectedOutput)
+                : materials.get(0);
+        if (reagent.isEmpty()) {
+            RSIntegrationMod.LOGGER.warn("[RSI-ArsApparatus] Failed to prepare dynamic reagent");
+            refundRejectedStart(player, level, materials);
+            return false;
+        }
         List<ItemStack> pedestalStacks = materials.subList(1, materials.size());
 
         // Place pedestal items first (reversible if fails)
         if (!placePedestalItems(level, pedestalStacks)) {
             RSIntegrationMod.LOGGER.warn("[RSI-ArsApparatus] Failed to place pedestal items");
+            refundRejectedStart(player, level, materials);
             return false;
         }
 
@@ -210,24 +235,13 @@ public final class ArsApparatusBatchDelegate extends AbstractBatchDelegate {
         container.setItem(0, reagent.copy());
         be.setChanged();
 
-        // Call attemptCraft(catalyst, null) via reflection
-        boolean craftStarted = Reflect.invoke(be, "attemptCraft",
-                new Class<?>[]{ItemStack.class, net.minecraft.world.entity.player.Player.class},
-                reagent.copy(), null).isPresent();
-
-        if (!craftStarted) {
-            RSIntegrationMod.LOGGER.warn("[RSI-ArsApparatus] attemptCraft returned false");
-            // Clean up
-            container.setItem(0, ItemStack.EMPTY);
-            clearPedestalItems(level);
-            return false;
-        }
-
-        // Verify isCrafting flag is now true
+        // EnchantingApparatusTile.setItem invokes attemptCraft(reagent, null).
+        // Verify that the native insertion path accepted and started the recipe.
         if (!ArsTileAccess.isApparatusCrafting(be)) {
-            RSIntegrationMod.LOGGER.warn("[RSI-ArsApparatus] isCrafting not set after attemptCraft");
+            RSIntegrationMod.LOGGER.warn("[RSI-ArsApparatus] Native reagent insertion did not start crafting");
             container.setItem(0, ItemStack.EMPTY);
-            clearPedestalItems(level);
+            discardPedestalItems(level);
+            refundRejectedStart(player, level, materials);
             return false;
         }
 
@@ -272,7 +286,7 @@ public final class ArsApparatusBatchDelegate extends AbstractBatchDelegate {
             // Verify output is present (but can't read slot directly during isCrafting)
             if (be instanceof Container container) {
                 ItemStack result = container.getItem(0);
-                if (!result.isEmpty() && ItemStack.isSameItem(result, expectedOutput)) {
+                if (matchesExpectedOutput(result)) {
                     return doneObservation();
                 } else {
                     return failObservation("Expected output not found after craft");
@@ -294,7 +308,7 @@ public final class ArsApparatusBatchDelegate extends AbstractBatchDelegate {
 
         if (!isCrafting && counter == 0 && be instanceof Container container) {
             ItemStack result = container.getItem(0);
-            return !result.isEmpty() && ItemStack.isSameItem(result, expectedOutput);
+            return matchesExpectedOutput(result);
         }
 
         return false;
@@ -336,7 +350,7 @@ public final class ArsApparatusBatchDelegate extends AbstractBatchDelegate {
         // Try to recover items
         if (be instanceof Container container) {
             ItemStack remaining = container.removeItem(0, 64);
-            if (!remaining.isEmpty() && player != null) {
+            if (!usingSharedLedger && !remaining.isEmpty() && player != null) {
                 player.addItem(remaining);
             }
         }
@@ -344,7 +358,7 @@ public final class ArsApparatusBatchDelegate extends AbstractBatchDelegate {
         // Clear pedestals
         ServerLevel level = resolveMachineLevel(player);
         if (level != null) {
-            clearPedestalItems(level);
+            discardPedestalItems(level);
         }
     }
 
@@ -402,27 +416,20 @@ public final class ArsApparatusBatchDelegate extends AbstractBatchDelegate {
     }
 
     private List<IngredientSpec> buildMaterialsList(Recipe<?> recipe) {
-        List<IngredientSpec> specs = new ArrayList<>();
+        if (ArsDynamicApparatusRecipe.isSupported(recipe)) return List.of();
+        Ingredient reagent = Reflect.<Ingredient>getField(recipe, "reagent").orElse(Ingredient.EMPTY);
+        List<Ingredient> pedestalItems = Reflect.<List<Ingredient>>getField(recipe, "pedestalItems")
+                .orElse(List.of());
+        return ArsApparatusMaterials.build(reagent, pedestalItems);
+    }
 
-        // Reagent (catalyst in central slot)
-        Reflect.<Ingredient>getField(recipe, "reagent").ifPresent(ing -> {
-            if (!ing.isEmpty()) {
-                specs.add(new IngredientSpec(ing, 1, DemandRole.CATALYST));
-            }
-        });
-
-        // Pedestal items
-        Reflect.<List<Ingredient>>getField(recipe, "pedestalItems").ifPresent(pedestalList -> {
-            if (pedestalList != null) {
-                for (Ingredient ing : pedestalList) {
-                    if (!ing.isEmpty()) {
-                        specs.add(new IngredientSpec(ing, 1, DemandRole.CONSUMED));
-                    }
-                }
-            }
-        });
-
-        return specs;
+    private boolean matchesExpectedOutput(ItemStack result) {
+        if (result == null || result.isEmpty() || expectedOutput == null || expectedOutput.isEmpty()) {
+            return false;
+        }
+        return ArsDynamicApparatusRecipe.isSupported(recipe)
+                ? ItemStack.isSameItemSameTags(result, expectedOutput)
+                : ItemStack.isSameItem(result, expectedOutput);
     }
 
     private boolean placePedestalItems(ServerLevel level, List<ItemStack> pedestalStacks) {
@@ -435,14 +442,26 @@ public final class ArsApparatusBatchDelegate extends AbstractBatchDelegate {
             return false;
         }
 
+        activePedestalPositions.clear();
+        for (BlockPos pedestalPos : positions) {
+            BlockEntity pedestalBe = level.getBlockEntity(pedestalPos);
+            if (pedestalBe instanceof Container pedestalContainer
+                    && !pedestalContainer.getItem(0).isEmpty()) {
+                RSIntegrationMod.LOGGER.warn("[RSI-ArsApparatus] Pedestal at {} is occupied", pedestalPos);
+                return false;
+            }
+        }
+
         for (int i = 0; i < pedestalStacks.size(); i++) {
             BlockPos pedestalPos = positions.get(i);
             BlockEntity pedestalBe = level.getBlockEntity(pedestalPos);
             if (pedestalBe instanceof Container pedestalContainer) {
                 pedestalContainer.setItem(0, pedestalStacks.get(i).copy());
                 pedestalBe.setChanged();
+                activePedestalPositions.add(pedestalPos);
             } else {
                 RSIntegrationMod.LOGGER.warn("[RSI-ArsApparatus] Pedestal at {} is not a container", pedestalPos);
+                discardPedestalItems(level);
                 return false;
             }
         }
@@ -450,24 +469,42 @@ public final class ArsApparatusBatchDelegate extends AbstractBatchDelegate {
         return true;
     }
 
-    private void clearPedestalItems(ServerLevel level) {
-        if (pedestalLayout == null) return;
-
-        for (BlockPos pedestalPos : pedestalLayout.pedestalPositions()) {
+    private void discardPedestalItems(ServerLevel level) {
+        for (BlockPos pedestalPos : List.copyOf(activePedestalPositions)) {
             BlockEntity pedestalBe = level.getBlockEntity(pedestalPos);
             if (pedestalBe instanceof Container pedestalContainer) {
                 pedestalContainer.setItem(0, ItemStack.EMPTY);
                 pedestalBe.setChanged();
             }
         }
+        activePedestalPositions.clear();
+    }
+
+    private void refundRejectedStart(ServerPlayer player, ServerLevel level,
+                                     List<ItemStack> materials) {
+        if (network == null) {
+            network = CraftPacketUtils.resolveNetworkForCraft(
+                    player, level.dimension(), machinePos);
+        }
+        for (ItemStack material : materials) {
+            if (material == null || material.isEmpty()) continue;
+            ItemStack remainder = material.copy();
+            if (network != null) {
+                remainder = network.insertItem(remainder, remainder.getCount(),
+                        com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+            }
+            if (!remainder.isEmpty()) {
+                PlayerUtils.safeGiveToPlayer(player, remainder, network);
+            }
+        }
+        RSIntegrationMod.LOGGER.debug("[RSI-ArsApparatus] Refunded {} material stack(s) after rejected start",
+                materials.stream().filter(stack -> stack != null && !stack.isEmpty()).count());
     }
 
     private void collectPedestalRemainders(ServerLevel level) {
-        if (pedestalLayout == null) return;
-
         // Apparatus recipes may leave container remainder items on pedestals
         // (handled by getCraftingRemainingItem())
-        for (BlockPos pedestalPos : pedestalLayout.pedestalPositions()) {
+        for (BlockPos pedestalPos : List.copyOf(activePedestalPositions)) {
             BlockEntity pedestalBe = level.getBlockEntity(pedestalPos);
             if (pedestalBe instanceof Container pedestalContainer) {
                 ItemStack stack = pedestalContainer.getItem(0);
@@ -485,5 +522,6 @@ public final class ArsApparatusBatchDelegate extends AbstractBatchDelegate {
                 pedestalBe.setChanged();
             }
         }
+        activePedestalPositions.clear();
     }
 }

@@ -416,12 +416,12 @@ public final class FRKettleBatchDelegate extends AbstractBatchDelegate {
                                        Map<Item, Integer> neededCounts,
                                        int repeatCount) {}
 
-    public static List<String> getPlanWarnings(ServerPlayer player, Recipe<?> recipe,
+    public static List<Component> getPlanWarnings(ServerPlayer player, Recipe<?> recipe,
                                                 @Nullable ResourceLocation dim,
                                                 @Nullable BlockPos pos) {
-        List<String> warnings = new ArrayList<>();
-        warnings.add(Component.translatable("rsi.farmersrespite.kettle.heat_warning").getString());
-        warnings.add(Component.translatable("rsi.farmersrespite.kettle.container_warning").getString());
+        List<Component> warnings = new ArrayList<>();
+        warnings.add(Component.translatable("rsi.farmersrespite.kettle.heat_warning"));
+        warnings.add(Component.translatable("rsi.farmersrespite.kettle.container_warning"));
         return warnings;
     }
 

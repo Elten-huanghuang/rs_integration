@@ -6,9 +6,9 @@ import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
-import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.reflection.probes.ArsNouveauReflection;
 import com.huanghuang.rsintegration.util.ChunkUtils;
+import com.huanghuang.rsintegration.util.PlayerUtils;
 import com.huanghuang.rsintegration.util.Reflect;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
@@ -68,11 +68,17 @@ public final class ArsImbuementBatchDelegate extends AbstractBatchDelegate {
     private int sourceCost;
     private ArsPedestalLayout pedestalLayout;
     private List<IngredientSpec> requiredMaterials;
+    private final List<OwnedPedestalCatalyst> activePedestalCatalysts = new ArrayList<>();
+    private boolean pedestalCatalystsInstalled;
     private boolean craftStarted;
     private long craftStartTick;
 
-    // Timeout: 100 base ticks + time for Source accumulation (conservative: 200 ticks for up to 2000 Source)
-    private static final long CRAFT_TIMEOUT_TICKS = 100 + 200;
+    // Without a nearby provider Ars Nouveau only adds 10 Source every 20 ticks.
+    private static final int SOURCE_FALLBACK_AMOUNT = 10;
+    private static final int SOURCE_FALLBACK_INTERVAL_TICKS = 20;
+    private static final long CRAFT_TIMEOUT_GRACE_TICKS = 200;
+
+    private record OwnedPedestalCatalyst(BlockPos position, int count) {}
 
     // ── IBatchDelegate implementation ─────────────────────────────────────────
 
@@ -134,6 +140,8 @@ public final class ArsImbuementBatchDelegate extends AbstractBatchDelegate {
         this.machinePos = pos;
         this.craftStarted = false;
         this.craftStartTick = 0;
+        this.activePedestalCatalysts.clear();
+        this.pedestalCatalystsInstalled = false;
 
         ChunkUtils.loadChunk(level, pos);
         BlockEntity be = level.getBlockEntity(pos);
@@ -156,6 +164,16 @@ public final class ArsImbuementBatchDelegate extends AbstractBatchDelegate {
         // Build required materials list
         this.requiredMaterials = buildMaterialsList(foundRecipe);
 
+        List<Ingredient> pedestalItems = getPedestalIngredients(foundRecipe);
+        int availablePedestals = pedestalLayout != null ? pedestalLayout.pedestalCount() : 0;
+        if (!ArsImbuementMaterials.hasPedestalCapacity(pedestalItems, availablePedestals)) {
+            RSIntegrationMod.LOGGER.debug(
+                    "[RSI-ArsImbuement] Rejecting machine with insufficient pedestals: recipe={}, need={}, have={}",
+                    recipeId, ArsImbuementMaterials.pedestalItemCount(pedestalItems),
+                    availablePedestals);
+            return false;
+        }
+
         RSIntegrationMod.LOGGER.debug("[RSI-ArsImbuement] Validated: recipe={}, output={}, source={}, pedestals={}",
                 recipeId, expectedOutput, sourceCost, pedestalLayout != null ? pedestalLayout.pedestalCount() : 0);
 
@@ -173,17 +191,22 @@ public final class ArsImbuementBatchDelegate extends AbstractBatchDelegate {
                                         @Nonnull List<ItemStack> materials,
                                         @Nonnull ExtractionLedger sharedLedger) {
         ServerLevel level = getLevel();
-        if (level == null) return false;
+        if (level == null) {
+            refundRejectedStart(player, player.serverLevel(), materials);
+            return false;
+        }
 
         BlockEntity be = level.getBlockEntity(machinePos);
         if (be == null || !(be instanceof Container container)) {
             RSIntegrationMod.LOGGER.warn("[RSI-ArsImbuement] Machine disappeared during start");
+            refundRejectedStart(player, level, materials);
             return false;
         }
 
         // Verify slot 0 is empty
         if (!container.getItem(0).isEmpty()) {
             RSIntegrationMod.LOGGER.warn("[RSI-ArsImbuement] Slot 0 occupied at start");
+            refundRejectedStart(player, level, materials);
             return false;
         }
 
@@ -197,9 +220,15 @@ public final class ArsImbuementBatchDelegate extends AbstractBatchDelegate {
         List<ItemStack> pedestalStacks = materials.subList(1, materials.size());
 
         // Place pedestal items first (if any)
-        if (!pedestalStacks.isEmpty() && pedestalLayout != null) {
+        if (!pedestalStacks.isEmpty() && pedestalLayout == null) {
+            RSIntegrationMod.LOGGER.warn("[RSI-ArsImbuement] Required pedestals are unavailable at start");
+            refundRejectedStart(player, level, materials);
+            return false;
+        }
+        if (!pedestalStacks.isEmpty()) {
             if (!placePedestalItems(level, pedestalStacks)) {
                 RSIntegrationMod.LOGGER.warn("[RSI-ArsImbuement] Failed to place pedestal items");
+                refundRejectedStart(player, level, materials);
                 return false;
             }
         }
@@ -213,7 +242,8 @@ public final class ArsImbuementBatchDelegate extends AbstractBatchDelegate {
             RSIntegrationMod.LOGGER.warn("[RSI-ArsImbuement] Recipe did not activate after placement");
             // Try to clean up
             container.setItem(0, ItemStack.EMPTY);
-            clearPedestalItems(level);
+            discardPedestalCatalysts(level);
+            refundRejectedStart(player, level, materials);
             return false;
         }
 
@@ -235,12 +265,6 @@ public final class ArsImbuementBatchDelegate extends AbstractBatchDelegate {
             return failObservation("Machine is not a container");
         }
 
-        // Check timeout
-        long elapsed = level.getGameTime() - craftStartTick;
-        if (elapsed > CRAFT_TIMEOUT_TICKS) {
-            return failObservation("Craft timeout");
-        }
-
         // Read current slot 0
         ItemStack currentStack = container.getItem(0);
 
@@ -252,6 +276,15 @@ public final class ArsImbuementBatchDelegate extends AbstractBatchDelegate {
                 // craftTicks at 0 means done, >= 100 means not started or reset
                 return doneObservation();
             }
+        }
+
+        // Ars Nouveau's no-provider fallback is intentionally slow. A 500 Source
+        // recipe takes up to 1000 ticks to charge, while craftTicks counts down in
+        // parallel. Derive the hard limit from the recipe instead of rejecting it
+        // at the old fixed 300-tick boundary.
+        long elapsed = level.getGameTime() - craftStartTick;
+        if (elapsed > timeoutTicksForSourceCost(sourceCost)) {
+            return failObservation("Craft timeout");
         }
 
         // Check if slot is empty (stolen by external hopper/magnet)
@@ -305,8 +338,6 @@ public final class ArsImbuementBatchDelegate extends AbstractBatchDelegate {
         be.setChanged();
 
         // Clear pedestal items if any
-        clearPedestalItems(level);
-
         RSIntegrationMod.LOGGER.debug("[RSI-ArsImbuement] Collected result: {}", result);
         return result;
     }
@@ -318,21 +349,41 @@ public final class ArsImbuementBatchDelegate extends AbstractBatchDelegate {
         // Try to recover items if craft didn't start or failed early
         if (be instanceof Container container) {
             ItemStack remaining = container.removeItem(0, 64);
-            if (!remaining.isEmpty() && player != null) {
+            if (!usingSharedLedger && !remaining.isEmpty() && player != null) {
                 player.addItem(remaining);
             }
         }
 
         ServerLevel level = resolveMachineLevel(player);
         if (level != null) {
-            clearPedestalItems(level);
+            discardPedestalCatalysts(level);
         }
     }
 
     @Override
     public void onBatchFinished(@Nonnull ServerPlayer player) {
         RSIntegrationMod.LOGGER.debug("[RSI-ArsImbuement] Batch finished successfully");
-        // Cleanup is done in collectResult
+        // Reusable pedestal catalysts are returned by releaseReusableMaterials.
+    }
+
+    @Override
+    public void releaseReusableMaterials(@Nonnull ServerPlayer player) {
+        ServerLevel level = getLevel();
+        if (level == null) return;
+
+        int recovered = 0;
+        for (OwnedPedestalCatalyst owned : List.copyOf(activePedestalCatalysts)) {
+            BlockEntity pedestalBe = level.getBlockEntity(owned.position());
+            if (!(pedestalBe instanceof Container pedestalContainer)) continue;
+            ItemStack catalyst = pedestalContainer.removeItem(0, owned.count());
+            pedestalBe.setChanged();
+            if (catalyst.isEmpty()) continue;
+            recovered += catalyst.getCount();
+            returnCatalyst(player, level, catalyst);
+        }
+        activePedestalCatalysts.clear();
+        pedestalCatalystsInstalled = false;
+        RSIntegrationMod.LOGGER.debug("[RSI-ArsImbuement] Recovered {} pedestal catalyst item(s)", recovered);
     }
 
     @Nonnull
@@ -383,27 +434,12 @@ public final class ArsImbuementBatchDelegate extends AbstractBatchDelegate {
     }
 
     private List<IngredientSpec> buildMaterialsList(Recipe<?> recipe) {
-        List<IngredientSpec> specs = new ArrayList<>();
+        Ingredient input = Reflect.<Ingredient>getField(recipe, "input").orElse(Ingredient.EMPTY);
+        return ArsImbuementMaterials.build(input, getPedestalIngredients(recipe));
+    }
 
-        // Input ingredient
-        Reflect.<Ingredient>getField(recipe, "input").ifPresent(ing -> {
-            if (!ing.isEmpty()) {
-                specs.add(new IngredientSpec(ing, 1, DemandRole.CONSUMED));
-            }
-        });
-
-        // Pedestal items
-        Reflect.<List<Ingredient>>getField(recipe, "pedestalItems").ifPresent(pedestalList -> {
-            if (pedestalList != null) {
-                for (Ingredient ing : pedestalList) {
-                    if (!ing.isEmpty()) {
-                        specs.add(new IngredientSpec(ing, 1, DemandRole.CONSUMED));
-                    }
-                }
-            }
-        });
-
-        return specs;
+    private List<Ingredient> getPedestalIngredients(Recipe<?> recipe) {
+        return Reflect.<List<Ingredient>>getField(recipe, "pedestalItems").orElse(List.of());
     }
 
     private boolean placePedestalItems(ServerLevel level, List<ItemStack> pedestalStacks) {
@@ -416,30 +452,101 @@ public final class ArsImbuementBatchDelegate extends AbstractBatchDelegate {
             return false;
         }
 
+        if (pedestalCatalystsInstalled) {
+            for (int i = 0; i < pedestalStacks.size(); i++) {
+                BlockEntity pedestalBe = level.getBlockEntity(positions.get(i));
+                if (!(pedestalBe instanceof Container pedestalContainer)
+                        || !ItemStack.isSameItemSameTags(
+                        pedestalContainer.getItem(0), pedestalStacks.get(i))) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        activePedestalCatalysts.clear();
         for (int i = 0; i < pedestalStacks.size(); i++) {
             BlockPos pedestalPos = positions.get(i);
+            ItemStack required = pedestalStacks.get(i);
             BlockEntity pedestalBe = level.getBlockEntity(pedestalPos);
             if (pedestalBe instanceof Container pedestalContainer) {
-                pedestalContainer.setItem(0, pedestalStacks.get(i).copy());
-                pedestalBe.setChanged();
+                ItemStack installed = pedestalContainer.getItem(0);
+                if (!installed.isEmpty()
+                        && (!ItemStack.isSameItemSameTags(installed, required)
+                        || installed.getCount() < required.getCount())) {
+                    RSIntegrationMod.LOGGER.warn("[RSI-ArsImbuement] Pedestal at {} is occupied", pedestalPos);
+                    discardPedestalCatalysts(level);
+                    return false;
+                }
+                if (installed.isEmpty()) {
+                    pedestalContainer.setItem(0, required.copy());
+                    pedestalBe.setChanged();
+                }
+                activePedestalCatalysts.add(new OwnedPedestalCatalyst(
+                        pedestalPos, required.getCount()));
             } else {
                 RSIntegrationMod.LOGGER.warn("[RSI-ArsImbuement] Pedestal at {} is not a container", pedestalPos);
+                discardPedestalCatalysts(level);
                 return false;
             }
         }
 
+        pedestalCatalystsInstalled = true;
         return true;
     }
 
-    private void clearPedestalItems(ServerLevel level) {
-        if (pedestalLayout == null) return;
-
-        for (BlockPos pedestalPos : pedestalLayout.pedestalPositions()) {
-            BlockEntity pedestalBe = level.getBlockEntity(pedestalPos);
+    private void discardPedestalCatalysts(ServerLevel level) {
+        for (OwnedPedestalCatalyst owned : List.copyOf(activePedestalCatalysts)) {
+            BlockEntity pedestalBe = level.getBlockEntity(owned.position());
             if (pedestalBe instanceof Container pedestalContainer) {
-                pedestalContainer.setItem(0, ItemStack.EMPTY);
+                pedestalContainer.removeItem(0, owned.count());
                 pedestalBe.setChanged();
             }
+        }
+        activePedestalCatalysts.clear();
+        pedestalCatalystsInstalled = false;
+    }
+
+    static long timeoutTicksForSourceCost(int sourceCost) {
+        long sourceTicks = ((Math.max(0, sourceCost) + SOURCE_FALLBACK_AMOUNT - 1L)
+                / SOURCE_FALLBACK_AMOUNT) * SOURCE_FALLBACK_INTERVAL_TICKS;
+        return Math.max(ArsTileAccess.IMBUEMENT_CRAFT_TICKS, sourceTicks)
+                + CRAFT_TIMEOUT_GRACE_TICKS;
+    }
+
+    private void refundRejectedStart(ServerPlayer player, ServerLevel level,
+                                     List<ItemStack> materials) {
+        if (network == null) {
+            network = CraftPacketUtils.resolveNetworkForCraft(
+                    player, level.dimension(), machinePos);
+        }
+        for (ItemStack material : materials) {
+            if (material == null || material.isEmpty()) continue;
+            ItemStack remainder = material.copy();
+            if (network != null) {
+                remainder = network.insertItem(remainder, remainder.getCount(),
+                        com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+            }
+            if (!remainder.isEmpty()) {
+                PlayerUtils.safeGiveToPlayer(player, remainder, network);
+            }
+        }
+        RSIntegrationMod.LOGGER.debug(
+                "[RSI-ArsImbuement] Refunded {} material stack(s) after rejected start",
+                materials.stream().filter(stack -> stack != null && !stack.isEmpty()).count());
+    }
+
+    private void returnCatalyst(ServerPlayer player, ServerLevel level, ItemStack catalyst) {
+        if (network == null) {
+            network = CraftPacketUtils.resolveNetworkForCraft(player, level.dimension(), machinePos);
+        }
+        ItemStack remainder = catalyst.copy();
+        if (network != null) {
+            remainder = network.insertItem(remainder, remainder.getCount(),
+                    com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+        }
+        if (!remainder.isEmpty()) {
+            PlayerUtils.safeGiveToPlayer(player, remainder, network);
         }
     }
 

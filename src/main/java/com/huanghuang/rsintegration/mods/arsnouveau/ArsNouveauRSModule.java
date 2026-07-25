@@ -29,6 +29,14 @@ import java.util.List;
 public final class ArsNouveauRSModule implements IModIntegration {
 
     public static final ArsNouveauRSModule INSTANCE = new ArsNouveauRSModule();
+    static final List<String> IMBUEMENT_BLOCK_CLASSES = List.of(
+            "com.hollingsworth.arsnouveau.common.block.ImbuementBlock");
+    static final List<String> IMBUEMENT_BLOCK_IDS = List.of(
+            "ars_nouveau:imbuement_chamber");
+    static final List<String> APPARATUS_BLOCK_CLASSES = List.of(
+            "com.hollingsworth.arsnouveau.common.block.EnchantingApparatusBlock");
+    static final List<String> APPARATUS_BLOCK_IDS = List.of(
+            "ars_nouveau:enchanting_apparatus");
 
     private ArsNouveauRSModule() {}
 
@@ -63,7 +71,11 @@ public final class ArsNouveauRSModule implements IModIntegration {
         // Enchanting Apparatus
         ModType.register(
                 ModIds.ID_ARS_APPARATUS,
-                new String[]{"com.hollingsworth.arsnouveau.api.enchanting_apparatus.EnchantingApparatusRecipe"},
+                new String[]{
+                        "com.hollingsworth.arsnouveau.api.enchanting_apparatus.EnchantingApparatusRecipe",
+                        "com.hollingsworth.arsnouveau.api.enchanting_apparatus.EnchantmentRecipe",
+                        "com.hollingsworth.arsnouveau.api.enchanting_apparatus.ArmorUpgradeRecipe"
+                },
                 new String[]{"apparatus", "enchanting"},
                 new String[]{"apparatus", "enchanting"},
                 ModType.delegateSupplier("com.huanghuang.rsintegration.mods.arsnouveau.ArsApparatusBatchDelegate")
@@ -71,8 +83,16 @@ public final class ArsNouveauRSModule implements IModIntegration {
 
         ModType.configureJei(
                 ModIds.ID_ARS_APPARATUS,
-                new String[][]{{"ars_nouveau:enchanting_apparatus", "apparatus"}},
-                new String[][]{{"com.hollingsworth.arsnouveau.api.enchanting_apparatus.EnchantingApparatusRecipe", "apparatus"}},
+                new String[][]{
+                        {"ars_nouveau:enchanting_apparatus", "apparatus"},
+                        {"ars_nouveau:enchantment_apparatus", "apparatus"},
+                        {"ars_nouveau:armor_upgrade", "apparatus"}
+                },
+                new String[][]{
+                        {"com.hollingsworth.arsnouveau.api.enchanting_apparatus.EnchantingApparatusRecipe", "apparatus"},
+                        {"com.hollingsworth.arsnouveau.api.enchanting_apparatus.EnchantmentRecipe", "apparatus"},
+                        {"com.hollingsworth.arsnouveau.api.enchanting_apparatus.ArmorUpgradeRecipe", "apparatus"}
+                },
                 "gui.rs_integration.jei.ars_nouveau_apparatus_craft"
         );
     }
@@ -84,8 +104,10 @@ public final class ArsNouveauRSModule implements IModIntegration {
                 ModIds.ARS_NOUVEAU,
                 ModType.byId(ModIds.ID_ARS_IMBUEMENT),
                 RSIntegrationConfig.ENABLE_ARS_NOUVEAU,
-                List.of("com.hollingsworth.arsnouveau.common.block.tile.ImbuementTile"),
-                "ars_nouveau_imbuement"
+                IMBUEMENT_BLOCK_CLASSES,
+                IMBUEMENT_BLOCK_IDS,
+                "ars_nouveau_imbuement",
+                false
         ));
 
         // Enchanting Apparatus
@@ -93,8 +115,10 @@ public final class ArsNouveauRSModule implements IModIntegration {
                 ModIds.ARS_NOUVEAU,
                 ModType.byId(ModIds.ID_ARS_APPARATUS),
                 RSIntegrationConfig.ENABLE_ARS_NOUVEAU,
-                List.of("com.hollingsworth.arsnouveau.common.block.tile.EnchantingApparatusTile"),
-                "ars_nouveau_apparatus"
+                APPARATUS_BLOCK_CLASSES,
+                APPARATUS_BLOCK_IDS,
+                "ars_nouveau_apparatus",
+                false
         ));
     }
 
