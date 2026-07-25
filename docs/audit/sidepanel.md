@@ -37,17 +37,17 @@
 
 ## P3 发现（已知边界行为）
 
-### [P3-1] RSSidePanelRequestPacket 排序比较器曾有错误
+### [P3-1] 侧板排序曾有服务端/客户端判据不一致的 bug
 
-**位置**：`RSSidePanelRequestPacket.java:buildComparator()`
+**历史问题**：`RSSidePanelRequestPacket.buildComparator()` 曾使用错误的排序判据
+（见 memory `bug_server_side_panel_sort.md`）。
 
-**历史问题**（已修复）：
-根据 memory 记录，`buildComparator()` 曾使用错误的排序条件（bug_server_side_panel_sort.md）。
+**当前代码（2026-07-25 复核）**：`buildComparator()` **已不存在**，
+`RSSidePanelRequestPacket` 里也没有任何排序逻辑——排序已重构到客户端的
+`DisplayListManager`（`Comparator<PanelStack>`，按 SortMode 组合 name/qty/id/timestamp）。
+本条仅作为历史记录保留：排序判据一旦再次两端各算一份，就会重现这个 bug。
 
-**当前状态**：
-已修复，但建议增加单元测试覆盖排序逻辑的各种组合。
-
-**优先级**：P3（已修复，仅建议增加测试）
+**建议**：`DisplayListManager` 的比较器组合仍无单元测试覆盖。
 
 ---
 
