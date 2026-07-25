@@ -16,6 +16,14 @@ final class FtbQuestExternalItemDetector {
 
     private FtbQuestExternalItemDetector() {}
 
+    static boolean isReady(ServerPlayer player) {
+        if (player instanceof FakePlayer) return true;
+        ServerQuestFile questFile = ServerQuestFile.INSTANCE;
+        if (questFile == null || questFile.isLoading()) return false;
+        TeamData teamData = TeamData.get(player);
+        return teamData != null && !teamData.isLocked();
+    }
+
     static void detect(ServerPlayer player, Map<MaterialKey, Long> inserted) {
         if (player instanceof FakePlayer || inserted.isEmpty()) return;
         ServerQuestFile questFile = ServerQuestFile.INSTANCE;
