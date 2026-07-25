@@ -381,7 +381,10 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
             resetState();
             return;
         }
-        boolean refundPhysical = player == null;
+        // Refund physical slots only when no ledger will cover them. `player == null`
+        // is not sufficient: terminate() nulls the player under SILENT_REFUND, and
+        // that policy still refunds the ledger — doing both duplicates the material.
+        boolean refundPhysical = player == null && !usingSharedLedger;
         if (factoryMode) {
             for (int lane = 0; lane < FACTORY_INPUT.length; lane++) {
                 if (!ownedFactoryLanes[lane]) continue;

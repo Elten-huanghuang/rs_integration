@@ -700,8 +700,10 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
     }
 
     /** Clear items from storage block handlers. When player is online,
-     *  abort() refunds the ledger — only refund physical items to RS
-     *  when the player is offline (abortSilently does NOT refund the ledger). */
+     *  Refund physical items only when the ledger will not. `player == null`
+     *  is not sufficient on its own — terminate() nulls the player under
+     *  SILENT_REFUND, which still refunds the ledger; the usingSharedLedger
+     *  check below is what prevents the double refund. */
     private void clearHandlers() {
         if (storageBlockEntities == null || slotsFilled == null) return;
         boolean refundToRS = player == null;

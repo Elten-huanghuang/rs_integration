@@ -1329,8 +1329,11 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
 
     private void recoverFromPedestals() {
         if (filledPedestals == null) return;
-        // When player != null, abort() refunds the ledger — don't double-refund
-        // physical items to RS. Only refund when player is offline (abortSilently).
+        // Refund physical items only when the ledger will not. Note that
+        // `player == null` does not by itself mean "no ledger refund":
+        // terminate() nulls the player under SILENT_REFUND, which still sets
+        // refundLedger = true. The usingSharedLedger branch below is what
+        // actually prevents the double refund.
         boolean refundToRS = player == null;
         for (Object ped : filledPedestals) {
             ItemStack stack = readPedestalItem(ped);
