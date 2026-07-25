@@ -28,8 +28,10 @@ public final class FtbQuestSubmissionPlanner {
         List<IngredientSpec> specs = new ArrayList<>();
         List<String> overflow = new ArrayList<>();
         for (QuestItemRequirement requirement : snapshot.requirements()) {
+            // descriptionId, not a rendered name: `missing` is a translation-key
+            // channel resolved on the client (a server has no lang table).
             int remaining = boundedCount(requirement.remaining(), overflow,
-                    requirement.displayStack().getHoverName().getString());
+                    requirement.displayStack().getDescriptionId());
             if (remaining <= 0) continue;
             Ingredient ingredient = requirement.validDisplayItems().isEmpty()
                     ? Ingredient.of(requirement.displayStack())
@@ -57,9 +59,15 @@ public final class FtbQuestSubmissionPlanner {
                 materials, missing.stream().distinct().toList());
     }
 
-    private static int boundedCount(long count, List<String> errors, String name) {
+    /**
+     * Clamps an absurd quest requirement to int range, recording the item in
+     * {@code errors}. The recorded value must stay a bare translation key so the
+     * client can resolve it; the count is deliberately omitted rather than
+     * appended, which would defeat the key lookup.
+     */
+    private static int boundedCount(long count, List<String> errors, String descriptionId) {
         if (count > Integer.MAX_VALUE) {
-            errors.add(name + " x" + count);
+            errors.add(descriptionId);
             return Integer.MAX_VALUE;
         }
         return (int) Math.max(0L, count);

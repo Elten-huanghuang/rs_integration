@@ -1601,7 +1601,7 @@ public final class GenericCraftPacket {
             if (mergedRs != null && mergedRs.syntheticInput() != null && mergedRs.syntheticOutput() != null) {
                 steps.add(new PlanStep(stepId, mergedRs.syntheticOutput().copy(), batches,
                         List.of(mergedRs.syntheticInput().copy()), Collections.emptyList(), mergedRs.modType(),
-                        0, false, 0, 0, Collections.emptyList(), Collections.emptyList()));
+                        0, false, 0, 0, Collections.emptyList()));
                 continue;
             }
             Recipe<?> stepRecipe = resolveRecipe(player.serverLevel(), stepId);
@@ -1927,7 +1927,7 @@ public final class GenericCraftPacket {
 
             steps.add(new PlanStep(recipeId, targetOutput, repeatCount, targetInputs,
                     targetAlts, recipeModType, targetDepth, !targetAlts.isEmpty(),
-                    targetW, targetH, targetAltModTypes, Collections.emptyList()));
+                    targetW, targetH, targetAltModTypes));
 
             // Emit only the still-required levels. If a matching level-S book is
             // already available, it is a leaf input and the chain begins at S+1;
@@ -1940,7 +1940,7 @@ public final class GenericCraftPacket {
                     steps.add(new PlanStep(recipeId, levelBooks[k - 1].copy(), repeatCount,
                             lvlInputs, Collections.emptyList(), recipeModType,
                             targetDepth + (levelBooks.length - k), false,
-                            0, 0, Collections.emptyList(), Collections.emptyList()));
+                            0, 0, Collections.emptyList()));
                 }
             }
 
