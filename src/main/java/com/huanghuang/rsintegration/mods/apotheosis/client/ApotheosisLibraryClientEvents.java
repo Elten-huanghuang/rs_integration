@@ -35,11 +35,22 @@ public final class ApotheosisLibraryClientEvents {
 
     private ApotheosisLibraryClientEvents() {}
 
+    /**
+     * COMMON config: on a dedicated server the client loads its own file, so the
+     * server-synced value has to win or a server-disabled integration still
+     * shows its button.
+     */
+    private static boolean apotheosisEnabled() {
+        return com.huanghuang.rsintegration.config.ClientSyncedConfig.isSynced()
+                ? com.huanghuang.rsintegration.config.ClientSyncedConfig.ENABLE_APOTHEOSIS
+                : RSIntegrationConfig.ENABLE_APOTHEOSIS.get();
+    }
+
     @SubscribeEvent
     public static void onScreenInit(ScreenEvent.Init.Post event) {
         if (!isLibraryScreen(event.getScreen())
                 || !(event.getScreen() instanceof AbstractContainerScreen<?> screen)
-                || !RSIntegrationConfig.ENABLE_APOTHEOSIS.get()) return;
+                || !apotheosisEnabled()) return;
 
         if (!isCurrentLibraryBound(screen)) return;
         panel = new ApotheosisLibraryImportScreen(screen);

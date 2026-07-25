@@ -480,7 +480,9 @@ public final class AsyncCraftChain {
                     }
                 }
                 if (observation.phase() == IBatchDelegate.CraftPhase.FAILED) {
-                    abort("Machine craft failed: " + observation.detail());
+                    abort("Machine craft failed: " + observation.detail(),
+                            Component.translatable("rsi.async.abort.machine_craft_failed",
+                                    observation.detail()));
                     return true;
                 }
                 // World-output capture cancels the spawned ItemEntity before the delegate can observe it.
@@ -522,7 +524,8 @@ public final class AsyncCraftChain {
                         ledger.reset();
                         abortWithoutRefund("Expected craft output was not captured: "
                                 + steps.get(currentStepIdx).recipeId(),
-                                Component.translatable("rsi.async.error.output_extracted", 1, 0));
+                                Component.translatable("rsi.async.abort.output_not_captured",
+                                        steps.get(currentStepIdx).recipeId().toString()));
                         return true;
                     }
 
@@ -545,7 +548,8 @@ public final class AsyncCraftChain {
                     if (parallelGroup) {
                         ParallelCraftGroup group = (ParallelCraftGroup) currentDelegate;
                         if (group.getCompletedOperations() != group.getTotalOperations()) {
-                            abort("Parallel group completed with missing operations");
+                            abort("Parallel group completed with missing operations",
+                                    Component.translatable("rsi.async.abort.parallel_incomplete"));
                             return true;
                         }
                         machineCount = group.getChildCount();
@@ -579,7 +583,8 @@ public final class AsyncCraftChain {
                         // the chain and its reservations forever.
                         int drainLimit = Math.max(timeoutTicks * 4, 20 * 60);
                         if (drainingTicks > drainLimit) {
-                            abort("Timeout draining in-flight parallel crafts");
+                            abort("Timeout draining in-flight parallel crafts",
+                                    Component.translatable("rsi.async.abort.parallel_drain_timeout"));
                             return true;
                         }
                         RSIntegrationMod.LOGGER.warn(ctx.format(
@@ -588,12 +593,14 @@ public final class AsyncCraftChain {
                         waitTicks = 0;
                         return false;
                     }
-                    abort("Timeout waiting for craft completion");
+                    abort("Timeout waiting for craft completion",
+                            Component.translatable("rsi.async.abort.craft_timeout"));
                     return true;
                 }
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.error(ctx.format("Error polling craft completion"), e);
-                abort("Internal error during craft polling");
+                abort("Internal error during craft polling",
+                        Component.translatable("rsi.async.abort.poll_error"));
                 return true;
             }
             maybeSendProgress(online, false);
@@ -617,7 +624,8 @@ public final class AsyncCraftChain {
             currentStepIdx = executeVanillaBatch(currentStepIdx, online);
             if (state == State.ABORTED) return true;
             if (!ledger.isCommitted() && !ledger.commit(network, online)) {
-                abort("Commit failed after vanilla batch");
+                abort("Commit failed after vanilla batch",
+                        Component.translatable("rsi.async.abort.vanilla_commit_failed"));
                 return true;
             }
             ledger.reset();
@@ -634,13 +642,17 @@ public final class AsyncCraftChain {
                     machineLeaseWaitTicks++;
                     int timeoutTicks = RSIntegrationConfig.MULTIBLOCK_CRAFT_TIMEOUT_SECONDS.get() * 20;
                     if (machineLeaseWaitTicks > timeoutTicks) {
-                        abort("Timeout waiting for an available multi-block machine: " + step.recipeId());
+                        abort("Timeout waiting for an available multi-block machine: " + step.recipeId(),
+                                Component.translatable("rsi.async.abort.machine_wait_timeout",
+                                        step.recipeId().toString()));
                         return true;
                     }
                     maybeSendProgress(online, false);
                     return false;
                 }
-                abort("Failed to start multi-block craft: " + step.recipeId());
+                abort("Failed to start multi-block craft: " + step.recipeId(),
+                        Component.translatable("rsi.async.abort.machine_start_failed",
+                                step.recipeId().toString()));
                 return true;
             }
             waitingForMachineLease = false;
@@ -666,7 +678,8 @@ public final class AsyncCraftChain {
 
     private boolean tickGraph(ServerPlayer online) {
         if (graphScheduler == null) {
-            abort("Graph scheduler is null");
+            abort("Graph scheduler is null",
+                    Component.translatable("rsi.async.abort.scheduler_missing"));
             return true;
         }
 
@@ -689,7 +702,8 @@ public final class AsyncCraftChain {
         }
 
         if (graphExecutor == null) {
-            abort("Graph executor not initialised");
+            abort("Graph executor not initialised",
+                    Component.translatable("rsi.async.abort.executor_missing"));
             return true;
         }
 
@@ -702,7 +716,9 @@ public final class AsyncCraftChain {
         // never duped); only settled/undispatched materials are returned.
         if (++graphTotalTicks > graphGlobalTimeoutTicks) {
             abort("Crafting chain exceeded global timeout ("
-                    + (graphGlobalTimeoutTicks / 20) + "s)");
+                    + (graphGlobalTimeoutTicks / 20) + "s)",
+                    Component.translatable("rsi.async.abort.global_timeout",
+                            graphGlobalTimeoutTicks / 20));
             return true;
         }
 
@@ -715,7 +731,9 @@ public final class AsyncCraftChain {
             graphExecutor.tick();
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.error(ctx.format("Graph executor tick error"), e);
-            abort("Graph executor error: " + e.getMessage());
+            abort("Graph executor error: " + e.getMessage(),
+                    Component.translatable("rsi.async.abort.executor_error",
+                            String.valueOf(e.getMessage())));
             return true;
         }
 
@@ -725,9 +743,13 @@ public final class AsyncCraftChain {
                 NodeId failedNode = graphScheduler.failedNode();
                 String detail = failedNode == null ? ""
                         : graphFailureDetails.getOrDefault(failedNode, "");
-                abort(detail.isEmpty()
-                        ? "Graph execution failed -no running nodes remain"
-                        : "Graph node " + failedNode.value() + " failed: " + detail);
+                if (detail.isEmpty()) {
+                    abort("Graph execution failed -no running nodes remain",
+                            Component.translatable("rsi.async.abort.graph_stalled"));
+                } else {
+                    abort("Graph node " + failedNode.value() + " failed: " + detail,
+                            Component.translatable("rsi.async.abort.graph_node_failed", detail));
+                }
                 return true;
             }
         }
@@ -2098,7 +2120,9 @@ public final class AsyncCraftChain {
                             logVirtualInventory("at failure for step " + stepId);
                             logLedgerState(executionLedger);
                             if (allowPhysicalFallback) {
-                                abort("Missing: " + describeIngredientSafe(ing));
+                                abort("Missing: " + describeIngredientSafe(ing),
+                                        Component.translatable("rsi.async.abort.missing_material",
+                                                nameIngredientSafe(ing)));
                             }
                             return false;
                         }
@@ -2163,7 +2187,9 @@ public final class AsyncCraftChain {
                             logVirtualInventory("at failure for step " + stepId);
                             logLedgerState(executionLedger);
                             if (allowPhysicalFallback) {
-                                abort("Missing: " + describeIngredientSafe(spec.ingredient()));
+                                abort("Missing: " + describeIngredientSafe(spec.ingredient()),
+                                        Component.translatable("rsi.async.abort.missing_material",
+                                                nameIngredientSafe(spec.ingredient())));
                             }
                             return false;
                         }
@@ -3210,7 +3236,8 @@ public final class AsyncCraftChain {
                         // remaining items are not silently destroyed.
                         // Leave unconsumed items in virtualInventory for
                         // the abort path to refund.
-                        abort("Drop throttle tripped -RS network full and player offline");
+                        abort("Drop throttle tripped -RS network full and player offline",
+                                Component.translatable("rsi.async.abort.drop_throttle"));
                         return;
                     }
                 }
@@ -3268,7 +3295,8 @@ public final class AsyncCraftChain {
             RSIntegrationMod.LOGGER.warn(ctx.format("Commit failed for player {} after {} steps"),
                     online.getName().getString(), steps.size());
             online.sendSystemMessage(Component.translatable("rsi.async.error.commit_failed"));
-            abort("Final commit failed");
+            abort("Final commit failed",
+                    Component.translatable("rsi.async.abort.final_commit_failed"));
             return;
         }
 
@@ -3365,29 +3393,33 @@ public final class AsyncCraftChain {
 
     /** Abort after a physical machine consumed inputs but its output escaped.
      * Refunding here would duplicate the escaped result. */
-    private void abortWithoutRefund(String reason) {
-        abortWithoutRefund(reason, Component.literal(reason));
-    }
-
     private void abortWithoutRefund(String reason, Component userReason) {
         terminate(reason, userReason, SettlementPolicy.NO_REFUND,
                 TerminationCoordinator.Cause.FAILURE);
     }
 
-    public void abort(String reason) {
-        abort(reason, Component.literal(reason));
-    }
-
-    private void abort(String reason, Component userReason) {
+    /**
+     * Aborts and refunds. {@code reason} is the log line (English is fine);
+     * {@code userReason} is shown to the player and must be a translatable
+     * Component — the server cannot resolve translations, so a pre-rendered or
+     * literal English string would reach the client untranslated.
+     */
+    public void abort(String reason, Component userReason) {
         terminate(reason, userReason, SettlementPolicy.REFUND_AND_DELIVER,
                 TerminationCoordinator.Cause.FAILURE);
     }
 
-    public void cancel(String reason) {
-        terminate(reason, Component.literal(reason), SettlementPolicy.REFUND_AND_DELIVER,
+    /** @param userReason player-facing text; must be translatable, not literal English. */
+    public void cancel(String reason, Component userReason) {
+        terminate(reason, userReason, SettlementPolicy.REFUND_AND_DELIVER,
                 TerminationCoordinator.Cause.CANCELLED);
     }
 
+    /**
+     * Player is already offline: refund silently. {@code userReason} is unused
+     * under {@link SettlementPolicy#SILENT_REFUND} (no chat is sent), so a
+     * literal log string is safe here.
+     */
     public void abortOffline(String reason) {
         terminate(reason, Component.literal(reason), SettlementPolicy.SILENT_REFUND,
                 TerminationCoordinator.Cause.OFFLINE);
@@ -3724,11 +3756,20 @@ public final class AsyncCraftChain {
 
     //  debug helpers
 
+    /** Rendered name — log use only. See {@link #nameIngredientSafe} for player-facing text. */
     private static String describeIngredientSafe(Ingredient ing) {
+        return nameIngredientSafe(ing).getString();
+    }
+
+    /**
+     * Unresolved item name for player-facing messages. Must stay a Component:
+     * this runs server-side, where item translation keys cannot be resolved.
+     */
+    private static Component nameIngredientSafe(Ingredient ing) {
         for (ItemStack stack : ing.getItems()) {
-            if (!stack.isEmpty()) return stack.getHoverName().getString();
+            if (!stack.isEmpty()) return stack.getHoverName();
         }
-        return "Unknown";
+        return Component.translatable("rsi.plan.unknown_item");
     }
 
     private void logMissingIngredient(Ingredient ing, ResourceLocation stepId) {

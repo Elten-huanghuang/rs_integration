@@ -27,11 +27,20 @@ public final class LithumAltarHUDOverlay implements IGuiOverlay {
 
     private LithumAltarHUDOverlay() {}
 
+    private static boolean distantWorldsEnabled() {
+        return com.huanghuang.rsintegration.config.ClientSyncedConfig.isSynced()
+                ? com.huanghuang.rsintegration.config.ClientSyncedConfig.ENABLE_DISTANT_WORLDS
+                : RSIntegrationConfig.ENABLE_DISTANT_WORLDS.get();
+    }
+
     @Override
     public void render(ForgeGui gui, GuiGraphics graphics, float partialTick, int width, int height) {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null || mc.level == null || mc.options.hideGui || mc.screen != null
-                || !RSIntegrationConfig.ENABLE_DISTANT_WORLDS_HUD.get()) return;
+                || !RSIntegrationConfig.ENABLE_DISTANT_WORLDS_HUD.get()
+                // The overlay is registered at client setup, before any server is
+                // known; honour the server's COMMON toggle here instead.
+                || !distantWorldsEnabled()) return;
         if (!(mc.hitResult instanceof BlockHitResult hit) || DistantWorldsReflection.lithumCoreBlockClass == null
                 || !DistantWorldsReflection.lithumCoreBlockClass.isInstance(
                 mc.level.getBlockState(hit.getBlockPos()).getBlock())) return;

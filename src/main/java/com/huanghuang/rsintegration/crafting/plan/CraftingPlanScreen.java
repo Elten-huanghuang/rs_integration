@@ -8,6 +8,7 @@ import com.huanghuang.rsintegration.network.packet.NetworkHandler;
 import com.huanghuang.rsintegration.network.RSJeiPlugin;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.config.ClientSyncedConfig;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
 import com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket;
@@ -377,7 +378,7 @@ public final class CraftingPlanScreen extends Screen {
             embersCardsH = 0;
         }
         // Show mode toggle only when both modes are available (calc enabled AND tablet bound)
-        int embersModeH = (showEmbersModeToggle = canInfer && RSIntegrationConfig.ENABLE_EMBERS_ALCHEMY_CALC.get()) ? 28 : 0;
+        int embersModeH = (showEmbersModeToggle = canInfer && embersCalcEnabled()) ? 28 : 0;
         embersPedestalH = embersCardsH + embersModeH;
         // Default mode: Calculate if code is known (from cache or computed), Infer otherwise
         embersInferMode = !hasEmbers;
@@ -1750,6 +1751,24 @@ public final class CraftingPlanScreen extends Screen {
         hoverPreviewId = null;
     }
 
+    /**
+     * Candidate cap. Prefers the server-synced value: this is a SERVER-type
+     * config, so the client's own file holds only its local default and would
+     * disagree with the plan the server actually built.
+     */
+    private static int maxCandidates() {
+        return ClientSyncedConfig.isSynced()
+                ? ClientSyncedConfig.RECIPE_TREE_MAX_CANDIDATES
+                : RSIntegrationConfig.RECIPE_TREE_MAX_CANDIDATES.get();
+    }
+
+    /** Embers Calculate mode is a COMMON config; the server's value governs. */
+    private static boolean embersCalcEnabled() {
+        return ClientSyncedConfig.isSynced()
+                ? ClientSyncedConfig.ENABLE_EMBERS_ALCHEMY_CALC
+                : RSIntegrationConfig.ENABLE_EMBERS_ALCHEMY_CALC.get();
+    }
+
     private void renderDropdown(GuiGraphics gfx, Font font, int mouseX, int mouseY) {
         dropHits.clear();
         if (dropdownNode == null) return;
@@ -1762,7 +1781,7 @@ public final class CraftingPlanScreen extends Screen {
         List<String> mods = dropdownNode.step.alternativeModTypes();
         if (alts.isEmpty()) return;
 
-        int maxShown = Math.min(alts.size(), RSIntegrationConfig.RECIPE_TREE_MAX_CANDIDATES.get());
+        int maxShown = Math.min(alts.size(), maxCandidates());
         boolean truncated = maxShown < alts.size();
 
         Set<String> passport = plan.boundMachineTypes() != null
@@ -1954,7 +1973,7 @@ public final class CraftingPlanScreen extends Screen {
     /** Index of the currently-selected recipe within a node's (capped) alternative list, else 0. */
     private int selectedAltIndex(PlanTreeNode node) {
         List<ResourceLocation> alts = node.step.alternatives();
-        int cap = Math.min(alts.size(), RSIntegrationConfig.RECIPE_TREE_MAX_CANDIDATES.get());
+        int cap = Math.min(alts.size(), maxCandidates());
         for (int i = 0; i < cap; i++) {
             if (alts.get(i).equals(node.step.recipeId())) return i;
         }
@@ -2199,7 +2218,7 @@ public final class CraftingPlanScreen extends Screen {
         // Open dropdown captures navigation keys: Up/Down move, Enter confirms, Esc closes.
         if (dropdownNode != null && dropdownNode.step != null) {
             List<ResourceLocation> alts = dropdownNode.step.alternatives();
-            int cap = Math.min(alts.size(), RSIntegrationConfig.RECIPE_TREE_MAX_CANDIDATES.get());
+            int cap = Math.min(alts.size(), maxCandidates());
             if (cap > 0) {
                 if (keyCode == GLFW.GLFW_KEY_UP) {
                     dropdownCursor = dropdownCursor <= 0 ? cap - 1 : dropdownCursor - 1;
