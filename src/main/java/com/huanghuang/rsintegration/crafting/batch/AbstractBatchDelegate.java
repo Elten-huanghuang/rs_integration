@@ -43,6 +43,14 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
     protected boolean usingSharedLedger;
     protected CraftPhase phase = CraftPhase.WAITING_FOR_START;
 
+    /**
+     * Set by the first terminal callback ({@code onBatchFailed} or
+     * {@code onBatchFinished}). Deliberately NOT cleared by {@link #resetState()}:
+     * a delegate instance owns exactly one operation, so the flag must outlive
+     * the state reset that its own cleanup performs.
+     */
+    private boolean terminalCleanupDone;
+
     /** The dimension the target machine lives in. Set by {@link #validateAndInit}. */
     @Nullable
     protected ResourceLocation machineDim;
@@ -182,6 +190,17 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
      */
     @Override
     public final void onBatchFailed(@Nullable ServerPlayer player, String reason) {
+        // Exactly-once. A second call would be actively harmful, not merely
+        // redundant: clearMachineState ends in resetState(), which clears
+        // usingSharedLedger, so the repeat would see the shared-ledger guard
+        // disarmed and refund physical items the chain ledger already covered.
+        if (!markTerminalCleanup()) {
+            RSIntegrationMod.LOGGER.warn(
+                    "[RSI-Delegate] {} received a repeat terminal callback (onBatchFailed: {}); ignoring. "
+                            + "A delegate instance owns exactly one operation and must be discarded after it settles.",
+                    getClass().getSimpleName(), reason);
+            return;
+        }
         releasePreparationResources();
         BlockPos pos = getMachinePos();
         // Virtual delegates (e.g. GenericBatchDelegate for CUSTOM_GUI recipes)
@@ -296,6 +315,26 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
     }
 
     // ── Shared state lifecycle ─────────────────────────────────────
+
+    /**
+     * Marks this delegate's operation as terminally settled and reports whether
+     * the caller is the first to do so.
+     *
+     * <p>{@code onBatchFailed} is guarded centrally because it is {@code final}.
+     * {@code onBatchFinished} is implemented per subclass, so a subclass whose
+     * completion path is not naturally idempotent should gate on this:
+     * {@code if (!markTerminalCleanup()) return;}</p>
+     */
+    protected final boolean markTerminalCleanup() {
+        if (terminalCleanupDone) return false;
+        terminalCleanupDone = true;
+        return true;
+    }
+
+    /** True once a terminal callback has run for this operation. */
+    protected final boolean isTerminalCleanupDone() {
+        return terminalCleanupDone;
+    }
 
     /** Call at end of onBatchFailed and onBatchFinished — resets all shared state. */
     protected void resetState() {
