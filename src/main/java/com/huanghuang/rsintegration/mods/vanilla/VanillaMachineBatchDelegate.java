@@ -785,10 +785,14 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
     @Override
     protected void clearMachineState(BlockEntity be, ServerPlayer player) {
         if (kind == MachineKind.FURNACE && furnaceBE != null) {
-            // When player != null, abort() will refund the ledger — don't double-refund
-            // physical items from the machine slots. Only refund to RS when the player
-            // is offline (abortSilently path, ledger is NOT refunded).
-            boolean refundToRS = player == null;
+            // Refund the machine's physical input only when nothing else will.
+            //
+            // `player == null` alone is NOT a safe signal: terminate() forces
+            // `online = null` under SILENT_REFUND, and that policy still has
+            // refundLedger = true. Refunding here as well would return the same
+            // material twice. The ledger holding this input is the deciding
+            // factor, so defer to it whenever it is the shared chain ledger.
+            boolean refundToRS = player == null && !usingSharedLedger;
 
             ItemStack slot0 = furnaceBE.getItem(0);
             if (!slot0.isEmpty()) {
