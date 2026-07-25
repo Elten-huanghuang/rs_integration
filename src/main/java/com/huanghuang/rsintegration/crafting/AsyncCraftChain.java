@@ -1995,11 +1995,8 @@ public final class AsyncCraftChain {
 
     private static boolean hasEquippedCursedRing(ServerPlayer player) {
         try {
-            var optional = top.theillusivec4.curios.api.CuriosApi.getCuriosInventory(player).resolve();
-            if (optional.isEmpty()) return false;
-            var handler = optional.get().getEquippedCurios();
-            for (int i = 0; i < handler.getSlots(); i++) {
-                ItemStack stack = handler.getStackInSlot(i);
+            for (ItemStack stack : com.huanghuang.rsintegration.util.CuriosAccess
+                    .equippedStacks(player)) {
                 if (new ResourceLocation("enigmaticlegacy", "cursed_ring")
                         .equals(ForgeRegistries.ITEMS.getKey(stack.getItem()))) return true;
             }

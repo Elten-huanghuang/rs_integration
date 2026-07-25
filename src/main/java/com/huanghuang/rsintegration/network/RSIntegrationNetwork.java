@@ -127,22 +127,9 @@ public final class RSIntegrationNetwork {
             INetwork net = resolveFromNetworkItem(player, stack);
             if (net != null) return net;
         }
-        if (!net.minecraftforge.fml.ModList.get().isLoaded("curios")) return null;
-        try {
-            var opt = top.theillusivec4.curios.api.CuriosApi.getCuriosInventory(player).resolve();
-            if (opt.isPresent()) {
-                var handler = opt.get();
-                for (var stacksHandler : handler.getCurios().values()) {
-                    var stacks = stacksHandler.getStacks();
-                    for (int s = 0; s < stacks.getSlots(); s++) {
-                        ItemStack stack = stacks.getStackInSlot(s);
-                        INetwork net = resolveFromNetworkItem(player, stack);
-                        if (net != null) return net;
-                    }
-                }
-            }
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI] Curios scan error", e);
+        for (ItemStack stack : com.huanghuang.rsintegration.util.CuriosAccess.stacks(player)) {
+            INetwork net = resolveFromNetworkItem(player, stack);
+            if (net != null) return net;
         }
         return null;
     }

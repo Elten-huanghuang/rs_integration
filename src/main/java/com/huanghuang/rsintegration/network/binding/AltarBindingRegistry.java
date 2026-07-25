@@ -73,18 +73,8 @@ public final class AltarBindingRegistry {
         action.accept(inv.items);
         action.accept(inv.offhand);
         action.accept(inv.armor);
-        try {
-            var opt = top.theillusivec4.curios.api.CuriosApi.getCuriosInventory(player).resolve();
-            if (opt.isPresent()) {
-                for (var handler : opt.get().getCurios().values()) {
-                    var stacks = handler.getStacks();
-                    for (int s = 0; s < stacks.getSlots(); s++) {
-                        action.accept(List.of(stacks.getStackInSlot(s)));
-                    }
-                }
-            }
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI] Curios scan failed", e);
+        for (ItemStack curio : com.huanghuang.rsintegration.util.CuriosAccess.stacks(player)) {
+            action.accept(List.of(curio));
         }
     }
 
@@ -98,19 +88,9 @@ public final class AltarBindingRegistry {
         if (result != null) return result;
         result = extractor.apply(inv.armor);
         if (result != null) return result;
-        try {
-            var opt = top.theillusivec4.curios.api.CuriosApi.getCuriosInventory(player).resolve();
-            if (opt.isPresent()) {
-                for (var handler : opt.get().getCurios().values()) {
-                    var stacks = handler.getStacks();
-                    for (int s = 0; s < stacks.getSlots(); s++) {
-                        result = extractor.apply(List.of(stacks.getStackInSlot(s)));
-                        if (result != null) return result;
-                    }
-                }
-            }
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI] Curios scan failed", e);
+        for (ItemStack curio : com.huanghuang.rsintegration.util.CuriosAccess.stacks(player)) {
+            result = extractor.apply(List.of(curio));
+            if (result != null) return result;
         }
         return null;
     }

@@ -939,17 +939,8 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
                         allStacks.addAll(player.getInventory().items);
                         allStacks.addAll(player.getInventory().offhand);
                         allStacks.addAll(player.getInventory().armor);
-                        try {
-                            var opt = top.theillusivec4.curios.api.CuriosApi.getCuriosInventory(player).resolve();
-                            if (opt.isPresent()) {
-                                for (var handler : opt.get().getCurios().values()) {
-                                    var stacks = handler.getStacks();
-                                    for (int s = 0; s < stacks.getSlots(); s++) {
-                                        allStacks.add(stacks.getStackInSlot(s));
-                                    }
-                                }
-                            }
-                        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] curios inventory probe failed", e); }
+                        allStacks.addAll(
+                                com.huanghuang.rsintegration.util.CuriosAccess.stacks(player));
                         ResourceLocation foundDim = null;
                         BlockPos foundPos = null;
                         outer:
