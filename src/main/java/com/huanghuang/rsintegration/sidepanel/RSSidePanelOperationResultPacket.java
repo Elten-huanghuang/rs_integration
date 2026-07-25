@@ -1,6 +1,8 @@
 package com.huanghuang.rsintegration.sidepanel;
 
 import net.minecraft.network.FriendlyByteBuf;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.fml.DistExecutor;
 import net.minecraftforge.network.NetworkEvent;
 
 import java.util.UUID;
@@ -64,7 +66,8 @@ public final class RSSidePanelOperationResultPacket {
     static void handle(RSSidePanelOperationResultPacket packet,
                        Supplier<NetworkEvent.Context> contextSupplier) {
         NetworkEvent.Context context = contextSupplier.get();
-        context.enqueueWork(() -> RSSidePanelClient.onOperationResult(packet));
+        context.enqueueWork(() -> DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
+                () -> () -> RSSidePanelClientPacketHandler.onOperationResult(packet)));
         context.setPacketHandled(true);
     }
 }

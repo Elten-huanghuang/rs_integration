@@ -49,6 +49,27 @@ class StrippedPacketHandlerTest {
     private static final Pattern METHOD_REF = Pattern.compile("(\\w+)\\s*::\\s*(\\w+)");
 
     @Test
+    void methodsAreNotStrippedOnDedicatedServer() throws IOException {
+        assertTrue(Files.isDirectory(SRC), () -> "missing source root " + SRC.toAbsolutePath());
+
+        List<String> offenders = new ArrayList<>();
+        forEachJavaFile(path -> {
+            String text = read(path);
+            if (!text.contains("OnlyIn")) return;
+            Matcher matcher = STRIPPED_METHOD.matcher(text);
+            while (matcher.find()) {
+                offenders.add(SRC.relativize(path) + "::" + matcher.group(2));
+            }
+        });
+
+        assertEquals(List.of(), offenders,
+                "method-level @OnlyIn(Dist.CLIENT) is fragile in common classes: Forge removes "
+                        + "the method on dedicated servers, so a later common-side method reference "
+                        + "can fail with NoSuchMethodError. Keep the method and gate client work "
+                        + "with DistExecutor instead.");
+    }
+
+    @Test
     void registeredPacketHandlersAreNotStrippedOnDedicatedServer() throws IOException {
         assertTrue(Files.isDirectory(SRC), () -> "missing source root " + SRC.toAbsolutePath());
 

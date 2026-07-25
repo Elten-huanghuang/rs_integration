@@ -3,6 +3,8 @@ package com.huanghuang.rsintegration.autoeat.network;
 import com.huanghuang.rsintegration.autoeat.AutoEatMode;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.fml.DistExecutor;
 
 public class AutoEatSyncPacket {
     public final AutoEatMode mode;
@@ -30,12 +32,8 @@ public class AutoEatSyncPacket {
     }
 
     public static void handle(AutoEatSyncPacket packet, java.util.function.Supplier<net.minecraftforge.network.NetworkEvent.Context> ctx) {
-        ctx.get().enqueueWork(() -> {
-            var player = net.minecraft.client.Minecraft.getInstance().player;
-            if (player != null) {
-                player.displayClientMessage(packet.message, true);
-            }
-        });
+        ctx.get().enqueueWork(() -> DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
+                () -> () -> AutoEatClientPacketHandler.onSync(packet)));
         ctx.get().setPacketHandled(true);
     }
 }

@@ -1,9 +1,10 @@
 package com.huanghuang.rsintegration.crafting.batch;
 
 import com.huanghuang.rsintegration.crafting.CraftProgressSnapshot;
-import com.huanghuang.rsintegration.crafting.CraftProgressTracker;
 import io.netty.handler.codec.DecoderException;
 import net.minecraft.network.FriendlyByteBuf;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.fml.DistExecutor;
 import net.minecraftforge.network.NetworkEvent;
 
 import java.util.ArrayList;
@@ -132,7 +133,8 @@ public final class CraftProgressPacket {
     }
 
     public static void handle(CraftProgressPacket packet, Supplier<NetworkEvent.Context> ctx) {
-        ctx.get().enqueueWork(() -> CraftProgressTracker.onProgress(packet.snapshot));
+        ctx.get().enqueueWork(() -> DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
+                () -> () -> CraftProgressClientPacketHandler.onProgress(packet.snapshot)));
         ctx.get().setPacketHandled(true);
     }
 

@@ -1,6 +1,5 @@
 package com.huanghuang.rsintegration.mods.distantworlds;
 
-import com.huanghuang.rsintegration.mods.distantworlds.client.LithumAltarStatusCache;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.network.NetworkEvent;
@@ -35,11 +34,11 @@ public final class LithumAltarStatusPacket {
      * this as a method ref during {@code common_setup} — the JVM then raises
      * {@link NoSuchMethodError} and mod loading fails outright. The method stays on
      * both sides; the client-only cache update is deferred behind DistExecutor so
-     * {@link LithumAltarStatusCache} is never linked on the server.
+     * its implementation class is never linked on the server.
      */
     public static void handle(LithumAltarStatusPacket packet, Supplier<NetworkEvent.Context> ctx) {
         ctx.get().enqueueWork(() -> net.minecraftforge.fml.DistExecutor.unsafeRunWhenOn(
-                Dist.CLIENT, () -> () -> LithumAltarStatusCache.update(packet.snapshot)));
+                Dist.CLIENT, () -> () -> LithumAltarClientPacketHandler.handle(packet.snapshot)));
         ctx.get().setPacketHandled(true);
     }
 }

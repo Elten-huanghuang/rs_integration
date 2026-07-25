@@ -3,10 +3,11 @@ package com.huanghuang.rsintegration.mods.apotheosis.network;
 import com.huanghuang.rsintegration.mods.apotheosis.ApothSpawnerModels;
 import com.huanghuang.rsintegration.mods.apotheosis.ApothSpawnerModels.Entry;
 import com.huanghuang.rsintegration.mods.apotheosis.ApothSpawnerUpgradeService;
-import com.huanghuang.rsintegration.mods.apotheosis.client.ApothSpawnerUpgradeScreen;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.fml.DistExecutor;
 import net.minecraftforge.network.NetworkEvent;
 
 import java.util.List;
@@ -32,7 +33,8 @@ public record ApothSpawnerStatePacket(ResourceLocation dimension, BlockPos pos,
 
     public static void handle(ApothSpawnerStatePacket packet, Supplier<NetworkEvent.Context> supplier) {
         NetworkEvent.Context context = supplier.get();
-        context.enqueueWork(() -> ApothSpawnerUpgradeScreen.accept(packet));
+        context.enqueueWork(() -> DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
+                () -> () -> ApotheosisClientPacketHandler.onSpawnerState(packet)));
         context.setPacketHandled(true);
     }
 }

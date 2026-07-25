@@ -1,8 +1,9 @@
 package com.huanghuang.rsintegration.autoeat.network;
 
-import com.huanghuang.rsintegration.autoeat.client.ClientState;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.fml.DistExecutor;
 
 import java.util.HashSet;
 import java.util.Set;
@@ -26,12 +27,8 @@ public class BlacklistSyncPacket {
     }
 
     public static void handle(BlacklistSyncPacket packet, java.util.function.Supplier<net.minecraftforge.network.NetworkEvent.Context> ctx) {
-        ctx.get().enqueueWork(() -> {
-            ClientState.blacklistedItems.clear();
-            ClientState.blacklistedItems.addAll(packet.blacklist);
-            ClientState.blacklistedEffects.clear();
-            ClientState.blacklistedEffects.addAll(packet.effectBlacklist);
-        });
+        ctx.get().enqueueWork(() -> DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
+                () -> () -> AutoEatClientPacketHandler.onBlacklistSync(packet)));
         ctx.get().setPacketHandled(true);
     }
 

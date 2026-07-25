@@ -1,7 +1,8 @@
 package com.huanghuang.rsintegration.reforging;
 
-import com.huanghuang.rsintegration.reforging.client.ReforgingRestockClient;
 import net.minecraft.network.FriendlyByteBuf;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.fml.DistExecutor;
 import net.minecraftforge.network.NetworkEvent;
 
 import java.util.function.Supplier;
@@ -27,7 +28,8 @@ public record ReforgingRestockResultPacket(Status status, int inserted, int miss
 
     public static void handle(ReforgingRestockResultPacket packet, Supplier<NetworkEvent.Context> contextSupplier) {
         NetworkEvent.Context context = contextSupplier.get();
-        context.enqueueWork(() -> ReforgingRestockClient.accept(packet));
+        context.enqueueWork(() -> DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
+                () -> () -> ReforgingRestockClientPacketHandler.handle(packet)));
         context.setPacketHandled(true);
     }
 }

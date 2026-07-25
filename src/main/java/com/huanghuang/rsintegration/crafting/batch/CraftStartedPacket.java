@@ -1,8 +1,9 @@
 package com.huanghuang.rsintegration.crafting.batch;
 
-import com.huanghuang.rsintegration.crafting.CraftProgressTracker;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.world.item.ItemStack;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.fml.DistExecutor;
 import net.minecraftforge.network.NetworkEvent;
 
 import java.util.UUID;
@@ -39,7 +40,8 @@ public final class CraftStartedPacket {
     }
 
     public static void handle(CraftStartedPacket packet, Supplier<NetworkEvent.Context> ctx) {
-        ctx.get().enqueueWork(() -> CraftProgressTracker.onStarted(packet));
+        ctx.get().enqueueWork(() -> DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
+                () -> () -> CraftProgressClientPacketHandler.onStarted(packet)));
         ctx.get().setPacketHandled(true);
     }
 

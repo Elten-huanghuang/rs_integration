@@ -1,14 +1,9 @@
 package com.huanghuang.rsintegration.sidepanel.network;
 
-import com.huanghuang.rsintegration.mods.ironfurnaces.client.IronFurnaceJeiRefresh;
-import com.huanghuang.rsintegration.util.ModIds;
-
-import com.huanghuang.rsintegration.machine.MachineHub;
-import com.huanghuang.rsintegration.sidepanel.data.BindingCache;
 import com.huanghuang.rsintegration.sidepanel.data.BindingInfo;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.fml.DistExecutor;
 import net.minecraftforge.network.NetworkEvent;
 
 import java.util.ArrayList;
@@ -45,17 +40,10 @@ public final class RSBindingSyncPacket {
     }
 
     public static void handle(RSBindingSyncPacket packet, Supplier<NetworkEvent.Context> ctx) {
-        ctx.get().enqueueWork(() -> applyOnClient(packet));
+        ctx.get().enqueueWork(() -> DistExecutor.unsafeRunWhenOn(
+                Dist.CLIENT, () -> () -> RSBindingSyncClientPacketHandler.handle(packet)));
         ctx.get().setPacketHandled(true);
     }
 
-    @OnlyIn(Dist.CLIENT)
-    private static void applyOnClient(RSBindingSyncPacket packet) {
-        BindingCache.getInstance().updateBindings(packet.bindings);
-        MachineHub.refreshMachines();
-        if (net.minecraftforge.fml.ModList.get().isLoaded(
-                ModIds.JEI)) {
-            IronFurnaceJeiRefresh.refreshIfOpen();
-        }
-    }
+    List<BindingInfo> bindings() { return bindings; }
 }

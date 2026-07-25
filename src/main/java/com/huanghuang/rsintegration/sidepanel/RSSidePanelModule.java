@@ -1,8 +1,5 @@
 package com.huanghuang.rsintegration.sidepanel;
 
-import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.api.distmarker.OnlyIn;
-
 public final class RSSidePanelModule {
 
     private RSSidePanelModule() {}
@@ -11,7 +8,6 @@ public final class RSSidePanelModule {
         RSSidePanelNetworkHandler.register();
     }
 
-    @OnlyIn(Dist.CLIENT)
     public static void initClient() {
         RSSidePanelClient.init();
     }

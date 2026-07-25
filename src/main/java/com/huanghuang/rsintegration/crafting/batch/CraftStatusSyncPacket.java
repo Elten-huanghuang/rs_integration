@@ -1,7 +1,8 @@
 package com.huanghuang.rsintegration.crafting.batch;
 
-import com.huanghuang.rsintegration.crafting.CraftProgressTracker;
 import net.minecraft.network.FriendlyByteBuf;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.fml.DistExecutor;
 import net.minecraftforge.network.NetworkEvent;
 
 import java.util.ArrayList;
@@ -53,10 +54,9 @@ public final class CraftStatusSyncPacket {
     }
 
     public static void handle(CraftStatusSyncPacket packet, Supplier<NetworkEvent.Context> ctx) {
-        ctx.get().enqueueWork(() -> {
-            if (packet.mode == FULL) CraftProgressTracker.retainOnly(packet.craftIds);
-            else CraftProgressTracker.remove(packet.craftIds.get(0));
-        });
+        ctx.get().enqueueWork(() -> DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
+                () -> () -> CraftProgressClientPacketHandler.onStatusSync(
+                        packet.mode == FULL, packet.craftIds)));
         ctx.get().setPacketHandled(true);
     }
 
