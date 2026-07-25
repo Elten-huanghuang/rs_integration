@@ -3446,10 +3446,31 @@ public final class AsyncCraftChain {
                 SettlementPolicy.SILENT_REFUND, TerminationCoordinator.Cause.SERVER_STOP);
     }
 
+    /**
+     * Settle a craft that already finished when the server began stopping.
+     *
+     * <p>Must run even when the owning player is offline. Bailing out on a null
+     * player used to leave the delegate un-settled, so {@link #terminate} then
+     * treated a <em>completed</em> craft as a failure: the ledger refunded the
+     * consumed inputs while the finished product stayed in the machine — the
+     * same material on both sides of the restart. The product is collected into
+     * the virtual inventory here and delivered by the normal recovery path,
+     * which already handles a null player.</p>
+     */
     private void collectCompletedDelegateForShutdown(@Nullable ServerPlayer player) {
-        if (currentDelegate == null || player == null) return;
-        for (ItemStack result : currentDelegate.collectAllResults(player)) {
-            if (result != null && !result.isEmpty()) addToVirtualInventory(result);
+        if (currentDelegate == null) return;
+        if (player != null) {
+            for (ItemStack result : currentDelegate.collectAllResults(player)) {
+                if (result != null && !result.isEmpty()) addToVirtualInventory(result);
+            }
+        } else {
+            // No player to fall back to, so take the captured world output
+            // directly; recoverCommittedVirtual handles delivery without one.
+            for (ItemStack captured : disarmOutputCapture()) {
+                if (captured != null && !captured.isEmpty()) addToVirtualInventory(captured);
+            }
+            RSIntegrationMod.LOGGER.warn(ctx.format(
+                    "Server stop: owner offline for a completed craft; settling it so inputs are not refunded twice"));
         }
         currentDelegate.onBatchFinished(player);
         currentDelegate.releaseReusableMaterials(player);
