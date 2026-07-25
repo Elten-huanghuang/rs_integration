@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.resonance.bridge.RSInventoryBridge;
 import com.huanghuang.rsintegration.resonance.disk.ResonanceDiskWrapper;
+import com.huanghuang.rsintegration.util.ThreadLocalStack;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
@@ -30,36 +31,28 @@ import java.util.List;
 public abstract class NineSwordBooksMixin {
 
     @Unique
-    private static final ThreadLocal<Player> rsi$currentPlayer = new ThreadLocal<>();
-
-    // 缓存 RS 盘折算后的额外剑数
-    @Unique
-    private static final ThreadLocal<Integer> rsi$cachedExtraSize = ThreadLocal.withInitial(() -> 0);
+    private static final ThreadLocalStack<RsiContext> rsi$contexts = new ThreadLocalStack<>();
 
     @Inject(method = "curioTick", at = @At("HEAD"))
     private void rsi$onCurioTickHead(SlotContext ctx, ItemStack stack, CallbackInfo ci) {
         if (ctx.entity() instanceof Player player) {
-            rsi$currentPlayer.set(player);
-            rsi$cachedExtraSize.set(rsi$computeExtraSize(player));
+            rsi$pushContext(player);
         }
     }
 
     @Inject(method = "curioTick", at = @At("RETURN"))
     private void rsi$onCurioTickReturn(SlotContext ctx, ItemStack stack, CallbackInfo ci) {
-        rsi$currentPlayer.remove();
-        rsi$cachedExtraSize.remove();
+        if (ctx.entity() instanceof Player) rsi$contexts.pop();
     }
 
     @Inject(method = "Head", at = @At("HEAD"))
     private void rsi$onHeadHead(Player player, ItemStack stack, CallbackInfoReturnable<Multimap<Attribute, AttributeModifier>> cir) {
-        rsi$currentPlayer.set(player);
-        rsi$cachedExtraSize.set(rsi$computeExtraSize(player));
+        rsi$pushContext(player);
     }
 
     @Inject(method = "Head", at = @At("RETURN"))
     private void rsi$onHeadReturn(Player player, ItemStack stack, CallbackInfoReturnable<Multimap<Attribute, AttributeModifier>> cir) {
-        rsi$currentPlayer.remove();
-        rsi$cachedExtraSize.remove();
+        rsi$contexts.pop();
     }
 
     // 拦截 integers.size()，注入等效后的剑数
@@ -70,18 +63,33 @@ public abstract class NineSwordBooksMixin {
             return originalSize;
         }
 
-        Integer extra = rsi$cachedExtraSize.get();
-        if (extra == null) extra = 0;
+        RsiContext context = rsi$contexts.peek();
+        int extra = context == null ? 0 : context.extraSize;
 
         int finalSize = originalSize + extra;
 
-        Player player = rsi$currentPlayer.get();
+        Player player = context == null ? null : context.player;
         if (player != null && player.tickCount % 40 == 0 && extra > 0) {
             // 已移除 "Bug-Scaled" 字眼，因为原模组已修复该 Bug，现在是 1:1 绝对公平转换
             RSIntegrationMod.LOGGER.info("[RSI-NineSwords] size() Hack! HotbarSize: {}, DiskSize(Extra): {}, Total: {}", originalSize, extra, finalSize);
         }
 
         return finalSize;
+    }
+
+    @Unique
+    private void rsi$pushContext(Player player) {
+        rsi$contexts.push(new RsiContext(player, rsi$computeExtraSize(player)));
+    }
+
+    private static final class RsiContext {
+        private final Player player;
+        private final int extraSize;
+
+        private RsiContext(Player player, int extraSize) {
+            this.player = player;
+            this.extraSize = extraSize;
+        }
     }
 
     // ========== 核心逻辑：1:1 统计快捷栏与 RS 盘的剑 ==========
