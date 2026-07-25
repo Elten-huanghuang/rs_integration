@@ -26,8 +26,6 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.network.chat.contents.TranslatableContents;
 import net.minecraft.world.item.ItemStack;
 
-import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.api.distmarker.OnlyIn;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.entity.player.PlayerContainerEvent;
@@ -251,7 +249,6 @@ public final class RSSidePanelNetworkHandler {
     }
 
 
-    @OnlyIn(Dist.CLIENT)
     public static void sendRequestSync() {
         CHANNEL.sendToServer(new RSSidePanelRequestPacket(true, false));
     }

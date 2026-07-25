@@ -4,10 +4,11 @@ import com.huanghuang.rsintegration.mods.apotheosis.ApotheosisLibraryModels;
 
 import com.huanghuang.rsintegration.mods.apotheosis.ApotheosisLibraryModels.ImportStats;
 import com.huanghuang.rsintegration.mods.apotheosis.ApotheosisLibraryService;
-import com.huanghuang.rsintegration.mods.apotheosis.client.ApotheosisLibraryClientEvents;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.fml.DistExecutor;
 import net.minecraftforge.network.NetworkEvent;
 
 import java.util.function.Supplier;
@@ -51,9 +52,8 @@ public record ApotheosisLibraryImportResultPacket(ResourceLocation dimension, Bl
     public static void handle(ApotheosisLibraryImportResultPacket packet,
                               Supplier<NetworkEvent.Context> supplier) {
         NetworkEvent.Context context = supplier.get();
-        context.enqueueWork(() -> {
-            ApotheosisLibraryClientEvents.acceptImportResult(packet);
-        });
+        context.enqueueWork(() -> DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
+                () -> () -> ApotheosisClientPacketHandler.onImportResult(packet)));
         context.setPacketHandled(true);
     }
 }

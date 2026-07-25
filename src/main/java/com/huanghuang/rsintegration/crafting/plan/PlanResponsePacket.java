@@ -4,13 +4,12 @@ import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.tree.IngredientKey;
 import io.netty.handler.codec.DecoderException;
-import net.minecraft.client.Minecraft;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.fml.DistExecutor;
 import net.minecraftforge.network.NetworkEvent;
 
 import java.util.*;
@@ -461,92 +460,9 @@ public final class PlanResponsePacket {
                 "[RSI-PlanPkt] Client received PlanResponsePacket: recipeId={} success={} steps={}",
                 packet.plan.recipeId(), packet.plan.success(), packet.plan.steps().size());
         NetworkEvent.Context ctx = ctxSupplier.get();
-        ctx.enqueueWork(() -> {
-            RSIntegrationMod.LOGGER.debug(
-                    "[RSI-PlanPkt] enqueueWork running on client thread: recipeId={}",
-                    packet.plan.recipeId());
-            localizePlanForClient(packet.plan, packet.requestId);
-        });
+        ctx.enqueueWork(() -> DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
+                () -> () -> PlanResponseClientPacketHandler.handle(
+                        packet.plan, packet.requestId)));
         ctx.setPacketHandled(true);
-    }
-
-    @OnlyIn(Dist.CLIENT)
-    private static void localizePlanForClient(PlanResponse plan, long requestId) {
-        List<String> missing = localizeItemNames(plan.missing());
-        String targetName = plan.targetResult().isEmpty()
-                ? plan.targetName()
-                : plan.targetResult().getHoverName().getString();
-        PlanResponse localized = new PlanResponse(
-                plan.success(), targetName, plan.targetResult(), plan.steps(), plan.materials(), missing,
-                plan.recipeId(), plan.executionModTypeId(), plan.executionDim(), plan.executionPosX(),
-                plan.executionPosY(), plan.executionPosZ(), plan.modWarnings(), plan.repeatCount(),
-                plan.embersCode(), plan.embersAspectNames(), plan.embersInputNames(), plan.embersSeed(),
-                plan.embersCanInfer(), plan.embersCodeFromCache(), plan.executionMachineSupportsGui(),
-                plan.baseItem(), plan.boundMachineTypes(), plan.leftovers(), plan.clickedOutput(), plan.graph());
-        openScreen(localized, requestId);
-    }
-
-    @OnlyIn(Dist.CLIENT)
-    private static List<String> localizeItemNames(List<String> names) {
-        if (names.isEmpty()) return names;
-        List<String> localized = new ArrayList<>(names.size());
-        for (String name : names) {
-            String translated = name;
-            int hintStart = name.indexOf(" §");
-            String key = hintStart >= 0 ? name.substring(0, hintStart) : name;
-            String suffix = hintStart >= 0 ? name.substring(hintStart) : "";
-            // Entries are item descriptionIds (see CraftingResolver.describeItem),
-            // so a direct lookup is enough. Anything unresolvable is shown verbatim
-            // rather than scanning the whole item registry per entry.
-            if (net.minecraft.client.resources.language.I18n.exists(key)) {
-                translated = net.minecraft.client.resources.language.I18n.get(key) + suffix;
-            }
-            localized.add(translated);
-        }
-        return localized;
-    }
-
-    @OnlyIn(Dist.CLIENT)
-    private static void openScreen(PlanResponse plan, long requestId) {
-        RSIntegrationMod.LOGGER.debug(
-                "[RSI-PlanPkt] openScreen called: success={} steps={}",
-                plan.success(), plan.steps().size());
-        var mc = Minecraft.getInstance();
-        if (mc.player == null) {
-            RSIntegrationMod.LOGGER.warn("[RSI-PlanPkt] openScreen ABORT: mc.player is null");
-            return;
-        }
-        // A response can arrive after the user has already requested another
-        // recipe. Never let that stale response replace the active plan screen.
-        if (mc.screen instanceof CraftingPlanScreen existing
-                && requestId != 0L && requestId < existing.activeRequestId()) {
-            RSIntegrationMod.LOGGER.debug("[RSI-PlanPkt] Dropping stale request response {} < {}",
-                    requestId, existing.activeRequestId());
-            return;
-        }
-        if (mc.screen instanceof CraftingPlanScreen existing
-                && plan.recipeId() != null
-                && !plan.recipeId().equals(existing.getRecipeId())) {
-            RSIntegrationMod.LOGGER.debug("[RSI-PlanPkt] Dropping stale response: received={} active={}",
-                    plan.recipeId(), existing.getRecipeId());
-            return;
-        }
-        // If a CraftingPlanScreen is already open for the same recipe,
-        // update it in-place rather than replacing it — this preserves
-        // scroll position and avoids flicker during OR-path switching.
-        if (mc.screen instanceof CraftingPlanScreen existing
-                && plan.recipeId() != null
-                && plan.recipeId().equals(existing.getRecipeId())) {
-            RSIntegrationMod.LOGGER.debug("[RSI-PlanPkt] openScreen UPDATE: refreshing plan for {}",
-                    plan.recipeId());
-            existing.acceptResponse(requestId, plan);
-            return;
-        }
-        try {
-            mc.setScreen(new CraftingPlanScreen(plan));
-            RSIntegrationMod.LOGGER.debug("[RSI-PlanPkt] CraftingPlanScreen opened successfully");
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.error("[RSI-PlanPkt] Failed to open CraftingPlanScreen:", e);
-        }
     }
 }

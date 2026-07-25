@@ -1,11 +1,10 @@
 package com.huanghuang.rsintegration.sidepanel;
 
 import com.huanghuang.rsintegration.sidepanel.data.BindingInfo;
-import net.minecraft.client.Minecraft;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.fml.DistExecutor;
 import net.minecraftforge.network.NetworkEvent;
 
 import java.util.ArrayList;
@@ -135,16 +134,11 @@ public final class RSSidePanelSyncPacket {
     static void handle(RSSidePanelSyncPacket packet,
                        Supplier<NetworkEvent.Context> contextSupplier) {
         NetworkEvent.Context context = contextSupplier.get();
-        context.enqueueWork(() -> applyOnClient(packet));
+        context.enqueueWork(() -> DistExecutor.unsafeRunWhenOn(
+                Dist.CLIENT, () -> () -> RSSidePanelClientPacketHandler.onSync(packet)));
         context.setPacketHandled(true);
     }
 
     public List<BindingInfo> getBindings() { return bindings; }
 
-    @OnlyIn(Dist.CLIENT)
-    private static void applyOnClient(RSSidePanelSyncPacket packet) {
-        var mc = Minecraft.getInstance();
-        if (mc.player == null) return;
-        RSSidePanelClient.onSyncReceived(packet);
-    }
 }

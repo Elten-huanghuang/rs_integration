@@ -1,8 +1,9 @@
 package com.huanghuang.rsintegration.villager;
 
-import com.huanghuang.rsintegration.villager.client.VillagerRestockClient;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.world.item.ItemStack;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.fml.DistExecutor;
 import net.minecraftforge.network.NetworkEvent;
 import java.util.ArrayList;
 import java.util.List;
@@ -25,6 +26,9 @@ public record VillagerRestockResultPacket(Status status, int inventoryCount, int
         return new VillagerRestockResultPacket(status, inventory, rs, List.copyOf(missing));
     }
     public static void handle(VillagerRestockResultPacket p, Supplier<NetworkEvent.Context> cs) {
-        NetworkEvent.Context c=cs.get(); c.enqueueWork(() -> VillagerRestockClient.accept(p)); c.setPacketHandled(true);
+        NetworkEvent.Context c=cs.get();
+        c.enqueueWork(() -> DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
+                () -> () -> VillagerRestockClientPacketHandler.handle(p)));
+        c.setPacketHandled(true);
     }
 }

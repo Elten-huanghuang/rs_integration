@@ -1,7 +1,8 @@
 package com.huanghuang.rsintegration.network.packet;
 
-import com.huanghuang.rsintegration.config.ClientSyncedConfig;
 import net.minecraft.network.FriendlyByteBuf;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.fml.DistExecutor;
 import net.minecraftforge.network.NetworkEvent;
 
 import java.util.function.Supplier;
@@ -91,7 +92,8 @@ public class ConfigSyncPacket {
     }
 
     public static void handle(ConfigSyncPacket packet, Supplier<NetworkEvent.Context> ctx) {
-        ctx.get().enqueueWork(() -> ClientSyncedConfig.apply(packet));
+        ctx.get().enqueueWork(() -> DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
+                () -> () -> ConfigSyncClientPacketHandler.handle(packet)));
         ctx.get().setPacketHandled(true);
     }
 }
