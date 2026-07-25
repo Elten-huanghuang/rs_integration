@@ -61,14 +61,8 @@ public final class IronFurnaceBindingUpdater {
             changed |= updateStack(stack, dimension, pos, replacementPrefix);
         }
         try {
-            var curios = top.theillusivec4.curios.api.CuriosApi.getCuriosInventory(player).resolve();
-            if (curios.isPresent()) {
-                for (var handler : curios.get().getCurios().values()) {
-                    var stacks = handler.getStacks();
-                    for (int slot = 0; slot < stacks.getSlots(); slot++) {
-                        changed |= updateStack(stacks.getStackInSlot(slot), dimension, pos, replacementPrefix);
-                    }
-                }
+            for (ItemStack curio : com.huanghuang.rsintegration.util.CuriosAccess.stacks(player)) {
+                changed |= updateStack(curio, dimension, pos, replacementPrefix);
             }
         } catch (Exception exception) {
             RSIntegrationMod.LOGGER.debug("[RSI-IronFurnaces] Curios binding migration failed", exception);

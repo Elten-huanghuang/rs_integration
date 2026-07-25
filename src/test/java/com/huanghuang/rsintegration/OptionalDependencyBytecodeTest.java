@@ -11,12 +11,19 @@ import org.objectweb.asm.Opcodes;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class OptionalDependencyBytecodeTest {
     @Test
@@ -79,6 +86,50 @@ class OptionalDependencyBytecodeTest {
         String constantPool = new String(classBytes(type), StandardCharsets.ISO_8859_1);
         assertFalse(constantPool.contains(internalPackage),
                 () -> type.getName() + " directly links optional " + dependencyName + " bytecode");
+    }
+
+    /**
+     * Curios is {@code mandatory = false}. A direct reference compiles a hard
+     * {@code invokestatic} to {@code CuriosApi}, and on a server without Curios the
+     * JVM throws {@link NoClassDefFoundError} — an {@link Error}, which the
+     * {@code catch (Exception)} these call sites used does NOT intercept. All access
+     * must go through {@code util.CuriosAccess}, which gates on ModList and reflects.
+     */
+    @Test
+    void curiosIsOnlyReachedThroughTheReflectiveHelper() throws IOException {
+        Path classRoot = Path.of("build", "classes", "java", "main");
+        assertTrue(Files.isDirectory(classRoot),
+                () -> "compile the mod before running this test: " + classRoot.toAbsolutePath());
+
+        List<String> offenders = new ArrayList<>();
+        try (Stream<Path> classes = Files.walk(classRoot)) {
+            classes.filter(p -> p.toString().endsWith(".class"))
+                    // The helper itself resolves the class by name at runtime.
+                    .filter(p -> !p.toString().replace('\\', '/').contains("/util/CuriosAccess"))
+                    // Mixins whose @Mixin target itself requires Curios: if Curios is
+                    // absent the target is too, so the mixin is never applied and its
+                    // Curios references are never linked. RSIntegrationMixinPlugin
+                    // gates this one on SlotContext being present.
+                    .filter(p -> !p.toString().replace('\\', '/')
+                            .contains("/mixin/moonstone/NineSwordBooksMixin"))
+                    .forEach(p -> {
+                        byte[] bytes;
+                        try {
+                            bytes = Files.readAllBytes(p);
+                        } catch (IOException e) {
+                            throw new UncheckedIOException(e);
+                        }
+                        // A reflective Class.forName("top.theillusivec4...") stores the
+                        // name dotted; a hard link stores it slash-separated.
+                        if (new String(bytes, StandardCharsets.ISO_8859_1)
+                                .contains("top/theillusivec4/curios")) {
+                            offenders.add(classRoot.relativize(p).toString());
+                        }
+                    });
+        }
+
+        assertEquals(List.of(), offenders,
+                "these classes hard-link Curios types; route the access through util.CuriosAccess");
     }
 
     private static byte[] classBytes(Class<?> type) throws IOException {

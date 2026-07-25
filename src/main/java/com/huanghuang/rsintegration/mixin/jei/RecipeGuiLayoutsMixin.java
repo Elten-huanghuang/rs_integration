@@ -1343,22 +1343,12 @@ public class RecipeGuiLayoutsMixin {
             }
         }
 
-        try {
-            var opt = top.theillusivec4.curios.api.CuriosApi.getCuriosInventory(player).resolve();
-            if (opt.isPresent()) {
-                var handler = opt.get();
-                for (var stacksHandler : handler.getCurios().values()) {
-                    var stacks = stacksHandler.getStacks();
-                    for (int s = 0; s < stacks.getSlots(); s++) {
-                        ItemStack stack = stacks.getStackInSlot(s);
-                        for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
-                            if (debug) allBlockKeys.add(entry.blockKey());
-                            if (rsi$bindingMatchesFilter(entry.blockKey(), filter)) return entry;
-                        }
-                    }
-                }
+        for (ItemStack stack : com.huanghuang.rsintegration.util.CuriosAccess.stacks(player)) {
+            for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
+                if (debug) allBlockKeys.add(entry.blockKey());
+                if (rsi$bindingMatchesFilter(entry.blockKey(), filter)) return entry;
             }
-        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] Reflection probe failed", e); }
+        }
 
         if (debug) {
             RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] findBinding(filter={}) found no match. All blockKeys in inv: {}",

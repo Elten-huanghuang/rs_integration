@@ -998,17 +998,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         all.addAll(inv.items);
         all.addAll(inv.offhand);
         all.addAll(inv.armor);
-        try {
-            var opt = top.theillusivec4.curios.api.CuriosApi.getCuriosInventory(player).resolve();
-            if (opt.isPresent()) {
-                for (var handler : opt.get().getCurios().values()) {
-                    var stacks = handler.getStacks();
-                    for (int s = 0; s < stacks.getSlots(); s++) {
-                        all.add(stacks.getStackInSlot(s));
-                    }
-                }
-            }
-        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
+        all.addAll(com.huanghuang.rsintegration.util.CuriosAccess.stacks(player));
 
         for (ItemStack stack : all) {
             if (IBatchDelegate.matchesProducedItem(stack, expected)) {

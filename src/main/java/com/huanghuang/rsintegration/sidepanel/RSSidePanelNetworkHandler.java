@@ -178,19 +178,8 @@ public final class RSSidePanelNetworkHandler {
         collectBindingsFromStacks(player.getInventory().items, bindings);
         collectBindingsFromStacks(player.getInventory().offhand, bindings);
         collectBindingsFromStacks(player.getInventory().armor, bindings);
-        try {
-            var opt = top.theillusivec4.curios.api.CuriosApi.getCuriosInventory(player).resolve();
-            if (opt.isPresent()) {
-                for (var handler : opt.get().getCurios().values()) {
-                    var stacks = handler.getStacks();
-                    for (int s = 0; s < stacks.getSlots(); s++) {
-                        collectBindingsFromStacks(List.of(stacks.getStackInSlot(s)), bindings);
-                    }
-                }
-            }
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-SidePanel] reflection probe failed", e);
-        }
+        collectBindingsFromStacks(
+                com.huanghuang.rsintegration.util.CuriosAccess.stacks(player), bindings);
 
         UUID pid = player.getUUID();
         Map<String, MachineStatus> playerLast = lastPushedStatuses.computeIfAbsent(pid,
@@ -283,19 +272,8 @@ public final class RSSidePanelNetworkHandler {
             collectBindingsFromStacks(player.getInventory().items, bindings);
             collectBindingsFromStacks(player.getInventory().offhand, bindings);
             collectBindingsFromStacks(player.getInventory().armor, bindings);
-            try {
-                var opt = top.theillusivec4.curios.api.CuriosApi.getCuriosInventory(player).resolve();
-                if (opt.isPresent()) {
-                    for (var handler : opt.get().getCurios().values()) {
-                        var stacks = handler.getStacks();
-                        for (int s = 0; s < stacks.getSlots(); s++) {
-                            collectBindingsFromStacks(List.of(stacks.getStackInSlot(s)), bindings);
-                        }
-                    }
-                }
-            } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-SidePanel] reflection probe failed", e);
-        }
+            collectBindingsFromStacks(
+                    com.huanghuang.rsintegration.util.CuriosAccess.stacks(player), bindings);
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.debug("[RSI] Failed to collect bindings for sync", e);
         }
@@ -314,19 +292,8 @@ public final class RSSidePanelNetworkHandler {
             collectBindingsFromStacks(player.getInventory().items, bindings);
             collectBindingsFromStacks(player.getInventory().offhand, bindings);
             collectBindingsFromStacks(player.getInventory().armor, bindings);
-            try {
-                var opt = top.theillusivec4.curios.api.CuriosApi.getCuriosInventory(player).resolve();
-                if (opt.isPresent()) {
-                    for (var handler : opt.get().getCurios().values()) {
-                        var stacks = handler.getStacks();
-                        for (int s = 0; s < stacks.getSlots(); s++) {
-                            collectBindingsFromStacks(List.of(stacks.getStackInSlot(s)), bindings);
-                        }
-                    }
-                }
-            } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-SidePanel] reflection probe failed", e);
-        }
+            collectBindingsFromStacks(
+                    com.huanghuang.rsintegration.util.CuriosAccess.stacks(player), bindings);
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.debug("[RSI] Failed to build binding info", e);
         }

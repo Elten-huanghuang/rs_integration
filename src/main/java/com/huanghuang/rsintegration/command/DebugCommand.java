@@ -420,17 +420,7 @@ public final class DebugCommand {
         allStacks.addAll(player.getInventory().items);
         allStacks.addAll(player.getInventory().offhand);
         allStacks.addAll(player.getInventory().armor);
-        try {
-            var opt = top.theillusivec4.curios.api.CuriosApi.getCuriosInventory(player).resolve();
-            if (opt.isPresent()) {
-                for (var handler : opt.get().getCurios().values()) {
-                    var stacks = handler.getStacks();
-                    for (int s = 0; s < stacks.getSlots(); s++) {
-                        allStacks.add(stacks.getStackInSlot(s));
-                    }
-                }
-            }
-        } catch (Throwable e) { /* curios not present */ }
+        allStacks.addAll(com.huanghuang.rsintegration.util.CuriosAccess.stacks(player));
 
         int totalBindings = 0;
         for (ItemStack stack : allStacks) {
