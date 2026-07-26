@@ -53,6 +53,8 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.BooleanValue ENABLE_FARMERSRESPITE;
     public static ForgeConfigSpec.BooleanValue ENABLE_IRON_FURNACES;
     public static ForgeConfigSpec.BooleanValue ENABLE_DISTANT_WORLDS;
+    public static ForgeConfigSpec.BooleanValue ENABLE_LYCHEE;
+    public static ForgeConfigSpec.ConfigValue<List<? extends String>> LYCHEE_RECIPE_ALLOWLIST;
     public static ForgeConfigSpec.BooleanValue ALLOW_DISTANT_WORLDS_RESEARCH_BYPASS;
     public static ForgeConfigSpec.BooleanValue DISABLE_DISTANT_WORLDS_FIRON_FAILURE;
     public static ForgeConfigSpec.BooleanValue ALLOW_DISTANT_WORLDS_FUEL_AUTOMATION;
@@ -198,6 +200,58 @@ public final class RSIntegrationConfig {
         ENABLE_DISTANT_WORLDS = c
                 .comment("Enable RS integration with Distant Worlds Lithum Altar Firon recipes.")
                 .define("enableDistantWorlds", true);
+        ENABLE_LYCHEE = c
+                .comment("Enable virtual RS crafting for the supported Lychee item_inside recipes.",
+                        "The matching substrate bucket in any Resonance Disk slot is required but never consumed.")
+                .define("enableLychee", true);
+        LYCHEE_RECIPE_ALLOWLIST = c
+                .comment("Lychee recipe IDs allowed for virtual RS crafting.",
+                        "Only built-in deterministic powder-snow, Greek-fire, Dwarven-oil, and Deep-Aether-poison profiles are accepted.",
+                        "An empty list disables all Lychee virtual recipes.")
+                .defineListAllowEmpty("lycheeRecipeAllowlist", List.of(
+                                "crafttweaker:avaritia.diamond_lattice.1",
+                                "crafttweaker:avaritia.diamond_lattice.2",
+                                "crafttweaker:avaritia.diamond_lattice.3",
+                                "crafttweaker:avaritia.diamond_lattice.4",
+                                "crafttweaker:avaritia.diamond_lattice.6",
+                                "crafttweaker:avaritia.diamond_lattice.7",
+                                "crafttweaker:avaritia.diamond_lattice.8",
+                                "crafttweaker:avaritia.diamond_lattice.9",
+                                "crafttweaker:avaritia.diamond_lattice.10",
+                                "crafttweaker:avaritia.diamond_lattice.11",
+                                "crafttweaker:avaritia.diamond_lattice.12",
+                                "crafttweaker:eidolon.lead_ingot.1",
+                                "crafttweaker:eidolon.lead_ingot.2",
+                                "crafttweaker:eidolon.lead_ingot.3",
+                                "crafttweaker:eidolon.silver_ingot.1",
+                                "crafttweaker:eidolon.silver_ingot.2",
+                                "crafttweaker:eidolon.silver_ingot.3",
+                                "crafttweaker:minecraft.copper_block",
+                                "crafttweaker:minecraft.exposed_copper",
+                                "crafttweaker:minecraft.oxidized_copper",
+                                "crafttweaker:minecraft.weathered_copper",
+                                "crafttweaker:minecraft.sugar.1",
+                                "crafttweaker:minecraft.sugar.2",
+                                "crafttweaker:nameless_trinkets.dubious_dust",
+                                "crafttweaker:refinedstorage.advanced_processor",
+                                "crafttweaker:refinedstorage.basic_processor",
+                                "crafttweaker:refinedstorage.improved_processor",
+                                "crafttweaker:refinedstorage.processor_binding.1",
+                                "crafttweaker:refinedstorage.processor_binding.2",
+                                "crafttweaker:refinedstorage.silicon",
+                                "crafttweaker:avaritia.eternal_singularity",
+                                "crafttweaker:embers.lead_ingot.special",
+                                "crafttweaker:embers.silver_ingot.special",
+                                "crafttweaker:yuusha.epic_material",
+                                "crafttweaker:yuusha.legendary_material",
+                                "crafttweaker:yuusha.rare_material",
+                                "crafttweaker:yuusha.ultimate_material",
+                                "crafttweaker:yuusha.uncommon_material",
+                                "crafttweaker:deep_aether.sterling_aercloud",
+                                "crafttweaker:aether_redux.sentrite",
+                                "crafttweaker:hmag.evil_crystal_fragment"),
+                        value -> value instanceof String recipeId
+                                && ResourceLocation.tryParse(recipeId) != null);
         ALLOW_DISTANT_WORLDS_RESEARCH_BYPASS = c
                 .comment("Allow RS Integration to craft Distant Worlds Firon recipes without the",
                         "distant_worlds:incandescent_forever advancement.",

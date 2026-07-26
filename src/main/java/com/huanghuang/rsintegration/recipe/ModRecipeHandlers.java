@@ -54,6 +54,7 @@ public final class ModRecipeHandlers {
     };
 
     private static final List<ModRecipeHandler> HANDLERS = new ArrayList<>();
+    private static final List<ModRecipeHandler> RECIPE_SENSITIVE_HANDLERS = new ArrayList<>();
 
     static {
         HANDLERS.add(new GenericRecipeHandler());
@@ -69,6 +70,7 @@ public final class ModRecipeHandlers {
      */
     public static void register(ModRecipeHandler handler) {
         HANDLERS.add(handler);
+        if (!handler.cacheByRecipeClass()) RECIPE_SENSITIVE_HANDLERS.add(handler);
         HANDLER_CACHE.clear(); // Invalidate — new handler may cover previously-unknown classes
     }
 
@@ -78,6 +80,10 @@ public final class ModRecipeHandlers {
 
     @Nullable
     public static ModRecipeHandler handlerFor(Recipe<?> recipe) {
+        for (int i = RECIPE_SENSITIVE_HANDLERS.size() - 1; i >= 0; i--) {
+            ModRecipeHandler handler = RECIPE_SENSITIVE_HANDLERS.get(i);
+            if (handler.canHandle(recipe)) return handler;
+        }
         Class<?> clazz = recipe.getClass();
         ModRecipeHandler cached = HANDLER_CACHE.get(clazz);
         if (cached != null) return cached == NO_HANDLER ? null : cached;

@@ -258,6 +258,10 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
                     && delegate.getExpectedOutput() != null && !delegate.getExpectedOutput().isEmpty()
                     && (outputs == null || outputs.canCompleteWith(capturedSnapshot));
             if (observation.phase() == IBatchDelegate.CraftPhase.DONE || capturedWorldOutput) {
+                if (!delegate.validateExecutionContext(player)) {
+                    failureReason = "execution context changed before output publication";
+                    return ConcurrentNodeExecutor.Observation.FAILED;
+                }
                 doSucceed();
                 return ConcurrentNodeExecutor.Observation.SUCCEEDED;
             }

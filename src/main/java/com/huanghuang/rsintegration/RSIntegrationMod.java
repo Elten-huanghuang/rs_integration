@@ -27,6 +27,7 @@ import com.huanghuang.rsintegration.mods.goety.GoetyRSModule;
 import com.huanghuang.rsintegration.mods.immortalersdelight.ImmortalersDelightRSModule;
 import com.huanghuang.rsintegration.mods.ironfurnaces.IronFurnacesRSModule;
 import com.huanghuang.rsintegration.mods.malum.MalumRSModule;
+import com.huanghuang.rsintegration.mods.lychee.LycheeRSModule;
 import com.huanghuang.rsintegration.mods.botania.BotaniaRSModule;
 import com.huanghuang.rsintegration.mods.slashblade.SlashBladeRSModule;
 import com.huanghuang.rsintegration.mods.tacz.TaczRSModule;
@@ -163,7 +164,9 @@ public final class RSIntegrationMod {
             new ModuleEntry(ModIds.IRON_FURNACES, RSIntegrationConfig.ENABLE_IRON_FURNACES,
                     () -> IronFurnacesRSModule.INSTANCE),
             new ModuleEntry(ModIds.DISTANT_WORLDS, RSIntegrationConfig.ENABLE_DISTANT_WORLDS,
-                    () -> DistantWorldsRSModule.INSTANCE)
+                    () -> DistantWorldsRSModule.INSTANCE),
+            new ModuleEntry(ModIds.LYCHEE, RSIntegrationConfig.ENABLE_LYCHEE,
+                    () -> LycheeRSModule.INSTANCE)
     );
 
     public RSIntegrationMod() {
@@ -532,14 +535,16 @@ public final class RSIntegrationMod {
                 net.minecraftforge.common.MinecraftForge.EVENT_BUS.addListener(
                         (net.minecraftforge.client.event.ClientPlayerNetworkEvent.LoggingOut e) ->
                                 com.huanghuang.rsintegration.sidepanel.RSSidePanelClient.clearOnLogout()));
+        DistExecutor.safeRunWhenOn(Dist.CLIENT, () -> () ->
+                net.minecraftforge.common.MinecraftForge.EVENT_BUS.addListener(
+                        (net.minecraftforge.client.event.ClientPlayerNetworkEvent.LoggingOut e) ->
+                                com.huanghuang.rsintegration.resonance.bridge.ClientDiskData.clear()));
 
         // Resonance disk factory 閳?register with RS storage disk registry
-        if (RSIntegrationConfig.ENABLE_RS_PASSIVE_EFFECTS.get()) {
-            ResonanceNetworkHandler.register();
-            API.instance().getStorageDiskRegistry().add(
-                    ResonanceDiskWrapper.FACTORY_ID, new ResonanceDiskFactory());
-            MinecraftForge.EVENT_BUS.register(PassiveEffectEngine.class);
-        }
+        ResonanceNetworkHandler.register();
+        API.instance().getStorageDiskRegistry().add(
+                ResonanceDiskWrapper.FACTORY_ID, new ResonanceDiskFactory());
+        MinecraftForge.EVENT_BUS.register(PassiveEffectEngine.class);
 
         ContractValidation.validateAll();
 

@@ -7,6 +7,8 @@ package com.huanghuang.rsintegration.resonance.bridge;
 public final class ClientDiskData {
 
     private static int gemCount;
+    private static int lycheeCatalystMask;
+    private static long revision = -1L;
 
     private ClientDiskData() {}
 
@@ -16,5 +18,36 @@ public final class ClientDiskData {
 
     public static void setGemCount(int count) {
         gemCount = count;
+    }
+
+    public static boolean hasPowderSnowBucket() {
+        return hasLycheeCatalyst(
+                com.huanghuang.rsintegration.mods.lychee.LycheeVirtualCatalysts.POWDER_SNOW_BUCKET);
+    }
+
+    public static boolean hasLycheeCatalyst(int requiredMask) {
+        return com.huanghuang.rsintegration.mods.lychee.LycheeVirtualCatalysts
+                .hasCatalyst(lycheeCatalystMask, requiredMask);
+    }
+
+    public static int lycheeCatalystMask() {
+        return lycheeCatalystMask;
+    }
+
+    public static long revision() {
+        return revision;
+    }
+
+    public static void apply(int count, int catalystMask, long newRevision) {
+        if (newRevision < revision) return;
+        gemCount = count;
+        lycheeCatalystMask = catalystMask;
+        revision = newRevision;
+    }
+
+    public static void clear() {
+        gemCount = 0;
+        lycheeCatalystMask = 0;
+        revision = -1L;
     }
 }

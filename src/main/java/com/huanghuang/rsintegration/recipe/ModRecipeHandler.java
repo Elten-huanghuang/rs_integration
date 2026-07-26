@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.recipe;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import net.minecraft.core.RegistryAccess;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Recipe;
 
@@ -24,6 +25,17 @@ public interface ModRecipeHandler {
 
     /** Quick check: does this handler claim responsibility for the given recipe? */
     boolean canHandle(@Nonnull Recipe<?> recipe);
+
+    /** Whether {@link #canHandle} depends only on the recipe class. */
+    default boolean cacheByRecipeClass() {
+        return true;
+    }
+
+    /** Runtime requirements that are intentionally not consumed as ingredients. */
+    default boolean isAvailableForPlanning(@Nonnull Recipe<?> recipe,
+                                           @Nullable ServerPlayer player) {
+        return true;
+    }
 
     /** Extract the primary result item for display/indexing purposes. */
     @Nonnull

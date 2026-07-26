@@ -19,12 +19,17 @@ class AsyncCraftChainMachineDedupTest {
     @Test
     void exclusiveMultiExecutionNodeUsesOneSerialWorker() {
         assertTrue(AsyncCraftChain.shouldUseGraphOperationGroup(2, 4));
-        assertEquals(1, AsyncCraftChain.graphOperationWorkerCount(2, 4, 3, false));
+        assertEquals(1, AsyncCraftChain.graphOperationWorkerCount(2, 4, 3, false, false));
     }
 
     @Test
     void concurrentMultiExecutionNodeMayUseSeveralWorkers() {
-        assertEquals(2, AsyncCraftChain.graphOperationWorkerCount(2, 4, 3, true));
+        assertEquals(2, AsyncCraftChain.graphOperationWorkerCount(2, 4, 3, true, false));
+    }
+
+    @Test
+    void reusableGraphMaterialForcesOneSequentialWorker() {
+        assertEquals(1, AsyncCraftChain.graphOperationWorkerCount(8, 8, 4, true, true));
     }
 
     @Test

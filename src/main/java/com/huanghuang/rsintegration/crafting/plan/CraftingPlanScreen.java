@@ -926,7 +926,8 @@ public final class CraftingPlanScreen extends Screen {
                               boolean showFoldToggle) {
         boolean isMultiblock = step != null
                 && step.modType() != null
-                && step.modType() != ModType.GENERIC;
+                && step.modType() != ModType.GENERIC
+                && !step.modType().isVirtual();
         boolean isGrid = step != null && step.recipeWidth() > 0 && step.recipeHeight() > 0;
 
         int gridW = isGrid ? step.recipeWidth() * (GRID_SLOT + GRID_GAP) - GRID_GAP : 0;

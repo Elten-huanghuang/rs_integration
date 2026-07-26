@@ -100,6 +100,7 @@ public final class AltarCraftButtons {
 
     public static int hitTest(double mouseX, double mouseY) {
         for (int i = POSITIONS.size() - 1; i >= 0; i--) {
+            if (!isVisible(i)) continue;
             int[] pos = POSITIONS.get(i);
             if (mouseX >= pos[0] && mouseX < pos[0] + pos[2]
                     && mouseY >= pos[1] && mouseY < pos[1] + pos[3]) {
@@ -121,7 +122,8 @@ public final class AltarCraftButtons {
     }
 
     public static void triggerClick(int index) {
-        if (index >= 0 && index < HANDLERS.size() && HANDLERS.get(index) != null) {
+        if (index >= 0 && index < HANDLERS.size() && HANDLERS.get(index) != null
+                && isVisible(index)) {
             // Dedup: skip if same recipe was requested within 1.5s
             if (index < RECIPE_IDS.size()) {
                 ResourceLocation rid = RECIPE_IDS.get(index);
@@ -153,6 +155,16 @@ public final class AltarCraftButtons {
                 MOD_TYPES.get(index),
                 TOOLTIPS.get(index)
         );
+    }
+
+    public static boolean isVisible(int index) {
+        if (index < 0 || index >= MOD_TYPES.size()) return false;
+        ModType type = MOD_TYPES.get(index);
+        if (type == null || !"lychee_item_inside_virtual".equals(type.id())) return true;
+        int required = com.huanghuang.rsintegration.mods.lychee.LycheeVirtualRecipeHandler
+                .requiredCatalystMask(RECIPE_IDS.get(index));
+        return required != 0 && com.huanghuang.rsintegration.resonance.bridge.ClientDiskData
+                .hasLycheeCatalyst(required);
     }
 
     public record CraftButtonData(

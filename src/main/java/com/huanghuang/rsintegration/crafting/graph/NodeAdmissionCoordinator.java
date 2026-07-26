@@ -92,6 +92,22 @@ public final class NodeAdmissionCoordinator {
         materials.settle(admission.materialToken());
     }
 
+    /**
+     * Settle a committed admission once. Private-ledger nodes may externalize
+     * their checkout before physical completion, so their common completion
+     * callback must accept an admission that is already settled.
+     */
+    public boolean settleMaterialOnce(Admission admission) {
+        MaterialBroker.ReservationState state = materials.state(admission.materialToken());
+        if (state == MaterialBroker.ReservationState.COMMITTED) {
+            materials.settle(admission.materialToken());
+            return true;
+        }
+        if (state == MaterialBroker.ReservationState.SETTLED) return false;
+        throw new IllegalStateException("admission " + admission.nodeId()
+                + " cannot settle from " + state);
+    }
+
     public void refundCommittedMaterial(Admission admission) {
         materials.refund(admission.materialToken());
     }
