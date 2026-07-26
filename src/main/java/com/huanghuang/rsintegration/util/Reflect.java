@@ -60,12 +60,19 @@ public final class Reflect {
                     return s.get();
                 }
                 return raw;
-            } catch (Exception e) {
+            } catch (Exception | LinkageError e) {
                 LOG.debug("{} reflection probe failed", TAG, e);
             }
         }
         // Brute-force: return first non-synthetic Object field
-        for (var f : holder.getClass().getDeclaredFields()) {
+        Field[] holderFields;
+        try {
+            holderFields = holder.getClass().getDeclaredFields();
+        } catch (LinkageError e) {
+            LOG.warn("{} Cannot inspect holder fields: {}", TAG, e.toString());
+            return null;
+        }
+        for (var f : holderFields) {
             if (java.lang.reflect.Modifier.isStatic(f.getModifiers())) continue;
             if (f.isSynthetic()) continue;
             if (f.getType() == Object.class) {
@@ -89,7 +96,7 @@ public final class Reflect {
     public static Optional<Class<?>> forName(String className) {
         try {
             return Optional.of(Class.forName(className));
-        } catch (ClassNotFoundException e) {
+        } catch (ClassNotFoundException | LinkageError e) {
             LOG.debug("{} Class not found: {}", TAG, className);
             return Optional.empty();
         }
@@ -203,6 +210,11 @@ public final class Reflect {
                 return Optional.of(f);
             } catch (NoSuchFieldException e) {
                 scan = scan.getSuperclass();
+            } catch (LinkageError e) {
+                fieldCache.put(key, Optional.empty());
+                LOG.warn("{} Cannot inspect fields for {} without unavailable side-only class: {}",
+                        TAG, scan.getName(), e.toString());
+                return Optional.empty();
             }
         }
         fieldCache.put(key, Optional.empty());
@@ -240,9 +252,19 @@ public final class Reflect {
                         }
                     } catch (NoSuchMethodException ex) {
                         LOG.debug("{} reflection probe failed", TAG, ex);
+                    } catch (LinkageError ex) {
+                        methodCache.put(key, Optional.empty());
+                        LOG.warn("{} Cannot inspect relaxed method signature for {}: {}",
+                                TAG, scan.getName(), ex.toString());
+                        return null;
                     }
                 }
                 scan = scan.getSuperclass();
+            } catch (LinkageError e) {
+                methodCache.put(key, Optional.empty());
+                LOG.warn("{} Cannot inspect methods for {} without unavailable side-only class: {}",
+                        TAG, scan.getName(), e.toString());
+                return null;
             }
         }
 
@@ -269,7 +291,14 @@ public final class Reflect {
     private static Method findAssignable(Class<?> clazz, String name, Class<?>[] paramTypes) {
         Class<?> scan = clazz;
         while (scan != null && scan != Object.class) {
-            for (Method m : scan.getDeclaredMethods()) {
+            Method[] methods;
+            try {
+                methods = scan.getDeclaredMethods();
+            } catch (LinkageError e) {
+                LOG.warn("{} Cannot scan methods for {}: {}", TAG, scan.getName(), e.toString());
+                return null;
+            }
+            for (Method m : methods) {
                 if (!m.getName().equals(name)) continue;
                 Class<?>[] declared = m.getParameterTypes();
                 if (declared.length != paramTypes.length) continue;

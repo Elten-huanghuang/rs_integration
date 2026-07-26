@@ -183,6 +183,12 @@ public class RecipeGuiLayoutsMixin {
                 skippedNoRecipe++;
                 continue;
             }
+            if (recipeClassName.equals("com.sammy.malum.common.recipe.FavorOfTheVoidRecipe")
+                    && !com.huanghuang.rsintegration.mods.malum
+                    .MalumVoidFavorVirtualRecipeHandler.isSupported(recipe)) {
+                skippedNoRecipe++;
+                continue;
+            }
             boolean isFa = recipeClassName.startsWith("com.stal111.forbidden_arcanus");
             boolean isFaOrTlm = isFa
                     || recipeClassName.startsWith("com.github.tartaricacid.touhoulittlemaid.");

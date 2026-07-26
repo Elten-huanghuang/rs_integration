@@ -1,6 +1,10 @@
 package com.huanghuang.rsintegration.mods.wizardsreborn;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.mixin.wizardsreborn.ArcaneIteratorBlockEntityAccessor;
+import com.huanghuang.rsintegration.mixin.wizardsreborn.ArcaneWorkbenchBlockEntityAccessor;
+import com.huanghuang.rsintegration.mixin.wizardsreborn.CrystalBlockEntityAccessor;
+import com.huanghuang.rsintegration.mixin.wizardsreborn.WissenCrystallizerBlockEntityAccessor;
 import com.huanghuang.rsintegration.util.Reflect;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -18,6 +22,27 @@ public final class WRContainerHelper {
 
     private WRContainerHelper() {}
 
+    public static boolean invokeWissenWandFunction(Object be) {
+        try {
+            if (be instanceof ArcaneWorkbenchBlockEntityAccessor accessor) {
+                accessor.rsi$invokeWissenWandFunction();
+            } else if (be instanceof ArcaneIteratorBlockEntityAccessor accessor) {
+                accessor.rsi$invokeWissenWandFunction();
+            } else if (be instanceof WissenCrystallizerBlockEntityAccessor accessor) {
+                accessor.rsi$invokeWissenWandFunction();
+            } else if (be instanceof CrystalBlockEntityAccessor accessor) {
+                accessor.rsi$invokeWissenWandFunction();
+            } else {
+                Reflect.getMethodOrThrow(be.getClass(), "wissenWandFunction", "wissenWandFunction")
+                        .invoke(be);
+            }
+            return true;
+        } catch (Exception | LinkageError e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-WR] Cannot invoke wissenWandFunction safely", e);
+            return false;
+        }
+    }
+
     // ── Forge capability ─────────────────────────────────────────
 
     @Nullable
@@ -34,7 +59,7 @@ public final class WRContainerHelper {
     public static net.minecraft.world.SimpleContainer getLiveSimpleContainer(Object be) {
         Class<?> clazz = be.getClass();
         while (clazz != null && clazz != Object.class) {
-            for (java.lang.reflect.Field field : clazz.getDeclaredFields()) {
+            for (java.lang.reflect.Field field : declaredFieldsOrEmpty(clazz)) {
                 if (net.minecraft.world.SimpleContainer.class.isAssignableFrom(field.getType())) {
                     field.setAccessible(true);
                     try {
@@ -49,6 +74,17 @@ public final class WRContainerHelper {
         return null;
     }
 
+    private static java.lang.reflect.Field[] declaredFieldsOrEmpty(Class<?> type) {
+        try {
+            return type.getDeclaredFields();
+        } catch (LinkageError e) {
+            RSIntegrationMod.LOGGER.warn(
+                    "[RSI-WR] Skipping fields on {} because a side-only type is unavailable: {}",
+                    type.getName(), e.toString());
+            return new java.lang.reflect.Field[0];
+        }
+    }
+
     @Nullable
     public static net.minecraft.world.SimpleContainer getSimpleContainer(Object be) {
         Class<?> clazz = be.getClass();
@@ -59,7 +95,7 @@ public final class WRContainerHelper {
                 return (net.minecraft.world.SimpleContainer) m.invoke(be);
             } catch (NoSuchMethodException e) {
                 clazz = clazz.getSuperclass();
-            } catch (Exception e) {
+            } catch (Exception | LinkageError e) {
                 RSIntegrationMod.LOGGER.warn("[RSI-WR] Container reflection failed", e);
                 return null;
             }
@@ -236,7 +272,7 @@ public final class WRContainerHelper {
         Class<?> clazz = bc;
         int count = 0;
         while (clazz != null && clazz != Object.class && count < 3) {
-            for (java.lang.reflect.Field field : clazz.getDeclaredFields()) {
+            for (java.lang.reflect.Field field : declaredFieldsOrEmpty(clazz)) {
                 if (sb.length() > 0) sb.append(", ");
                 sb.append(field.getName()).append(':').append(field.getType().getSimpleName());
             }

@@ -8,6 +8,7 @@ public final class ClientDiskData {
 
     private static int gemCount;
     private static int lycheeCatalystMask;
+    private static int abilityMask;
     private static long revision = -1L;
 
     private ClientDiskData() {}
@@ -34,20 +35,31 @@ public final class ClientDiskData {
         return lycheeCatalystMask;
     }
 
+    public static boolean hasAbility(int ability) {
+        return (abilityMask & ability) == ability;
+    }
+
+    public static int abilityMask() {
+        return abilityMask;
+    }
+
     public static long revision() {
         return revision;
     }
 
-    public static void apply(int count, int catalystMask, long newRevision) {
+    public static void apply(int count, int catalystMask, int newAbilityMask,
+                             long newRevision) {
         if (newRevision < revision) return;
         gemCount = count;
         lycheeCatalystMask = catalystMask;
+        abilityMask = newAbilityMask;
         revision = newRevision;
     }
 
     public static void clear() {
         gemCount = 0;
         lycheeCatalystMask = 0;
+        abilityMask = 0;
         revision = -1L;
     }
 }

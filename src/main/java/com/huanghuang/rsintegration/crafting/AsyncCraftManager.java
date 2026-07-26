@@ -135,7 +135,7 @@ public final class AsyncCraftManager {
         for (AsyncCraftChain chain : snapshot) {
             try {
                 chain.abortForServerStop();
-            } catch (Exception e) {
+            } catch (Exception | LinkageError e) {
                 RSIntegrationMod.LOGGER.error("[RSI-AsyncMgr] Failed to abort chain during shutdown for player {}",
                         chain.getPlayerId(), e);
             }
@@ -189,7 +189,7 @@ public final class AsyncCraftManager {
                 try {
                     chain.abort("Internal error: " + msg,
                             Component.translatable("rsi.async.abort.internal_error", msg));
-                } catch (Exception terminationError) {
+                } catch (Exception | LinkageError terminationError) {
                     RSIntegrationMod.LOGGER.error(
                             "[RSI-AsyncMgr] Chain termination also failed; keeping craft {} registered for audit",
                             chain.getCraftId(), terminationError);
@@ -201,7 +201,7 @@ public final class AsyncCraftManager {
         }
         for (Runnable callback; (callback = completionQueue.poll()) != null;) {
             try { callback.run(); }
-            catch (RuntimeException e) { RSIntegrationMod.LOGGER.error("[RSI-AsyncMgr] Completion callback failed", e); }
+            catch (RuntimeException | LinkageError e) { RSIntegrationMod.LOGGER.error("[RSI-AsyncMgr] Completion callback failed", e); }
         }
         PerformanceMonitor.recordTick(
                 System.nanoTime() - tickStart);

@@ -98,7 +98,7 @@ public final class EidolonCraftPacket {
         }        context.enqueueWork(() -> {
             try {
                 tryCraft(player, packet.recipeId, packet.dim, packet.pos);
-            } catch (Exception e) {
+            } catch (Exception | LinkageError e) {
                 RSIntegrationMod.LOGGER.error("[RSI-Eidolon] Crucible craft failed for {}:", packet.recipeId, e);
                 player.sendSystemMessage(Component.translatable("rsi.eidolon.error.craft_failed"));
             }

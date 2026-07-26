@@ -15,6 +15,7 @@ import java.util.List;
 public final class MalumRSModule implements IModIntegration {
 
     public static final MalumRSModule INSTANCE = new MalumRSModule();
+    public static final String VOID_FAVOR_TYPE_ID = "malum_void_favor_virtual";
 
     private MalumRSModule() {}
 
@@ -45,6 +46,9 @@ public final class MalumRSModule implements IModIntegration {
                 new String[]{"malum"},
                 new String[]{"malum"},
                 ModType.delegateSupplier("com.huanghuang.rsintegration.mods.malum.MalumBatchDelegate"));
+        ModType.registerVirtual(VOID_FAVOR_TYPE_ID,
+                new String[]{"com.sammy.malum.common.recipe.FavorOfTheVoidRecipe"},
+                com.huanghuang.rsintegration.crafting.batch.GenericBatchDelegate::new);
         ModType.configureJei("malum",
                 new String[][]{{"malum:spirit_infusion", "spirit_altar"},
                         {"malum:spirit_focusing", "spirit_crucible"},
@@ -56,6 +60,10 @@ public final class MalumRSModule implements IModIntegration {
                         {"malum:runic_workbench", "runic_workbench"}},
                 new String[][]{{"com.sammy.malum.common.recipe.RunicWorkbenchRecipe", "malum_runic_workbench"}},
                 null);
+        ModType.configureJei(VOID_FAVOR_TYPE_ID,
+                new String[][]{{"malum:weeping_well", VOID_FAVOR_TYPE_ID}},
+                new String[][]{{"com.sammy.malum.common.recipe.FavorOfTheVoidRecipe", VOID_FAVOR_TYPE_ID}},
+                "gui.rs_integration.jei.malum_void_favor_virtual_craft");
     }
 
     @Override
@@ -87,6 +95,7 @@ public final class MalumRSModule implements IModIntegration {
     @Override
     public void registerRecipeHandler() {
         ModRecipeHandlers.register(new MalumRecipeHandler());
+        ModRecipeHandlers.register(new MalumVoidFavorVirtualRecipeHandler());
     }
 
     @Override

@@ -81,7 +81,7 @@ public final class FaCraftPacket {
         }        context.enqueueWork(() -> {
             try {
                 tryCraft(player, packet.ritualId, packet.dim, packet.pos);
-            } catch (Exception e) {
+            } catch (Exception | LinkageError e) {
                 RSIntegrationMod.LOGGER.error("[RSI-FA] Ritual craft failed for {}:", packet.ritualId, e);
                 player.sendSystemMessage(Component.translatable("rsi.fa.error.craft_failed"));
             }
