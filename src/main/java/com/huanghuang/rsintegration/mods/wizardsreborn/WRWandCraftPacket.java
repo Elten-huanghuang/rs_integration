@@ -13,6 +13,9 @@ import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.MaterialSources;
+import com.huanghuang.rsintegration.mixin.wizardsreborn.ArcaneIteratorBlockEntityAccessor;
+import com.huanghuang.rsintegration.mixin.wizardsreborn.ArcaneWorkbenchBlockEntityAccessor;
+import com.huanghuang.rsintegration.mixin.wizardsreborn.WissenCrystallizerBlockEntityAccessor;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.reflection.probes.WRReflection;
 import com.refinedmods.refinedstorage.api.network.INetwork;
@@ -121,7 +124,7 @@ public final class WRWandCraftPacket {
                         packet.recipeId, be.getClass().getName());
                 player.sendSystemMessage(Component.translatable("rsi.generic.error.unsupported_machine", be.getClass().getName()));
             }
-            } catch (Exception e) {
+            } catch (Exception | LinkageError e) {
                 RSIntegrationMod.LOGGER.error("[RSI-WR] Craft failed for recipe {}:", packet.recipeId, e);
                 player.sendSystemMessage(Component.translatable("rsi.wr.error.parse_failed"));
             }
@@ -206,7 +209,9 @@ public final class WRWandCraftPacket {
             }
 
             try {
-                rsi$getMethod(be.getClass(), "wissenWandFunction").invoke(be);
+                if (!WRContainerHelper.invokeWissenWandFunction(be)) {
+                    throw new IllegalStateException("wissenWandFunction is unavailable");
+                }
                 rsi$syncBlockEntity(be);
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.warn("[RSI-WR] wissenWandFunction invoke failed, rolling back", e);
@@ -301,7 +306,9 @@ public final class WRWandCraftPacket {
             }
 
             try {
-                rsi$getMethod(be.getClass(), "wissenWandFunction").invoke(be);
+                if (!WRContainerHelper.invokeWissenWandFunction(be)) {
+                    throw new IllegalStateException("wissenWandFunction is unavailable");
+                }
                 rsi$syncBlockEntity(be);
             } catch (Exception ex) {
                 for (int i = 0; i < templates.size(); i++) {
@@ -331,9 +338,11 @@ public final class WRWandCraftPacket {
 
         net.minecraftforge.items.ItemStackHandler itemHandler;
         try {
-            itemHandler = (net.minecraftforge.items.ItemStackHandler) be.getClass()
-                    .getField("itemHandler").get(be);
-        } catch (Exception e) {
+            itemHandler = be instanceof ArcaneWorkbenchBlockEntityAccessor accessor
+                    ? accessor.rsi$getItemHandler()
+                    : (net.minecraftforge.items.ItemStackHandler) be.getClass()
+                            .getField("itemHandler").get(be);
+        } catch (Exception | LinkageError e) {
             RSIntegrationMod.LOGGER.warn("[RSI-WR] Failed to get itemHandler from ArcaneWorkbench", e);
             player.sendSystemMessage(Component.translatable("rsi.wr.error.cant_access_inventory"));
             return false;
@@ -398,7 +407,9 @@ public final class WRWandCraftPacket {
             }
 
             try {
-                rsi$getMethod(be.getClass(), "wissenWandFunction").invoke(be);
+                if (!WRContainerHelper.invokeWissenWandFunction(be)) {
+                    throw new IllegalStateException("wissenWandFunction is unavailable");
+                }
                 rsi$syncBlockEntity(be);
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.warn("[RSI-WR] wissenWandFunction invoke failed, rolling back", e);
@@ -548,7 +559,9 @@ public final class WRWandCraftPacket {
             }
 
             try {
-                rsi$getMethod(be.getClass(), "wissenWandFunction").invoke(be);
+                if (!WRContainerHelper.invokeWissenWandFunction(be)) {
+                    throw new IllegalStateException("wissenWandFunction is unavailable");
+                }
                 rsi$syncBlockEntity(be);
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.warn("Failed to invoke wissenWandFunction on CrystalBlockEntity", e);
@@ -729,11 +742,20 @@ public final class WRWandCraftPacket {
     }
 
     private static int readCurrentWissen(BlockEntity be) {
+        if (be instanceof ArcaneWorkbenchBlockEntityAccessor accessor) {
+            return accessor.rsi$getWissen();
+        }
+        if (be instanceof ArcaneIteratorBlockEntityAccessor accessor) {
+            return accessor.rsi$getWissen();
+        }
+        if (be instanceof WissenCrystallizerBlockEntityAccessor accessor) {
+            return accessor.rsi$getWissen();
+        }
         try {
             java.lang.reflect.Method m = Reflect.findMethod(
                     be.getClass(), "getWissen", new Class<?>[0]);
             if (m != null) return (int) m.invoke(be);
-        } catch (Exception e) {
+        } catch (Exception | LinkageError e) {
             RSIntegrationMod.LOGGER.debug("[RSI-WR] Failed to read current wissen", e);
         }
         // Fallback: try reading the public `wissen` field directly

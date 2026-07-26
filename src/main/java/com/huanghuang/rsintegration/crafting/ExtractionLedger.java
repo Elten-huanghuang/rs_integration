@@ -166,6 +166,58 @@ public final class ExtractionLedger implements AutoCloseable {
         return ItemStack.EMPTY;
     }
 
+    /**
+     * Reserve one exact item/NBT identity across the RS network and the player's
+     * inventory. A graph requirement represents one logical stack, but its
+     * physical items may be split between both sources.
+     */
+    @Nonnull
+    public ItemStack reserveExactAcrossNetworkAndInventory(
+            @Nonnull ItemStack template, int count,
+            @Nullable INetwork network, @Nonnull ServerPlayer player) {
+        requireState(State.IDLE, State.RESERVING);
+        if (count <= 0 || template.isEmpty()) return ItemStack.EMPTY;
+        if (state == State.IDLE) transition(State.RESERVING);
+
+        int networkAvailable = network != null
+                ? countExactAvailableInNetwork(network, template) : 0;
+        int inventoryAvailable = countExactAvailableInInventory(player, template);
+        int[] allocation = allocateExactAcrossSources(count, networkAvailable, inventoryAvailable);
+        if (allocation.length == 0) return ItemStack.EMPTY;
+
+        int mark = reservationMark();
+        Ingredient ingredient = Ingredient.of(template.copyWithCount(1));
+        if (allocation[0] > 0) {
+            if (network == null
+                    || !reserveExactAvailability(network, template, allocation[0], pendingNet)) {
+                cancelReservationsSince(mark);
+                return ItemStack.EMPTY;
+            }
+            ItemStack reserved = template.copyWithCount(allocation[0]);
+            recordEntry(new Entry(Source.NETWORK, ingredient, reserved,
+                    null, null, null, network, true));
+        }
+        if (allocation[1] > 0) {
+            if (!reserveExactInventoryAvailability(player, template, allocation[1])) {
+                cancelReservationsSince(mark);
+                return ItemStack.EMPTY;
+            }
+            ItemStack reserved = template.copyWithCount(allocation[1]);
+            recordEntry(new Entry(Source.PLAYER_INVENTORY, ingredient, reserved,
+                    null, null, null, null, true));
+        }
+        return template.copyWithCount(count);
+    }
+
+    static int[] allocateExactAcrossSources(int needed, int networkAvailable, int inventoryAvailable) {
+        if (needed <= 0 || networkAvailable < 0 || inventoryAvailable < 0
+                || (long) networkAvailable + inventoryAvailable < needed) {
+            return new int[0];
+        }
+        int fromNetwork = Math.min(needed, networkAvailable);
+        return new int[]{fromNetwork, needed - fromNetwork};
+    }
+
     @Nonnull
     public ItemStack reserveFromNetwork(@Nonnull Ingredient ingredient, int count, @Nonnull INetwork network) {
         requireState(State.IDLE, State.RESERVING);
@@ -643,7 +695,26 @@ public final class ExtractionLedger implements AutoCloseable {
         }
     }
 
-    private boolean reserveExactInventoryAvailability(ServerPlayer player, ItemStack template, int needed) {
+    private int countExactAvailableInNetwork(INetwork network, ItemStack template) {
+        try {
+            var cache = network.getItemStorageCache();
+            if (cache == null) return 0;
+            int available = 0;
+            for (var entry : cache.getList().getStacks()) {
+                ItemStack stored = entry.getStack();
+                if (!stored.isEmpty() && ItemStack.isSameItemSameTags(stored, template)) {
+                    available += stored.getCount();
+                }
+            }
+            return Math.max(0, available - pendingNet.getOrDefault(
+                    CraftingResolver.StackKey.of(template, true), 0));
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Ledger] Error counting exact network stack", e);
+            return 0;
+        }
+    }
+
+    private int countExactAvailableInInventory(ServerPlayer player, ItemStack template) {
         CraftingResolver.StackKey key = CraftingResolver.StackKey.of(template, true);
         int available = countExact(player.getInventory().items, template)
                 + countExact(player.getInventory().offhand, template)
@@ -654,7 +725,12 @@ public final class ExtractionLedger implements AutoCloseable {
                 if (ItemStack.isSameItemSameTags(stored, template)) available += stored.getCount();
             }
         }
-        available -= pendingInv.getOrDefault(key, 0);
+        return Math.max(0, available - pendingInv.getOrDefault(key, 0));
+    }
+
+    private boolean reserveExactInventoryAvailability(ServerPlayer player, ItemStack template, int needed) {
+        CraftingResolver.StackKey key = CraftingResolver.StackKey.of(template, true);
+        int available = countExactAvailableInInventory(player, template);
         if (available < needed) return false;
         pendingInv.merge(key, needed, Integer::sum);
         return true;

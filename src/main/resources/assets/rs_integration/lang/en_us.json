@@ -108,6 +108,7 @@
   "gui.rs_integration.jei.vanilla_machine_craft": "Remote Craft via Vanilla Machine",
   "gui.rs_integration.jei.rs_auto_craft": "RS Auto-Craft (recursive)",
   "gui.rs_integration.jei.lychee_virtual_craft": "Craft virtually with Resonance Disk substrate",
+  "gui.rs_integration.jei.malum_void_favor_virtual_craft": "Perform void transmutation through the Resonance Disk",
   "rsi.generic.error.execution_context": "Recipe requirements are no longer available: %s",
   "rsi.async.abort.execution_context": "A virtual recipe requirement was removed before completion",
   "gui.rs_integration.jei.ftb_quest_submit": "Recursive Craft and Submit Quest",
@@ -344,6 +345,7 @@
   "rsi.batch.mod.smithing": "Smithing Table",
   "rsi.batch.mod.generic": "RS Auto-Craft",
   "rsi.batch.mod.lychee_item_inside_virtual": "Lychee Item-Inside Virtual Crafting",
+  "rsi.batch.mod.malum_void_favor_virtual": "Resonance Void Transmutation",
   "rsi.tlm.error.altar_not_found": "Maid Altar not found",
   "rsi.tlm.error.multiblock_incomplete": "Maid Altar multiblock structure incomplete",
   "rsi.tlm.error.no_power": "Cannot access P-Power",
@@ -752,6 +754,8 @@
   "rsi.resonance_backpack.no_disk": "No resonance disk in network",
 
   "rsi.resonance.duplicate_disk": "§cThis RS network already has a resonance disk. Only one resonance disk is allowed per network.",
+  "rsi.resonance.void_favor_unlocked": "§5The Resonance Disk has inherited the Weeping Well's Favor of the Void",
+  "rsi.resonance.void_favor_no_disk": "§cNo Resonance Disk was found in the current RS network",
 
   "rsi.autoeat.mode.diversity": "Diversity",
   "rsi.autoeat.mode.stack": "Stack Eat",

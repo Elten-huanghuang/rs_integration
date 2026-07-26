@@ -12,6 +12,10 @@ import com.huanghuang.rsintegration.reflection.probes.WRReflection;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.MaterialSources;
+import com.huanghuang.rsintegration.mixin.wizardsreborn.ArcaneWorkbenchBlockEntityAccessor;
+import com.huanghuang.rsintegration.mixin.wizardsreborn.ArcaneIteratorBlockEntityAccessor;
+import com.huanghuang.rsintegration.mixin.wizardsreborn.CrystalBlockEntityAccessor;
+import com.huanghuang.rsintegration.mixin.wizardsreborn.WissenCrystallizerBlockEntityAccessor;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.recipe.WRRecipeHandler;
@@ -247,7 +251,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
                     return false;
                 }
                 try {
-                    pedestalRefs = (List<?>) Reflect.getMethodOrThrow(be.getClass(), "getPedestals", "getPedestals").invoke(be);
+                    pedestalRefs = getIteratorPedestals();
                 } catch (Exception e) {
                     RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] Failed to get iterator pedestals", e);
                     return false;
@@ -326,6 +330,15 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
      */
     private boolean isMachineCrafting() {
         if (be == null) return false;
+        if (be instanceof ArcaneWorkbenchBlockEntityAccessor accessor) {
+            return accessor.rsi$isCraftStarted() || accessor.rsi$getWissenInCraft() > 0;
+        }
+        if (be instanceof ArcaneIteratorBlockEntityAccessor accessor) {
+            return accessor.rsi$isCraftStarted() || accessor.rsi$getWissenInCraft() > 0;
+        }
+        if (be instanceof WissenCrystallizerBlockEntityAccessor accessor) {
+            return accessor.rsi$isCraftStarted() || accessor.rsi$getWissenInCraft() > 0;
+        }
         Class<?> bc = be.getClass();
         // Boolean flags — set during processing
         for (String name : new String[]{"startCraft", "isCrafting", "crafting", "active", "workStarted"}) {
@@ -358,11 +371,15 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
     private boolean validateCrystalSetup(ServerPlayer player, ServerLevel level) {
         // [Step 1] Not already running a ritual
         try {
-            java.lang.reflect.Field f = Reflect.findField(be.getClass(), "startRitual").orElse(null);
-            if (f != null) {
-                f.setAccessible(true);
-                if (f.getBoolean(be)) {
+            if (be instanceof CrystalBlockEntityAccessor accessor) {
+                if (accessor.rsi$isRitualStarted()) {
                     RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] [step 1/6] startRitual is true — ritual already running");
+                    player.sendSystemMessage(Component.translatable("rsi.wr.error.ritual_already_running"));
+                    return false;
+                }
+            } else {
+                java.lang.reflect.Field f = Reflect.findField(be.getClass(), "startRitual").orElse(null);
+                if (f != null && f.getBoolean(be)) {
                     player.sendSystemMessage(Component.translatable("rsi.wr.error.ritual_already_running"));
                     return false;
                 }
@@ -372,10 +389,11 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
 
         // [Step 2] Cooldown expired
         try {
-            java.lang.reflect.Field f = Reflect.findField(be.getClass(), "cooldown").orElse(null);
-            if (f != null) {
-                f.setAccessible(true);
-                int cd = f.getInt(be);
+            Integer cooldown = be instanceof CrystalBlockEntityAccessor accessor
+                    ? accessor.rsi$getCooldown()
+                    : Reflect.getIntField(be, "cooldown").stream().boxed().findFirst().orElse(null);
+            if (cooldown != null) {
+                int cd = cooldown;
                 if (cd > 0) {
                     RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] [step 2/6] cooldown={} — still cooling down", cd);
                     player.sendSystemMessage(Component.translatable("rsi.wr.error.crystal_cooldown"));
@@ -578,7 +596,9 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
 
         craftStarted = true;
         try {
-            Reflect.getMethodOrThrow(be.getClass(), "wissenWandFunction", "wissenWandFunction").invoke(be);
+            if (!WRContainerHelper.invokeWissenWandFunction(be)) {
+                throw new IllegalStateException("wissenWandFunction is unavailable");
+            }
             syncBlockEntity(be);
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] wissenWandFunction invoke failed, rolling back", e);
@@ -593,7 +613,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
     private boolean tryStartArcaneIterator(ServerPlayer player, List<Ingredient> ingredients) {
         List<?> pedestals;
         try {
-            pedestals = (List<?>) Reflect.getMethodOrThrow(be.getClass(), "getPedestals", "getPedestals").invoke(be);
+            pedestals = getIteratorPedestals();
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] Failed to get pedestals from ArcaneIterator", e);
             return false;
@@ -707,7 +727,9 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         iteratorCraftProcessing = false;
         iteratorCenterBefore = getContainerItem(pedestals.get(0), 0).copy();
         try {
-            Reflect.getMethodOrThrow(be.getClass(), "wissenWandFunction", "wissenWandFunction").invoke(be);
+            if (!WRContainerHelper.invokeWissenWandFunction(be)) {
+                throw new IllegalStateException("wissenWandFunction is unavailable");
+            }
             syncBlockEntity(be);
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] wissenWandFunction invoke failed, rolling back", e);
@@ -738,7 +760,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         // Re-fetch pedestals (positional cube scan is stable; reuse cache on miss).
         List<?> pedestals = pedestalRefs;
         try {
-            Object refetched = Reflect.getMethodOrThrow(be.getClass(), "getPedestals", "getPedestals").invoke(be);
+            Object refetched = getIteratorPedestals();
             if (refetched instanceof List<?> l && l.size() > iteratorSideIngredients.size()) {
                 pedestals = l;
                 this.pedestalRefs = l;
@@ -824,7 +846,9 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         stallTicks = 0;
         waitTicks = 0;
         try {
-            Reflect.getMethodOrThrow(be.getClass(), "wissenWandFunction", "wissenWandFunction").invoke(be);
+            if (!WRContainerHelper.invokeWissenWandFunction(be)) {
+                throw new IllegalStateException("wissenWandFunction is unavailable");
+            }
             syncBlockEntity(be);
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] wissenWandFunction re-trigger failed", e);
@@ -846,16 +870,31 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
     /** Read the current center-pedestal book (index 0 of getPedestals / getMainPedestal). */
     private ItemStack readIteratorCenterBook() {
         try {
-            java.lang.reflect.Method getMain = Reflect.findMethod(be.getClass(), "getMainPedestal", new Class<?>[0]);
-            if (getMain != null) {
-                Object mainPed = getMain.invoke(be);
-                if (mainPed != null) return getContainerItem(mainPed, 0);
-            }
+            Object mainPed = getIteratorMainPedestal();
+            if (mainPed != null) return getContainerItem(mainPed, 0);
         } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] center book probe failed", e); }
         if (pedestalRefs != null && !pedestalRefs.isEmpty()) {
             try { return getContainerItem(pedestalRefs.get(0), 0); } catch (Exception e) { /* ignore */ }
         }
         return ItemStack.EMPTY;
+    }
+
+    private List<?> getIteratorPedestals() throws Exception {
+        if (be instanceof ArcaneIteratorBlockEntityAccessor accessor) {
+            return accessor.rsi$getPedestals();
+        }
+        return (List<?>) Reflect.getMethodOrThrow(
+                be.getClass(), "getPedestals", "getPedestals").invoke(be);
+    }
+
+    @Nullable
+    private Object getIteratorMainPedestal() throws Exception {
+        if (be instanceof ArcaneIteratorBlockEntityAccessor accessor) {
+            return accessor.rsi$getMainPedestal();
+        }
+        java.lang.reflect.Method method = Reflect.findMethod(
+                be.getClass(), "getMainPedestal", new Class<?>[0]);
+        return method != null ? method.invoke(be) : null;
     }
 
     private boolean tryStartArcaneWorkbench(ServerPlayer player, List<Ingredient> ingredients) {
@@ -908,7 +947,9 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
 
         craftStarted = true;
         try {
-            Reflect.getMethodOrThrow(be.getClass(), "wissenWandFunction", "wissenWandFunction").invoke(be);
+            if (!WRContainerHelper.invokeWissenWandFunction(be)) {
+                throw new IllegalStateException("wissenWandFunction is unavailable");
+            }
             syncBlockEntity(be);
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] wissenWandFunction invoke failed, rolling back", e);
@@ -1011,7 +1052,9 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
 
         craftStarted = true;
         try {
-            Reflect.getMethodOrThrow(be.getClass(), "wissenWandFunction", "wissenWandFunction").invoke(be);
+            if (!WRContainerHelper.invokeWissenWandFunction(be)) {
+                throw new IllegalStateException("wissenWandFunction is unavailable");
+            }
             syncBlockEntity(be);
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] Failed to invoke wissenWandFunction on crystal block", e);
@@ -1122,7 +1165,9 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
 
         craftStarted = true;
         try {
-            Reflect.getMethodOrThrow(be.getClass(), "wissenWandFunction", "wissenWandFunction").invoke(be);
+            if (!WRContainerHelper.invokeWissenWandFunction(be)) {
+                throw new IllegalStateException("wissenWandFunction is unavailable");
+            }
             syncBlockEntity(be);
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] wissenWandFunction invoke failed, rolling back", e);
@@ -1136,7 +1181,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         if (!checkWissen()) return false;
         List<?> pedestals;
         try {
-            pedestals = (List<?>) Reflect.getMethodOrThrow(be.getClass(), "getPedestals", "getPedestals").invoke(be);
+            pedestals = getIteratorPedestals();
         } catch (Exception e) {
             return false;
         }
@@ -1166,7 +1211,9 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         craftStarted = true;
         iteratorCraftProcessing = false;
         try {
-            Reflect.getMethodOrThrow(be.getClass(), "wissenWandFunction", "wissenWandFunction").invoke(be);
+            if (!WRContainerHelper.invokeWissenWandFunction(be)) {
+                throw new IllegalStateException("wissenWandFunction is unavailable");
+            }
             syncBlockEntity(be);
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] wissenWandFunction invoke failed, rolling back", e);
@@ -1207,7 +1254,9 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
 
         craftStarted = true;
         try {
-            Reflect.getMethodOrThrow(be.getClass(), "wissenWandFunction", "wissenWandFunction").invoke(be);
+            if (!WRContainerHelper.invokeWissenWandFunction(be)) {
+                throw new IllegalStateException("wissenWandFunction is unavailable");
+            }
             syncBlockEntity(be);
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] wissenWandFunction invoke failed, rolling back", e);
@@ -1279,7 +1328,9 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
 
         craftStarted = true;
         try {
-            Reflect.getMethodOrThrow(be.getClass(), "wissenWandFunction", "wissenWandFunction").invoke(be);
+            if (!WRContainerHelper.invokeWissenWandFunction(be)) {
+                throw new IllegalStateException("wissenWandFunction is unavailable");
+            }
             syncBlockEntity(be);
         } catch (Exception e) {
             clearFilledPedestals(!usingSharedLedger);
@@ -1418,6 +1469,9 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
 
     private boolean isIteratorCraftRunning() {
         if (be == null) return false;
+        if (be instanceof ArcaneIteratorBlockEntityAccessor accessor) {
+            return accessor.rsi$isCraftStarted() && accessor.rsi$getWissenInCraft() > 0;
+        }
         try {
             java.lang.reflect.Field sc = be.getClass().getDeclaredField("startCraft");
             sc.setAccessible(true);
@@ -1434,6 +1488,11 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
      *  detection catches a freeze in any one of them. */
     private int readIteratorProgress() {
         if (be == null) return -1;
+        if (be instanceof ArcaneIteratorBlockEntityAccessor accessor) {
+            return accessor.rsi$getWissenIsCraft()
+                    + accessor.rsi$getExperienceIsCraft()
+                    + accessor.rsi$getHealthIsCraft();
+        }
         try {
             int total = 0;
             for (String name : new String[]{"wissenIsCraft", "experienceIsCraft", "healthIsCraft"}) {
@@ -1448,6 +1507,9 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
 
     private boolean isCrystalRitualRunning() {
         if (be == null) return false;
+        if (be instanceof CrystalBlockEntityAccessor accessor) {
+            return accessor.rsi$isRitualStarted();
+        }
         try {
             java.lang.reflect.Field f = Reflect.findField(be.getClass(), "startRitual").orElse(null);
             if (f != null) {
@@ -1506,17 +1568,13 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
 
                 // 1. Check main pedestal (canonical output location)
                 try {
-                    java.lang.reflect.Method getMain = Reflect.findMethod(
-                            be.getClass(), "getMainPedestal", new Class<?>[0]);
-                    if (getMain != null) {
-                        Object mainPed = getMain.invoke(be);
-                        if (mainPed != null) {
-                            ItemStack mainStack = getContainerItem(mainPed, 0);
-                            if (!mainStack.isEmpty()) {
-                                setContainerItem(mainPed, 0, ItemStack.EMPTY);
-                                syncBlockEntity(mainPed);
-                                fromMachine = mainStack;
-                            }
+                    Object mainPed = getIteratorMainPedestal();
+                    if (mainPed != null) {
+                        ItemStack mainStack = getContainerItem(mainPed, 0);
+                        if (!mainStack.isEmpty()) {
+                            setContainerItem(mainPed, 0, ItemStack.EMPTY);
+                            syncBlockEntity(mainPed);
+                            fromMachine = mainStack;
                         }
                     }
                 } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] mainPedestal probe failed", e); }
@@ -1886,6 +1944,9 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
     }
 
     private static ItemStackHandler getWorkbenchItemHandler(Object be) {
+        if (be instanceof ArcaneWorkbenchBlockEntityAccessor accessor) {
+            return accessor.rsi$getItemHandler();
+        }
         try {
             java.lang.reflect.Field f = be.getClass().getDeclaredField("itemHandler");
             f.setAccessible(true);
@@ -1897,6 +1958,9 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
     }
 
     private static ItemStackHandler getWorkbenchOutputHandler(Object be) {
+        if (be instanceof ArcaneWorkbenchBlockEntityAccessor accessor) {
+            return accessor.rsi$getItemOutputHandler();
+        }
         try {
             java.lang.reflect.Field f = be.getClass().getDeclaredField("itemOutputHandler");
             f.setAccessible(true);
@@ -2004,6 +2068,15 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
     }
 
     private int readCurrentWissen() {
+        if (be instanceof ArcaneWorkbenchBlockEntityAccessor accessor) {
+            return accessor.rsi$getWissen();
+        }
+        if (be instanceof ArcaneIteratorBlockEntityAccessor accessor) {
+            return accessor.rsi$getWissen();
+        }
+        if (be instanceof WissenCrystallizerBlockEntityAccessor accessor) {
+            return accessor.rsi$getWissen();
+        }
         try {
             java.lang.reflect.Method m = Reflect.findMethod(be.getClass(), "getWissen", new Class<?>[0]);
             if (m != null) return (int) m.invoke(be);

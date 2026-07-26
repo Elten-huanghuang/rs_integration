@@ -14,31 +14,37 @@ public class ResonanceSyncPacket {
 
     public final int diskGems;
     public final int lycheeCatalystMask;
+    public final int abilityMask;
     public final long revision;
 
     public ResonanceSyncPacket(int diskGems) {
-        this(diskGems, 0, 0L);
+        this(diskGems, 0, 0, 0L);
     }
 
-    public ResonanceSyncPacket(int diskGems, int lycheeCatalystMask, long revision) {
+    public ResonanceSyncPacket(int diskGems, int lycheeCatalystMask,
+                               int abilityMask, long revision) {
         this.diskGems = diskGems;
         this.lycheeCatalystMask = lycheeCatalystMask;
+        this.abilityMask = abilityMask;
         this.revision = revision;
     }
 
     public static void encode(ResonanceSyncPacket packet, FriendlyByteBuf buf) {
         buf.writeVarInt(packet.diskGems);
         buf.writeVarInt(packet.lycheeCatalystMask);
+        buf.writeVarInt(packet.abilityMask);
         buf.writeVarLong(packet.revision);
     }
 
     public static ResonanceSyncPacket decode(FriendlyByteBuf buf) {
-        return new ResonanceSyncPacket(buf.readVarInt(), buf.readVarInt(), buf.readVarLong());
+        return new ResonanceSyncPacket(
+                buf.readVarInt(), buf.readVarInt(), buf.readVarInt(), buf.readVarLong());
     }
 
     public static void handle(ResonanceSyncPacket packet, Supplier<NetworkEvent.Context> ctx) {
         ctx.get().enqueueWork(() -> ClientDiskData.apply(
-                packet.diskGems, packet.lycheeCatalystMask, packet.revision));
+                packet.diskGems, packet.lycheeCatalystMask,
+                packet.abilityMask, packet.revision));
         ctx.get().setPacketHandled(true);
     }
 }

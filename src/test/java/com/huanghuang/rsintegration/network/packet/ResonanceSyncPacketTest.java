@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.network.packet;
 
 import com.huanghuang.rsintegration.resonance.bridge.ClientDiskData;
 import com.huanghuang.rsintegration.mods.lychee.LycheeVirtualCatalysts;
+import com.huanghuang.rsintegration.resonance.disk.ResonanceDiskAbilities;
 import io.netty.buffer.Unpooled;
 import net.minecraft.network.FriendlyByteBuf;
 import org.junit.jupiter.api.AfterEach;
@@ -25,23 +26,28 @@ class ResonanceSyncPacketTest {
         int catalysts = LycheeVirtualCatalysts.POWDER_SNOW_BUCKET
                 | LycheeVirtualCatalysts.GREEK_FIRE_BUCKET
                 | LycheeVirtualCatalysts.DEEP_AETHER_POISON_BUCKET;
-        ResonanceSyncPacket.encode(new ResonanceSyncPacket(17, catalysts, 42L), buffer);
+        ResonanceSyncPacket.encode(new ResonanceSyncPacket(
+                17, catalysts, ResonanceDiskAbilities.MALUM_VOID_FAVOR, 42L), buffer);
         ResonanceSyncPacket decoded = ResonanceSyncPacket.decode(buffer);
 
         assertEquals(17, decoded.diskGems);
         assertEquals(catalysts, decoded.lycheeCatalystMask);
+        assertEquals(ResonanceDiskAbilities.MALUM_VOID_FAVOR, decoded.abilityMask);
         assertEquals(42L, decoded.revision);
         assertEquals(0, buffer.readableBytes());
     }
 
     @Test
     void staleRevisionCannotRestoreRemovedCatalyst() {
-        ClientDiskData.apply(3, LycheeVirtualCatalysts.DWARVEN_OIL_BUCKET, 8L);
-        ClientDiskData.apply(9, LycheeVirtualCatalysts.POWDER_SNOW_BUCKET, 7L);
+        ClientDiskData.apply(3, LycheeVirtualCatalysts.DWARVEN_OIL_BUCKET,
+                ResonanceDiskAbilities.MALUM_VOID_FAVOR, 8L);
+        ClientDiskData.apply(9, LycheeVirtualCatalysts.POWDER_SNOW_BUCKET,
+                0, 7L);
 
         assertEquals(3, ClientDiskData.getGemCount());
         assertFalse(ClientDiskData.hasPowderSnowBucket());
         assertTrue(ClientDiskData.hasLycheeCatalyst(LycheeVirtualCatalysts.DWARVEN_OIL_BUCKET));
+        assertTrue(ClientDiskData.hasAbility(ResonanceDiskAbilities.MALUM_VOID_FAVOR));
         assertEquals(8L, ClientDiskData.revision());
     }
 }

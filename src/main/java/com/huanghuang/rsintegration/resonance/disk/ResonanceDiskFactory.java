@@ -40,7 +40,9 @@ public final class ResonanceDiskFactory implements IStorageDiskFactory<ItemStack
 
     @Override
     public IStorageDisk<ItemStack> createFromNbt(ServerLevel level, CompoundTag tag) {
-        return new ResonanceDiskWrapper(rsFactoryOrThrow().createFromNbt(level, tag));
+        return new ResonanceDiskWrapper(
+                rsFactoryOrThrow().createFromNbt(level, tag),
+                ResonanceDiskAbilities.read(tag));
     }
 
     @Override

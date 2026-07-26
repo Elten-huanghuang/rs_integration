@@ -796,8 +796,8 @@ public final class AsyncCraftChain {
             List<ItemStack> operationInventory = new ArrayList<>(checkout.producerStacks());
             boolean initialReserved = true;
             for (ItemStack initial : checkout.initialStacks()) {
-                ItemStack reserved = nodeLedger.reserveExact(initial, initial.getCount(),
-                        network, online, null, null);
+                ItemStack reserved = nodeLedger.reserveExactAcrossNetworkAndInventory(
+                        initial, initial.getCount(), network, online);
                 if (reserved.isEmpty()) {
                     initialReserved = false;
                     break;
@@ -1509,8 +1509,8 @@ public final class AsyncCraftChain {
         for (MaterialBroker.Fragment fragment : checkout.fragments()) {
             ItemStack planned = fragment.stack();
             if (fragment.source() instanceof MaterialSource.InitialPool) {
-                ItemStack reserved = ledger.reserveExact(
-                        planned, planned.getCount(), network, online, null, null);
+                ItemStack reserved = ledger.reserveExactAcrossNetworkAndInventory(
+                        planned, planned.getCount(), network, online);
                 if (reserved.isEmpty()) return null;
                 materials.add(reserved);
             } else if (fragment.source() instanceof MaterialSource.ProducerOutput) {
@@ -1696,15 +1696,16 @@ public final class AsyncCraftChain {
             if (remaining > 0) {
                 ItemStack planned = takeExactMatching(initialPool, spec.ingredient(), remaining);
                 if (planned.isEmpty() || planned.getCount() != remaining) return null;
-                ItemStack initial = ledger.reserveExact(planned, remaining,
-                        network, online, null, null);
+                int reservationMark = ledger.reservationMark();
+                ItemStack initial = ledger.reserveExactAcrossNetworkAndInventory(
+                        planned, remaining, network, online);
                 if (initial.isEmpty()) return null;
                 if (combined.isEmpty()) {
                     combined = initial.copyWithCount(remaining);
                 } else if (ItemStack.isSameItemSameTags(combined, initial)) {
                     combined.grow(remaining);
                 } else {
-                    ledger.cancelLastReservation();
+                    ledger.cancelReservationsSince(reservationMark);
                     return null;
                 }
             }

@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import java.util.ArrayList;
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -26,6 +27,18 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * here and must be covered by the real-Forge end-to-end suite.</p>
  */
 class ExtractionLedgerTest {
+
+    @Test
+    void exactAllocationCombinesNetworkAndInventory() {
+        assertArrayEquals(new int[]{15, 1},
+                ExtractionLedger.allocateExactAcrossSources(16, 15, 1));
+    }
+
+    @Test
+    void exactAllocationRejectsInsufficientCombinedAvailability() {
+        assertArrayEquals(new int[0],
+                ExtractionLedger.allocateExactAcrossSources(16, 14, 1));
+    }
 
     @Test
     void freshLedgerStartsIdleAndEmpty() {

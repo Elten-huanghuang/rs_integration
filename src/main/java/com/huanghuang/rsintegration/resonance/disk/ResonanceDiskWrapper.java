@@ -28,9 +28,15 @@ public final class ResonanceDiskWrapper implements IStorageDisk<ItemStack> {
     private static final String RSI_SLOT_TAG = "RSISlot";
 
     private final IStorageDisk<ItemStack> delegate;
+    private int abilityMask;
 
     public ResonanceDiskWrapper(IStorageDisk<ItemStack> delegate) {
+        this(delegate, 0);
+    }
+
+    public ResonanceDiskWrapper(IStorageDisk<ItemStack> delegate, int abilityMask) {
         this.delegate = delegate;
+        this.abilityMask = abilityMask;
     }
 
     public static boolean isLogicallyNonStackable(ItemStack stack) {
@@ -68,6 +74,21 @@ public final class ResonanceDiskWrapper implements IStorageDisk<ItemStack> {
     }
     public IStorageDisk<ItemStack> delegate() {
         return delegate;
+    }
+
+    public int abilityMask() {
+        return abilityMask;
+    }
+
+    public boolean hasAbility(int ability) {
+        return (abilityMask & ability) == ability;
+    }
+
+    public boolean unlockAbility(int ability) {
+        int updated = abilityMask | ability;
+        if (updated == abilityMask) return false;
+        abilityMask = updated;
+        return true;
     }
 
     @Override
@@ -344,7 +365,9 @@ public final class ResonanceDiskWrapper implements IStorageDisk<ItemStack> {
 
     @Override
     public CompoundTag writeToNbt() {
-        return delegate.writeToNbt();
+        CompoundTag tag = delegate.writeToNbt();
+        ResonanceDiskAbilities.write(tag, abilityMask);
+        return tag;
     }
 
     public static void rsi$stripSlotTag(ItemStack stack) {

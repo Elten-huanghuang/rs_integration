@@ -108,6 +108,7 @@
   "gui.rs_integration.jei.vanilla_machine_craft": "通过原版机器远程合成",
   "gui.rs_integration.jei.rs_auto_craft": "RS 自动合成（递归）",
   "gui.rs_integration.jei.lychee_virtual_craft": "使用共振盘基底虚拟合成",
+  "gui.rs_integration.jei.malum_void_favor_virtual_craft": "通过共振盘进行虚空转化",
   "rsi.generic.error.execution_context": "配方执行条件已不满足：%s",
   "rsi.async.abort.execution_context": "虚拟配方完成前所需条件已被移除",
   "gui.rs_integration.jei.ftb_quest_submit": "递归合成并提交任务",
@@ -348,6 +349,7 @@
   "rsi.batch.mod.smithing": "锻造台",
   "rsi.batch.mod.generic": "RS 自动合成",
   "rsi.batch.mod.lychee_item_inside_virtual": "物品浸泡虚拟合成",
+  "rsi.batch.mod.malum_void_favor_virtual": "共振虚空转化",
   "rsi.tlm.error.altar_not_found": "无法找到女仆祭坛",
   "rsi.tlm.error.multiblock_incomplete": "女仆祭坛多方块结构不完整",
   "rsi.tlm.error.no_power": "无法获取P点能力",
@@ -754,6 +756,8 @@
   "rsi.resonance_backpack.no_disk": "当前网络无共振盘",
 
   "rsi.resonance.duplicate_disk": "§c此 RS 网络已绑定共振盘，同一网络只能使用一个共振盘。",
+  "rsi.resonance.void_favor_unlocked": "§5共振盘已继承哭泣之井的虚空恩惠",
+  "rsi.resonance.void_favor_no_disk": "§c当前 RS 网络中没有共振盘，无法赋予转化能力",
 
   "rsi.autoeat.mode.diversity": "多样饮食",
   "rsi.autoeat.mode.stack": "堆叠暴食",

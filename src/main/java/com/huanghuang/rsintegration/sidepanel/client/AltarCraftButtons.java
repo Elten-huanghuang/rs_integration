@@ -160,11 +160,20 @@ public final class AltarCraftButtons {
     public static boolean isVisible(int index) {
         if (index < 0 || index >= MOD_TYPES.size()) return false;
         ModType type = MOD_TYPES.get(index);
-        if (type == null || !"lychee_item_inside_virtual".equals(type.id())) return true;
-        int required = com.huanghuang.rsintegration.mods.lychee.LycheeVirtualRecipeHandler
-                .requiredCatalystMask(RECIPE_IDS.get(index));
-        return required != 0 && com.huanghuang.rsintegration.resonance.bridge.ClientDiskData
-                .hasLycheeCatalyst(required);
+        if (type == null) return true;
+        if ("lychee_item_inside_virtual".equals(type.id())) {
+            int required = com.huanghuang.rsintegration.mods.lychee.LycheeVirtualRecipeHandler
+                    .requiredCatalystMask(RECIPE_IDS.get(index));
+            return required != 0 && com.huanghuang.rsintegration.resonance.bridge.ClientDiskData
+                    .hasLycheeCatalyst(required);
+        }
+        if (com.huanghuang.rsintegration.mods.malum.MalumRSModule.VOID_FAVOR_TYPE_ID
+                .equals(type.id())) {
+            return com.huanghuang.rsintegration.resonance.bridge.ClientDiskData.hasAbility(
+                    com.huanghuang.rsintegration.resonance.disk.ResonanceDiskAbilities
+                            .MALUM_VOID_FAVOR);
+        }
+        return true;
     }
 
     public record CraftButtonData(

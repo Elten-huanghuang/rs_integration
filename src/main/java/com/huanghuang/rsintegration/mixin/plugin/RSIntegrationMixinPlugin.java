@@ -56,6 +56,37 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
             return isClassPresent("com.stal111.forbidden_arcanus.common.block.entity.clibano.ClibanoMainBlockEntity")
                     && hasMethod(targetClassName, "getBurnDuration");
         }
+        if (mixinClassName.contains("wizardsreborn.ArcaneWorkbenchBlockEntityAccessor")) {
+            return isClassPresent("mod.maxbogomol.wizards_reborn.common.block.arcane_workbench.ArcaneWorkbenchBlockEntity")
+                    && hasField(targetClassName, "itemHandler")
+                    && hasField(targetClassName, "itemOutputHandler")
+                    && hasField(targetClassName, "startCraft")
+                    && hasField(targetClassName, "wissenInCraft")
+                    && hasField(targetClassName, "wissen")
+                    && hasMethod(targetClassName, "wissenWandFunction");
+        }
+        if (mixinClassName.contains("wizardsreborn.ArcaneIteratorBlockEntityAccessor")) {
+            return hasField(targetClassName, "startCraft")
+                    && hasField(targetClassName, "wissenInCraft")
+                    && hasField(targetClassName, "wissenIsCraft")
+                    && hasField(targetClassName, "experienceIsCraft")
+                    && hasField(targetClassName, "healthIsCraft")
+                    && hasField(targetClassName, "wissen")
+                    && hasMethod(targetClassName, "wissenWandFunction")
+                    && hasMethod(targetClassName, "getPedestals")
+                    && hasMethod(targetClassName, "getMainPedestal");
+        }
+        if (mixinClassName.contains("wizardsreborn.WissenCrystallizerBlockEntityAccessor")) {
+            return hasField(targetClassName, "startCraft")
+                    && hasField(targetClassName, "wissenInCraft")
+                    && hasField(targetClassName, "wissen")
+                    && hasMethod(targetClassName, "wissenWandFunction");
+        }
+        if (mixinClassName.contains("wizardsreborn.CrystalBlockEntityAccessor")) {
+            return hasField(targetClassName, "startRitual")
+                    && hasField(targetClassName, "cooldown")
+                    && hasMethod(targetClassName, "wissenWandFunction");
+        }
         if (mixinClassName.contains("CraftingManagerMixin")
                 || mixinClassName.contains("CraftingTaskMixin")
                 || mixinClassName.contains("CraftingTaskAccessor")

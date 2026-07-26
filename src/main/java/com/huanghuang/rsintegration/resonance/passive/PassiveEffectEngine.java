@@ -85,20 +85,24 @@ public final class PassiveEffectEngine {
             }
         }
         int catalystMask = LycheeVirtualCatalysts.catalystMask(disk);
+        int abilityMask = disk == null ? 0 : disk.abilityMask();
         DiskSyncState previous = SYNC_CACHE.get(player.getUUID());
         long revision = previous == null ? 0L : previous.revision();
         if (previous == null || previous.gemCount() != gemCount
-                || previous.lycheeCatalystMask() != catalystMask) {
+                || previous.lycheeCatalystMask() != catalystMask
+                || previous.abilityMask() != abilityMask) {
             revision++;
         }
-        SYNC_CACHE.put(player.getUUID(), new DiskSyncState(gemCount, catalystMask, revision));
+        SYNC_CACHE.put(player.getUUID(),
+                new DiskSyncState(gemCount, catalystMask, abilityMask, revision));
         NetworkHandler.CHANNEL.sendTo(
-                new ResonanceSyncPacket(gemCount, catalystMask, revision),
+                new ResonanceSyncPacket(gemCount, catalystMask, abilityMask, revision),
                 player.connection.connection,
                 net.minecraftforge.network.NetworkDirection.PLAY_TO_CLIENT);
     }
 
-    private record DiskSyncState(int gemCount, int lycheeCatalystMask, long revision) {}
+    private record DiskSyncState(int gemCount, int lycheeCatalystMask,
+                                 int abilityMask, long revision) {}
 
     @Nullable
     public static ResonanceDiskWrapper findResonanceDisk(INetwork network) {
