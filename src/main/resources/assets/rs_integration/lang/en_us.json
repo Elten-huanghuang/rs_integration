@@ -842,5 +842,7 @@
   "rsi.apotheosis.spawner.stat.redstone_control": "Redstone Control",
   "rsi.apotheosis.spawner.stat.no_ai": "No AI",
   "rsi.apotheosis.spawner.stat.silent": "Silent",
-  "rsi.apotheosis.spawner.stat.baby": "Baby Mobs"
+  "rsi.apotheosis.spawner.stat.baby": "Baby Mobs",
+  "rsi.ftb_quest.missing_bookmarked": "Missing %s x %s; added to JEI bookmarks",
+  "rsi.ftb_quest.missing": "Missing %s x %s; JEI bookmarks are unavailable"
 }

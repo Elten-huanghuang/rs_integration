@@ -844,5 +844,7 @@
   "rsi.apotheosis.spawner.stat.redstone_control": "红石控制",
   "rsi.apotheosis.spawner.stat.no_ai": "无 AI",
   "rsi.apotheosis.spawner.stat.silent": "静音",
-  "rsi.apotheosis.spawner.stat.baby": "幼年形态"
+  "rsi.apotheosis.spawner.stat.baby": "幼年形态",
+  "rsi.ftb_quest.missing_bookmarked": "缺少 %s x %s，已加入 JEI 收藏",
+  "rsi.ftb_quest.missing": "缺少 %s x %s，当前无法使用 JEI 收藏"
 }

@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting.batch;
 
 import com.huanghuang.rsintegration.compat.ftbquests.QuestSubmissionRequestPacket;
+import com.huanghuang.rsintegration.compat.ftbquests.QuestMissingBookmarkPacket;
 import com.huanghuang.rsintegration.util.ModIds;
 
 import com.huanghuang.rsintegration.crafting.plan.PlanResponsePacket;
@@ -47,6 +48,12 @@ public final class BatchCraftNetworkHandler {
                     QuestSubmissionRequestPacket::decode,
                     QuestSubmissionRequestPacket::handle,
                     java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_SERVER));
+            ch.registerMessage(NetworkPacketIds.FTB_QUEST_MISSING_BOOKMARK,
+                    QuestMissingBookmarkPacket.class,
+                    QuestMissingBookmarkPacket::encode,
+                    QuestMissingBookmarkPacket::decode,
+                    QuestMissingBookmarkPacket::handle,
+                    java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_CLIENT));
         }
         registered = true;
     }

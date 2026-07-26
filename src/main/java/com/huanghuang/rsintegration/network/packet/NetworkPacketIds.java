@@ -72,6 +72,7 @@ public final class NetworkPacketIds {
 
     // ── FTB Quests submission (90-99) ────────────────────────────────
     public static final int FTB_QUEST_SUBMISSION_REQUEST = 90;
+    public static final int FTB_QUEST_MISSING_BOOKMARK = 91;
 
     // ── Apotheosis library (100-109) ─────────────────────────────────
     public static final int APOTHEOSIS_LIBRARY_LEVEL = 100;
