@@ -1321,8 +1321,9 @@ public final class AsyncCraftChain {
     /**
      * Private-ledger delegates read their inputs from RS/player storage rather
      * than from the graph checkout. Move producer outputs into RS before the
-     * delegate starts, then settle the broker claim so abort recovery cannot
-     * deliver the same producer fragments a second time.
+     * delegate starts. Keep the broker claim committed until the common node
+     * completion path settles it; committed fragments are already excluded
+     * from surplus delivery.
      */
     private void materializePrivateLedgerGraphInputs(
             NodeAdmissionCoordinator.Admission admission, ServerPlayer online) {
@@ -1350,7 +1351,6 @@ public final class AsyncCraftChain {
                 PlayerUtils.safeGiveToPlayer(online, leftover, network);
             }
         }
-        graphAdmissions.settleMaterial(admission);
     }
 
     private void publishIncrementalGraphOutputs(NodeId nodeId, ConcurrentNodeExecutor.Worker worker) {
