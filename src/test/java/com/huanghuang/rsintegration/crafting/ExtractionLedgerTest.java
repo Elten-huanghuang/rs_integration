@@ -41,6 +41,20 @@ class ExtractionLedgerTest {
     }
 
     @Test
+    void questAllocationConsumesMainInventoryBeforeNetwork() {
+        assertArrayEquals(new int[]{12, 8},
+                ExtractionLedger.allocateInventoryFirst(20, 12, 35));
+        assertArrayEquals(new int[]{20, 0},
+                ExtractionLedger.allocateInventoryFirst(20, 23, 0));
+    }
+
+    @Test
+    void questAllocationSupportsPartialNetworkSubmission() {
+        assertArrayEquals(new int[]{0, 19},
+                ExtractionLedger.allocateInventoryFirst(20, 0, 19));
+    }
+
+    @Test
     void freshLedgerStartsIdleAndEmpty() {
         ExtractionLedger ledger = new ExtractionLedger();
         assertEquals(ExtractionLedger.State.IDLE, ledger.state());

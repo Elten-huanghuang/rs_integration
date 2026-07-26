@@ -100,6 +100,19 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
                     && isClassPresent("dev.ftb.mods.ftbquests.quest.TeamData")
                     && isClassPresent("dev.ftb.mods.ftbquests.quest.task.ItemTask");
         }
+        if (mixinClassName.contains("ftbquests.SubmitTaskMessageMixin")) {
+            return isClassPresent("dev.ftb.mods.ftbquests.net.SubmitTaskMessage")
+                    && hasMethod(targetClassName, "handle")
+                    && hasMethod(targetClassName, "lambda$handle$0");
+        }
+        if (mixinClassName.contains("ftbquests.InventoryTaskAutoSubmissionMixin")) {
+            return isClassPresent("dev.ftb.mods.ftbquests.util.FTBQuestsInventoryListener")
+                    && hasMethod(targetClassName, "lambda$detect$0");
+        }
+        if (mixinClassName.contains("ftbquests.ItemTaskSequenceAccessor")) {
+            return isClassPresent("dev.ftb.mods.ftbquests.quest.task.Task")
+                    && hasMethod(targetClassName, "checkTaskSequence");
+        }
         if (mixinClassName.contains("namelesstrinkets")) {
             return isClassPresent("com.cozary.nameless_trinkets.items.trinkets.SuperMagnet")
                     && hasMethod(targetClassName, "curioTick");

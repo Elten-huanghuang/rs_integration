@@ -246,6 +246,109 @@ public final class ExtractionLedger implements AutoCloseable {
         return template;
     }
 
+    /**
+     * Reserve as much as possible, preferring the player's main inventory and
+     * using the RS network only for the remainder. Every exact item/NBT variant
+     * gets its own ledger entry so a broad ingredient cannot flatten variants.
+     */
+    public int reserveUpToFromMainInventoryThenNetwork(
+            @Nonnull Ingredient ingredient, int limit, @Nonnull ServerPlayer player,
+            @Nullable INetwork network) {
+        requireState(State.IDLE, State.RESERVING);
+        if (limit <= 0 || ingredient.isEmpty()) return 0;
+
+        LinkedHashMap<CraftingResolver.StackKey, ItemStack> inventoryTemplates = new LinkedHashMap<>();
+        LinkedHashMap<CraftingResolver.StackKey, Integer> inventoryCounts = new LinkedHashMap<>();
+        collectMatchingAvailability(player.getInventory().items, ingredient, pendingInv,
+                inventoryTemplates, inventoryCounts);
+
+        LinkedHashMap<CraftingResolver.StackKey, ItemStack> networkTemplates = new LinkedHashMap<>();
+        LinkedHashMap<CraftingResolver.StackKey, Integer> networkCounts = new LinkedHashMap<>();
+        if (network != null) {
+            List<ItemStack> stored = networkEntryCache.computeIfAbsent(network, n -> {
+                List<ItemStack> list = new ArrayList<>();
+                var cache = n.getItemStorageCache();
+                if (cache != null) {
+                    for (var entry : cache.getList().getStacks()) {
+                        ItemStack stack = entry.getStack();
+                        if (!stack.isEmpty()) list.add(stack);
+                    }
+                }
+                return list;
+            });
+            collectMatchingAvailability(stored, ingredient, pendingNet,
+                    networkTemplates, networkCounts);
+        }
+
+        int inventoryAvailable = saturatedSum(inventoryCounts.values(), List.of());
+        int networkAvailable = saturatedSum(networkCounts.values(), List.of());
+        int[] allocation = allocateInventoryFirst(limit, inventoryAvailable, networkAvailable);
+        int target = allocation[0] + allocation[1];
+        if (target <= 0) return 0;
+        if (state == State.IDLE) transition(State.RESERVING);
+
+        int remaining = reserveCandidates(inventoryTemplates, inventoryCounts, pendingInv,
+                ingredient, allocation[0], Source.PLAYER_INVENTORY, null);
+        if (remaining != 0) {
+            throw new IllegalStateException("inventory availability changed while reserving");
+        }
+        remaining = reserveCandidates(networkTemplates, networkCounts, pendingNet,
+                ingredient, allocation[1], Source.NETWORK, network);
+        if (remaining != 0) {
+            throw new IllegalStateException("network availability changed while reserving");
+        }
+        return target;
+    }
+
+    static int[] allocateInventoryFirst(int needed, int inventoryAvailable, int networkAvailable) {
+        if (needed <= 0 || inventoryAvailable < 0 || networkAvailable < 0) return new int[]{0, 0};
+        int inventory = Math.min(needed, inventoryAvailable);
+        int network = Math.min(needed - inventory, networkAvailable);
+        return new int[]{inventory, network};
+    }
+
+    private static int saturatedSum(Collection<Integer> first, Collection<Integer> second) {
+        long total = 0L;
+        for (int value : first) total = Math.min(Integer.MAX_VALUE, total + Math.max(0, value));
+        for (int value : second) total = Math.min(Integer.MAX_VALUE, total + Math.max(0, value));
+        return (int) total;
+    }
+
+    private static void collectMatchingAvailability(
+            Collection<ItemStack> stacks, Ingredient ingredient,
+            Map<CraftingResolver.StackKey, Integer> pending,
+            LinkedHashMap<CraftingResolver.StackKey, ItemStack> templates,
+            LinkedHashMap<CraftingResolver.StackKey, Integer> counts) {
+        for (ItemStack stack : stacks) {
+            if (stack.isEmpty() || !IngredientMatcher.test(ingredient, stack)) continue;
+            CraftingResolver.StackKey key = CraftingResolver.StackKey.of(stack, true);
+            templates.putIfAbsent(key, stack.copyWithCount(1));
+            counts.merge(key, stack.getCount(), (left, right) ->
+                    (int) Math.min(Integer.MAX_VALUE, (long) left + right));
+        }
+        counts.replaceAll((key, count) -> Math.max(0, count - pending.getOrDefault(key, 0)));
+        counts.entrySet().removeIf(entry -> entry.getValue() <= 0);
+    }
+
+    private int reserveCandidates(
+            LinkedHashMap<CraftingResolver.StackKey, ItemStack> templates,
+            LinkedHashMap<CraftingResolver.StackKey, Integer> counts,
+            Map<CraftingResolver.StackKey, Integer> pending, Ingredient ingredient,
+            int needed, Source source, @Nullable INetwork sourceNetwork) {
+        int remaining = needed;
+        for (var candidate : counts.entrySet()) {
+            if (remaining <= 0) break;
+            int take = Math.min(remaining, candidate.getValue());
+            if (take <= 0) continue;
+            ItemStack template = templates.get(candidate.getKey());
+            pending.merge(candidate.getKey(), take, Integer::sum);
+            recordEntry(new Entry(source, ingredient, template.copyWithCount(take), null,
+                    null, null, sourceNetwork, true));
+            remaining -= take;
+        }
+        return remaining;
+    }
+
     // Three-phase atomic commit: pre-check, batch extract, confirm.
     public boolean commit(@Nullable INetwork network, @Nonnull ServerPlayer player) {
         if (state == State.COMMITTED) return true;
