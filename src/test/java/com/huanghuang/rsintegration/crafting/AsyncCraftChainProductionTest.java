@@ -14,6 +14,8 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AsyncCraftChainProductionTest extends BootstrapTest {
 
@@ -67,6 +69,27 @@ class AsyncCraftChainProductionTest extends BootstrapTest {
                                 List.of(), List.of(), false, 1), 4);
         assertEquals(3, combined.get(0).executions());
         assertEquals(4, combined.get(1).executions());
+    }
+
+    @Test
+    void vanillaDependenciesCanExecuteInline() {
+        var vanilla = new CraftingResolver.ResolutionStep(
+                new ResourceLocation("minecraft", "stick"), ModType.GENERIC,
+                new ResourceLocation("minecraft", "crafting"));
+
+        assertFalse(CraftPacketUtils.requiresOuterDag(List.of(vanilla)));
+    }
+
+    @Test
+    void multiBlockDependencyMustBePlannedInOuterDag() {
+        var vanilla = new CraftingResolver.ResolutionStep(
+                new ResourceLocation("minecraft", "stick"), ModType.GENERIC,
+                new ResourceLocation("minecraft", "crafting"));
+        var multiBlock = new CraftingResolver.ResolutionStep(
+                new ResourceLocation("test", "multi_block"), ModType.CUSTOM_GUI,
+                new ResourceLocation("test", "machine"));
+
+        assertTrue(CraftPacketUtils.requiresOuterDag(List.of(vanilla, multiBlock)));
     }
 
     @Test

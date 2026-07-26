@@ -1037,9 +1037,7 @@ public final class AsyncCraftChain {
     private PreparationResult prepareGraphNode(NodeId nodeId,
                                                CraftingResolver.ResolutionStep step,
                                                ServerPlayer online) {
-        String path = step.recipeId().getPath();
-        int slash = path.indexOf('/');
-        String subTypeHint = slash > 0 ? path.substring(0, slash).toLowerCase() : null;
+        String subTypeHint = AltarBindingRegistry.recipeSubTypeHint(step.recipeId());
         List<BoundMachine> machines = deduplicateMachines(AltarBindingRegistry.getBoundMachinesForType(
                 online, step.modType(), subTypeHint));
         machines.sort((a, b) -> {
@@ -1313,10 +1311,46 @@ public final class AsyncCraftChain {
         graphAdmissions.commit(admission);
         runtime.markDispatched();
         nodeRuntimes.put(nodeId, runtime);
+        materializePrivateLedgerGraphInputs(admission, online);
 
         boolean accepted = operationSession.tryStart(() -> delegate.tryStartSingleCraft(online));
         if (!accepted) runtime.markStartFailed("delegate rejected private-ledger graph dispatch");
         return GraphDispatchResult.started(runtime);
+    }
+
+    /**
+     * Private-ledger delegates read their inputs from RS/player storage rather
+     * than from the graph checkout. Move producer outputs into RS before the
+     * delegate starts, then settle the broker claim so abort recovery cannot
+     * deliver the same producer fragments a second time.
+     */
+    private void materializePrivateLedgerGraphInputs(
+            NodeAdmissionCoordinator.Admission admission, ServerPlayer online) {
+        if (graphMaterials == null) return;
+        MaterialBroker.Checkout checkout = graphMaterials.checkout(admission.materialToken());
+        for (ItemStack producer : checkout.producerStacks()) {
+            if (producer.isEmpty()) continue;
+            ItemStack leftover = producer.copy();
+            try {
+                if (network != null) {
+                    leftover = network.insertItem(leftover, leftover.getCount(),
+                            com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                    ItemStack inserted = InsertedStackDelta.between(producer, leftover);
+                    var tracker = network.getItemStorageTracker();
+                    if (!inserted.isEmpty() && tracker != null) {
+                        tracker.changed(online, inserted.copy());
+                    }
+                }
+            } catch (RuntimeException exception) {
+                RSIntegrationMod.LOGGER.warn(ctx.format(
+                        "Producer material transfer to RS failed for private-ledger node {}"),
+                        admission.nodeId(), exception);
+            }
+            if (!leftover.isEmpty()) {
+                PlayerUtils.safeGiveToPlayer(online, leftover, network);
+            }
+        }
+        graphAdmissions.settleMaterial(admission);
     }
 
     private void publishIncrementalGraphOutputs(NodeId nodeId, ConcurrentNodeExecutor.Worker worker) {
@@ -2266,9 +2300,7 @@ public final class AsyncCraftChain {
         // Extract machine sub-type from recipe ID (e.g. "wissen_crystallizer"
         // from "wizards_reborn:wissen_crystallizer/earth_crystal_seed") so we
         // only probe machines of the correct type, not every binding for the mod.
-        String path = step.recipeId().getPath();
-        int slash = path.indexOf('/');
-        String subTypeHint = slash > 0 ? path.substring(0, slash).toLowerCase() : null;
+        String subTypeHint = AltarBindingRegistry.recipeSubTypeHint(step.recipeId());
 
         List<BoundMachine> machines = AltarBindingRegistry.getBoundMachinesForType(
                 online, step.modType(), subTypeHint);
@@ -3656,7 +3688,7 @@ public final class AsyncCraftChain {
                         runtime.describe(), e);
             }
             try {
-                if (runtime.hasDelegate()) runtime.delegate().onBatchFailed(player, reason);
+                runtime.cleanupFailure();
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.error(ctx.format("Error in graph node delegate cleanup {}"),
                         runtime.describe(), e);

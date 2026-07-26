@@ -14,7 +14,6 @@ import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.util.CraftLogContext;
 import com.huanghuang.rsintegration.util.PlayerUtils;
 import com.huanghuang.rsintegration.util.Reflect;
-import com.huanghuang.rsintegration.util.TextBuilder;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.NonNullList;
@@ -1132,20 +1131,17 @@ public final class CraftPacketUtils {
     // ── multi-block chain helper ──────────────────────────────────
 
     /**
-     * Resolve auto-craft steps using the multi-block-aware resolver, then
-     * either execute vanilla steps inline or submit an {@link AsyncCraftChain}
-     * for multi-block steps.
-     *
-     * @return true if the chain was executed/submitted and items should
-     *         now (or eventually) be available
-     */
-    /**
-     * Resolve and execute/submit a crafting chain for the given ingredient+count.
+     * Resolve and synchronously execute a crafting chain for the given ingredient+count.
      * Preserves the original {@link Ingredient} (which may represent a Tag with
      * many valid item options) instead of degrading it to a single ItemStack.
      *
-     * @return true if the chain was executed/submitted and items should
-     *         now (or eventually) be available
+     * <p>Multi-block dependencies must be part of the outer graph assembled by
+     * the request entry point. This synchronous material API cannot suspend its
+     * caller while another {@link AsyncCraftChain} runs, so it never submits a
+     * nested chain.</p>
+     *
+     * @return true if every resolved step completed inline and the items are
+     *         available now
      */
     private static boolean tryResolveAndRunChain(ServerPlayer player, INetwork network,
                                                   Ingredient ingredient, int count) {
@@ -1162,15 +1158,12 @@ public final class CraftPacketUtils {
                         missing);
             }
             if (!steps.isEmpty() && missing.isEmpty()) {
-                boolean hasMultiblock = steps.stream()
-                        .anyMatch(s -> s.modType() != ModType.GENERIC);
-                if (hasMultiblock) {
-                    AsyncCraftChain chain = new AsyncCraftChain(player.getUUID(), player.getServer(), network, steps);
-                    AsyncCraftManager.getInstance().submit(chain);
-                    player.sendSystemMessage(
-                            TextBuilder.translate("rsi.async.chain_started", steps.size())
-                                    .build());
-                    return false; // items not yet available — chain is running async
+                if (requiresOuterDag(steps)) {
+                    RSIntegrationMod.LOGGER.warn(
+                            "[RSI] Inline material resolution requires {} multi-block step(s); "
+                                    + "refusing nested chain submission because dependencies must be planned in the outer DAG",
+                            steps.stream().filter(s -> s.modType() != ModType.GENERIC).count());
+                    return false;
                 }
                 // All vanilla — execute inline
                 player.sendSystemMessage(Component.translatable(
@@ -1201,6 +1194,10 @@ public final class CraftPacketUtils {
         RSIntegrationMod.LOGGER.warn("[RSI] tryResolveAndRunChain: both typed and vanilla resolvers failed for {} x{}",
                 describeIngredient(ingredient).getString(), count);
         return false;
+    }
+
+    static boolean requiresOuterDag(List<ResolutionStep> steps) {
+        return steps.stream().anyMatch(step -> step.modType() != ModType.GENERIC);
     }
 
     // ── shared material extraction with auto-crafting ────────────
@@ -1238,6 +1235,9 @@ public final class CraftPacketUtils {
             if (RSIntegrationConfig.ENABLE_AUTO_CRAFTING.get() && !ingredient.isEmpty()
                     && network != null) {
                 if (tryResolveAndRunChain(player, network, ingredient, count)) {
+                    // The first reserve cached the network before this inline
+                    // craft inserted the requested intermediate stack.
+                    ledger.invalidateNetworkSnapshot();
                     reserved = ledger.reserve(ingredient, count, network,
                             player, altarDim, altarPos);
                     if (!reserved.isEmpty()) return reserved;

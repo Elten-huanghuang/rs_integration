@@ -455,12 +455,7 @@ public final class AltarBindingRegistry {
             if (mapped != null && ModType.byId(mapped) != null) type = ModType.byId(mapped);
         }
 
-        String recipePath = recipe.getId().getPath();
-        String subType = null;
-        int slashIdx = recipePath.indexOf('/');
-        if (slashIdx > 0) {
-            subType = recipePath.substring(0, slashIdx).toLowerCase(java.util.Locale.ROOT);
-        }
+        String subType = recipeSubTypeHint(recipe.getId());
         subType = normalizeSubType(subType, type);
 
         TickCache cache = getTickCache(player);
@@ -727,6 +722,25 @@ public final class AltarBindingRegistry {
                 && !key.contains("soul_candlestick");
     }
 
+    /**
+     * Extract a possible machine subtype from a recipe ID.
+     *
+     * <p>CraftTweaker owns the namespace of every recipe it adds and preserves
+     * the script-provided name as the path. That name is arbitrary grouping,
+     * even when it contains a slash, so it cannot describe the target machine.
+     * KubeJS likewise uses {@code kjs/} as an origin marker for unnamed custom
+     * recipes.</p>
+     */
+    @Nullable
+    public static String recipeSubTypeHint(@Nullable ResourceLocation recipeId) {
+        if (recipeId == null || "crafttweaker".equals(recipeId.getNamespace())) return null;
+        String path = recipeId.getPath();
+        int slash = path.indexOf('/');
+        if (slash <= 0) return null;
+        String hint = path.substring(0, slash).toLowerCase(java.util.Locale.ROOT);
+        return "kjs".equals(hint) ? null : hint;
+    }
+
     /** Map recipe-ID sub-type names to canonical machine-prefix names.
      *  Wizards Reborn names its recipe category "crystal_infusion"
      *  but the machine prefix used during binding is "crystal_ritual".
@@ -737,6 +751,10 @@ public final class AltarBindingRegistry {
      *  machine prefix used during binding is "spirit_altar". */
     static String normalizeSubType(String hint, ModType type) {
         if (hint == null) return null;
+        // KubeJS assigns every unnamed custom recipe an ID shaped as
+        // <recipe-type-namespace>:kjs/<content-id>. The "kjs" segment is an
+        // origin marker shared by all recipe types, not a machine subtype.
+        if ("kjs".equals(hint)) return null;
         if (type == null) return hint;
         // These vanilla ModTypes each represent exactly one machine. A slash in a
         // datapack/KubeJS recipe ID (for example minecraft:kjs/win_15) is only a

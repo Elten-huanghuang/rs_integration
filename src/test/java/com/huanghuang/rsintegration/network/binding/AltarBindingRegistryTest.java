@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.network.binding;
 
 import com.huanghuang.rsintegration.ModType;
+import net.minecraft.resources.ResourceLocation;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
@@ -40,5 +41,28 @@ class AltarBindingRegistryTest {
         ModType infuser = ModType.byId("goety_cursed_infuser");
 
         assertNull(AltarBindingRegistry.normalizeSubType("shade", infuser));
+    }
+
+    @Test
+    void kubeJsGeneratedFolderIsNeverTreatedAsMachineSubtype() {
+        assertNull(AltarBindingRegistry.normalizeSubType("kjs", ModType.GENERIC));
+        assertNull(AltarBindingRegistry.normalizeSubType("kjs", ModType.byId("goety")));
+        assertNull(AltarBindingRegistry.normalizeSubType("kjs", null));
+    }
+
+    @Test
+    void scriptOwnedRecipeIdsDoNotExposeArbitraryMachineSubtypes() {
+        assertNull(AltarBindingRegistry.recipeSubTypeHint(
+                new ResourceLocation("crafttweaker", "custom_group/machine_recipe")));
+        assertNull(AltarBindingRegistry.recipeSubTypeHint(
+                new ResourceLocation("malum", "kjs/content_hash")));
+        assertNull(AltarBindingRegistry.recipeSubTypeHint(null));
+    }
+
+    @Test
+    void nativeRecipeFoldersStillExposeMachineSubtypes() {
+        org.junit.jupiter.api.Assertions.assertEquals("wissen_crystallizer",
+                AltarBindingRegistry.recipeSubTypeHint(new ResourceLocation(
+                        "wizards_reborn", "wissen_crystallizer/earth_crystal_seed")));
     }
 }

@@ -369,6 +369,14 @@ public final class ExtractionLedger implements AutoCloseable {
         networkEntryCache.clear();
     }
 
+    /**
+     * Forget cached network contents while preserving this ledger's pending
+     * reservations. Inline auto-crafting may add a new stack between reserves.
+     */
+    public void invalidateNetworkSnapshot() {
+        networkEntryCache.clear();
+    }
+
     public int size() { return entries.size(); }
     public boolean isCommitted() { return state == State.COMMITTED; }
     public State state() { return state; }
