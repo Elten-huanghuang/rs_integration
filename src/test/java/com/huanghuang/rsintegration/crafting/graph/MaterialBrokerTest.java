@@ -206,6 +206,28 @@ class MaterialBrokerTest extends BootstrapTest {
     }
 
     @Test
+    void checkedOutProducerClaimStaysCommittedUntilNodeCompletion() {
+        MaterialBroker broker = new MaterialBroker();
+        ItemStack actual = new ItemStack(Items.DIAMOND, 2);
+        MaterialKey diamond = MaterialKey.of(actual);
+        MaterialSource producer = new MaterialSource.ProducerOutput(
+                new OutputPortId(new NodeId(7), 0));
+        broker.publishActual(producer, diamond, actual);
+        MaterialBroker.ReservationToken token = broker.reserve(new NodeId(8),
+                List.of(new MaterialBroker.Request(producer, diamond, 2)));
+
+        broker.commit(token);
+        MaterialBroker.Checkout checkout = broker.checkout(token);
+
+        assertEquals(2, checkout.producerStacks().get(0).getCount());
+        assertEquals(MaterialBroker.ReservationState.COMMITTED, broker.state(token));
+        assertEquals(0, broker.drainAvailableProducerAssets().size());
+
+        broker.settle(token);
+        assertEquals(MaterialBroker.ReservationState.SETTLED, broker.state(token));
+    }
+
+    @Test
     void actualProducerFragmentsAreCheckedOutAndUnavailableForSurplus() {
         MaterialBroker broker = new MaterialBroker();
         ItemStack actual = new ItemStack(Items.DIAMOND, 3);
