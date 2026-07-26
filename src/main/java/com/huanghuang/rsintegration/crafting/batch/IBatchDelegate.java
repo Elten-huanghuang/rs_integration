@@ -96,6 +96,11 @@ public interface IBatchDelegate {
                 : PreparationResult.retry("delegate validation did not accept the machine yet");
     }
 
+    /** Revalidate non-material requirements before commit and output publication. */
+    default boolean validateExecutionContext(@Nullable ServerPlayer player) {
+        return true;
+    }
+
     /**
      * Whether a bound block without a block entity is a valid idle form for this delegate.
      * Most machines require a block entity; world-interaction machines may opt in after

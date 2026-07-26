@@ -491,6 +491,11 @@ public final class AsyncCraftChain {
                 boolean capturedWorldOutput = capturedOutput
                         && hasCapturedExpectedCount(expectedCapturedOutput);
                 if (observation.phase() == IBatchDelegate.CraftPhase.DONE || capturedWorldOutput) {
+                    if (!currentDelegate.validateExecutionContext(online)) {
+                        abort("Execution context changed before output publication",
+                                Component.translatable("rsi.async.abort.execution_context"));
+                        return true;
+                    }
                     List<ItemStack> actualResults = new ArrayList<>(disarmOutputCapture());
                     closeFlatOperationScope();
                     actualResults.addAll(currentDelegate.collectAllResults(online));
@@ -1126,8 +1131,10 @@ public final class AsyncCraftChain {
                 globalOperationBudget.availableCapacity());
         boolean operationGroup = shouldUseGraphOperationGroup(desiredOperations, availableOperations);
         boolean concurrencySafe = !concurrencyDecision(step, delegate).exclusive();
+        boolean workerReusable = delegate.getMaterialReservationScopes().contains(
+                IBatchDelegate.MaterialReservationScope.PER_WORKER_REUSABLE);
         int operationCost = graphOperationWorkerCount(desiredOperations, availableOperations,
-                eligible.size(), concurrencySafe);
+                eligible.size(), concurrencySafe, workerReusable);
         return PreparationResult.ready(
                 new PreparedGraphNode(step, delegate, eligible, operationCost, operationGroup));
     }
@@ -1137,8 +1144,10 @@ public final class AsyncCraftChain {
     }
 
     static int graphOperationWorkerCount(int executions, int availableOperations,
-                                         int eligibleMachines, boolean concurrencySafe) {
-        if (!shouldUseGraphOperationGroup(executions, availableOperations) || !concurrencySafe) return 1;
+                                         int eligibleMachines, boolean concurrencySafe,
+                                         boolean workerReusable) {
+        if (!shouldUseGraphOperationGroup(executions, availableOperations)
+                || !concurrencySafe || workerReusable) return 1;
         return Math.max(1, Math.min(Math.min(executions, availableOperations), eligibleMachines));
     }
 
@@ -1195,6 +1204,10 @@ public final class AsyncCraftChain {
                     return GraphDispatchResult.retry("supplemental materials unavailable");
                 }
                 materials = delegate.mergeSupplementalMaterials(materials, supplementalMaterials);
+            }
+            if (!delegate.validateExecutionContext(online)) {
+                return GraphDispatchResult.fatal(
+                        "execution context changed before material commit");
             }
             OperationExecutionKernel.Session operationSession = null;
             if (delegate instanceof ParallelCraftGroup group) {
@@ -1321,9 +1334,9 @@ public final class AsyncCraftChain {
     /**
      * Private-ledger delegates read their inputs from RS/player storage rather
      * than from the graph checkout. Move producer outputs into RS before the
-     * delegate starts. Keep the broker claim committed until the common node
-     * completion path settles it; committed fragments are already excluded
-     * from surplus delivery.
+     * delegate starts. Once externalized, settle the broker claim immediately:
+     * the delegate's private ledger now owns physical recovery, and returning
+     * the producer claim to the graph on failure would deliver it twice.
      */
     private void materializePrivateLedgerGraphInputs(
             NodeAdmissionCoordinator.Admission admission, ServerPlayer online) {
@@ -1351,6 +1364,7 @@ public final class AsyncCraftChain {
                 PlayerUtils.safeGiveToPlayer(online, leftover, network);
             }
         }
+        graphAdmissions.settleMaterialOnce(admission);
     }
 
     private void publishIncrementalGraphOutputs(NodeId nodeId, ConcurrentNodeExecutor.Worker worker) {
@@ -1384,7 +1398,7 @@ public final class AsyncCraftChain {
             publishIncrementalGraphOutputs(nodeId, runtime);
             OperationExecutionKernel.CompletionResult completion = runtime.completeOperation(
                     runtime::outputsComplete, () -> {
-                        if (admission != null) graphAdmissions.settleMaterial(admission);
+                        if (admission != null) graphAdmissions.settleMaterialOnce(admission);
                         if (nodeLedger != null && nodeLedger.isCommitted()) {
                             nodeLedger.settleAllCommitted();
                         }
@@ -1528,8 +1542,9 @@ public final class AsyncCraftChain {
             List<IngredientSpec> perOperationSpecs = new ArrayList<>();
             List<IngredientSpec> reusableSpecs = new ArrayList<>();
             List<IBatchDelegate.MaterialReservationScope> scopes = group.getMaterialReservationScopes();
+            List<Integer> reusableIndices = reusableMaterialIndices(scopes, operationSpecs.size());
             for (int i = 0; i < operationSpecs.size(); i++) {
-                if (i < scopes.size() && scopes.get(i) == IBatchDelegate.MaterialReservationScope.PER_WORKER_REUSABLE) {
+                if (reusableIndices.contains(i)) {
                     reusableSpecs.add(operationSpecs.get(i));
                 } else {
                     perOperationSpecs.add(operationSpecs.get(i));
@@ -1551,7 +1566,7 @@ public final class AsyncCraftChain {
                 int consumedIndex = 0;
                 int reusableIndex = operation % Math.max(1, workers);
                 for (int i = 0; i < operationSpecs.size(); i++) {
-                    if (i < scopes.size() && scopes.get(i) == IBatchDelegate.MaterialReservationScope.PER_WORKER_REUSABLE) {
+                    if (reusableIndices.contains(i)) {
                         full.add(reusable.get(reusableIndex));
                         reusableIndex += workers;
                     } else {
@@ -1563,6 +1578,7 @@ public final class AsyncCraftChain {
                 virtualDebits.add(List.of());
                 producerDebits.add(consumedFragments(producerBefore, producerPool));
             }
+            requireGraphMaterialPoolsDrained(initialPool, producerPool);
             return new GraphNodeMaterials(materials, tokens, virtualDebits, producerDebits);
         }
         MaterialBroker.Checkout checkout = graphMaterials != null
@@ -1573,8 +1589,23 @@ public final class AsyncCraftChain {
                 delegate.getMaterialReservationScopes(), executions);
         List<ItemStack> materials = reserveGraphMaterials(
                 scaledSpecs, online, ledger, initialPool, producerPool);
-        return materials == null ? null
-                : new GraphNodeMaterials(materials, List.of(), List.of(), List.of());
+        if (materials == null) return null;
+        requireGraphMaterialPoolsDrained(initialPool, producerPool);
+        return new GraphNodeMaterials(materials, List.of(), List.of(), List.of());
+    }
+
+    private static void requireGraphMaterialPoolsDrained(
+            List<ItemStack> initialPool, List<ItemStack> producerPool) {
+        if (!graphMaterialPoolsDrained(initialPool, producerPool)) {
+            throw new IllegalStateException(
+                    "runtime material specs did not consume the complete graph checkout");
+        }
+    }
+
+    static boolean graphMaterialPoolsDrained(
+            List<ItemStack> initialPool, List<ItemStack> producerPool) {
+        return initialPool.stream().allMatch(stack -> stack == null || stack.isEmpty())
+                && producerPool.stream().allMatch(stack -> stack == null || stack.isEmpty());
     }
 
     static List<IngredientSpec> scaleGraphSpecsForExecutions(
@@ -1591,6 +1622,18 @@ public final class AsyncCraftChain {
             scaledSpecs.add(new IngredientSpec(spec.ingredient(), count, spec.role()));
         }
         return List.copyOf(scaledSpecs);
+    }
+
+    static List<Integer> reusableMaterialIndices(
+            List<IBatchDelegate.MaterialReservationScope> scopes, int specCount) {
+        List<Integer> indices = new ArrayList<>();
+        int limit = Math.min(Math.max(0, specCount), scopes.size());
+        for (int i = 0; i < limit; i++) {
+            if (scopes.get(i) == IBatchDelegate.MaterialReservationScope.PER_WORKER_REUSABLE) {
+                indices.add(i);
+            }
+        }
+        return List.copyOf(indices);
     }
 
     private static List<ItemStack> consumedFragments(
@@ -2297,6 +2340,18 @@ public final class AsyncCraftChain {
     }
 
     private IBatchDelegate startModStep(CraftingResolver.ResolutionStep step, ServerPlayer online) {
+        if (step.modType().isVirtual()) {
+            IBatchDelegate virtualDelegate = step.inferMode()
+                    ? step.modType().createInferDelegate() : createDelegate(step.modType());
+            if (virtualDelegate == null || !PreparationMessageScope.validate(
+                    virtualDelegate, online, step.recipeId(), null, BlockPos.ZERO)) {
+                return null;
+            }
+            if (virtualDelegate instanceof AbstractBatchDelegate abd) {
+                abd.setMachineServer(server);
+            }
+            return startGenericStep(virtualDelegate, step, online);
+        }
         // Extract machine sub-type from recipe ID (e.g. "wissen_crystallizer"
         // from "wizards_reborn:wissen_crystallizer/earth_crystal_seed") so we
         // only probe machines of the correct type, not every binding for the mod.
@@ -2647,6 +2702,13 @@ public final class AsyncCraftChain {
                     }
                     return null;
                 }
+                if (!delegate.validateExecutionContext(online)) {
+                    RSIntegrationMod.LOGGER.warn(ctx.format(
+                            "Execution context unavailable for generic step {}"), step.recipeId());
+                    try { delegate.onBatchFailed(online, "execution context unavailable"); }
+                    catch (Exception ignored) { }
+                    return null;
+                }
                 if (!ledger.commit(network, online)) {
                     RSIntegrationMod.LOGGER.warn(ctx.format("Ledger commit failed for generic step {}"),
                             step.recipeId());
@@ -2877,21 +2939,19 @@ public final class AsyncCraftChain {
         List<ReservedOperation> reservations = new ArrayList<>();
         int effectiveWorkers = Math.min(Math.max(1, workerCount), operationCount);
         List<ItemStack> reusable = new ArrayList<>();
-        for (int i = 0; i < specs.size(); i++) {
-            if (i < scopes.size() && scopes.get(i) == IBatchDelegate.MaterialReservationScope.PER_WORKER_REUSABLE) {
-                IngredientSpec spec = specs.get(i);
-                for (int worker = 0; worker < effectiveWorkers; worker++) {
-                    List<IngredientSpec> one = List.of(new IngredientSpec(
-                            spec.ingredient(), spec.count(), spec.role()));
-                    List<ItemStack> material = preReserveStepMaterials(one, online);
-                    if (material == null) {
-                        ledger.reset();
-                        restoreVirtualSnapshot(virtualSnapshot);
-                        return null;
-                    }
-                    reusable.addAll(material);
+        List<Integer> reusableIndices = reusableMaterialIndices(scopes, specs.size());
+        for (int i : reusableIndices) {
+            IngredientSpec spec = specs.get(i);
+            for (int worker = 0; worker < effectiveWorkers; worker++) {
+                List<IngredientSpec> one = List.of(new IngredientSpec(
+                        spec.ingredient(), spec.count(), spec.role()));
+                List<ItemStack> material = preReserveStepMaterials(one, online);
+                if (material == null) {
+                    ledger.reset();
+                    restoreVirtualSnapshot(virtualSnapshot);
+                    return null;
                 }
-                break;
+                reusable.addAll(material);
             }
         }
         for (int operation = 0; operation < operationCount; operation++) {
@@ -2899,7 +2959,7 @@ public final class AsyncCraftChain {
             List<ItemStack> virtualDebits = new ArrayList<>();
             List<IngredientSpec> perOperation = new ArrayList<>();
             for (int i = 0; i < specs.size(); i++) {
-                if (i >= scopes.size() || scopes.get(i) == IBatchDelegate.MaterialReservationScope.PER_OPERATION) {
+                if (!reusableIndices.contains(i)) {
                     perOperation.add(specs.get(i));
                 }
             }
@@ -2913,7 +2973,7 @@ public final class AsyncCraftChain {
             int perIndex = 0;
             int reusableIndex = 0;
             for (int i = 0; i < specs.size(); i++) {
-                if (i < scopes.size() && scopes.get(i) == IBatchDelegate.MaterialReservationScope.PER_WORKER_REUSABLE) {
+                if (reusableIndices.contains(i)) {
                     full.add(reusable.get((operation % effectiveWorkers) + reusableIndex));
                     reusableIndex += effectiveWorkers;
                 } else {

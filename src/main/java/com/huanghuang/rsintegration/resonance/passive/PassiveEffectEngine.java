@@ -1,12 +1,10 @@
 package com.huanghuang.rsintegration.resonance.passive;
 
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
-
-import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;
 import com.huanghuang.rsintegration.network.packet.ResonanceSyncPacket;
-import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
+import com.huanghuang.rsintegration.mods.lychee.LycheeVirtualCatalysts;
 import com.huanghuang.rsintegration.resonance.backpack.ResonanceBackpackContainer;
 import com.huanghuang.rsintegration.resonance.disk.ResonanceDiskWrapper;
 import com.refinedmods.refinedstorage.api.network.INetwork;
@@ -29,6 +27,7 @@ public final class PassiveEffectEngine {
 
     private static final Field DRIVE_PARENT;
     private static final Map<UUID, ResonanceDiskWrapper> DISK_CACHE = new ConcurrentHashMap<>();
+    private static final Map<UUID, DiskSyncState> SYNC_CACHE = new ConcurrentHashMap<>();
 
     static {
         Field f = null;
@@ -45,21 +44,20 @@ public final class PassiveEffectEngine {
     public static void onPlayerTick(TickEvent.PlayerTickEvent event) {
         if (event.phase != TickEvent.Phase.END) return;
         if (!(event.player instanceof ServerPlayer player)) return;
-        if (!RSIntegrationConfig.ENABLE_RS_PASSIVE_EFFECTS.get()) return;
-
         // Resolve disk once per second; every tick use cached reference
         if (player.tickCount % 20 == 0) {
             INetwork network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
             ResonanceDiskWrapper disk = (network != null) ? findResonanceDisk(network) : null;
             if (disk != null) {
                 DISK_CACHE.put(player.getUUID(), disk);
-                syncDiskGemCount(player, disk);
             } else {
                 DISK_CACHE.remove(player.getUUID());
             }
+            syncDiskState(player, disk);
         }
 
         ResonanceDiskWrapper cachedDisk = DISK_CACHE.get(player.getUUID());
+        if (!RSIntegrationConfig.ENABLE_RS_PASSIVE_EFFECTS.get()) return;
         // The backpack menu owns a slot snapshot and reconciles user changes
         // against it. Mutating NBT in the delegate while that menu is open can
         // make the snapshot stale and overwrite a different NBT variant when
@@ -73,21 +71,34 @@ public final class PassiveEffectEngine {
     public static void onPlayerLogout(PlayerEvent.PlayerLoggedOutEvent event) {
         if (event.getEntity() instanceof ServerPlayer sp) {
             DISK_CACHE.remove(sp.getUUID());
+            SYNC_CACHE.remove(sp.getUUID());
         }
     }
 
-    private static void syncDiskGemCount(ServerPlayer player, ResonanceDiskWrapper disk) {
+    private static void syncDiskState(ServerPlayer player, @Nullable ResonanceDiskWrapper disk) {
         int gemCount = 0;
-        for (ItemStack stack : disk.getStacks()) {
-            if (!stack.isEmpty() && stack.is(net.minecraftforge.common.Tags.Items.GEMS)) {
-                gemCount += stack.getCount();
+        if (disk != null) {
+            for (ItemStack stack : disk.getStacks()) {
+                if (!stack.isEmpty() && stack.is(net.minecraftforge.common.Tags.Items.GEMS)) {
+                    gemCount += stack.getCount();
+                }
             }
         }
+        int catalystMask = LycheeVirtualCatalysts.catalystMask(disk);
+        DiskSyncState previous = SYNC_CACHE.get(player.getUUID());
+        long revision = previous == null ? 0L : previous.revision();
+        if (previous == null || previous.gemCount() != gemCount
+                || previous.lycheeCatalystMask() != catalystMask) {
+            revision++;
+        }
+        SYNC_CACHE.put(player.getUUID(), new DiskSyncState(gemCount, catalystMask, revision));
         NetworkHandler.CHANNEL.sendTo(
-                new ResonanceSyncPacket(gemCount),
+                new ResonanceSyncPacket(gemCount, catalystMask, revision),
                 player.connection.connection,
                 net.minecraftforge.network.NetworkDirection.PLAY_TO_CLIENT);
     }
+
+    private record DiskSyncState(int gemCount, int lycheeCatalystMask, long revision) {}
 
     @Nullable
     public static ResonanceDiskWrapper findResonanceDisk(INetwork network) {

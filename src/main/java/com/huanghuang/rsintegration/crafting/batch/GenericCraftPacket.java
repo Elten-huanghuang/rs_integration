@@ -684,6 +684,15 @@ public final class GenericCraftPacket {
         }
 
         ModType modType = ModType.classifyRecipe(recipe);
+        if (modType != null && modType.isVirtual()) {
+            ModRecipeHandler virtualHandler = ModRecipeHandlers.handlerFor(recipe);
+            if (virtualHandler == null || virtualHandler.modType() != modType
+                    || !virtualHandler.isAvailableForPlanning(recipe, player)) {
+                player.sendSystemMessage(Component.translatable(
+                        "rsi.generic.error.execution_context", recipeId));
+                return;
+            }
+        }
         INetwork network = resolveNetworkForRecipe(player, dim, pos, modType);
 
         // Auto-select a bound machine for mod recipes when dim/pos are not
@@ -693,7 +702,11 @@ public final class GenericCraftPacket {
         // machine entirely and may fail or give results for free.
         ResourceLocation effectiveDim = dim;
         net.minecraft.core.BlockPos effectivePos = pos;
-        if ((effectiveDim == null || effectivePos == null) && !(recipe instanceof CraftingRecipe) && modType != null) {
+        if ((effectiveDim == null || effectivePos == null) && modType != null && modType.isVirtual()) {
+            effectiveDim = player.level().dimension().location();
+            effectivePos = player.blockPosition();
+        } else if ((effectiveDim == null || effectivePos == null)
+                && !(recipe instanceof CraftingRecipe) && modType != null) {
             String reqKeyword = getMachineKeywordForRecipe(recipe);
             for (var m : AltarBindingRegistry
                     .getBoundMachinesForType(player, modType)) {
@@ -711,10 +724,10 @@ public final class GenericCraftPacket {
         // Smithing recipes don't need a bound machine — they compute results
         // directly via getResultItem().  Skip the async chain path.
         if (!(recipe instanceof CraftingRecipe) && effectiveDim != null && effectivePos != null
-                && network != null && RSIntegrationConfig.ENABLE_MULTIBLOCK_AUTO_CRAFTING.get()
+                && network != null && ((modType != null && modType.isVirtual())
+                || RSIntegrationConfig.ENABLE_MULTIBLOCK_AUTO_CRAFTING.get())
                 && modType != ModType.byId("smithing")) {
             if (modType != null) {
-                List<IngredientSpec> graphSpecs = new ArrayList<>();
                 List<IngredientSpec> executionSpecs = specs;
                 if (CrockPotRecipeHandler.hasCategoryConstraints(recipe)) {
                     ServerLevel crockPotLevel = CraftPacketUtils.resolveLevel(
@@ -728,9 +741,12 @@ public final class GenericCraftPacket {
                     }
                     executionSpecs = categorySpecs;
                 }
-                for (IngredientSpec spec : executionSpecs) {
-                    if (!spec.isEmpty()) graphSpecs.add(spec);
-                }
+                // The terminal executes repeatCount times, so its input DAG must
+                // cover the complete batch. Otherwise the flat compatibility
+                // path produces one intermediate and the second terminal run
+                // fails while trying to reserve material that was never planned.
+                List<IngredientSpec> graphSpecs = scaleIngredientSpecs(
+                        executionSpecs, repeatCount);
                 Map<StackKey, Integer> avail = MaterialSources.listAllAvailable(player, network);
                 List<String> missing = new ArrayList<>();
                 CraftPlanGraph inputGraph = CraftingResolver.resolveGraphForSpecsWithTypes(
@@ -876,6 +892,7 @@ public final class GenericCraftPacket {
         // Exception: smithing recipes can produce results directly via
         // getResultItem() (e.g. netherite upgrade) without a machine.
         if (!(recipe instanceof CraftingRecipe) && modType != null && modType != ModType.GENERIC
+                && !modType.isVirtual()
                 && modType != ModType.byId("smithing")
                 && (effectiveDim == null || effectivePos == null)) {
             player.sendSystemMessage(Component.translatable(
@@ -1107,7 +1124,7 @@ public final class GenericCraftPacket {
         INetwork network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
         if (network != null) return network;
         // 3. For mod recipes: try all bound machines of matching type
-        if (modType != null && modType != ModType.GENERIC) {
+        if (modType != null && modType != ModType.GENERIC && !modType.isVirtual()) {
             for (AltarBindingRegistry.BoundMachine m :
                     AltarBindingRegistry.getBoundMachinesForType(player, modType)) {
                 if (m.dim().equals(dim) && m.pos().equals(pos)) continue;
@@ -1145,7 +1162,7 @@ public final class GenericCraftPacket {
         return tag != null ? key + "#" + tag : key;
     }
 
-    private static List<IngredientSpec> scaleIngredientSpecs(
+    static List<IngredientSpec> scaleIngredientSpecs(
             List<IngredientSpec> specs, int executions) {
         List<IngredientSpec> scaled = new ArrayList<>(specs.size());
         for (IngredientSpec spec : specs) {

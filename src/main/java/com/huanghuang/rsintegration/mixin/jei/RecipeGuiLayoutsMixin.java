@@ -173,6 +173,16 @@ public class RecipeGuiLayoutsMixin {
             }
 
             String recipeClassName = recipe.getClass().getName();
+            if (recipeClassName.equals("snownee.lychee.item_inside.ItemInsideRecipe")
+                    && !com.huanghuang.rsintegration.mods.lychee.LycheeVirtualRecipeHandler
+                    .isSupported(recipe)) {
+                RSIntegrationMod.LOGGER.warn("[RSI-JEI-Mixin] Lychee recipe rejected: id={} reason={}",
+                        getRecipeIdSafe(recipe),
+                        com.huanghuang.rsintegration.mods.lychee.LycheeVirtualRecipeHandler
+                                .unsupportedReason(recipe));
+                skippedNoRecipe++;
+                continue;
+            }
             boolean isFa = recipeClassName.startsWith("com.stal111.forbidden_arcanus");
             boolean isFaOrTlm = isFa
                     || recipeClassName.startsWith("com.github.tartaricacid.touhoulittlemaid.");
@@ -212,6 +222,8 @@ public class RecipeGuiLayoutsMixin {
                 skippedNoRecipeId++;
                 continue;
             }
+            ModType recipeModType = computeModType(recipe);
+            boolean isVirtual = recipeModType != null && recipeModType.isVirtual();
 
             // Skip Goety rituals that don't produce items:
             // - requiresSacrifice() (entity sacrifice rituals)
@@ -231,7 +243,7 @@ public class RecipeGuiLayoutsMixin {
             BlockPos machinePos;
             String boundBlockKey = null;
             String boundBlockRegKey = null;
-            if (isGeneric) {
+            if (isGeneric || isVirtual) {
                 bindingDim = player.level().dimension().location();
                 machinePos = player.blockPosition();
             } else {
@@ -298,7 +310,7 @@ public class RecipeGuiLayoutsMixin {
 
             ModType modType = "vanilla_brewing_stand".equals(filter)
                     ? ModType.byId("vanilla_brewing_stand")
-                    : computeModType(recipe);
+                    : recipeModType;
 
             String tooltipKey;
             if (rsi$isGoetyRitual(recipe)) {
@@ -343,7 +355,7 @@ public class RecipeGuiLayoutsMixin {
 
             // Register machine GUI button for non-generic (bound) recipes
             // when the bound machine supports remote GUI.
-            if (!isGeneric && bindingDim != null && machinePos != null
+            if (!isGeneric && !isVirtual && bindingDim != null && machinePos != null
                     && modType != null
                     && supportsGuiWithRegCheck(boundBlockKey, boundBlockRegKey)) {
                 ResourceLocation guiDim = bindingDim;
@@ -543,6 +555,7 @@ public class RecipeGuiLayoutsMixin {
 
         Font font = Minecraft.getInstance().font;
         for (int i = 0; i < rsi$positions.size(); i++) {
+            if (!AltarCraftButtons.isVisible(i)) continue;
             int[] pos = rsi$positions.get(i);
             int bx = pos[0], by = pos[1], bw = pos[2], bh = pos[3];
             boolean hovered = mouseX >= bx && mouseX < bx + bw && mouseY >= by && mouseY < by + bh;
@@ -613,11 +626,104 @@ public class RecipeGuiLayoutsMixin {
 
     @Unique
     private static Object getRecipeFromLayout(IRecipeLayoutDrawable<?> layout) {
+        if (layout == null) return null;
         try {
-            return layout.getRecipe();
-        } catch (Exception e) {
-            return null;
+            Object recipe = layout.getRecipe();
+            if (recipe != null) return recipe;
+        } catch (Throwable e) {
+            // A few optional JEI integrations ship layouts compiled against a
+            // different API revision. Keep the rest of JEI usable, but retain
+            // the exception so the incompatibility is diagnosable.
+            RSIntegrationMod.LOGGER.warn("[RSI-JEI-Mixin] getRecipe() failed: layoutClass={} category={} error={}",
+                    layout.getClass().getName(), rsi$safeCategoryUid(layout), e.toString());
         }
+
+        // JEI's public implementation stores the recipe in a private field.
+        // This fallback covers wrapper layouts which accidentally return null
+        // from the interface method while still retaining the delegate.
+        for (Class<?> type = layout.getClass(); type != null; type = type.getSuperclass()) {
+            try {
+                java.lang.reflect.Field field = type.getDeclaredField("recipe");
+                field.setAccessible(true);
+                Object recipe = field.get(layout);
+                if (recipe != null) {
+                    RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] recovered recipe from {}.recipe (layoutClass={})",
+                            type.getName(), layout.getClass().getName());
+                    return recipe;
+                }
+            } catch (NoSuchFieldException ignored) {
+                // Continue through the superclass chain.
+            } catch (Throwable e) {
+                RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] recipe field probe failed: layoutClass={}",
+                        layout.getClass().getName(), e);
+                break;
+            }
+        }
+
+        Object recovered = recoverLycheeRecipe(layout);
+        if (recovered != null) return recovered;
+
+        String category = rsi$safeCategoryUid(layout);
+        if (category != null && category.startsWith("lychee:")) {
+            RSIntegrationMod.LOGGER.warn("[RSI-JEI-Mixin] Lychee layout has no recipe: layoutClass={} category={}",
+                    layout.getClass().getName(), category);
+        }
+        return null;
+    }
+
+    /**
+     * Lychee 5.1 keeps the category's source list in {@code initialRecipes}.
+     * On affected JEI/Lychee combinations the drawable loses its recipe
+     * reference, but the category and rendered output remain available. Use
+     * that data to recover the supported recipe by its output stack.
+     */
+    @Unique
+    private static Object recoverLycheeRecipe(IRecipeLayoutDrawable<?> layout) {
+        String category = rsi$safeCategoryUid(layout);
+        if (category == null || !category.startsWith("lychee:item_inside/")) return null;
+        try {
+            Object recipeCategory = layout.getRecipeCategory();
+            java.lang.reflect.Field field = null;
+            for (Class<?> type = recipeCategory.getClass(); type != null && field == null; type = type.getSuperclass()) {
+                try {
+                    field = type.getDeclaredField("initialRecipes");
+                } catch (NoSuchFieldException ignored) {
+                    // Continue through Lychee's category hierarchy.
+                }
+            }
+            if (field == null) return null;
+            field.setAccessible(true);
+            Object raw = field.get(recipeCategory);
+            if (!(raw instanceof Iterable<?> recipes)) return null;
+
+            ItemStack renderedOutput = extractOutputStack(layout);
+            Object soleCandidate = null;
+            int supportedCount = 0;
+            for (Object candidate : recipes) {
+                if (!(candidate instanceof Recipe<?> recipe)
+                        || !com.huanghuang.rsintegration.mods.lychee.LycheeVirtualRecipeHandler.isSupported(candidate)) {
+                    continue;
+                }
+                soleCandidate = candidate;
+                supportedCount++;
+                if (renderedOutput != null && !renderedOutput.isEmpty() && Minecraft.getInstance().level != null) {
+                    ItemStack expected = new com.huanghuang.rsintegration.mods.lychee.LycheeVirtualRecipeHandler()
+                            .getResultItem(recipe, Minecraft.getInstance().level.registryAccess());
+                    if (!expected.isEmpty() && ItemStack.isSameItemSameTags(renderedOutput, expected)) {
+                        RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] recovered Lychee recipe by output: {}", recipe.getId());
+                        return candidate;
+                    }
+                }
+            }
+            if (supportedCount == 1) {
+                RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] recovered sole Lychee recipe: {}",
+                        ((Recipe<?>) soleCandidate).getId());
+                return soleCandidate;
+            }
+        } catch (Throwable e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] Lychee category recipe recovery failed", e);
+        }
+        return null;
     }
 
     @Unique

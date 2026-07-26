@@ -71,18 +71,27 @@ final class CandidateEngine {
                 ResourceLocation rid = entry.recipe().getId();
                 if (byId.containsKey(rid)) continue; // already collected
                 if (entry.modType() != ModType.GENERIC) {
+                    var handler = ModRecipeHandlers.handlerFor(entry.recipe());
+                    if (handler != null
+                            && !handler.isAvailableForPlanning(entry.recipe(), ctx.player)) {
+                        if (diag != null) logDiag(diag, item, entry, 0, entry.modType(), true,
+                                "Execution context unavailable");
+                        continue;
+                    }
                     if (!isMachineAvailable(entry, ctx)) {
                         if (diag != null) logDiag(diag, item, entry, 0, entry.modType(), true, "Machine not available");
                         continue;
                     }
-                    var allowlist = RSIntegrationConfig.MULTIBLOCK_RECIPE_ALLOWLIST.get();
-                    if (!allowlist.isEmpty() && !allowlist.contains(rid.toString())) {
-                        if (diag != null) logDiag(diag, item, entry, 0, entry.modType(), true, "Not in allowlist");
-                        continue;
-                    }
-                    if (RSIntegrationConfig.MULTIBLOCK_RECIPE_BLACKLIST.get().contains(rid.toString())) {
-                        if (diag != null) logDiag(diag, item, entry, 0, entry.modType(), true, "Blocklisted");
-                        continue;
+                    if (!entry.modType().isVirtual()) {
+                        var allowlist = RSIntegrationConfig.MULTIBLOCK_RECIPE_ALLOWLIST.get();
+                        if (!allowlist.isEmpty() && !allowlist.contains(rid.toString())) {
+                            if (diag != null) logDiag(diag, item, entry, 0, entry.modType(), true, "Not in allowlist");
+                            continue;
+                        }
+                        if (RSIntegrationConfig.MULTIBLOCK_RECIPE_BLACKLIST.get().contains(rid.toString())) {
+                            if (diag != null) logDiag(diag, item, entry, 0, entry.modType(), true, "Blocklisted");
+                            continue;
+                        }
                     }
                 }
                 byId.put(rid, entry);
@@ -206,7 +215,7 @@ final class CandidateEngine {
     }
 
     private static boolean isMachineAvailable(RecipeIndex.Entry entry, ResolutionContext ctx) {
-        if (entry.modType() == ModType.GENERIC) return true;
+        if (entry.modType() == ModType.GENERIC || entry.modType().isVirtual()) return true;
         if (ctx.player == null) return false;
         return AltarBindingRegistry.hasBindingForRecipe(ctx.player, entry.recipe());
     }

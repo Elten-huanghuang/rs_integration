@@ -2,11 +2,15 @@ package com.huanghuang.rsintegration.crafting.batch;
 
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.CraftingResolver;
+import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.OutputDestination;
+import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import io.netty.buffer.Unpooled;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.item.crafting.Ingredient;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -50,6 +54,18 @@ class GenericCraftPacketTest extends BootstrapTest {
         assertTrue(GenericCraftPacket.smithingAsyncSteps(
                 List.of(intermediate), new ResourceLocation("test", "divine_gold_helmet"), 1)
                 .isEmpty());
+    }
+
+    @Test
+    void terminalInputGraphCoversWholeBatchWithoutScalingCatalysts() {
+        List<IngredientSpec> scaled = GenericCraftPacket.scaleIngredientSpecs(List.of(
+                new IngredientSpec(Ingredient.of(Items.IRON_INGOT), 1, DemandRole.CONSUMED),
+                new IngredientSpec(Ingredient.of(Items.BUCKET), 1, DemandRole.CATALYST)), 6);
+
+        assertEquals(6, scaled.get(0).count());
+        assertEquals(DemandRole.CONSUMED, scaled.get(0).role());
+        assertEquals(1, scaled.get(1).count());
+        assertEquals(DemandRole.CATALYST, scaled.get(1).role());
     }
 
     @Test

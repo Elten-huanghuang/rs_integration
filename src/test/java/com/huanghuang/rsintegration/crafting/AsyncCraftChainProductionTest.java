@@ -120,6 +120,24 @@ class AsyncCraftChainProductionTest extends BootstrapTest {
     }
 
     @Test
+    void findsEveryReusableMaterialInsteadOfOnlyTheFirst() {
+        assertEquals(List.of(0, 2), AsyncCraftChain.reusableMaterialIndices(List.of(
+                IBatchDelegate.MaterialReservationScope.PER_WORKER_REUSABLE,
+                IBatchDelegate.MaterialReservationScope.PER_OPERATION,
+                IBatchDelegate.MaterialReservationScope.PER_WORKER_REUSABLE), 3));
+    }
+
+    @Test
+    void graphCheckoutRejectsUnconsumedPlannedFragments() {
+        assertTrue(AsyncCraftChain.graphMaterialPoolsDrained(
+                List.of(ItemStack.EMPTY), List.of()));
+        assertFalse(AsyncCraftChain.graphMaterialPoolsDrained(
+                List.of(new ItemStack(Items.IRON_INGOT)), List.of()));
+        assertFalse(AsyncCraftChain.graphMaterialPoolsDrained(
+                List.of(), List.of(new ItemStack(Items.GOLD_INGOT))));
+    }
+
+    @Test
     void reusableRequirementDoesNotScaleWithExecutions() {
         IngredientSpec consumed = new IngredientSpec(
                 Ingredient.of(Items.IRON_INGOT), 2, DemandRole.CONSUMED);

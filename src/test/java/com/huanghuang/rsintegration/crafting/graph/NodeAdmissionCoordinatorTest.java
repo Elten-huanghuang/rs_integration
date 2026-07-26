@@ -11,10 +11,31 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class NodeAdmissionCoordinatorTest extends BootstrapTest {
+
+    @Test
+    void externallyMaterializedAdmissionSettlesOnlyOnce() {
+        MaterialBroker broker = new MaterialBroker();
+        DagScheduler scheduler = new DagScheduler(
+                independentGraph(new NodeId(0), new NodeId(1)));
+        NodeAdmissionCoordinator coordinator = new NodeAdmissionCoordinator(scheduler, broker);
+        NodeId node = new NodeId(0);
+        scheduler.claim(node);
+        NodeAdmissionCoordinator.Admission admission = coordinator.tryAdmitClaimed(
+                new NodeAdmissionCoordinator.Candidate(node, List.of()));
+
+        assertNotNull(admission);
+        coordinator.commit(admission);
+        assertTrue(coordinator.settleMaterialOnce(admission));
+        assertFalse(coordinator.settleMaterialOnce(admission));
+        assertEquals(MaterialBroker.ReservationState.SETTLED,
+                broker.state(admission.materialToken()));
+    }
 
     @Test
     void materialConflictRollsBackClaimWithoutOwningPhysicalResources() {

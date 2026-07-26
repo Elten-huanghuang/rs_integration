@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting.batch;
 
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
+import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
@@ -60,12 +61,28 @@ public final class GenericBatchDelegate extends AbstractBatchDelegate {
         this.pendingResult = ItemStack.EMPTY;
         this.craftDone = false;
 
+        if (!validateExecutionContext(player)) {
+            player.sendSystemMessage(Component.translatable(
+                    "rsi.generic.error.execution_context", recipeId));
+            return false;
+        }
         RSIntegrationMod.LOGGER.debug("[RSI-Batch-Generic] validateAndInit OK: recipe={}", recipeId);
         return true;
     }
 
     @Override
+    public boolean validateExecutionContext(@Nullable ServerPlayer player) {
+        if (recipe == null) return false;
+        ModRecipeHandler handler = ModRecipeHandlers.handlerFor(recipe);
+        if (handler == null) {
+            return !recipe.getClass().getName().startsWith("snownee.lychee.item_inside.");
+        }
+        return handler.isAvailableForPlanning(recipe, player);
+    }
+
+    @Override
     public boolean tryStartSingleCraft(ServerPlayer player) {
+        if (!validateExecutionContext(player)) return false;
         this.player = player;
         this.ledger = new ExtractionLedger();
         this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
@@ -111,7 +128,7 @@ public final class GenericBatchDelegate extends AbstractBatchDelegate {
         }
 
         // Phase 3: commit all extractions atomically
-        if (!ledger.commit(network, player)) {
+        if (!validateExecutionContext(player) || !ledger.commit(network, player)) {
             RSIntegrationMod.LOGGER.error("[RSI-Batch-Generic] Ledger commit failed");
             this.pendingResult = ItemStack.EMPTY;
             return false; // ledger not committed — nothing lost
@@ -151,6 +168,7 @@ public final class GenericBatchDelegate extends AbstractBatchDelegate {
     public boolean tryStartWithMaterials(ServerPlayer player,
                                          List<ItemStack> materials,
                                          ExtractionLedger sharedLedger) {
+        if (!validateExecutionContext(player)) return false;
         this.player = player;
         this.ledger = sharedLedger;
         this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
@@ -170,9 +188,17 @@ public final class GenericBatchDelegate extends AbstractBatchDelegate {
             if (recipe instanceof net.minecraft.world.item.crafting.CraftingRecipe cr) {
                 if (!captureRepeatedCraftingOutputs(cr, materials, player)) return false;
             } else {
+                int executions = materialExecutions(materials);
+                if (executions <= 0) return false;
+                pendingResult.setCount(Math.multiplyExact(pendingResult.getCount(), executions));
                 this.pendingSecondary.addAll(
                         ModRecipeHandlers.tryGetSecondaryOutputs(
                                 recipe, player.serverLevel().registryAccess()));
+                if (executions > 1) {
+                    for (ItemStack secondary : pendingSecondary) {
+                        secondary.setCount(Math.multiplyExact(secondary.getCount(), executions));
+                    }
+                }
             }
         }
 
@@ -228,6 +254,23 @@ public final class GenericBatchDelegate extends AbstractBatchDelegate {
         }
         pendingResult = outputs.result();
         return true;
+    }
+
+    private int materialExecutions(List<ItemStack> materials) {
+        List<IngredientSpec> specs = getRequiredMaterials();
+        if (specs == null || specs.size() != materials.size()) return -1;
+        int executions = -1;
+        for (int i = 0; i < specs.size(); i++) {
+            IngredientSpec spec = specs.get(i);
+            if (spec.isEmpty()) continue;
+            ItemStack material = materials.get(i);
+            if (material == null || material.isEmpty() || spec.count() <= 0
+                    || material.getCount() % spec.count() != 0) return -1;
+            int slotExecutions = material.getCount() / spec.count();
+            if (executions < 0) executions = slotExecutions;
+            else if (executions != slotExecutions) return -1;
+        }
+        return executions;
     }
 
     /**

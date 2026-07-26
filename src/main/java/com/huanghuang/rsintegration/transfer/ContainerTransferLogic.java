@@ -1,7 +1,5 @@
 package com.huanghuang.rsintegration.transfer;
 
-import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
-
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.util.InsertedStackDelta;
@@ -17,6 +15,7 @@ import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.fml.ModList;
 import net.minecraftforge.items.IItemHandler;
+import net.minecraftforge.registries.ForgeRegistries;
 import net.p3pp3rf1y.sophisticatedbackpacks.api.CapabilityBackpackWrapper;
 import net.p3pp3rf1y.sophisticatedbackpacks.api.IItemHandlerInteractionUpgrade;
 import net.p3pp3rf1y.sophisticatedbackpacks.upgrades.deposit.DepositUpgradeWrapper;
@@ -29,6 +28,16 @@ final class ContainerTransferLogic {
 
     private static final String TETRA_WORKBENCH_MENU =
             "se.mickelus.tetra.blocks.workbench.WorkbenchContainer";
+    private static final String DISK_DRIVE_MENU =
+            "com.refinedmods.refinedstorage.container.DiskDriveContainerMenu";
+    private static final String RESONANCE_BACKPACK_MENU =
+            "com.huanghuang.rsintegration.resonance.backpack.ResonanceBackpackContainer";
+    private static final String STORAGE_UPGRADE_SLOT =
+            "net.p3pp3rf1y.sophisticatedcore.common.gui.StorageContainerMenuBase$StorageUpgradeSlot";
+    private static final String BACKPACK_UPGRADE_SLOT =
+            "net.p3pp3rf1y.sophisticatedbackpacks.common.gui.BackpackContainer$BackpackUpgradeSlot";
+    private static final String RS_BLOCK_POS_TAG = "RSBlockPos";
+    private static final String RS_BLOCK_DIMENSION_TAG = "RSBlockDimension";
     private static final int PLAYER_MAIN_INVENTORY_SLOTS = 36;
 
     private ContainerTransferLogic() {}
@@ -43,6 +52,12 @@ final class ContainerTransferLogic {
     }
 
     private static void transferToRS(ServerPlayer player, AbstractContainerMenu menu) {
+        if (isSelfNetworkStorageMenu(menu.getClass().getName())) {
+            player.sendSystemMessage(
+                    Component.translatable("rsi.transfer.self_network_blocked"), false);
+            return;
+        }
+
         INetwork network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
         if (network == null) {
             player.sendSystemMessage(
@@ -77,11 +92,13 @@ final class ContainerTransferLogic {
         for (int slotIndex = 0; slotIndex < menu.slots.size(); slotIndex++) {
             Slot slot = menu.slots.get(slotIndex);
             if (isPlayerInventorySlot(player, menu, slotIndex, slot)) continue;
+            if (isUpgradeSlot(slot)) continue;
             if (hasCrafting && isResultSlot(slot)) continue;
             if (slot.container instanceof CraftingContainer) continue;
 
             ItemStack stack = slot.getItem();
             if (stack.isEmpty()) continue;
+            if (isBoundNetworkUpgrade(stack)) continue;
             if (!slot.mayPickup(player)) continue;
 
             // Skip items the deposit upgrade says should stay in the backpack.
@@ -362,6 +379,47 @@ final class ContainerTransferLogic {
         return TETRA_WORKBENCH_MENU.equals(menuClassName)
                 && slotCount >= PLAYER_MAIN_INVENTORY_SLOTS
                 && slotIndex >= slotCount - PLAYER_MAIN_INVENTORY_SLOTS;
+    }
+
+    static boolean isSelfNetworkStorageMenu(String menuClassName) {
+        return DISK_DRIVE_MENU.equals(menuClassName)
+                || RESONANCE_BACKPACK_MENU.equals(menuClassName);
+    }
+
+    private static boolean isUpgradeSlot(Slot slot) {
+        Class<?> type = slot.getClass();
+        while (type != null && type != Object.class) {
+            if (isUpgradeSlotClass(type.getName())) return true;
+            type = type.getSuperclass();
+        }
+        return false;
+    }
+
+    static boolean isUpgradeSlotClass(String slotClassName) {
+        return STORAGE_UPGRADE_SLOT.equals(slotClassName)
+                || BACKPACK_UPGRADE_SLOT.equals(slotClassName)
+                || slotClassName.endsWith("$StorageUpgradeSlot")
+                || slotClassName.endsWith("$BackpackUpgradeSlot");
+    }
+
+    private static boolean isBoundNetworkUpgrade(ItemStack stack) {
+        var itemId = ForgeRegistries.ITEMS.getKey(stack.getItem());
+        var tag = stack.getTag();
+        return itemId != null && tag != null
+                && isProtectedBoundNetworkUpgrade(
+                        itemId.toString(),
+                        tag.contains(RS_BLOCK_POS_TAG),
+                        tag.contains(RS_BLOCK_DIMENSION_TAG));
+    }
+
+    static boolean isProtectedBoundNetworkUpgrade(String itemId,
+                                                   boolean hasBlockPos,
+                                                   boolean hasDimension) {
+        if (!hasBlockPos || !hasDimension) return false;
+        return itemId.equals("rs_integration:rs_magnet_upgrade")
+                || itemId.equals("rs_integration:rs_pickup_upgrade")
+                || itemId.equals("rs_integration:rs_refill_upgrade")
+                || itemId.equals("rs_integration:rs_feeding_upgrade");
     }
 
     // Skip result/output slots so containers where input and output

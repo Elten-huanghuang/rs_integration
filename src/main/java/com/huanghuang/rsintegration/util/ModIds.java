@@ -27,6 +27,7 @@ public final class ModIds {
     public static final String MAJRUSZS_ACCESSORIES = "majruszsaccessories";
     public static final String BOTANIA = "botania";
     public static final String ARS_NOUVEAU = "ars_nouveau";
+    public static final String LYCHEE = "lychee";
 
     // Dependencies
     public static final String REFINED_STORAGE = "refinedstorage";

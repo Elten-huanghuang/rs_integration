@@ -32,6 +32,7 @@ public final class ModType {
     private final String[] blockKeyPrefixes;
     private final Supplier<IBatchDelegate> delegateFactory;
     private final Supplier<IBatchDelegate> inferDelegateFactory;
+    private final boolean virtual;
 
     // JEI integration — set via configureJei() after register()
     // uidToFilter: [[jeiUid, filterString], ...] — filterString is what getBindingFilter returns
@@ -69,16 +70,21 @@ public final class ModType {
 
     private ModType(String id, String[] recipePrefixes, String[] blockKeyKeywords,
                     String[] blockKeyPrefixes, Supplier<IBatchDelegate> delegateFactory,
-                    @Nullable Supplier<IBatchDelegate> inferDelegateFactory) {
+                    @Nullable Supplier<IBatchDelegate> inferDelegateFactory,
+                    boolean virtual) {
         this.id = id;
         this.recipePrefixes = recipePrefixes;
         this.blockKeyKeywords = blockKeyKeywords;
         this.blockKeyPrefixes = blockKeyPrefixes;
         this.delegateFactory = delegateFactory;
         this.inferDelegateFactory = inferDelegateFactory;
+        this.virtual = virtual;
     }
 
     public String id() { return id; }
+
+    /** True for logical recipes that need no bound block or world interaction. */
+    public boolean isVirtual() { return virtual; }
 
     @Nullable
     public IBatchDelegate createDelegate() {
@@ -115,7 +121,16 @@ public final class ModType {
                                     Supplier<IBatchDelegate> delegateFactory,
                                     @Nullable Supplier<IBatchDelegate> inferDelegateFactory) {
         ModType type = new ModType(id, recipePrefixes, blockKeyKeywords,
-                blockKeyPrefixes, delegateFactory, inferDelegateFactory);
+                blockKeyPrefixes, delegateFactory, inferDelegateFactory, false);
+        BY_ID.put(id, type);
+        return type;
+    }
+
+    /** Register a recipe family that executes entirely in the logical crafting engine. */
+    public static ModType registerVirtual(String id, String[] recipePrefixes,
+                                          Supplier<IBatchDelegate> delegateFactory) {
+        ModType type = new ModType(id, recipePrefixes, new String[0],
+                new String[0], delegateFactory, null, true);
         BY_ID.put(id, type);
         return type;
     }
