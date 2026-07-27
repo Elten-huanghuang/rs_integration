@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting.batch;
 
 import com.huanghuang.rsintegration.crafting.CraftProgressSnapshot;
+import com.huanghuang.rsintegration.command.PerformanceMonitor;
 import io.netty.handler.codec.DecoderException;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraftforge.api.distmarker.Dist;
@@ -28,6 +29,7 @@ public final class CraftProgressPacket {
     }
 
     public void encode(FriendlyByteBuf buf) {
+        int startIndex = buf.writerIndex();
         buf.writeUUID(snapshot.craftId());
         buf.writeVarInt(snapshot.sequence());
         buf.writeVarInt(snapshot.result().ordinal());
@@ -62,6 +64,7 @@ public final class CraftProgressPacket {
             buf.writeUtf(node.technicalDetail(), MAX_TECHNICAL_DETAIL_LENGTH);
             buf.writeBoolean(node.draining());
         }
+        PerformanceMonitor.recordProgressPacketBytes(buf.writerIndex() - startIndex);
     }
 
     public static CraftProgressPacket decode(FriendlyByteBuf buf) {

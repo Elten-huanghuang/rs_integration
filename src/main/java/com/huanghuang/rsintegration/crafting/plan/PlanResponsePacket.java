@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.crafting.plan;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.tree.IngredientKey;
+import com.huanghuang.rsintegration.command.PerformanceMonitor;
 import io.netty.handler.codec.DecoderException;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
@@ -72,6 +73,7 @@ public final class PlanResponsePacket {
     }
 
     public void encode(FriendlyByteBuf buf) {
+        int startIndex = buf.writerIndex();
         buf.writeBoolean(plan.success());
         buf.writeUtf(plan.recipeId() != null ? plan.recipeId() : "", MAX_RECIPE_ID_LENGTH);
         // Always send full plan data — even infeasible plans need the recipe
@@ -169,6 +171,7 @@ public final class PlanResponsePacket {
         if (plan.graph() != null) writeGraph(buf, plan.graph());
         buf.writeBoolean(requestId != 0L);
         if (requestId != 0L) buf.writeVarLong(requestId);
+        PerformanceMonitor.recordPlanPacketBytes(buf.writerIndex() - startIndex);
     }
 
     public static PlanResponsePacket decode(FriendlyByteBuf buf) {
