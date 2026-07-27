@@ -21,6 +21,8 @@ public final class ExternalItemProgressBridge {
 
     private static final Map<UUID, Map<MaterialKey, Long>> PENDING_EXTERNAL = new LinkedHashMap<>();
     private static final Map<UUID, Map<MaterialKey, Long>> PENDING_CRAFTED = new LinkedHashMap<>();
+    private static final int MAX_PENDING_PLAYERS = 256;
+    private static final int MAX_PENDING_ITEMS_PER_PLAYER = 4096;
     private static volatile boolean enabled;
     private static boolean initialized;
 
@@ -57,8 +59,19 @@ public final class ExternalItemProgressBridge {
                                 ServerPlayer player, ItemStack inserted) {
         if (!enabled || player == null || inserted == null || inserted.isEmpty()) return;
         MaterialKey key = MaterialKey.of(inserted);
-        pending.computeIfAbsent(player.getUUID(), ignored -> new LinkedHashMap<>())
-                .merge(key, (long) inserted.getCount(), ExternalItemProgressBridge::saturatedAdd);
+        Map<MaterialKey, Long> playerPending = pending.computeIfAbsent(
+                player.getUUID(), ignored -> new LinkedHashMap<>());
+        if (!playerPending.containsKey(key) && playerPending.size() >= MAX_PENDING_ITEMS_PER_PLAYER) {
+            RSIntegrationMod.LOGGER.warn("Dropping FTB progress item for {}: per-player queue limit reached",
+                    player.getGameProfile().getName());
+            return;
+        }
+        playerPending.merge(key, (long) inserted.getCount(), ExternalItemProgressBridge::saturatedAdd);
+        if (pending.size() > MAX_PENDING_PLAYERS) {
+            UUID oldest = pending.keySet().iterator().next();
+            pending.remove(oldest);
+            RSIntegrationMod.LOGGER.warn("Dropping oldest FTB progress queue: player limit reached");
+        }
     }
 
     @SubscribeEvent
