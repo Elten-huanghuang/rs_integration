@@ -8,6 +8,7 @@ import com.huanghuang.rsintegration.util.InsertedStackDelta;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
 import com.huanghuang.rsintegration.crafting.batch.CraftProgressPacket;
+import com.huanghuang.rsintegration.crafting.batch.CraftProgressDeltaPacket;
 import com.huanghuang.rsintegration.crafting.batch.CraftStartedPacket;
 import com.huanghuang.rsintegration.crafting.batch.PreparationMessageScope;
 import net.minecraftforge.network.NetworkDirection;
@@ -178,6 +179,8 @@ public final class AsyncCraftChain {
     private final OperationResourceCoordinator operationResources;
     private final OperationExecutionKernel operationKernel;
     private int progressTickCounter;
+    /** Last non-terminal progress payload sent to this craft's owner. */
+    private CraftProgressSnapshot lastProgressSent;
     private int progressSequence;
     private boolean terminalProgressSent;
     @Nullable
@@ -3863,13 +3866,50 @@ public final class AsyncCraftChain {
     }
 
     private void sendProgressSnapshot(ServerPlayer online, CraftProgressSnapshot snapshot) {
+        boolean terminal = snapshot.isTerminal();
+        if (!terminal && sameProgressPayload(lastProgressSent, snapshot)) {
+            return;
+        }
         RSIntegrationMod.LOGGER.debug(ctx.format(
                 "Progress S2C: sequence={} result={} reason={} nodes={}/{} running={}"),
                 snapshot.sequence(), snapshot.result(), snapshot.reason(),
                 snapshot.completedNodes(), snapshot.totalNodes(), snapshot.runningNodes());
-        BatchCraftNetworkHandler.CHANNEL.sendTo(
-                new CraftProgressPacket(snapshot), online.connection.connection,
-                net.minecraftforge.network.NetworkDirection.PLAY_TO_CLIENT);
+        if (!terminal && lastProgressSent != null && progressTickCounter % 100 != 0) {
+            BatchCraftNetworkHandler.CHANNEL.sendTo(
+                    new CraftProgressDeltaPacket(craftId, lastProgressSent.sequence(), snapshot,
+                            changedNodes(lastProgressSent, snapshot)),
+                    online.connection.connection, NetworkDirection.PLAY_TO_CLIENT);
+        } else {
+            BatchCraftNetworkHandler.CHANNEL.sendTo(
+                    new CraftProgressPacket(snapshot), online.connection.connection,
+                    NetworkDirection.PLAY_TO_CLIENT);
+        }
+        if (snapshot.sequence() != CraftProgressSnapshot.TERMINAL_SEQUENCE) {
+            lastProgressSent = snapshot;
+        }
+    }
+
+    private static List<CraftProgressSnapshot.NodeProgress> changedNodes(
+            CraftProgressSnapshot previous, CraftProgressSnapshot current) {
+        java.util.Map<Integer, CraftProgressSnapshot.NodeProgress> old = new java.util.HashMap<>();
+        for (CraftProgressSnapshot.NodeProgress node : previous.nodes()) old.put(node.nodeId(), node);
+        List<CraftProgressSnapshot.NodeProgress> changed = new ArrayList<>();
+        for (CraftProgressSnapshot.NodeProgress node : current.nodes()) {
+            if (!java.util.Objects.equals(old.get(node.nodeId()), node)) changed.add(node);
+        }
+        return List.copyOf(changed);
+    }
+
+    private static boolean sameProgressPayload(CraftProgressSnapshot previous,
+                                                CraftProgressSnapshot current) {
+        if (previous == null) return false;
+        return previous.result() == current.result()
+                && previous.reason() == current.reason()
+                && previous.completedNodes() == current.completedNodes()
+                && previous.totalNodes() == current.totalNodes()
+                && previous.runningNodes() == current.runningNodes()
+                && java.util.Objects.equals(previous.technicalDetail(), current.technicalDetail())
+                && java.util.Objects.equals(previous.nodes(), current.nodes());
     }
 
     private void sendStartedPacket(ServerPlayer online) {
