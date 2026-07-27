@@ -81,6 +81,8 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
     private int stallTicks;
     private int insufficientWissenCurrent = -1;
     private int insufficientWissenRequired = -1;
+    private int insufficientXpCurrent = -1;
+    private int insufficientXpRequired = -1;
     // Timeout: max of 7200 ticks (6 min) or wissenCost/5*2 (double the
     // theoretical time, accounting for XP/health drain cooldowns).
     // Stall threshold kicks in at 5 seconds of no progress.
@@ -120,6 +122,14 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
                     "Insufficient Wissen energy (have " + current + ", need " + required + ")",
                     Component.translatable("rsi.wr.error.insufficient_wissen", current, required));
         }
+        if (insufficientXpRequired > 0
+                && insufficientXpCurrent < insufficientXpRequired) {
+            return PreparationResult.fatal(
+                    "Insufficient XP levels (have " + insufficientXpCurrent
+                            + ", need " + insufficientXpRequired + ")",
+                    Component.translatable("rsi.wr.error.insufficient_xp",
+                            insufficientXpCurrent, insufficientXpRequired));
+        }
         return PreparationResult.retry("WR machine is temporarily unavailable");
     }
 
@@ -147,6 +157,8 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         this.iteratorSideIngredients = null;
         this.insufficientWissenCurrent = -1;
         this.insufficientWissenRequired = -1;
+        this.insufficientXpCurrent = -1;
+        this.insufficientXpRequired = -1;
 
         ServerLevel level = CraftPacketUtils.resolveLevel(player.server, dim, player);
         if (level == null) {
@@ -211,8 +223,8 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         // cannot reserve or commit ingredients for a craft that WR will reject.
         if (!checkWissen()) {
             RSIntegrationMod.LOGGER.debug(
-                    "[RSI-Batch-WR] validateAndInit rejected {}: insufficient Wissen",
-                    recipeId);
+                    "[RSI-Batch-WR] validateAndInit rejected {}: {}",
+                    recipeId, requirementFailureDetail());
             return false;
         }
 
@@ -2071,6 +2083,8 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
     private boolean checkWissen() {
         insufficientWissenCurrent = -1;
         insufficientWissenRequired = -1;
+        insufficientXpCurrent = -1;
+        insufficientXpRequired = -1;
 
         // Crystal rituals don't consume wissen
         if (machineType == MachineType.CRYSTAL_RITUAL) return true;
@@ -2094,6 +2108,8 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         if (machineType == MachineType.ARCANE_ITERATOR) {
             int xpNeeded = readRecipeInt("getExperience");
             if (xpNeeded > 0 && player.experienceLevel < xpNeeded) {
+                insufficientXpCurrent = player.experienceLevel;
+                insufficientXpRequired = xpNeeded;
                 player.sendSystemMessage(Component.translatable(
                         "rsi.wr.error.insufficient_xp",
                         player.experienceLevel, xpNeeded));
@@ -2101,6 +2117,18 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
             }
         }
         return true;
+    }
+
+    private String requirementFailureDetail() {
+        if (insufficientWissenRequired > 0) {
+            return "insufficient Wissen (have " + Math.max(0, insufficientWissenCurrent)
+                    + ", need " + insufficientWissenRequired + ")";
+        }
+        if (insufficientXpRequired > 0) {
+            return "insufficient XP levels (have " + Math.max(0, insufficientXpCurrent)
+                    + ", need " + insufficientXpRequired + ")";
+        }
+        return "machine requirements not satisfied";
     }
 
     private int readRecipeInt(String methodName) {

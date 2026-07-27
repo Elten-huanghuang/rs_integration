@@ -24,7 +24,10 @@ import net.minecraft.world.item.crafting.CraftingRecipe;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraftforge.registries.ForgeRegistries;
 
+import javax.annotation.Nullable;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -260,14 +263,73 @@ final class StepExecutor {
             if (spec.isEmpty()) continue;
             int quantity = CraftPacketUtils.requiredCount(spec, batches);
             InputPortId port = new InputPortId(nodeId, index++);
-            if (!CraftingResolver.ensureIngredient(spec.ingredient(), quantity,
-                    ctx, depth + 1, edges, port, null)) {
+            Ingredient plannedIngredient = ensureSingleVariantMachineInput(
+                    spec.ingredient(), quantity, ctx, depth + 1, edges, port);
+            if (plannedIngredient == null) {
                 return null;
             }
-            inputs.add(new InputDemand(port, spec.ingredient(), quantity,
-                    effectiveDemandRole(spec), firstDisplay(spec.ingredient())));
+            inputs.add(new InputDemand(port, plannedIngredient, quantity,
+                    effectiveDemandRole(spec), firstDisplay(plannedIngredient)));
         }
         return inputs;
+    }
+
+    /**
+     * A non-crafting machine spec represents one physical input slot.  The
+     * resolver may satisfy a tag ingredient from several compatible variants,
+     * but those variants cannot coexist in one ItemStack.  Lock the complete
+     * slot demand to one concrete variant while leaving crafting-grid slots
+     * independent (and therefore still mixable across slots).
+     */
+    @Nullable
+    private static Ingredient ensureSingleVariantMachineInput(
+            Ingredient ingredient, int quantity, ResolutionContext ctx, int depth,
+            CraftingResolver.EdgeTracker edges, InputPortId port) {
+        List<ItemStack> variants = Arrays.stream(ingredient.getItems())
+                .filter(stack -> stack != null && !stack.isEmpty())
+                .map(stack -> stack.copyWithCount(1))
+                .collect(java.util.stream.Collectors.collectingAndThen(
+                        java.util.stream.Collectors.toMap(
+                                stack -> CraftingResolver.StackKey.of(stack, stack.hasTag()),
+                                stack -> stack,
+                                (first, ignored) -> first,
+                                LinkedHashMap::new),
+                        map -> new ArrayList<>(map.values())));
+
+        // Custom ingredients may not expose concrete item stacks. Preserve the
+        // existing behavior because there is no safe variant to lock onto.
+        if (variants.size() <= 1) {
+            Ingredient selected = variants.isEmpty()
+                    ? ingredient
+                    : CraftingResolver.ingredientOf(variants.get(0), variants.get(0).hasTag());
+            return CraftingResolver.ensureIngredient(
+                    selected, quantity, ctx, depth, edges, port, null) ? selected : null;
+        }
+
+        variants.sort(Comparator
+                .comparingInt((ItemStack stack) -> ctx.countMatching(
+                        CraftingResolver.ingredientOf(stack, stack.hasTag())))
+                .reversed()
+                .thenComparing(stack -> {
+                    ResourceLocation id = ForgeRegistries.ITEMS.getKey(stack.getItem());
+                    return id != null ? id.toString() : "";
+                }));
+
+        for (ItemStack variant : variants) {
+            Ingredient selected = CraftingResolver.ingredientOf(variant, variant.hasTag());
+            ctx.beginUndo();
+            edges.beginUndo();
+            boolean resolved = CraftingResolver.ensureIngredient(
+                    selected, quantity, ctx, depth, edges, port, null);
+            if (resolved) {
+                ctx.commitUndo();
+                edges.commitUndo();
+                return selected;
+            }
+            ctx.rollback();
+            edges.rollback();
+        }
+        return null;
     }
 
     /**
