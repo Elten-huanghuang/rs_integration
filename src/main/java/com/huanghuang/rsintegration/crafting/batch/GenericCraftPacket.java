@@ -2569,6 +2569,11 @@ public final class GenericCraftPacket {
         PLAN_CACHE.clear();
     }
 
+    public static void onPlayerLogout(UUID playerId) {
+        PREVIEW_GENERATIONS.remove(playerId);
+        PLAN_CACHE.keySet().removeIf(key -> key.playerId().equals(playerId));
+    }
+
     private static void sendPlanError(ServerPlayer player, Component msg) {
         RSIntegrationMod.LOGGER.warn("[RSI-tryBuildPlan] sendPlanError: recipe={} msg={} player={}",
                 "?", msg.getString(), player.getGameProfile().getName());
