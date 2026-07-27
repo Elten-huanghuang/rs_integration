@@ -622,6 +622,7 @@ public final class RSSidePanelNetworkHandler {
             SidePanelRequestRateLimiter.onPlayerLogout(pid);
             com.huanghuang.rsintegration.crafting.batch.CraftCancelPacket.onPlayerLogout(pid);
             com.huanghuang.rsintegration.crafting.batch.CraftStatusRequestPacket.onPlayerLogout(pid);
+            com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket.onPlayerLogout(pid);
         }
     }
 
