@@ -2088,22 +2088,15 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
             return false;
         }
 
-        // ARCANE_ITERATOR also drains XP levels and health from the player
-        // during the craft.  If the player doesn't have enough, the craft
-        // will stall mid-way and eventually time out.
+        // ARCANE_ITERATOR drains XP levels during the craft.  Do not reject
+        // based on current health here: servers may provide rapid regeneration
+        // or other protection, and Wizard's Reborn owns the actual health cost.
         if (machineType == MachineType.ARCANE_ITERATOR) {
             int xpNeeded = readRecipeInt("getExperience");
             if (xpNeeded > 0 && player.experienceLevel < xpNeeded) {
                 player.sendSystemMessage(Component.translatable(
                         "rsi.wr.error.insufficient_xp",
                         player.experienceLevel, xpNeeded));
-                return false;
-            }
-            int hpNeeded = readRecipeInt("getHealth");
-            if (hpNeeded > 0 && player.getHealth() <= hpNeeded) {
-                player.sendSystemMessage(Component.translatable(
-                        "rsi.wr.error.insufficient_health",
-                        (int) player.getHealth(), hpNeeded));
                 return false;
             }
         }
