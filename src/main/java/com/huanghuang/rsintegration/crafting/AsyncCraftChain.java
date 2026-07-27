@@ -1364,6 +1364,14 @@ public final class AsyncCraftChain {
                 PlayerUtils.safeGiveToPlayer(online, leftover, network);
             }
         }
+        // Private-ledger delegates resolve their inputs from MaterialSources.
+        // The producer stacks were just inserted into RS above, so invalidate
+        // the per-player snapshot before the delegate starts in this same tick.
+        // Without this, a freshly produced intermediate (for example a Goety
+        // ritual input) can be reported as missing until the player reconnects.
+        if (online != null) {
+            MaterialSources.invalidateFor(online);
+        }
         graphAdmissions.settleMaterialOnce(admission);
     }
 
