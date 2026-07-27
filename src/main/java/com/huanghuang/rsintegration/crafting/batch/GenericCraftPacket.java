@@ -94,6 +94,7 @@ import java.util.stream.Collectors;
 
 public final class GenericCraftPacket {
     private static final LogSampler FAILURE_LOG_SAMPLER = new LogSampler(2_000);
+    private static final java.util.concurrent.ConcurrentHashMap<UUID, Long> PREVIEW_GENERATIONS = new java.util.concurrent.ConcurrentHashMap<>();
 
     // Time-based plan cache — serves both dedup and compute-avoidance.
     // On cache hit within TTL: reply with cached plan immediately (no silent drop).
@@ -379,6 +380,8 @@ public final class GenericCraftPacket {
             context.setPacketHandled(true);
             return;
         }
+        final long previewGeneration = packet.preview
+                ? PREVIEW_GENERATIONS.merge(player.getUUID(), 1L, Long::sum) : 0L;
         if (packet.preview) {
             PlanCacheKey cacheKey = new PlanCacheKey(player.getUUID(), packet.recipeId,
                     packet.forcedRecipes, packet.repeatCount,
@@ -402,7 +405,8 @@ public final class GenericCraftPacket {
                 if (packet.preview) {
                     RSIntegrationMod.debug("[RSI-Generic] handle() → tryBuildPlan: recipeId={}", packet.recipeId);
                     tryBuildPlan(player, packet.recipeId, packet.forcedRecipes,
-                            packet.dim, packet.pos, packet.repeatCount, packet.baseItem, packet.targetOutput, packet.requestId);
+                            packet.dim, packet.pos, packet.repeatCount, packet.baseItem, packet.targetOutput,
+                            packet.requestId, previewGeneration);
                 } else {
                     RSIntegrationMod.debug("[RSI-Generic] handle() → tryResolve: recipeId={} forced={}", packet.recipeId, packet.forcedRecipes.size());
                     tryResolve(player, packet.recipeId, packet.forcedRecipes, packet.dim, packet.pos,
@@ -1224,7 +1228,8 @@ public final class GenericCraftPacket {
                                       @Nullable net.minecraft.core.BlockPos pos,
                                       int repeatCount,
                                       @Nullable ItemStack baseItem,
-                                      @Nullable ItemStack clickedOutput, long requestId) {
+                                      @Nullable ItemStack clickedOutput, long requestId,
+                                      long previewGeneration) {
         long planStartNanos = System.nanoTime();
         Recipe<?> recipe = resolveRecipe(player.serverLevel(), recipeId);
         if (recipe == null) {
@@ -2349,6 +2354,12 @@ public final class GenericCraftPacket {
 
         PLAN_CACHE.put(cacheKey, new CachedPlan(plan, System.nanoTime()));
         prunePlanCache(System.nanoTime());
+
+        if (previewGeneration != 0L
+                && !java.util.Objects.equals(PREVIEW_GENERATIONS.get(player.getUUID()), previewGeneration)) {
+            RSIntegrationMod.debug("[RSI-tryBuildPlan] Discarding stale preview result: recipeId={}", recipeId);
+            return;
+        }
 
         RSIntegrationMod.debug("[RSI-tryBuildPlan] SENDING PlanResponsePacket: recipeId={} steps={} feasible={} player={}",
                 recipeId, steps.size(), feasible, player.getGameProfile().getName());
