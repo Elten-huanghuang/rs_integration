@@ -36,6 +36,9 @@ public final class PerformanceMonitor {
     private static final AtomicLong networkResolveCalls = new AtomicLong();
     private static final AtomicLong networkResolveCacheHits = new AtomicLong();
     private static final AtomicLong networkResolveSuccesses = new AtomicLong();
+    private static final AtomicLong delegateObserveCalls = new AtomicLong();
+    private static final AtomicLong delegateObserveNanos = new AtomicLong();
+    private static final AtomicLong delegateObserveMaxNanos = new AtomicLong();
 
     private PerformanceMonitor() {}
 
@@ -74,6 +77,11 @@ public final class PerformanceMonitor {
         networkResolveCalls.incrementAndGet();
         if (cacheHit) networkResolveCacheHits.incrementAndGet();
         if (success) networkResolveSuccesses.incrementAndGet();
+    }
+    public static void recordDelegateObserve(long nanosElapsed) {
+        delegateObserveCalls.incrementAndGet();
+        delegateObserveNanos.addAndGet(nanosElapsed);
+        delegateObserveMaxNanos.updateAndGet(prev -> Math.max(prev, nanosElapsed));
     }
 
     // ── Queries ────────────────────────────────────────────────────
@@ -114,6 +122,9 @@ public final class PerformanceMonitor {
              + " resonanceStacks=" + resonanceScannedStacks.get() + "/" + resonanceMatchedStacks.get()
              + " networkResolve=" + networkResolveCalls.get() + "/" + networkResolveCacheHits.get()
              + " networkSuccess=" + networkResolveSuccesses.get()
+             + " delegateObserve=" + delegateObserveCalls.get() + "/"
+             + (delegateObserveCalls.get() == 0 ? 0 : delegateObserveNanos.get() / delegateObserveCalls.get() / 1000)
+             + "/" + delegateObserveMaxNanos.get() / 1000 + "us"
              + " chains=" + getActiveChainCount();
     }
 }

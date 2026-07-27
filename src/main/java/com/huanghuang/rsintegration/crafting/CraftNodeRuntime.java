@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.command.PerformanceMonitor;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.graph.ConcurrentNodeExecutor;
 import com.huanghuang.rsintegration.crafting.graph.MachineLeaseRegistry;
@@ -239,6 +240,7 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
         }
         waitTicks++;
 
+        long observeStartNanos = System.nanoTime();
         try {
             if (delegate instanceof ParallelCraftGroup group && group.isDraining()) {
                 drainingTicks++;
@@ -268,6 +270,8 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
         } catch (Exception e) {
             failureReason = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
             return ConcurrentNodeExecutor.Observation.FAILED;
+        } finally {
+            PerformanceMonitor.recordDelegateObserve(System.nanoTime() - observeStartNanos);
         }
 
         // Timeout: if this node is draining, give it extra time
