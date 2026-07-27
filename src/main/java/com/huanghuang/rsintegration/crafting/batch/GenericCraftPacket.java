@@ -97,12 +97,19 @@ public final class GenericCraftPacket {
 
     // Time-based plan cache — serves both dedup and compute-avoidance.
     // On cache hit within TTL: reply with cached plan immediately (no silent drop).
-    // Key: "playerUUID:recipeId:forcedHash:repeatCount"
-    private static final java.util.concurrent.ConcurrentHashMap<String, CachedPlan> PLAN_CACHE =
+    private static final java.util.concurrent.ConcurrentHashMap<PlanCacheKey, CachedPlan> PLAN_CACHE =
             new java.util.concurrent.ConcurrentHashMap<>();
     // This is a request-coalescing window, not a world-state cache. Keeping it
     // short prevents stale RS inventory and machine-lease previews.
     private static final long PLAN_CACHE_TTL_NANOS = 500_000_000L;
+
+    private record PlanCacheKey(UUID playerId, ResourceLocation recipeId,
+                                Map<String, String> forcedRecipes, int repeatCount,
+                                String clickedOutputToken) {
+        private PlanCacheKey {
+            forcedRecipes = Map.copyOf(forcedRecipes);
+        }
+    }
 
     private static final class CachedPlan {
         final PlanResponse plan;
@@ -373,9 +380,9 @@ public final class GenericCraftPacket {
             return;
         }
         if (packet.preview) {
-            String cacheKey = player.getUUID() + ":" + packet.recipeId + ":"
-                    + packet.forcedRecipes.hashCode() + ":" + packet.repeatCount + ":"
-                    + clickedOutputCacheToken(packet.targetOutput);
+            PlanCacheKey cacheKey = new PlanCacheKey(player.getUUID(), packet.recipeId,
+                    packet.forcedRecipes, packet.repeatCount,
+                    clickedOutputCacheToken(packet.targetOutput));
             CachedPlan cached = PLAN_CACHE.get(cacheKey);
             if (cached != null && System.nanoTime() - cached.createdNanos < PLAN_CACHE_TTL_NANOS) {
                 RSIntegrationMod.debug("[RSI-Generic] handle() CACHE HIT: replying with cached plan, recipeId={} player={} ageMs={}",
@@ -1461,9 +1468,9 @@ public final class GenericCraftPacket {
             }
         }
 
-        final String cacheKey = player.getUUID() + ":" + recipeId + ":"
-                + (forcedOverrides != null ? forcedOverrides.hashCode() : "0") + ":"
-                + repeatCount + ":" + clickedOutputCacheToken(clickedOutput);
+        final PlanCacheKey cacheKey = new PlanCacheKey(player.getUUID(), recipeId,
+                forcedOverrides == null ? Collections.emptyMap() : forcedRecipes,
+                repeatCount, clickedOutputCacheToken(clickedOutput));
         CachedPlan cached = PLAN_CACHE.get(cacheKey);
         if (cached != null && System.nanoTime() - cached.createdNanos < PLAN_CACHE_TTL_NANOS) {
             RSIntegrationMod.debug("[RSI-tryBuildPlan] Cache hit: recipeId={}", recipeId);
