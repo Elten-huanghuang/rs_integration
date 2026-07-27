@@ -271,7 +271,8 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
             failureReason = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
             return ConcurrentNodeExecutor.Observation.FAILED;
         } finally {
-            PerformanceMonitor.recordDelegateObserve(System.nanoTime() - observeStartNanos);
+            PerformanceMonitor.recordDelegateObserve(delegate.getClass().getSimpleName(),
+                    System.nanoTime() - observeStartNanos);
         }
 
         // Timeout: if this node is draining, give it extra time
