@@ -20,6 +20,10 @@ final class CraftProgressClientPacketHandler {
         CraftProgressTracker.onProgress(snapshot);
     }
 
+    static void onDelta(CraftProgressDeltaPacket packet) {
+        CraftProgressTracker.onDelta(packet);
+    }
+
     static void onStatusSync(boolean full, List<UUID> craftIds) {
         if (full) CraftProgressTracker.retainOnly(craftIds);
         else CraftProgressTracker.remove(craftIds.get(0));

@@ -26,6 +26,7 @@ public final class NetworkPacketIds {
     public static final int CRAFT_CANCEL = 4;
     public static final int CRAFT_STATUS_REQUEST = 5;
     public static final int CRAFT_STATUS_SYNC = 6;
+    public static final int CRAFT_PROGRESS_DELTA = 7;
 
     // ── Container transfer (10-19) ─────────────────────────────────
     public static final int STORE_ALL = 10;

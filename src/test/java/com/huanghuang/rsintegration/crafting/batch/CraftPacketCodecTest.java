@@ -109,6 +109,29 @@ class CraftPacketCodecTest extends BootstrapTest {
     }
 
     @Test
+    void progressDeltaPacketRoundTripsBaseSequenceAndChangedNodes() {
+        UUID craftId = UUID.randomUUID();
+        CraftProgressSnapshot snapshot = new CraftProgressSnapshot(craftId, 12,
+                CraftProgressSnapshot.Result.RUNNING,
+                CraftProgressSnapshot.Reason.MACHINE_BUSY,
+                2, 5, 1, "waiting", List.of(
+                new NodeProgress(3, NodeState.RUNNING, "test:recipe", "generic",
+                        new ItemStack(Items.IRON_INGOT), 2, 4, 1, "overworld@1,2,3",
+                        CraftProgressSnapshot.Reason.MACHINE_BUSY, "busy", false)));
+        FriendlyByteBuf buf = buffer();
+        new CraftProgressDeltaPacket(craftId, 11, snapshot, snapshot.nodes()).encode(buf);
+        CraftProgressDeltaPacket decoded = CraftProgressDeltaPacket.decode(buf);
+
+        assertEquals(craftId, decoded.craftId());
+        assertEquals(11, decoded.baseSequence());
+        assertEquals(12, decoded.sequence());
+        assertEquals(CraftProgressSnapshot.Reason.MACHINE_BUSY, decoded.reason());
+        assertEquals(1, decoded.changedNodes().size());
+        assertEquals(3, decoded.changedNodes().get(0).nodeId());
+        assertEquals(0, buf.readableBytes());
+    }
+
+    @Test
     void progressPacketRejectsInvalidOperationCounts() {
         FriendlyByteBuf buf = basePayload(0, 0);
         buf.writeVarInt(1);

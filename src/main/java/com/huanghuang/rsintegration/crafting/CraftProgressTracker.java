@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.crafting.batch.CraftStartedPacket;
 import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
+import com.huanghuang.rsintegration.crafting.batch.CraftProgressDeltaPacket;
 import com.huanghuang.rsintegration.crafting.batch.CraftStatusRequestPacket;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.api.distmarker.Dist;
@@ -52,6 +53,29 @@ public final class CraftProgressTracker {
         if (snapshot.isTerminal()) {
             TERMINAL_SINCE.putIfAbsent(snapshot.craftId(), System.currentTimeMillis());
         }
+    }
+
+    /** Apply a delta only when it is based on the latest local full state. */
+    public static void onDelta(CraftProgressDeltaPacket delta) {
+        CraftProgressSnapshot existing = ACTIVE.get(delta.craftId());
+        if (existing == null || existing.sequence() != delta.baseSequence()) {
+            requestFullStatus(delta.craftId());
+            return;
+        }
+        Map<Integer, CraftProgressSnapshot.NodeProgress> nodes = new LinkedHashMap<>();
+        for (CraftProgressSnapshot.NodeProgress node : existing.nodes()) nodes.put(node.nodeId(), node);
+        for (CraftProgressSnapshot.NodeProgress node : delta.changedNodes()) nodes.put(node.nodeId(), node);
+        onProgress(new CraftProgressSnapshot(delta.craftId(), delta.sequence(), delta.result(),
+                delta.reason(), delta.completedNodes(), delta.totalNodes(), delta.runningNodes(),
+                delta.technicalDetail(), List.copyOf(nodes.values())));
+    }
+
+    private static void requestFullStatus(UUID craftId) {
+        long now = System.currentTimeMillis();
+        long requested = LAST_STATUS_REQUEST.getOrDefault(craftId, 0L);
+        if (now - requested < STALE_STATUS_MS) return;
+        LAST_STATUS_REQUEST.put(craftId, now);
+        BatchCraftNetworkHandler.CHANNEL.sendToServer(new CraftStatusRequestPacket(craftId));
     }
 
     private static void expireTerminal() {
