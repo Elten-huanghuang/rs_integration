@@ -2339,11 +2339,7 @@ public final class GenericCraftPacket {
         );
 
         PLAN_CACHE.put(cacheKey, new CachedPlan(plan, System.nanoTime()));
-        // Prune stale entries if cache grows too large
-        if (PLAN_CACHE.size() > 64) {
-            long cutoff = System.nanoTime() - PLAN_CACHE_TTL_NANOS;
-            PLAN_CACHE.values().removeIf(e -> e.createdNanos < cutoff);
-        }
+        prunePlanCache(System.nanoTime());
 
         RSIntegrationMod.debug("[RSI-tryBuildPlan] SENDING PlanResponsePacket: recipeId={} steps={} feasible={} player={}",
                 recipeId, steps.size(), feasible, player.getGameProfile().getName());
@@ -2351,6 +2347,21 @@ public final class GenericCraftPacket {
                 PacketDistributor.PLAYER.with(() -> player),
                 new PlanResponsePacket(plan, requestId));
         RSIntegrationMod.debug("[RSI-tryBuildPlan] PlanResponsePacket SENT: recipeId={}", recipeId);
+    }
+
+    private static void prunePlanCache(long now) {
+        if (PLAN_CACHE.size() <= 64) return;
+        long cutoff = now - PLAN_CACHE_TTL_NANOS;
+        PLAN_CACHE.entrySet().removeIf(entry -> entry.getValue().createdNanos < cutoff);
+        if (PLAN_CACHE.size() <= 64) return;
+
+        PLAN_CACHE.entrySet().stream()
+                .sorted(java.util.Map.Entry.comparingByValue(
+                        java.util.Comparator.comparingLong(entry -> entry.createdNanos)))
+                .limit(PLAN_CACHE.size() - 64L)
+                .map(java.util.Map.Entry::getKey)
+                .toList()
+                .forEach(PLAN_CACHE::remove);
     }
 
     static boolean hasNbtMismatch(Map<IngredientKey, PlanResponse.Availability> materials,

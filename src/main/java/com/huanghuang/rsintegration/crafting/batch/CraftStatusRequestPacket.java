@@ -100,4 +100,12 @@ public final class CraftStatusRequestPacket {
     public boolean requestsAll() {
         return craftId == null;
     }
+
+    public static void onPlayerLogout(UUID playerId) {
+        STATUS_COOLDOWN.remove(playerId);
+    }
+
+    public static void clearServerState() {
+        STATUS_COOLDOWN.clear();
+    }
 }

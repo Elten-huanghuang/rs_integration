@@ -63,4 +63,12 @@ public final class CraftCancelPacket {
     }
 
     public UUID craftId() { return craftId; }
+
+    public static void onPlayerLogout(UUID playerId) {
+        CANCEL_COOLDOWN.remove(playerId);
+    }
+
+    public static void clearServerState() {
+        CANCEL_COOLDOWN.clear();
+    }
 }
