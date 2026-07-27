@@ -67,7 +67,11 @@ public record CraftProgressSnapshot(
         PLAYER_OFFLINE,
         SERVER_STOP,
         INTERNAL_ERROR,
-        UNKNOWN;
+        UNKNOWN,
+        NETWORK_UNAVAILABLE,
+        NO_BOUND_MACHINE,
+        INPUT_CONFLICT,
+        SPECIAL_RESOURCE_INSUFFICIENT;
 
         public static Reason fromOrdinal(int ordinal) {
             Reason[] values = values();
