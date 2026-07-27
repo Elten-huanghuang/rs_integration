@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting.batch;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -41,6 +42,16 @@ class DelegatePreparationContractTest {
                 null, new ResourceLocation("test", "recipe"), null, BlockPos.ZERO);
         assertEquals(IBatchDelegate.PreparationState.FATAL, result.state());
         assertEquals("recipe type unsupported", result.detail());
+    }
+
+    @Test
+    void fatalPreparationCanCarryLocalizedPlayerMessage() {
+        Component message = Component.translatable("rsi.wr.error.insufficient_wissen", "0", "1,000");
+        IBatchDelegate.PreparationResult result =
+                IBatchDelegate.PreparationResult.fatal("insufficient Wissen", message);
+
+        assertEquals(IBatchDelegate.PreparationState.FATAL, result.state());
+        assertEquals(message, result.userMessage());
     }
 
     @Test

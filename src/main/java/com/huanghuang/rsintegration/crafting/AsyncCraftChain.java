@@ -916,17 +916,22 @@ public final class AsyncCraftChain {
 
     private record PreparationResult(PreparationState state,
                                      @Nullable PreparedGraphNode prepared,
-                                     String detail) {
+                                     String detail,
+                                     @Nullable Component userMessage) {
         static PreparationResult ready(PreparedGraphNode prepared) {
-            return new PreparationResult(PreparationState.READY, prepared, "");
+            return new PreparationResult(PreparationState.READY, prepared, "", null);
         }
 
         static PreparationResult retry(String detail) {
-            return new PreparationResult(PreparationState.RETRY, null, detail);
+            return new PreparationResult(PreparationState.RETRY, null, detail, null);
         }
 
         static PreparationResult fatal(String detail) {
-            return new PreparationResult(PreparationState.FATAL, null, detail);
+            return fatal(detail, null);
+        }
+
+        static PreparationResult fatal(String detail, @Nullable Component userMessage) {
+            return new PreparationResult(PreparationState.FATAL, null, detail, userMessage);
         }
     }
 
@@ -1010,6 +1015,9 @@ public final class AsyncCraftChain {
             graphFailureDetails.put(nodeId, preparation.detail());
             RSIntegrationMod.LOGGER.warn(ctx.format("Graph node {} preparation failed: {}"),
                     nodeId, preparation.detail());
+            if (preparation.userMessage() != null) {
+                online.sendSystemMessage(preparation.userMessage());
+            }
             return ConcurrentNodeExecutor.StartResult.failed();
         }
         PreparedGraphNode prepared = preparation.prepared();
@@ -1082,6 +1090,7 @@ public final class AsyncCraftChain {
         boolean validationThrew = false;
         boolean retryableRejection = false;
         String fatalDetail = "";
+        Component fatalUserMessage = null;
         for (BoundMachine machine : available) {
             try {
                 IBatchDelegate candidate = eligible.isEmpty() ? delegate
@@ -1109,6 +1118,7 @@ public final class AsyncCraftChain {
                 } else if (fatalDetail.isEmpty()) {
                     candidate.releasePreparationResources();
                     fatalDetail = result.detail();
+                    fatalUserMessage = result.userMessage();
                 } else {
                     candidate.releasePreparationResources();
                 }
@@ -1120,7 +1130,7 @@ public final class AsyncCraftChain {
         }
         if (eligible.isEmpty()) {
             if (!retryableRejection && !validationThrew && !fatalDetail.isEmpty()) {
-                return PreparationResult.fatal(fatalDetail);
+                return PreparationResult.fatal(fatalDetail, fatalUserMessage);
             }
             return PreparationResult.retry(validationThrew
                     ? "delegate validation temporarily failed on every available machine"
@@ -2481,6 +2491,7 @@ public final class AsyncCraftChain {
         BoundMachine matchedMachine = null;
         boolean retryableRejection = false;
         String fatalDetail = "";
+        Component fatalUserMessage = null;
         for (BoundMachine m : machines) {
             try {
                 IBatchDelegate candidate = delegate == null ? initialDelegate
@@ -2503,6 +2514,7 @@ public final class AsyncCraftChain {
                     retryableRejection = true;
                 } else if (fatalDetail.isEmpty()) {
                     fatalDetail = preparation.detail();
+                    fatalUserMessage = preparation.userMessage();
                 }
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.debug(ctx.format("prepare failed for machine at {}"), m.pos(), e);
@@ -2521,8 +2533,9 @@ public final class AsyncCraftChain {
                     "All {} bound machines failed preparation for mod type {}: recipe={} detail={}"),
                     machines.size(), step.modType(), step.recipeId(),
                     fatalDetail);
-            online.sendSystemMessage(Component.translatable(
-                    "rsi.async.error.machine_valid_failed", step.recipeId()));
+            online.sendSystemMessage(fatalUserMessage != null
+                    ? fatalUserMessage
+                    : Component.translatable("rsi.async.error.machine_valid_failed", step.recipeId()));
             return null;
         }
 

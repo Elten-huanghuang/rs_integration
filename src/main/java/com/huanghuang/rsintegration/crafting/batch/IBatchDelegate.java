@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.crafting.batch;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -59,7 +60,12 @@ public interface IBatchDelegate {
         FATAL
     }
 
-    record PreparationResult(PreparationState state, String detail) {
+    record PreparationResult(PreparationState state, String detail,
+                             @Nullable Component userMessage) {
+        public PreparationResult(PreparationState state, String detail) {
+            this(state, detail, null);
+        }
+
         public PreparationResult {
             if (state == null) throw new IllegalArgumentException("preparation state is required");
             detail = detail == null ? "" : detail;
@@ -75,6 +81,10 @@ public interface IBatchDelegate {
 
         public static PreparationResult fatal(String detail) {
             return new PreparationResult(PreparationState.FATAL, detail);
+        }
+
+        public static PreparationResult fatal(String detail, Component userMessage) {
+            return new PreparationResult(PreparationState.FATAL, detail, userMessage);
         }
     }
 

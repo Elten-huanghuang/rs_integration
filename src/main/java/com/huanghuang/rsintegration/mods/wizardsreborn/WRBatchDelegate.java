@@ -79,6 +79,8 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
     // abort early instead of waiting for MAX_WAIT_TICKS.
     private int lastCraftProgress = -1;
     private int stallTicks;
+    private int insufficientWissenCurrent = -1;
+    private int insufficientWissenRequired = -1;
     // Timeout: max of 7200 ticks (6 min) or wissenCost/5*2 (double the
     // theoretical time, accounting for XP/health drain cooldowns).
     // Stall threshold kicks in at 5 seconds of no progress.
@@ -105,6 +107,23 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
     private ItemStack iteratorCenterBefore = ItemStack.EMPTY;
 
     @Override
+    public PreparationResult prepare(ServerPlayer player, ResourceLocation recipeId,
+                                     @Nullable ResourceLocation dim, BlockPos pos) {
+        if (validateAndInit(player, recipeId, dim, pos)) {
+            return PreparationResult.ready();
+        }
+        if (insufficientWissenRequired > 0
+                && insufficientWissenCurrent < insufficientWissenRequired) {
+            String current = String.format("%,d", Math.max(0, insufficientWissenCurrent));
+            String required = String.format("%,d", insufficientWissenRequired);
+            return PreparationResult.fatal(
+                    "Insufficient Wissen energy (have " + current + ", need " + required + ")",
+                    Component.translatable("rsi.wr.error.insufficient_wissen", current, required));
+        }
+        return PreparationResult.retry("WR machine is temporarily unavailable");
+    }
+
+    @Override
     public boolean validateAndInit(ServerPlayer player, ResourceLocation recipeId,
                                    @Nullable ResourceLocation dim, BlockPos pos) {
 
@@ -126,6 +145,8 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         this.iteratorTargetLevel = 1;
         this.iteratorCompletedRuns = 0;
         this.iteratorSideIngredients = null;
+        this.insufficientWissenCurrent = -1;
+        this.insufficientWissenRequired = -1;
 
         ServerLevel level = CraftPacketUtils.resolveLevel(player.server, dim, player);
         if (level == null) {
@@ -2048,6 +2069,9 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
      * Must be called BEFORE ledger commit to avoid extracting items that can't be used.
      */
     private boolean checkWissen() {
+        insufficientWissenCurrent = -1;
+        insufficientWissenRequired = -1;
+
         // Crystal rituals don't consume wissen
         if (machineType == MachineType.CRYSTAL_RITUAL) return true;
 
@@ -2056,6 +2080,8 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
 
         int current = readCurrentWissen();
         if (current < cost) {
+            insufficientWissenCurrent = current;
+            insufficientWissenRequired = cost;
             player.sendSystemMessage(Component.translatable(
                     "rsi.wr.error.insufficient_wissen",
                     String.format("%,d", current), String.format("%,d", cost)));
