@@ -558,8 +558,9 @@ public final class RSIntegrationConfig {
         CRAFTING_MAX_STEPS = s
                 .comment("Maximum total crafting steps in a single resolution plan.",
                         "Prevents runaway plans from consuming excessive server resources.",
-                        "Range: 256-16384.")
-                .defineInRange("craftingMaxSteps", 4096, 256, 16384);
+                        "The upper bound matches the craft-progress network protocol.",
+                        "Range: 256-4096.")
+                .defineInRange("craftingMaxSteps", 4096, 256, 4096);
         CRAFTING_RESOLVE_TIMEOUT_MS = s
                 .comment("Maximum wall-clock time (ms) the crafting resolver may spend on one plan.",
                         "Deep, interdependent modpack recipe trees (e.g. self-referential 'upgrade'",

@@ -88,13 +88,15 @@ public final class PassiveEffectEngine {
         int abilityMask = disk == null ? 0 : disk.abilityMask();
         DiskSyncState previous = SYNC_CACHE.get(player.getUUID());
         long revision = previous == null ? 0L : previous.revision();
-        if (previous == null || previous.gemCount() != gemCount
+        boolean changed = previous == null || previous.gemCount() != gemCount
                 || previous.lycheeCatalystMask() != catalystMask
-                || previous.abilityMask() != abilityMask) {
+                || previous.abilityMask() != abilityMask;
+        if (changed) {
             revision++;
         }
         SYNC_CACHE.put(player.getUUID(),
                 new DiskSyncState(gemCount, catalystMask, abilityMask, revision));
+        if (!changed) return;
         NetworkHandler.CHANNEL.sendTo(
                 new ResonanceSyncPacket(gemCount, catalystMask, abilityMask, revision),
                 player.connection.connection,

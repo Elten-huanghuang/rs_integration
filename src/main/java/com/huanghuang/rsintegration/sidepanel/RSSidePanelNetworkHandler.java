@@ -599,6 +599,8 @@ public final class RSSidePanelNetworkHandler {
         machineStatusSequence = 0;
         tickFiringConfirmed = false;
         com.huanghuang.rsintegration.network.RSIntegrationNetwork.clearNetworkResolutionCache();
+        com.huanghuang.rsintegration.crafting.batch.CraftCancelPacket.clearServerState();
+        com.huanghuang.rsintegration.crafting.batch.CraftStatusRequestPacket.clearServerState();
     }
 
     /** @return true if the player has an active storage-cache listener. */
@@ -618,6 +620,8 @@ public final class RSSidePanelNetworkHandler {
             GuiOpenRateLimiter.onPlayerLogout(pid);
             com.huanghuang.rsintegration.crafting.PreviewRateLimiter.onPlayerLogout(pid);
             SidePanelRequestRateLimiter.onPlayerLogout(pid);
+            com.huanghuang.rsintegration.crafting.batch.CraftCancelPacket.onPlayerLogout(pid);
+            com.huanghuang.rsintegration.crafting.batch.CraftStatusRequestPacket.onPlayerLogout(pid);
         }
     }
 

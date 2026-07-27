@@ -12,7 +12,7 @@ import java.util.*;
 
 public final class TickSimulator {
 
-    private static List<WhitelistEntry> whitelist = List.of();
+    private static Map<Item, WhitelistEntry> whitelist = Map.of();
     private static int lastConfigHash = -1;
 
     private TickSimulator() {}
@@ -23,13 +23,9 @@ public final class TickSimulator {
 
         // The delegate owns mutable ItemStack instances. Extraction and reinsertion may
         // mutate or reuse them, so each tick must work from an exact, detached snapshot.
-        for (ItemStack stack : snapshotStacks(disk.delegate().getStacks())) {
-            if (stack.isEmpty()) continue;
-            ResourceLocation key = BuiltInRegistries.ITEM.getKey(stack.getItem());
-            if (key == null) continue;
-
-            WhitelistEntry entry = findEntry(key.toString());
-            if (entry == null) continue;
+        for (MatchedStack matched : snapshotMatchedStacks(disk.delegate().getStacks())) {
+            ItemStack stack = matched.stack();
+            WhitelistEntry entry = matched.entry();
             if (entry.mutates) {
                 int originalSlot = getSlot(stack);
                 ItemStack before = stack.copy();
@@ -58,6 +54,16 @@ public final class TickSimulator {
         return stacks.stream().map(ItemStack::copy).toList();
     }
 
+    private static List<MatchedStack> snapshotMatchedStacks(Collection<ItemStack> stacks) {
+        List<MatchedStack> matched = new ArrayList<>();
+        for (ItemStack stack : stacks) {
+            if (stack.isEmpty()) continue;
+            WhitelistEntry entry = whitelist.get(stack.getItem());
+            if (entry != null) matched.add(new MatchedStack(stack.copy(), entry));
+        }
+        return List.copyOf(matched);
+    }
+
     private static int getSlot(ItemStack stack) {
         net.minecraft.nbt.CompoundTag tag = stack.getTag();
         if (tag != null && tag.contains("RSISlot")) return tag.getInt("RSISlot");
@@ -70,32 +76,25 @@ public final class TickSimulator {
         if (hash == lastConfigHash) return;
         lastConfigHash = hash;
 
-        List<WhitelistEntry> list = new ArrayList<>();
+        Map<Item, WhitelistEntry> entries = new HashMap<>();
         for (String entry : configList) {
             String[] parts = entry.split("\\|");
             String itemId = parts[0].trim();
             if (itemId.isEmpty()) continue;
             boolean mutates = parts.length > 1 && "mutates".equals(parts[1].trim());
-            list.add(new WhitelistEntry(itemId, mutates));
-        }
-        whitelist = List.copyOf(list);
-
-        for (WhitelistEntry e : whitelist) {
-            ResourceLocation rl = ResourceLocation.tryParse(e.itemId);
+            ResourceLocation rl = ResourceLocation.tryParse(itemId);
             if (rl != null) {
                 Item item = BuiltInRegistries.ITEM.get(rl);
-                if (item != null) PassiveRegistry.register(item);
+                if (item != null) {
+                    WhitelistEntry parsed = new WhitelistEntry(itemId, mutates);
+                    entries.put(item, parsed);
+                    PassiveRegistry.register(item);
+                }
             }
         }
-    }
-
-    @javax.annotation.Nullable
-    private static WhitelistEntry findEntry(String itemId) {
-        for (WhitelistEntry e : whitelist) {
-            if (e.itemId.equals(itemId)) return e;
-        }
-        return null;
+        whitelist = Map.copyOf(entries);
     }
 
     private record WhitelistEntry(String itemId, boolean mutates) {}
+    private record MatchedStack(ItemStack stack, WhitelistEntry entry) {}
 }
