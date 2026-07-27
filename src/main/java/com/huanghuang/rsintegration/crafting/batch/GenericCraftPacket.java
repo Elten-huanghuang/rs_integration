@@ -25,6 +25,7 @@ import com.huanghuang.rsintegration.crafting.plan.PlanStep;
 import com.huanghuang.rsintegration.crafting.tree.IngredientKey;
 import com.huanghuang.rsintegration.crafting.tree.PlanTreeModel;
 import com.huanghuang.rsintegration.crafting.plan.PlanWarnings;
+import com.huanghuang.rsintegration.command.PerformanceMonitor;
 import com.huanghuang.rsintegration.mods.crabbersdelight.CrabTrapRecipeResolver;
 import com.huanghuang.rsintegration.mods.distantworlds.LithumAltarRecipeResolver;
 import com.huanghuang.rsintegration.mods.distantworlds.LithumAltarRecipeWrapper;
@@ -1217,6 +1218,7 @@ public final class GenericCraftPacket {
                                       int repeatCount,
                                       @Nullable ItemStack baseItem,
                                       @Nullable ItemStack clickedOutput, long requestId) {
+        long planStartNanos = System.nanoTime();
         Recipe<?> recipe = resolveRecipe(player.serverLevel(), recipeId);
         if (recipe == null) {
             sendPlanError(player, Component.translatable("rsi.generic.error.recipe_not_found", recipeId.toString()));
@@ -2346,6 +2348,8 @@ public final class GenericCraftPacket {
         BatchCraftNetworkHandler.CHANNEL.send(
                 PacketDistributor.PLAYER.with(() -> player),
                 new PlanResponsePacket(plan, requestId));
+        PerformanceMonitor.recordPlanBuild(System.nanoTime() - planStartNanos,
+                plan.graph() != null ? plan.graph().nodes().size() : steps.size());
         RSIntegrationMod.debug("[RSI-tryBuildPlan] PlanResponsePacket SENT: recipeId={}", recipeId);
     }
 
