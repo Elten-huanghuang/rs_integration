@@ -807,7 +807,10 @@ public final class GenericCraftPacket {
         }
 
         // Pre-resolve: if intermediate steps are needed, execute them
-        if (RSIntegrationConfig.ENABLE_MULTIBLOCK_AUTO_CRAFTING.get() && network != null
+        // Pure crafting-table recursion can run from the player's inventory
+        // without an RS network. Machine-backed candidates still require a
+        // network and are filtered by the resolver as usual.
+        if (RSIntegrationConfig.ENABLE_MULTIBLOCK_AUTO_CRAFTING.get()
                 && recipe instanceof CraftingRecipe cr && forcedRecipes.isEmpty()) {
             List<ResolutionStep> allSteps = CraftPacketUtils.resolveIntermediateSteps(player, network, cr, repeatCount);
             if (allSteps == null || allSteps.isEmpty()) {
@@ -840,7 +843,7 @@ public final class GenericCraftPacket {
         // Unified resolution pass: use the same resolver as tryBuildPlan so the
         // execute path sees the same recipe chain the preview showed. Only for
         // CraftingRecipe (the typed resolver works with shaped/shapeless ingredients).
-        if (recipe instanceof CraftingRecipe cr2 && network != null
+        if (recipe instanceof CraftingRecipe cr2
                 && RSIntegrationConfig.ENABLE_AUTO_CRAFTING.get()) {
             Map<StackKey, Integer> avail = MaterialSources.listAllAvailable(player, network);
             List<String> missingCheck = new ArrayList<>();

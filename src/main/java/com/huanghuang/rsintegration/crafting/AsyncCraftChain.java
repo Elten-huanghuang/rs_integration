@@ -1176,11 +1176,15 @@ public final class AsyncCraftChain {
                     prepared.step().executions(), prepared.step().inferMode(), groupCapability);
             if (PreparationMessageScope.validate(
                     group, online, prepared.step().recipeId(), null, BlockPos.ZERO)) {
+                delegate.releasePreparationResources();
                 group.setMachineServer(server);
                 if (targetOutput != null && isGraphTerminalNode(nodeId)) {
                     group.setTargetOutput(targetOutput);
                 }
                 delegate = group;
+            } else {
+                return GraphDispatchResult.retry(
+                        "operation group could not prepare a worker for serial dispatch");
             }
         }
         try {

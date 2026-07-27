@@ -655,28 +655,33 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         }
         GraphConcurrencyPolicy.Decision concurrency = GraphConcurrencyPolicy.decide(
                 modType.id(), delegate, concurrencyCapabilities);
-        if (concurrency.exclusive()) {
+        if (!operationGroupAcceptsChild(concurrency.exclusive(), workers.size())) {
             RSIntegrationMod.LOGGER.debug(
-                    "[RSI-ParallelGroup] Rejecting capability-exclusive child delegate={} reason={}",
-                    delegate.getClass().getSimpleName(), concurrency.reason());
+                    "[RSI-ParallelGroup] Rejecting capability-exclusive child delegate={} "
+                            + "for {} workers reason={}",
+                    delegate.getClass().getSimpleName(), workers.size(), concurrency.reason());
             return false;
         }
         ItemStack expected = delegate.getExpectedOutput();
         var region = delegate.getOutputCaptureRegion();
-        boolean ownsWorldCapture = concurrency.capabilities().outputOwnership()
+        boolean ownsWorldCapture = !concurrency.exclusive()
+                && concurrency.capabilities().outputOwnership()
                 == BatchConcurrencyCapabilities.OutputOwnership.OWNED_WORLD_CAPTURE;
-        if (expected != null && !expected.isEmpty() && !ownsWorldCapture) return false;
-        OperationResourceCoordinator.CaptureRequest capture = ownsWorldCapture
-                && expected != null && !expected.isEmpty() && region != null
+        if (!concurrency.exclusive() && expected != null && !expected.isEmpty()
+                && !ownsWorldCapture) return false;
+        OperationResourceCoordinator.CaptureRequest capture = expected != null
+                && !expected.isEmpty() && region != null
                  ? new OperationResourceCoordinator.CaptureRequest(worker.machine.dim(), region, expected)
                  : null;
         List<MachineLeaseRegistry.MachineKey> machineScope = new ArrayList<>();
         BlockPos operationMachinePos = delegate.getOperationMachinePos(worker.machine.pos());
         machineScope.add(new MachineLeaseRegistry.MachineKey(
                 worker.machine.dim(), operationMachinePos, modType.id()));
-        for (BlockPos offset : concurrency.capabilities().supportOffsets()) {
-            machineScope.add(new MachineLeaseRegistry.MachineKey(
-                    worker.machine.dim(), operationMachinePos.offset(offset), modType.id() + ":support"));
+        if (concurrency.capabilities() != null) {
+            for (BlockPos offset : concurrency.capabilities().supportOffsets()) {
+                machineScope.add(new MachineLeaseRegistry.MachineKey(
+                        worker.machine.dim(), operationMachinePos.offset(offset), modType.id() + ":support"));
+            }
         }
         try {
             worker.operationSession = operationKernel.tryPrepare(
@@ -686,6 +691,10 @@ public final class ParallelCraftGroup implements IBatchDelegate {
             worker.operationSession = null;
             return false;
         }
+    }
+
+    static boolean operationGroupAcceptsChild(boolean exclusive, int workerCount) {
+        return !exclusive || workerCount == 1;
     }
 
     private void armCaptureLegacy(WorkerSlot worker) {
