@@ -3438,6 +3438,10 @@ public final class AsyncCraftChain {
                     }
                 }
             }
+        } else {
+            for (ItemStack vi : virtualInventory) {
+                if (!vi.isEmpty()) safeGiveToPlayer(online, vi.copy());
+            }
         }
 
         state = State.COMPLETED;

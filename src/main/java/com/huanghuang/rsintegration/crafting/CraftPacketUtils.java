@@ -165,7 +165,7 @@ public final class CraftPacketUtils {
      */
     public static boolean executeCraftingSteps(@Nonnull ServerPlayer player,
                                                @Nonnull List<CraftingResolver.ResolutionStep> steps,
-                                               @Nonnull INetwork network) {
+                                               @Nullable INetwork network) {
         RecipeManager rm = player.serverLevel().getRecipeManager();
         ResourceLocation primaryRecipe = steps.isEmpty() ? new ResourceLocation("rsintegration", "empty_chain")
                 : steps.get(0).recipeId();
@@ -213,7 +213,9 @@ public final class CraftPacketUtils {
                         }
 
                         if (stillNeeded > 0) {
-                            ItemStack reserved = ledger.reserveFromNetwork(ing, stillNeeded, network);
+                            ItemStack reserved = network != null
+                                    ? ledger.reserveFromNetwork(ing, stillNeeded, network)
+                                    : ItemStack.EMPTY;
                             if (reserved.isEmpty()) {
                                 reserved = ledger.reserveFromInventory(ing, stillNeeded, player);
                             }
@@ -277,7 +279,9 @@ public final class CraftPacketUtils {
                             RSIntegrationMod.LOGGER.debug(ctx.format("Step {}/{} {}: need {} more of {}, reserving from ledger..."),
                                     stepIdx + 1, steps.size(), stepId, stillNeeded,
                                     opts.length > 0 ? net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(opts[0].getItem()) : "?");
-                            ItemStack reserved = ledger.reserveFromNetwork(spec.ingredient(), stillNeeded, network);
+                            ItemStack reserved = network != null
+                                    ? ledger.reserveFromNetwork(spec.ingredient(), stillNeeded, network)
+                                    : ItemStack.EMPTY;
                             if (reserved.isEmpty()) {
                                 reserved = ledger.reserveFromInventory(spec.ingredient(), stillNeeded, player);
                             }
@@ -323,12 +327,16 @@ public final class CraftPacketUtils {
             // max-stack-size chunks to prevent item-entity explosions).
             for (ItemStack vi : virtualInventory) {
                 if (!vi.isEmpty()) {
-                    var tracker = network.getItemStorageTracker();
-                    if (tracker != null) tracker.changed(player, vi.copy());
-                    ItemStack remainder = network.insertItem(vi.copy(), vi.getCount(),
-                            com.refinedmods.refinedstorage.api.util.Action.PERFORM);
-                    if (!remainder.isEmpty()) {
-                        PlayerUtils.safeGiveToPlayer(player, remainder, network);
+                    if (network == null) {
+                        PlayerUtils.safeGiveToPlayer(player, vi.copy(), null);
+                    } else {
+                        var tracker = network.getItemStorageTracker();
+                        if (tracker != null) tracker.changed(player, vi.copy());
+                        ItemStack remainder = network.insertItem(vi.copy(), vi.getCount(),
+                                com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                        if (!remainder.isEmpty()) {
+                            PlayerUtils.safeGiveToPlayer(player, remainder, network);
+                        }
                     }
                 }
             }
