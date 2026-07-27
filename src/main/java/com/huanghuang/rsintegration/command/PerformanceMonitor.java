@@ -31,6 +31,8 @@ public final class PerformanceMonitor {
     private static final AtomicLong maxPlanPacketBytes = new AtomicLong();
     private static final AtomicLong progressPacketBytes = new AtomicLong();
     private static final AtomicLong maxProgressPacketBytes = new AtomicLong();
+    private static final AtomicLong resonanceScannedStacks = new AtomicLong();
+    private static final AtomicLong resonanceMatchedStacks = new AtomicLong();
 
     private PerformanceMonitor() {}
 
@@ -60,6 +62,10 @@ public final class PerformanceMonitor {
     public static void recordProgressPacketBytes(int bytes) {
         progressPacketBytes.addAndGet(bytes);
         maxProgressPacketBytes.updateAndGet(prev -> Math.max(prev, bytes));
+    }
+    public static void recordResonanceScan(int scanned, int matched) {
+        resonanceScannedStacks.addAndGet(scanned);
+        resonanceMatchedStacks.addAndGet(matched);
     }
 
     // ── Queries ────────────────────────────────────────────────────
@@ -97,6 +103,7 @@ public final class PerformanceMonitor {
              + " planNodes=" + (planBuildCount.get() > 0 ? totalPlanNodes.get() / planBuildCount.get() : 0)
              + " planBytes=" + planPacketBytes.get() + "/" + maxPlanPacketBytes.get()
              + " progressBytes=" + progressPacketBytes.get() + "/" + maxProgressPacketBytes.get()
+             + " resonanceStacks=" + resonanceScannedStacks.get() + "/" + resonanceMatchedStacks.get()
              + " chains=" + getActiveChainCount();
     }
 }
