@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.resonance.passive;
 
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.command.PerformanceMonitor;
 import com.huanghuang.rsintegration.resonance.disk.ResonanceDiskWrapper;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
@@ -56,11 +57,14 @@ public final class TickSimulator {
 
     private static List<MatchedStack> snapshotMatchedStacks(Collection<ItemStack> stacks) {
         List<MatchedStack> matched = new ArrayList<>();
+        int scanned = 0;
         for (ItemStack stack : stacks) {
+            scanned++;
             if (stack.isEmpty()) continue;
             WhitelistEntry entry = whitelist.get(stack.getItem());
             if (entry != null) matched.add(new MatchedStack(stack.copy(), entry));
         }
+        PerformanceMonitor.recordResonanceScan(scanned, matched.size());
         return List.copyOf(matched);
     }
 
