@@ -3,6 +3,8 @@ package com.huanghuang.rsintegration.command;
 import com.huanghuang.rsintegration.crafting.AsyncCraftManager;
 
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.Map;
 
 /**
  * Lightweight performance instrumentation.
@@ -39,6 +41,8 @@ public final class PerformanceMonitor {
     private static final AtomicLong delegateObserveCalls = new AtomicLong();
     private static final AtomicLong delegateObserveNanos = new AtomicLong();
     private static final AtomicLong delegateObserveMaxNanos = new AtomicLong();
+    private static final Map<String, DelegateStats> delegateStats = new ConcurrentHashMap<>();
+    private record DelegateStats(AtomicLong calls, AtomicLong totalNanos, AtomicLong maxNanos) {}
 
     private PerformanceMonitor() {}
 
@@ -83,6 +87,14 @@ public final class PerformanceMonitor {
         delegateObserveNanos.addAndGet(nanosElapsed);
         delegateObserveMaxNanos.updateAndGet(prev -> Math.max(prev, nanosElapsed));
     }
+    public static void recordDelegateObserve(String type, long nanosElapsed) {
+        recordDelegateObserve(nanosElapsed);
+        DelegateStats stats = delegateStats.computeIfAbsent(type,
+                ignored -> new DelegateStats(new AtomicLong(), new AtomicLong(), new AtomicLong()));
+        stats.calls().incrementAndGet();
+        stats.totalNanos().addAndGet(nanosElapsed);
+        stats.maxNanos().updateAndGet(prev -> Math.max(prev, nanosElapsed));
+    }
 
     // ── Queries ────────────────────────────────────────────────────
 
@@ -125,6 +137,10 @@ public final class PerformanceMonitor {
              + " delegateObserve=" + delegateObserveCalls.get() + "/"
              + (delegateObserveCalls.get() == 0 ? 0 : delegateObserveNanos.get() / delegateObserveCalls.get() / 1000)
              + "/" + delegateObserveMaxNanos.get() / 1000 + "us"
+             + " delegateTypes=" + delegateStats.entrySet().stream().limit(8)
+             .map(e -> e.getKey() + ":" + e.getValue().totalNanos().get() / e.getValue().calls().get() / 1000
+                     + "/" + e.getValue().maxNanos().get() / 1000 + "us")
+             .collect(java.util.stream.Collectors.joining(","))
              + " chains=" + getActiveChainCount();
     }
 }
