@@ -72,4 +72,18 @@ class PlayerNetworkResolutionCacheTest {
         cache.clear();
         assertNull(cache.get(second, server, "overworld", menu, 1));
     }
+
+    @Test
+    void evictsOldestEntryWhenCapacityIsExceeded() {
+        PlayerNetworkResolutionCache<Object> cache = new PlayerNetworkResolutionCache<>(20);
+        Object server = new Object();
+        Object dimension = new Object();
+        Object menu = new Object();
+        UUID oldest = UUID.randomUUID();
+        cache.put(oldest, server, dimension, menu, 1, new Object());
+        for (int i = 0; i < 4096; i++) {
+            cache.put(UUID.randomUUID(), server, dimension, menu, i + 2, new Object());
+        }
+        assertNull(cache.get(oldest, server, dimension, menu, 4097));
+    }
 }

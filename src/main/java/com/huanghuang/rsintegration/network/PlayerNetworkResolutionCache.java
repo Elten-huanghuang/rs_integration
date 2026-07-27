@@ -7,6 +7,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /** Per-player cache with short-lived negative entries and tick-scoped positive entries. */
 final class PlayerNetworkResolutionCache<T> {
+    private static final int MAX_ENTRIES = 4096;
     private final Map<UUID, Entry<T>> entries = new ConcurrentHashMap<>();
     private final long negativeTtlTicks;
 
@@ -24,6 +25,17 @@ final class PlayerNetworkResolutionCache<T> {
 
     void put(UUID playerId, Object server, Object dimension, Object menu, long tick, @Nullable T value) {
         entries.put(playerId, new Entry<>(server, dimension, menu, tick, value));
+        if (entries.size() > MAX_ENTRIES) {
+            UUID oldest = null;
+            long oldestTick = Long.MAX_VALUE;
+            for (Map.Entry<UUID, Entry<T>> candidate : entries.entrySet()) {
+                if (candidate.getValue().tick() < oldestTick) {
+                    oldestTick = candidate.getValue().tick();
+                    oldest = candidate.getKey();
+                }
+            }
+            if (oldest != null) entries.remove(oldest);
+        }
     }
 
     void invalidate(UUID playerId) {
