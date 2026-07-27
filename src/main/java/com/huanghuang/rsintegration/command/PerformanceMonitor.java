@@ -33,6 +33,9 @@ public final class PerformanceMonitor {
     private static final AtomicLong maxProgressPacketBytes = new AtomicLong();
     private static final AtomicLong resonanceScannedStacks = new AtomicLong();
     private static final AtomicLong resonanceMatchedStacks = new AtomicLong();
+    private static final AtomicLong networkResolveCalls = new AtomicLong();
+    private static final AtomicLong networkResolveCacheHits = new AtomicLong();
+    private static final AtomicLong networkResolveSuccesses = new AtomicLong();
 
     private PerformanceMonitor() {}
 
@@ -66,6 +69,11 @@ public final class PerformanceMonitor {
     public static void recordResonanceScan(int scanned, int matched) {
         resonanceScannedStacks.addAndGet(scanned);
         resonanceMatchedStacks.addAndGet(matched);
+    }
+    public static void recordNetworkResolve(boolean cacheHit, boolean success) {
+        networkResolveCalls.incrementAndGet();
+        if (cacheHit) networkResolveCacheHits.incrementAndGet();
+        if (success) networkResolveSuccesses.incrementAndGet();
     }
 
     // ── Queries ────────────────────────────────────────────────────
@@ -104,6 +112,8 @@ public final class PerformanceMonitor {
              + " planBytes=" + planPacketBytes.get() + "/" + maxPlanPacketBytes.get()
              + " progressBytes=" + progressPacketBytes.get() + "/" + maxProgressPacketBytes.get()
              + " resonanceStacks=" + resonanceScannedStacks.get() + "/" + resonanceMatchedStacks.get()
+             + " networkResolve=" + networkResolveCalls.get() + "/" + networkResolveCacheHits.get()
+             + " networkSuccess=" + networkResolveSuccesses.get()
              + " chains=" + getActiveChainCount();
     }
 }

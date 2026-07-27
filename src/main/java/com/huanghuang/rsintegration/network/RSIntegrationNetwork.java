@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.network;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.command.PerformanceMonitor;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.network.security.Permission;
@@ -41,10 +42,14 @@ public final class RSIntegrationNetwork {
         long tick = server.getTickCount();
         PlayerNetworkResolutionCache.Entry<INetwork> cached =
                 RESOLUTION_CACHE.get(playerId, server, dimension, menu, tick);
-        if (cached != null) return cached.value();
+        if (cached != null) {
+            PerformanceMonitor.recordNetworkResolve(true, cached.value() != null);
+            return cached.value();
+        }
 
         INetwork network = resolveNetworkFromPlayerUncached(player);
         RESOLUTION_CACHE.put(playerId, server, dimension, menu, tick, network);
+        PerformanceMonitor.recordNetworkResolve(false, network != null);
         return network;
     }
 
