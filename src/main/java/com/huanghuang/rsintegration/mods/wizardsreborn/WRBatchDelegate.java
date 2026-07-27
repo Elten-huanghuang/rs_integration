@@ -185,10 +185,33 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         // Validate idle state per machine type
         if (!validateIdle(player, level)) return false;
 
+        // Wissen is consumed by the machine when the wand function is invoked.
+        // Check it while the machine is still untouched so graph/flat dispatch
+        // cannot reserve or commit ingredients for a craft that WR will reject.
+        if (!checkWissen()) {
+            RSIntegrationMod.LOGGER.debug(
+                    "[RSI-Batch-WR] validateAndInit rejected {}: insufficient Wissen",
+                    recipeId);
+            return false;
+        }
+
         this.waitTicks = 0;
 
         RSIntegrationMod.LOGGER.debug("[RSI-Batch-WR] validateAndInit OK: recipe={} type={}", recipeId, machineType);
         return true;
+    }
+
+    /**
+     * Re-check dynamic machine requirements immediately before ledger commit.
+     * Wissen can change after preparation (another craft or a player action may
+     * drain it), so the initialization-time check alone is not sufficient.
+     * Once the wand function has been invoked, Wissen is expected to decrease;
+     * completion validation must therefore not apply this pre-start check again.
+     */
+    @Override
+    public boolean validateExecutionContext(@Nullable ServerPlayer online) {
+        if (online != null) this.player = online;
+        return craftStarted || (this.player != null && checkWissen());
     }
 
     /**
@@ -1125,6 +1148,16 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
                 break;
             default:
                 ok = false;
+        }
+        // A dynamic Wissen check can still fail after the chain committed the
+        // shared ledger (for example, another operation drained the machine in
+        // between preparation and dispatch). If no craft was started, nothing
+        // has entered the machine and this delegate can safely settle the
+        // committed reservation now. The chain's later refund is then a no-op.
+        if (!ok && !craftStarted && sharedLedger != null && sharedLedger.isCommitted()) {
+            RSIntegrationMod.LOGGER.debug(
+                    "[RSI-Batch-WR] Start rejected before machine activation; refunding shared ledger");
+            sharedLedger.refundCommitted(network, player);
         }
         return ok;
     }
