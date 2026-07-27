@@ -2553,6 +2553,11 @@ public final class GenericCraftPacket {
      * {@code getString()}, because a dedicated server cannot resolve {@code rsi.*}
      * keys.</p>
      */
+    /** Clears preview plans when recipe data is reloaded. */
+    public static void clearPlanCache() {
+        PLAN_CACHE.clear();
+    }
+
     private static void sendPlanError(ServerPlayer player, Component msg) {
         RSIntegrationMod.LOGGER.warn("[RSI-tryBuildPlan] sendPlanError: recipe={} msg={} player={}",
                 "?", msg.getString(), player.getGameProfile().getName());

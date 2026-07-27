@@ -495,6 +495,7 @@ public final class RecipeIndex {
     public static void invalidate() {
         index = null;
         source = null;
+        com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket.clearPlanCache();
     }
 
     // ── result-item extraction (formerly in ModRecipeIndex) ─────
