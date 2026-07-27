@@ -1977,6 +1977,30 @@ public final class AsyncCraftChain {
         if (detail == null || detail.isEmpty()) return CraftProgressSnapshot.Reason.NONE;
         String normalized = detail.toLowerCase(java.util.Locale.ROOT);
         if (normalized.contains("busy")) return CraftProgressSnapshot.Reason.MACHINE_BUSY;
+        if (normalized.contains("network is null")
+                || normalized.contains("network unavailable")
+                || normalized.contains("no usable rs network")
+                || (normalized.contains("getitemstoragetracker") && normalized.contains("null"))) {
+            return CraftProgressSnapshot.Reason.NETWORK_UNAVAILABLE;
+        }
+        if (normalized.contains("no bound") || normalized.contains("not bound")) {
+            return CraftProgressSnapshot.Reason.NO_BOUND_MACHINE;
+        }
+        if (normalized.contains("slot mismatch")
+                || normalized.contains("input conflict")
+                || normalized.contains("cannot merge")
+                || normalized.contains("mixed variant")) {
+            return CraftProgressSnapshot.Reason.INPUT_CONFLICT;
+        }
+        if (normalized.contains("insufficient wissen")
+                || normalized.contains("insufficient xp")
+                || normalized.contains("insufficient source")
+                || normalized.contains("insufficient mana")
+                || normalized.contains("insufficient aureal")
+                || normalized.contains("insufficient souls")
+                || normalized.contains("insufficient blood")) {
+            return CraftProgressSnapshot.Reason.SPECIAL_RESOURCE_INSUFFICIENT;
+        }
         if (normalized.contains("unloaded") || normalized.contains("chunk")) {
             return CraftProgressSnapshot.Reason.CHUNK_UNLOADED;
         }

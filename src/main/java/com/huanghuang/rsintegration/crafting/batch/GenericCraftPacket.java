@@ -403,15 +403,41 @@ public final class GenericCraftPacket {
                 }
             } catch (Throwable e) {
                 RSIntegrationMod.LOGGER.error("[RSI-Generic] Failed for {}:", packet.recipeId, e);
-                String reason = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
                 try {
-                    player.sendSystemMessage(Component.translatable("rsi.generic.error.craft_failed", reason));
+                    player.sendSystemMessage(buildFailureMessage(e, packet.recipeId));
                 } catch (Exception ex) {
                     RSIntegrationMod.LOGGER.error("[RSI-Generic] Failed to send error message to player", ex);
                 }
             }
         });
         context.setPacketHandled(true);
+    }
+
+    /**
+     * Converts common outer-layer failures into stable, translated messages.
+     * The complete exception remains in the server log for diagnostics; raw
+     * JVM messages are not suitable player-facing text and are often English.
+     */
+    private static Component buildFailureMessage(Throwable failure, ResourceLocation recipeId) {
+        if (containsNetworkNullFailure(failure)) {
+            return Component.translatable("rsi.generic.error.network_unavailable");
+        }
+        String detail = failure.getMessage();
+        if (detail == null || detail.isBlank()) detail = failure.getClass().getSimpleName();
+        return Component.translatable("rsi.generic.error.craft_failed", recipeId + " - " + detail);
+    }
+
+    private static boolean containsNetworkNullFailure(Throwable failure) {
+        for (Throwable current = failure; current != null; current = current.getCause()) {
+            String message = current.getMessage();
+            if (message == null) continue;
+            String normalized = message.toLowerCase(java.util.Locale.ROOT);
+            if (normalized.contains("network is null")
+                    || (normalized.contains("getitemstoragetracker") && normalized.contains("null"))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     // ── execute: resolve ingredients, craft result, give result to player ──
