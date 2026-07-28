@@ -27,6 +27,12 @@ public final class CaptureLeaseRegistry {
 
     public synchronized Lease tryAcquire(ResourceLocation dimension, AABB region,
                             MaterialKey expectedMaterial, Owner owner) {
+        return tryAcquire(dimension, region, expectedMaterial, owner, false);
+    }
+
+    public synchronized Lease tryAcquire(ResourceLocation dimension, AABB region,
+                            MaterialKey expectedMaterial, Owner owner,
+                            boolean allowOverlappingOrigins) {
         Objects.requireNonNull(dimension, "dimension");
         Objects.requireNonNull(region, "region");
         Objects.requireNonNull(expectedMaterial, "expectedMaterial");
@@ -34,7 +40,10 @@ public final class CaptureLeaseRegistry {
         for (Lease existing : leases.values()) {
             if (!existing.dimension().equals(dimension)) continue;
             if (!existing.region().intersects(region)) continue;
-            if (mayOverlap(existing.expectedMaterial(), expectedMaterial)) return null;
+            // Overlapping world zones are safe when they belong to different
+            // machine origins: CraftOutputInterceptor assigns an entity to the
+            // nearest active zone. Only identical origins are ambiguous.
+            if (!allowOverlappingOrigins && mayOverlap(existing.expectedMaterial(), expectedMaterial)) return null;
         }
         Lease lease = new Lease(nextId++, dimension, region, expectedMaterial, owner);
         leases.put(lease.id(), lease);
@@ -72,4 +81,5 @@ public final class CaptureLeaseRegistry {
         if (first.item() != second.item()) return false;
         return first.tag() == null || second.tag() == null || first.tag().equals(second.tag());
     }
+
 }

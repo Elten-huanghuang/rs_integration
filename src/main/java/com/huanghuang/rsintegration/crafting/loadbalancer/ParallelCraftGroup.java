@@ -671,7 +671,8 @@ public final class ParallelCraftGroup implements IBatchDelegate {
                 && !ownsWorldCapture) return false;
         OperationResourceCoordinator.CaptureRequest capture = expected != null
                 && !expected.isEmpty() && region != null
-                 ? new OperationResourceCoordinator.CaptureRequest(worker.machine.dim(), region, expected)
+                 ? new OperationResourceCoordinator.CaptureRequest(worker.machine.dim(), region, expected,
+                         "malum".equals(modType.id()))
                  : null;
         List<MachineLeaseRegistry.MachineKey> machineScope = new ArrayList<>();
         BlockPos operationMachinePos = delegate.getOperationMachinePos(worker.machine.pos());

@@ -88,10 +88,16 @@ public final class CraftOutputInterceptor {
 
     /** Arm a uniquely-owned zone, rejecting ambiguous overlapping captures. */
     public static CaptureHandle arm(ResourceKey<Level> dim, AABB region, ItemStack expectedOutput) {
+        return arm(dim, region, expectedOutput, false);
+    }
+
+    public static CaptureHandle arm(ResourceKey<Level> dim, AABB region, ItemStack expectedOutput,
+                                    boolean allowOverlappingOrigins) {
         if (dim == null || region == null) return null;
         Map<UUID, ActiveZone> dimZones = ZONES.computeIfAbsent(dim, k -> new ConcurrentHashMap<>());
         for (ActiveZone active : dimZones.values()) {
-            if (active.region.intersects(region) && outputsMayOverlap(active.expectedOutput, expectedOutput)) {
+            if (!allowOverlappingOrigins && active.region.intersects(region)
+                    && outputsMayOverlap(active.expectedOutput, expectedOutput)) {
                 return null;
             }
         }
