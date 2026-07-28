@@ -129,20 +129,31 @@ public final class PlanTreeModel {
             applyAvailability(missing, plan, missingRef.display());
             root.children.add(missing);
         }
-        // The flat step list is the server's execution manifest. Every declared operation must
-        // remain visible even when a virtual/custom producer has no allocation edge in the DAG.
+        // The graph node list is the complete execution manifest. The legacy flat step list may
+        // contain only the terminal operation, so it cannot recover omitted intermediate nodes.
         Set<ResourceLocation> renderedRecipes = new HashSet<>();
         collectRenderedRecipeIds(root, renderedRecipes);
-        for (PlanStep step : plan.steps()) {
-            if (renderedRecipes.contains(step.recipeId())) continue;
-            ItemStack display = step.output().isEmpty()
-                    ? plan.targetResult().copyWithCount(1) : step.output().copyWithCount(1);
+        for (Integer nodeId : graph.topologicalOrder()) {
+            PlanGraphView.NodeView graphNode = nodes.get(nodeId);
+            if (graphNode == null || renderedRecipes.contains(graphNode.recipeId())) continue;
+            PlanStep step = graphNode.asPlanStep();
+            PlanGraphView.OutputView output = graphNode.outputs().stream().findFirst().orElse(null);
+            ItemStack display = output != null && !output.display().isEmpty()
+                    ? output.display().copyWithCount(1)
+                    : graphNode.primaryOutput().copyWithCount(1);
+            if (display.isEmpty()) continue;
+            int quantity = output != null ? output.quantity()
+                    : Math.max(1, display.getCount() * graphNode.executions());
             PlanTreeNode omitted = new PlanTreeNode(IngredientKey.of(display), display,
-                    Math.max(1, step.output().getCount() * step.batches()), 1, step);
+                    quantity, 1, step, nodeId);
             omitted.limited = step.alternatives().size() > maxTreeCandidates();
             applyAvailability(omitted, plan, display);
+            for (GraphReference edge : mergeConsumerEdges(graph, nodeId)) {
+                omitted.children.add(buildGraphReference(edge.source(), edge.material(), edge.quantity(),
+                        2, graph, nodes, new HashSet<>(Set.of(nodeId)), plan));
+            }
             root.children.add(omitted);
-            renderedRecipes.add(step.recipeId());
+            renderedRecipes.add(graphNode.recipeId());
         }
         mergeEquivalentProducedChildren(root);
         return new PlanTreeModel(root);
