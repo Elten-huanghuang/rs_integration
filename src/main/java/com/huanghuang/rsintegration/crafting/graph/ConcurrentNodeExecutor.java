@@ -105,6 +105,7 @@ public final class ConcurrentNodeExecutor {
     private final int maxDispatchPerCraft;
     private int dispatchedThisCraft;
     private final Map<NodeId, RunningWorker> running = new LinkedHashMap<>();
+    private final Map<NodeId, Boolean> exclusiveNodes = new LinkedHashMap<>();
 
     /** Legacy constructor: every node is treated as concurrency-safe. */
     public ConcurrentNodeExecutor(DagScheduler scheduler, WorkerFactory workers,
@@ -291,54 +292,70 @@ public final class ConcurrentNodeExecutor {
 
     private void dispatchAvailable(int tickBudget) {
         // An exclusive node already running blocks all further dispatch.
-        if (running.keySet().stream().anyMatch(exclusivity::isExclusive)) return;
+        if (running.keySet().stream().anyMatch(this::isExclusive)) return;
 
         int remainingCraftBudget = maxDispatchPerCraft - dispatchedThisCraft;
-        int capacity = Math.min(maxConcurrentNodes - running.size(),
-                Math.min(tickBudget, remainingCraftBudget));
-        if (capacity <= 0) return;
+        int dispatchLimit = Math.min(tickBudget, remainingCraftBudget);
+        if (dispatchLimit <= 0 || running.size() >= maxConcurrentNodes) return;
 
-        for (NodeId nodeId : scheduler.peekReady(capacity)) {
-            boolean nodeExclusive = exclusivity.isExclusive(nodeId);
-            // An exclusive node may only start on an empty field; a non-exclusive
-            // node may not start once an exclusive one is running. Either way, stop
-            // here so the exclusive node runs alone.
-            if (nodeExclusive && !running.isEmpty()) return;
+        // Inspect the full ready set. Looking at only `capacity` entries lets an
+        // exclusive node at the front hide later concurrency-safe work.
+        List<NodeId> ready = scheduler.peekReady(scheduler.readyCount());
+        int dispatchedNow = 0;
+        for (NodeId nodeId : ready) {
+            if (running.size() >= maxConcurrentNodes || dispatchedNow >= dispatchLimit) break;
+            if (isExclusive(nodeId)) continue;
 
-            scheduler.claim(nodeId);
-            StartResult start;
-            try {
-                start = Objects.requireNonNull(workers.start(nodeId), "worker start result");
-            } catch (RuntimeException exception) {
-                RSIntegrationMod.LOGGER.error(
-                        "Graph node start failed: {}", nodeId, exception);
-                start = StartResult.failed();
+            StartStatus status = dispatch(nodeId);
+            if (status == StartStatus.STARTED || status == StartStatus.COMPLETED) {
+                dispatchedNow++;
             }
-            switch (start.status()) {
-                case STARTED -> {
-                    running.put(nodeId, new RunningWorker(start.worker(), scheduler.epoch()));
-                    dispatchedThisCraft++;
-                }
-                case RETRY -> scheduler.releaseClaim(nodeId);
-                case COMPLETED -> {
-                    dispatchedThisCraft++;
-                    if (scheduler.state(nodeId) == DagScheduler.NodeState.RUNNING) {
-                        scheduler.succeed(nodeId);
-                    }
-                }
-                case FAILED -> {
-                    if (scheduler.state(nodeId) == DagScheduler.NodeState.RUNNING) {
-                        scheduler.fail(nodeId);
-                    }
-                }
-            }
-
-            if (start.status() == StartStatus.RETRY) continue;
-            if (scheduler.isStopping()) return;
-
-            // A freshly started exclusive node must run alone — stop dispatching.
-            if (nodeExclusive) return;
+            if (status == StartStatus.FAILED || scheduler.isStopping()) return;
         }
+
+        // Exclusive work may start only when no safe worker was admitted. If all
+        // safe candidates asked to retry, try exclusive candidates in stable order
+        // so one unavailable machine cannot stall otherwise runnable work.
+        if (!running.isEmpty() || dispatchedNow > 0 || dispatchedNow >= dispatchLimit) return;
+        for (NodeId nodeId : ready) {
+            if (!isExclusive(nodeId)) continue;
+            StartStatus status = dispatch(nodeId);
+            if (status != StartStatus.RETRY) return;
+        }
+    }
+
+    private boolean isExclusive(NodeId nodeId) {
+        return exclusiveNodes.computeIfAbsent(nodeId, exclusivity::isExclusive);
+    }
+
+    private StartStatus dispatch(NodeId nodeId) {
+        scheduler.claim(nodeId);
+        StartResult start;
+        try {
+            start = Objects.requireNonNull(workers.start(nodeId), "worker start result");
+        } catch (RuntimeException exception) {
+            RSIntegrationMod.LOGGER.error("Graph node start failed: {}", nodeId, exception);
+            start = StartResult.failed();
+        }
+        switch (start.status()) {
+            case STARTED -> {
+                running.put(nodeId, new RunningWorker(start.worker(), scheduler.epoch()));
+                dispatchedThisCraft++;
+            }
+            case RETRY -> scheduler.releaseClaim(nodeId);
+            case COMPLETED -> {
+                dispatchedThisCraft++;
+                if (scheduler.state(nodeId) == DagScheduler.NodeState.RUNNING) {
+                    scheduler.succeed(nodeId);
+                }
+            }
+            case FAILED -> {
+                if (scheduler.state(nodeId) == DagScheduler.NodeState.RUNNING) {
+                    scheduler.fail(nodeId);
+                }
+            }
+        }
+        return start.status();
     }
 
     private record RunningWorker(Worker worker, int epoch) {}

@@ -64,7 +64,7 @@ class ConcurrentNodeExecutorTest extends BootstrapTest {
     }
 
     @Test
-    void exclusiveNodeRunsAloneEvenWhenCapacityAllowsMore() {
+    void readyNonExclusiveNodeRunsBeforeExclusiveNode() {
         DagScheduler scheduler = new DagScheduler(forkJoinGraph());
         Map<NodeId, FakeWorker> workers = new HashMap<>();
         workers.put(new NodeId(0), new FakeWorker(ConcurrentNodeExecutor.Observation.WORKING,
@@ -76,32 +76,32 @@ class ConcurrentNodeExecutorTest extends BootstrapTest {
                 nodeId -> nodeId.equals(new NodeId(0)));
 
         executor.tick();
-        // Only the exclusive leaf started; the sibling must wait.
+        // Prefer the safe leaf so the exclusive candidate cannot split a safe batch.
         assertEquals(1, executor.runningCount());
-        assertEquals(DagScheduler.NodeState.RUNNING, scheduler.state(new NodeId(0)));
-        assertEquals(DagScheduler.NodeState.READY, scheduler.state(new NodeId(1)));
+        assertEquals(DagScheduler.NodeState.READY, scheduler.state(new NodeId(0)));
+        assertEquals(DagScheduler.NodeState.RUNNING, scheduler.state(new NodeId(1)));
     }
 
     @Test
-    void nonExclusiveNodeWaitsWhileExclusiveNodeRuns() {
-        DagScheduler scheduler = new DagScheduler(forkJoinGraph());
+    void readyExclusiveNodeDoesNotHideLaterSafeNode() {
+        DagScheduler scheduler = new DagScheduler(threeLeafJoinGraph());
         Map<NodeId, FakeWorker> workers = new HashMap<>();
-        // Node 0 exclusive & long-running; node 1 non-exclusive.
-        workers.put(new NodeId(0), new FakeWorker(ConcurrentNodeExecutor.Observation.WORKING,
-                ConcurrentNodeExecutor.Observation.SUCCEEDED));
-        workers.put(new NodeId(1), new FakeWorker(ConcurrentNodeExecutor.Observation.WORKING,
-                ConcurrentNodeExecutor.Observation.SUCCEEDED));
-        ConcurrentNodeExecutor executor = new ConcurrentNodeExecutor(scheduler, workers::get, 2,
-                nodeId -> nodeId.equals(new NodeId(0)));
+        workers.put(new NodeId(0), new FakeWorker(ConcurrentNodeExecutor.Observation.WORKING));
+        workers.put(new NodeId(1), new FakeWorker(ConcurrentNodeExecutor.Observation.WORKING));
+        workers.put(new NodeId(2), new FakeWorker(ConcurrentNodeExecutor.Observation.WORKING));
+        ConcurrentNodeExecutor.AdmissionWorkerFactory factory = nodeId ->
+                ConcurrentNodeExecutor.StartResult.started(workers.get(nodeId));
+        ConcurrentNodeExecutor executor = new ConcurrentNodeExecutor(scheduler, factory, 2,
+                nodeId -> nodeId.equals(new NodeId(1)),
+                (nodeId, worker) -> ConcurrentNodeExecutor.CompletionStatus.SUCCEEDED,
+                1, 10);
 
-        executor.tick(); // start node 0 alone
+        executor.tick(); // Tick budget starts safe node 0 only.
         assertEquals(1, executor.runningCount());
-        executor.tick(); // node 0 still working — node 1 must NOT be dispatched alongside
-        assertEquals(1, executor.runningCount());
+        executor.tick(); // Skip exclusive node 1 and admit safe node 2.
+        assertEquals(2, executor.runningCount());
         assertEquals(DagScheduler.NodeState.READY, scheduler.state(new NodeId(1)));
-        executor.tick(); // node 0 succeeds this tick, then node 1 dispatches
-        assertEquals(DagScheduler.NodeState.SUCCEEDED, scheduler.state(new NodeId(0)));
-        assertEquals(DagScheduler.NodeState.RUNNING, scheduler.state(new NodeId(1)));
+        assertEquals(DagScheduler.NodeState.RUNNING, scheduler.state(new NodeId(2)));
     }
 
     @Test
@@ -126,7 +126,7 @@ class ConcurrentNodeExecutorTest extends BootstrapTest {
     }
 
     @Test
-    void transientAdmissionConflictReturnsNodeToReady() {
+    void transientAdmissionConflictDoesNotBlockReadySibling() {
         DagScheduler scheduler = new DagScheduler(forkJoinGraph());
         AtomicInteger starts = new AtomicInteger();
         ConcurrentNodeExecutor.AdmissionWorkerFactory factory = nodeId -> {
@@ -141,8 +141,6 @@ class ConcurrentNodeExecutorTest extends BootstrapTest {
 
         executor.tick();
         assertEquals(DagScheduler.NodeState.READY, scheduler.state(new NodeId(0)));
-        assertEquals(0, executor.runningCount());
-        executor.tick();
         assertEquals(DagScheduler.NodeState.RUNNING, scheduler.state(new NodeId(1)));
         assertEquals(1, executor.runningCount());
     }
@@ -179,6 +177,26 @@ class ConcurrentNodeExecutorTest extends BootstrapTest {
         assertEquals(1, executor.runningCount());
         executor.tick();
         assertEquals(2, executor.runningCount());
+    }
+
+    @Test
+    void exclusivityDecisionIsCachedPerNode() {
+        DagScheduler scheduler = new DagScheduler(forkJoinGraph());
+        Map<NodeId, FakeWorker> workers = new HashMap<>();
+        workers.put(new NodeId(0), new FakeWorker(ConcurrentNodeExecutor.Observation.WORKING));
+        workers.put(new NodeId(1), new FakeWorker(ConcurrentNodeExecutor.Observation.WORKING));
+        AtomicInteger decisions = new AtomicInteger();
+        ConcurrentNodeExecutor executor = new ConcurrentNodeExecutor(scheduler, workers::get, 2,
+                nodeId -> {
+                    decisions.incrementAndGet();
+                    return false;
+                });
+
+        executor.tick();
+        executor.tick();
+
+        assertEquals(2, executor.runningCount());
+        assertEquals(2, decisions.get());
     }
 
     @Test
@@ -311,6 +329,49 @@ class ConcurrentNodeExecutorTest extends BootstrapTest {
                         new ItemStack(Items.DIAMOND), List.of(new RootAllocation(
                         new MaterialSource.ProducerOutput(joinOutput), result, 1)))),
                 List.of(), List.of(leftId, rightId, joinId));
+    }
+
+    private static CraftPlanGraph threeLeafJoinGraph() {
+        NodeId firstId = new NodeId(0);
+        NodeId exclusiveId = new NodeId(1);
+        NodeId lastId = new NodeId(2);
+        NodeId joinId = new NodeId(3);
+        MaterialKey iron = MaterialKey.of(new ItemStack(Items.IRON_INGOT));
+        MaterialKey gold = MaterialKey.of(new ItemStack(Items.GOLD_INGOT));
+        MaterialKey copper = MaterialKey.of(new ItemStack(Items.COPPER_INGOT));
+        MaterialKey result = MaterialKey.of(new ItemStack(Items.DIAMOND));
+        OutputPortId firstOutput = new OutputPortId(firstId, 0);
+        OutputPortId exclusiveOutput = new OutputPortId(exclusiveId, 0);
+        OutputPortId lastOutput = new OutputPortId(lastId, 0);
+        OutputPortId joinOutput = new OutputPortId(joinId, 0);
+        InputPortId joinFirst = new InputPortId(joinId, 0);
+        InputPortId joinExclusive = new InputPortId(joinId, 1);
+        InputPortId joinLast = new InputPortId(joinId, 2);
+        CraftNode first = node(firstId, "first", List.of(),
+                List.of(new OutputDeclaration(firstOutput, iron, 1, OutputKind.PRIMARY)));
+        CraftNode exclusive = node(exclusiveId, "exclusive", List.of(),
+                List.of(new OutputDeclaration(exclusiveOutput, gold, 1, OutputKind.PRIMARY)));
+        CraftNode last = node(lastId, "last", List.of(),
+                List.of(new OutputDeclaration(lastOutput, copper, 1, OutputKind.PRIMARY)));
+        CraftNode join = node(joinId, "join", List.of(
+                new InputDemand(joinFirst, Ingredient.of(Items.IRON_INGOT), 1,
+                        DemandRole.CONSUMED, new ItemStack(Items.IRON_INGOT)),
+                new InputDemand(joinExclusive, Ingredient.of(Items.GOLD_INGOT), 1,
+                        DemandRole.CONSUMED, new ItemStack(Items.GOLD_INGOT)),
+                new InputDemand(joinLast, Ingredient.of(Items.COPPER_INGOT), 1,
+                        DemandRole.CONSUMED, new ItemStack(Items.COPPER_INGOT))),
+                List.of(new OutputDeclaration(joinOutput, result, 1, OutputKind.PRIMARY)));
+        return new CraftPlanGraph(1, List.of(first, exclusive, last, join), List.of(
+                new MaterialAllocation(new AllocationId(0), joinFirst,
+                        new MaterialSource.ProducerOutput(firstOutput), iron, 1),
+                new MaterialAllocation(new AllocationId(1), joinExclusive,
+                        new MaterialSource.ProducerOutput(exclusiveOutput), gold, 1),
+                new MaterialAllocation(new AllocationId(2), joinLast,
+                        new MaterialSource.ProducerOutput(lastOutput), copper, 1)),
+                List.of(new RootDemand(Ingredient.of(Items.DIAMOND), 1, 0,
+                        new ItemStack(Items.DIAMOND), List.of(new RootAllocation(
+                        new MaterialSource.ProducerOutput(joinOutput), result, 1)))),
+                List.of(), List.of(firstId, exclusiveId, lastId, joinId));
     }
 
     private static CraftNode node(NodeId id, String name, List<InputDemand> inputs,

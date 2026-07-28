@@ -887,14 +887,16 @@ public final class AsyncCraftChain {
                 : createDelegate(step.modType());
         GraphConcurrencyPolicy.Decision decision = concurrencyDecision(step, probe);
         if (decision.exclusive()) {
-            RSIntegrationMod.debug(
-                    "[RSI-GraphConcurrency] nodeId={} modType={} delegate={} decision=exclusive reason={}",
-                    nodeId, step.modType().id(), probe == null ? "none" : probe.getClass().getSimpleName(),
+            RSIntegrationMod.LOGGER.debug(
+                    "[RSI-GraphConcurrency] nodeId={} recipe={} modType={} delegate={} decision=exclusive reason={}",
+                    nodeId, step.recipeId(), step.modType().id(),
+                    probe == null ? "none" : probe.getClass().getSimpleName(),
                     decision.reason());
         } else {
-            RSIntegrationMod.debug(
-                    "[RSI-GraphConcurrency] nodeId={} modType={} delegate={} decision=parallel capability={}",
-                    nodeId, step.modType().id(), probe.getClass().getSimpleName(), decision.capabilities());
+            RSIntegrationMod.LOGGER.debug(
+                    "[RSI-GraphConcurrency] nodeId={} recipe={} modType={} delegate={} decision=parallel capability={}",
+                    nodeId, step.recipeId(), step.modType().id(),
+                    probe.getClass().getSimpleName(), decision.capabilities());
         }
         return decision.exclusive();
     }
