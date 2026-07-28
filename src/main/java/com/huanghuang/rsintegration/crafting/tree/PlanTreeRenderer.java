@@ -153,6 +153,9 @@ public final class PlanTreeRenderer {
         int x = box.x(), y = box.y(), w = box.w(), h = box.h();
 
         boolean isSelected = node.hasAlternatives() && path.isSelected(node.key);
+        boolean marketRecipe = node.step != null
+                && "farmingforblockheads".equals(node.step.recipeId().getNamespace())
+                && node.step.recipeId().getPath().startsWith("market/");
 
         // Path tint: subtle green backing behind a user-selected alternative node.
         if (isSelected) {
@@ -163,7 +166,8 @@ public final class PlanTreeRenderer {
         UIRenderer.rounded(gfx, x + 2, y + 2, w, h, NODE_RADIUS, C_SHADOW);
 
         // 2. Border.
-        int borderColor = borderColor(node, hovered, isSelected);
+        int borderColor = marketRecipe && !hovered && !isSelected
+                ? 0xFF55B978 : borderColor(node, hovered, isSelected);
         UIRenderer.rounded(gfx, x, y, w, h, NODE_RADIUS, borderColor);
 
         // 3. Fill — depth-differentiated + missing tint.
@@ -184,6 +188,9 @@ public final class PlanTreeRenderer {
             if (!drewIcon) {
                 UIRenderer.rounded(gfx, rx, ry, PlanTreeLayout.RECIPE_ICON_SIZE,
                         PlanTreeLayout.RECIPE_ICON_SIZE, 3f, C_RECIPE_ICON);
+            }
+            if (marketRecipe) {
+                gfx.drawString(font, "M", rx + 3, ry + 2, 0xFFFFFFFF, true);
             }
         }
 

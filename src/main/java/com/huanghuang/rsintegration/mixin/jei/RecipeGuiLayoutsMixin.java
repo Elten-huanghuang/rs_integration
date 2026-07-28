@@ -183,6 +183,17 @@ public class RecipeGuiLayoutsMixin {
                 skippedNoRecipe++;
                 continue;
             }
+            if (recipe instanceof snownee.lychee.interaction.BlockInteractingRecipe
+                    && !com.huanghuang.rsintegration.mods.lychee.LycheeBlockInteractingRecipeHandler
+                    .isSupported(recipe)) {
+                RSIntegrationMod.LOGGER.debug(
+                        "[RSI-JEI-Mixin] Lychee block interaction rejected: id={} reason={}",
+                        getRecipeIdSafe(recipe),
+                        com.huanghuang.rsintegration.mods.lychee.LycheeBlockInteractingRecipeHandler
+                                .unsupportedReason(recipe));
+                skippedNoRecipe++;
+                continue;
+            }
             if (recipeClassName.equals("com.sammy.malum.common.recipe.FavorOfTheVoidRecipe")
                     && !com.huanghuang.rsintegration.mods.malum
                     .MalumVoidFavorVirtualRecipeHandler.isSupported(recipe)) {
