@@ -354,6 +354,7 @@
   "rsi.batch.mod.smithing": "锻造台",
   "rsi.batch.mod.generic": "RS 自动合成",
   "rsi.batch.mod.lychee_item_inside_virtual": "物品浸泡虚拟合成",
+  "rsi.batch.mod.lychee_block_interacting": "Lychee 交互合成",
   "rsi.batch.mod.malum_void_favor_virtual": "共振虚空转化",
   "rsi.tlm.error.altar_not_found": "无法找到女仆祭坛",
   "rsi.tlm.error.multiblock_incomplete": "女仆祭坛多方块结构不完整",
