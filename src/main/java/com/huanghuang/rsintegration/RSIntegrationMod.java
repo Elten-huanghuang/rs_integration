@@ -76,6 +76,7 @@ import net.minecraftforge.fml.ModList;
 import net.minecraftforge.fml.ModLoadingContext;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.event.config.ModConfigEvent;
+import net.minecraftforge.fml.config.ModConfig;
 import net.minecraftforge.fml.event.lifecycle.FMLCommonSetupEvent;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 import net.minecraftforge.network.NetworkConstants;
@@ -200,8 +201,16 @@ public final class RSIntegrationMod {
         registerDisplayTest();
         RSIntegrationConfig.register();
         refreshConfigCache();
+        MOD_BUS.addListener((ModConfigEvent.Loading e) -> {
+            if (e.getConfig().getType() == ModConfig.Type.SERVER) {
+                com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket.reloadPlanningConfig();
+            }
+        });
         MOD_BUS.addListener((ModConfigEvent.Reloading e) -> {
             refreshConfigCache();
+            if (e.getConfig().getType() == ModConfig.Type.SERVER) {
+                com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket.reloadPlanningConfig();
+            }
             com.huanghuang.rsintegration.compat.ftbquests.ExternalItemProgressBridge.refreshEnabled();
             broadcastConfigSync();
         });

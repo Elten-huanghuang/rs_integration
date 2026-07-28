@@ -20,7 +20,6 @@ import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
-import net.minecraftforge.common.world.ForgeChunkManager;
 import net.minecraftforge.items.ItemHandlerHelper;
 import org.jetbrains.annotations.NotNull;
 
@@ -325,12 +324,12 @@ public final class CuisineBoardBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public void onBatchFinished(@NotNull ServerPlayer player) {
+        forceChunkLoad(false);
         BlockEntity be = myLevel.getBlockEntity(myPos);
         if (be != null && isCuisineBE(be)) {
             clearModel(be);
             be.setChanged();
         }
-        forceChunkLoad(false);
         craftDone = false;
         resultItem = ItemStack.EMPTY;
         network = null;
@@ -635,12 +634,6 @@ public final class CuisineBoardBatchDelegate extends AbstractBatchDelegate {
     }
 
     private void forceChunkLoad(boolean load) {
-        try {
-            int cx = myPos.getX() >> 4;
-            int cz = myPos.getZ() >> 4;
-            ForgeChunkManager.forceChunk(myLevel, RSIntegrationMod.MOD_ID, myPos, cx, cz, load, true);
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Cuisine] Chunk load failed", e);
-        }
+        forceMachineChunk(myLevel, myPos, load);
     }
 }

@@ -30,7 +30,6 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraftforge.registries.ForgeRegistries;
 import net.minecraftforge.common.ForgeHooks;
-import net.minecraftforge.common.world.ForgeChunkManager;
 import net.minecraftforge.items.ItemHandlerHelper;
 import org.jetbrains.annotations.NotNull;
 
@@ -62,7 +61,6 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
     // CAMPFIRE path state
     private int campfireSlot = -1;
     private Object campfireBE;
-    private boolean campfireChunkForced;
     private static final java.lang.reflect.Field CAMPFIRE_ITEMS;
     private static final java.lang.reflect.Field CAMPFIRE_COOKING_PROGRESS;
     private static final java.lang.reflect.Field CAMPFIRE_COOKING_TIME;
@@ -829,11 +827,9 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public void onBatchFinished(@NotNull ServerPlayer player) {
+        campfireForceLoad(false);
         if (kind == MachineKind.FURNACE) {
             refundLeftoverFuel();
-        }
-        if (kind == MachineKind.CAMPFIRE) {
-            campfireForceLoad(false);
         }
         pendingResult = ItemStack.EMPTY;
         craftDone = false;
@@ -869,16 +865,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
     // ── helpers ───────────────────────────────────────────────────
 
     private void campfireForceLoad(boolean load) {
-        if (campfireChunkForced == load) return;
-        try {
-            int cx = myPos.getX() >> 4;
-            int cz = myPos.getZ() >> 4;
-            ForgeChunkManager.forceChunk(myLevel, RSIntegrationMod.MOD_ID,
-                    myPos, cx, cz, load, true);
-            campfireChunkForced = load;
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Vanilla] Campfire chunk force-load failed", e);
-        }
+        forceMachineChunk(myLevel, myPos, load);
     }
 
     private void refundToRSNetwork(ItemStack stack) {

@@ -24,7 +24,6 @@ import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
-import net.minecraftforge.common.world.ForgeChunkManager;
 import net.minecraftforge.items.IItemHandler;
 import net.minecraftforge.items.ItemHandlerHelper;
 import org.jetbrains.annotations.NotNull;
@@ -333,8 +332,8 @@ public final class CookingPotBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public void onBatchFinished(@NotNull ServerPlayer player) {
-        clearMachineSlotsAndRefund();
         forceChunkLoad(false);
+        clearMachineSlotsAndRefund();
         craftDone = false;
         network = null;
     }
@@ -508,12 +507,6 @@ public final class CookingPotBatchDelegate extends AbstractBatchDelegate {
     }
 
     private void forceChunkLoad(boolean load) {
-        try {
-            int cx = myPos.getX() >> 4;
-            int cz = myPos.getZ() >> 4;
-            ForgeChunkManager.forceChunk(myLevel, RSIntegrationMod.MOD_ID, myPos, cx, cz, load, true);
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Batch-CookingPot] Chunk load failed", e);
-        }
+        forceMachineChunk(myLevel, myPos, load);
     }
 }

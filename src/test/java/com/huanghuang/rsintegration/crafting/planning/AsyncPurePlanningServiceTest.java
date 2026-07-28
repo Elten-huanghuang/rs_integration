@@ -27,11 +27,12 @@ class AsyncPurePlanningServiceTest {
                 "network", "binding", false);
         try (AsyncPlanningCoordinator coordinator = new AsyncPlanningCoordinator(1)) {
             CountDownLatch done = new CountDownLatch(1);
-            AtomicReference<PureRecipePlanner.Result> result = new AtomicReference<>();
+            AtomicReference<AsyncPurePlanningService.CompletedPlan> result = new AtomicReference<>();
             new AsyncPurePlanningService(coordinator).submit(snapshot, Runnable::run, 20,
                     value -> { result.set(value); done.countDown(); }, failure -> done.countDown());
             assertTrue(done.await(2, TimeUnit.SECONDS));
-            assertTrue(result.get() != null && result.get().feasible() == false);
+            assertTrue(result.get() != null && result.get().snapshot() == snapshot);
+            assertTrue(result.get() != null && result.get().result().feasible() == false);
         }
     }
 

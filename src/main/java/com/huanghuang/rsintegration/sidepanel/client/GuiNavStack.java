@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.sidepanel.client;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 
+import com.huanghuang.rsintegration.config.GuiTimingConfig;
 import com.huanghuang.rsintegration.machine.MachineHub;
 import com.huanghuang.rsintegration.machine.MachineHubRenderer;
 import com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler;
@@ -36,7 +37,6 @@ public final class GuiNavStack {
     private static ResourceLocation cachedGridDim;
     private static int pendingRestores;
     private static long pushTimestamp;
-    private static final long PUSH_TIMEOUT_MS = 5000;
 
     static {
         MinecraftForge.EVENT_BUS.register(GuiNavStack.class);
@@ -167,10 +167,23 @@ public final class GuiNavStack {
 
     @SubscribeEvent
     public static void onClientTick(net.minecraftforge.event.TickEvent.ClientTickEvent event) {
-        if (pendingRestores > 0 && System.currentTimeMillis() - pushTimestamp > PUSH_TIMEOUT_MS) {
+        long now = System.currentTimeMillis();
+        if (pendingRestores > 0 && hasPushTimedOut(now, pushTimestamp, configuredPushTimeoutMs())) {
             RSIntegrationMod.LOGGER.debug("[RSI-GuiNav] Push timeout ({}ms) — clearing stale state",
-                    System.currentTimeMillis() - pushTimestamp);
+                    now - pushTimestamp);
             clearPending();
+        }
+    }
+
+    static boolean hasPushTimedOut(long now, long startedAt, long timeoutMs) {
+        return now - startedAt > timeoutMs;
+    }
+
+    private static long configuredPushTimeoutMs() {
+        try {
+            return GuiTimingConfig.loadNavigationTimeoutMs();
+        } catch (Exception ignored) {
+            return GuiTimingConfig.DEFAULT_NAVIGATION_TIMEOUT_MS;
         }
     }
 

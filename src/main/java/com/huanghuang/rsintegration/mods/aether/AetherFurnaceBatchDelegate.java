@@ -24,7 +24,6 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.AbstractFurnaceBlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraftforge.common.ForgeHooks;
-import net.minecraftforge.common.world.ForgeChunkManager;
 import net.minecraftforge.items.IItemHandler;
 import org.jetbrains.annotations.NotNull;
 
@@ -294,10 +293,10 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public void onBatchFinished(@NotNull ServerPlayer player) {
+        forceChunkLoad(false);
         myLevel.getChunk(myPos);
         BlockEntity be = myLevel.getBlockEntity(myPos);
         if (be != null) refundLeftoverFuel(be);
-        forceChunkLoad(false);
         network = null;
     }
 
@@ -421,12 +420,6 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
     }
 
     private void forceChunkLoad(boolean load) {
-        try {
-            int cx = myPos.getX() >> 4;
-            int cz = myPos.getZ() >> 4;
-            ForgeChunkManager.forceChunk(myLevel, RSIntegrationMod.MOD_ID, myPos, cx, cz, load, true);
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Batch-Aether] Chunk load failed", e);
-        }
+        forceMachineChunk(myLevel, myPos, load);
     }
 }

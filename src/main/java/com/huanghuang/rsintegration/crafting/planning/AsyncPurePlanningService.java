@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.crafting.planning;
 
+import com.huanghuang.rsintegration.config.CraftingPlanningConfig;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.IngredientRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.RecipeNode;
 import net.minecraft.resources.ResourceLocation;
@@ -18,27 +19,43 @@ public final class AsyncPurePlanningService {
     }
 
     public void submit(PlanningSnapshot snapshot, Executor serverExecutor, int maxSteps,
-                       Consumer<PureRecipePlanner.Result> commit,
+                       Consumer<CompletedPlan> commit,
                        Consumer<Throwable> rollback) {
+        submit(snapshot, serverExecutor, maxSteps,
+                CraftingPlanningConfig.DEFAULT_SEARCH_STATES,
+                CraftingPlanningConfig.DEFAULT_MEMOIZED_FAILURES, commit, rollback);
+    }
+
+    public void submit(PlanningSnapshot snapshot, Executor serverExecutor, int maxSteps,
+                       int maxSearchStates, int maxMemoizedFailures,
+                       Consumer<CompletedPlan> commit, Consumer<Throwable> rollback) {
         if (snapshot.mainThreadOnly()) {
             serverExecutor.execute(() -> rollback.accept(
                     new PlanningThreadContext.MainThreadPlanningFallbackException("special recipe planning")));
             return;
         }
-        coordinator.submit(snapshot, ignored -> compute(snapshot, maxSteps), serverExecutor,
-                current -> current.recipeRevision() == snapshot.recipeRevision(), commit, rollback);
+        coordinator.submit(snapshot, ignored -> compute(snapshot, maxSteps, maxSearchStates,
+                        maxMemoizedFailures), serverExecutor,
+                current -> current.recipeRevision() == snapshot.recipeRevision(),
+                result -> commit.accept(new CompletedPlan(snapshot, result)), rollback);
     }
 
-    private static PureRecipePlanner.Result compute(PlanningSnapshot snapshot, int maxSteps) {
-        RecipeNode target = snapshot.recipeGraph().recipesByOutput().values().stream()
-                .flatMap(List::stream)
-                .filter(node -> node.recipeId().equals(snapshot.recipeId()))
-                .findFirst().orElse(null);
+    private static PureRecipePlanner.Result compute(PlanningSnapshot snapshot, int maxSteps,
+                                                     int maxSearchStates, int maxMemoizedFailures) {
+        PlanningThreadContext.throwIfCancelled();
+        RecipeNode target = snapshot.recipeGraph().recipesById().get(snapshot.recipeId());
         if (target == null) {
             return new PureRecipePlanner.Result(false, List.of(), List.of(), Map.of());
         }
         Map<ImmutableRecipeGraph.MaterialRef, Integer> stock =
                 ImmutableRecipeGraphProjector.projectAvailability(snapshot.availableItems());
-        return PureRecipePlanner.resolve(snapshot.recipeGraph(), stock, target.inputs(), maxSteps);
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(
+                snapshot.recipeGraph(), stock, target.inputs(), maxSteps,
+                maxSearchStates, maxMemoizedFailures);
+        com.huanghuang.rsintegration.command.PerformanceMonitor.recordPurePlanningSearch(result);
+        return result;
     }
+
+    /** Keeps a background result inseparable from the immutable state that produced it. */
+    public record CompletedPlan(PlanningSnapshot snapshot, PureRecipePlanner.Result result) {}
 }

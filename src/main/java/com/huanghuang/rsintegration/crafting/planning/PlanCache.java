@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.crafting.planning;
 
+import com.huanghuang.rsintegration.config.CraftingPreviewPolicy;
 import com.huanghuang.rsintegration.crafting.plan.PlanResponse;
 import net.minecraft.resources.ResourceLocation;
 
@@ -7,27 +8,41 @@ import java.util.Comparator;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.IntSupplier;
+import java.util.function.LongSupplier;
 
 /** Bounded, short-lived preview cache independent from packet transport code. */
 public final class PlanCache {
-    public static final long DEFAULT_TTL_NANOS = 500_000_000L;
-    private static final int MAX_ENTRIES = 64;
-    private final long ttlNanos;
+    public static final long DEFAULT_TTL_NANOS =
+            CraftingPreviewPolicy.DEFAULT_CACHE_TTL_MS * 1_000_000L;
+    static final int DEFAULT_MAX_ENTRIES = CraftingPreviewPolicy.DEFAULT_CACHE_MAX_ENTRIES;
+    private final LongSupplier ttlNanos;
+    private final IntSupplier maxEntries;
     private final ConcurrentHashMap<Key, Entry> entries = new ConcurrentHashMap<>();
 
     public PlanCache() {
-        this(DEFAULT_TTL_NANOS);
+        this(PlanCache::configuredTtlNanos, PlanCache::configuredMaxEntries);
     }
 
     public PlanCache(long ttlNanos) {
-        if (ttlNanos <= 0) throw new IllegalArgumentException("ttlNanos");
+        this(ttlNanos, DEFAULT_MAX_ENTRIES);
+    }
+
+    PlanCache(long ttlNanos, int maxEntries) {
+        this(() -> ttlNanos, () -> maxEntries);
+    }
+
+    private PlanCache(LongSupplier ttlNanos, IntSupplier maxEntries) {
+        if (ttlNanos.getAsLong() <= 0) throw new IllegalArgumentException("ttlNanos");
+        if (maxEntries.getAsInt() <= 0) throw new IllegalArgumentException("maxEntries");
         this.ttlNanos = ttlNanos;
+        this.maxEntries = maxEntries;
     }
 
     public Entry get(Key key, long now) {
         Entry entry = entries.get(key);
         if (entry == null) return null;
-        if (now - entry.createdNanos() >= ttlNanos) {
+        if (now - entry.createdNanos() >= ttlNanos.getAsLong()) {
             entries.remove(key, entry);
             return null;
         }
@@ -52,15 +67,32 @@ public final class PlanCache {
     }
 
     private void prune(long now) {
-        long cutoff = now - ttlNanos;
+        long cutoff = now - ttlNanos.getAsLong();
         entries.entrySet().removeIf(entry -> entry.getValue().createdNanos() < cutoff);
-        if (entries.size() <= MAX_ENTRIES) return;
+        int maximum = maxEntries.getAsInt();
+        if (entries.size() <= maximum) return;
         entries.entrySet().stream()
                 .sorted(Map.Entry.comparingByValue(Comparator.comparingLong(Entry::createdNanos)))
-                .limit(entries.size() - MAX_ENTRIES)
+                .limit(entries.size() - maximum)
                 .map(Map.Entry::getKey)
                 .toList()
                 .forEach(entries::remove);
+    }
+
+    private static long configuredTtlNanos() {
+        try {
+            return CraftingPreviewPolicy.load().cacheTtlMs() * 1_000_000L;
+        } catch (Exception ignored) {
+            return DEFAULT_TTL_NANOS;
+        }
+    }
+
+    private static int configuredMaxEntries() {
+        try {
+            return CraftingPreviewPolicy.load().cacheMaxEntries();
+        } catch (Exception ignored) {
+            return DEFAULT_MAX_ENTRIES;
+        }
     }
 
     public record Key(UUID playerId, ResourceLocation recipeId,

@@ -31,9 +31,10 @@ import java.util.*;
  */
 final class ResolutionContext {
 
-    static final long MAX_RESOLVE_NANOS = 500_000_000L; // 500ms — fallback if config unavailable
+    static final long MAX_RESOLVE_NANOS =
+            RSIntegrationConfig.DEFAULT_CRAFTING_RESOLVE_TIMEOUT_MS * 1_000_000L;
 
-    /** Resolve deadline from config (ms → ns), falling back to the 500ms default
+    /** Resolve deadline from config (ms → ns), falling back to the configured default
      *  if the config spec is not yet loaded (should not happen at runtime). */
     private static long resolveDeadlineNanos() {
         try {

@@ -23,7 +23,6 @@ import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.properties.BooleanProperty;
-import net.minecraftforge.common.world.ForgeChunkManager;
 import net.minecraftforge.items.IItemHandler;
 import net.minecraftforge.items.ItemHandlerHelper;
 import org.jetbrains.annotations.NotNull;
@@ -256,8 +255,8 @@ public final class MokaPotBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public void onBatchFinished(@NotNull ServerPlayer player) {
-        clearAndRefund();
         forceChunkLoad(false);
+        clearAndRefund();
         craftDone = false;
         network = null;
     }
@@ -552,12 +551,6 @@ public final class MokaPotBatchDelegate extends AbstractBatchDelegate {
     }
 
     private void forceChunkLoad(boolean load) {
-        try {
-            int cx = myPos.getX() >> 4;
-            int cz = myPos.getZ() >> 4;
-            ForgeChunkManager.forceChunk(myLevel, RSIntegrationMod.MOD_ID, myPos, cx, cz, load, true);
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Moka] Chunk load failed", e);
-        }
+        forceMachineChunk(myLevel, myPos, load);
     }
 }

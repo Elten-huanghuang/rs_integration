@@ -19,10 +19,14 @@
 - 该调度器尚未替换 `GenericCraftPacket.tryBuildPlan`。在迁移完成前，现有规划仍保持同步执行，避免第三方配方反射对象越过线程安全边界。
 - 预览请求的退出、停服和同玩家新请求取消已接入调度器；后台上下文访问非原版配方结果提取时会 fail-closed，触发回滚/同步回退，而不是执行第三方反射。
 - `tryBuildPlan` 已在主线程采集 `PlanningSnapshot`，提交前重验配方版本、玩家连接状态、背包/RS 可用物品、网络身份和机器绑定；计划缓存命中也必须通过相同快照指纹校验。
-- 已加入不持有 Minecraft/Forge/RS 对象的 `ImmutableRecipeGraph` 与 `PureRecipePlanner`，覆盖库存扣减、标签候选、递归批次和循环终止；真实 `RecipeIndex` 到该值对象图的主线程投影尚待接入。
+- 已加入不持有 Minecraft/Forge/RS 对象的 `ImmutableRecipeGraph` 与 `PureRecipePlanner`，覆盖库存扣减、标签候选、递归批次和循环终止；真实 `RecipeIndex` 已通过 `ImmutableRecipeGraphProjector` 在主线程投影为值对象图。
 - 已加入 `ImmutableRecipeGraphProjector`，并将原版配方图写入 `PlanningSnapshot`；投影发生在主线程，后台只读取值对象。尚未将该结果替换现有 `CraftingResolver` 的最终计划输出。
+- 原版不可变配方图现在按 `RecipeManager` 身份和规划修订号共享；普通预览及计划缓存复用同一份图，数据包重载和停服会清理缓存，避免每个请求重复全量投影并保留独立大图。性能快照记录投影调用/命中及重建平均/最大耗时。
+- 异步纯规划结果与产生它的 `PlanningSnapshot` 绑定返回；服务端组装前重验原始库存、网络、绑定、请求代次和强制候选，取消或过期任务不会再触发同步回退。命中计划缓存时也会在提交后台任务前直接返回。
+- `PurePlanAdapter` 从逐步骤扫描完整配方图改为一次建立配方 ID 集合，回调适配复杂度由步骤数乘配方数降为线性。
 - `GenericCraftPacket.tryBuildPlan` 已按配方类型切换：原版配方先走快照值图和后台纯规划，结果回主线程复用旧计划组装；特殊/第三方配方、投影缺失和后台异常走同步兼容路径。
 - 阶段 D 已提取 `PlanCache`、`PlanRequestService`、`PlanningStateValidator` 和 `PlanResponsePublisher`；错误响应现在保留客户端 `requestId`。完整 `PlanResponse` 数据组装仍位于 `GenericCraftPacket`。
+- 阶段 D 已提取 `PlanMaterialBill`：标签候选合并、严格 NBT 库存统计、净需求可行性、树形毛需求展示和过量产物统计不再由 `GenericCraftPacket` 直接承担；模组特有警告与最终 `PlanResponse` 数据组装仍待迁移。
 - 已从 `AsyncCraftChain` 提取有状态 `CraftProgressPublisher`，统一完整包/delta 选择、重复负载抑制、终态单次发送和节点变化计算。
 - 已提取实质性的 `TerminationService`：拥有退款/交付/静默策略、固定清理顺序、步骤失败隔离和最终审计；`AsyncCraftChain` 仅通过 `Actions` 回调提供具体资源操作。
 - 平铺/DAG 执行策略现在返回带原因的 `Decision`，并支持 `ModType.requireFlatExecution(reason)` 元数据；策略会检查自包含图中的全部 `ModType`，而不是只检查追加终端步骤。
@@ -41,3 +45,7 @@
 - 新增有界 `LegacyExecutionMetrics`：按固定原因枚举和已注册 ModType 统计回退次数，recipe ID 只进入诊断事件；性能快照会显示 infer、运行时选材、未知输出、非确定输出、taint、ModType 限制和图组合拒绝的实际命中量。
 - 完整图因 `ModType.requireFlatExecution` 选择平铺时同样会记录真正触发约束的图节点类型，而不是误记终端 GENERIC 类型。
 - `GenericCraftPacket` 中所有生产平铺启动已统一经过 `LegacyFlatExecutionService`，且必须携带固定原因；标准 FTB Quest、Spawner Upgrade、原版递归链、机器终端和 Smithing 链均使用 graph。剩余 adapter 集合已收敛为 `custom_gui`、infer、运行时选材、未知/非确定输出、taint 合成步骤及图组合校验失败兜底。
+- 异步规划线程池已改为服务端配置控制的固定 worker 和有界队列（默认 4/64）；同玩家旧请求会取消底层 `Future` 并从等待队列移除，纯规划在目标查找、库存投影和递归求解中协作响应中断。队列满时返回可重试错误，不会在服务端线程同步代跑；停服会执行 `shutdownNow()`，配置重载会安全替换 executor，性能快照记录提交/完成/拒绝/取消、活跃数、队列深度和执行耗时。
+- `PureRecipePlanner` 已从逐根贪心递归改为跨全部根需求的有界事务式回溯，能撤销先前配方或标签候选选择，避免可行计划误判。不可变图附带 recipe-ID 索引；搜索状态和失败缓存上限由服务端配置统一控制（默认 65,536/8,192），并区分 `UNRESOLVABLE`、`STEP_LIMIT`、`SEARCH_LIMIT`。非成功结果不暴露半成品步骤或库存，继续由 typed resolver 保守兜底；性能快照记录展开状态、回溯、缓存命中和两类预算耗尽。
+- 新增纯 DTO 边界 `PlanResponseDraft`：`GenericCraftPacket` 收集完实时机器/绑定/Embers 状态后生成不可变草稿，由规划 worker 完成最终响应冻结；回到服务端线程后再次重验玩家、配方修订、库存、网络、绑定和请求 generation，才写入缓存并发送。目标、步骤输入输出、基础物品、点击产物、Embers 数组及 DAG 视图均深拷贝，材料和机器类型保持插入顺序且只读，避免计划缓存被后续可变 `ItemStack`、数组或集合污染。
+- 新增固定随机种子的纯规划性质测试：200 个小型 DAG 与独立广度优先穷举器对照可行性，成功计划按步骤重放并要求剩余库存完全一致；1,200 层深链由 512 层调用深度保险转为 `SEARCH_LIMIT`，避免 JVM 栈溢出并保守回退 typed resolver。

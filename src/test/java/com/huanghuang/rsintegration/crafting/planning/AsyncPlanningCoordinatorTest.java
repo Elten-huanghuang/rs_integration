@@ -7,8 +7,10 @@ import org.junit.jupiter.api.Test;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -59,6 +61,37 @@ class AsyncPlanningCoordinatorTest extends BootstrapTest {
     }
 
     @Test
+    void repeatedCancellationPublishesOneRollback() throws Exception {
+        try (AsyncPlanningCoordinator coordinator = new AsyncPlanningCoordinator(1)) {
+            UUID player = UUID.randomUUID();
+            CountDownLatch workerStarted = new CountDownLatch(1);
+            CountDownLatch releaseWorker = new CountDownLatch(1);
+            CountDownLatch rolledBack = new CountDownLatch(1);
+            AtomicInteger rollbacks = new AtomicInteger();
+            coordinator.submit(snapshot(player, 1), ignored -> {
+                workerStarted.countDown();
+                try {
+                    releaseWorker.await(2, TimeUnit.SECONDS);
+                } catch (InterruptedException ex) {
+                    Thread.currentThread().interrupt();
+                }
+                return null;
+            }, Runnable::run, ignored -> true, ignored -> {}, failure -> {
+                rollbacks.incrementAndGet();
+                rolledBack.countDown();
+            });
+            assertTrue(workerStarted.await(2, TimeUnit.SECONDS));
+
+            coordinator.cancel(player);
+            coordinator.cancel(player);
+            releaseWorker.countDown();
+
+            assertTrue(rolledBack.await(2, TimeUnit.SECONDS));
+            assertEquals(1, rollbacks.get());
+        }
+    }
+
+    @Test
     void snapshotCopiesMutableInputsAndCapturesRevision() {
         Map<com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey, Integer> items =
                 new java.util.HashMap<>();
@@ -84,6 +117,93 @@ class AsyncPlanningCoordinatorTest extends BootstrapTest {
                     }, failure -> completed.countDown(), ignored -> "sync");
             assertTrue(completed.await(2, TimeUnit.SECONDS));
             assertEquals(1, commits.get());
+        }
+    }
+
+    @Test
+    void supersededQueuedRequestIsRemovedBeforeReplacementIsSubmitted() throws Exception {
+        try (AsyncPlanningCoordinator coordinator = new AsyncPlanningCoordinator(
+                1, 1, runnable -> new Thread(runnable, "planner-test"))) {
+            UUID workerPlayer = UUID.randomUUID();
+            UUID queuedPlayer = UUID.randomUUID();
+            CountDownLatch workerStarted = new CountDownLatch(1);
+            CountDownLatch releaseWorker = new CountDownLatch(1);
+            CountDownLatch completed = new CountDownLatch(3);
+            AtomicInteger oldComputations = new AtomicInteger();
+            AtomicInteger newComputations = new AtomicInteger();
+            AtomicInteger commits = new AtomicInteger();
+            AtomicInteger rollbacks = new AtomicInteger();
+
+            coordinator.submit(snapshot(workerPlayer, 1), ignored -> {
+                workerStarted.countDown();
+                try {
+                    releaseWorker.await(2, TimeUnit.SECONDS);
+                } catch (InterruptedException ex) {
+                    Thread.currentThread().interrupt();
+                }
+                return "worker";
+            }, Runnable::run, ignored -> true,
+                    ignored -> { commits.incrementAndGet(); completed.countDown(); },
+                    ignored -> { rollbacks.incrementAndGet(); completed.countDown(); });
+            assertTrue(workerStarted.await(2, TimeUnit.SECONDS));
+
+            coordinator.submit(snapshot(queuedPlayer, 1), ignored -> {
+                oldComputations.incrementAndGet();
+                return "old";
+            }, Runnable::run, ignored -> true,
+                    ignored -> { commits.incrementAndGet(); completed.countDown(); },
+                    ignored -> { rollbacks.incrementAndGet(); completed.countDown(); });
+            coordinator.submit(snapshot(queuedPlayer, 2), ignored -> {
+                newComputations.incrementAndGet();
+                return "new";
+            }, Runnable::run, ignored -> true,
+                    ignored -> { commits.incrementAndGet(); completed.countDown(); },
+                    ignored -> { rollbacks.incrementAndGet(); completed.countDown(); });
+
+            releaseWorker.countDown();
+            assertTrue(completed.await(2, TimeUnit.SECONDS));
+            assertEquals(0, oldComputations.get());
+            assertEquals(1, newComputations.get());
+            assertEquals(2, commits.get());
+            assertEquals(1, rollbacks.get());
+        }
+    }
+
+    @Test
+    void fullQueueRejectsWithoutRunningComputationOnCaller() throws Exception {
+        try (AsyncPlanningCoordinator coordinator = new AsyncPlanningCoordinator(
+                1, 1, runnable -> new Thread(runnable, "planner-test"))) {
+            CountDownLatch workerStarted = new CountDownLatch(1);
+            CountDownLatch releaseWorker = new CountDownLatch(1);
+            CountDownLatch rejected = new CountDownLatch(1);
+            AtomicInteger rejectedComputations = new AtomicInteger();
+            AtomicReference<Throwable> rejection = new AtomicReference<>();
+
+            coordinator.submit(snapshot(UUID.randomUUID(), 1), ignored -> {
+                workerStarted.countDown();
+                try {
+                    releaseWorker.await(2, TimeUnit.SECONDS);
+                } catch (InterruptedException ex) {
+                    Thread.currentThread().interrupt();
+                }
+                return "worker";
+            }, Runnable::run, ignored -> true, ignored -> {}, ignored -> {});
+            assertTrue(workerStarted.await(2, TimeUnit.SECONDS));
+            coordinator.submit(snapshot(UUID.randomUUID(), 1), ignored -> "queued",
+                    Runnable::run, ignored -> true, ignored -> {}, ignored -> {});
+
+            coordinator.submit(snapshot(UUID.randomUUID(), 1), ignored -> {
+                rejectedComputations.incrementAndGet();
+                return "rejected";
+            }, Runnable::run, ignored -> true, ignored -> {}, failure -> {
+                rejection.set(failure);
+                rejected.countDown();
+            });
+
+            assertTrue(rejected.await(2, TimeUnit.SECONDS));
+            assertEquals(0, rejectedComputations.get());
+            assertTrue(rejection.get() instanceof RejectedExecutionException);
+            releaseWorker.countDown();
         }
     }
 

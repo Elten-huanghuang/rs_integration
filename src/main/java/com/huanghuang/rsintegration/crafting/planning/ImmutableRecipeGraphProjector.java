@@ -2,9 +2,11 @@ package com.huanghuang.rsintegration.crafting.planning;
 
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
+import com.huanghuang.rsintegration.crafting.CraftPlanningRevision;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.RecipeIndex;
+import com.huanghuang.rsintegration.command.PerformanceMonitor;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.IngredientRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.MaterialRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.RecipeNode;
@@ -13,6 +15,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.CraftingRecipe;
 import net.minecraft.world.item.crafting.Ingredient;
+import net.minecraft.world.item.crafting.RecipeManager;
 import net.minecraft.world.level.Level;
 import net.minecraftforge.common.crafting.StrictNBTIngredient;
 
@@ -26,10 +29,35 @@ import java.util.Set;
 
 /** Reads live recipe objects on the server thread and projects them into immutable values. */
 public final class ImmutableRecipeGraphProjector {
+    private static volatile CachedProjection cachedProjection;
+
     private ImmutableRecipeGraphProjector() {}
 
     public static ImmutableRecipeGraph capture(Level level) {
         PlanningThreadContext.requireMainThread("recipe graph projection");
+        RecipeManager source = level.getRecipeManager();
+        long revision = CraftPlanningRevision.current();
+        CachedProjection cached = cachedProjection;
+        if (cached != null && cached.matches(source, revision)) {
+            PerformanceMonitor.recordRecipeGraphProjection(true, 0L);
+            return cached.graph();
+        }
+
+        synchronized (ImmutableRecipeGraphProjector.class) {
+            cached = cachedProjection;
+            if (cached != null && cached.matches(source, revision)) {
+                PerformanceMonitor.recordRecipeGraphProjection(true, 0L);
+                return cached.graph();
+            }
+            long started = System.nanoTime();
+            ImmutableRecipeGraph graph = project(level);
+            cachedProjection = new CachedProjection(source, revision, graph);
+            PerformanceMonitor.recordRecipeGraphProjection(false, System.nanoTime() - started);
+            return graph;
+        }
+    }
+
+    private static ImmutableRecipeGraph project(Level level) {
         Map<MaterialRef, List<RecipeNode>> projected = new HashMap<>();
         Set<ResourceLocation> seen = new HashSet<>();
         for (List<RecipeIndex.Entry> entries : RecipeIndex.get(level).values()) {
@@ -61,9 +89,14 @@ public final class ImmutableRecipeGraphProjector {
         return new ImmutableRecipeGraph(projected);
     }
 
+    public static void clearCache() {
+        cachedProjection = null;
+    }
+
     public static Map<MaterialRef, Integer> projectAvailability(Map<StackKey, Integer> available) {
         Map<MaterialRef, Integer> projected = new HashMap<>();
         for (Map.Entry<StackKey, Integer> entry : available.entrySet()) {
+            PlanningThreadContext.throwIfCancelled();
             ResourceLocation itemId = BuiltInRegistries.ITEM.getKey(entry.getKey().item());
             if (itemId == null || entry.getValue() <= 0) continue;
             MaterialRef plain = new MaterialRef(itemId, "");
@@ -99,5 +132,12 @@ public final class ImmutableRecipeGraphProjector {
             if (candidate.isEmpty() || !candidate.hasTag()) return false;
         }
         return true;
+    }
+
+    private record CachedProjection(RecipeManager source, long revision,
+                                    ImmutableRecipeGraph graph) {
+        private boolean matches(RecipeManager currentSource, long currentRevision) {
+            return source == currentSource && revision == currentRevision;
+        }
     }
 }

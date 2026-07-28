@@ -51,6 +51,8 @@ public final class ApothSpawnerUpgradeService {
 
     public static void preview(ServerPlayer player, ResourceLocation dimension, BlockPos pos,
                                Map<ResourceLocation, Integer> selected) {
+        long now = System.currentTimeMillis();
+        PENDING.entrySet().removeIf(entry -> entry.getValue().expiresAt() < now);
         Context context = context(player, dimension, pos);
         INetwork network = network(player);
         if (context == null || network == null) {
@@ -74,7 +76,7 @@ public final class ApothSpawnerUpgradeService {
                 MaterialSources.listAllAvailable(player, network), context.level, player, network,
                 missing, null, false);
         PENDING.put(player.getUUID(), new PendingPlan(dimension, pos, Map.copyOf(selected),
-                System.currentTimeMillis() + PREVIEW_TTL_MS));
+                now + PREVIEW_TTL_MS));
         PlanGraphView graphView = graph == null ? null : PlanGraphView.from(graph);
         List<PlanStep> steps = graphView == null ? List.of() : graphView.nodes().stream()
                 .map(PlanGraphView.NodeView::asPlanStep)
@@ -97,6 +99,14 @@ public final class ApothSpawnerUpgradeService {
             return scan(player, dimension, pos, "rsi.apotheosis.spawner.plan_expired");
         }
         return executeOrQueueRecursive(player, dimension, pos, pending.selected());
+    }
+
+    public static void clearPlayer(UUID playerId) {
+        PENDING.remove(playerId);
+    }
+
+    public static void clearServerState() {
+        PENDING.clear();
     }
 
     public static Snapshot scan(ServerPlayer player, ResourceLocation dimension, BlockPos pos, String message) {

@@ -11,13 +11,11 @@ public final class PurePlanAdapter {
 
     public static List<ResolutionStep> toResolutionSteps(PureRecipePlanner.Result result,
                                                           ImmutableRecipeGraph graph) {
-        return result.steps().stream().map(step -> graph.recipesByOutput().values().stream()
-                .flatMap(List::stream)
-                .filter(node -> node.recipeId().equals(step.recipeId()))
-                .findFirst()
-                .map(node -> new ResolutionStep(node.recipeId(), ModType.GENERIC,
+        return result.steps().stream()
+                .filter(step -> graph.recipesById().containsKey(step.recipeId()))
+                .map(step -> new ResolutionStep(step.recipeId(), ModType.GENERIC,
                         new net.minecraft.resources.ResourceLocation("minecraft", "crafting"),
                         List.of(), List.of(), false, step.batches(), null, null))
-                .orElse(null)).filter(java.util.Objects::nonNull).toList();
+                .toList();
     }
 }

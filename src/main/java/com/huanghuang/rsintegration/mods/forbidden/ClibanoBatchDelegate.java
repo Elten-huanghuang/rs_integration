@@ -28,7 +28,6 @@ import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraftforge.common.capabilities.ForgeCapabilities;
-import net.minecraftforge.common.world.ForgeChunkManager;
 import net.minecraftforge.items.IItemHandler;
 import org.jetbrains.annotations.NotNull;
 
@@ -57,7 +56,6 @@ public final class ClibanoBatchDelegate extends AbstractBatchDelegate {
     private boolean inputConsumed;
     private boolean resultsCollected;
     private boolean cleanupDone;
-    private boolean chunkForced;
     private int outputGraceTicks;
 
     @Override
@@ -298,6 +296,7 @@ public final class ClibanoBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public void onBatchFinished(@NotNull ServerPlayer player) {
+        forceChunkLoad(false);
         if (level != null && pos != null) {
             BlockEntity raw = level.getBlockEntity(pos);
             if (raw instanceof ClibanoMainBlockEntity be) {
@@ -305,7 +304,6 @@ public final class ClibanoBatchDelegate extends AbstractBatchDelegate {
                 if (inventory != null) cleanupRuntimeResources(be, inventory);
             }
         }
-        forceChunkLoad(false);
         resetState();
     }
 
@@ -539,14 +537,7 @@ public final class ClibanoBatchDelegate extends AbstractBatchDelegate {
     }
 
     private void forceChunkLoad(boolean load) {
-        if (level == null || pos == null || chunkForced == load) return;
-        try {
-            ForgeChunkManager.forceChunk(level, RSIntegrationMod.MOD_ID, pos,
-                    pos.getX() >> 4, pos.getZ() >> 4, load, true);
-            chunkForced = load;
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Clibano] Failed to update chunk ticket at {}", pos, e);
-        }
+        forceMachineChunk(level, pos, load);
     }
 
     private void resetOperationState() {

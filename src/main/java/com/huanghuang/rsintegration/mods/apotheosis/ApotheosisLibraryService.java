@@ -135,6 +135,7 @@ public final class ApotheosisLibraryService {
 
     public static ScanResult scan(ServerPlayer player, ResourceLocation dimension, BlockPos pos) {
         if (!allowRequest(player)) return failure("rsi.apotheosis.library.busy");
+        removeExpiredSnapshots(System.currentTimeMillis());
         Context context = validateContext(player, dimension, pos, true);
         if (context == null) return failure("rsi.apotheosis.library.context_changed");
         if (!adapterReady()) return failure("rsi.apotheosis.library.unavailable");
@@ -146,6 +147,21 @@ public final class ApotheosisLibraryService {
         SNAPSHOTS.put(player.getUUID(), new Snapshot(snapshotId, System.currentTimeMillis(),
                 dimension, pos.immutable(), copyEntries(entries)));
         return new ScanResult(snapshotId, entries, null);
+    }
+
+    public static void clearPlayer(UUID playerId) {
+        SNAPSHOTS.remove(playerId);
+        LAST_REQUEST.remove(playerId);
+    }
+
+    public static void clearServerState() {
+        SNAPSHOTS.clear();
+        LAST_REQUEST.clear();
+        ACTIVE_IMPORTS.clear();
+    }
+
+    private static void removeExpiredSnapshots(long now) {
+        SNAPSHOTS.entrySet().removeIf(entry -> now - entry.getValue().createdAt > SNAPSHOT_TTL_MS);
     }
 
     public static ImportResult importEntries(ServerPlayer player, ResourceLocation dimension, BlockPos pos,

@@ -20,7 +20,6 @@ import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
-import net.minecraftforge.common.world.ForgeChunkManager;
 import net.minecraftforge.fluids.FluidStack;
 import net.minecraftforge.fluids.capability.IFluidHandler;
 import net.minecraftforge.items.ItemHandlerHelper;
@@ -396,10 +395,10 @@ public final class FRKettleBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public void onBatchFinished(@NotNull ServerPlayer player) {
+        forceChunkLoad(false);
         BlockEntity be = myLevel.getBlockEntity(myPos);
         ItemStackHandler inventory = (be != null && isFRKettleBE(be)) ? getInventory(be) : null;
         if (inventory != null) clearAndRefund(inventory, be);
-        forceChunkLoad(false);
         craftDone = false;
         filledInputSlots.clear();
         network = null;
@@ -541,12 +540,6 @@ public final class FRKettleBatchDelegate extends AbstractBatchDelegate {
     }
 
     private void forceChunkLoad(boolean load) {
-        try {
-            int cx = myPos.getX() >> 4;
-            int cz = myPos.getZ() >> 4;
-            ForgeChunkManager.forceChunk(myLevel, RSIntegrationMod.MOD_ID, myPos, cx, cz, load, true);
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-FRKettle] Chunk load failed", e);
-        }
+        forceMachineChunk(myLevel, myPos, load);
     }
 }
