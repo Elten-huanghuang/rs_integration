@@ -128,8 +128,32 @@ public final class PlanTreeModel {
             applyAvailability(missing, plan, missingRef.display());
             root.children.add(missing);
         }
+        // Virtual market entries can participate in the server's topological execution list
+        // without receiving a root allocation edge. Keep those executed producers visible.
+        Set<Integer> renderedNodeIds = new HashSet<>();
+        collectGraphNodeIds(root, renderedNodeIds);
+        for (Integer nodeId : graph.topologicalOrder()) {
+            PlanGraphView.NodeView producer = nodes.get(nodeId);
+            if (producer == null || renderedNodeIds.contains(nodeId)
+                    || !"farmingforblockheads".equals(producer.recipeId().getNamespace())
+                    || !producer.recipeId().getPath().startsWith("market/")) continue;
+            PlanGraphView.OutputView output = producer.outputs().stream().findFirst().orElse(null);
+            ItemStack display = output != null && !output.display().isEmpty()
+                    ? output.display() : producer.primaryOutput();
+            int quantity = output != null ? output.quantity()
+                    : Math.max(1, display.getCount() * producer.executions());
+            int port = output != null ? output.portIndex() : 0;
+            root.children.add(buildGraphReference(
+                    new PlanGraphView.SourceView(false, nodeId, port), display, quantity,
+                    1, graph, nodes, new HashSet<>(), plan));
+        }
         mergeEquivalentProducedChildren(root);
         return new PlanTreeModel(root);
+    }
+
+    private static void collectGraphNodeIds(PlanTreeNode node, Set<Integer> ids) {
+        if (node.graphNodeId != null && node.graphNodeId >= 0) ids.add(node.graphNodeId);
+        for (PlanTreeNode child : node.children) collectGraphNodeIds(child, ids);
     }
 
     private static PlanTreeNode buildGraphReference(PlanGraphView.SourceView source,
