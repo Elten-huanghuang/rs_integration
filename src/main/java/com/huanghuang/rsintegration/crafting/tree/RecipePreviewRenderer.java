@@ -36,6 +36,7 @@ public final class RecipePreviewRenderer {
 
     // Cached items for synthetic recipe icons
     private net.minecraft.world.item.Item gemCuttingTableItem;
+    private net.minecraft.world.item.Item marketItem;
 
     public RecipePreviewRenderer() {
         this.mc = Minecraft.getInstance();
@@ -46,6 +47,7 @@ public final class RecipePreviewRenderer {
         iconCache.clear();
         titleCache.clear();
         gemCuttingTableItem = null;  // Clear cached item on reset
+        marketItem = null;
     }
 
     /**
@@ -297,6 +299,16 @@ public final class RecipePreviewRenderer {
                 return true;
             }
         }
+        if (isVirtualMarketRecipe(recipeId)) {
+            if (marketItem == null) {
+                marketItem = net.minecraftforge.registries.ForgeRegistries.ITEMS
+                        .getValue(new ResourceLocation("farmingforblockheads", "market"));
+            }
+            if (marketItem != null && marketItem != net.minecraft.world.item.Items.AIR) {
+                gfx.renderItem(new ItemStack(marketItem), x, y);
+                return true;
+            }
+        }
         IDrawable icon = iconCache.computeIfAbsent(recipeId, this::lookupCategoryIcon).orElse(null);
         if (icon == null) return false;
         try {
@@ -337,6 +349,12 @@ public final class RecipePreviewRenderer {
     private static boolean isSyntheticGemCuttingRecipe(ResourceLocation recipeId) {
         return "rs_integration".equals(recipeId.getNamespace())
                 && recipeId.getPath().startsWith("gem_cutting/");
+    }
+
+    static boolean isVirtualMarketRecipe(ResourceLocation recipeId) {
+        return recipeId != null
+                && "farmingforblockheads".equals(recipeId.getNamespace())
+                && recipeId.getPath().startsWith("market/");
     }
 
     /**

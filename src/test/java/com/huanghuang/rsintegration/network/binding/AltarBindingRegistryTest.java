@@ -44,6 +44,12 @@ class AltarBindingRegistryTest {
     }
 
     @Test
+    void marketRecipeFolderIsNotTreatedAsMachineSubtype() {
+        assertNull(AltarBindingRegistry.normalizeSubType(
+                "market", ModType.FARMINGFORBLOCKHEADS_MARKET));
+    }
+
+    @Test
     void kubeJsGeneratedFolderIsNeverTreatedAsMachineSubtype() {
         assertNull(AltarBindingRegistry.normalizeSubType("kjs", ModType.GENERIC));
         assertNull(AltarBindingRegistry.normalizeSubType("kjs", ModType.byId("goety")));

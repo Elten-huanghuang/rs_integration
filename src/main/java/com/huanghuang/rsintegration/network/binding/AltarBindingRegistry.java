@@ -779,6 +779,12 @@ public final class AltarBindingRegistry {
         if (ModIds.ID_FA_CLIBANO.equals(type.id())) {
             return null;
         }
+        // Market recipes use market/<entry-uuid>. "market" identifies the
+        // virtual recipe family, not a machine subtype; every entry executes
+        // through the same bound Farming for Blockheads Market.
+        if (ModIds.FARMINGFORBLOCKHEADS.equals(type.id())) {
+            return null;
+        }
         // Cursed Infuser is also a leaf machine type. Goety organizes recipe
         // IDs in content folders such as shade/shade_stone; "shade" describes
         // the recipe family, not a different machine binding.
