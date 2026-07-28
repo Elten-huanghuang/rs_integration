@@ -130,6 +130,7 @@
   "rsi.vanilla.error.wrong_furnace_type": "§c配方与机器类型不匹配 — 请使用对应的熔炉、高炉或烟熏炉",
   "rsi.vanilla.error.furnace_occupied": "§c熔炉输入槽已有不匹配此配方的物品 — 请先取出",
   "rsi.vanilla.error.campfire_full": "§c营火已满（4个槽位均被占用）—— 请等待有物品烹饪完成后再试",
+  "rsi.vanilla.error.campfire_unavailable": "§c当前 Minecraft 映射版本不支持营火自动化",
   "rsi.vanilla.error.no_fuel": "§cRS网络中未找到可用的燃料",
   "rsi.vanilla.info.fuel_supplied": "§a已从RS网络自动补充 %s 个燃料",
   "rsi.vanilla.error.machine_not_found": "§c绑定位置未找到原版机器",

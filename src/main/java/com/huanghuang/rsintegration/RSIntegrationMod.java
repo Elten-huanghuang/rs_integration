@@ -68,6 +68,7 @@ import net.minecraftforge.common.ForgeConfigSpec;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.common.world.ForgeChunkManager;
 import net.minecraftforge.event.entity.player.PlayerEvent;
+import net.minecraftforge.event.server.ServerStartedEvent;
 import net.minecraftforge.event.server.ServerStoppingEvent;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.fml.DistExecutor;
@@ -517,6 +518,10 @@ public final class RSIntegrationMod {
                 com.huanghuang.rsintegration.autoeat.AutoEatRateLimiter.onPlayerLogout(sp.getUUID());
             }
         });
+        // Build the unified recipe index after datapacks and mod registries are ready,
+        // but before the first normal server tick can expose the cold-build pause.
+        MinecraftForge.EVENT_BUS.addListener((ServerStartedEvent e) ->
+                com.huanghuang.rsintegration.crafting.RecipeIndex.warmUp(e.getServer().overworld()));
 
         // Cross-dimension: unpin the old dimension's IStorageCache listener
         // and re-register against the new dimension's network.

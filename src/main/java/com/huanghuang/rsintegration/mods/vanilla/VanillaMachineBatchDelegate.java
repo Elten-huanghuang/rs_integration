@@ -82,14 +82,31 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
     }
 
     private static java.lang.reflect.Field resolveCampfireField(Class<?> clazz, String official, String srg) {
-        for (String name : new String[]{official, srg}) {
+        java.lang.reflect.Field field = findDeclaredField(clazz, official, srg);
+        if (field == null) {
+            RSIntegrationMod.LOGGER.warn(
+                    "[RSI-Vanilla] Campfire field unavailable: {} (tried {}, {})",
+                    official, official, srg);
+        }
+        return field;
+    }
+
+    @Nullable
+    static java.lang.reflect.Field findDeclaredField(Class<?> clazz, String... candidateNames) {
+        for (String name : candidateNames) {
             try {
                 java.lang.reflect.Field f = clazz.getDeclaredField(name);
                 f.setAccessible(true);
                 return f;
-            } catch (NoSuchFieldException e) { RSIntegrationMod.LOGGER.debug("[RSI-Vanilla] campfire field not found", e); }
+            } catch (NoSuchFieldException ignored) {}
         }
         return null;
+    }
+
+    private static boolean campfireFieldsAvailable() {
+        return CAMPFIRE_ITEMS != null
+                && CAMPFIRE_COOKING_PROGRESS != null
+                && CAMPFIRE_COOKING_TIME != null;
     }
 
     private static final java.lang.reflect.Field LIT_TIME_FIELD = resolveLitTimeField();
@@ -223,11 +240,15 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
 
             this.furnaceBE = fbe;
             this.kind = MachineKind.FURNACE;
-        } else if (CAMPFIRE_ITEMS != null
-                && be instanceof net.minecraft.world.level.block.entity.CampfireBlockEntity) {
+        } else if (be instanceof net.minecraft.world.level.block.entity.CampfireBlockEntity) {
             if (!(recipe instanceof CampfireCookingRecipe)) {
                 this.kind = MachineKind.VIRTUAL;
                 return true;
+            }
+            if (!campfireFieldsAvailable()) {
+                player.sendSystemMessage(Component.translatable(
+                        "rsi.vanilla.error.campfire_unavailable"));
+                return false;
             }
             try {
                 @SuppressWarnings("unchecked")

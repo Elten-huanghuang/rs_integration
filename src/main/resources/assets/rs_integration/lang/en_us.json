@@ -130,6 +130,7 @@
   "rsi.vanilla.error.wrong_furnace_type": "§cWrong furnace type for this recipe — use the matching machine (Furnace, Blast Furnace, or Smoker)",
   "rsi.vanilla.error.furnace_occupied": "§cFurnace input slot has an item that doesn't match this recipe — clear it first",
   "rsi.vanilla.error.campfire_full": "§cCampfire is full (all 4 slots occupied) — wait for an item to finish cooking first",
+  "rsi.vanilla.error.campfire_unavailable": "§cCampfire automation is unavailable with this Minecraft mapping version",
   "rsi.vanilla.error.no_fuel": "§cNo usable fuel found in RS network for this recipe",
   "rsi.vanilla.info.fuel_supplied": "§aAuto-supplied %s fuel item(s) from RS network",
   "rsi.vanilla.error.machine_not_found": "§cVanilla machine not found at the bound position",
