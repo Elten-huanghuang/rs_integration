@@ -79,6 +79,11 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
     private net.minecraft.world.phys.AABB outputCaptureRegion;
     private Recipe<?> recipe;
     private boolean craftEverConfirmed;
+    @Nullable
+    private ExtractionLedger powerTopUpLedger;
+    private float powerBeforeTopUp;
+    private int reservedPowerPointItems;
+    private boolean powerTopUpApplied;
 
     // Storage block positions and their TileEntityAltars (the 8 surrounding blocks)
     private List<BlockPos> storagePositions;
@@ -266,6 +271,27 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
+    public PreparationResult prepare(ServerPlayer player, ResourceLocation recipeId,
+                                     @Nullable ResourceLocation dim, BlockPos pos) {
+        if (!validateAndInit(player, recipeId, dim, pos)) {
+            return PreparationResult.retry("altar validation did not accept the machine yet");
+        }
+        float cost = readPowerCost();
+        if (cost > 0) {
+            Float current = readCurrentPower(player);
+            if (current != null && current < cost) {
+                int available = countPowerPointItems(player, dim, pos);
+                if (available < powerItemsNeeded(current, cost)) {
+                    return PreparationResult.fatal("insufficient altar power",
+                            Component.translatable("rsi.tlm.warn.insufficient_power_bind",
+                                    String.format("%.1f", current), String.format("%.1f", cost)));
+                }
+            }
+        }
+        return PreparationResult.ready();
+    }
+
+    @Override
     @Nullable
     public List<IngredientSpec> getRequiredMaterials() {
         if (recipe == null) return null;
@@ -300,7 +326,6 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
         }
 
         if (!checkAllHandlersEmpty(player)) return false;
-        if (!checkPower(player)) return false;
 
         ServerLevel level = resolveMachineLevel(player);
         if (recipe == null) {
@@ -331,11 +356,16 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
             }
             templates.add(t);
         }
+        if (!reservePowerTopUp(player, ledger, false)) return false;
 
         // Phase 2: Commit BEFORE placing — commit failure means no items were
         // physically extracted, so there is nothing to clean up from machine slots.
         if (!ledger.commit(network, player)) {
             RSIntegrationMod.LOGGER.error("[RSI-Batch-TLM] Ledger commit failed");
+            return false;
+        }
+        if (!applyReservedPowerTopUp(player)) {
+            ledger.refundCommitted(network, player);
             return false;
         }
 
@@ -384,6 +414,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
             return false;
         }
         this.craftEverConfirmed = true;
+        finishPowerTopUp();
 
         return true;
     }
@@ -411,13 +442,14 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
         }
 
         if (!checkAllHandlersEmpty(player)) return false;
-        if (recipe != null && !checkPower(player)) return false;
 
         if (materials.size() > storageBlockEntities.size()) {
             RSIntegrationMod.LOGGER.debug("[RSI-Batch-TLM] {} materials > {} storage blocks",
                     materials.size(), storageBlockEntities.size());
             return false;
         }
+        if (!reservePowerTopUp(player, new ExtractionLedger(), true)) return false;
+        if (!applyReservedPowerTopUp(player)) return false;
 
         ServerLevel level = resolveMachineLevel(player);
         try {
@@ -458,6 +490,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
             return false;
         }
         this.craftEverConfirmed = true;
+        finishPowerTopUp();
 
         return true;
     }
@@ -565,6 +598,101 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
         return true;
     }
 
+    static int powerItemsNeeded(float current, float cost) {
+        if (!Float.isFinite(current) || !Float.isFinite(cost) || cost <= current) return 0;
+        return Math.max(0, (int) Math.ceil((double) cost - current - 1.0e-6d));
+    }
+
+    private boolean reservePowerTopUp(ServerPlayer player, ExtractionLedger targetLedger,
+                                      boolean commitSeparately) {
+        Float current = readCurrentPower(player);
+        float cost = readPowerCost();
+        if (current == null) {
+            player.sendSystemMessage(Component.translatable("rsi.tlm.error.no_power"));
+            return false;
+        }
+        int needed = powerItemsNeeded(current, cost);
+        if (needed == 0) return true;
+
+        var item = ForgeRegistries.ITEMS.getValue(PP_ID);
+        if (item == null) return false;
+        ItemStack reserved = targetLedger.reserveExactAcrossNetworkAndInventory(
+                new ItemStack(item), needed, network, player);
+        if (reserved.isEmpty()) {
+            player.sendSystemMessage(Component.translatable(
+                    "rsi.tlm.error.insufficient_power",
+                    String.format("%.1f", current), String.format("%.1f", cost)));
+            return false;
+        }
+        if (commitSeparately && !targetLedger.commit(network, player)) return false;
+
+        powerTopUpLedger = commitSeparately ? targetLedger : null;
+        powerBeforeTopUp = current;
+        reservedPowerPointItems = needed;
+        powerTopUpApplied = false;
+        return true;
+    }
+
+    private boolean applyReservedPowerTopUp(ServerPlayer player) {
+        if (reservedPowerPointItems == 0) return checkPower(player);
+        try {
+            Object cap = resolvePowerCapability(player);
+            if (cap == null) throw new IllegalStateException("P-power capability unavailable");
+            Method add = Reflect.findMethod(cap.getClass(), "add", new Class<?>[]{float.class});
+            if (add == null) throw new NoSuchMethodException("PowerCapability.add(float)");
+            add.invoke(cap, (float) reservedPowerPointItems);
+            powerTopUpApplied = true;
+            Float after = readCurrentPower(player);
+            if (after != null && after + 1.0e-6f >= readPowerCost()) {
+                RSIntegrationMod.LOGGER.debug("[RSI-Batch-TLM] Added {} stored P-point item(s): {} -> {}",
+                        reservedPowerPointItems, powerBeforeTopUp, after);
+                return true;
+            }
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.error("[RSI-Batch-TLM] Failed to apply stored P-points", e);
+        }
+        rollbackPowerTopUp();
+        return false;
+    }
+
+    @Nullable
+    private Object resolvePowerCapability(ServerPlayer player) {
+        probePowerCap();
+        if (powerCapToken == null) return null;
+        return player.getCapability((net.minecraftforge.common.capabilities.Capability<?>) powerCapToken)
+                .resolve().orElse(null);
+    }
+
+    private void rollbackPowerTopUp() {
+        if (powerTopUpApplied && player != null) {
+            try {
+                Object cap = resolvePowerCapability(player);
+                if (cap != null) {
+                    Method set = Reflect.findMethod(cap.getClass(), "set", new Class<?>[]{float.class});
+                    if (set != null) set.invoke(cap, powerBeforeTopUp);
+                }
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.error("[RSI-Batch-TLM] Failed to restore P-power after rollback", e);
+            }
+        }
+        if (powerTopUpLedger != null && powerTopUpLedger.isCommitted()) {
+            powerTopUpLedger.refundCommitted(network, player);
+        }
+        clearPowerTopUpState();
+    }
+
+    private void finishPowerTopUp() {
+        if (powerTopUpLedger != null) powerTopUpLedger.reset();
+        clearPowerTopUpState();
+    }
+
+    private void clearPowerTopUpState() {
+        powerTopUpLedger = null;
+        powerBeforeTopUp = 0f;
+        reservedPowerPointItems = 0;
+        powerTopUpApplied = false;
+    }
+
     /** Read the P-point cost from the recipe. Returns 0 if not available. */
     private float readPowerCost() {
         if (recipe == null) return 0;
@@ -661,6 +789,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
 
     /** Clear items from handlers we filled, return them to RS network. */
     private void rollbackAll() {
+        rollbackPowerTopUp();
         clearHandlers();
         // Entity output cleanup: skip item recovery when using shared committed
         // ledger -- refund is centralized via ledger.refundCommitted().
