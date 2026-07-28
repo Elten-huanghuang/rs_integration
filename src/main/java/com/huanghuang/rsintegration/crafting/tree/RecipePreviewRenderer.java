@@ -300,13 +300,17 @@ public final class RecipePreviewRenderer {
             }
         }
         if (isVirtualMarketRecipe(recipeId)) {
-            if (marketItem == null) {
-                marketItem = net.minecraftforge.registries.ForgeRegistries.ITEMS
-                        .getValue(new ResourceLocation("farmingforblockheads", "market"));
-            }
-            if (marketItem != null && marketItem != net.minecraft.world.item.Items.AIR) {
-                gfx.renderItem(new ItemStack(marketItem), x, y);
-                return true;
+            try {
+                if (marketItem == null) {
+                    marketItem = net.minecraftforge.registries.ForgeRegistries.ITEMS
+                            .getValue(new ResourceLocation("farmingforblockheads", "market"));
+                }
+                if (marketItem != null && marketItem != net.minecraft.world.item.Items.AIR) {
+                    gfx.renderItem(new ItemStack(marketItem), x, y);
+                    return true;
+                }
+            } catch (RuntimeException ignored) {
+                // Registry lookup/rendering must not prevent the recipe tree from drawing.
             }
         }
         IDrawable icon = iconCache.computeIfAbsent(recipeId, this::lookupCategoryIcon).orElse(null);
