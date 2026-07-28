@@ -59,8 +59,9 @@ final class PlanResponseClientPacketHandler {
 
     private static void openScreen(PlanResponse plan, long requestId) {
         RSIntegrationMod.LOGGER.debug(
-                "[RSI-PlanPkt] openScreen called: success={} steps={}",
-                plan.success(), plan.steps().size());
+                "[RSI-PlanPkt] openScreen called: success={} steps={} graphNodes={}",
+                plan.success(), plan.steps().size(),
+                plan.graph() != null ? plan.graph().nodes().size() : 0);
         var mc = Minecraft.getInstance();
         if (mc.player == null) {
             RSIntegrationMod.LOGGER.warn("[RSI-PlanPkt] openScreen ABORT: mc.player is null");

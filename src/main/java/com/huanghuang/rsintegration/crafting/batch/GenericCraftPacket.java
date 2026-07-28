@@ -1636,7 +1636,7 @@ public final class GenericCraftPacket {
         CraftPlanGraph planGraph = null;
         List<ResourceLocation> stepIds;
 
-        if (precomputedPlan != null) {
+        if (canUsePrecomputedPlan(precomputedPlan)) {
             resolutionSteps = PurePlanAdapter.toResolutionSteps(precomputedPlan,
                     planningSnapshot.recipeGraph());
             for (var unresolved : precomputedPlan.missing()) {
@@ -1645,6 +1645,11 @@ public final class GenericCraftPacket {
                 }
             }
         } else if (RSIntegrationConfig.ENABLE_MULTIBLOCK_AUTO_CRAFTING.get() && network != null) {
+            // The async projection intentionally contains CraftingRecipe entries only. An
+            // infeasible pure result may therefore mean that a missing input is produced by
+            // a virtual recipe (Market, Lychee, etc.), not that the complete plan is
+            // infeasible. Re-run the typed resolver so the execution DAG and tree retain
+            // those intermediate nodes.
             planGraph = CraftingResolver.resolveGraphForSpecsWithTypes(
                     recipeSpecs,
                     available, player.serverLevel(),
@@ -2489,8 +2494,9 @@ public final class GenericCraftPacket {
             return;
         }
 
-        RSIntegrationMod.debug("[RSI-tryBuildPlan] SENDING PlanResponsePacket: recipeId={} steps={} feasible={} player={}",
-                recipeId, steps.size(), feasible, player.getGameProfile().getName());
+        RSIntegrationMod.debug("[RSI-tryBuildPlan] SENDING PlanResponsePacket: recipeId={} steps={} graphNodes={} feasible={} player={}",
+                recipeId, steps.size(), planGraphView != null ? planGraphView.nodes().size() : 0,
+                feasible, player.getGameProfile().getName());
         PlanResponsePublisher.send(player, plan, requestId);
         PerformanceMonitor.recordPlanBuild(System.nanoTime() - planStartNanos,
                 plan.graph() != null ? plan.graph().nodes().size() : steps.size());
@@ -2678,6 +2684,10 @@ public final class GenericCraftPacket {
     /** Clears preview plans when recipe data is reloaded. */
     public static void clearPlanCache() {
         PLAN_CACHE.clear();
+    }
+
+    static boolean canUsePrecomputedPlan(@Nullable PureRecipePlanner.Result result) {
+        return result != null && result.feasible();
     }
 
     public static void onPlayerLogout(UUID playerId) {
