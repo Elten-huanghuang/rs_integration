@@ -3,10 +3,14 @@ package com.huanghuang.rsintegration.crafting.plan;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.resources.language.I18n;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.registries.ForgeRegistries;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 
 @OnlyIn(Dist.CLIENT)
@@ -33,16 +37,24 @@ final class PlanResponseClientPacketHandler {
 
     private static List<String> localizeItemNames(List<String> names) {
         if (names.isEmpty()) return names;
-        List<String> localized = new ArrayList<>(names.size());
+        LinkedHashSet<String> localized = new LinkedHashSet<>(names.size());
         for (String name : names) {
             String translated = name;
             int hintStart = name.indexOf(" \u00a7");
             String key = hintStart >= 0 ? name.substring(0, hintStart) : name;
             String suffix = hintStart >= 0 ? name.substring(hintStart) : "";
-            if (I18n.exists(key)) translated = I18n.get(key) + suffix;
+            if (I18n.exists(key)) {
+                translated = I18n.get(key) + suffix;
+            } else {
+                ResourceLocation itemId = ResourceLocation.tryParse(key);
+                var item = itemId != null ? ForgeRegistries.ITEMS.getValue(itemId) : null;
+                if (item != null && !new ItemStack(item).isEmpty()) {
+                    translated = new ItemStack(item).getHoverName().getString() + suffix;
+                }
+            }
             localized.add(translated);
         }
-        return localized;
+        return new ArrayList<>(localized);
     }
 
     private static void openScreen(PlanResponse plan, long requestId) {

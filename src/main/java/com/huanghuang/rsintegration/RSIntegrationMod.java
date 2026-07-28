@@ -100,6 +100,7 @@ public final class RSIntegrationMod {
             "forbidden_arcanus", "forbidden_arcanus_clibano", "goety",
             "goety_cursed_infuser", "immortalers_delight", "ironfurnaces_blast_furnace",
             "ironfurnaces_furnace", "ironfurnaces_smoker", "lychee_item_inside_virtual",
+            "lychee_block_interacting",
             "malum", "malum_runic_workbench", "malum_spirit_crucible",
             "malum_void_favor_virtual", "slashblade", "smithing", "tacz",
             "touhou_little_maid", "vanilla_anvil", "vanilla_blast_furnace",

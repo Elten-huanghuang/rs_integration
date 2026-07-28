@@ -306,7 +306,15 @@ public final class RecipePreviewRenderer {
                             .getValue(new ResourceLocation("farmingforblockheads", "market"));
                 }
                 if (marketItem != null && marketItem != net.minecraft.world.item.Items.AIR) {
-                    gfx.renderItem(new ItemStack(marketItem), x, y);
+                    gfx.pose().pushPose();
+                    try {
+                        gfx.pose().translate(x, y, 0);
+                        float scale = size / 16.0f;
+                        gfx.pose().scale(scale, scale, 1.0f);
+                        gfx.renderItem(new ItemStack(marketItem), 0, 0);
+                    } finally {
+                        gfx.pose().popPose();
+                    }
                     return true;
                 }
             } catch (RuntimeException ignored) {
@@ -366,6 +374,9 @@ public final class RecipePreviewRenderer {
      * resolved from the category that actually handles the recipe. Cached; empty when JEI is off.
      */
     public Optional<Component> categoryTitle(ResourceLocation recipeId) {
+        if (isVirtualMarketRecipe(recipeId)) {
+            return Optional.of(Component.translatable("block.farmingforblockheads.market"));
+        }
         return titleCache.computeIfAbsent(recipeId, this::lookupCategoryTitle);
     }
 
