@@ -181,7 +181,7 @@ public final class BindingEventHandler {
                 RSIntegrationNetwork.invalidateNetworkResolution(player.getUUID());
                 player.displayClientMessage(
                         Component.translatable("gui.rs_integration.altar.unbound", blockName),
-                        true);
+                        false);
                 sendBindingRefresh(player);
             } else {
                 Optional<AltarBinding> binding = hook.get().createBinding(held);
@@ -199,7 +199,7 @@ public final class BindingEventHandler {
                     player.displayClientMessage(
                             Component.translatable("gui.rs_integration.altar.bound",
                                     coloredBlockName, dimensionName, coloredPosition),
-                            true);
+                            false);
                     sendBindingRefresh(player);
                 }
             }
