@@ -38,8 +38,8 @@ public final class LycheeRSModule implements IModIntegration {
                 new String[][]{{"snownee.lychee.item_inside.ItemInsideRecipe", TYPE_ID}},
                 "gui.rs_integration.jei.lychee_virtual_craft");
         ModType.configureJei(BLOCK_INTERACTING_TYPE_ID,
-                new String[][]{{"lychee:block_interacting/minecraft/default", BLOCK_INTERACTING_TYPE_ID}},
-                new String[][]{{"snownee.lychee.interaction.BlockInteractingRecipe", BLOCK_INTERACTING_TYPE_ID}},
+                new String[][]{{"lychee:block_interacting/minecraft/default", "hydraulic_press"}},
+                new String[][]{{"snownee.lychee.interaction.BlockInteractingRecipe", "hydraulic_press"}},
                 "gui.rs_integration.jei.lychee_virtual_craft");
     }
 
