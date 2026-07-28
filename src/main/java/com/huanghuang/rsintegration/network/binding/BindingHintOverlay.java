@@ -17,11 +17,12 @@ import net.minecraftforge.eventbus.api.SubscribeEvent;
 /** One-line, non-modal hint for the only two terminal binding actions. */
 @OnlyIn(Dist.CLIENT)
 public final class BindingHintOverlay {
-    private static final int BG = 0xA6101418;
+    private static final int BG = 0xC0101418;
     private static final int BIND = 0xFF69D6A3;
     private static final int UNBIND = 0xFF78B7FF;
-    private static final int ACTION = 0xFFD8DEE6;
-    private static final int PADDING = 6;
+    private static final int PADDING_X = 8;
+    private static final int PADDING_Y = 5;
+    private static final int BOTTOM_OFFSET = 96;
 
     private BindingHintOverlay() {}
 
@@ -43,11 +44,11 @@ public final class BindingHintOverlay {
         int color = bound ? UNBIND : BIND;
 
         Font font = mc.font;
-        int width = font.width(text) + PADDING * 2;
+        int width = font.width(text) + PADDING_X * 2;
         int x = (mc.getWindow().getGuiScaledWidth() - width) / 2;
-        int y = mc.getWindow().getGuiScaledHeight() - 68;
+        int y = mc.getWindow().getGuiScaledHeight() - BOTTOM_OFFSET;
         GuiGraphics g = event.getGuiGraphics();
-        g.fill(x, y, x + width, y + font.lineHeight + PADDING * 2, BG);
-        g.drawString(font, text, x + PADDING, y + PADDING, color, true);
+        g.fill(x, y, x + width, y + font.lineHeight + PADDING_Y * 2, BG);
+        g.drawString(font, text, x + PADDING_X, y + PADDING_Y, color, true);
     }
 }
