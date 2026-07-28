@@ -1241,7 +1241,8 @@ public final class AsyncCraftChain {
                 OperationResourceCoordinator.CaptureRequest capture = expected != null
                         && !expected.isEmpty() && region != null
                         ? new OperationResourceCoordinator.CaptureRequest(
-                        prepared.machine().dim(), region, expected) : null;
+                        prepared.machine().dim(), region, expected,
+                        "malum".equals(prepared.step().modType().id())) : null;
                 if (expected != null && !expected.isEmpty() && region == null) {
                     return GraphDispatchResult.fatal("delegate expects a world output without a capture region");
                 }

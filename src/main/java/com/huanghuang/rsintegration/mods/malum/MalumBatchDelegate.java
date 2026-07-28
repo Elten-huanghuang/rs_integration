@@ -653,10 +653,11 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public net.minecraft.world.phys.AABB getOutputCaptureRegion() {
-        // Malum drops the result at the altar itself. Keeping the capture zone to
-        // that block prevents adjacent altars with shared pedestal rings from
-        // being treated as one protected output area.
-        return myPos == null ? null : new net.minecraft.world.phys.AABB(myPos);
+        // Malum may spawn the result on one of the nearby pedestals rather than
+        // at the altar block. Cover the complete altar/pedestal ring so magnets
+        // cannot steal it before RSI captures it. Capture leases still permit
+        // overlapping zones when their expected outputs are different.
+        return myPos == null ? null : new net.minecraft.world.phys.AABB(myPos).inflate(3);
     }
 
     // ── Pedestal helpers ─────────────────────────────────────────

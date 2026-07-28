@@ -79,7 +79,8 @@ public final class OperationResourceCoordinator {
             CaptureLeaseRegistry.Owner captureOwner = new CaptureLeaseRegistry.Owner(
                     craftId, nodeId, operationId);
             CaptureLeaseRegistry.Lease captureLease = captures.tryAcquire(
-                    capture.dimension(), capture.region(), MaterialKey.of(capture.expected()), captureOwner);
+                    capture.dimension(), capture.region(), MaterialKey.of(capture.expected()), captureOwner,
+                    capture.allowOverlappingOrigins());
             if (captureLease == null) {
                 machines.releaseAll(machineLeases);
                 permit.cancelBeforeStart();
@@ -87,7 +88,7 @@ public final class OperationResourceCoordinator {
             }
             ResourceKey<Level> dimension = ResourceKey.create(Registries.DIMENSION, capture.dimension());
             CraftOutputInterceptor.CaptureHandle handle = CraftOutputInterceptor.arm(
-                    dimension, capture.region(), capture.expected());
+                    dimension, capture.region(), capture.expected(), capture.allowOverlappingOrigins());
             if (handle == null) {
                 captures.release(captureLease);
                 machines.releaseAll(machineLeases);
@@ -99,7 +100,11 @@ public final class OperationResourceCoordinator {
         return new Scope(machines, machineLeases, permit, captureSession);
     }
 
-    public record CaptureRequest(ResourceLocation dimension, AABB region, ItemStack expected) {
+    public record CaptureRequest(ResourceLocation dimension, AABB region, ItemStack expected,
+                                 boolean allowOverlappingOrigins) {
+        public CaptureRequest(ResourceLocation dimension, AABB region, ItemStack expected) {
+            this(dimension, region, expected, false);
+        }
         public CaptureRequest {
             Objects.requireNonNull(dimension, "dimension");
             Objects.requireNonNull(region, "region");
