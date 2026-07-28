@@ -1063,7 +1063,9 @@ public final class AsyncCraftChain {
         if (delegate == null) {
             return PreparationResult.fatal("No delegate for mod type " + step.modType().id());
         }
-        if (delegate instanceof GenericBatchDelegate) {
+        // Only the exact generic delegate is logical/positionless. Physical adapters may
+        // reuse its material transaction logic while still requiring a bound machine.
+        if (delegate.getClass() == GenericBatchDelegate.class) {
             if (!PreparationMessageScope.validate(
                     delegate, online, step.recipeId(), null, BlockPos.ZERO)) {
                 return PreparationResult.fatal("Virtual recipe validation failed for " + step.recipeId());
