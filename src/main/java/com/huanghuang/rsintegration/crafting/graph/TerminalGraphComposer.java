@@ -16,13 +16,6 @@ public final class TerminalGraphComposer {
     public static CraftPlanGraph compose(CraftPlanGraph base,
                                          CraftingResolver.ResolutionStep terminalStep,
                                          ItemStack terminalOutput) {
-        return compose(base, terminalStep, terminalOutput, true);
-    }
-
-    public static CraftPlanGraph compose(CraftPlanGraph base,
-                                         CraftingResolver.ResolutionStep terminalStep,
-                                         ItemStack terminalOutput,
-                                         boolean deterministicPrimaryOutput) {
         Objects.requireNonNull(base, "base");
         Objects.requireNonNull(terminalStep, "terminalStep");
         Objects.requireNonNull(terminalOutput, "terminalOutput");
@@ -50,7 +43,7 @@ public final class TerminalGraphComposer {
             RootDemand root = base.rootDemands().get(index);
             InputPortId inputId = new InputPortId(terminalId, index);
             inputs.add(new InputDemand(inputId, root.ingredient(), root.quantity(),
-                    DemandRole.CONSUMED, root.displayHint()));
+                    root.role(), root.displayHint()));
             for (RootAllocation rootAllocation : root.allocations()) {
                 allocations.add(new MaterialAllocation(new AllocationId(nextAllocationValue++),
                         inputId, rootAllocation.source(), rootAllocation.material(),
@@ -61,9 +54,8 @@ public final class TerminalGraphComposer {
         ItemStack totalOutput = terminalOutput.copyWithCount(Math.multiplyExact(
                 terminalOutput.getCount(), terminalStep.executions()));
         OutputPortId outputId = new OutputPortId(terminalId, 0);
-        OutputKind outputKind = deterministicPrimaryOutput ? OutputKind.PRIMARY : OutputKind.DYNAMIC;
         OutputDeclaration output = new OutputDeclaration(outputId, MaterialKey.of(totalOutput),
-                totalOutput.getCount(), outputKind);
+                totalOutput.getCount(), OutputKind.PRIMARY);
         CraftNode terminal = new CraftNode(terminalId, terminalStep.recipeId(),
                 terminalStep.modType().id(), terminalStep.recipeTypeId(), terminalStep.executions(),
                 terminalStep.alternativeIds(), terminalStep.alternativeModTypes(),
@@ -77,7 +69,7 @@ public final class TerminalGraphComposer {
         MaterialSource terminalSource = new MaterialSource.ProducerOutput(outputId);
         RootDemand finalDemand = new RootDemand(Ingredient.of(totalOutput), totalOutput.getCount(), 0,
                 totalOutput, List.of(new RootAllocation(terminalSource,
-                MaterialKey.of(totalOutput), totalOutput.getCount())));
+                MaterialKey.of(totalOutput), totalOutput.getCount())), DemandRole.CONSUMED);
 
         CraftPlanGraph result = new CraftPlanGraph(base.version(), nodes, allocations,
                 List.of(finalDemand), List.of(), order, base.planningRevision());

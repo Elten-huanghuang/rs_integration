@@ -46,6 +46,22 @@ class TerminalGraphComposerTest extends BootstrapTest {
     }
 
     @Test
+    void preservesCatalystRoleOnTerminalInputs() {
+        MaterialKey catalyst = MaterialKey.of(new ItemStack(Items.BUCKET));
+        CraftPlanGraph base = new CraftPlanGraph(1, List.of(), List.of(), List.of(
+                new RootDemand(Ingredient.of(Items.BUCKET), 1, 0,
+                        new ItemStack(Items.BUCKET), List.of(new RootAllocation(
+                        new MaterialSource.InitialPool(catalyst), catalyst, 1)),
+                        DemandRole.CATALYST)), List.of(), List.of());
+
+        CraftPlanGraph result = TerminalGraphComposer.compose(base,
+                step("catalyst_terminal", 1), new ItemStack(Items.CAKE));
+
+        CraftNode terminal = result.nodes().get(0);
+        assertEquals(DemandRole.CATALYST, terminal.inputs().get(0).role());
+    }
+
+    @Test
     void scalesTerminalOutputByExecutionsAndUsesNonCollidingAllocationIds() {
         MaterialKey iron = MaterialKey.of(new ItemStack(Items.IRON_INGOT));
         NodeId existingId = new NodeId(2);
@@ -89,17 +105,17 @@ class TerminalGraphComposerTest extends BootstrapTest {
     }
 
     @Test
-    void marksRandomTerminalOutputAsDynamic() {
+    void composesKnownTerminalOutputAsPrimary() {
         MaterialKey geode = MaterialKey.of(new ItemStack(Items.PRISMARINE));
         CraftPlanGraph base = new CraftPlanGraph(1, List.of(), List.of(), List.of(
                 new RootDemand(Ingredient.of(Items.PRISMARINE), 1, 0,
                         new ItemStack(Items.PRISMARINE), List.of(new RootAllocation(
                         new MaterialSource.InitialPool(geode), geode, 1)))), List.of(), List.of());
 
-        CraftPlanGraph result = TerminalGraphComposer.compose(base, step("random", 1),
-                new ItemStack(Items.SNIFFER_EGG), false);
+        CraftPlanGraph result = TerminalGraphComposer.compose(base, step("known", 1),
+                new ItemStack(Items.SNIFFER_EGG));
 
-        assertEquals(OutputKind.DYNAMIC, result.nodes().get(0).outputs().get(0).kind());
+        assertEquals(OutputKind.PRIMARY, result.nodes().get(0).outputs().get(0).kind());
         CraftPlanValidator.validate(result);
     }
 

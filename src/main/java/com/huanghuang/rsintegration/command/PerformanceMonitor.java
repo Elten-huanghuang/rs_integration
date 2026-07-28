@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.command;
 
 import com.huanghuang.rsintegration.crafting.AsyncCraftManager;
+import com.huanghuang.rsintegration.crafting.batch.LegacyExecutionMetrics;
 
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.ConcurrentHashMap;
@@ -141,6 +142,7 @@ public final class PerformanceMonitor {
              .map(e -> e.getKey() + ":" + e.getValue().totalNanos().get() / e.getValue().calls().get() / 1000
                      + "/" + e.getValue().maxNanos().get() / 1000 + "us")
              .collect(java.util.stream.Collectors.joining(","))
+             + " legacy=" + LegacyExecutionMetrics.summary()
              + " chains=" + getActiveChainCount();
     }
 }

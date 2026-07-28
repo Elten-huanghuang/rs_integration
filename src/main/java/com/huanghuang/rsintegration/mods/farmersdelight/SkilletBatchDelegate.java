@@ -50,6 +50,7 @@ public final class SkilletBatchDelegate extends AbstractBatchDelegate {
 
     // Skillet-specific
     private boolean isSkillet;
+    private boolean skilletStarted;
     private int skilletPrevTime = -1;
     // Campfire-specific
     private int campfireSlot = -1;
@@ -112,6 +113,7 @@ public final class SkilletBatchDelegate extends AbstractBatchDelegate {
         }
         this.recipe = found;
         this.craftDone = false;
+        this.skilletStarted = false;
 
         BlockEntity be = level.getBlockEntity(pos);
         if (be != null && isSkilletBE(be)) {
@@ -212,6 +214,7 @@ public final class SkilletBatchDelegate extends AbstractBatchDelegate {
             be.setChanged();
             campfireForceLoad(true);
             skilletPrevTime = -1;
+            skilletStarted = true;
             RSIntegrationMod.LOGGER.debug("[RSI-Batch-Skillet] Item added to skillet");
             return true;
         } catch (Exception e) {
@@ -275,7 +278,22 @@ public final class SkilletBatchDelegate extends AbstractBatchDelegate {
             // the stored item. hasStoredStack() returns true even for raw
             // ingredients, so compare against the expected input to determine
             // if cooking has transformed the item.
-            if (CAMPFIRE_ITEMS != null) {
+            if (!skilletStarted) return false;
+            try {
+                if ((Boolean) be.getClass().getMethod("isCooking").invoke(be)) return false;
+                Object value = be.getClass().getMethod("getStoredStack").invoke(be);
+                if (value instanceof ItemStack stored && !stored.isEmpty()) {
+                    ItemStack rawInput = recipe.getIngredients().isEmpty() ? ItemStack.EMPTY
+                            : recipe.getIngredients().get(0).getItems().length > 0
+                            ? recipe.getIngredients().get(0).getItems()[0] : ItemStack.EMPTY;
+                    return rawInput.isEmpty() || !ItemStack.isSameItem(stored, rawInput);
+                }
+                return true;
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.warn("[RSI-Batch-Skillet] Unable to inspect skillet state", e);
+                return false;
+            }
+            /*if (CAMPFIRE_ITEMS != null) {
                 try {
                     @SuppressWarnings("unchecked")
                     var items = (net.minecraft.core.NonNullList<ItemStack>) CAMPFIRE_ITEMS.get(be);
@@ -301,7 +319,7 @@ public final class SkilletBatchDelegate extends AbstractBatchDelegate {
                     RSIntegrationMod.LOGGER.debug("[RSI-Batch-Skillet] Item peek failed", e);
                 }
             }
-            return false;
+            return false;*/
         }
 
         if (isCampfireBE(be) && CAMPFIRE_ITEMS != null) {

@@ -75,9 +75,13 @@ public final class AetherworksRecipeHandler extends AbstractRecipeHandler {
         try {
             Object results = recipe.getClass().getMethod("getAllResults").invoke(recipe);
             return !(results instanceof List<?> list) || list.size() <= 1;
+        } catch (NoSuchMethodException e) {
+            // Recipe families without a multi-result API use their single declared result.
+            return true;
         } catch (ReflectiveOperationException e) {
             RSIntegrationMod.LOGGER.debug("[RSI-Aetherworks] getAllResults reflection failed", e);
-            return true;
+            // The API exists but could not be read. Do not claim an exact DAG output.
+            return false;
         }
     }
 
