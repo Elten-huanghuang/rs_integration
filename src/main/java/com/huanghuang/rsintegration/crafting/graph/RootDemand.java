@@ -11,10 +11,18 @@ public record RootDemand(
         int quantity,
         int unresolvedQuantity,
         ItemStack displayHint,
-        List<RootAllocation> allocations
+        List<RootAllocation> allocations,
+        DemandRole role
 ) {
+    public RootDemand(Ingredient ingredient, int quantity, int unresolvedQuantity,
+                      ItemStack displayHint, List<RootAllocation> allocations) {
+        this(ingredient, quantity, unresolvedQuantity, displayHint, allocations,
+                DemandRole.CONSUMED);
+    }
+
     public RootDemand {
         Objects.requireNonNull(ingredient, "ingredient");
+        Objects.requireNonNull(role, "role");
         if (quantity <= 0) throw new IllegalArgumentException("root quantity must be positive");
         if (unresolvedQuantity < 0 || unresolvedQuantity > quantity) {
             throw new IllegalArgumentException("invalid unresolved root quantity");

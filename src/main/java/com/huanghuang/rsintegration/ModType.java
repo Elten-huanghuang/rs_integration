@@ -24,6 +24,12 @@ import java.util.function.Supplier;
  */
 public final class ModType {
 
+    public enum GraphExecutionAudit {
+        UNAUDITED,
+        GRAPH_SAFE,
+        FLAT_REQUIRED
+    }
+
     private static final Map<String, ModType> BY_ID = new LinkedHashMap<>();
 
     private final String id;
@@ -33,6 +39,9 @@ public final class ModType {
     private final Supplier<IBatchDelegate> delegateFactory;
     private final Supplier<IBatchDelegate> inferDelegateFactory;
     private final boolean virtual;
+    private volatile String flatExecutionReason;
+    private volatile GraphExecutionAudit graphExecutionAudit = GraphExecutionAudit.UNAUDITED;
+    private volatile String graphExecutionAuditReason = "not audited for graph execution";
 
     // JEI integration — set via configureJei() after register()
     // uidToFilter: [[jeiUid, filterString], ...] — filterString is what getBindingFilter returns
@@ -50,18 +59,22 @@ public final class ModType {
         GENERIC = register("generic",
                 new String[0], new String[0], new String[0],
                 GenericBatchDelegate::new);
+        GENERIC.confirmGraphExecution("logical crafting has no external machine state");
 
         CUSTOM_GUI = register("custom_gui",
                 new String[0],
                 new String[0],
                 new String[0],
                 GenericBatchDelegate::new);
+        CUSTOM_GUI.requireFlatExecution("custom GUI machine state is not represented in the DAG");
 
         FARMINGFORBLOCKHEADS_MARKET = register("farmingforblockheads",
                 new String[]{"com.huanghuang.rsintegration.mods.farmingforblockheads.MarketRecipeWrapper"},
                 new String[]{"market", "farmingforblockheads"},
                 new String[]{"market"},
                 delegateSupplier("com.huanghuang.rsintegration.mods.farmingforblockheads.MarketBatchDelegate"));
+        FARMINGFORBLOCKHEADS_MARKET.confirmGraphExecution(
+                "market execution uses the standard material transaction and output capture");
         configureJei("farmingforblockheads",
                 new String[][]{{"farmingforblockheads:market", "market"}},
                 new String[][]{{"net.blay09.mods.farmingforblockheads.", "farmingforblockheads"}},
@@ -85,6 +98,46 @@ public final class ModType {
 
     /** True for logical recipes that need no bound block or world interaction. */
     public boolean isVirtual() { return virtual; }
+
+    @Nullable
+    public String flatExecutionReason() { return flatExecutionReason; }
+
+    public GraphExecutionAudit graphExecutionAudit() { return graphExecutionAudit; }
+
+    public String graphExecutionAuditReason() { return graphExecutionAuditReason; }
+
+    public ModType confirmGraphExecution(String reason) {
+        if (reason == null || reason.isBlank()) throw new IllegalArgumentException("reason");
+        if (graphExecutionAudit == GraphExecutionAudit.FLAT_REQUIRED) {
+            throw new IllegalStateException(id + " already requires flat execution");
+        }
+        graphExecutionAuditReason = reason;
+        graphExecutionAudit = GraphExecutionAudit.GRAPH_SAFE;
+        return this;
+    }
+
+    public ModType requireFlatExecution(String reason) {
+        if (reason == null || reason.isBlank()) throw new IllegalArgumentException("reason");
+        flatExecutionReason = reason;
+        graphExecutionAuditReason = reason;
+        graphExecutionAudit = GraphExecutionAudit.FLAT_REQUIRED;
+        return this;
+    }
+
+    /**
+     * Freezes the current registry after startup auditing. Types registered later remain
+     * UNAUDITED and are therefore rejected by the graph execution policy.
+     */
+    public static void confirmReviewedGraphExecution(Collection<String> reviewedTypeIds,
+                                                     String reason) {
+        Objects.requireNonNull(reviewedTypeIds, "reviewedTypeIds");
+        for (ModType type : BY_ID.values()) {
+            if (type.graphExecutionAudit == GraphExecutionAudit.UNAUDITED
+                    && reviewedTypeIds.contains(type.id)) {
+                type.confirmGraphExecution(reason);
+            }
+        }
+    }
 
     @Nullable
     public IBatchDelegate createDelegate() {
@@ -142,6 +195,12 @@ public final class ModType {
     /** Get a registered ModType by id. Never returns null — falls back to GENERIC. */
     public static ModType byId(String id) {
         return BY_ID.getOrDefault(id, GENERIC);
+    }
+
+    /** Strict lookup for persisted execution graphs, where an unknown type is unsafe. */
+    @Nullable
+    public static ModType findById(String id) {
+        return BY_ID.get(id);
     }
 
     /** Call after {@link #register} to link JEI category UIDs and tooltip key.

@@ -9,6 +9,7 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
 import com.huanghuang.rsintegration.crafting.batch.CraftProgressPacket;
 import com.huanghuang.rsintegration.crafting.batch.CraftProgressDeltaPacket;
+import com.huanghuang.rsintegration.crafting.batch.CraftProgressPublisher;
 import com.huanghuang.rsintegration.crafting.batch.CraftStartedPacket;
 import com.huanghuang.rsintegration.crafting.batch.PreparationMessageScope;
 import net.minecraftforge.network.NetworkDirection;
@@ -126,6 +127,7 @@ public final class AsyncCraftChain {
     private String abortReason = "";
     private TerminationCoordinator.Cause terminalCause;
     private final TerminalListeners terminalListeners;
+    private final TerminationService terminationService = new TerminationService();
     private int machineCount = 1;
     private boolean waitingForMachineLease;
     private int machineLeaseWaitTicks;
@@ -179,10 +181,8 @@ public final class AsyncCraftChain {
     private final OperationResourceCoordinator operationResources;
     private final OperationExecutionKernel operationKernel;
     private int progressTickCounter;
-    /** Last non-terminal progress payload sent to this craft's owner. */
-    private CraftProgressSnapshot lastProgressSent;
+    private final CraftProgressPublisher progressPublisher;
     private int progressSequence;
-    private boolean terminalProgressSent;
     @Nullable
     private TerminationCoordinator.Report terminationReport;
 
@@ -193,24 +193,29 @@ public final class AsyncCraftChain {
 
     public AsyncCraftChain(UUID playerId, MinecraftServer server, INetwork network,
                            CraftPlanGraph graph) {
-        this(UUID.randomUUID(), playerId, server, network, projectSteps(graph), graph);
+        this(UUID.randomUUID(), playerId, server, network,
+                ExecutionEquivalence.projectFlatSteps(graph), graph);
     }
 
     public AsyncCraftChain(UUID playerId, MinecraftServer server, INetwork network,
                            CraftPlanGraph graph, CraftingResolver.ResolutionStep terminalStep,
                            int repeatCount) {
         this(UUID.randomUUID(), playerId, server, network,
-                compatibilitySteps(projectSteps(graph), terminalStep, repeatCount), graph);
+                compatibilitySteps(ExecutionEquivalence.projectFlatSteps(graph),
+                        terminalStep, repeatCount), graph);
         // The resolver graph describes the materials needed by terminalStep; it
         // does not contain terminalStep itself. Running that graph scheduler would
         // therefore finish after the intermediates and silently skip the requested
         // physical craft. Keep the authoritative projected allocations for plan/UI,
         // but execute this compatibility shape through the flat chain until the
         // terminal operation is represented as a real graph node.
-        this.useGraphExecution = GraphExecutionPolicy.useGraphExecutor(true);
+        GraphExecutionPolicy.Decision executionDecision = GraphExecutionPolicy.decide(true,
+                terminalStep == null ? null : terminalStep.modType());
+        this.useGraphExecution = executionDecision.useGraphExecutor();
         RSIntegrationMod.LOGGER.debug(ctx.format(
-                "Using flat execution for graph plan with appended terminal step {}"),
-                terminalStep.recipeId());
+                "Using {} execution for graph plan: reason={} detail={} terminalStep={}"),
+                executionDecision.useGraphExecutor() ? "graph" : "flat",
+                executionDecision.reason(), executionDecision.detail(), terminalStep.recipeId());
     }
 
     AsyncCraftChain(UUID craftId, UUID playerId, MinecraftServer server, INetwork network,
@@ -222,6 +227,7 @@ public final class AsyncCraftChain {
                             List<CraftingResolver.ResolutionStep> steps,
                             @Nullable CraftPlanGraph graph) {
         this.craftId = Objects.requireNonNull(craftId, "craftId");
+        this.progressPublisher = new CraftProgressPublisher(craftId);
         this.playerId = playerId;
         this.server = server;
         this.network = network;
@@ -277,7 +283,13 @@ public final class AsyncCraftChain {
             this.graphMaterials = new MaterialBroker();
             this.graphAdmissions = new NodeAdmissionCoordinator(graphScheduler, graphMaterials);
             initialiseGraphMaterialFlow(graph);
-            this.useGraphExecution = true;
+            GraphExecutionPolicy.Decision executionDecision = GraphExecutionPolicy.decide(false,
+                    steps.stream().map(CraftingResolver.ResolutionStep::modType).distinct().toList());
+            this.useGraphExecution = executionDecision.useGraphExecutor();
+            RSIntegrationMod.LOGGER.debug(ctx.format(
+                    "Using {} execution for self-contained graph: reason={} detail={}"),
+                    executionDecision.useGraphExecutor() ? "graph" : "flat",
+                    executionDecision.reason(), executionDecision.detail());
         } else {
             this.graph = null;
             this.graphScheduler = null;
@@ -317,22 +329,6 @@ public final class AsyncCraftChain {
     }
 
     private record InitialLotKey(MaterialSource.InitialPool source, MaterialKey material) {}
-
-    private static List<CraftingResolver.ResolutionStep> projectSteps(CraftPlanGraph graph) {
-        Objects.requireNonNull(graph, "graph");
-        Map<NodeId, CraftNode> nodes = graph.nodesById();
-        List<CraftingResolver.ResolutionStep> projected = new ArrayList<>(graph.topologicalOrder().size());
-        for (NodeId nodeId : graph.topologicalOrder()) {
-            CraftNode node = nodes.get(nodeId);
-            if (node == null) throw new IllegalArgumentException("missing graph node " + nodeId);
-            ModType modType = ModType.byId(node.modTypeId());
-            if (modType == null) throw new IllegalArgumentException("unknown graph mod type " + node.modTypeId());
-            projected.add(new CraftingResolver.ResolutionStep(node.recipeId(), modType,
-                    node.recipeTypeId(), node.alternativeIds(), node.alternativeModTypeIds(),
-                    node.inferMode(), node.executions(), node.syntheticInput(), node.syntheticOutput()));
-        }
-        return List.copyOf(projected);
-    }
 
     static List<CraftingResolver.ResolutionStep> compatibilitySteps(
             List<CraftingResolver.ResolutionStep> projected,
@@ -3508,39 +3504,10 @@ public final class AsyncCraftChain {
         return machineCount;
     }
 
-    /**
-     * Settlement policy for {@link #terminate}. Captures the three orthogonal
-     * dimensions that distinguished the old {@code abort*} variants:
-     * whether to refund the ledger, whether to deliver captured outputs, and
-     * whether the player is treated as offline (no chat message).
-     */
-    private enum SettlementPolicy {
-        /** Normal failure/cancel: refund ledger, deliver captured outputs, notify online player. */
-        REFUND_AND_DELIVER(true, true, false),
-        /** Player already offline: refund ledger (via network/spawn), deliver captured, no chat message. */
-        SILENT_REFUND(true, true, true),
-        /**
-         * A physical machine consumed inputs but its output escaped. Refunding
-         * would duplicate the escaped result, so do NOT refund and discard the
-         * (unconfirmed) captured outputs. Earlier settled products are still owed.
-         */
-        NO_REFUND(false, false, false);
-
-        final boolean refundLedger;
-        final boolean deliverCaptured;
-        final boolean silent;
-
-        SettlementPolicy(boolean refundLedger, boolean deliverCaptured, boolean silent) {
-            this.refundLedger = refundLedger;
-            this.deliverCaptured = deliverCaptured;
-            this.silent = silent;
-        }
-    }
-
     /** Abort after a physical machine consumed inputs but its output escaped.
      * Refunding here would duplicate the escaped result. */
     private void abortWithoutRefund(String reason, Component userReason) {
-        terminate(reason, userReason, SettlementPolicy.NO_REFUND,
+        terminate(reason, userReason, TerminationService.Policy.NO_REFUND,
                 TerminationCoordinator.Cause.FAILURE);
     }
 
@@ -3551,13 +3518,13 @@ public final class AsyncCraftChain {
      * literal English string would reach the client untranslated.
      */
     public void abort(String reason, Component userReason) {
-        terminate(reason, userReason, SettlementPolicy.REFUND_AND_DELIVER,
+        terminate(reason, userReason, TerminationService.Policy.REFUND_AND_DELIVER,
                 TerminationCoordinator.Cause.FAILURE);
     }
 
     /** @param userReason player-facing text; must be translatable, not literal English. */
     public void cancel(String reason, Component userReason) {
-        terminate(reason, userReason, SettlementPolicy.REFUND_AND_DELIVER,
+        terminate(reason, userReason, TerminationService.Policy.REFUND_AND_DELIVER,
                 TerminationCoordinator.Cause.CANCELLED);
     }
 
@@ -3567,7 +3534,7 @@ public final class AsyncCraftChain {
      * literal log string is safe here.
      */
     public void abortOffline(String reason) {
-        terminate(reason, Component.literal(reason), SettlementPolicy.SILENT_REFUND,
+        terminate(reason, Component.literal(reason), TerminationService.Policy.SILENT_REFUND,
                 TerminationCoordinator.Cause.OFFLINE);
     }
 
@@ -3592,7 +3559,7 @@ public final class AsyncCraftChain {
             }
         }
         terminate("Server stopping", Component.literal("Server stopping"),
-                SettlementPolicy.SILENT_REFUND, TerminationCoordinator.Cause.SERVER_STOP);
+                TerminationService.Policy.SILENT_REFUND, TerminationCoordinator.Cause.SERVER_STOP);
     }
 
     /**
@@ -3650,23 +3617,11 @@ public final class AsyncCraftChain {
      * recovery never duplicates; in-flight products from rolled-back
      * reservations are discarded.
      */
-    private void terminate(String reason, Component userReason, SettlementPolicy policy,
+    private void terminate(String reason, Component userReason, TerminationService.Policy policy,
                            TerminationCoordinator.Cause cause) {
         if (state == State.ABORTED || state == State.COMPLETED) return;
 
-        TerminationCoordinator termination = new TerminationCoordinator(craftId, cause, reason);
-        if (flatOperationSession != null) {
-            termination.classify(switch (flatOperationSession.terminalClass()) {
-                case PRE_START -> TerminationCoordinator.OperationState.PRE_START;
-                case IN_FLIGHT -> TerminationCoordinator.OperationState.IN_FLIGHT;
-                case SETTLED -> TerminationCoordinator.OperationState.SETTLED;
-            });
-        }
-        for (CraftNodeRuntime runtime : nodeRuntimes.values()) {
-            runtime.classifyTermination(termination);
-        }
-
-        ServerPlayer online = policy.silent ? null : resolvePlayer();
+        ServerPlayer online = policy.silent() ? null : resolvePlayer();
         RSIntegrationMod.LOGGER.warn(ctx.format("Aborting chain (state={}, policy={}) for {}: {}"),
                 state, policy, online != null ? online.getName().getString() : playerId, reason);
         Diagnostics.record(Diagnostics.Category.CHAIN_STATE,
@@ -3692,41 +3647,41 @@ public final class AsyncCraftChain {
             currentDelegate = null;
         }
 
-        // Captured outputs: deliver them, or discard when a refund would
-        // duplicate an output that already escaped to the player.
-        termination.run("flat-capture", () -> {
-            if (policy.deliverCaptured) recoverCapturedOutputs(online);
-            else disarmOutputCapture();
-        });
-        termination.run("flat-operation-scope", this::closeFlatOperationScope);
-
-        // Graph path: stop executor and clean up all running node runtimes.
-        termination.run("graph-runtime-cleanup", () -> cleanupGraphNodes(online, reason));
-        termination.run("graph-surplus-recovery", () -> {
-            if (useGraphExecution && graphMaterials != null) {
-                for (ItemStack stack : graphMaterials.drainAvailableProducerAssets()) {
-                    addToVirtualInventory(stack);
-                }
-                snapshotCommittedVirtual();
-            }
-        });
-
-        if (policy.refundLedger) {
-            termination.run("ledger-refund", () -> refundOrRollbackLedger(online));
-        }
-
-        // Deliver intermediate products whose backing inputs were already
-        // irreversibly consumed by earlier settled steps.
-        termination.run("settled-asset-delivery", () -> recoverCommittedVirtual(online));
-        termination.run("ledger-close", ledger::close);
-
-        // Only notify when the player is still online (never under a silent policy).
-        termination.run("terminal-notification", () -> {
-            if (!policy.silent && online != null) {
-                online.sendSystemMessage(Component.translatable("rsi.async.chain_aborted", userReason));
-            }
-        });
-        terminationReport = termination.report();
+        terminationReport = terminationService.terminate(craftId, cause, reason, policy,
+                new TerminationService.Actions() {
+                    @Override public void classify(TerminationService.Session session) {
+                        if (flatOperationSession != null) {
+                            session.classify(switch (flatOperationSession.terminalClass()) {
+                                case PRE_START -> TerminationCoordinator.OperationState.PRE_START;
+                                case IN_FLIGHT -> TerminationCoordinator.OperationState.IN_FLIGHT;
+                                case SETTLED -> TerminationCoordinator.OperationState.SETTLED;
+                            });
+                        }
+                        for (CraftNodeRuntime runtime : nodeRuntimes.values()) {
+                            runtime.classifyTermination(session.coordinator());
+                        }
+                    }
+                    @Override public void settleCaptured(boolean deliver) {
+                        if (deliver) recoverCapturedOutputs(online); else disarmOutputCapture();
+                    }
+                    @Override public void closeOperationScope() { closeFlatOperationScope(); }
+                    @Override public void cleanupGraph() { cleanupGraphNodes(online, reason); }
+                    @Override public void recoverGraphSurplus() {
+                        if (useGraphExecution && graphMaterials != null) {
+                            for (ItemStack stack : graphMaterials.drainAvailableProducerAssets()) {
+                                addToVirtualInventory(stack);
+                            }
+                            snapshotCommittedVirtual();
+                        }
+                    }
+                    @Override public void refundLedger() { refundOrRollbackLedger(online); }
+                    @Override public void deliverSettledAssets() { recoverCommittedVirtual(online); }
+                    @Override public void closeLedger() { ledger.close(); }
+                    @Override public void notifyOwner() {
+                        if (online != null) online.sendSystemMessage(Component.translatable(
+                                "rsi.async.chain_aborted", userReason));
+                    }
+                });
         if (!terminationReport.clean()) {
             RSIntegrationMod.LOGGER.error(ctx.format(
                     "Termination audit incomplete: cause={} unknown={} failedSteps={} steps={}"),
@@ -3860,56 +3815,11 @@ public final class AsyncCraftChain {
     }
 
     private void sendTerminalProgress(ServerPlayer online) {
-        if (terminalProgressSent || online == null || online.connection == null) return;
-        terminalProgressSent = true;
         sendProgressSnapshot(online, buildProgressSnapshot(true));
     }
 
     private void sendProgressSnapshot(ServerPlayer online, CraftProgressSnapshot snapshot) {
-        boolean terminal = snapshot.isTerminal();
-        if (!terminal && sameProgressPayload(lastProgressSent, snapshot)) {
-            return;
-        }
-        RSIntegrationMod.LOGGER.debug(ctx.format(
-                "Progress S2C: sequence={} result={} reason={} nodes={}/{} running={}"),
-                snapshot.sequence(), snapshot.result(), snapshot.reason(),
-                snapshot.completedNodes(), snapshot.totalNodes(), snapshot.runningNodes());
-        if (!terminal && lastProgressSent != null && progressTickCounter % 100 != 0) {
-            BatchCraftNetworkHandler.CHANNEL.sendTo(
-                    new CraftProgressDeltaPacket(craftId, lastProgressSent.sequence(), snapshot,
-                            changedNodes(lastProgressSent, snapshot)),
-                    online.connection.connection, NetworkDirection.PLAY_TO_CLIENT);
-        } else {
-            BatchCraftNetworkHandler.CHANNEL.sendTo(
-                    new CraftProgressPacket(snapshot), online.connection.connection,
-                    NetworkDirection.PLAY_TO_CLIENT);
-        }
-        if (snapshot.sequence() != CraftProgressSnapshot.TERMINAL_SEQUENCE) {
-            lastProgressSent = snapshot;
-        }
-    }
-
-    private static List<CraftProgressSnapshot.NodeProgress> changedNodes(
-            CraftProgressSnapshot previous, CraftProgressSnapshot current) {
-        java.util.Map<Integer, CraftProgressSnapshot.NodeProgress> old = new java.util.HashMap<>();
-        for (CraftProgressSnapshot.NodeProgress node : previous.nodes()) old.put(node.nodeId(), node);
-        List<CraftProgressSnapshot.NodeProgress> changed = new ArrayList<>();
-        for (CraftProgressSnapshot.NodeProgress node : current.nodes()) {
-            if (!java.util.Objects.equals(old.get(node.nodeId()), node)) changed.add(node);
-        }
-        return List.copyOf(changed);
-    }
-
-    private static boolean sameProgressPayload(CraftProgressSnapshot previous,
-                                                CraftProgressSnapshot current) {
-        if (previous == null) return false;
-        return previous.result() == current.result()
-                && previous.reason() == current.reason()
-                && previous.completedNodes() == current.completedNodes()
-                && previous.totalNodes() == current.totalNodes()
-                && previous.runningNodes() == current.runningNodes()
-                && java.util.Objects.equals(previous.technicalDetail(), current.technicalDetail())
-                && java.util.Objects.equals(previous.nodes(), current.nodes());
+        progressPublisher.publish(online, snapshot, progressTickCounter);
     }
 
     private void sendStartedPacket(ServerPlayer online) {

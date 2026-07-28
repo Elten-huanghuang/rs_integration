@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.recipe;
 
 import com.huanghuang.rsintegration.crafting.RecipeIndex;
+import com.huanghuang.rsintegration.crafting.planning.PlanningThreadContext;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.ModType;
@@ -121,6 +122,12 @@ public final class ModRecipeHandlers {
      * Expensive reflection is done at most once per recipe instance.
      */
     public static ItemStack tryGetResultItem(Recipe<?> recipe, RegistryAccess access) {
+        // Non-vanilla recipe handlers may invoke arbitrary third-party reflection and
+        // registry state. They remain on the server thread until their inputs are
+        // projected into an immutable planning snapshot.
+        if (!(recipe instanceof CraftingRecipe)) {
+            PlanningThreadContext.requireMainThread("third-party recipe result extraction");
+        }
         if (recipe instanceof CraftingRecipe cr) {
             ItemStack result = cr.getResultItem(access);
             if (!result.isEmpty()) return result.copy();

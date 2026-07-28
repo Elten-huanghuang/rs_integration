@@ -59,6 +59,7 @@ import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.apiimpl.API;
 
 import java.util.List;
+import java.util.Set;
 import java.util.function.Supplier;
 
 import net.minecraft.server.level.ServerPlayer;
@@ -84,6 +85,31 @@ import org.apache.logging.log4j.Logger;
 
 @Mod(RSIntegrationMod.MOD_ID)
 public final class RSIntegrationMod {
+    private static final Set<String> REVIEWED_GRAPH_EXECUTION_TYPES = Set.of(
+            "aether", "aether_altar", "aether_freezer", "aether_incubator",
+            "aetherworks_anvil", "aetherworks_tool_station",
+            "apotheosis_fletching", "apotheosis_gem_cutting", "apotheosis_library",
+            "ars_nouveau_apparatus", "ars_nouveau_imbuement",
+            "avaritia_crafting", "avaritia_compressor", "avaritia_gui", "avaritia_smithing",
+            "botania_apothecary", "botania_brewery", "botania_elven_trade",
+            "botania_mana_pool", "botania_pure_daisy", "botania_runic_altar",
+            "botania_terra_plate", "confluence", "crabbersdelight", "crockpot",
+            "distant_worlds_lithum_altar", "eidolon", "eidolon_worktable",
+            "embers_alchemy", "farmersdelight", "farmersdelight_cooking_pot",
+            "farmersdelight_skillet", "farmersrespite", "farmersrespite_kettle",
+            "forbidden_arcanus", "forbidden_arcanus_clibano", "goety",
+            "goety_cursed_infuser", "immortalers_delight", "ironfurnaces_blast_furnace",
+            "ironfurnaces_furnace", "ironfurnaces_smoker", "lychee_item_inside_virtual",
+            "malum", "malum_runic_workbench", "malum_spirit_crucible",
+            "malum_void_favor_virtual", "slashblade", "smithing", "tacz",
+            "touhou_little_maid", "vanilla_anvil", "vanilla_blast_furnace",
+            "vanilla_brewing_stand", "vanilla_campfire", "vanilla_furnace",
+            "vanilla_smoker", "vanilla_stonecutter", "wizards_reborn",
+            "youkaishomecoming", "youkaishomecoming_cooking_large",
+            "youkaishomecoming_cooking_short", "youkaishomecoming_cooking_small",
+            "youkaishomecoming_cuisine", "youkaishomecoming_ferment",
+            "youkaishomecoming_kettle", "youkaishomecoming_moka",
+            "youkaishomecoming_steamer");
 
     public static final String MOD_ID = "rs_integration";
     public static final String MOD_NAME = "RS Integration";
@@ -501,6 +527,7 @@ public final class RSIntegrationMod {
         // Server shutdown: abort all active async craft chains so committed
         // materials are refunded rather than silently lost.
         MinecraftForge.EVENT_BUS.addListener((ServerStoppingEvent e) -> {
+            com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket.cancelAllPlanning();
             AsyncCraftManager.abortAll();
             RemoteGuiAuth.clearServerState();
             RSSidePanelNetworkHandler.clearServerState();
@@ -546,6 +573,8 @@ public final class RSIntegrationMod {
                 ResonanceDiskWrapper.FACTORY_ID, new ResonanceDiskFactory());
         MinecraftForge.EVENT_BUS.register(PassiveEffectEngine.class);
 
+        ModType.confirmReviewedGraphExecution(REVIEWED_GRAPH_EXECUTION_TYPES,
+                "startup registry audit: standard machine lease, material transaction and output capture apply");
         ContractValidation.validateAll();
 
         LOGGER.info("{} initialized.", MOD_NAME);

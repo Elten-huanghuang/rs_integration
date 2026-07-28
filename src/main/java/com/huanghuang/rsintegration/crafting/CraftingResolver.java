@@ -322,7 +322,7 @@ public final class CraftingResolver {
             int missing = Math.max(0, spec.count() - supplied);
             if (!resolved && missingOut != null) missingOut.add(describeFirstItem(spec.ingredient()));
             roots.add(new RootDemand(spec.ingredient(), spec.count(), missing,
-                    firstDisplayStack(spec.ingredient()), allocations));
+                    firstDisplayStack(spec.ingredient()), allocations, spec.role()));
             if (!resolved && !bestEffort) break;
         }
 
