@@ -460,8 +460,9 @@ public final class PlanResponsePacket {
     @SuppressWarnings("resource")
     public static void handle(PlanResponsePacket packet, Supplier<NetworkEvent.Context> ctxSupplier) {
         RSIntegrationMod.LOGGER.debug(
-                "[RSI-PlanPkt] Client received PlanResponsePacket: recipeId={} success={} steps={}",
-                packet.plan.recipeId(), packet.plan.success(), packet.plan.steps().size());
+                "[RSI-PlanPkt] Client received PlanResponsePacket: recipeId={} success={} steps={} graphNodes={}",
+                packet.plan.recipeId(), packet.plan.success(), packet.plan.steps().size(),
+                packet.plan.graph() != null ? packet.plan.graph().nodes().size() : 0);
         NetworkEvent.Context ctx = ctxSupplier.get();
         ctx.enqueueWork(() -> DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
                 () -> () -> PlanResponseClientPacketHandler.handle(

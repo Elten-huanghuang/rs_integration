@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.crafting.CraftingResolver;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.OutputDestination;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
+import com.huanghuang.rsintegration.crafting.planning.PureRecipePlanner;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import io.netty.buffer.Unpooled;
 import net.minecraft.network.FriendlyByteBuf;
@@ -14,11 +15,30 @@ import net.minecraft.world.item.crafting.Ingredient;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class GenericCraftPacketTest extends BootstrapTest {
+
+    @Test
+    void infeasiblePurePlanFallsBackToTypedResolverForVirtualIntermediates() {
+        PureRecipePlanner.Result incomplete = new PureRecipePlanner.Result(false,
+                List.of(), List.of(), Map.of());
+
+        assertFalse(GenericCraftPacket.canUsePrecomputedPlan(incomplete));
+        assertFalse(GenericCraftPacket.canUsePrecomputedPlan(null));
+    }
+
+    @Test
+    void feasiblePurePlanCanBeUsedWithoutMainThreadReplanning() {
+        PureRecipePlanner.Result complete = new PureRecipePlanner.Result(true,
+                List.of(), List.of(), Map.of());
+
+        assertTrue(GenericCraftPacket.canUsePrecomputedPlan(complete));
+    }
 
     @Test
     void synchronousTerminalStepUsesRequestedExecutionCount() {
