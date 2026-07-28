@@ -24,7 +24,6 @@ import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
-import net.minecraftforge.common.world.ForgeChunkManager;
 import net.minecraftforge.items.ItemHandlerHelper;
 import org.jetbrains.annotations.NotNull;
 
@@ -55,7 +54,6 @@ public final class SkilletBatchDelegate extends AbstractBatchDelegate {
     // Campfire-specific
     private int campfireSlot = -1;
     private Object campfireBE;
-    private boolean campfireChunkForced;
 
     private static volatile Class<?> campfireClass;
     private static final Field CAMPFIRE_ITEMS;
@@ -508,14 +506,6 @@ public final class SkilletBatchDelegate extends AbstractBatchDelegate {
     }
 
     private void campfireForceLoad(boolean load) {
-        if (campfireChunkForced == load) return;
-        try {
-            int cx = myPos.getX() >> 4;
-            int cz = myPos.getZ() >> 4;
-            ForgeChunkManager.forceChunk(myLevel, RSIntegrationMod.MOD_ID, myPos, cx, cz, load, true);
-            campfireChunkForced = load;
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Batch-Skillet] Chunk load failed", e);
-        }
+        forceMachineChunk(myLevel, myPos, load);
     }
 }

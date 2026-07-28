@@ -12,6 +12,25 @@ import net.minecraftforge.registries.ForgeRegistries;
 import java.util.List;
 
 public final class RSIntegrationConfig {
+    public static final int DEFAULT_CRAFTING_PLANNING_WORKERS = CraftingPlanningConfig.DEFAULT_WORKERS;
+    public static final int DEFAULT_CRAFTING_PLANNING_QUEUE_CAPACITY =
+            CraftingPlanningConfig.DEFAULT_QUEUE_CAPACITY;
+    public static final int DEFAULT_CRAFTING_PURE_SEARCH_MAX_STATES =
+            CraftingPlanningConfig.DEFAULT_SEARCH_STATES;
+    public static final int DEFAULT_CRAFTING_PURE_SEARCH_MAX_MEMOIZED_FAILURES =
+            CraftingPlanningConfig.DEFAULT_MEMOIZED_FAILURES;
+    public static final int DEFAULT_CRAFTING_RESOLVE_TIMEOUT_MS = 2_000;
+    public static final int DEFAULT_CRAFTING_MAX_ENSURE_CALLS = 10_000;
+    public static final int DEFAULT_CRAFTING_PREVIEW_RATE_LIMIT_MS =
+            CraftingPreviewPolicy.DEFAULT_RATE_LIMIT_MS;
+    public static final int DEFAULT_CRAFTING_PLAN_CACHE_TTL_MS =
+            CraftingPreviewPolicy.DEFAULT_CACHE_TTL_MS;
+    public static final int DEFAULT_CRAFTING_PLAN_CACHE_MAX_ENTRIES =
+            CraftingPreviewPolicy.DEFAULT_CACHE_MAX_ENTRIES;
+    public static final int DEFAULT_GUI_OPEN_RATE_LIMIT_MS =
+            GuiTimingConfig.DEFAULT_OPEN_RATE_LIMIT_MS;
+    public static final int DEFAULT_SIDE_PANEL_NAVIGATION_TIMEOUT_MS =
+            GuiTimingConfig.DEFAULT_NAVIGATION_TIMEOUT_MS;
 
     public static final ForgeConfigSpec COMMON_SPEC;
     public static final ForgeConfigSpec SERVER_SPEC;
@@ -107,8 +126,16 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.IntValue RS_SIDE_PANEL_MAX_SLOTS;
     public static ForgeConfigSpec.IntValue SIDE_PANEL_SYNC_INTERVAL;
     public static ForgeConfigSpec.IntValue SIDE_PANEL_EXTRACTION_TIMEOUT;
+    public static ForgeConfigSpec.IntValue GUI_OPEN_RATE_LIMIT_MS;
     public static ForgeConfigSpec.IntValue CRAFTING_MAX_DEPTH;
     public static ForgeConfigSpec.IntValue CRAFTING_MAX_STEPS;
+    public static ForgeConfigSpec.IntValue CRAFTING_PLANNING_WORKERS;
+    public static ForgeConfigSpec.IntValue CRAFTING_PLANNING_QUEUE_CAPACITY;
+    public static ForgeConfigSpec.IntValue CRAFTING_PURE_SEARCH_MAX_STATES;
+    public static ForgeConfigSpec.IntValue CRAFTING_PURE_SEARCH_MAX_MEMOIZED_FAILURES;
+    public static ForgeConfigSpec.IntValue CRAFTING_PREVIEW_RATE_LIMIT_MS;
+    public static ForgeConfigSpec.IntValue CRAFTING_PLAN_CACHE_TTL_MS;
+    public static ForgeConfigSpec.IntValue CRAFTING_PLAN_CACHE_MAX_ENTRIES;
     public static ForgeConfigSpec.IntValue CRAFTING_RESOLVE_TIMEOUT_MS;
     public static ForgeConfigSpec.IntValue CRAFTING_MAX_ENSURE_CALLS;
     public static ForgeConfigSpec.IntValue CRAFTING_MAX_CONCURRENT_GRAPH_NODES;
@@ -129,6 +156,7 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.IntValue RS_SIDE_PANEL_WIDTH;
     public static ForgeConfigSpec.IntValue RS_SIDE_PANEL_HEIGHT;
     public static ForgeConfigSpec.BooleanValue RS_SIDE_PANEL_HIDDEN;
+    public static ForgeConfigSpec.IntValue SIDE_PANEL_NAVIGATION_TIMEOUT_MS;
     public static ForgeConfigSpec.BooleanValue ENABLE_DISTANT_WORLDS_HUD;
 
 
@@ -561,18 +589,72 @@ public final class RSIntegrationConfig {
                         "The upper bound matches the craft-progress network protocol.",
                         "Range: 256-4096.")
                 .defineInRange("craftingMaxSteps", 4096, 256, 4096);
+        CRAFTING_PLANNING_WORKERS = s
+                .comment("Number of background workers used for immutable preview planning.",
+                        "World, block entity and RS mutations never run on these workers.",
+                        "Changes take effect when the server config reloads. Range: 1-8.")
+                .defineInRange("craftingPlanningWorkers",
+                        DEFAULT_CRAFTING_PLANNING_WORKERS,
+                        CraftingPlanningConfig.MIN_WORKERS, CraftingPlanningConfig.MAX_WORKERS);
+        CRAFTING_PLANNING_QUEUE_CAPACITY = s
+                .comment("Maximum number of preview-planning tasks waiting behind active workers.",
+                        "A full queue rejects new previews with a retryable busy response instead of",
+                        "running expensive planning on the Minecraft server thread. Range: 8-1024.")
+                .defineInRange("craftingPlanningQueueCapacity",
+                        DEFAULT_CRAFTING_PLANNING_QUEUE_CAPACITY,
+                        CraftingPlanningConfig.MIN_QUEUE_CAPACITY,
+                        CraftingPlanningConfig.MAX_QUEUE_CAPACITY);
+        CRAFTING_PURE_SEARCH_MAX_STATES = s
+                .comment("Maximum backtracking states expanded by one immutable pure-plan search.",
+                        "When exhausted, the request safely falls back to the complete typed resolver.",
+                        "Range: 256-262144.")
+                .defineInRange("craftingPureSearchMaxStates",
+                        DEFAULT_CRAFTING_PURE_SEARCH_MAX_STATES,
+                        CraftingPlanningConfig.MIN_SEARCH_STATES,
+                        CraftingPlanningConfig.MAX_SEARCH_STATES);
+        CRAFTING_PURE_SEARCH_MAX_MEMOIZED_FAILURES = s
+                .comment("Maximum proven-failure search states cached during one pure-plan request.",
+                        "Higher values reduce repeated backtracking at the cost of temporary memory.",
+                        "Set to 0 to disable failure memoization. Range: 0-65536.")
+                .defineInRange("craftingPureSearchMaxMemoizedFailures",
+                        DEFAULT_CRAFTING_PURE_SEARCH_MAX_MEMOIZED_FAILURES,
+                        CraftingPlanningConfig.MIN_MEMOIZED_FAILURES,
+                        CraftingPlanningConfig.MAX_MEMOIZED_FAILURES);
+        CRAFTING_PREVIEW_RATE_LIMIT_MS = s
+                .comment("Minimum interval in milliseconds between craft preview requests.",
+                        "Range: 10-2000.")
+                .defineInRange("craftingPreviewRateLimitMs",
+                        DEFAULT_CRAFTING_PREVIEW_RATE_LIMIT_MS,
+                        CraftingPreviewPolicy.MIN_RATE_LIMIT_MS,
+                        CraftingPreviewPolicy.MAX_RATE_LIMIT_MS);
+        CRAFTING_PLAN_CACHE_TTL_MS = s
+                .comment("Lifetime in milliseconds for reusable craft preview plans.",
+                        "Range: 50-10000.")
+                .defineInRange("craftingPlanCacheTtlMs",
+                        DEFAULT_CRAFTING_PLAN_CACHE_TTL_MS,
+                        CraftingPreviewPolicy.MIN_CACHE_TTL_MS,
+                        CraftingPreviewPolicy.MAX_CACHE_TTL_MS);
+        CRAFTING_PLAN_CACHE_MAX_ENTRIES = s
+                .comment("Maximum number of reusable craft preview plans retained in memory.",
+                        "Range: 8-1024.")
+                .defineInRange("craftingPlanCacheMaxEntries",
+                        DEFAULT_CRAFTING_PLAN_CACHE_MAX_ENTRIES,
+                        CraftingPreviewPolicy.MIN_CACHE_MAX_ENTRIES,
+                        CraftingPreviewPolicy.MAX_CACHE_MAX_ENTRIES);
         CRAFTING_RESOLVE_TIMEOUT_MS = s
                 .comment("Maximum wall-clock time (ms) the crafting resolver may spend on one plan.",
                         "Deep, interdependent modpack recipe trees (e.g. self-referential 'upgrade'",
                         "recipes) can exhaust the default budget and falsely report a reachable",
                         "ingredient as missing. Increase for such packs; the resolver runs on the",
                         "server thread, so very large values can cause a brief hitch. Range: 200-10000.")
-                .defineInRange("craftingResolveTimeoutMs", 2000, 200, 10000);
+                .defineInRange("craftingResolveTimeoutMs",
+                        DEFAULT_CRAFTING_RESOLVE_TIMEOUT_MS, 200, 10000);
         CRAFTING_MAX_ENSURE_CALLS = s
                 .comment("Maximum recursive ingredient-resolution calls per plan.",
                         "Companion cap to craftingResolveTimeoutMs guarding against runaway recursion.",
                         "Increase alongside the timeout for deep recipe trees. Range: 1000-100000.")
-                .defineInRange("craftingMaxEnsureCalls", 10000, 1000, 100000);
+                .defineInRange("craftingMaxEnsureCalls",
+                        DEFAULT_CRAFTING_MAX_ENSURE_CALLS, 1000, 100000);
         CRAFTING_MAX_CONCURRENT_GRAPH_NODES = s
                 .comment("Maximum number of independent DAG recipe nodes that may run in parallel.",
                         "Set to 1 for serial execution (safest); increase for multi-machine speedup.",
@@ -669,6 +751,17 @@ public final class RSIntegrationConfig {
                 .defineInRange("sidePanelExtractionTimeout", 2000, 500, 10000);
         s.pop();
 
+        s.push("rateLimits");
+        GUI_OPEN_RATE_LIMIT_MS = s
+                .comment("Minimum interval in milliseconds between remote GUI open requests.",
+                        "Applies per player to machine and supported backpack GUI requests.",
+                        "Range: 50-5000.")
+                .defineInRange("guiOpenRateLimitMs",
+                        DEFAULT_GUI_OPEN_RATE_LIMIT_MS,
+                        GuiTimingConfig.MIN_OPEN_RATE_LIMIT_MS,
+                        GuiTimingConfig.MAX_OPEN_RATE_LIMIT_MS);
+        s.pop();
+
         s.push("remoteMachineGui");
         MACHINE_TAB_THRESHOLD = s
                 .comment("Maximum number of machine shortcut tabs displayed before auto-collapsing",
@@ -702,6 +795,13 @@ public final class RSIntegrationConfig {
         RS_SIDE_PANEL_HIDDEN = cl
                 .comment("Collapse the side panel to a small bar.")
                 .define("hidden", false);
+        SIDE_PANEL_NAVIGATION_TIMEOUT_MS = cl
+                .comment("Time allowed for returning from a remote machine GUI to the RS Grid.",
+                        "Stale navigation state is discarded after this interval. Range: 1000-30000.")
+                .defineInRange("navigationTimeoutMs",
+                        DEFAULT_SIDE_PANEL_NAVIGATION_TIMEOUT_MS,
+                        GuiTimingConfig.MIN_NAVIGATION_TIMEOUT_MS,
+                        GuiTimingConfig.MAX_NAVIGATION_TIMEOUT_MS);
         cl.pop();
         cl.push("distantWorlds");
         ENABLE_DISTANT_WORLDS_HUD = cl

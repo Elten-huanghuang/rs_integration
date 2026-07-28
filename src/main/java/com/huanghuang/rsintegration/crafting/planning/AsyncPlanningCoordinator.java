@@ -1,15 +1,20 @@
 package com.huanghuang.rsintegration.crafting.planning;
 
+import com.huanghuang.rsintegration.command.PerformanceMonitor;
+import com.huanghuang.rsintegration.config.CraftingPlanningConfig;
+
 import java.util.UUID;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CancellationException;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
@@ -17,7 +22,7 @@ import java.util.function.Predicate;
 /** Owns cancellation and the background-to-server-thread handoff for preview planning. */
 public final class AsyncPlanningCoordinator implements AutoCloseable {
     private static final AtomicInteger THREAD_IDS = new AtomicInteger();
-    private final ExecutorService workers;
+    private final ThreadPoolExecutor workers;
     private final ConcurrentHashMap<UUID, Request<?>> active = new ConcurrentHashMap<>();
 
     public AsyncPlanningCoordinator(int parallelism) {
@@ -28,8 +33,23 @@ public final class AsyncPlanningCoordinator implements AutoCloseable {
         });
     }
 
+    public AsyncPlanningCoordinator(int parallelism, int queueCapacity) {
+        this(parallelism, queueCapacity, runnable -> {
+            Thread thread = new Thread(runnable, "rsi-planner-" + THREAD_IDS.incrementAndGet());
+            thread.setDaemon(true);
+            return thread;
+        });
+    }
+
     AsyncPlanningCoordinator(int parallelism, ThreadFactory threadFactory) {
-        workers = Executors.newFixedThreadPool(Math.max(1, parallelism), threadFactory);
+        this(parallelism, CraftingPlanningConfig.DEFAULT_QUEUE_CAPACITY, threadFactory);
+    }
+
+    AsyncPlanningCoordinator(int parallelism, int queueCapacity, ThreadFactory threadFactory) {
+        int workerCount = Math.max(1, parallelism);
+        workers = new ThreadPoolExecutor(workerCount, workerCount, 0L, TimeUnit.MILLISECONDS,
+                new ArrayBlockingQueue<>(Math.max(1, queueCapacity)), threadFactory,
+                new ThreadPoolExecutor.AbortPolicy());
     }
 
     /**
@@ -56,43 +76,76 @@ public final class AsyncPlanningCoordinator implements AutoCloseable {
                            Consumer<T> commit,
                            Consumer<Throwable> rollback,
                            Function<PlanningSnapshot, T> synchronousFallback) {
-        Request<T> request = new Request<>(snapshot, serverExecutor, rollback);
+        Request<T> request = new Request<>(snapshot, serverExecutor, rollback, workers);
         Request<?> previous = active.put(snapshot.playerId(), request);
         if (previous != null) previous.cancel();
 
-        CompletableFuture<T> future = CompletableFuture.supplyAsync(() -> {
-            if (request.cancelled) throw new CancellationException();
-            return PlanningThreadContext.runInBackground(() -> computation.apply(snapshot));
-        }, workers);
-        request.future = future;
-        future.whenComplete((result, failure) -> serverExecutor.execute(() -> {
+        try {
+            Future<?> task = workers.submit(() -> execute(request, computation, revalidator,
+                    commit, synchronousFallback));
+            request.attach(task);
+            PerformanceMonitor.recordPlanningSubmitted(workers.getActiveCount(), workers.getQueue().size());
+        } catch (RejectedExecutionException rejected) {
+            active.remove(snapshot.playerId(), request);
+            PerformanceMonitor.recordPlanningRejected(workers.getActiveCount(), workers.getQueue().size());
+            request.reject(rejected);
+        }
+    }
+
+    private <T> void execute(Request<T> request,
+                             Function<PlanningSnapshot, T> computation,
+                             Predicate<PlanningSnapshot> revalidator,
+                             Consumer<T> commit,
+                             Function<PlanningSnapshot, T> synchronousFallback) {
+        long started = System.nanoTime();
+        T result = null;
+        Throwable failure = null;
+        try {
+            if (request.isCancelled()) throw new CancellationException();
+            result = PlanningThreadContext.runInBackground(() -> computation.apply(request.snapshot));
+        } catch (Throwable thrown) {
+            failure = thrown;
+        } finally {
+            int queued = workers.getQueue().size();
+            int activeAfterCompletion = Math.max(0, workers.getActiveCount() - (queued == 0 ? 1 : 0));
+            int queuedAfterCompletion = Math.max(0, queued - 1);
+            PerformanceMonitor.recordPlanningExecution(System.nanoTime() - started,
+                    activeAfterCompletion, queuedAfterCompletion);
+        }
+
+        T completedResult = result;
+        Throwable completedFailure = failure;
+        request.serverExecutor.execute(() -> {
+            PlanningSnapshot snapshot = request.snapshot;
             if (!active.remove(snapshot.playerId(), request)) return;
             if (!request.finish()) return;
-            Throwable cause = unwrap(failure);
+            Throwable cause = unwrap(completedFailure);
             if (cause != null) {
                 if (synchronousFallback != null
                         && cause instanceof PlanningThreadContext.MainThreadPlanningFallbackException
-                        && !request.cancelled && revalidator.test(snapshot)) {
+                        && !request.isCancelled() && revalidator.test(snapshot)) {
                     try {
+                        PerformanceMonitor.recordSynchronousPlanningFallback(
+                                SynchronousFallbackReason.MAIN_THREAD_ONLY, snapshot.recipeId());
                         commit.accept(synchronousFallback.apply(snapshot));
                     } catch (Throwable fallbackFailure) {
-                        rollback.accept(fallbackFailure);
+                        request.rollback.accept(fallbackFailure);
                     }
                     return;
                 }
-                rollback.accept(cause);
+                request.rollback.accept(cause);
                 return;
             }
             if (!revalidator.test(snapshot)) {
-                rollback.accept(new StalePlanningResultException(snapshot));
+                request.rollback.accept(new StalePlanningResultException(snapshot));
                 return;
             }
             try {
-                commit.accept(result);
+                commit.accept(completedResult);
             } catch (Throwable commitFailure) {
-                rollback.accept(commitFailure);
+                request.rollback.accept(commitFailure);
             }
-        }));
+        });
     }
 
     public void cancel(UUID playerId) {
@@ -113,6 +166,7 @@ public final class AsyncPlanningCoordinator implements AutoCloseable {
     public void close() {
         cancelAll();
         workers.shutdownNow();
+        PerformanceMonitor.recordPlanningExecutorState(0, 0);
     }
 
     private static Throwable unwrap(Throwable failure) {
@@ -122,31 +176,70 @@ public final class AsyncPlanningCoordinator implements AutoCloseable {
     }
 
     private static final class Request<T> {
+        private enum State {
+            ACTIVE,
+            CANCEL_REQUESTED,
+            CANCELLED,
+            TERMINAL;
+
+            private boolean cancelled() {
+                return this == CANCEL_REQUESTED || this == CANCELLED;
+            }
+        }
+
         private final PlanningSnapshot snapshot;
         private final Executor serverExecutor;
         private final Consumer<Throwable> rollback;
-        private final AtomicBoolean terminal = new AtomicBoolean();
-        private volatile boolean cancelled;
-        private volatile CompletableFuture<T> future;
+        private final ThreadPoolExecutor workers;
+        private final AtomicReference<State> state = new AtomicReference<>(State.ACTIVE);
+        private volatile Future<?> task;
 
-        private Request(PlanningSnapshot snapshot, Executor serverExecutor, Consumer<Throwable> rollback) {
+        private Request(PlanningSnapshot snapshot, Executor serverExecutor, Consumer<Throwable> rollback,
+                        ThreadPoolExecutor workers) {
             this.snapshot = snapshot;
             this.serverExecutor = serverExecutor;
             this.rollback = rollback;
+            this.workers = workers;
+        }
+
+        private void attach(Future<?> submittedTask) {
+            task = submittedTask;
+            if (state.get().cancelled()) cancelTask(submittedTask);
         }
 
         private void cancel() {
-            cancelled = true;
-            CompletableFuture<T> current = future;
-            if (current != null) current.cancel(true);
+            if (!state.compareAndSet(State.ACTIVE, State.CANCEL_REQUESTED)) return;
+            PerformanceMonitor.recordPlanningCancelled(workers.getActiveCount(), workers.getQueue().size());
+            Future<?> current = task;
+            if (current != null) cancelTask(current);
             serverExecutor.execute(() -> {
-                if (finish()) rollback.accept(new CancellationException(
+                if (finishCancellation()) rollback.accept(new CancellationException(
                         "Planning request cancelled for " + snapshot.recipeId()));
             });
         }
 
+        private void cancelTask(Future<?> current) {
+            current.cancel(true);
+            if (current instanceof Runnable queued) workers.remove(queued);
+            PerformanceMonitor.recordPlanningExecutorState(workers.getActiveCount(), workers.getQueue().size());
+        }
+
+        private void reject(RejectedExecutionException failure) {
+            serverExecutor.execute(() -> {
+                if (finish()) rollback.accept(failure);
+            });
+        }
+
+        private boolean isCancelled() {
+            return state.get().cancelled();
+        }
+
         private boolean finish() {
-            return terminal.compareAndSet(false, true);
+            return state.compareAndSet(State.ACTIVE, State.TERMINAL);
+        }
+
+        private boolean finishCancellation() {
+            return state.compareAndSet(State.CANCEL_REQUESTED, State.CANCELLED);
         }
     }
 

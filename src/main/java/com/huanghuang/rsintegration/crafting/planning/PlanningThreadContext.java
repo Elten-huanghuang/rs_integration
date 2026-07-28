@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.crafting.planning;
 
+import java.util.concurrent.CancellationException;
 import java.util.function.Supplier;
 
 /** Marks planner workers so world, network and third-party reflection access can fail closed. */
@@ -20,6 +21,12 @@ public final class PlanningThreadContext {
 
     public static boolean isBackgroundPlanningThread() {
         return BACKGROUND.get();
+    }
+
+    static void throwIfCancelled() {
+        if (Thread.currentThread().isInterrupted()) {
+            throw new CancellationException("Pure recipe planning interrupted");
+        }
     }
 
     public static void requireMainThread(String operation) {

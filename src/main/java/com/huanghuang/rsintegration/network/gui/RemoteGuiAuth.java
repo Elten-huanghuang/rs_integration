@@ -1,6 +1,6 @@
 package com.huanghuang.rsintegration.network.gui;
 
-import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.util.ForcedChunkTicketManager;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
@@ -8,7 +8,6 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.level.Level;
-import net.minecraftforge.common.world.ForgeChunkManager;
 import net.minecraftforge.event.level.ChunkEvent;
 import net.minecraftforge.registries.ForgeRegistries;
 import net.minecraftforge.server.ServerLifecycleHooks;
@@ -27,7 +26,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * <p><b>Safety:</b> Authorizations auto-expire after {@link #AUTH_TTL_MS} to prevent
  * permanent ghost-container access.  The {@code expectedBlock} field prevents
  * ghost-container access if the machine block is mined while the GUI is open.
- * Chunk force-loading via {@link ForgeChunkManager} prevents dupes from chunk
+ * Chunk force-loading via {@link ForcedChunkTicketManager} prevents dupes from chunk
  * unloads mid-interaction.</p>
  */
 public final class RemoteGuiAuth {
@@ -40,19 +39,14 @@ public final class RemoteGuiAuth {
     private static final Map<UUID, Authorization> ACTIVE = new ConcurrentHashMap<>();
 
     /**
-     * Per-chunk viewer refcount. ForgeChunkManager does NOT reference-count
+     * ForcedChunkTicketManager provides the process-wide refcount. Forge does NOT reference-count
      * tickets — a ticket is keyed by (modId, owner=BlockPos) and stored as a
      * set, so two players force-loading the same machine's chunk share one
      * ticket and the first release unforces it for everyone. We track viewers
-     * ourselves and only call forceChunk(false) when the last viewer leaves.
-     * Key: (dimension, chunkX, chunkZ) packed as a string.
+     * per exact ticket owner and only call forceChunk(false) when the last
+     * viewer of that machine leaves. Different machines in the same chunk use
+     * different owner positions and therefore different Forge tickets.
      */
-    private static final Map<String, Integer> CHUNK_VIEWERS = new ConcurrentHashMap<>();
-
-    private static String chunkKey(ResourceKey<Level> dim, int cx, int cz) {
-        return dim.location() + "@" + cx + "," + cz;
-    }
-
     private RemoteGuiAuth() {}
 
     /** Call BEFORE opening the remote GUI. Grants bypass for the specified machine.
@@ -68,23 +62,17 @@ public final class RemoteGuiAuth {
         int staleId = player.containerMenu != null ? player.containerMenu.containerId : -1;
         int cx = pos.getX() >> 4;
         int cz = pos.getZ() >> 4;
-        ACTIVE.put(player.getUUID(), new Authorization(dim, pos, expectedBlock, System.currentTimeMillis(),
+        BlockPos owner = pos.immutable();
+        ACTIVE.put(player.getUUID(), new Authorization(dim, owner, expectedBlock, System.currentTimeMillis(),
                 staleId, -1, cx, cz));
 
-        // Force-load the machine's chunk while the GUI is open.
-        // Track viewers ourselves — ForgeChunkManager tickets are not
-        // refcounted, so we must only add the physical ticket for the FIRST
-        // viewer of a chunk and only release it when the LAST one leaves.
+        // Retain through the shared registry so GUI viewers and active batch
+        // delegates cannot release each other's physical Forge ticket.
         var server = player.getServer();
         if (server != null) {
             var targetLevel = server.getLevel(dim);
             if (targetLevel != null) {
-                String key = chunkKey(dim, cx, cz);
-                int viewers = CHUNK_VIEWERS.merge(key, 1, Integer::sum);
-                if (viewers == 1) {
-                    ForgeChunkManager.forceChunk(targetLevel, RSIntegrationMod.MOD_ID,
-                            pos, cx, cz, true, true);
-                }
+                ForcedChunkTicketManager.retain(targetLevel, owner);
             }
         }
     }
@@ -167,14 +155,7 @@ public final class RemoteGuiAuth {
             releaseAndRemove(playerId);
         }
         ACTIVE.clear();
-        if (!CHUNK_VIEWERS.isEmpty()) {
-            if (server != null) {
-                for (String key : CHUNK_VIEWERS.keySet()) {
-                    RSIntegrationMod.LOGGER.debug("[RSI-GuiAuth] clearing stale chunk viewer {}", key);
-                }
-            }
-            CHUNK_VIEWERS.clear();
-        }
+        ForcedChunkTicketManager.clear(server);
     }
 
     /** Release chunk force-load and remove the authorization. */
@@ -185,14 +166,7 @@ public final class RemoteGuiAuth {
         if (server == null) return;
         var level = server.getLevel(auth.dim());
         if (level == null) return;
-        // Only unforce the chunk when the LAST viewer releases it. Decrement
-        // our own refcount; other players may still have the same machine open.
-        String key = chunkKey(auth.dim(), auth.chunkX(), auth.chunkZ());
-        Integer remaining = CHUNK_VIEWERS.computeIfPresent(key, (k, v) -> v <= 1 ? null : v - 1);
-        if (remaining == null) {
-            ForgeChunkManager.forceChunk(level, RSIntegrationMod.MOD_ID,
-                    auth.pos(), auth.chunkX(), auth.chunkZ(), false, true);
-        }
+        ForcedChunkTicketManager.release(level, auth.pos());
     }
 
     /** Check whether the player's currently open menu is the authorized menu. */

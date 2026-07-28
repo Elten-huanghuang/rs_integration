@@ -6,6 +6,9 @@ import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.OutputDestination;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.crafting.planning.PureRecipePlanner;
+import com.huanghuang.rsintegration.crafting.planning.AsyncPlanningCoordinator;
+import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph;
+import com.huanghuang.rsintegration.crafting.planning.PlanningSnapshot;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import io.netty.buffer.Unpooled;
 import net.minecraft.network.FriendlyByteBuf;
@@ -16,6 +19,9 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.RejectedExecutionException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -38,6 +44,40 @@ class GenericCraftPacketTest extends BootstrapTest {
                 List.of(), List.of(), Map.of());
 
         assertTrue(GenericCraftPacket.canUsePrecomputedPlan(complete));
+    }
+
+    @Test
+    void asyncResultMustRemainBoundToItsOriginalRequest() {
+        UUID playerId = UUID.randomUUID();
+        ResourceLocation recipeId = new ResourceLocation("test", "recipe");
+        ResourceLocation forcedItem = new ResourceLocation("minecraft", "diamond");
+        ResourceLocation forcedRecipe = new ResourceLocation("test", "diamond_recipe");
+        Map<ResourceLocation, ResourceLocation> overrides = Map.of(forcedItem, forcedRecipe);
+        PlanningSnapshot snapshot = new PlanningSnapshot(playerId, 7, 3, recipeId,
+                Map.of(), overrides, new ImmutableRecipeGraph(Map.of()),
+                "network", "binding", false);
+
+        assertTrue(GenericCraftPacket.matchesAsyncRequest(
+                snapshot, playerId, recipeId, 7, overrides));
+        assertFalse(GenericCraftPacket.matchesAsyncRequest(
+                snapshot, playerId, recipeId, 8, overrides));
+        assertFalse(GenericCraftPacket.matchesAsyncRequest(
+                snapshot, playerId, recipeId, 7, Map.of()));
+    }
+
+    @Test
+    void cancelledAndStaleAsyncPlansNeverTriggerSynchronousFallback() {
+        assertFalse(GenericCraftPacket.shouldFallbackAfterAsyncFailure(
+                new CancellationException("superseded")));
+        PlanningSnapshot snapshot = new PlanningSnapshot(UUID.randomUUID(), 1, 1,
+                new ResourceLocation("test", "recipe"), Map.of(), Map.of(),
+                new ImmutableRecipeGraph(Map.of()), "network", "binding", false);
+        assertFalse(GenericCraftPacket.shouldFallbackAfterAsyncFailure(
+                new AsyncPlanningCoordinator.StalePlanningResultException(snapshot)));
+        assertFalse(GenericCraftPacket.shouldFallbackAfterAsyncFailure(
+                new RejectedExecutionException("planner queue full")));
+        assertTrue(GenericCraftPacket.shouldFallbackAfterAsyncFailure(
+                new IllegalStateException("planner failed")));
     }
 
     @Test

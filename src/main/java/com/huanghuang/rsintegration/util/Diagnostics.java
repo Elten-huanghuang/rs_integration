@@ -41,7 +41,7 @@ public final class Diagnostics {
         INDEX_BUILD, RESOLVE_START, RESOLVE_END,
         CANDIDATE_SKIP, STEP_SELECTED,
         LEDGER_RESERVE, LEDGER_COMMIT, LEDGER_ROLLBACK,
-        CHAIN_STATE, CHAIN_STEP_DONE, LEGACY_EXECUTION, TIMER
+        CHAIN_STATE, CHAIN_STEP_DONE, LEGACY_EXECUTION, PLANNING_FALLBACK, TIMER
     }
 
     public record Event(long timestampNanos, Category category, String detail,

@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.crafting.batch;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
+import com.huanghuang.rsintegration.util.ForcedChunkTicketManager;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceKey;
@@ -50,6 +51,17 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
      * the state reset that its own cleanup performs.
      */
     private boolean terminalCleanupDone;
+
+    /**
+     * A forced-chunk ticket is owned by the delegate operation, not by the
+     * machine block entity. Keep its identity here so failure cleanup can
+     * release it even when the block entity disappeared.
+     */
+    @Nullable
+    private ServerLevel forcedChunkLevel;
+    @Nullable
+    private BlockPos forcedChunkOwner;
+    private boolean machineChunkForced;
 
     /** The dimension the target machine lives in. Set by {@link #validateAndInit}. */
     @Nullable
@@ -201,23 +213,27 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
                     getClass().getSimpleName(), reason);
             return;
         }
-        releasePreparationResources();
-        BlockPos pos = getMachinePos();
-        // Virtual delegates (e.g. GenericBatchDelegate for CUSTOM_GUI recipes)
-        // have no physical machine — nothing to clean up.
-        if (pos == null) return;
-        ServerLevel level = resolveMachineLevel(player != null ? player.serverLevel() : null);
-        if (level == null) return;
-        // Force-load chunk if unloaded so physical items can always be recovered.
-        // Without this, cross-dimension crafts lose items when the chunk unloads
-        // before the chain aborts: the ledger gets refunded but the machine items
-        // stay in NBT, then get consumed by vanilla mechanics on chunk reload.
-        if (!level.isLoaded(pos)) {
-            level.getChunk(pos);
+        try {
+            releasePreparationResources();
+            BlockPos pos = getMachinePos();
+            // Virtual delegates (e.g. GenericBatchDelegate for CUSTOM_GUI recipes)
+            // have no physical machine - nothing to clean up.
+            if (pos == null) return;
+            ServerLevel level = resolveMachineLevel(player != null ? player.serverLevel() : null);
+            if (level == null) return;
+            // Force-load chunk if unloaded so physical items can always be recovered.
+            // Without this, cross-dimension crafts lose items when the chunk unloads
+            // before the chain aborts: the ledger gets refunded but the machine items
+            // stay in NBT, then get consumed by vanilla mechanics on chunk reload.
+            if (!level.isLoaded(pos)) {
+                level.getChunk(pos);
+            }
+            BlockEntity be = level.getBlockEntity(pos);
+            if (be != null) clearMachineState(be, player);
+            else clearMissingMachineState(player);
+        } finally {
+            releaseMachineChunk();
         }
-        BlockEntity be = level.getBlockEntity(pos);
-        if (be != null) clearMachineState(be, player);
-        else clearMissingMachineState(player);
     }
 
     /**
@@ -336,8 +352,55 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
         return terminalCleanupDone;
     }
 
+    /**
+     * Acquire or release this operation's machine chunk ticket. Repeated calls
+     * are idempotent, and release uses the exact level/owner captured at
+     * acquisition time rather than mutable subclass fields.
+     */
+    protected final void forceMachineChunk(@Nullable ServerLevel level,
+                                           @Nullable BlockPos owner,
+                                           boolean load) {
+        if (!load) {
+            releaseMachineChunk();
+            return;
+        }
+        if (level == null || owner == null) return;
+        if (machineChunkForced) {
+            if (forcedChunkLevel == level && owner.equals(forcedChunkOwner)) return;
+            releaseMachineChunk();
+            if (machineChunkForced) return;
+        }
+
+        if (ForcedChunkTicketManager.retain(level, owner)) {
+            forcedChunkLevel = level;
+            forcedChunkOwner = owner.immutable();
+            machineChunkForced = true;
+        }
+    }
+
+    /** Release the exact ticket acquired by {@link #forceMachineChunk}. */
+    protected final void releaseMachineChunk() {
+        if (!machineChunkForced) return;
+        ServerLevel level = forcedChunkLevel;
+        BlockPos owner = forcedChunkOwner;
+        if (level == null || owner == null) {
+            clearForcedChunkState();
+            return;
+        }
+        if (ForcedChunkTicketManager.release(level, owner)) {
+            clearForcedChunkState();
+        }
+    }
+
+    private void clearForcedChunkState() {
+        machineChunkForced = false;
+        forcedChunkLevel = null;
+        forcedChunkOwner = null;
+    }
+
     /** Call at end of onBatchFailed and onBatchFinished — resets all shared state. */
     protected void resetState() {
+        releaseMachineChunk();
         if (ledger != null) {
             ledger.close();
         }

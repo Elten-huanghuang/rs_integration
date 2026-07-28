@@ -63,7 +63,8 @@ public final class CraftingResolver {
     private static final ResourceLocation EARTH_HEART_ID =
             new ResourceLocation("enigmaticlegacy", "earth_heart");
 
-    private static final int MAX_ENSURE_CALLS = 2000; // fallback if config unavailable
+    private static final int MAX_ENSURE_CALLS =
+            RSIntegrationConfig.DEFAULT_CRAFTING_MAX_ENSURE_CALLS;
 
     /** Per-plan recursion cap from config, falling back to the default. */
     private static int maxEnsureCalls() {

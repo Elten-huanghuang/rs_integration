@@ -29,11 +29,12 @@ class PreviewRateLimiterTest {
     }
 
     @Test
-    void requestIsAllowedAfterTheInterval() throws InterruptedException {
+    void requestIsAllowedAtTheIntervalBoundary() {
         UUID player = UUID.randomUUID();
-        PreviewRateLimiter.isRateLimited(player);
-        Thread.sleep(120); // MIN_INTERVAL_MS is 100ms
-        assertFalse(PreviewRateLimiter.isRateLimited(player),
+        long startedAt = 1_000;
+        assertFalse(PreviewRateLimiter.isRateLimited(player, startedAt, 100));
+        assertTrue(PreviewRateLimiter.isRateLimited(player, startedAt + 99, 100));
+        assertFalse(PreviewRateLimiter.isRateLimited(player, startedAt + 199, 100),
                 "a request after the interval elapses must pass");
     }
 

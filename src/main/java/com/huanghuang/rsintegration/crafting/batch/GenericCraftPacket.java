@@ -1,16 +1,17 @@
 package com.huanghuang.rsintegration.crafting.batch;
 
 import com.huanghuang.rsintegration.compat.ftbquests.ExternalItemProgressBridge;
-import com.huanghuang.rsintegration.crafting.IngredientMatcher;
 import com.huanghuang.rsintegration.crafting.graph.CraftNode;
 import com.huanghuang.rsintegration.crafting.graph.NodeId;
 import com.huanghuang.rsintegration.crafting.plan.PlanGraphView;
+import com.huanghuang.rsintegration.crafting.plan.PlanMaterialBill;
 import com.huanghuang.rsintegration.util.InsertedStackDelta;
 
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.config.CraftingPlanningConfig;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.CraftingResolver;
@@ -21,10 +22,10 @@ import com.huanghuang.rsintegration.crafting.RecipeIndex;
 import com.huanghuang.rsintegration.sidepanel.network.OpenBoundMachineGuiPacket;
 import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
 import com.huanghuang.rsintegration.crafting.plan.PlanResponse;
+import com.huanghuang.rsintegration.crafting.plan.PlanResponseDraft;
 import com.huanghuang.rsintegration.crafting.plan.PlanResponsePublisher;
 import com.huanghuang.rsintegration.crafting.plan.PlanStep;
 import com.huanghuang.rsintegration.crafting.tree.IngredientKey;
-import com.huanghuang.rsintegration.crafting.tree.PlanTreeModel;
 import com.huanghuang.rsintegration.crafting.plan.PlanWarnings;
 import com.huanghuang.rsintegration.command.PerformanceMonitor;
 import com.huanghuang.rsintegration.mods.crabbersdelight.CrabTrapRecipeResolver;
@@ -59,6 +60,7 @@ import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraphProjector;
 import com.huanghuang.rsintegration.crafting.planning.PurePlanAdapter;
 import com.huanghuang.rsintegration.crafting.planning.PureRecipePlanner;
+import com.huanghuang.rsintegration.crafting.planning.SynchronousFallbackReason;
 import com.huanghuang.rsintegration.crafting.planning.PlanCache;
 import com.huanghuang.rsintegration.crafting.planning.PlanRequestService;
 import com.huanghuang.rsintegration.crafting.planning.PlanningStateValidator;
@@ -88,7 +90,6 @@ import net.minecraft.world.item.crafting.AbstractCookingRecipe;
 import net.minecraft.world.item.crafting.CraftingRecipe;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
-import net.minecraftforge.common.crafting.StrictNBTIngredient;
 import net.minecraft.world.item.crafting.SmithingTransformRecipe;
 import net.minecraft.world.item.crafting.SmithingTrimRecipe;
 import net.minecraft.world.item.crafting.StonecutterRecipe;
@@ -98,13 +99,28 @@ import net.minecraftforge.network.NetworkEvent;
 import javax.annotation.Nullable;
 import java.lang.reflect.Method;
 import java.util.*;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 public final class GenericCraftPacket {
     private static final LogSampler FAILURE_LOG_SAMPLER = new LogSampler(2_000);
-    private static final PlanRequestService PLAN_REQUESTS =
-            new PlanRequestService(Math.max(1, Runtime.getRuntime().availableProcessors() / 2));
+    private static volatile PlanRequestService PLAN_REQUESTS = newDefaultPlanRequestService();
+
+    private static PlanRequestService newDefaultPlanRequestService() {
+        return newPlanRequestService(CraftingPlanningConfig.defaults());
+    }
+
+    private static PlanRequestService newPlanRequestService() {
+        return newPlanRequestService(CraftingPlanningConfig.load());
+    }
+
+    private static PlanRequestService newPlanRequestService(CraftingPlanningConfig config) {
+        return new PlanRequestService(
+                config.workers(), config.queueCapacity(),
+                config.maxSearchStates(), config.maxMemoizedFailures());
+    }
 
     // Time-based plan cache — serves both dedup and compute-avoidance.
     // On cache hit within TTL: reply with cached plan immediately (no silent drop).
@@ -1310,7 +1326,7 @@ public final class GenericCraftPacket {
                                       @Nullable ItemStack clickedOutput, long requestId,
                                       long previewGeneration) {
         tryBuildPlan(player, recipeId, forcedRecipes, dim, pos, repeatCount, baseItem,
-                clickedOutput, requestId, previewGeneration, null, false);
+                clickedOutput, requestId, previewGeneration, null, null, false, null);
     }
 
     private static void tryBuildPlan(ServerPlayer player, ResourceLocation recipeId,
@@ -1322,7 +1338,9 @@ public final class GenericCraftPacket {
                                       @Nullable ItemStack clickedOutput, long requestId,
                                       long previewGeneration,
                                       @Nullable PureRecipePlanner.Result precomputedPlan,
-                                      boolean asyncAttempted) {
+                                      @Nullable PlanningSnapshot precomputedSnapshot,
+                                      boolean asyncAttempted,
+                                      @Nullable SynchronousFallbackReason pendingFallbackReason) {
         long planStartNanos = System.nanoTime();
         Recipe<?> recipe = resolveRecipe(player.serverLevel(), recipeId);
         if (recipe == null) {
@@ -1577,38 +1595,77 @@ public final class GenericCraftPacket {
         net.minecraft.core.BlockPos planLookupPos = pos != null ? pos : player.blockPosition();
         INetwork network = CraftPacketUtils.resolveNetworkForCraft(player, planDimKey, planLookupPos);
 
-        // Build available items map (RS network + player inventory)
-        Map<StackKey, Integer> available = MaterialSources.listAllAvailable(player, network);
-        PlanningSnapshot planningSnapshot = PlanningSnapshotFactory.capture(
-                player.getUUID(), previewGeneration, recipeId, available,
-                forcedOverrides == null ? Map.of() : forcedOverrides,
-                recipe instanceof CraftingRecipe
-                        ? ImmutableRecipeGraphProjector.capture(player.serverLevel())
-                        : new ImmutableRecipeGraph(Map.of()),
-                PlanningStateValidator.networkFingerprint(network, available),
-                PlanningStateValidator.bindingFingerprint(player, planDimKey, planLookupPos),
-                !(recipe instanceof CraftingRecipe));
-
-        boolean hasProjectedTarget = planningSnapshot.recipeGraph().recipesByOutput().values().stream()
-                .flatMap(List::stream).anyMatch(node -> node.recipeId().equals(recipeId));
-        if (!asyncAttempted && !planningSnapshot.mainThreadOnly() && hasProjectedTarget) {
-            PLAN_REQUESTS.submit(planningSnapshot, player.getServer()::execute,
-                    RSIntegrationConfig.CRAFTING_MAX_STEPS.get(), result ->
-                            tryBuildPlan(player, recipeId, forcedRecipes, dim, pos, repeatCount,
-                                    baseItem, clickedOutput, requestId, previewGeneration, result, true),
-                    failure -> {
-                        RSIntegrationMod.LOGGER.debug("[RSI-plan] Pure planning fallback for {}", recipeId, failure);
-                        tryBuildPlan(player, recipeId, forcedRecipes, dim, pos, repeatCount,
-                                baseItem, clickedOutput, requestId, previewGeneration, null, true);
-                    });
-            return;
+        Map<ResourceLocation, ResourceLocation> effectiveOverrides =
+                forcedOverrides == null ? Map.of() : forcedOverrides;
+        Map<StackKey, Integer> available;
+        PlanningSnapshot planningSnapshot;
+        if (precomputedSnapshot != null) {
+            if (!matchesAsyncRequest(precomputedSnapshot, player.getUUID(), recipeId,
+                    previewGeneration, effectiveOverrides)
+                    || !PlanningStateValidator.revalidate(player, precomputedSnapshot,
+                    planDimKey, planLookupPos, PLAN_REQUESTS)) {
+                RSIntegrationMod.debug("[RSI-plan] Discarding stale async result before assembly: recipeId={}",
+                        recipeId);
+                return;
+            }
+            planningSnapshot = precomputedSnapshot;
+            available = precomputedSnapshot.availableItems();
+        } else {
+            available = MaterialSources.listAllAvailable(player, network);
+            planningSnapshot = PlanningSnapshotFactory.capture(
+                    player.getUUID(), previewGeneration, recipeId, available,
+                    effectiveOverrides,
+                    recipe instanceof CraftingRecipe
+                            ? ImmutableRecipeGraphProjector.capture(player.serverLevel())
+                            : new ImmutableRecipeGraph(Map.of()),
+                    PlanningStateValidator.networkFingerprint(network, available),
+                    PlanningStateValidator.bindingFingerprint(player, planDimKey, planLookupPos),
+                    !(recipe instanceof CraftingRecipe));
         }
+
         PlanCache.Entry cached = PLAN_CACHE.get(cacheKey, System.nanoTime());
         if (cached != null && PlanningStateValidator.sameState(cached.snapshot(), planningSnapshot)) {
             RSIntegrationMod.debug("[RSI-tryBuildPlan] Validated cache hit: recipeId={}", recipeId);
             PlanResponsePublisher.send(player, cached.plan(), requestId);
             return;
         }
+
+        boolean hasProjectedTarget = planningSnapshot.recipeGraph().recipesByOutput().values().stream()
+                .flatMap(List::stream).anyMatch(node -> node.recipeId().equals(recipeId));
+        if (!asyncAttempted && !planningSnapshot.mainThreadOnly() && hasProjectedTarget) {
+            PLAN_REQUESTS.submit(planningSnapshot, player.getServer()::execute,
+                    RSIntegrationConfig.CRAFTING_MAX_STEPS.get(), completed ->
+                            tryBuildPlan(player, recipeId, forcedRecipes, dim, pos, repeatCount,
+                                    baseItem, clickedOutput, requestId, previewGeneration,
+                                    completed.result(), completed.snapshot(), true, null),
+                    failure -> {
+                        if (failure instanceof RejectedExecutionException) {
+                            PlanResponsePublisher.sendError(player,
+                                    Component.translatable("rsi.plan.failure.planner_busy"), requestId);
+                            return;
+                        }
+                        var fallbackReason = SynchronousFallbackReason.fromAsyncFailure(failure);
+                        if (fallbackReason.isEmpty()) {
+                            RSIntegrationMod.debug("[RSI-plan] Async planning ended without fallback for {}: {}",
+                                    recipeId, failure.toString());
+                            return;
+                        }
+                        RSIntegrationMod.LOGGER.debug("[RSI-plan] Pure planning fallback for {}", recipeId, failure);
+                        tryBuildPlan(player, recipeId, forcedRecipes, dim, pos, repeatCount,
+                                baseItem, clickedOutput, requestId, previewGeneration,
+                                null, null, true, fallbackReason.orElseThrow());
+                    });
+            return;
+        }
+
+        var synchronousFallbackReason = pendingFallbackReason != null
+                ? java.util.Optional.of(pendingFallbackReason)
+                : asyncAttempted
+                        ? SynchronousFallbackReason.fromPureResult(precomputedPlan)
+                        : SynchronousFallbackReason.whenAsyncUnavailable(
+                                planningSnapshot.mainThreadOnly(), hasProjectedTarget);
+        synchronousFallbackReason.ifPresent(reason ->
+                PerformanceMonitor.recordSynchronousPlanningFallback(reason, recipeId));
 
         // Arcane Iterator plans should start from the highest matching enchanted
         // book the player already owns, rather than always rebuilding from a plain
@@ -2219,99 +2276,14 @@ public final class GenericCraftPacket {
                 recipeModType != null ? recipeModType.id() : null,
                 itemAvailable, itemSource, neededCounts, repeatCount);
 
-        Map<IngredientKey, PlanResponse.Availability> materials = new LinkedHashMap<>();
-        // Track tag-based ingredient groups so multiple slots of the same tag
-        // (e.g. "2 × #logs") get merged into a single material entry instead of
-        // showing separate per-item entries with double-counted availability.
-        Set<String> mergedTagKeys = new HashSet<>();
-        for (var entry : neededCounts.entrySet()) {
-            if (entry.getValue() <= 0) continue; // produced >= needed
-            int needed = entry.getValue();
-            Item displayItem = entry.getKey();
-            Ingredient source = itemSource.get(displayItem);
-            if (source != null && source.getItems().length > 1) {
-                String tagKey = source.toJson().toString();
-                if (!mergedTagKeys.add(tagKey)) continue; // already merged
-                // Sum the NET demand across every tag member (needs minus what the
-                // plan itself produces). A wood-tag slot whose representative resolved
-                // to dark_oak_log (nothing in stock → first tag member) but is actually
-                // satisfied by a crafted oak_log must not be counted short: oak_log's
-                // production surfaces as a negative neededCounts entry for the SAME tag,
-                // which offsets the dark_oak_log need. Clamping each member at 0 first
-                // would discard that offset and falsely fail the plan.
-                int netNeeded = 0;
-                int totalHave = 0;
-                for (ItemStack opt : source.getItems()) {
-                    if (opt.isEmpty()) continue;
-                    Item optItem = opt.getItem();
-                    netNeeded += neededCounts.getOrDefault(optItem, 0);
-                    totalHave += itemAvailable.getOrDefault(optItem, 0);
-                }
-                int totalNeeded = Math.max(0, netNeeded);
-                materials.put(IngredientKey.of(new ItemStack(displayItem)), new PlanResponse.Availability(totalNeeded, totalHave));
-            } else {
-                // NBT-strict ingredients (e.g. a charged Totem of Souls declared
-                // as .withTag({Souls:80000})) must count only stored items that
-                // actually carry the required NBT — the Item-keyed itemAvailable map
-                // drops NBT and would lump a bare, empty totem in as "available",
-                // falsely turning the plan green even though extraction can't use it.
-                int have = (source != null && isNbtStrict(source))
-                        ? countNbtMatching(source, available)
-                        : itemAvailable.getOrDefault(displayItem, 0);
-                ItemStack materialDisplay = new ItemStack(displayItem);
-                if (source != null && isNbtStrict(source) && source.getItems().length > 0) {
-                    materialDisplay = source.getItems()[0].copyWithCount(1);
-                }
-                materials.put(IngredientKey.of(materialDisplay), new PlanResponse.Availability(needed, have));
-            }
-        }
-
-        boolean feasible = missing.isEmpty() && materials.values().stream().allMatch(PlanResponse.Availability::isEnough);
-
-        // Overproduction from integer batch rounding — items produced beyond what
-        // the plan consumes surface as negative neededCounts. The target output is
-        // intentionally negative (it's the goal, not surplus) so it's excluded.
-        Map<IngredientKey, Integer> leftovers = new LinkedHashMap<>();
-        for (var entry : neededCounts.entrySet()) {
-            if (entry.getValue() >= 0) continue;
-            if (entry.getKey() == targetOutput.getItem()) continue;
-            leftovers.put(IngredientKey.of(new ItemStack(entry.getKey())), -entry.getValue());
-        }
-
-        // 总需求条 = 树显示的毛需求（从零开始，忽略库存与 resolver 批次封顶）。上面的 neededCounts
-        // 用的是 step.batches()（净/封顶批次），逐支路会偏小、且和库存交互后偶尔偏大；这里用客户端
-        // 同一套 PlanTreeModel 重算毛需求并覆盖 materials 的 needed，保证「总需求条 == 树」永不漂移。
-        // available 仍是 RS 网络实际库存；feasible（上面按净需求判定）不动，不影响启动门控。
         PlanGraphView planGraphView = planGraph != null ? PlanGraphView.from(planGraph) : null;
-        PlanResponse treeSource = new PlanResponse(true, "", targetOutput, steps,
-                Collections.emptyMap(), Collections.emptyList(), "",
-                null, null, 0, 0, 0, Collections.emptyList(), repeatCount,
-                null, null, null, 0, false, false, false, null,
-                Collections.emptySet(), Collections.emptyMap(), null, planGraphView);
-        Map<IngredientKey, Integer> grossDemand = PlanTreeModel.grossDemandByKey(PlanTreeModel.from(treeSource));
-        // Re-key the UI material bill from the NBT-aware tree, not merely replace
-        // counts on the old Item-keyed entries. This is what preserves an existing
-        // level-IV enchanted book as the leaf material for a level-V target.
-        Map<IngredientKey, PlanResponse.Availability> displayMaterials = new LinkedHashMap<>();
-        for (Map.Entry<IngredientKey, Integer> entry : grossDemand.entrySet()) {
-            IngredientKey key = entry.getKey();
-            ItemStack display = key.stack(1);
-            int have;
-            if (display.hasTag()) {
-                have = available.entrySet().stream()
-                        .filter(e -> ItemStack.isSameItemSameTags(e.getKey().toStack(), display))
-                        .mapToInt(Map.Entry::getValue).sum();
-            } else {
-                have = itemAvailable.getOrDefault(key.item(), 0);
-            }
-            displayMaterials.put(key, new PlanResponse.Availability(entry.getValue(), have));
-        }
-        // Keep non-tree requirements injected by machine integrations (fuel,
-        // catalysts, etc.); tree identities take precedence for recipe inputs.
-        for (Map.Entry<IngredientKey, PlanResponse.Availability> entry : materials.entrySet()) {
-            displayMaterials.putIfAbsent(entry.getKey(), entry.getValue());
-        }
-        materials = displayMaterials;
+        PlanMaterialBill.Result materialBill = PlanMaterialBill.summarize(
+                neededCounts, itemSource, itemAvailable, available, targetOutput,
+                steps, repeatCount, planGraphView, !missing.isEmpty());
+        Map<IngredientKey, PlanResponse.Availability> materials =
+                new LinkedHashMap<>(materialBill.materials());
+        Map<IngredientKey, Integer> leftovers = materialBill.leftovers();
+        boolean feasible = materialBill.feasible();
 
         if (RSIntegrationMod.LOGGER.isDebugEnabled()) {
             long shortageCount = materials.values().stream().filter(a -> !a.isEnough()).count();
@@ -2451,7 +2423,7 @@ public final class GenericCraftPacket {
                     String.format("%,d", totalArsSource)));
         }
 
-        PlanResponse plan = new PlanResponse(
+        PlanResponseDraft responseDraft = new PlanResponseDraft(
                 feasible,
                 targetName,
                 targetOutput,
@@ -2480,27 +2452,40 @@ public final class GenericCraftPacket {
                 planGraphView
         );
 
-        if (!PlanningStateValidator.revalidate(player, planningSnapshot,
-                planDimKey, planLookupPos, PLAN_REQUESTS)) {
-            RSIntegrationMod.debug("[RSI-tryBuildPlan] Snapshot became stale before commit: recipeId={}", recipeId);
-            return;
-        }
-
-        PLAN_CACHE.put(cacheKey, plan, planningSnapshot, System.nanoTime());
-
-        if (previewGeneration != 0L
-                && !PLAN_REQUESTS.isCurrent(player.getUUID(), previewGeneration)) {
-            RSIntegrationMod.debug("[RSI-tryBuildPlan] Discarding stale preview result: recipeId={}", recipeId);
-            return;
-        }
-
-        RSIntegrationMod.debug("[RSI-tryBuildPlan] SENDING PlanResponsePacket: recipeId={} steps={} graphNodes={} feasible={} player={}",
-                recipeId, steps.size(), planGraphView != null ? planGraphView.nodes().size() : 0,
-                feasible, player.getGameProfile().getName());
-        PlanResponsePublisher.send(player, plan, requestId);
-        PerformanceMonitor.recordPlanBuild(System.nanoTime() - planStartNanos,
-                plan.graph() != null ? plan.graph().nodes().size() : steps.size());
-        RSIntegrationMod.debug("[RSI-tryBuildPlan] PlanResponsePacket SENT: recipeId={}", recipeId);
+        int responseStepCount = steps.size();
+        int responseGraphNodes = planGraphView != null ? planGraphView.nodes().size() : 0;
+        boolean responseFeasible = feasible;
+        PLAN_REQUESTS.submitResponse(planningSnapshot, responseDraft, player.getServer()::execute,
+                current -> PlanningStateValidator.revalidate(player, current,
+                        planDimKey, planLookupPos, PLAN_REQUESTS),
+                plan -> {
+                    if (previewGeneration != 0L
+                            && !PLAN_REQUESTS.isCurrent(player.getUUID(), previewGeneration)) {
+                        RSIntegrationMod.debug("[RSI-tryBuildPlan] Discarding stale finalized response: recipeId={}",
+                                recipeId);
+                        return;
+                    }
+                    PLAN_CACHE.put(cacheKey, plan, planningSnapshot, System.nanoTime());
+                    RSIntegrationMod.debug("[RSI-tryBuildPlan] SENDING PlanResponsePacket: recipeId={} steps={} graphNodes={} feasible={} player={}",
+                            recipeId, responseStepCount, responseGraphNodes,
+                            responseFeasible, player.getGameProfile().getName());
+                    PlanResponsePublisher.send(player, plan, requestId);
+                    PerformanceMonitor.recordPlanBuild(System.nanoTime() - planStartNanos,
+                            plan.graph() != null ? plan.graph().nodes().size() : responseStepCount);
+                    RSIntegrationMod.debug("[RSI-tryBuildPlan] PlanResponsePacket SENT: recipeId={}", recipeId);
+                }, failure -> {
+                    if (failure instanceof RejectedExecutionException) {
+                        PlanResponsePublisher.sendError(player,
+                                Component.translatable("rsi.plan.failure.planner_busy"), requestId);
+                    } else if (!(failure instanceof CancellationException)
+                            && !(failure instanceof com.huanghuang.rsintegration.crafting.planning
+                            .AsyncPlanningCoordinator.StalePlanningResultException)) {
+                        RSIntegrationMod.LOGGER.error("[RSI-plan] Response finalization failed for {}",
+                                recipeId, failure);
+                        PlanResponsePublisher.sendError(player,
+                                buildFailureMessage(failure, recipeId), requestId);
+                    }
+                });
     }
 
     static boolean hasNbtMismatch(Map<IngredientKey, PlanResponse.Availability> materials,
@@ -2520,35 +2505,6 @@ public final class GenericCraftPacket {
         return specs == null || specs.isEmpty()
                 ? CraftPacketUtils.extractCraftingIngredientSpecs(recipe)
                 : specs;
-    }
-
-    /**
-     * True when an ingredient matches by strict NBT (Forge {@link StrictNBTIngredient}
-     * or every candidate carries NBT). Such ingredients — e.g. a charged Totem of Souls
-     * declared as {@code .withTag({Souls:80000})} — must not count a bare, NBT-less item
-     * as "available", or the plan falsely turns green.
-     */
-    private static boolean isNbtStrict(Ingredient ingredient) {
-        if (ingredient instanceof StrictNBTIngredient) return true;
-        ItemStack[] items = ingredient.getItems();
-        if (items.length == 0) return false;
-        for (ItemStack s : items) {
-            if (s.isEmpty() || !s.hasTag()) return false;
-        }
-        return true;
-    }
-
-    /**
-     * Count how many stored items actually satisfy an NBT-strict ingredient, using the
-     * NBT-carrying {@link StackKey} availability map instead of the Item-keyed one (which
-     * drops NBT and would lump charged + empty totems together).
-     */
-    private static int countNbtMatching(Ingredient ingredient, Map<StackKey, Integer> available) {
-        int total = 0;
-        for (var e : available.entrySet()) {
-            if (IngredientMatcher.test(ingredient, e.getKey())) total += e.getValue();
-        }
-        return total;
     }
 
     /**
@@ -2690,14 +2646,37 @@ public final class GenericCraftPacket {
         return result != null && result.feasible();
     }
 
+    static boolean matchesAsyncRequest(PlanningSnapshot snapshot, UUID playerId,
+                                       ResourceLocation recipeId, long requestGeneration,
+                                       Map<ResourceLocation, ResourceLocation> forcedRecipes) {
+        return snapshot.playerId().equals(playerId)
+                && snapshot.recipeId().equals(recipeId)
+                && snapshot.requestGeneration() == requestGeneration
+                && snapshot.forcedRecipes().equals(forcedRecipes);
+    }
+
+    static boolean shouldFallbackAfterAsyncFailure(Throwable failure) {
+        return SynchronousFallbackReason.fromAsyncFailure(failure).isPresent();
+    }
+
     public static void onPlayerLogout(UUID playerId) {
         PLAN_REQUESTS.forget(playerId);
         PLAN_CACHE.removePlayer(playerId);
     }
 
     /** Cancels preview workers during server shutdown before world objects are torn down. */
-    public static void cancelAllPlanning() {
-        PLAN_REQUESTS.cancelAll();
+    public static synchronized void cancelAllPlanning() {
+        PlanRequestService stopped = PLAN_REQUESTS;
+        PLAN_REQUESTS = newDefaultPlanRequestService();
+        stopped.close();
+        ImmutableRecipeGraphProjector.clearCache();
+    }
+
+    /** Applies server-configured planner resource limits by replacing the bounded executor. */
+    public static synchronized void reloadPlanningConfig() {
+        PlanRequestService previous = PLAN_REQUESTS;
+        PLAN_REQUESTS = newPlanRequestService();
+        previous.close();
     }
 
 }

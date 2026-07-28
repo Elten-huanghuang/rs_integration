@@ -2,8 +2,14 @@ package com.huanghuang.rsintegration.command;
 
 import com.huanghuang.rsintegration.crafting.AsyncCraftManager;
 import com.huanghuang.rsintegration.crafting.batch.LegacyExecutionMetrics;
+import com.huanghuang.rsintegration.crafting.planning.PureRecipePlanner;
+import com.huanghuang.rsintegration.crafting.planning.SynchronousFallbackReason;
+import com.huanghuang.rsintegration.util.Diagnostics;
+import net.minecraft.resources.ResourceLocation;
 
+import java.util.Arrays;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicLongArray;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.Map;
 
@@ -39,6 +45,26 @@ public final class PerformanceMonitor {
     private static final AtomicLong networkResolveCalls = new AtomicLong();
     private static final AtomicLong networkResolveCacheHits = new AtomicLong();
     private static final AtomicLong networkResolveSuccesses = new AtomicLong();
+    private static final AtomicLong recipeGraphProjectionCalls = new AtomicLong();
+    private static final AtomicLong recipeGraphProjectionHits = new AtomicLong();
+    private static final AtomicLong recipeGraphProjectionBuildNanos = new AtomicLong();
+    private static final AtomicLong recipeGraphProjectionMaxNanos = new AtomicLong();
+    private static final AtomicLong planningSubmitted = new AtomicLong();
+    private static final AtomicLong planningCompleted = new AtomicLong();
+    private static final AtomicLong planningRejected = new AtomicLong();
+    private static final AtomicLong planningCancelled = new AtomicLong();
+    private static final AtomicLong planningExecutionNanos = new AtomicLong();
+    private static final AtomicLong planningExecutionMaxNanos = new AtomicLong();
+    private static final AtomicLong planningWorkerActive = new AtomicLong();
+    private static final AtomicLong planningQueueDepth = new AtomicLong();
+    private static final AtomicLong purePlanningSearches = new AtomicLong();
+    private static final AtomicLong purePlanningExpandedStates = new AtomicLong();
+    private static final AtomicLong purePlanningBacktracks = new AtomicLong();
+    private static final AtomicLong purePlanningMemoHits = new AtomicLong();
+    private static final AtomicLong purePlanningStepLimits = new AtomicLong();
+    private static final AtomicLong purePlanningSearchLimits = new AtomicLong();
+    private static final AtomicLongArray synchronousPlanningFallbacks =
+            new AtomicLongArray(SynchronousFallbackReason.values().length);
     private static final AtomicLong delegateObserveCalls = new AtomicLong();
     private static final AtomicLong delegateObserveNanos = new AtomicLong();
     private static final AtomicLong delegateObserveMaxNanos = new AtomicLong();
@@ -82,6 +108,68 @@ public final class PerformanceMonitor {
         networkResolveCalls.incrementAndGet();
         if (cacheHit) networkResolveCacheHits.incrementAndGet();
         if (success) networkResolveSuccesses.incrementAndGet();
+    }
+    public static void recordRecipeGraphProjection(boolean cacheHit, long buildNanos) {
+        recipeGraphProjectionCalls.incrementAndGet();
+        if (cacheHit) {
+            recipeGraphProjectionHits.incrementAndGet();
+            return;
+        }
+        recipeGraphProjectionBuildNanos.addAndGet(Math.max(0L, buildNanos));
+        recipeGraphProjectionMaxNanos.updateAndGet(previous -> Math.max(previous, buildNanos));
+    }
+    public static void recordPlanningSubmitted(int activeWorkers, int queuedTasks) {
+        planningSubmitted.incrementAndGet();
+        recordPlanningExecutorState(activeWorkers, queuedTasks);
+    }
+    public static void recordPlanningRejected(int activeWorkers, int queuedTasks) {
+        planningRejected.incrementAndGet();
+        recordPlanningExecutorState(activeWorkers, queuedTasks);
+    }
+    public static void recordPlanningCancelled(int activeWorkers, int queuedTasks) {
+        planningCancelled.incrementAndGet();
+        recordPlanningExecutorState(activeWorkers, queuedTasks);
+    }
+    public static void recordPlanningExecution(long nanosElapsed, int activeWorkers, int queuedTasks) {
+        planningCompleted.incrementAndGet();
+        planningExecutionNanos.addAndGet(Math.max(0L, nanosElapsed));
+        planningExecutionMaxNanos.updateAndGet(previous -> Math.max(previous, nanosElapsed));
+        recordPlanningExecutorState(activeWorkers, queuedTasks);
+    }
+    public static void recordPlanningExecutorState(int activeWorkers, int queuedTasks) {
+        planningWorkerActive.set(Math.max(0, activeWorkers));
+        planningQueueDepth.set(Math.max(0, queuedTasks));
+    }
+    public static void recordPurePlanningSearch(PureRecipePlanner.Result result) {
+        purePlanningSearches.incrementAndGet();
+        purePlanningExpandedStates.addAndGet(result.expandedStates());
+        purePlanningBacktracks.addAndGet(result.backtracks());
+        purePlanningMemoHits.addAndGet(result.memoHits());
+        if (result.status() == PureRecipePlanner.Status.STEP_LIMIT) {
+            purePlanningStepLimits.incrementAndGet();
+        } else if (result.status() == PureRecipePlanner.Status.SEARCH_LIMIT) {
+            purePlanningSearchLimits.incrementAndGet();
+        }
+    }
+    public static void recordSynchronousPlanningFallback(
+            SynchronousFallbackReason reason, ResourceLocation recipeId) {
+        synchronousPlanningFallbacks.incrementAndGet(reason.ordinal());
+        Diagnostics.record(Diagnostics.Category.PLANNING_FALLBACK,
+                "reason=" + reason, recipeId, null);
+    }
+    public static long getSynchronousPlanningFallbackCount(SynchronousFallbackReason reason) {
+        return synchronousPlanningFallbacks.get(reason.ordinal());
+    }
+    static void resetSynchronousPlanningFallbacksForTest() {
+        for (SynchronousFallbackReason reason : SynchronousFallbackReason.values()) {
+            synchronousPlanningFallbacks.set(reason.ordinal(), 0L);
+        }
+    }
+    private static String synchronousPlanningFallbackSummary() {
+        return Arrays.stream(SynchronousFallbackReason.values())
+                .map(reason -> reason.name().toLowerCase(java.util.Locale.ROOT) + ":"
+                        + getSynchronousPlanningFallbackCount(reason))
+                .collect(java.util.stream.Collectors.joining(",", "[", "]"));
     }
     public static void recordDelegateObserve(long nanosElapsed) {
         delegateObserveCalls.incrementAndGet();
@@ -135,6 +223,24 @@ public final class PerformanceMonitor {
              + " resonanceStacks=" + resonanceScannedStacks.get() + "/" + resonanceMatchedStacks.get()
              + " networkResolve=" + networkResolveCalls.get() + "/" + networkResolveCacheHits.get()
              + " networkSuccess=" + networkResolveSuccesses.get()
+             + " recipeGraph=" + recipeGraphProjectionCalls.get() + "/" + recipeGraphProjectionHits.get()
+             + "/" + (recipeGraphProjectionCalls.get() > recipeGraphProjectionHits.get()
+                     ? recipeGraphProjectionBuildNanos.get()
+                     / (recipeGraphProjectionCalls.get() - recipeGraphProjectionHits.get()) / 1000 : 0)
+             + "/" + recipeGraphProjectionMaxNanos.get() / 1000 + "us"
+             + " planningPool=" + planningSubmitted.get() + "/" + planningCompleted.get()
+             + "/" + planningRejected.get() + "/" + planningCancelled.get()
+             + " active=" + planningWorkerActive.get()
+             + " queued=" + planningQueueDepth.get()
+             + " exec=" + (planningCompleted.get() == 0 ? 0
+                     : planningExecutionNanos.get() / planningCompleted.get() / 1000)
+             + "/" + planningExecutionMaxNanos.get() / 1000 + "us"
+             + " pureSearch=" + purePlanningSearches.get()
+             + "/" + purePlanningExpandedStates.get()
+             + "/" + purePlanningBacktracks.get()
+             + "/" + purePlanningMemoHits.get()
+             + " limits=" + purePlanningStepLimits.get() + "/" + purePlanningSearchLimits.get()
+             + " syncFallback=" + synchronousPlanningFallbackSummary()
              + " delegateObserve=" + delegateObserveCalls.get() + "/"
              + (delegateObserveCalls.get() == 0 ? 0 : delegateObserveNanos.get() / delegateObserveCalls.get() / 1000)
              + "/" + delegateObserveMaxNanos.get() / 1000 + "us"

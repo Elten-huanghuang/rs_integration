@@ -28,27 +28,27 @@ class GuiOpenRateLimiterTest {
     }
 
     @Test
-    void openIsAllowedAfterTheInterval() throws InterruptedException {
+    void openIsAllowedAtTheIntervalBoundary() {
         UUID player = UUID.randomUUID();
-        GuiOpenRateLimiter.isRateLimited(player);
-        Thread.sleep(520); // MIN_INTERVAL_MS is 500ms
-        assertFalse(GuiOpenRateLimiter.isRateLimited(player));
+        long startedAt = 1_000;
+        assertFalse(GuiOpenRateLimiter.isRateLimited(player, startedAt, 500));
+        assertTrue(GuiOpenRateLimiter.isRateLimited(player, startedAt + 499, 500));
+        assertFalse(GuiOpenRateLimiter.isRateLimited(player, startedAt + 500, 500));
     }
 
     /**
      * Contract nuance vs {@link com.huanghuang.rsintegration.crafting.PreviewRateLimiter}:
      * GuiOpenRateLimiter only refreshes the timestamp when a request is ALLOWED.
      * A dropped request does NOT slide the window, so the gate opens exactly
-     * MIN_INTERVAL_MS after the last accepted open — not after the last attempt.
+     * the configured interval after the last accepted open — not after the last attempt.
      */
     @Test
-    void droppedAttemptsDoNotSlideTheWindow() throws InterruptedException {
+    void droppedAttemptsDoNotSlideTheWindow() {
         UUID player = UUID.randomUUID();
-        assertFalse(GuiOpenRateLimiter.isRateLimited(player)); // accepted at t0
-        Thread.sleep(300);
-        assertTrue(GuiOpenRateLimiter.isRateLimited(player), "t0+300ms: still within window");
-        Thread.sleep(250); // now t0+550ms — past the window measured from t0
-        assertFalse(GuiOpenRateLimiter.isRateLimited(player),
+        long startedAt = 2_000;
+        assertFalse(GuiOpenRateLimiter.isRateLimited(player, startedAt, 500));
+        assertTrue(GuiOpenRateLimiter.isRateLimited(player, startedAt + 300, 500));
+        assertFalse(GuiOpenRateLimiter.isRateLimited(player, startedAt + 500, 500),
                 "window is measured from the last ACCEPTED open, not the last attempt");
     }
 
