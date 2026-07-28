@@ -350,6 +350,7 @@
   "rsi.batch.mod.smithing": "Smithing Table",
   "rsi.batch.mod.generic": "RS Auto-Craft",
   "rsi.batch.mod.lychee_item_inside_virtual": "Lychee Item-Inside Virtual Crafting",
+  "rsi.batch.mod.lychee_block_interacting": "Lychee Interaction Crafting",
   "rsi.batch.mod.malum_void_favor_virtual": "Resonance Void Transmutation",
   "rsi.tlm.error.altar_not_found": "Maid Altar not found",
   "rsi.tlm.error.multiblock_incomplete": "Maid Altar multiblock structure incomplete",
