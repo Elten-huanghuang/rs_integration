@@ -303,27 +303,74 @@ public final class CraftingResolver {
             @Nullable List<String> missingOut,
             @Nullable Map<ResourceLocation, ResourceLocation> forcedOverrides,
             boolean bestEffort) {
+        return resolveGraphForSpecsWithTypes(needed, availableKeyed, level, player, network,
+                missingOut, forcedOverrides, bestEffort, false);
+    }
+
+    /**
+     * Resolve the root inputs of one machine recipe. Each {@link IngredientSpec}
+     * represents one physical machine slot, so a tag demand must be backed by one
+     * concrete stack variant for its complete quantity. For example, a two-wool
+     * altar slot may use two white wool, but never one white plus one red wool.
+     */
+    public static CraftPlanGraph resolveMachineGraphForSpecsWithTypes(
+            List<IngredientSpec> needed,
+            Map<StackKey, Integer> availableKeyed,
+            Level level,
+            @Nullable ServerPlayer player,
+            @Nullable INetwork network,
+            @Nullable List<String> missingOut,
+            @Nullable Map<ResourceLocation, ResourceLocation> forcedOverrides,
+            boolean bestEffort) {
+        return resolveGraphForSpecsWithTypes(needed, availableKeyed, level, player, network,
+                missingOut, forcedOverrides, bestEffort, true);
+    }
+
+    private static CraftPlanGraph resolveGraphForSpecsWithTypes(
+            List<IngredientSpec> needed,
+            Map<StackKey, Integer> availableKeyed,
+            Level level,
+            @Nullable ServerPlayer player,
+            @Nullable INetwork network,
+            @Nullable List<String> missingOut,
+            @Nullable Map<ResourceLocation, ResourceLocation> forcedOverrides,
+            boolean bestEffort,
+            boolean singleVariantRoots) {
         Map<ResourceLocation, ResourceLocation> prefs = mergeForcedOverrides(level, forcedOverrides);
         ResolutionContext ctx = new ResolutionContext(level, RecipeIndex.get(level), availableKeyed,
                 prefs, player, network, bestEffort, missingOut);
         EdgeTracker edges = new EdgeTracker();
         List<RootDemand> roots = new ArrayList<>();
 
-        List<IngredientSpec> rootsToResolve = coalesceRootSpecs(needed);
+        // Crafting-grid roots are fungible planning demand and may be coalesced.
+        // Machine roots are physical input slots and must retain their boundaries.
+        List<IngredientSpec> rootsToResolve = singleVariantRoots
+                ? StepExecutor.machineSpecsForGraph(needed)
+                : coalesceRootSpecs(needed);
         for (int rootIndex = 0; rootIndex < rootsToResolve.size(); rootIndex++) {
             IngredientSpec spec = rootsToResolve.get(rootIndex);
             if (spec.isEmpty()) continue;
             List<ResolutionContext.SupplySlice> consumed = new ArrayList<>();
-            boolean resolved = ensureIngredient(spec.ingredient(), spec.count(), ctx, 0, edges, null, consumed);
+            Ingredient resolvedIngredient = spec.ingredient();
+            boolean resolved;
+            if (singleVariantRoots) {
+                resolvedIngredient = StepExecutor.ensureSingleVariantMachineInput(
+                        spec.ingredient(), spec.count(), ctx, 0, edges, null, consumed);
+                resolved = resolvedIngredient != null;
+                if (!resolved) resolvedIngredient = spec.ingredient();
+            } else {
+                resolved = ensureIngredient(resolvedIngredient, spec.count(),
+                        ctx, 0, edges, null, consumed);
+            }
             List<RootAllocation> allocations = new ArrayList<>(consumed.size());
             for (ResolutionContext.SupplySlice slice : consumed) {
                 allocations.add(new RootAllocation(slice.source(), slice.material(), slice.quantity()));
             }
             int supplied = consumed.stream().mapToInt(ResolutionContext.SupplySlice::quantity).sum();
             int missing = Math.max(0, spec.count() - supplied);
-            if (!resolved && missingOut != null) missingOut.add(describeFirstItem(spec.ingredient()));
-            roots.add(new RootDemand(spec.ingredient(), spec.count(), missing,
-                    firstDisplayStack(spec.ingredient()), allocations, spec.role()));
+            if (!resolved && missingOut != null) missingOut.add(describeFirstItem(resolvedIngredient));
+            roots.add(new RootDemand(resolvedIngredient, spec.count(), missing,
+                    firstDisplayStack(resolvedIngredient), allocations, spec.role()));
             if (!resolved && !bestEffort) break;
         }
 
