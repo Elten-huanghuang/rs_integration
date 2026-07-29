@@ -481,6 +481,10 @@ public final class GenericCraftPacket {
         if (recipe != null) return recipe;
         recipe = ApotheosisGemCuttingCatalog.byId(recipeId);
         if (recipe != null) return recipe;
+        if (net.minecraftforge.fml.ModList.get().isLoaded(ModIds.PMMO)) {
+            recipe = com.huanghuang.rsintegration.mods.pmmo.PmmoSalvageCatalog.byId(recipeId);
+            if (recipe != null) return recipe;
+        }
         recipe = CrabTrapRecipeResolver.resolveRecipe(level, recipeId);
         if (recipe != null) return recipe;
         var firon = LithumAltarRecipeResolver.resolve(recipeId);

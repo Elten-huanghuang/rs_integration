@@ -3,6 +3,10 @@ package com.huanghuang.rsintegration;
 import com.huanghuang.rsintegration.crafting.plan.PlanWarnings;
 import com.huanghuang.rsintegration.mixin.jei.RecipeGuiLayoutsMixin;
 import com.huanghuang.rsintegration.mixin.wizardterracurios.BuffItemMixin;
+import com.huanghuang.rsintegration.mods.pmmo.client.PmmoSalvageAccess;
+import com.huanghuang.rsintegration.mods.pmmo.client.PmmoSalvageJeiBridge;
+import com.huanghuang.rsintegration.mods.pmmo.PmmoSalvageCatalog;
+import com.huanghuang.rsintegration.mods.pmmo.PmmoSalvageRuntime;
 import org.objectweb.asm.AnnotationVisitor;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassVisitor;
@@ -36,6 +40,43 @@ class OptionalDependencyBytecodeTest {
     void sharedJeiMixinDoesNotLinkApotheosisTypes() throws IOException {
         assertNoTypeReference(RecipeGuiLayoutsMixin.class, "dev/shadowsoffire/apotheosis",
                 "Apotheosis");
+    }
+
+    @Test
+    void sharedJeiMixinDoesNotLinkLycheeTypes() throws IOException {
+        assertNoTypeReference(RecipeGuiLayoutsMixin.class, "snownee/lychee", "Lychee");
+    }
+
+    @Test
+    void sharedJeiMixinDoesNotLinkOtherOptionalRecipeModTypes() throws IOException {
+        String[][] dependencies = {
+                {"alabaster/crabbersdelight", "Crabber's Delight"},
+                {"com/Polarice3/Goety", "Goety"},
+                {"com/aetherteam/aether", "The Aether"},
+                {"com/github/tartaricacid/touhoulittlemaid", "Touhou Little Maid"},
+                {"com/hollingsworth/arsnouveau", "Ars Nouveau"},
+                {"com/sammy/malum", "Malum"},
+                {"com/stal111/forbidden_arcanus", "Forbidden and Arcanus"},
+                {"committee/nova/mods/avaritia", "Avaritia"},
+                {"dev/ftb/mods/ftbquests", "FTB Quests"},
+                {"dev/xkmc/youkaishomecoming", "Youkai's Homecoming"},
+                {"elucent/eidolon", "Eidolon"},
+                {"mod/maxbogomol/wizards_reborn", "Wizard's Reborn"},
+                {"net/blay09/mods/farmingforblockheads", "Farming for Blockheads"},
+                {"team/lodestar/embers", "Embers Rekindled"},
+                {"vectorwing/farmersdelight", "Farmer's Delight"}
+        };
+        for (String[] dependency : dependencies) {
+            assertNoTypeReference(RecipeGuiLayoutsMixin.class, dependency[0], dependency[1]);
+        }
+    }
+
+    @Test
+    void pmmoJeiCompatibilityHasNoHardPmmoTypeLinks() throws IOException {
+        assertNoTypeReference(PmmoSalvageAccess.class, "harmonised/pmmo", "Project MMO");
+        assertNoTypeReference(PmmoSalvageJeiBridge.class, "harmonised/pmmo", "Project MMO");
+        assertNoTypeReference(PmmoSalvageCatalog.class, "harmonised/pmmo", "Project MMO");
+        assertNoTypeReference(PmmoSalvageRuntime.class, "harmonised/pmmo", "Project MMO");
     }
 
     @Test

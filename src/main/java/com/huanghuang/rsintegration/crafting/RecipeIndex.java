@@ -2,12 +2,15 @@ package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.mods.farmingforblockheads.MarketRecipeWrapper;
 import com.huanghuang.rsintegration.mods.apotheosis.ApotheosisGemCuttingCatalog;
 import com.huanghuang.rsintegration.mods.forbidden.FaRitualWrapper;
 import com.huanghuang.rsintegration.mods.distantworlds.LithumAltarRecipeResolver;
 import com.huanghuang.rsintegration.mods.distantworlds.LithumAltarRecipeDefinition;
 import com.huanghuang.rsintegration.mods.distantworlds.LithumAltarRecipeWrapper;
+import com.huanghuang.rsintegration.mods.pmmo.PmmoSalvageCatalog;
+import com.huanghuang.rsintegration.mods.pmmo.PmmoRSModule;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.util.Diagnostics;
@@ -153,6 +156,7 @@ public final class RecipeIndex {
 
             // ── Distant Worlds Firon Lithum Altar definitions ─────────
             int distantWorldsIndexed = indexDistantWorldsFiron(idx, seen);
+            int pmmoSalvageIndexed = indexPmmoSalvage(idx, seen);
             int brewingIndexed = com.huanghuang.rsintegration.mods.vanilla.brewing
                     .VanillaBrewingCatalog.index(level, idx, seen);
 
@@ -168,6 +172,7 @@ public final class RecipeIndex {
                     + ", " + faIndexed + " FA rituals"
                     + ", " + marketIndexed + " market"
                     + ", " + distantWorldsIndexed + " Distant Worlds Firon"
+                    + ", " + pmmoSalvageIndexed + " PMMO salvage"
                     + ", " + brewingIndexed + " brewing");
             RSIntegrationMod.LOGGER.info("[RecipeIndex] built: {} items, {} entries in {}ms"
                             + " (skipped: {} unknown, {} empty-result, {} identity"
@@ -176,6 +181,24 @@ public final class RecipeIndex {
                     skippedIdentity, faIndexed, marketIndexed, distantWorldsIndexed);
             return idx;
         }
+    }
+
+    private static int indexPmmoSalvage(Map<Item, List<Entry>> idx,
+                                        Set<ResourceLocation> seen) {
+        if (!net.minecraftforge.fml.ModList.get().isLoaded(ModIds.PMMO)
+                || RSIntegrationConfig.ENABLE_PMMO == null
+                || !RSIntegrationConfig.ENABLE_PMMO.get()) return 0;
+        int count = 0;
+        for (var recipe : PmmoSalvageCatalog.refresh()) {
+            if (!seen.add(recipe.getId())) continue;
+            ItemStack output = recipe.getResultItem(RegistryAccess.EMPTY);
+            if (output.isEmpty()) continue;
+            idx.computeIfAbsent(output.getItem(), key -> new ArrayList<>()).add(new Entry(
+                    recipe, ModType.byId(PmmoRSModule.TYPE_ID),
+                    new ResourceLocation(RSIntegrationMod.MOD_ID, "pmmo_salvage"), true));
+            count++;
+        }
+        return count;
     }
 
     private static int indexGemCutting(Level level, Map<Item, List<Entry>> idx, Set<ResourceLocation> seen) {

@@ -21,6 +21,10 @@ class AltarBindingRegistryTest {
             ModType.register("goety_cursed_infuser", new String[0], new String[]{"goety"},
                     new String[]{"goety_cursed_infuser"}, () -> null);
         }
+        if (ModType.byId("pmmo_salvage") == ModType.GENERIC) {
+            ModType.register("pmmo_salvage", new String[0], new String[]{"pmmo_salvage"},
+                    new String[]{"pmmo_salvage"}, () -> null);
+        }
     }
 
     @Test
@@ -54,6 +58,12 @@ class AltarBindingRegistryTest {
         assertNull(AltarBindingRegistry.normalizeSubType("kjs", ModType.GENERIC));
         assertNull(AltarBindingRegistry.normalizeSubType("kjs", ModType.byId("goety")));
         assertNull(AltarBindingRegistry.normalizeSubType("kjs", null));
+    }
+
+    @Test
+    void pmmoSyntheticFolderDoesNotRestrictConfiguredSalvageBlockBinding() {
+        assertNull(AltarBindingRegistry.normalizeSubType(
+                "pmmo_salvage", ModType.byId("pmmo_salvage")));
     }
 
     @Test

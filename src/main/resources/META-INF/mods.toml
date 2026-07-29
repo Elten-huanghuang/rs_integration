@@ -80,6 +80,13 @@ cross-mod automation for Minecraft 1.20.1.
     side = "CLIENT"
 
 [[dependencies.${mod_id}]]
+    modId = "pmmo"
+    mandatory = false
+    versionRange = "[0,)"
+    ordering = "AFTER"
+    side = "BOTH"
+
+[[dependencies.${mod_id}]]
     modId = "malum"
     mandatory = false
     versionRange = "[0,)"

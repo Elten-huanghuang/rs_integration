@@ -18,6 +18,8 @@ import com.huanghuang.rsintegration.mods.forbidden.ClibanoBatchDelegate;
 import com.huanghuang.rsintegration.mods.forbidden.FaBatchDelegate;
 import com.huanghuang.rsintegration.mods.goety.GoetyBatchDelegate;
 import com.huanghuang.rsintegration.mods.malum.MalumBatchDelegate;
+import com.huanghuang.rsintegration.mods.pmmo.PmmoSalvageRecipeWrapper;
+import com.huanghuang.rsintegration.mods.pmmo.PmmoSalvageRuntime;
 import com.huanghuang.rsintegration.mods.touhoulittlemaid.TlmAltarBatchDelegate;
 import com.huanghuang.rsintegration.mods.wizardsreborn.WRBatchDelegate;
 import com.huanghuang.rsintegration.mods.youkaishomecoming.ferment.FermentationTankBatchDelegate;
@@ -157,6 +159,18 @@ public final class PlanWarnings {
                 break;
             case ModIds.ID_YHK_FERMENT:
                 warnings.addAll(FermentationTankBatchDelegate.getPlanWarnings(player, recipe, dim, pos));
+                break;
+            case "pmmo_salvage":
+                if (recipe instanceof PmmoSalvageRecipeWrapper salvage) {
+                    PmmoSalvageRuntime.Eligibility eligibility =
+                            PmmoSalvageRuntime.eligibility(player, salvage);
+                    if (eligibility.state() == PmmoSalvageRuntime.EligibilityState.LEVEL_TOO_LOW) {
+                        warnings.add(Component.translatable("rsi.pmmo.warn.level_required",
+                                PmmoSalvageRuntime.requirementSummary(eligibility)));
+                    } else if (eligibility.state() == PmmoSalvageRuntime.EligibilityState.LOOKUP_FAILED) {
+                        warnings.add(Component.translatable("rsi.pmmo.warn.level_lookup_failed"));
+                    }
+                }
                 break;
             case ModIds.ID_AVARITIA_CRAFTING:
             case ModIds.ID_AVARITIA_COMPRESSOR:

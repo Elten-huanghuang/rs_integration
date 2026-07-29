@@ -285,6 +285,14 @@ public final class RecipePreviewRenderer {
      */
     public boolean drawCategoryIcon(GuiGraphics gfx, ResourceLocation recipeId,
                                     int x, int y, int size) {
+        if (isPmmoSalvageRecipe(recipeId)) {
+            ItemStack salvageBlock = com.huanghuang.rsintegration.mods.pmmo.client
+                    .PmmoSalvageAccess.salvageBlock();
+            if (!salvageBlock.isEmpty()) {
+                gfx.renderItem(salvageBlock, x, y);
+                return true;
+            }
+        }
         if (isSyntheticBrewingRecipe(recipeId)) {
             gfx.renderItem(new ItemStack(net.minecraft.world.item.Items.BREWING_STAND), x, y);
             return true;
@@ -369,11 +377,19 @@ public final class RecipePreviewRenderer {
                 && recipeId.getPath().startsWith("market/");
     }
 
+    private static boolean isPmmoSalvageRecipe(ResourceLocation recipeId) {
+        return recipeId != null && "rs_integration".equals(recipeId.getNamespace())
+                && recipeId.getPath().startsWith("pmmo_salvage/");
+    }
+
     /**
      * Human-readable JEI category title for {@code recipeId} (e.g. "Spirit Altar", "Crafting"),
      * resolved from the category that actually handles the recipe. Cached; empty when JEI is off.
      */
     public Optional<Component> categoryTitle(ResourceLocation recipeId) {
+        if (isPmmoSalvageRecipe(recipeId)) {
+            return Optional.of(Component.translatable("rsi.jei.pmmo_salvage"));
+        }
         if (isVirtualMarketRecipe(recipeId)) {
             return Optional.of(Component.translatable("block.farmingforblockheads.market"));
         }

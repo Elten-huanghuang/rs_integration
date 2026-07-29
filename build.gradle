@@ -56,14 +56,6 @@ repositories {
 dependencies {
     minecraft "net.minecraftforge:forge:1.20.1-47.3.22"
 
-    // Pinyin search. TinyPinyin and its runtime trie are Apache-2.0 licensed.
-    implementation(jarJar("io.github.biezhi:TinyPinyin:2.0.3.RELEASE")) {
-        jarJar.ranged(it, "[2.0.3.RELEASE,)")
-    }
-    implementation(jarJar("org.ahocorasick:ahocorasick:0.4.0")) {
-        jarJar.ranged(it, "[0.4.0,)")
-    }
-
     // All mod jars in libs — must go through fg.deobf() so ForgeGradle
     // remaps the classes to match the dev-environment mappings.
     compileOnly fg.deobf(fileTree(dir: 'libs', include: ['*.jar']))
@@ -200,11 +192,8 @@ tasks.register('verifyReleaseJar') {
                     'META-INF/MANIFEST.MF',
                     'META-INF/mods.toml',
                     'META-INF/LICENSE_RS_INTEGRATION',
-                    'META-INF/licenses/Apache-2.0.txt',
                     'META-INF/licenses/MIT-MixinExtras.txt',
                     'META-INF/jarjar/metadata.json',
-                    'META-INF/jarjar/TinyPinyin-2.0.3.RELEASE.jar',
-                    'META-INF/jarjar/ahocorasick-0.4.0.jar',
                     'META-INF/jarjar/mixinextras-forge-0.3.6.jar',
                     'rs_integration.mixins.json',
                     'rs_integration.refmap.json'
@@ -212,6 +201,17 @@ tasks.register('verifyReleaseJar') {
             requiredEntries.each { entryName ->
                 if (zip.getEntry(entryName) == null) {
                     throw new GradleException("Release jar is missing ${entryName}: ${archive}")
+                }
+            }
+
+            def forbiddenFragments = ['tinypinyin', 'ahocorasick', 'com/github/promeg/']
+            zip.entries().each { entry ->
+                def lowerName = entry.name.toLowerCase(java.util.Locale.ROOT)
+                forbiddenFragments.each { fragment ->
+                    if (lowerName.contains(fragment)) {
+                        throw new GradleException(
+                                "Release jar contains removed pinyin dependency ${entry.name}: ${archive}")
+                    }
                 }
             }
 

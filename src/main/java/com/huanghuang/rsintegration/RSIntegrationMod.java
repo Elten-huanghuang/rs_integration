@@ -28,6 +28,7 @@ import com.huanghuang.rsintegration.mods.immortalersdelight.ImmortalersDelightRS
 import com.huanghuang.rsintegration.mods.ironfurnaces.IronFurnacesRSModule;
 import com.huanghuang.rsintegration.mods.malum.MalumRSModule;
 import com.huanghuang.rsintegration.mods.lychee.LycheeRSModule;
+import com.huanghuang.rsintegration.mods.pmmo.PmmoRSModule;
 import com.huanghuang.rsintegration.mods.botania.BotaniaRSModule;
 import com.huanghuang.rsintegration.mods.slashblade.SlashBladeRSModule;
 import com.huanghuang.rsintegration.mods.tacz.TaczRSModule;
@@ -195,7 +196,9 @@ public final class RSIntegrationMod {
             new ModuleEntry(ModIds.DISTANT_WORLDS, RSIntegrationConfig.ENABLE_DISTANT_WORLDS,
                     () -> DistantWorldsRSModule.INSTANCE),
             new ModuleEntry(ModIds.LYCHEE, RSIntegrationConfig.ENABLE_LYCHEE,
-                    () -> LycheeRSModule.INSTANCE)
+                    () -> LycheeRSModule.INSTANCE),
+            new ModuleEntry(ModIds.PMMO, RSIntegrationConfig.ENABLE_PMMO,
+                    () -> PmmoRSModule.INSTANCE)
     );
 
     public RSIntegrationMod() {

@@ -7,6 +7,9 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.ClientSyncedConfig;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.mods.jei.JeiMarqueeSelector;
+import com.huanghuang.rsintegration.mods.pmmo.client.PmmoSalvageAccess;
+import com.huanghuang.rsintegration.mods.pmmo.client.PmmoSalvageJeiBridge;
+import com.huanghuang.rsintegration.mods.pmmo.client.PmmoSalvageRecipeCategory;
 import com.huanghuang.rsintegration.mods.goety.GoetyRSModule;
 import com.huanghuang.rsintegration.mods.distantworlds.LithumAltarRecipeResolver;
 import com.huanghuang.rsintegration.mods.distantworlds.LithumAltarRecipeWrapper;
@@ -56,6 +59,9 @@ public final class RSJeiPlugin implements IModPlugin {
             FtbQuestJeiRuntime
                     .onRuntimeAvailable(jeiRuntime);
         }
+        if (pmmoSalvageEnabled()) {
+            PmmoSalvageJeiBridge.addLateSyncedRecipes(jeiRuntime);
+        }
     }
 
     @Override
@@ -68,6 +74,9 @@ public final class RSJeiPlugin implements IModPlugin {
         }
         if (RSIntegrationConfig.ENABLE_GOETY.get() && ModList.get().isLoaded(ModIds.GOETY)) {
             GoetyRSModule.INSTANCE.onJeiRuntimeUnavailable();
+        }
+        if (ModList.get().isLoaded(ModIds.PMMO)) {
+            PmmoSalvageJeiBridge.clear();
         }
     }
 
@@ -83,6 +92,10 @@ public final class RSJeiPlugin implements IModPlugin {
             registration.addRecipeCategories(new LithumAltarFironRecipeCategory(
                     registration.getJeiHelpers().getGuiHelper()));
         }
+        if (pmmoSalvageEnabled()) {
+            registration.addRecipeCategories(new PmmoSalvageRecipeCategory(
+                    registration.getJeiHelpers().getGuiHelper(), PmmoSalvageAccess.salvageBlock()));
+        }
     }
 
     @Override
@@ -97,6 +110,9 @@ public final class RSJeiPlugin implements IModPlugin {
                                     definition))
                             .toList());
         }
+        if (pmmoSalvageEnabled()) {
+            PmmoSalvageJeiBridge.registerRecipes(registration);
+        }
         // FTB Quests client data is not guaranteed to exist during JEI's static
         // registration pass. Player-specific entries are added from
         // FtbQuestJeiRuntime once ClientQuestFile has synchronized.
@@ -109,6 +125,12 @@ public final class RSJeiPlugin implements IModPlugin {
             var item = net.minecraftforge.registries.ForgeRegistries.ITEMS.getValue(
                     ResourceLocation.fromNamespaceAndPath(ModIds.DISTANT_WORLDS, "lithum_core"));
             if (item != null) registration.addRecipeCatalyst(item, LithumAltarFironRecipeCategory.TYPE);
+        }
+        if (pmmoSalvageEnabled()) {
+            var salvageBlock = PmmoSalvageAccess.salvageBlock();
+            if (!salvageBlock.isEmpty()) {
+                registration.addRecipeCatalyst(salvageBlock, PmmoSalvageRecipeCategory.TYPE);
+            }
         }
     }
 
@@ -154,5 +176,9 @@ public final class RSJeiPlugin implements IModPlugin {
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-JEI] Failed to register Eidolon worktable transfer", e);
         }
+    }
+
+    private static boolean pmmoSalvageEnabled() {
+        return RSIntegrationConfig.ENABLE_PMMO.get() && ModList.get().isLoaded(ModIds.PMMO);
     }
 }

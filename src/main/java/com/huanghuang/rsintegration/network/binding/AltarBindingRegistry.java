@@ -514,6 +514,10 @@ public final class AltarBindingRegistry {
                 INetwork net = resolveNetworkForAltar(player, altarDim, entry.pos());
                 if (net != null) {
                     addCompatibleTypeIds(entryType, entry.blockKey(), modTypeIds, blockKeysByType);
+                    if (isPmmoSalvageBinding(entry)) {
+                        addTypeId(com.huanghuang.rsintegration.mods.pmmo.PmmoRSModule.TYPE_ID,
+                                entry.blockKey(), modTypeIds, blockKeysByType);
+                    }
                 }
             }
         }
@@ -665,7 +669,9 @@ public final class AltarBindingRegistry {
             if (stack.isEmpty()) continue;
             for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
                 ModType entryType = ModType.fromBlockKey(entry.blockKey());
-                if (!isCompatibleMachineType(type, entryType)) continue;
+                if (!isCompatibleMachineType(type, entryType)
+                        && !(com.huanghuang.rsintegration.mods.pmmo.PmmoRSModule.TYPE_ID
+                        .equals(type.id()) && isPmmoSalvageBinding(entry))) continue;
                 ResourceKey<Level> altarDim = ResourceKey.create(
                         net.minecraft.core.registries.Registries.DIMENSION, entry.dim());
                 ServerLevel entryLevel = player.server.getLevel(altarDim);
@@ -695,7 +701,9 @@ public final class AltarBindingRegistry {
             if (stack.isEmpty()) continue;
             for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
                 ModType entryType = ModType.fromBlockKey(entry.blockKey());
-                if (!isCompatibleMachineType(type, entryType)) continue;
+                if (!isCompatibleMachineType(type, entryType)
+                        && !(com.huanghuang.rsintegration.mods.pmmo.PmmoRSModule.TYPE_ID
+                        .equals(type.id()) && isPmmoSalvageBinding(entry))) continue;
                 if (!isExecutableBinding(type, entry.blockKey())) continue;
                 if (normalized != null && entry.blockKey() != null
                         && !entry.blockKey().toLowerCase(java.util.Locale.ROOT).contains(normalized)) {
@@ -711,6 +719,13 @@ public final class AltarBindingRegistry {
                 out.add(new BoundMachine(entry.dim(), entry.pos(), type, entry.blockKey()));
             }
         }
+    }
+
+    private static boolean isPmmoSalvageBinding(BindingStorage.BindingEntry entry) {
+        if (!net.minecraftforge.fml.ModList.get().isLoaded(ModIds.PMMO)) return false;
+        ResourceLocation configured = com.huanghuang.rsintegration.mods.pmmo
+                .PmmoSalvageCatalog.salvageBlockId();
+        return configured != null && configured.toString().equals(entry.blockRegKey());
     }
 
     static boolean isExecutableBinding(ModType type, String blockKey) {
@@ -756,6 +771,12 @@ public final class AltarBindingRegistry {
         // origin marker shared by all recipe types, not a machine subtype.
         if ("kjs".equals(hint)) return null;
         if (type == null) return hint;
+        // PMMO exposes one globally configured salvage interaction block. The
+        // synthetic recipe path starts with pmmo_salvage, but an existing
+        // binding may legitimately retain the owning mod's block key.
+        if (com.huanghuang.rsintegration.mods.pmmo.PmmoRSModule.TYPE_ID.equals(type.id())) {
+            return null;
+        }
         // These vanilla ModTypes each represent exactly one machine. A slash in a
         // datapack/KubeJS recipe ID (for example minecraft:kjs/win_15) is only a
         // namespace-like folder and must not be treated as a machine subtype.
