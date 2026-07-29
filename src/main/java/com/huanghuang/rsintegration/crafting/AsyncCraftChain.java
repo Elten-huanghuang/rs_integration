@@ -131,6 +131,8 @@ public final class AsyncCraftChain {
     private int machineCount = 1;
     private boolean waitingForMachineLease;
     private int machineLeaseWaitTicks;
+    @Nullable
+    private Component machineStartFailureMessage;
     private int dropsThisChain;
     private boolean dropThrottleTripped;
     private static final int MAX_DROPS_PER_CHAIN = 20;
@@ -479,6 +481,31 @@ public final class AsyncCraftChain {
                     }
                 }
                 if (observation.phase() == IBatchDelegate.CraftPhase.FAILED) {
+                    if (currentDelegate.failureConsumesInputs(observation)) {
+                        List<ItemStack> actualResults = new ArrayList<>(disarmOutputCapture());
+                        closeFlatOperationScope();
+                        actualResults.addAll(currentDelegate.collectAllResults(online));
+                        actualResults.removeIf(stack -> stack == null || stack.isEmpty());
+                        for (ItemStack result : actualResults) addToVirtualInventory(result);
+                        snapshotCommittedVirtual();
+                        ledger.reset();
+                        Component failureMessage = currentDelegate.craftFailureMessage(observation);
+                        if (failureMessage == null) {
+                            failureMessage = Component.translatable(
+                                    "rsi.async.abort.machine_craft_failed", observation.detail());
+                        }
+                        try {
+                            currentDelegate.onBatchFinished(online);
+                            currentDelegate.releaseReusableMaterials(online);
+                        } catch (Exception cleanupFailure) {
+                            RSIntegrationMod.LOGGER.error(ctx.format(
+                                    "Consumed-failure delegate cleanup failed"), cleanupFailure);
+                        }
+                        currentDelegate = null;
+                        abortWithoutRefund("Machine craft consumed inputs but failed: "
+                                + observation.detail(), failureMessage);
+                        return true;
+                    }
                     abort("Machine craft failed: " + observation.detail(),
                             Component.translatable("rsi.async.abort.machine_craft_failed",
                                     observation.detail()));
@@ -655,12 +682,16 @@ public final class AsyncCraftChain {
                     return false;
                 }
                 abort("Failed to start multi-block craft: " + step.recipeId(),
-                        Component.translatable("rsi.async.abort.machine_start_failed",
-                                step.recipeId().toString()));
+                        machineStartFailureMessage != null
+                                ? machineStartFailureMessage
+                                : Component.translatable("rsi.async.abort.machine_start_failed",
+                                        step.recipeId().toString()));
+                machineStartFailureMessage = null;
                 return true;
             }
             waitingForMachineLease = false;
             machineLeaseWaitTicks = 0;
+            machineStartFailureMessage = null;
             state = State.WAITING_MOD;
             // Settled boundary: step's inputs are committed and any materials
             // pulled from virtualInventory have been removed by pre-reserve. If
@@ -2391,6 +2422,7 @@ public final class AsyncCraftChain {
     }
 
     private IBatchDelegate startModStep(CraftingResolver.ResolutionStep step, ServerPlayer online) {
+        machineStartFailureMessage = null;
         if (step.modType().isVirtual()) {
             IBatchDelegate virtualDelegate = step.inferMode()
                     ? step.modType().createInferDelegate() : createDelegate(step.modType());
@@ -2565,9 +2597,9 @@ public final class AsyncCraftChain {
                     "All {} bound machines failed preparation for mod type {}: recipe={} detail={}"),
                     machines.size(), step.modType(), step.recipeId(),
                     fatalDetail);
-            online.sendSystemMessage(fatalUserMessage != null
+            machineStartFailureMessage = fatalUserMessage != null
                     ? fatalUserMessage
-                    : Component.translatable("rsi.async.error.machine_valid_failed", step.recipeId()));
+                    : Component.translatable("rsi.async.error.machine_valid_failed", step.recipeId());
             return null;
         }
 

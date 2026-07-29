@@ -859,7 +859,12 @@ public final class CraftingPlanScreen extends Screen {
         int rowX = width / 2 - rowW / 2;
 
         // ── Label row ──
-        String label = Component.translatable("rsi.plan.repeat_count").getString();
+        ResourceLocation rootRecipe = ResourceLocation.tryParse(plan.recipeId());
+        boolean pmmoSalvage = rootRecipe != null
+                && "rs_integration".equals(rootRecipe.getNamespace())
+                && rootRecipe.getPath().startsWith("pmmo_salvage/");
+        String label = Component.translatable(pmmoSalvage
+                ? "rsi.plan.salvage_attempt_count" : "rsi.plan.repeat_count").getString();
         int labelW = font.width(label);
         UIRenderer.textBackdrop(gfx, font, rowX + (rowW - labelW) / 2, repeatRowY, label, C_TEXT_BACKDROP);
         gfx.drawString(font, label, rowX + (rowW - labelW) / 2, repeatRowY, 0xFFCCCCCC);

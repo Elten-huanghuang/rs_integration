@@ -275,6 +275,17 @@ public interface IBatchDelegate {
         return new CraftObservation(isCraftComplete(level) ? CraftPhase.DONE : CraftPhase.WORKING);
     }
 
+    /** True when a FAILED observation happened after the operation consumed its inputs. */
+    default boolean failureConsumesInputs(@Nonnull CraftObservation observation) {
+        return false;
+    }
+
+    /** Optional translated reason for a terminal craft failure. */
+    @Nullable
+    default Component craftFailureMessage(@Nonnull CraftObservation observation) {
+        return null;
+    }
+
     /**
      * Collect the result item from the machine after craft completes.
      * @return the result ItemStack, or ItemStack.EMPTY if not yet available

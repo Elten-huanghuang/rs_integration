@@ -73,6 +73,7 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.BooleanValue ENABLE_IRON_FURNACES;
     public static ForgeConfigSpec.BooleanValue ENABLE_DISTANT_WORLDS;
     public static ForgeConfigSpec.BooleanValue ENABLE_LYCHEE;
+    public static ForgeConfigSpec.BooleanValue ENABLE_PMMO;
     public static ForgeConfigSpec.ConfigValue<List<? extends String>> LYCHEE_RECIPE_ALLOWLIST;
     public static ForgeConfigSpec.BooleanValue ALLOW_DISTANT_WORLDS_RESEARCH_BYPASS;
     public static ForgeConfigSpec.BooleanValue DISABLE_DISTANT_WORLDS_FIRON_FAILURE;
@@ -232,6 +233,10 @@ public final class RSIntegrationConfig {
                 .comment("Enable virtual RS crafting for the supported Lychee item_inside recipes.",
                         "The matching substrate bucket in any Resonance Disk slot is required but never consumed.")
                 .define("enableLychee", true);
+        ENABLE_PMMO = c
+                .comment("Enable recursive PMMO salvage through its configured salvage block.",
+                        "The requested count is the number of independent salvage attempts, not a guaranteed output count.")
+                .define("enablePmmoSalvage", true);
         LYCHEE_RECIPE_ALLOWLIST = c
                 .comment("Lychee recipe IDs allowed for virtual RS crafting.",
                         "Only built-in deterministic powder-snow, Greek-fire, Dwarven-oil, and Deep-Aether-poison profiles are accepted.",

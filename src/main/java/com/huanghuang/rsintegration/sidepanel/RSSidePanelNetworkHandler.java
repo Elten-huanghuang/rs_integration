@@ -338,6 +338,9 @@ public final class RSSidePanelNetworkHandler {
 
     private static String resolveDisplayName(String blockKey, String blockRegKey,
                                              ItemStack displayStack) {
+        if (blockKey != null && blockKey.startsWith("pmmo_salvage||")) {
+            return "rsi.batch.mod.pmmo_salvage";
+        }
         // Gun-pack workbenches carry their real translation key via the item's
         // hover name (e.g. GunSmithTableItem.getName reads BlockId from NBT and
         // returns Component.translatable("emxarms.block.emx_workbench_table")).

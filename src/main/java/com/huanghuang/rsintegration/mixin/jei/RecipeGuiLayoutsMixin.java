@@ -183,7 +183,7 @@ public class RecipeGuiLayoutsMixin {
                 skippedNoRecipe++;
                 continue;
             }
-            if (recipe instanceof snownee.lychee.interaction.BlockInteractingRecipe
+            if (recipeClassName.equals("snownee.lychee.interaction.BlockInteractingRecipe")
                     && !com.huanghuang.rsintegration.mods.lychee.LycheeBlockInteractingRecipeHandler
                     .isSupported(recipe)) {
                 RSIntegrationMod.LOGGER.debug(
@@ -330,7 +330,9 @@ public class RecipeGuiLayoutsMixin {
                     : recipeModType;
 
             String tooltipKey;
-            if (rsi$isGoetyRitual(recipe)) {
+            if (recipe instanceof com.huanghuang.rsintegration.mods.pmmo.client.PmmoSalvageRecipe) {
+                tooltipKey = "gui.rs_integration.jei.pmmo_salvage_craft";
+            } else if (rsi$isGoetyRitual(recipe)) {
                 tooltipKey = "gui.rs_integration.jei.altar_craft";
             } else if (rsi$isGoetyBrazierRecipe(recipe)) {
                 tooltipKey = "gui.rs_integration.jei.goety_brazier_craft";
@@ -748,6 +750,13 @@ public class RecipeGuiLayoutsMixin {
         if (recipe instanceof com.huanghuang.rsintegration.mods.apotheosis.ApotheosisGemCuttingRecipe) {
             return "apotheosis_gem_cutting";
         }
+        // RSI owns this synthetic category. Recognise it directly so its
+        // recursive button cannot be lost to ModType/JEI registration timing.
+        if (recipe instanceof com.huanghuang.rsintegration.mods.pmmo.client.PmmoSalvageRecipe
+                && ModList.get().isLoaded(ModIds.PMMO)
+                && RSIntegrationConfig.ENABLE_PMMO.get()) {
+            return com.huanghuang.rsintegration.mods.pmmo.PmmoRSModule.TYPE_ID;
+        }
         if (rsi$isGoetyRitual(recipe)) return ModIds.GOETY;
 
         // YHK cooking pot recipes: 3 ModTypes share 1 JEI UID, so we use
@@ -842,6 +851,10 @@ public class RecipeGuiLayoutsMixin {
     @Unique
     private static ResourceLocation getRecipeId(Object recipe) {
         String className = recipe.getClass().getName();
+
+        if (recipe instanceof com.huanghuang.rsintegration.mods.pmmo.client.PmmoSalvageRecipe salvage) {
+            return salvage.recipeId();
+        }
 
         if (className.equals("dev.shadowsoffire.apotheosis.adventure.compat.GemCuttingCategory$GemCuttingRecipe")) {
             ItemStack output = rsi$readGemCuttingOutput(recipe);
@@ -1446,7 +1459,7 @@ public class RecipeGuiLayoutsMixin {
                 if (!stack.isEmpty()) {
                     for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
                         if (debug) allBlockKeys.add(entry.blockKey());
-                        if (rsi$bindingMatchesFilter(entry.blockKey(), filter)) return entry;
+                        if (rsi$bindingMatchesFilter(entry, filter)) return entry;
                     }
                 }
             }
@@ -1456,20 +1469,20 @@ public class RecipeGuiLayoutsMixin {
         for (ItemStack stack : inv.items) {
             for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
                 if (debug) allBlockKeys.add(entry.blockKey());
-                if (rsi$bindingMatchesFilter(entry.blockKey(), filter)) return entry;
+                if (rsi$bindingMatchesFilter(entry, filter)) return entry;
             }
         }
         for (ItemStack stack : inv.offhand) {
             for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
                 if (debug) allBlockKeys.add(entry.blockKey());
-                if (rsi$bindingMatchesFilter(entry.blockKey(), filter)) return entry;
+                if (rsi$bindingMatchesFilter(entry, filter)) return entry;
             }
         }
 
         for (ItemStack stack : com.huanghuang.rsintegration.util.CuriosAccess.stacks(player)) {
             for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
                 if (debug) allBlockKeys.add(entry.blockKey());
-                if (rsi$bindingMatchesFilter(entry.blockKey(), filter)) return entry;
+                if (rsi$bindingMatchesFilter(entry, filter)) return entry;
             }
         }
 
@@ -1482,9 +1495,15 @@ public class RecipeGuiLayoutsMixin {
     }
 
     @Unique
-    private static boolean rsi$bindingMatchesFilter(String blockKey, String filter) {
+    private static boolean rsi$bindingMatchesFilter(BindingStorage.BindingEntry entry, String filter) {
+        String blockKey = entry.blockKey();
         if (blockKey == null || filter == null) return false;
         if (blockKey.contains(filter)) return true;
+        if ("pmmo_salvage".equals(filter)) {
+            ResourceLocation configured = com.huanghuang.rsintegration.mods.pmmo.client
+                    .PmmoSalvageAccess.salvageBlockId();
+            return configured != null && configured.toString().equals(entry.blockRegKey());
+        }
         int sep = blockKey.indexOf("||");
         if (sep < 0) return false;
         String prefix = blockKey.substring(0, sep);
@@ -1600,6 +1619,9 @@ public class RecipeGuiLayoutsMixin {
     @Unique
     private static ModType computeModType(Object recipe) {
         String className = recipe.getClass().getName();
+        if (recipe instanceof com.huanghuang.rsintegration.mods.pmmo.client.PmmoSalvageRecipe) {
+            return ModType.byId(com.huanghuang.rsintegration.mods.pmmo.PmmoRSModule.TYPE_ID);
+        }
         if (className.startsWith("net.blay09.mods.farmingforblockheads.")) {
             return ModType.byId("farmingforblockheads");
         }

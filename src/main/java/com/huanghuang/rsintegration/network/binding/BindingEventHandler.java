@@ -9,6 +9,7 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.mods.touhoulittlemaid.TlmAltarStructure;
+import com.huanghuang.rsintegration.util.ModIds;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
@@ -266,6 +267,13 @@ public final class BindingEventHandler {
         public ModType modType() { return modType; }
 
         boolean matches(Block block, String className) {
+            // PMMO's salvage block belongs to the active world's server config,
+            // which is not available when common setup registers targets.
+            if (com.huanghuang.rsintegration.mods.pmmo.PmmoRSModule.TYPE_ID.equals(modType.id())
+                    && com.huanghuang.rsintegration.mods.pmmo.PmmoSalvageStructure
+                    .isBindingBlock(block)) {
+                return true;
+            }
             for (String name : blockClassNames) {
                 if (className.equals(name)) return true;
             }
@@ -322,6 +330,9 @@ public final class BindingEventHandler {
 
     public static Component resolveBlockName(String blockKey, @Nullable String blockRegKey,
                                              @Nullable ItemStack displayStack) {
+        if (blockKey != null && blockKey.startsWith("pmmo_salvage||")) {
+            return pmmoSalvageDisplayName();
+        }
         int sep = blockKey.indexOf("||");
         String descId = (sep >= 0 && sep < blockKey.length() - 2) ? blockKey.substring(sep + 2) : blockKey;
 
@@ -392,6 +403,10 @@ public final class BindingEventHandler {
         }
 
         return Component.translatable(descId);
+    }
+
+    private static Component pmmoSalvageDisplayName() {
+        return Component.translatable("rsi.batch.mod.pmmo_salvage");
     }
 
     public static final Map<String, MachineBindingTarget> CLASS_TARGET_MAP = new LinkedHashMap<>();
@@ -639,6 +654,11 @@ public final class BindingEventHandler {
     }
 
     static BlockPos resolveRootPos(Level level, BlockPos pos, Block block, String className) {
+        if (net.minecraftforge.fml.ModList.get().isLoaded(ModIds.PMMO)) {
+            BlockPos pmmoRoot = com.huanghuang.rsintegration.mods.pmmo.PmmoSalvageStructure
+                    .resolveRoot(level, pos);
+            if (pmmoRoot != null) return pmmoRoot;
+        }
         // Forbidden & Arcanus Clibano: visible shell parts resolve the hidden
         // main-part POI through the mod's own public structure contract.
         if (className.equals("com.stal111.forbidden_arcanus.common.block.ClibanoCenterBlock")
