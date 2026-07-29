@@ -65,9 +65,25 @@ Open an RS crafting grid to consume food directly from the network:
 - Bowls, bottles, and other remainders return to the RS network when possible.
 - Servers can configure activation requirements, execution cost, and per-use limits.
 
+### Villager trade restock
+
+- Select a villager trade and press `Space` to fill both payment slots for repeated trading.
+- Uses matching items from the player inventory first, then extracts the remainder from the accessible RS network.
+- Refills each payment slot up to its valid stack limit instead of supplying only one trade at a time.
+- Shows how many items came from the inventory and RS, with clear partial, no-network, no-permission, and invalid-trade results.
+- Missing payment items and quantities are displayed in the trade screen and added to JEI bookmarks automatically.
+
+### Apotheosis Enchantment Library
+
+- Bind an Apotheosis Library or Ender Library to RS, then open its screen to access the RSI enchanted-book import panel.
+- Scans every enchanted book in the bound RS network and groups identical NBT-bearing books with their available counts.
+- Search by enchantment or book information, select visible results, and import the filtered selection or every compatible book.
+- Clearly marks invalid books, unsupported custom data, and books rejected by the target library before import.
+- Imports are validated and executed server-side; rejected or uncommitted books are refunded to RS, or returned safely when RS cannot accept them.
+- The native Apotheosis library filter also supports pinyin and registry-name matching.
+
 ### Replenishment and item management
 
-- **Villager restock**: select a trade and press Space to fill its costs from inventory and RS; missing items are bookmarked in JEI.
 - **Reforging restock**: press Space in Apotheosis or Ancient Reforging screens to pull reforging materials from RS; missing items are bookmarked in JEI.
 - **Remote side panel**: press `Y` to browse and search RS contents from other screens and open JEI uses or recipes.
 

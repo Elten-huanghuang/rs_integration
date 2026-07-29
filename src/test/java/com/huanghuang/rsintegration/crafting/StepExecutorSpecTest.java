@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.crafting;
 
+import com.electronwill.nightconfig.core.CommentedConfig;
+import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.world.item.Items;
@@ -9,13 +11,23 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.crafting.CraftingBookCategory;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.ShapedRecipe;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 class StepExecutorSpecTest extends BootstrapTest {
+
+    @BeforeAll
+    static void loadDefaultServerConfig() {
+        CommentedConfig config = CommentedConfig.inMemory();
+        RSIntegrationConfig.SERVER_SPEC.correct(config);
+        RSIntegrationConfig.SERVER_SPEC.setConfig(config);
+    }
 
     @Test
     void coalescesRepeatedSlotsWithoutFlatteningCatalystRole() {
@@ -69,5 +81,58 @@ class StepExecutorSpecTest extends BootstrapTest {
         assertEquals(DemandRole.CONSUMED, merged.get(0).role());
         assertEquals(1, CraftPacketUtils.requiredCount(merged.get(1), 64));
         assertEquals(DemandRole.CATALYST, merged.get(1).role());
+    }
+
+    @Test
+    void machineGraphKeepsEqualPhysicalSlotsIndependent() {
+        Ingredient wool = Ingredient.of(Items.WHITE_WOOL, Items.RED_WOOL);
+
+        List<IngredientSpec> slots = StepExecutor.machineSpecsForGraph(List.of(
+                new IngredientSpec(wool, 1),
+                new IngredientSpec(wool, 1)));
+
+        assertEquals(2, slots.size());
+        assertEquals(1, slots.get(0).count());
+        assertEquals(1, slots.get(1).count());
+    }
+
+    @Test
+    void machineSlotChoosesOneVariantThatSatisfiesTheWholeTagDemand() {
+        ResolutionContext context = new ResolutionContext(null, Map.of(), List.of(
+                new ItemStack(Items.WHITE_WOOL, 64),
+                new ItemStack(Items.RED_WOOL, 1),
+                new ItemStack(Items.BLUE_WOOL, 1)), null);
+        Ingredient wool = Ingredient.of(Items.RED_WOOL, Items.BLUE_WOOL, Items.WHITE_WOOL);
+        List<ResolutionContext.SupplySlice> consumed = new java.util.ArrayList<>();
+
+        Ingredient selected = StepExecutor.ensureSingleVariantMachineInput(
+                wool, 2, context, 0, new CraftingResolver.EdgeTracker(), null, consumed);
+
+        assertEquals(Items.WHITE_WOOL, selected.getItems()[0].getItem());
+        assertEquals(1, consumed.size());
+        assertEquals(Items.WHITE_WOOL, consumed.get(0).material().item());
+        assertEquals(2, consumed.get(0).quantity());
+        assertEquals(62, context.countMatching(Ingredient.of(Items.WHITE_WOOL)));
+        assertEquals(1, context.countMatching(Ingredient.of(Items.RED_WOOL)));
+        assertEquals(1, context.countMatching(Ingredient.of(Items.BLUE_WOOL)));
+    }
+
+    @Test
+    void machineSlotNeverCombinesDifferentVariantsToReachOneStackCount() {
+        ResolutionContext context = new ResolutionContext(null, Map.of(), List.of(
+                new ItemStack(Items.RED_WOOL, 1),
+                new ItemStack(Items.BLUE_WOOL, 1)), null);
+        // Stop before recursive candidate lookup: this test only verifies that
+        // direct inventory supply is never combined across stack variants.
+        context.ensureCalls = RSIntegrationConfig.CRAFTING_MAX_ENSURE_CALLS.get();
+        Ingredient wool = Ingredient.of(Items.RED_WOOL, Items.BLUE_WOOL);
+
+        Ingredient selected = StepExecutor.ensureSingleVariantMachineInput(
+                wool, 2, context, 0, new CraftingResolver.EdgeTracker(), null,
+                new java.util.ArrayList<>());
+
+        assertNull(selected);
+        assertEquals(1, context.countMatching(Ingredient.of(Items.RED_WOOL)));
+        assertEquals(1, context.countMatching(Ingredient.of(Items.BLUE_WOOL)));
     }
 }

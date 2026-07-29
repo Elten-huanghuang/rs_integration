@@ -803,7 +803,7 @@ public final class GenericCraftPacket {
                         executionSpecs, repeatCount);
                 Map<StackKey, Integer> avail = MaterialSources.listAllAvailable(player, network);
                 List<String> missing = new ArrayList<>();
-                CraftPlanGraph inputGraph = CraftingResolver.resolveGraphForSpecsWithTypes(
+                CraftPlanGraph inputGraph = CraftingResolver.resolveMachineGraphForSpecsWithTypes(
                         graphSpecs, avail, player.serverLevel(), player, network, missing,
                         forcedOverrides, false);
                 if (!missing.isEmpty()) {
@@ -1711,10 +1711,13 @@ public final class GenericCraftPacket {
             // a virtual recipe (Market, Lychee, etc.), not that the complete plan is
             // infeasible. Re-run the typed resolver so the execution DAG and tree retain
             // those intermediate nodes.
-            planGraph = CraftingResolver.resolveGraphForSpecsWithTypes(
-                    recipeSpecs,
-                    available, player.serverLevel(),
-                    player, network, missing, forcedOverrides, true);
+            planGraph = recipe instanceof CraftingRecipe
+                    ? CraftingResolver.resolveGraphForSpecsWithTypes(
+                            recipeSpecs, available, player.serverLevel(),
+                            player, network, missing, forcedOverrides, true)
+                    : CraftingResolver.resolveMachineGraphForSpecsWithTypes(
+                            recipeSpecs, available, player.serverLevel(),
+                            player, network, missing, forcedOverrides, true);
             Map<NodeId,
                     CraftNode> graphNodes = planGraph.nodesById();
             resolutionSteps = planGraph.topologicalOrder().stream()

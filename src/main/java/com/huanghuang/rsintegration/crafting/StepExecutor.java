@@ -259,12 +259,15 @@ final class StepExecutor {
         if (depth > maxDepth() || ctx.steps.size() + 1 > maxSteps()) return null;
         List<InputDemand> inputs = new ArrayList<>();
         int index = 0;
-        for (IngredientSpec spec : coalesceSpecsForGraph(specs)) {
+        // Machine specs describe physical slots. Keep equal predicates as separate
+        // ports: two wool slots may legally choose different colours, while each
+        // individual slot must still be backed by one concrete stack variant.
+        for (IngredientSpec spec : machineSpecsForGraph(specs)) {
             if (spec.isEmpty()) continue;
             int quantity = CraftPacketUtils.requiredCount(spec, batches);
             InputPortId port = new InputPortId(nodeId, index++);
             Ingredient plannedIngredient = ensureSingleVariantMachineInput(
-                    spec.ingredient(), quantity, ctx, depth + 1, edges, port);
+                    spec.ingredient(), quantity, ctx, depth + 1, edges, port, null);
             if (plannedIngredient == null) {
                 return null;
             }
@@ -282,9 +285,10 @@ final class StepExecutor {
      * independent (and therefore still mixable across slots).
      */
     @Nullable
-    private static Ingredient ensureSingleVariantMachineInput(
+    static Ingredient ensureSingleVariantMachineInput(
             Ingredient ingredient, int quantity, ResolutionContext ctx, int depth,
-            CraftingResolver.EdgeTracker edges, InputPortId port) {
+            CraftingResolver.EdgeTracker edges, @Nullable InputPortId port,
+            @Nullable List<ResolutionContext.SupplySlice> consumedOut) {
         List<ItemStack> variants = Arrays.stream(ingredient.getItems())
                 .filter(stack -> stack != null && !stack.isEmpty())
                 .map(stack -> stack.copyWithCount(1))
@@ -302,8 +306,11 @@ final class StepExecutor {
             Ingredient selected = variants.isEmpty()
                     ? ingredient
                     : CraftingResolver.ingredientOf(variants.get(0), variants.get(0).hasTag());
-            return CraftingResolver.ensureIngredient(
-                    selected, quantity, ctx, depth, edges, port, null) ? selected : null;
+            List<ResolutionContext.SupplySlice> consumed = new ArrayList<>();
+            boolean resolved = CraftingResolver.ensureIngredient(
+                    selected, quantity, ctx, depth, edges, port, consumed);
+            if (resolved && consumedOut != null) consumedOut.addAll(consumed);
+            return resolved ? selected : null;
         }
 
         variants.sort(Comparator
@@ -317,13 +324,15 @@ final class StepExecutor {
 
         for (ItemStack variant : variants) {
             Ingredient selected = CraftingResolver.ingredientOf(variant, variant.hasTag());
+            List<ResolutionContext.SupplySlice> consumed = new ArrayList<>();
             ctx.beginUndo();
             edges.beginUndo();
             boolean resolved = CraftingResolver.ensureIngredient(
-                    selected, quantity, ctx, depth, edges, port, null);
+                    selected, quantity, ctx, depth, edges, port, consumed);
             if (resolved) {
                 ctx.commitUndo();
                 edges.commitUndo();
+                if (consumedOut != null) consumedOut.addAll(consumed);
                 return selected;
             }
             ctx.rollback();
@@ -359,6 +368,10 @@ final class StepExecutor {
             });
         }
         return List.copyOf(merged.values());
+    }
+
+    static List<IngredientSpec> machineSpecsForGraph(List<IngredientSpec> specs) {
+        return specs.stream().filter(spec -> !spec.isEmpty()).toList();
     }
 
     private record GraphSpecKey(DemandRole role, String ingredientClass,
