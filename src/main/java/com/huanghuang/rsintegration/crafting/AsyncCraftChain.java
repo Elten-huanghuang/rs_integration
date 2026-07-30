@@ -1768,8 +1768,15 @@ public final class AsyncCraftChain {
                 ItemStack planned = takeExactMatching(initialPool, spec.ingredient(), remaining);
                 if (planned.isEmpty() || planned.getCount() != remaining) return null;
                 int reservationMark = ledger.reservationMark();
-                ItemStack initial = ledger.reserveExactAcrossNetworkAndInventory(
-                        planned, remaining, network, online);
+                // A tagless graph allocation represents an NBT-insensitive demand, not a
+                // requirement for a physically tagless stack. Reserve through the original
+                // ingredient so stateful variants (damage, affixes, item modifiers, etc.)
+                // remain eligible and the ledger captures the exact stack it selected.
+                ItemStack initial = requiresExactGraphReservation(spec.ingredient())
+                        ? ledger.reserveExactAcrossNetworkAndInventory(
+                                planned, remaining, network, online)
+                        : ledger.reserve(spec.ingredient(), remaining, network, online,
+                                null, null);
                 if (initial.isEmpty()) return null;
                 if (combined.isEmpty()) {
                     combined = initial.copyWithCount(remaining);
@@ -1783,6 +1790,17 @@ public final class AsyncCraftChain {
             materials.add(combined);
         }
         return materials;
+    }
+
+    static boolean requiresExactGraphReservation(Ingredient ingredient) {
+        if (ingredient == null || ingredient.isEmpty()) return false;
+        for (ItemStack template : ingredient.getItems()) {
+            if (!template.isEmpty() && template.hasTag()
+                    && template.getTag() != null && !template.getTag().isEmpty()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static ItemStack takeExactMatching(
