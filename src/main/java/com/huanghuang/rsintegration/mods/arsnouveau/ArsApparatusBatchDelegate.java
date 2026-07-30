@@ -130,7 +130,7 @@ public final class ArsApparatusBatchDelegate extends AbstractBatchDelegate {
         this.craftStartTick = 0;
         this.activePedestalPositions.clear();
 
-        ChunkUtils.loadChunk(level, pos);
+        if (!level.hasChunkAt(pos)) return false;
         BlockEntity be = level.getBlockEntity(pos);
         if (be == null || !ArsTileAccess.isApparatus(be)) {
             return false;

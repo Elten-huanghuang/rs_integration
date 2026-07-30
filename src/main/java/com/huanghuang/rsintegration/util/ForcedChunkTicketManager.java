@@ -29,6 +29,10 @@ public final class ForcedChunkTicketManager {
     /** Retain the ticket for an owner. Must be called on the server thread. */
     public static synchronized boolean retain(ServerLevel level, BlockPos owner) {
         if (level == null || owner == null) return false;
+        if (!level.hasChunkAt(owner)) {
+            RSIntegrationMod.LOGGER.debug("[RSI-ChunkTicket] Refusing to retain unloaded chunk at {}", owner);
+            return false;
+        }
         TicketKey key = TicketKey.of(level.dimension(), owner);
         if (!REFERENCES.retain(key)) return true;
 

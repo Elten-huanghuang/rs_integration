@@ -132,17 +132,9 @@ extends AbstractBatchDelegate {
         }
         this.level = lvl;
         this.machinePos = pos;
-        if (!lvl.isLoaded(pos)) {
-            lvl.getChunk(pos);
-        }
-        int minCX = pos.getX() - 3 >> 4;
-        int maxCX = pos.getX() + 3 >> 4;
-        int minCZ = pos.getZ() - 3 >> 4;
-        int maxCZ = pos.getZ() + 3 >> 4;
-        for (int cx = minCX; cx <= maxCX; ++cx) {
-            for (int cz = minCZ; cz <= maxCZ; ++cz) {
-                lvl.getChunk(cx, cz);
-            }
+        if (!ChunkUtils.isAreaLoaded(lvl, pos, 3)) {
+            player.sendSystemMessage(Component.translatable("rsi.error.chunk_unloaded"));
+            return false;
         }
         BlockEntity be = lvl.getBlockEntity(pos);
         if (be == null || !EmbersReflection.alchemyTabletBEClass.isInstance(be)) {
@@ -350,7 +342,7 @@ extends AbstractBatchDelegate {
             return r2;
         }
         BlockPos below = this.machinePos.below();
-        ChunkUtils.loadChunk((ServerLevel)this.level, (BlockPos)below);
+        if (!this.level.isLoaded(below)) return ItemStack.EMPTY;
         BlockEntity be = this.level.getBlockEntity(below);
         if (EmbersReflection.ibinClass != null && be != null && EmbersReflection.ibinClass.isInstance(be) && (binInv = Reflect.invoke((Object)be, "getInventory").orElse(null)) != null && !(r = Reflect.invoke(binInv, "getStackInSlot", 0).map(o -> (ItemStack)o).orElse(ItemStack.EMPTY)).isEmpty()) {
             return r;
@@ -482,8 +474,7 @@ extends AbstractBatchDelegate {
             if (cleared.isEmpty()) {
                 // Result may be in IBin below
                 BlockPos below = this.machinePos.below();
-                ChunkUtils.loadChunk((ServerLevel)this.level, (BlockPos)below);
-                BlockEntity be = this.level.getBlockEntity(below);
+                BlockEntity be = this.level.isLoaded(below) ? this.level.getBlockEntity(below) : null;
                 if (EmbersReflection.ibinClass != null && be != null && EmbersReflection.ibinClass.isInstance(be)) {
                     Object binInv = Reflect.invoke((Object)be, "getInventory").orElse(null);
                     if (binInv != null) {
@@ -667,10 +658,7 @@ extends AbstractBatchDelegate {
             for (int i = 0; i < this.inputsSize; ++i) {
                 EreAlchemyBatchDelegate.PedestalInfo pi = this.pedestals.get(i);
                 BlockPos bottomPos = pi.pos().below();
-                if (!this.level.isLoaded(bottomPos)) {
-                    RSIntegrationMod.LOGGER.warn("[RSI-Embers-Infer] Bottom pedestal chunk unloaded at {} \u2014 force-loading", (Object)bottomPos);
-                    ChunkUtils.loadChunk((ServerLevel) this.level, bottomPos);
-                }
+                if (!this.level.isLoaded(bottomPos)) continue;
                 BlockEntity be = this.level.getBlockEntity(bottomPos);
                 if (be != null && EmbersReflection.alchemyPedestalBEClass != null && EmbersReflection.alchemyPedestalBEClass.isInstance(be)) {
                     Object bottomInv = Reflect.getField((Object)be, "inventory").orElse(null);

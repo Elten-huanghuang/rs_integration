@@ -1,14 +1,30 @@
 package com.huanghuang.rsintegration.mods.lychee;
 
 import com.google.gson.JsonParser;
+import com.huanghuang.rsintegration.testutil.BootstrapTest;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.item.crafting.Ingredient;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-class LycheeVirtualRecipeIdTest {
+class LycheeVirtualRecipeIdTest extends BootstrapTest {
+
+    @Test
+    void virtualConversionsIgnoreInputNbtButKeepItemIdentity() {
+        ItemStack expected = taggedDiamond(1);
+        Ingredient strict = Ingredient.of(expected);
+        Ingredient normalized = LycheeVirtualRecipeHandler.ignoringNbt(strict);
+
+        assertTrue(normalized.test(taggedDiamond(2)));
+        assertTrue(normalized.test(new ItemStack(Items.DIAMOND)));
+        assertFalse(normalized.test(new ItemStack(Items.EMERALD)));
+    }
 
     @Test
     void acceptsOnlyReviewedPackRecipeIds() {
@@ -87,5 +103,13 @@ class LycheeVirtualRecipeIdTest {
         assertEquals(LycheeVirtualCatalysts.DEEP_AETHER_POISON_BUCKET,
                 LycheeVirtualRecipeHandler.requiredCatalystMask(
                         new ResourceLocation("crafttweaker", "deep_aether.sterling_aercloud")));
+    }
+
+    private static ItemStack taggedDiamond(int value) {
+        ItemStack stack = new ItemStack(Items.DIAMOND);
+        CompoundTag tag = new CompoundTag();
+        tag.putInt("conversion_state", value);
+        stack.setTag(tag);
+        return stack;
     }
 }

@@ -21,6 +21,7 @@ import snownee.lychee.item_inside.ItemInsideRecipe;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -58,6 +59,11 @@ public final class LycheeVirtualRecipeHandler implements ModRecipeHandler {
     }
 
     @Override
+    public boolean preferHandlerIngredients() {
+        return true;
+    }
+
+    @Override
     public boolean isAvailableForPlanning(@Nonnull Recipe<?> recipe,
                                           @Nullable ServerPlayer player) {
         int required = requiredCatalystMask(recipe.getId());
@@ -78,9 +84,17 @@ public final class LycheeVirtualRecipeHandler implements ModRecipeHandler {
         if (!isSupported(recipe)) return null;
         List<IngredientSpec> specs = new ArrayList<>();
         for (Ingredient ingredient : recipe.getIngredients()) {
-            if (!ingredient.isEmpty()) specs.add(new IngredientSpec(ingredient, 1));
+            if (!ingredient.isEmpty()) specs.add(new IngredientSpec(ignoringNbt(ingredient), 1));
         }
         return specs.isEmpty() ? null : List.copyOf(specs);
+    }
+
+    static Ingredient ignoringNbt(Ingredient ingredient) {
+        return Ingredient.of(Arrays.stream(ingredient.getItems()).map(stack -> {
+            ItemStack copy = stack.copyWithCount(1);
+            copy.setTag(null);
+            return copy;
+        }));
     }
 
     public static boolean isSupported(Object value) {

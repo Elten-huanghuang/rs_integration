@@ -104,7 +104,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
         }
         this.ritual = foundRitual;
 
-        ChunkUtils.loadChunk(level, pos);
+        if (!level.hasChunkAt(pos)) return false;
         BlockEntity be = level.getBlockEntity(pos);
         if (be == null || !FAReflection.hephaestusForgeBEClass.isInstance(be)) {
             player.sendSystemMessage(Component.translatable("rsi.fa.error.forge_not_found"));
@@ -930,7 +930,6 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
             try {
                 ServerLevel probeLevel = CraftPacketUtils.resolveLevel(player.server, dim, player);
                 if (probeLevel != null && probeLevel.isLoaded(pos)) {
-                    ChunkUtils.loadChunk(probeLevel, pos);
                     BlockEntity probeBe = probeLevel.getBlockEntity(pos);
                     if (probeBe == null || !FAReflection.hephaestusForgeBEClass.isInstance(probeBe)) {
                         RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] pos is not a forge, searching player bindings...");
@@ -987,7 +986,6 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
                         // Without this, getBlockEntity may return null even when
                         // isLoaded() returns true (chunk data present but BEs not
                         // yet instantiated).
-                        ChunkUtils.loadChunk(level, pos);
                         BlockEntity be = level.getBlockEntity(pos);
                         if (be != null && FAReflection.hephaestusForgeBEClass.isInstance(be)) {
                             Object ritualManager = Reflect.getMethodOrThrow(FAReflection.hephaestusForgeBEClass, "getRitualManager", "getRitualManager").invoke(be);
@@ -1034,7 +1032,6 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
                 if (dim != null && pos != null) {
                     ServerLevel level = CraftPacketUtils.resolveLevel(player.server, dim, player);
                     if (level != null && level.isLoaded(pos)) {
-                        ChunkUtils.loadChunk(level, pos);
                         BlockEntity be = level.getBlockEntity(pos);
                         if (be != null && FAReflection.hephaestusForgeBEClass.isInstance(be)) {
                             java.lang.reflect.Field slotMapField = Reflect.findField(
@@ -1090,7 +1087,6 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
                     if (dim != null && pos != null) {
                         ServerLevel level = CraftPacketUtils.resolveLevel(player.server, dim, player);
                         if (level != null && level.isLoaded(pos)) {
-                            ChunkUtils.loadChunk(level, pos);
                             BlockState state = level.getBlockState(pos);
                             BlockEntity be = level.getBlockEntity(pos);
                             int forgeTier = FaRitualHelper.getForgeTier(state, be);
@@ -1132,7 +1128,6 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
                     if (dim != null && pos != null) {
                         ServerLevel level = CraftPacketUtils.resolveLevel(player.server, dim, player);
                         if (level != null && level.isLoaded(pos)) {
-                            ChunkUtils.loadChunk(level, pos);
                             BlockEntity be = level.getBlockEntity(pos);
                             if (be != null && FAReflection.hephaestusForgeBEClass.isInstance(be)) {
                                 Object rm = Reflect.getMethodOrThrow(FAReflection.hephaestusForgeBEClass, "getRitualManager", "getRitualManager").invoke(be);

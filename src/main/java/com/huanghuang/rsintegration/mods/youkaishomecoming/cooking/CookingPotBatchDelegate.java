@@ -155,7 +155,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
         this.craftDone = false;
 
         forceChunkLoad(true);
-        myLevel.getChunk(myPos);
+        if (!myLevel.hasChunkAt(myPos)) return false;
 
         BlockEntity be = findCookingBE();
         if (be == null) {
@@ -483,9 +483,8 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
         "youkaishomecoming:cooking_stockpot" };
 
     private BlockEntity findCookingBE() {
-        // Try direct chunk BE lookup first -- more reliable when chunk was just loaded.
-        var chunk = myLevel.getChunk(myPos);
-        BlockEntity be = chunk.getBlockEntity(myPos);
+        if (!myLevel.hasChunkAt(myPos)) return null;
+        BlockEntity be = myLevel.getBlockEntity(myPos);
         if (be != null && isCookingBE(be)) return be;
 
         // Fallback to level-level lookup.

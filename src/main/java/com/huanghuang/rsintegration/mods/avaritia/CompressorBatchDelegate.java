@@ -112,7 +112,7 @@ public final class CompressorBatchDelegate extends AbstractBatchDelegate {
         this.sharedLedger = sharedLedger;
         this.usingSharedLedger = true;
         this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
-        myLevel.getChunk(myPos);
+        if (!myLevel.hasChunkAt(myPos)) return false;
 
         BlockEntity be = myLevel.getBlockEntity(myPos);
         if (be == null) return false;

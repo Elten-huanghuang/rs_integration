@@ -108,14 +108,7 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
         if (pos == null) return isMachineCraftFinished(null, null);
         ServerLevel level = resolveMachineLevel(playerLevel);
         if (level == null) return false;
-        // Force-load the chunk each poll tick so the machine keeps ticking
-        // even after the player leaves the area. Without this, cross-dimension
-        // crafts silently stall: items are already placed on the machine but
-        // isCraftComplete keeps returning false, the chain times out, and the
-        // abort path must unwind committed extractions.
-        if (!level.isLoaded(pos)) {
-            level.getChunk(pos);
-        }
+        if (!level.hasChunkAt(pos)) return false;
         BlockEntity be = level.getBlockEntity(pos);
         if (be == null || be.isRemoved()) return false;
         return isMachineCraftFinished(level, be);
@@ -132,7 +125,7 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
         }
         ServerLevel level = resolveMachineLevel(playerLevel);
         if (level == null) return failObservation("machine dimension unavailable");
-        if (!level.isLoaded(pos)) level.getChunk(pos);
+        if (!level.hasChunkAt(pos)) return failObservation("machine chunk unloaded");
         BlockEntity be = level.getBlockEntity(pos);
         if (be == null || be.isRemoved()) return observeMissingMachineCraft(level, pos);
         CraftObservation observed = observeMachineCraft(level, be);
@@ -221,12 +214,12 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
             if (pos == null) return;
             ServerLevel level = resolveMachineLevel(player != null ? player.serverLevel() : null);
             if (level == null) return;
-            // Force-load chunk if unloaded so physical items can always be recovered.
-            // Without this, cross-dimension crafts lose items when the chunk unloads
-            // before the chain aborts: the ledger gets refunded but the machine items
-            // stay in NBT, then get consumed by vanilla mechanics on chunk reload.
-            if (!level.isLoaded(pos)) {
-                level.getChunk(pos);
+            if (!level.hasChunkAt(pos)) {
+                RSIntegrationMod.LOGGER.warn(
+                        "[RSI-Delegate] Skipping physical cleanup for unloaded machine chunk at {} in {}; "
+                                + "the transaction ledger remains authoritative",
+                        pos, level.dimension().location());
+                return;
             }
             BlockEntity be = level.getBlockEntity(pos);
             if (be != null) clearMachineState(be, player);
@@ -371,6 +364,9 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
             if (machineChunkForced) return;
         }
 
+        // Never use a Forge ticket to revive an unloaded target. A ticket may
+        // only keep an already-loaded machine chunk resident after start.
+        if (!level.hasChunkAt(owner)) return;
         if (ForcedChunkTicketManager.retain(level, owner)) {
             forcedChunkLevel = level;
             forcedChunkOwner = owner.immutable();

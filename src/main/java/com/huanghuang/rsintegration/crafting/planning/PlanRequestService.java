@@ -15,6 +15,7 @@ public final class PlanRequestService implements AutoCloseable {
     private final AsyncPlanningCoordinator coordinator;
     private final AsyncPurePlanningService purePlanning;
     private final AsyncPlanResponseService responsePlanning;
+    private final AsyncMaxCraftablePlanningService maxCraftablePlanning;
     private final int maxSearchStates;
     private final int maxMemoizedFailures;
 
@@ -37,6 +38,7 @@ public final class PlanRequestService implements AutoCloseable {
         coordinator = new AsyncPlanningCoordinator(parallelism, queueCapacity);
         purePlanning = new AsyncPurePlanningService(coordinator);
         responsePlanning = new AsyncPlanResponseService(coordinator);
+        maxCraftablePlanning = new AsyncMaxCraftablePlanningService(coordinator);
         this.maxSearchStates = Math.max(1, maxSearchStates);
         this.maxMemoizedFailures = Math.max(0, maxMemoizedFailures);
     }
@@ -58,6 +60,13 @@ public final class PlanRequestService implements AutoCloseable {
                 commit, rollback);
     }
 
+    public void submit(PlanningSnapshot snapshot, int repeatCount, Executor serverExecutor,
+                       int maxSteps, Consumer<AsyncPurePlanningService.CompletedPlan> commit,
+                       Consumer<Throwable> rollback) {
+        purePlanning.submit(snapshot, repeatCount, serverExecutor, maxSteps,
+                maxSearchStates, maxMemoizedFailures, commit, rollback);
+    }
+
     public void submitResponse(PlanningSnapshot snapshot, PlanResponseDraft draft,
                                Executor serverExecutor,
                                Predicate<PlanningSnapshot> revalidator,
@@ -65,6 +74,19 @@ public final class PlanRequestService implements AutoCloseable {
                                Consumer<Throwable> rollback) {
         responsePlanning.submit(snapshot, draft, serverExecutor, revalidator, commit, rollback);
     }
+
+    public void submitMaxCraftable(PlanningSnapshot snapshot, int limit, Executor serverExecutor,
+                                   int maxSteps, Consumer<MaxCraftableResult> commit,
+                                   Consumer<Throwable> rollback) {
+        maxCraftablePlanning.submit(snapshot, limit, serverExecutor, maxSteps,
+                maxSearchStates, maxMemoizedFailures,
+                result -> commit.accept(new MaxCraftableResult(result.maximum(), result.plan(),
+                        result.snapshot())), rollback);
+    }
+
+    public record MaxCraftableResult(int maximum, PureRecipePlanner.Result plan,
+                                     PlanningSnapshot snapshot) {}
+
 
     public void forget(UUID playerId) {
         coordinator.cancel(playerId);

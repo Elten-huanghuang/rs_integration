@@ -1,6 +1,8 @@
 package com.huanghuang.rsintegration.crafting.plan;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.config.ClientSyncedConfig;
+import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
 import com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket;
 import net.minecraft.Util;
@@ -51,7 +53,10 @@ public final class PlanPreviewClient {
     public static void onRepeatCountChanged(String recipeId, int repeatCount,
                                              Map<String, String> forcedSlots) {
         pendingRecipeId = recipeId;
-        pendingRepeatCount = Math.max(1, Math.min(repeatCount, 999));
+        int limit = ClientSyncedConfig.isSynced()
+                ? ClientSyncedConfig.REPEAT_COUNT_MAX
+                : RSIntegrationConfig.REPEAT_COUNT_DEFAULT;
+        pendingRepeatCount = Math.max(1, Math.min(repeatCount, limit));
         pendingForcedSlots = forcedSlots;
         pending = true;
         lastChangeTime = Util.getMillis();

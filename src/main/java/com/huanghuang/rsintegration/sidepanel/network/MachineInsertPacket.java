@@ -106,13 +106,16 @@ public final class MachineInsertPacket {
                     Component.translatable("rsi.error.dim_not_loaded"));
                 return;
             }
+            if (!targetLevel.hasChunkAt(packet.pos)) {
+                player.sendSystemMessage(Component.translatable("rsi.error.chunk_unloaded"));
+                return;
+            }
 
             if (!ProtectionChecker.canInteract(player, targetLevel, packet.pos)) {
                 player.sendSystemMessage(Component.translatable("rsi.error.protected_block"));
                 return;
             }
 
-            ChunkUtils.loadChunk(targetLevel, packet.pos);
             BlockEntity be = targetLevel.getBlockEntity(packet.pos);
             if (isIronFurnace(be)) {
                 if (!(be instanceof Container iron) || !isOrdinaryIronFurnace(be)) {

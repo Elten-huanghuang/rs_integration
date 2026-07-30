@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.sidepanel.network;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.network.gui.RemoteGuiAuth;
+import com.huanghuang.rsintegration.network.ProtectionChecker;
 import com.huanghuang.rsintegration.util.ChunkUtils;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -82,8 +83,12 @@ public final class ReturnToRSPacket {
             }
 
             if (!level.hasChunkAt(packet.pos)) {
-                ChunkUtils.loadChunk(level, packet.pos);
-                if (!level.hasChunkAt(packet.pos)) return;
+                player.sendSystemMessage(Component.translatable("rsi.error.chunk_unloaded"));
+                return;
+            }
+            if (!ProtectionChecker.canInteract(player, level, packet.pos)) {
+                player.sendSystemMessage(Component.translatable("rsi.error.protection_denied"));
+                return;
             }
 
             BlockEntity be = level.getBlockEntity(packet.pos);

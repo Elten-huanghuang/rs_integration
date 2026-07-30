@@ -31,6 +31,11 @@ public interface ModRecipeHandler {
         return true;
     }
 
+    /** Whether this handler's ingredient semantics override generic CraftTweaker probes. */
+    default boolean preferHandlerIngredients() {
+        return false;
+    }
+
     /** Runtime requirements that are intentionally not consumed as ingredients. */
     default boolean isAvailableForPlanning(@Nonnull Recipe<?> recipe,
                                            @Nullable ServerPlayer player) {

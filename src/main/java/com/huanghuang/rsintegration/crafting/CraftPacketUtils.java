@@ -904,6 +904,14 @@ public final class CraftPacketUtils {
     @Nullable
     @SuppressWarnings("unchecked")
     public static List<IngredientSpec> extractIngredientSpecs(Object recipe) {
+        if (recipe instanceof net.minecraft.world.item.crafting.Recipe<?> r) {
+            var handler = ModRecipeHandlers.handlerFor(r);
+            if (handler != null && handler.preferHandlerIngredients()) {
+                List<IngredientSpec> result = handler.getIngredients(r);
+                if (result != null) return result;
+            }
+        }
+
         List<IngredientSpec> craftTweakerSpecs = tryExtractCraftTweakerSpecs(recipe);
         if (craftTweakerSpecs != null) return craftTweakerSpecs;
 

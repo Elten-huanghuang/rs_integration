@@ -43,6 +43,7 @@ minecraft {
 }
 
 repositories {
+    flatDir { dirs 'libs' }
     maven { url = 'https://maven.minecraftforge.net/' }
     maven { url = 'https://maven.blamejared.com' }
     maven {
@@ -50,7 +51,6 @@ repositories {
         content { includeGroup 'org.spongepowered' }
     }
     mavenCentral()
-    flatDir { dirs 'libs' }
 }
 
 dependencies {
@@ -94,6 +94,25 @@ dependencies {
     testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
+
+tasks.register('verifyNoForcedChunkLoads') {
+    doLast {
+        def violations = []
+        fileTree('src/main/java') { include '**/*.java' }.each { source ->
+            if (source.name == 'RemoteGuiAuth.java') return
+            def text = source.getText('UTF-8')
+            if (text.contains('ChunkUtils.loadChunk') || text =~ /\.getChunk\s*\(/) {
+                violations << source
+            }
+        }
+        if (!violations.isEmpty()) {
+            throw new GradleException('Remote operations must not load chunks directly: '
+                    + violations.join(', '))
+        }
+    }
+}
+
+check.dependsOn tasks.named('verifyNoForcedChunkLoads')
 
 test {
     useJUnitPlatform()

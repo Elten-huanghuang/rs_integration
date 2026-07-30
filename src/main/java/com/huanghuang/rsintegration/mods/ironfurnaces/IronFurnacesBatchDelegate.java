@@ -75,7 +75,7 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
                                      @Nullable ResourceLocation dim, @NotNull BlockPos pos) {
         ServerLevel target = CraftPacketUtils.resolveLevel(player.server, dim, player);
         if (target == null) return PreparationResult.fatal("machine dimension unavailable");
-        if (!target.isLoaded(pos)) target.getChunk(pos);
+        if (!target.hasChunkAt(pos)) return PreparationResult.retry("machine chunk unloaded");
 
         Recipe<?> found = target.getRecipeManager().byKey(recipeId).orElse(null);
         if (!(found instanceof AbstractCookingRecipe cooking)) {
@@ -252,7 +252,7 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
 
     private boolean refreshMachine() {
         if (level == null || pos == null) return false;
-        if (!level.isLoaded(pos)) level.getChunk(pos);
+        if (!level.hasChunkAt(pos)) return false;
         BlockEntity be = level.getBlockEntity(pos);
         if (!(be instanceof BlockIronFurnaceTileBase current)) return false;
         furnace = current;

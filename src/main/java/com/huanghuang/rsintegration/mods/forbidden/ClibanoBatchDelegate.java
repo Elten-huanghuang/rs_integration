@@ -65,7 +65,7 @@ public final class ClibanoBatchDelegate extends AbstractBatchDelegate {
         resetOperationState();
         ServerLevel resolved = CraftPacketUtils.resolveLevel(player.server, dim, player);
         if (resolved == null) return false;
-        resolved.getChunk(pos);
+        if (!resolved.hasChunkAt(pos)) return false;
 
         Recipe<?> found = resolved.getRecipeManager().byKey(recipeId).orElse(null);
         BlockEntity be = resolved.getBlockEntity(pos);
@@ -144,7 +144,7 @@ public final class ClibanoBatchDelegate extends AbstractBatchDelegate {
         ItemStack material = materials.get(0);
         if (material.isEmpty() || !recipe.getIngredients().get(0).test(material)) return false;
 
-        level.getChunk(pos);
+        if (!level.hasChunkAt(pos)) return false;
         BlockEntity raw = level.getBlockEntity(pos);
         if (!(raw instanceof ClibanoMainBlockEntity be)) return false;
         IItemHandler inventory = fullInventory(be);

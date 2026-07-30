@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
+import com.huanghuang.rsintegration.network.ProtectionChecker;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.CraftingResolver;
@@ -138,7 +139,14 @@ public final class EidolonCraftPacket {
             }
         }
 
-        ChunkUtils.loadChunk(level, pos);
+        if (!level.hasChunkAt(pos)) {
+            player.sendSystemMessage(Component.translatable("rsi.error.chunk_unloaded"));
+            return;
+        }
+        if (!ProtectionChecker.canInteract(player, level, pos)) {
+            player.sendSystemMessage(Component.translatable("rsi.error.protection_denied"));
+            return;
+        }
         BlockEntity be = level.getBlockEntity(pos);
         if (be == null || !EidolonReflection.crucibleTileEntityClass.isInstance(be)) {
             player.sendSystemMessage(Component.translatable("rsi.eidolon.error.crucible_not_found"));

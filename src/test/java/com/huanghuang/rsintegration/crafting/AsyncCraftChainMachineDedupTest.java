@@ -76,4 +76,42 @@ class AsyncCraftChainMachineDedupTest {
         assertEquals(AsyncCraftChain.MachineLeaseAvailability.AVAILABLE,
                 AsyncCraftChain.classifyLeaseAvailability(2, 1));
     }
+
+    @Test
+    void rejectedMachineDoesNotBlockLaterUsableMachine() {
+        ResourceLocation overworld = new ResourceLocation("minecraft", "overworld");
+        BoundMachine denied = new BoundMachine(overworld, new BlockPos(1, 64, 2),
+                ModType.GENERIC, "denied");
+        BoundMachine usable = new BoundMachine(overworld, new BlockPos(3, 64, 4),
+                ModType.GENERIC, "usable");
+
+        AsyncCraftChain.MachineCandidateSelection selection =
+                AsyncCraftChain.filterMachineCandidates(
+                        List.of(denied, usable),
+                        machine -> true,
+                        machine -> machine == usable);
+
+        assertEquals(List.of(usable), selection.usable());
+        assertTrue(selection.protectionRejected());
+        assertEquals(false, selection.unloadedRejected());
+    }
+
+    @Test
+    void unloadedMachineDoesNotBlockLaterLoadedMachine() {
+        ResourceLocation overworld = new ResourceLocation("minecraft", "overworld");
+        BoundMachine unloaded = new BoundMachine(overworld, new BlockPos(1, 64, 2),
+                ModType.GENERIC, "unloaded");
+        BoundMachine loaded = new BoundMachine(overworld, new BlockPos(3, 64, 4),
+                ModType.GENERIC, "loaded");
+
+        AsyncCraftChain.MachineCandidateSelection selection =
+                AsyncCraftChain.filterMachineCandidates(
+                        List.of(unloaded, loaded),
+                        machine -> machine == loaded,
+                        machine -> true);
+
+        assertEquals(List.of(loaded), selection.usable());
+        assertTrue(selection.unloadedRejected());
+        assertEquals(false, selection.protectionRejected());
+    }
 }

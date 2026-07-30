@@ -42,13 +42,17 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.fml.loading.FMLPaths;
 
 import javax.annotation.Nullable;
+import java.nio.file.Path;
 import java.util.*;
 
 @OnlyIn(Dist.CLIENT)
 public final class CraftingPlanScreen extends Screen {
 
+    private static final Path PLAN_PREFS_PATH = FMLPaths.CONFIGDIR.get()
+            .resolve("rs_integration").resolve("crafting_plan.json");
     private static final int SLOT_SIZE = 18;
     private static final int CARD_PAD = 8;
     private static final int ARROW_W = 18;
@@ -100,13 +104,14 @@ public final class CraftingPlanScreen extends Screen {
     private int scrollbarGrabDy;
     private int repeatRowY;
     // repeat button hitboxes — set during render
-    private final int[] repeatBtnX = new int[8], repeatBtnY = new int[8];
-    private final int[] repeatBtnW = new int[8], repeatBtnH = new int[8];
+    private final int[] repeatBtnX = new int[9], repeatBtnY = new int[9];
+    private final int[] repeatBtnW = new int[9], repeatBtnH = new int[9];
     private int countPillX, countPillY, countPillW, countPillH;
     private String repeatBuf = "1";
     private long lastKeyTime;
     private int planRefreshTick = -1;
     private int lastRefreshCount = 1;
+    private boolean maxCraftablePending;
     private int ticksOpen;
     private int mouseX, mouseY;
 
@@ -142,7 +147,7 @@ public final class CraftingPlanScreen extends Screen {
     private int foldAllHitX, foldAllHitY, foldAllHitW, foldAllHitH;
     private boolean foldAllHovered;
     // Tree-view [Expand All] / [Collapse All] toolbar button hitbox (top-right of the viewport).
-    private OutputDestination outputDestination = OutputDestination.RS_NETWORK;
+    private OutputDestination outputDestination;
     private int outputSelectorX, outputSelectorY, outputSegmentW, outputSelectorH;
     private int treeFoldAllHitX, treeFoldAllHitY, treeFoldAllHitW, treeFoldAllHitH;
     // Alternative-recipe dropdown (screen space); open node + row hitboxes.
@@ -264,6 +269,7 @@ public final class CraftingPlanScreen extends Screen {
                 plan.targetResult().getHoverName().getString()));
         this.plan = plan;
         this.activeRequestId = 0L;
+        this.outputDestination = CraftingPlanPreferences.loadOutputDestination(PLAN_PREFS_PATH);
         // Adaptive view routing (§2.5): non-trivial plans open in the tree; simple ones stay on the card.
         this.viewMode = plan.steps().size() > 2 ? ViewMode.TREE : ViewMode.CARD;
         this.renderEngine = new PlanRenderEngine(Minecraft.getInstance().font);
@@ -288,6 +294,13 @@ public final class CraftingPlanScreen extends Screen {
             return;
         } else {
             activeRequestId = requestId;
+        }
+        maxCraftablePending = false;
+        if (newPlan.recipeId() == null || newPlan.recipeId().isEmpty()) {
+            if (minecraft != null && minecraft.player != null && !newPlan.modWarnings().isEmpty()) {
+                minecraft.player.displayClientMessage(newPlan.modWarnings().get(0), false);
+            }
+            return;
         }
         updatePlan(newPlan);
     }
@@ -353,7 +366,7 @@ public final class CraftingPlanScreen extends Screen {
     @Override
     protected void init() {
         super.init();
-        currentRepeat = Math.max(1, Math.min(plan.repeatCount(), 64));
+        currentRepeat = clampRepeatCount(plan.repeatCount());
         repeatBuf = Integer.toString(currentRepeat);
         lastKeyTime = 0;
         lastRefreshCount = currentRepeat;
@@ -477,10 +490,17 @@ public final class CraftingPlanScreen extends Screen {
     }
 
     private void selectOutputDestination(OutputDestination destination) {
-        outputDestination = destination;
+        OutputDestination selected = destination == null
+                ? OutputDestination.RS_NETWORK : destination;
+        if (selected == outputDestination) return;
+        outputDestination = selected;
+        if (!CraftingPlanPreferences.saveOutputDestination(PLAN_PREFS_PATH, selected)) {
+            RSIntegrationMod.LOGGER.debug("[RSI-Plan] Failed to save output destination preference");
+        }
     }
 
     private void onConfirm() {
+        if (maxCraftablePending) return;
         String recipeId = plan.recipeId();
         ResourceLocation targetId = ResourceLocation.tryParse(recipeId);
         if (QuestSubmissionTargetIds
@@ -505,7 +525,7 @@ public final class CraftingPlanScreen extends Screen {
         if (recipeId != null && !recipeId.isEmpty()) {
             Map<String, String> forced = exportForcedSelections();
             sendCraftPacket(ResourceLocation.tryParse(recipeId), false, forced,
-                    Math.max(1, Math.min(currentRepeat, 64)),
+                    clampRepeatCount(currentRepeat),
                     plan.embersCode() != null && embersInferMode);
         }
         onClose();
@@ -583,6 +603,32 @@ public final class CraftingPlanScreen extends Screen {
         if (currentRepeat == lastRefreshCount) return;
         lastRefreshCount = currentRepeat;
         planRefreshTick = ticksOpen + 10;
+    }
+
+    private void startMaxCraftableSearch() {
+        ResourceLocation recipeId = ResourceLocation.tryParse(plan.recipeId());
+        if (recipeId == null || maxCraftablePending) return;
+        ResourceLocation execDim = null;
+        net.minecraft.core.BlockPos execPos = null;
+        if (plan.executionDim() != null && !plan.executionDim().isEmpty()) {
+            execDim = ResourceLocation.tryParse(plan.executionDim());
+            execPos = new net.minecraft.core.BlockPos(
+                    plan.executionPosX(), plan.executionPosY(), plan.executionPosZ());
+        }
+        long requestId = nextRequestId++;
+        if (nextRequestId <= 0 || nextRequestId > 0x7FFF_FFFF_FFFF_FFFFL) nextRequestId = 1L;
+        activeRequestId = requestId;
+        maxCraftablePending = true;
+        BatchCraftNetworkHandler.CHANNEL.sendToServer(GenericCraftPacket.maxPreview(
+                recipeId, exportForcedSelections(), execDim, execPos, plan.baseItem(),
+                executionTarget(plan.clickedOutput(), plan.targetResult()), requestId));
+    }
+
+    private void cancelPendingMaxCraftableSearch() {
+        if (!maxCraftablePending) return;
+        maxCraftablePending = false;
+        activeRequestId = nextRequestId++;
+        if (nextRequestId <= 0 || nextRequestId > 0x7FFF_FFFF_FFFF_FFFFL) nextRequestId = 1L;
     }
 
     @Override
@@ -843,7 +889,8 @@ public final class CraftingPlanScreen extends Screen {
 
     private void drawRepeatRow(GuiGraphics gfx, Font font) {
         String[] leftLabels = {"1", "-10", "-5", "-"};
-        String[] rightLabels = {"+", "+5", "+10", "64"};
+        String[] rightLabels = {"+", "+5", "+10", "+64",
+                Component.translatable("rsi.plan.max").getString()};
 
         int btnW = 22, btnH = 14;
         int gap = 3;
@@ -898,7 +945,7 @@ public final class CraftingPlanScreen extends Screen {
         UIRenderer.pillBadge(gfx, font, countPillX, countPillY, pillW, pillH,
                 0xCC1B5E20, 0xFFC8E6C9, countStr);
 
-        // ── Right buttons: +, +5, +10, 64 ──
+        // ── Right buttons: +, +5, +10, +64, Max ──
         bx = pillX + pillW + innerGap - gap;
         for (int i = 0; i < rightLabels.length; i++) {
             int idx = leftLabels.length + i;
@@ -1987,9 +2034,10 @@ public final class CraftingPlanScreen extends Screen {
             // the debounced refresh (requestPlanRefresh) re-resolves after scrolling stops.
             PlanTreeNode node = nodeAt(mouseX, mouseY);
             if (node != null && node == treeModel.root) {
+                cancelPendingMaxCraftableSearch();
                 int stepBy = hasShiftDown() ? 10 : 1;
                 int dir = delta > 0 ? 1 : -1;
-                currentRepeat = Math.max(1, Math.min(64, currentRepeat + dir * stepBy));
+                currentRepeat = clampRepeatCount(currentRepeat + dir * stepBy);
                 requestPlanRefresh();
                 return true;
             }
@@ -2136,19 +2184,24 @@ public final class CraftingPlanScreen extends Screen {
             }
         }
         if (button == 0) {
-            // Repeat row quick-set buttons (8 total)
-            for (int i = 0; i < 8; i++) {
+            // Repeat row quick-set buttons (9 total)
+            for (int i = 0; i < repeatBtnX.length; i++) {
                 if (mx >= repeatBtnX[i] && mx <= repeatBtnX[i] + repeatBtnW[i]
                         && my >= repeatBtnY[i] && my <= repeatBtnY[i] + repeatBtnH[i]) {
+                    if (i == 8) {
+                        startMaxCraftableSearch();
+                        return true;
+                    }
+                    cancelPendingMaxCraftableSearch();
                     switch (i) {
                         case 0: currentRepeat = 1; break;
                         case 1: currentRepeat = Math.max(1, currentRepeat - 10); break;
                         case 2: currentRepeat = Math.max(1, currentRepeat - 5); break;
                         case 3: currentRepeat = Math.max(1, currentRepeat - 1); break;
-                        case 4: currentRepeat = Math.min(64, currentRepeat + 1); break;
-                        case 5: currentRepeat = Math.min(64, currentRepeat + 5); break;
-                        case 6: currentRepeat = Math.min(64, currentRepeat + 10); break;
-                        case 7: currentRepeat = 64; break;
+                        case 4: currentRepeat = clampRepeatCount(currentRepeat + 1); break;
+                        case 5: currentRepeat = clampRepeatCount(currentRepeat + 5); break;
+                        case 6: currentRepeat = clampRepeatCount(currentRepeat + 10); break;
+                        case 7: currentRepeat = clampRepeatCount(currentRepeat + 64L); break;
                     }
                     repeatBuf = Integer.toString(currentRepeat);
                     lastKeyTime = 0;
@@ -2236,22 +2289,40 @@ public final class CraftingPlanScreen extends Screen {
         }
         // Digit keys accumulate the whole-plan repeat count (ignored while Ctrl is held).
         if (!ctrl && keyCode >= GLFW.GLFW_KEY_0 && keyCode <= GLFW.GLFW_KEY_9) {
+            cancelPendingMaxCraftableSearch();
             long now = System.currentTimeMillis();
             if (now - lastKeyTime > 600) repeatBuf = "";
             lastKeyTime = now;
             repeatBuf += (char)('0' + (keyCode - GLFW.GLFW_KEY_0));
-            try { currentRepeat = Math.max(1, Math.min(Integer.parseInt(repeatBuf), 64)); }
-            catch (NumberFormatException ignored) { currentRepeat = 1; repeatBuf = "1"; }
+            try {
+                currentRepeat = clampRepeatCount(Long.parseLong(repeatBuf));
+                repeatBuf = Integer.toString(currentRepeat);
+            } catch (NumberFormatException ignored) {
+                currentRepeat = repeatCountLimit();
+                repeatBuf = Integer.toString(currentRepeat);
+            }
             requestPlanRefresh();
             return true;
         }
         if (keyCode == GLFW.GLFW_KEY_BACKSPACE || keyCode == GLFW.GLFW_KEY_DELETE) {
+            cancelPendingMaxCraftableSearch();
             repeatBuf = "1";
             currentRepeat = 1;
             lastKeyTime = 0;
             return true;
         }
         return super.keyPressed(keyCode, scanCode, modifiers);
+    }
+
+    private static int repeatCountLimit() {
+        int limit = ClientSyncedConfig.isSynced()
+                ? ClientSyncedConfig.REPEAT_COUNT_MAX
+                : RSIntegrationConfig.REPEAT_COUNT_MAX.get();
+        return Math.max(1, Math.min(limit, RSIntegrationConfig.REPEAT_COUNT_ABSOLUTE_MAX));
+    }
+
+    private static int clampRepeatCount(long requested) {
+        return (int) Math.max(1L, Math.min(requested, repeatCountLimit()));
     }
 
     // ── Status helpers ────────────────────────────────────────────

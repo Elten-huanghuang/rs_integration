@@ -108,8 +108,8 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         this.machineDim = level.dimension().location();
 
         if (!level.isLoaded(pos)) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] validateAndInit [2/9] chunk unloaded at {} — force-loading", pos);
-            level.getChunk(pos);
+            player.sendSystemMessage(Component.translatable("rsi.error.chunk_unloaded"));
+            return false;
         }
         RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] validateAndInit [2/9] chunk ready, getting BE at {} dim={}", pos, myDim);
 

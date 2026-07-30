@@ -64,7 +64,7 @@ public final class AetherworksToolStationBatchDelegate extends AbstractBatchDele
         this.level = lvl;
         this.machinePos = pos;
 
-        ChunkUtils.loadChunk(lvl, pos);
+        if (!lvl.hasChunkAt(pos)) return false;
 
         BlockEntity be = lvl.getBlockEntity(pos);
         if (be == null || AetherworksReflection.toolStationBEClass == null

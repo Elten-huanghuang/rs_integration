@@ -147,7 +147,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
             player.sendSystemMessage(Component.translatable("rsi.generic.error.dim_not_found"));
             return false;
         }
-        ChunkUtils.loadChunk(level, pos);
+        if (!level.hasChunkAt(pos)) return false;
 
         this.myLevel = level;
         this.myDim = level.dimension();

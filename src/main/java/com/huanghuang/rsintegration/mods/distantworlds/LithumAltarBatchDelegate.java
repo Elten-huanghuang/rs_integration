@@ -59,10 +59,7 @@ public final class LithumAltarBatchDelegate extends AbstractBatchDelegate {
         if (!LithumAltarRecipeResolver.isComplete(definition)) return false;
         this.definition = definition;
         this.level = CraftPacketUtils.resolveLevel(player.server, dim, player);
-        if (level == null || !level.isLoaded(pos)) {
-            if (level == null) return false;
-            ChunkUtils.loadChunk(level, pos);
-        }
+        if (level == null || !level.hasChunkAt(pos)) return false;
         this.machineDim = level.dimension().location();
         this.dimension = level.dimension();
         BlockState state = level.getBlockState(pos);

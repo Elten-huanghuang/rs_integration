@@ -51,7 +51,7 @@ public final class CookingMachineBatchDelegate extends AbstractBatchDelegate {
         ServerLevel level = CraftPacketUtils.resolveLevel(
                 player.server, dim, player);
         if (level == null) return null;
-        if (!level.isLoaded(pos)) level.getChunk(pos);
+        if (!level.hasChunkAt(pos)) return null;
         BlockEntity be = level.getBlockEntity(pos);
         if (be != null && isIronFurnace(be.getClass())) {
             try {

@@ -137,7 +137,7 @@ public final class MokaPotBatchDelegate extends AbstractBatchDelegate {
         this.craftDone = false;
 
         forceChunkLoad(true);
-        myLevel.getChunk(myPos);
+        if (!myLevel.hasChunkAt(myPos)) return false;
 
         BlockEntity be = myLevel.getBlockEntity(myPos);
         if (be == null || !isMokaBE(be)) {
@@ -521,7 +521,7 @@ public final class MokaPotBatchDelegate extends AbstractBatchDelegate {
     // -- cleanup --
 
     private void clearAndRefund() {
-        myLevel.getChunk(myPos);
+        if (!myLevel.hasChunkAt(myPos)) return;
         BlockEntity be = myLevel.getBlockEntity(myPos);
         if (be == null || !isMokaBE(be)) return;
 

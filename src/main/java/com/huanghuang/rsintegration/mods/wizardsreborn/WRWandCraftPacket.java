@@ -6,6 +6,7 @@ import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
+import com.huanghuang.rsintegration.network.ProtectionChecker;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.CraftingResolver;
@@ -101,7 +102,12 @@ public final class WRWandCraftPacket {
             }
 
             if (!level.isLoaded(packet.pos)) {
-                level.getChunk(packet.pos);
+                player.sendSystemMessage(Component.translatable("rsi.error.chunk_unloaded"));
+                return;
+            }
+            if (!ProtectionChecker.canInteract(player, level, packet.pos)) {
+                player.sendSystemMessage(Component.translatable("rsi.error.protection_denied"));
+                return;
             }
             BlockEntity be = level.getBlockEntity(packet.pos);
             if (be == null) {

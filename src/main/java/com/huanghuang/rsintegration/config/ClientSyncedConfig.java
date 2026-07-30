@@ -22,6 +22,7 @@ public final class ClientSyncedConfig {
     public static boolean ENABLE_DISTANT_WORLDS = true;
     public static boolean ENABLE_EMBERS_ALCHEMY_CALC = false;
     public static int RECIPE_TREE_MAX_CANDIDATES = 8;
+    public static int REPEAT_COUNT_MAX = RSIntegrationConfig.REPEAT_COUNT_DEFAULT;
 
     private ClientSyncedConfig() {}
 
@@ -38,6 +39,7 @@ public final class ClientSyncedConfig {
         ENABLE_DISTANT_WORLDS = packet.enableDistantWorlds;
         ENABLE_EMBERS_ALCHEMY_CALC = packet.enableEmbersAlchemyCalc;
         RECIPE_TREE_MAX_CANDIDATES = packet.recipeTreeMaxCandidates;
+        REPEAT_COUNT_MAX = packet.repeatCountMax;
     }
 
     /** Whether the server has sent a config sync. If not, fall back to local config. */
@@ -57,5 +59,6 @@ public final class ClientSyncedConfig {
         ENABLE_DISTANT_WORLDS = true;
         ENABLE_EMBERS_ALCHEMY_CALC = false;
         RECIPE_TREE_MAX_CANDIDATES = 8;
+        REPEAT_COUNT_MAX = RSIntegrationConfig.REPEAT_COUNT_DEFAULT;
     }
 }

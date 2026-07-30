@@ -207,6 +207,7 @@ public final class RSIntegrationMod {
         refreshConfigCache();
         MOD_BUS.addListener((ModConfigEvent.Loading e) -> {
             if (e.getConfig().getType() == ModConfig.Type.SERVER) {
+                migrateServerConfig(e.getConfig());
                 com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket.reloadPlanningConfig();
             }
         });
@@ -242,6 +243,22 @@ public final class RSIntegrationMod {
         FMLJavaModLoadingContext.get().getModEventBus().addListener(this::onCommonSetup);
         MinecraftForge.EVENT_BUS.register(
                 com.huanghuang.rsintegration.compat.ftbquests.ExternalItemProgressBridge.class);
+    }
+
+    private static void migrateServerConfig(ModConfig config) {
+        int schema = RSIntegrationConfig.SERVER_CONFIG_SCHEMA_VERSION.get();
+        if (schema >= RSIntegrationConfig.SERVER_CONFIG_SCHEMA) return;
+
+        int currentMax = RSIntegrationConfig.REPEAT_COUNT_MAX.get();
+        int migratedMax = RSIntegrationConfig.migrateRepeatCountMax(schema, currentMax);
+        if (migratedMax != currentMax) {
+            RSIntegrationConfig.REPEAT_COUNT_MAX.set(migratedMax);
+            LOGGER.info("[RSI-Config] Migrated repeatCountMax from 64 to {}",
+                    migratedMax);
+        }
+        RSIntegrationConfig.SERVER_CONFIG_SCHEMA_VERSION
+                .set(RSIntegrationConfig.SERVER_CONFIG_SCHEMA);
+        config.save();
     }
 
     private void onCommonSetup(final FMLCommonSetupEvent event) {
@@ -495,6 +512,10 @@ public final class RSIntegrationMod {
         com.huanghuang.rsintegration.reforging.ReforgingRestockNetworkHandler.register();
         DistExecutor.safeRunWhenOn(Dist.CLIENT,
                 () -> com.huanghuang.rsintegration.reforging.client.ReforgingRestockClient::init);
+        com.huanghuang.rsintegration.anvilmemory.AnvilMemoryNetworkHandler.register();
+        MinecraftForge.EVENT_BUS.register(com.huanghuang.rsintegration.anvilmemory.AnvilMemoryEvents.class);
+        DistExecutor.safeRunWhenOn(Dist.CLIENT,
+                () -> com.huanghuang.rsintegration.anvilmemory.AnvilMemoryClient::init);
         ConfigSyncPacket.register();
 
         // Altar binding registry (BINDINGS cache + scan caches)
@@ -553,7 +574,7 @@ public final class RSIntegrationMod {
 
         // Chunk unload safety net: force-close remote GUI whose machine
         // chunk is being unloaded. Primary prevention is ForgeChunkManager
-        // force-loading in RemoteGuiAuth.authorize(); this catches edge cases
+        // active-chunk retention in RemoteGuiAuth.authorize(); this catches edge cases
         // (e.g. another mod force-unloading the chunk).
         MinecraftForge.EVENT_BUS.addListener(RemoteGuiAuth::onChunkUnload);
 

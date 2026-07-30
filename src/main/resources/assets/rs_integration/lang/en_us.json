@@ -408,6 +408,7 @@
   "rsi.plan.materials": "Materials",
   "rsi.plan.tooltip.available": "Available",
   "rsi.plan.repeat_count": "Repeat:",
+  "rsi.plan.max": "Max",
 
   "rsi.async.chain_started": "§aMulti-step crafting chain started (%s steps). Items will be delivered to the RS network when complete.",
   "rsi.async.cancel_button": "[Cancel]",
@@ -868,5 +869,15 @@
   "rsi.apotheosis.spawner.stat.silent": "Silent",
   "rsi.apotheosis.spawner.stat.baby": "Baby Mobs",
   "rsi.ftb_quest.missing_bookmarked": "Missing %s x %s; added to JEI bookmarks",
-  "rsi.ftb_quest.missing": "Missing %s x %s; JEI bookmarks are unavailable"
+  "rsi.ftb_quest.missing": "Missing %s x %s; JEI bookmarks are unavailable",
+  "rsi.anvil_memory.swap": "Swap anvil inputs",
+  "rsi.anvil_memory.restock": "Click to restock",
+  "rsi.anvil_memory.complete": "Restocked (inventory %s, RS %s)",
+  "rsi.anvil_memory.partial": "Partially restocked; missing %s",
+  "rsi.anvil_memory.no_network": "No RS network; missing %s",
+  "rsi.anvil_memory.no_permission": "No RS extraction permission; missing %s",
+  "rsi.anvil_memory.occupied": "Material slot contains another item",
+  "rsi.anvil_memory.rejected": "This material cannot be placed in the material slot",
+  "rsi.anvil_memory.swapped": "Anvil inputs swapped",
+  "rsi.anvil_memory.invalid": "Anvil memory is unavailable"
 }

@@ -143,7 +143,7 @@ public final class ArsImbuementBatchDelegate extends AbstractBatchDelegate {
         this.activePedestalCatalysts.clear();
         this.pedestalCatalystsInstalled = false;
 
-        ChunkUtils.loadChunk(level, pos);
+        if (!level.hasChunkAt(pos)) return false;
         BlockEntity be = level.getBlockEntity(pos);
         if (be == null || !ArsTileAccess.isImbuement(be)) {
             return false;

@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.network;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.util.ModIds;
+import com.huanghuang.rsintegration.util.LogSampler;
 import com.huanghuang.rsintegration.util.Reflect;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
@@ -9,6 +10,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraftforge.fml.ModList;
 
+import javax.annotation.Nullable;
 import java.lang.reflect.Method;
 import java.util.Optional;
 import java.util.UUID;
@@ -19,8 +21,9 @@ import java.util.UUID;
  *
  * <p>All checks are performed via reflection so that these mods remain
  * optional dependencies. A loaded provider that cannot be queried is treated
- * as indeterminate and denied by the side-effecting callers; API drift must
- * never silently disable claim protection.</p>
+ * as indeterminate and logged. Only a provider result that can be resolved to
+ * another owner is denied; API drift must not lock owners out of their own
+ * machines.</p>
  */
 public final class ProtectionChecker {
 
@@ -34,6 +37,7 @@ public final class ProtectionChecker {
     }
 
     private static final String TAG = "[RSI-Protect]";
+    private static final LogSampler FAILURE_LOGS = new LogSampler(60_000L);
 
     private ProtectionChecker() {}
 
@@ -126,35 +130,34 @@ public final class ProtectionChecker {
             // 1. Load ClaimedChunks manager
             Optional<Class<?>> ccClass = Reflect.forName(
                     "dev.ftb.mods.ftbchunks.data.ClaimedChunks");
-            if (ccClass.isEmpty()) return true;
+            if (ccClass.isEmpty()) return resolveUnknown("FTB Chunks",
+                    "provider is loaded but ClaimedChunks is unavailable");
 
             Object manager = getFTBChunksManager(ccClass.get());
-            if (manager == null) return true;
+            if (manager == null) return resolveUnknown("FTB Chunks",
+                    "claim manager lookup failed");
 
             // 2. Check if the chunk is claimed
-            boolean isClaimed = isFTBChunkClaimed(manager, level, pos);
+            Boolean isClaimed = isFTBChunkClaimed(manager, level, pos);
+            if (isClaimed == null) return resolveUnknown("FTB Chunks",
+                    "claim lookup API is unavailable");
             if (!isClaimed) return true; // Not claimed — allow
 
             // 3. Chunk is claimed — get the claim owner's team/player UUID
             Object claimOwnerId = getFTBClaimOwner(manager, level, pos);
             if (claimOwnerId == null) {
-                // Can't determine owner — allow (fail-open)
-                return true;
+                return resolveUnknown("FTB Chunks", "claimed chunk owner lookup failed");
             }
 
             // 4. Get the player's team
             Object playerTeam = getFTBPlayerTeam(player);
             if (playerTeam == null) {
-                // Player is not in any team — deny (they can't be the owner
-                // of the claim if they have no team)
-                RSIntegrationMod.LOGGER.debug(
-                        "{} FTB Chunks: player {} has no team, chunk is claimed",
-                        TAG, player.getGameProfile().getName());
-                return false;
+                return resolveUnknown("FTB Chunks", "player team lookup failed");
             }
 
             Object playerTeamId = getFTBTeamId(playerTeam);
-            if (playerTeamId == null) return true; // Can't determine — allow
+            if (playerTeamId == null) return resolveUnknown("FTB Chunks",
+                    "player team identity lookup failed");
 
             // 5. Compare claim owner with player's team
             if (claimOwnerId.equals(playerTeamId)) return true;
@@ -166,8 +169,8 @@ public final class ProtectionChecker {
             return false;
 
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("{} FTB Chunks check error (fail-open)", TAG, e);
-            return true; // fail-open
+            RSIntegrationMod.LOGGER.warn("{} FTB Chunks check error; treating result as unknown", TAG, e);
+            return ProtectionFailurePolicy.allowUnknown();
         }
     }
 
@@ -193,7 +196,8 @@ public final class ProtectionChecker {
 
     // ── FTB Chunks: claim detection ───────────────────────────────
 
-    private static boolean isFTBChunkClaimed(Object manager, ServerLevel level, BlockPos pos) {
+    @Nullable
+    private static Boolean isFTBChunkClaimed(Object manager, ServerLevel level, BlockPos pos) {
         ChunkPos chunkPos = new ChunkPos(pos);
 
         // Approach 1: getChunk(ChunkPos) returns ClaimedChunk or null
@@ -237,13 +241,7 @@ public final class ProtectionChecker {
             }
         } catch (Exception e) { RSIntegrationMod.LOGGER.debug("{} reflection probe failed", TAG, e); }
 
-        // Can't determine — default to not claimed (allow). This is a SILENT
-        // fail-open: if FTB renamed these methods, every claimed chunk becomes
-        // allowed. Log at warn so API drift is visible instead of silently
-        // disabling claim protection.
-        RSIntegrationMod.LOGGER.warn("{} FTB Chunks: all claim-detection probes failed "
-                + "(API may have changed) — treating chunk as UNCLAIMED (fail-open)", TAG);
-        return false;
+        return null;
     }
 
     // ── FTB Chunks: claim owner extraction ────────────────────────
@@ -420,32 +418,38 @@ public final class ProtectionChecker {
         try {
             Optional<Class<?>> chClass = Reflect.forName(
                     "earth.terrarium.cadmus.common.claims.ClaimHandler");
-            if (chClass.isEmpty()) return true;
+            if (chClass.isEmpty()) return resolveUnknown("Cadmus",
+                    "provider is loaded but ClaimHandler is unavailable");
 
             // Try static getClaim(ServerLevel, BlockPos) → ClaimInfo or null
             Object claimInfo = null;
+            boolean claimLookupSupported = false;
             try {
                 Method getClaim = Reflect.findMethod(
                         chClass.get(), "getClaim",
                         new Class<?>[]{ServerLevel.class, BlockPos.class});
                 if (getClaim != null) {
+                    claimLookupSupported = true;
                     claimInfo = getClaim.invoke(null, level, pos);
+                    if (claimInfo == null) return true;
                 }
             } catch (Exception e) { RSIntegrationMod.LOGGER.debug("{} reflection probe failed", TAG, e); }
 
-            if (claimInfo == null) {
+            if (claimInfo == null && !claimLookupSupported) {
                 try {
                     ChunkPos chunkPos = new ChunkPos(pos);
                     Method getClaim = Reflect.findMethod(
                             chClass.get(), "getClaim",
                             new Class<?>[]{ServerLevel.class, ChunkPos.class});
                     if (getClaim != null) {
+                        claimLookupSupported = true;
                         claimInfo = getClaim.invoke(null, level, chunkPos);
+                        if (claimInfo == null) return true;
                     }
                 } catch (Exception e) { RSIntegrationMod.LOGGER.debug("{} reflection probe failed", TAG, e); }
             }
 
-            if (claimInfo == null) {
+            if (claimInfo == null && !claimLookupSupported) {
                 // Try: isClaimed(ServerLevel, BlockPos)
                 try {
                     Method m = Reflect.findMethod(chClass.get(), "isClaimed",
@@ -458,10 +462,7 @@ public final class ProtectionChecker {
                         if (result instanceof Boolean) return false;
                     }
                 } catch (Exception e) { RSIntegrationMod.LOGGER.debug("{} reflection probe failed", TAG, e); }
-                // All Cadmus claim-detection probes failed — silent fail-open.
-                RSIntegrationMod.LOGGER.warn("{} Cadmus: all claim-detection probes failed "
-                        + "(API may have changed) — allowing interaction (fail-open)", TAG);
-                return true; // Can't determine claim — allow
+                return resolveUnknown("Cadmus", "claim lookup API is unavailable");
             }
 
             // Try to get claim owner and compare with player
@@ -483,13 +484,19 @@ public final class ProtectionChecker {
                 if (name.equals(player.getGameProfile().getName())) return true;
             }
 
-            // Can't determine owner — deny to be safe
-            // (Claim exists but we can't tell who owns it)
-            return false;
+            return resolveUnknown("Cadmus", "claimed chunk owner lookup failed");
 
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("{} Cadmus check error (fail-open)", TAG, e);
-            return true; // fail-open
+            RSIntegrationMod.LOGGER.warn("{} Cadmus check error; treating result as unknown", TAG, e);
+            return ProtectionFailurePolicy.allowUnknown();
         }
+    }
+
+    static boolean resolveUnknown(String provider, String detail) {
+        if (FAILURE_LOGS.allow(provider + ':' + detail)) {
+            RSIntegrationMod.LOGGER.warn("{} {} protection lookup failed ({}); allowing interaction because no explicit denial was returned",
+                    TAG, provider, detail);
+        }
+        return ProtectionFailurePolicy.allowUnknown();
     }
 }

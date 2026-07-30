@@ -110,8 +110,8 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
         this.player = player;
 
         if (!level.isLoaded(pos)) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Batch-TLM] Chunk unloaded at {} -- force-loading", pos);
-            level.getChunk(pos);
+            player.sendSystemMessage(Component.translatable("rsi.error.chunk_unloaded"));
+            return false;
         }
         BlockEntity be = level.getBlockEntity(pos);
         if (be == null || !TLMReflection.altarBEClass.isInstance(be)) {
@@ -185,6 +185,10 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
             List<BlockPos> allBlockPositions = Reflect.invokeExact(blockPosData, "getData",
                     new Class<?>[0]).map(l -> (List<BlockPos>) l).orElse(null);
             if (allBlockPositions != null && !allBlockPositions.isEmpty()) {
+                if (allBlockPositions.stream().anyMatch(bp -> !level.hasChunkAt(bp))) {
+                    player.sendSystemMessage(Component.translatable("rsi.error.chunk_unloaded"));
+                    return false;
+                }
                 int targetY = myPos.getY() - 2;
                 long sumX = 0, sumZ = 0;
                 int count = 0;
@@ -232,7 +236,10 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
 
         this.storageBlockEntities = new ArrayList<>();
         for (BlockPos p : storagePositions) {
-            ChunkUtils.loadChunk(level, p);
+            if (!level.hasChunkAt(p)) {
+                player.sendSystemMessage(Component.translatable("rsi.error.chunk_unloaded"));
+                return false;
+            }
             BlockEntity storageBe = level.getBlockEntity(p);
             if (storageBe != null && TLMReflection.altarBEClass.isInstance(storageBe)) {
                 storageBlockEntities.add(storageBe);
@@ -383,10 +390,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
                 }
                 ItemStack placed = templates.get(templateIdx).copy();
                 ItemStackHandler handler = rsi$tlmsGetHandler(storageBe);
-                if (!level.isLoaded(storagePositions.get(i))) {
-                    RSIntegrationMod.LOGGER.warn("[RSI-Batch-TLM] Storage chunk unloaded at {} — force-loading", storagePositions.get(i));
-                    ChunkUtils.loadChunk((ServerLevel) level, storagePositions.get(i));
-                }
+                if (!level.isLoaded(storagePositions.get(i))) return false;
                 handler.setStackInSlot(0, placed);
                 slotsFilled[i] = true;
                 ((BlockEntity) storageBe).setChanged();
@@ -463,10 +467,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
                     return false;
                 }
                 ItemStackHandler handler = rsi$tlmsGetHandler(storageBe);
-                if (!level.isLoaded(storagePositions.get(i))) {
-                    RSIntegrationMod.LOGGER.warn("[RSI-Batch-TLM] Storage chunk unloaded at {} — force-loading", storagePositions.get(i));
-                    ChunkUtils.loadChunk((ServerLevel) level, storagePositions.get(i));
-                }
+                if (!level.isLoaded(storagePositions.get(i))) return false;
                 handler.setStackInSlot(0, stack.copy());
                 slotsFilled[i] = true;
                 ((BlockEntity) storageBe).setChanged();
