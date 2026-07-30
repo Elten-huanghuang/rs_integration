@@ -4,7 +4,12 @@ import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.graph.MachineLeaseRegistry;
 import com.huanghuang.rsintegration.crafting.graph.NodeId;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry.BoundMachine;
+import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.core.BlockPos;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.resources.ResourceLocation;
 import org.junit.jupiter.api.Test;
 
@@ -12,10 +17,24 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-class AsyncCraftChainMachineDedupTest {
+class AsyncCraftChainMachineDedupTest extends BootstrapTest {
+
+    @Test
+    void taglessGraphAllocationUsesIngredientReservation() {
+        ItemStack plain = new ItemStack(Items.DIAMOND);
+        assertFalse(AsyncCraftChain.requiresExactGraphReservation(Ingredient.of(plain)));
+
+        ItemStack modified = plain.copy();
+        CompoundTag tag = new CompoundTag();
+        tag.putString("itemModifier", "celestial_forge:sluggish");
+        modified.setTag(tag);
+        assertTrue(AsyncCraftChain.requiresExactGraphReservation(Ingredient.of(modified)));
+    }
+
     @Test
     void exclusiveMultiExecutionNodeUsesOneSerialWorker() {
         assertTrue(AsyncCraftChain.shouldUseGraphOperationGroup(2, 4));
