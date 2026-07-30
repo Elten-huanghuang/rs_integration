@@ -10,6 +10,7 @@ import com.huanghuang.rsintegration.mods.jei.JeiMarqueeSelector;
 import com.huanghuang.rsintegration.mods.pmmo.client.PmmoSalvageAccess;
 import com.huanghuang.rsintegration.mods.pmmo.client.PmmoSalvageJeiBridge;
 import com.huanghuang.rsintegration.mods.pmmo.client.PmmoSalvageRecipeCategory;
+import com.huanghuang.rsintegration.mods.apotheosis.client.ApotheosisLibraryClientEvents;
 import com.huanghuang.rsintegration.mods.goety.GoetyRSModule;
 import com.huanghuang.rsintegration.mods.distantworlds.LithumAltarRecipeResolver;
 import com.huanghuang.rsintegration.mods.distantworlds.LithumAltarRecipeWrapper;
@@ -21,8 +22,11 @@ import mezz.jei.api.JeiPlugin;
 import mezz.jei.api.registration.IRecipeCategoryRegistration;
 import mezz.jei.api.registration.IRecipeRegistration;
 import mezz.jei.api.registration.IRecipeTransferRegistration;
+import mezz.jei.api.registration.IGuiHandlerRegistration;
+import mezz.jei.api.gui.handlers.IGuiContainerHandler;
 import mezz.jei.api.runtime.IJeiRuntime;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.world.inventory.MenuType;
 import net.minecraftforge.fml.ModList;
 import org.jetbrains.annotations.NotNull;
@@ -175,6 +179,30 @@ public final class RSJeiPlugin implements IModPlugin {
             RSIntegrationMod.LOGGER.debug("[RSI-JEI] Registered Eidolon worktable transfer handler");
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-JEI] Failed to register Eidolon worktable transfer", e);
+        }
+    }
+
+    @Override
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    public void registerGuiHandlers(IGuiHandlerRegistration registration) {
+        if (!ModList.get().isLoaded(ModIds.APOTHEOSIS)) return;
+        try {
+            Class<?> raw = Class.forName(
+                    "dev.shadowsoffire.apotheosis.ench.library.EnchLibraryScreen");
+            if (!AbstractContainerScreen.class.isAssignableFrom(raw)) return;
+            Class<? extends AbstractContainerScreen<?>> screenClass =
+                    (Class<? extends AbstractContainerScreen<?>>) raw;
+            registration.addGuiContainerHandler((Class) screenClass,
+                    new IGuiContainerHandler<AbstractContainerScreen<?>>() {
+                        @Override
+                        public java.util.List<net.minecraft.client.renderer.Rect2i> getGuiExtraAreas(
+                                AbstractContainerScreen<?> screen) {
+                            return ApotheosisLibraryClientEvents.getJeiExtraAreas(screen);
+                        }
+                    });
+        } catch (ReflectiveOperationException exception) {
+            RSIntegrationMod.LOGGER.warn(
+                    "[RSI-JEI] Failed to register Apotheosis library exclusion area", exception);
         }
     }
 
