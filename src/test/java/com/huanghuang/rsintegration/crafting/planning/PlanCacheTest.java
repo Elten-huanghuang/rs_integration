@@ -12,6 +12,7 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 
 class PlanCacheTest extends BootstrapTest {
     @Test
@@ -47,5 +48,23 @@ class PlanCacheTest extends BootstrapTest {
         cache.put(key, plan, snapshot, 100);
         cache.removePlayer(key.playerId());
         assertNull(cache.get(key, 100));
+    }
+
+    @Test
+    void retainsOptionalPurePlanForValidatedExecution() {
+        PlanCache cache = new PlanCache(100);
+        PlanCache.Key key = new PlanCache.Key(UUID.randomUUID(),
+                new ResourceLocation("test", "pure"), Map.of(), 1, "");
+        PlanResponse plan = new PlanResponse(true, "", ItemStack.EMPTY, java.util.List.of(),
+                Map.of(), java.util.List.of(), key.recipeId().toString());
+        PlanningSnapshot snapshot = new PlanningSnapshot(key.playerId(), 1, 1,
+                key.recipeId(), Map.of(), Map.of(), new ImmutableRecipeGraph(Map.of()),
+                "", "", false);
+        PureRecipePlanner.Result pure = new PureRecipePlanner.Result(
+                true, java.util.List.of(), java.util.List.of(), Map.of());
+
+        cache.put(key, plan, snapshot, pure, 1);
+
+        assertSame(pure, cache.get(key, 2).purePlan());
     }
 }
