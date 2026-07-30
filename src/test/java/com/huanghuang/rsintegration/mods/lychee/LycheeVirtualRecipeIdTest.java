@@ -27,6 +27,22 @@ class LycheeVirtualRecipeIdTest extends BootstrapTest {
     }
 
     @Test
+    void virtualConversionsAcceptStatefulDamageableItems() {
+        ItemStack recipeAxe = new ItemStack(Items.IRON_AXE);
+        recipeAxe.setTag(null);
+        Ingredient normalized = LycheeVirtualRecipeHandler.ignoringNbt(
+                Ingredient.of(recipeAxe));
+
+        ItemStack modifiedAxe = new ItemStack(Items.IRON_AXE);
+        CompoundTag tag = new CompoundTag();
+        tag.putInt("Damage", 17);
+        tag.putString("itemModifier", "celestial_forge:sluggish");
+        modifiedAxe.setTag(tag);
+
+        assertTrue(normalized.test(modifiedAxe));
+    }
+
+    @Test
     void acceptsOnlyReviewedPackRecipeIds() {
         assertTrue(LycheeVirtualRecipeHandler.isSupportedId(
                 new ResourceLocation("crafttweaker", "avaritia.diamond_lattice.1")));

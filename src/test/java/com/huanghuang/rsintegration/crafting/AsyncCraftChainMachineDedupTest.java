@@ -13,6 +13,7 @@ import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.resources.ResourceLocation;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -22,6 +23,42 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AsyncCraftChainMachineDedupTest extends BootstrapTest {
+
+    @Test
+    void nbtInsensitiveGraphMaterialCombinesDifferentVariants() {
+        ItemStack sluggish = modifiedAxe("celestial_forge:sluggish");
+        ItemStack other = modifiedAxe("celestial_forge:other");
+        List<ItemStack> pool = new ArrayList<>(List.of(sluggish, other));
+
+        ItemStack selected = AsyncCraftChain.takeMatching(
+                pool, Ingredient.of(new ItemStack(Items.IRON_AXE)), 2, false);
+
+        assertEquals(2, selected.getCount());
+        assertTrue(pool.get(0).isEmpty());
+        assertTrue(pool.get(1).isEmpty());
+    }
+
+    @Test
+    void exactGraphMaterialDoesNotCombineDifferentVariants() {
+        ItemStack sluggish = modifiedAxe("celestial_forge:sluggish");
+        ItemStack other = modifiedAxe("celestial_forge:other");
+        List<ItemStack> pool = new ArrayList<>(List.of(sluggish, other));
+
+        ItemStack selected = AsyncCraftChain.takeMatching(
+                pool, Ingredient.of(sluggish.copyWithCount(1)), 2, true);
+
+        assertTrue(selected.isEmpty());
+        assertEquals(1, pool.get(0).getCount());
+        assertEquals(1, pool.get(1).getCount());
+    }
+
+    private static ItemStack modifiedAxe(String modifier) {
+        ItemStack stack = new ItemStack(Items.IRON_AXE);
+        CompoundTag tag = new CompoundTag();
+        tag.putString("itemModifier", modifier);
+        stack.setTag(tag);
+        return stack;
+    }
 
     @Test
     void taglessGraphAllocationUsesIngredientReservation() {
