@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.compat.ftbquests.ExternalItemProgressBridge;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.mods.crockpot.CrockPotBatchDelegate;
 import com.huanghuang.rsintegration.util.InsertedStackDelta;
+import com.huanghuang.rsintegration.util.LogSampler;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
@@ -86,6 +87,8 @@ import java.util.function.Predicate;
  * null-guarded via {@link #resolvePlayer()}.</p>
  */
 public final class AsyncCraftChain {
+
+    private static final LogSampler GRAPH_RETRY_LOGS = new LogSampler(2_000L);
 
     public enum State {
         PENDING,        // Created, not yet started
@@ -1058,6 +1061,7 @@ public final class AsyncCraftChain {
                 nodeId, graphRequests.getOrDefault(nodeId, List.of()));
         NodeAdmissionCoordinator.Admission admission = graphAdmissions.tryAdmitClaimed(candidate);
         if (admission == null) {
+            logGraphRetry(nodeId, "material admission unavailable", candidate.materialRequests());
             prepared.delegate().releasePreparationResources();
             return ConcurrentNodeExecutor.StartResult.retry();
         }
@@ -1065,6 +1069,7 @@ public final class AsyncCraftChain {
         GraphDispatchResult dispatch = dispatchPreparedGraphNode(
                 nodeId, prepared, online, admission);
         if (dispatch.state() == DispatchState.RETRY) {
+            logGraphRetry(nodeId, dispatch.detail(), candidate.materialRequests());
             prepared.delegate().releasePreparationResources();
             graphAdmissions.releaseMaterial(admission);
             return ConcurrentNodeExecutor.StartResult.retry();
@@ -1078,6 +1083,16 @@ public final class AsyncCraftChain {
             return ConcurrentNodeExecutor.StartResult.failed();
         }
         return ConcurrentNodeExecutor.StartResult.started(dispatch.worker());
+    }
+
+    private void logGraphRetry(NodeId nodeId, String detail,
+                               List<MaterialBroker.Request> requests) {
+        String key = craftId + ":" + nodeId + ":" + detail;
+        if (GRAPH_RETRY_LOGS.allow(key)) {
+            RSIntegrationMod.LOGGER.warn(ctx.format(
+                    "[RSI-GraphRetry] node={} detail={} requests={}"),
+                    nodeId, detail, requests);
+        }
     }
 
     private PreparationResult prepareGraphNode(NodeId nodeId,
@@ -1748,6 +1763,7 @@ public final class AsyncCraftChain {
                 materials.add(ItemStack.EMPTY);
                 continue;
             }
+            boolean exactReservation = requiresExactGraphReservation(spec.ingredient());
             int remaining = spec.count();
             ItemStack combined = ItemStack.EMPTY;
             for (ItemStack produced : producerPool) {
@@ -1756,7 +1772,7 @@ public final class AsyncCraftChain {
                 int take = Math.min(remaining, produced.getCount());
                 if (combined.isEmpty()) {
                     combined = produced.copyWithCount(take);
-                } else if (ItemStack.isSameItemSameTags(combined, produced)) {
+                } else if (!exactReservation || ItemStack.isSameItemSameTags(combined, produced)) {
                     combined.grow(take);
                 } else {
                     return null;
@@ -1765,22 +1781,31 @@ public final class AsyncCraftChain {
                 remaining -= take;
             }
             if (remaining > 0) {
-                ItemStack planned = takeExactMatching(initialPool, spec.ingredient(), remaining);
+                ItemStack planned = takeMatching(
+                        initialPool, spec.ingredient(), remaining, exactReservation);
                 if (planned.isEmpty() || planned.getCount() != remaining) return null;
                 int reservationMark = ledger.reservationMark();
                 // A tagless graph allocation represents an NBT-insensitive demand, not a
                 // requirement for a physically tagless stack. Reserve through the original
                 // ingredient so stateful variants (damage, affixes, item modifiers, etc.)
                 // remain eligible and the ledger captures the exact stack it selected.
-                ItemStack initial = requiresExactGraphReservation(spec.ingredient())
-                        ? ledger.reserveExactAcrossNetworkAndInventory(
-                                planned, remaining, network, online)
-                        : ledger.reserve(spec.ingredient(), remaining, network, online,
-                                null, null);
-                if (initial.isEmpty()) return null;
+                ItemStack initial;
+                if (exactReservation) {
+                    initial = ledger.reserveExactAcrossNetworkAndInventory(
+                            planned, remaining, network, online);
+                    if (initial.isEmpty()) return null;
+                } else {
+                    int reserved = ledger.reserveUpToFromMainInventoryThenNetwork(
+                            spec.ingredient(), remaining, online, network);
+                    if (reserved != remaining) {
+                        ledger.cancelReservationsSince(reservationMark);
+                        return null;
+                    }
+                    initial = planned.copyWithCount(remaining);
+                }
                 if (combined.isEmpty()) {
                     combined = initial.copyWithCount(remaining);
-                } else if (ItemStack.isSameItemSameTags(combined, initial)) {
+                } else if (!exactReservation || ItemStack.isSameItemSameTags(combined, initial)) {
                     combined.grow(remaining);
                 } else {
                     ledger.cancelReservationsSince(reservationMark);
@@ -1803,15 +1828,15 @@ public final class AsyncCraftChain {
         return false;
     }
 
-    private static ItemStack takeExactMatching(
-            List<ItemStack> pool, Ingredient ingredient, int count) {
+    static ItemStack takeMatching(
+            List<ItemStack> pool, Ingredient ingredient, int count, boolean exactNbt) {
         ItemStack selected = ItemStack.EMPTY;
         int available = 0;
         for (ItemStack stack : pool) {
             if (stack.isEmpty() || !IngredientMatcher.test(ingredient, stack)) continue;
             if (selected.isEmpty()) {
                 selected = stack.copyWithCount(1);
-            } else if (!ItemStack.isSameItemSameTags(selected, stack)) {
+            } else if (exactNbt && !ItemStack.isSameItemSameTags(selected, stack)) {
                 continue;
             }
             available += stack.getCount();
@@ -1822,7 +1847,8 @@ public final class AsyncCraftChain {
         int remaining = count;
         for (ItemStack stack : pool) {
             if (remaining <= 0) break;
-            if (stack.isEmpty() || !ItemStack.isSameItemSameTags(selected, stack)) continue;
+            if (stack.isEmpty() || !IngredientMatcher.test(ingredient, stack)) continue;
+            if (exactNbt && !ItemStack.isSameItemSameTags(selected, stack)) continue;
             int take = Math.min(remaining, stack.getCount());
             stack.shrink(take);
             remaining -= take;
