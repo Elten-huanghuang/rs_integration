@@ -971,6 +971,29 @@ public final class GenericCraftPacket {
         // CraftingRecipe (the typed resolver works with shaped/shapeless ingredients).
         if (recipe instanceof CraftingRecipe cr2
                 && RSIntegrationConfig.ENABLE_AUTO_CRAFTING.get()) {
+            PlanCache.Key executionCacheKey = new PlanCache.Key(player.getUUID(), recipeId,
+                    forcedRecipes, repeatCount, clickedOutputCacheToken(targetOutput));
+            PlanCache.Entry cachedExecutionPlan = PLAN_CACHE.get(executionCacheKey, System.nanoTime());
+            net.minecraft.resources.ResourceKey<net.minecraft.world.level.Level> executionDimKey =
+                    effectiveDim != null
+                            ? net.minecraft.resources.ResourceKey.create(
+                            net.minecraft.core.registries.Registries.DIMENSION, effectiveDim)
+                            : player.serverLevel().dimension();
+            net.minecraft.core.BlockPos executionLookupPos = effectivePos != null
+                    ? effectivePos : player.blockPosition();
+            if (cachedExecutionPlan != null && cachedExecutionPlan.plan().success()
+                    && canUsePrecomputedPlan(cachedExecutionPlan.purePlan())
+                    && PlanningStateValidator.revalidateForExecution(player,
+                    cachedExecutionPlan.snapshot(), executionDimKey, executionLookupPos)) {
+                List<ResolutionStep> cachedSteps = new ArrayList<>(PurePlanAdapter.toResolutionSteps(
+                        cachedExecutionPlan.purePlan(), cachedExecutionPlan.snapshot().recipeGraph()));
+                cachedSteps.add(genericTerminalStep(recipeId, repeatCount));
+                RSIntegrationMod.debug("[RSI-Generic] Executing revalidated pure preview plan for {}",
+                        recipeId);
+                executeSyncLoop(player, cachedSteps, network, recipeId, repeatCount,
+                        "Intermediate crafting failed");
+                return;
+            }
             Map<StackKey, Integer> avail = MaterialSources.listAllAvailable(player, network);
             List<String> missingCheck = new ArrayList<>();
             List<IngredientSpec> scaledSpecs = new ArrayList<>();
@@ -2649,7 +2672,9 @@ public final class GenericCraftPacket {
                                 recipeId);
                         return;
                     }
-                    PLAN_CACHE.put(cacheKey, plan, planningSnapshot, System.nanoTime());
+                    PLAN_CACHE.put(cacheKey, plan, planningSnapshot,
+                            canUsePrecomputedPlan(precomputedPlan) ? precomputedPlan : null,
+                            System.nanoTime());
                     RSIntegrationMod.debug("[RSI-tryBuildPlan] SENDING PlanResponsePacket: recipeId={} steps={} graphNodes={} feasible={} player={}",
                             recipeId, responseStepCount, responseGraphNodes,
                             responseFeasible, player.getGameProfile().getName());

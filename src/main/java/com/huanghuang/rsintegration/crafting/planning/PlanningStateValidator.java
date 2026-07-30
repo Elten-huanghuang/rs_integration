@@ -34,6 +34,19 @@ public final class PlanningStateValidator {
                 && snapshot.bindingFingerprint().equals(bindingFingerprint(player, dimension, lookupPos));
     }
 
+    /** Revalidates a preview snapshot for execution without tying it to a preview request generation. */
+    public static boolean revalidateForExecution(ServerPlayer player, PlanningSnapshot snapshot,
+                                                 ResourceKey<Level> dimension, BlockPos lookupPos) {
+        if (player.hasDisconnected() || player.isRemoved()
+                || !CraftPlanningRevision.isCurrent(snapshot.recipeRevision())) {
+            return false;
+        }
+        INetwork currentNetwork = CraftPacketUtils.resolveNetworkForCraft(player, dimension, lookupPos);
+        Map<StackKey, Integer> currentAvailable = MaterialSources.listAllAvailable(player, currentNetwork);
+        return snapshot.networkFingerprint().equals(networkFingerprint(currentNetwork, currentAvailable))
+                && snapshot.bindingFingerprint().equals(bindingFingerprint(player, dimension, lookupPos));
+    }
+
     public static boolean sameState(PlanningSnapshot left, PlanningSnapshot right) {
         return left.recipeRevision() == right.recipeRevision()
                 && left.recipeId().equals(right.recipeId())

@@ -85,6 +85,32 @@ class PureRecipePlannerTest {
     }
 
     @Test
+    void quartzConversionsBacktrackInsteadOfReportingChiseledQuartzMissing() {
+        MaterialRef quartz = material("quartz_block");
+        MaterialRef slab = material("quartz_slab");
+        MaterialRef chiseled = material("chiseled_quartz_block");
+        MaterialRef stairs = material("quartz_stairs");
+
+        ImmutableRecipeGraph graph = new ImmutableRecipeGraph(Map.of(
+                slab, List.of(
+                        recipe("slabs_from_chiseled", slab, 2, ingredient(chiseled, 1)),
+                        recipe("slabs_from_quartz", slab, 2, ingredient(quartz, 1))),
+                chiseled, List.of(recipe("chiseled_from_slabs", chiseled, 1,
+                        ingredient(slab, 2))),
+                stairs, List.of(recipe("stairs_from_chiseled", stairs, 4,
+                        ingredient(chiseled, 6)))));
+
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(graph, Map.of(quartz, 8),
+                List.of(ingredient(slab, 1), ingredient(stairs, 2), ingredient(chiseled, 1)), 20);
+
+        assertTrue(result.feasible());
+        assertEquals(PureRecipePlanner.Status.SUCCESS, result.status());
+        assertTrue(result.backtracks() > 0);
+        assertTrue(result.steps().stream().anyMatch(step ->
+                step.recipeId().equals(id("slabs_from_quartz"))));
+    }
+
+    @Test
     void searchBudgetProducesExplicitNonSuccessStatus() {
         MaterialRef target = material("target");
         RecipeNode impossibleA = recipe("impossible_a", target, 1, ingredient(LOG, 1));

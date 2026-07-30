@@ -50,7 +50,12 @@ public final class PlanCache {
     }
 
     public void put(Key key, PlanResponse plan, PlanningSnapshot snapshot, long now) {
-        entries.put(key, new Entry(plan, snapshot, now));
+        put(key, plan, snapshot, null, now);
+    }
+
+    public void put(Key key, PlanResponse plan, PlanningSnapshot snapshot,
+                    PureRecipePlanner.Result purePlan, long now) {
+        entries.put(key, new Entry(plan, snapshot, purePlan, now));
         prune(now);
     }
 
@@ -103,5 +108,6 @@ public final class PlanCache {
         }
     }
 
-    public record Entry(PlanResponse plan, PlanningSnapshot snapshot, long createdNanos) {}
+    public record Entry(PlanResponse plan, PlanningSnapshot snapshot,
+                        PureRecipePlanner.Result purePlan, long createdNanos) {}
 }
