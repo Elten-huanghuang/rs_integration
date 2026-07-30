@@ -33,6 +33,7 @@ import org.jetbrains.annotations.NotNull;
 import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.BiFunction;
 
 /**
  * A dynamic pool of physical machines executing one recipe operation at a time.
@@ -65,6 +66,8 @@ public final class ParallelCraftGroup implements IBatchDelegate {
     private List<List<ItemStack>> producerDebits = List.of();
     private List<ExtractionLedger.ReservationToken> reservationTokens = List.of();
     private List<IngredientSpec> baseSpecs;
+    private List<IngredientSpec> graphSpecs = List.of();
+    private List<IngredientSpec> supplementalSpecs = List.of();
     private ItemStack targetOutput;
     private OperationBudget craftOperationBudget;
     private OperationBudget globalOperationBudget;
@@ -147,7 +150,7 @@ public final class ParallelCraftGroup implements IBatchDelegate {
             workers.add(new WorkerSlot(workerId++, machine, preparation.delegate()));
             if (representativePos.equals(BlockPos.ZERO)) representativePos = machine.pos();
         }
-        if (!workers.isEmpty()) baseSpecs = workers.get(0).delegate.getRequiredMaterials();
+        refreshMaterialSpecs();
         RSIntegrationMod.debug("[RSI-ParallelGroup] Created {}/{} workers for {} operations of {}",
                 workers.size(), machines.size(), totalOperations, recipeId);
     }
@@ -169,7 +172,51 @@ public final class ParallelCraftGroup implements IBatchDelegate {
 
     @Nullable
     public List<IngredientSpec> getOperationMaterials() {
-        return baseSpecs == null ? null : List.copyOf(baseSpecs);
+        return graphSpecs.isEmpty() ? null : List.copyOf(graphSpecs);
+    }
+
+    @Override
+    public List<IngredientSpec> getSupplementalSpecs() {
+        return repeatSpecs(supplementalSpecs, operations.totalOperations());
+    }
+
+    @Override
+    public List<ItemStack> mergeSupplementalMaterials(
+            List<ItemStack> graphMaterials, List<ItemStack> supplementalMaterials) {
+        if (supplementalMaterials.isEmpty()) return graphMaterials;
+        if (workers.isEmpty()) return List.of();
+        IBatchDelegate child = workers.get(0).delegate;
+        return mergeOperationSlices(graphMaterials, supplementalMaterials,
+                operations.totalOperations(), graphSpecs.size(), supplementalSpecs.size(),
+                child::mergeSupplementalMaterials);
+    }
+
+    static List<IngredientSpec> repeatSpecs(List<IngredientSpec> specs, int operationCount) {
+        if (specs.isEmpty() || operationCount <= 0) return List.of();
+        List<IngredientSpec> all = new ArrayList<>(specs.size() * operationCount);
+        for (int i = 0; i < operationCount; i++) all.addAll(specs);
+        return List.copyOf(all);
+    }
+
+    static List<ItemStack> mergeOperationSlices(
+            List<ItemStack> graphMaterials, List<ItemStack> supplementalMaterials,
+            int operationCount, int graphPerOperation, int supplementalPerOperation,
+            BiFunction<List<ItemStack>, List<ItemStack>, List<ItemStack>> merger) {
+        if (graphMaterials.size() != graphPerOperation * operationCount
+                || supplementalMaterials.size() != supplementalPerOperation * operationCount) {
+            throw new IllegalArgumentException("parallel material slices do not match operation specs");
+        }
+        List<ItemStack> merged = new ArrayList<>();
+        for (int operation = 0; operation < operationCount; operation++) {
+            int graphStart = operation * graphPerOperation;
+            int supplementalStart = operation * supplementalPerOperation;
+            merged.addAll(merger.apply(
+                    List.copyOf(graphMaterials.subList(
+                            graphStart, graphStart + graphPerOperation)),
+                    List.copyOf(supplementalMaterials.subList(
+                            supplementalStart, supplementalStart + supplementalPerOperation))));
+        }
+        return List.copyOf(merged);
     }
 
     public List<IBatchDelegate.MaterialReservationScope> getMaterialReservationScopes() {
@@ -609,7 +656,21 @@ public final class ParallelCraftGroup implements IBatchDelegate {
     public void setTargetOutput(@Nullable ItemStack targetOutput) {
         this.targetOutput = targetOutput == null || targetOutput.isEmpty() ? null : targetOutput.copy();
         for (WorkerSlot worker : workers) configureDelegate(worker.delegate, worker.machine);
-        if (!workers.isEmpty()) baseSpecs = workers.get(0).delegate.getRequiredMaterials();
+        refreshMaterialSpecs();
+    }
+
+    private void refreshMaterialSpecs() {
+        if (workers.isEmpty()) {
+            baseSpecs = null;
+            graphSpecs = List.of();
+            supplementalSpecs = List.of();
+            return;
+        }
+        IBatchDelegate child = workers.get(0).delegate;
+        List<IngredientSpec> required = child.getRequiredMaterials();
+        baseSpecs = required == null ? null : List.copyOf(required);
+        graphSpecs = List.copyOf(child.getGraphSpecs());
+        supplementalSpecs = List.copyOf(child.getSupplementalSpecs());
     }
 
     private ChildPreparation prepareChildDelegate(BoundMachine machine, ServerPlayer player) {

@@ -16,6 +16,7 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
+import net.minecraft.client.renderer.Rect2i;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
@@ -90,6 +91,12 @@ public final class ApotheosisLibraryImportScreen {
 
     public boolean owns(AbstractContainerScreen<?> screen) {
         return owner == screen && Minecraft.getInstance().screen == owner;
+    }
+
+    public Optional<Rect2i> jeiExtraArea(AbstractContainerScreen<?> screen) {
+        if (!open || !owns(screen)) return Optional.empty();
+        updateBounds();
+        return Optional.of(new Rect2i(panelLeft, panelTop, PANEL_W, PANEL_H));
     }
 
     public void acceptScan(ApotheosisLibraryScanResponsePacket packet) {

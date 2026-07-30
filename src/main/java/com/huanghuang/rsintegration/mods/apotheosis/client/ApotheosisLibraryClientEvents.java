@@ -14,12 +14,15 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.AbstractButton;
 import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
+import net.minecraft.client.renderer.Rect2i;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.enchantment.Enchantment;
 import net.minecraftforge.client.event.ScreenEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.registries.ForgeRegistries;
+
+import java.util.List;
 
 /** Adds compact controls and an attached import panel to Apotheosis' library screen. */
 public final class ApotheosisLibraryClientEvents {
@@ -97,6 +100,11 @@ public final class ApotheosisLibraryClientEvents {
 
     public static void acceptImportResult(ApotheosisLibraryImportResultPacket packet) {
         if (panel != null) panel.acceptImportResult(packet);
+    }
+
+    public static List<Rect2i> getJeiExtraAreas(AbstractContainerScreen<?> screen) {
+        if (panel == null) return List.of();
+        return panel.jeiExtraArea(screen).map(List::of).orElseGet(List::of);
     }
 
     private static LibraryButton levelButton(AbstractContainerScreen<?> screen, int row,
