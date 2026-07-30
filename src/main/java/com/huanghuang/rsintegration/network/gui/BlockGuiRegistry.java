@@ -54,13 +54,12 @@ public final class BlockGuiRegistry {
             RSIntegrationMod.LOGGER.warn("[RSI-MachineGUI] openGui failed: dimension not found {}", dim);
             return false;
         }
-        // Try to force-load the chunk first — getBlockState needs the chunk
+        // Remote requests may keep an active machine loaded after opening, but
+        // must never revive an unloaded target chunk.
         if (!level.hasChunkAt(pos)) {
-            ChunkUtils.loadChunk(level, pos);
-            if (!level.hasChunkAt(pos)) {
-                RSIntegrationMod.LOGGER.warn("[RSI-MachineGUI] openGui failed: chunk not loaded at {} dim={}", pos, dim);
-                return false;
-            }
+            RSIntegrationMod.LOGGER.warn("[RSI-MachineGUI] openGui denied: chunk not loaded at {} dim={}", pos, dim);
+            player.sendSystemMessage(net.minecraft.network.chat.Component.translatable("rsi.error.chunk_unloaded"));
+            return false;
         }
         var blockState = level.getBlockState(pos);
         String blockId = ForgeRegistries.BLOCKS.getKey(blockState.getBlock()).toString();

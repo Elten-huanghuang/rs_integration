@@ -29,18 +29,26 @@ public final class AsyncPurePlanningService {
     public void submit(PlanningSnapshot snapshot, Executor serverExecutor, int maxSteps,
                        int maxSearchStates, int maxMemoizedFailures,
                        Consumer<CompletedPlan> commit, Consumer<Throwable> rollback) {
+        submit(snapshot, 1, serverExecutor, maxSteps, maxSearchStates,
+                maxMemoizedFailures, commit, rollback);
+    }
+
+    public void submit(PlanningSnapshot snapshot, int repeatCount, Executor serverExecutor,
+                       int maxSteps, int maxSearchStates, int maxMemoizedFailures,
+                       Consumer<CompletedPlan> commit, Consumer<Throwable> rollback) {
         if (snapshot.mainThreadOnly()) {
             serverExecutor.execute(() -> rollback.accept(
                     new PlanningThreadContext.MainThreadPlanningFallbackException("special recipe planning")));
             return;
         }
-        coordinator.submit(snapshot, ignored -> compute(snapshot, maxSteps, maxSearchStates,
-                        maxMemoizedFailures), serverExecutor,
+        coordinator.submit(snapshot, ignored -> compute(snapshot, repeatCount, maxSteps,
+                        maxSearchStates, maxMemoizedFailures), serverExecutor,
                 current -> current.recipeRevision() == snapshot.recipeRevision(),
                 result -> commit.accept(new CompletedPlan(snapshot, result)), rollback);
     }
 
-    private static PureRecipePlanner.Result compute(PlanningSnapshot snapshot, int maxSteps,
+    private static PureRecipePlanner.Result compute(PlanningSnapshot snapshot, int repeatCount,
+                                                     int maxSteps,
                                                      int maxSearchStates, int maxMemoizedFailures) {
         PlanningThreadContext.throwIfCancelled();
         RecipeNode target = snapshot.recipeGraph().recipesById().get(snapshot.recipeId());
@@ -49,8 +57,13 @@ public final class AsyncPurePlanningService {
         }
         Map<ImmutableRecipeGraph.MaterialRef, Integer> stock =
                 ImmutableRecipeGraphProjector.projectAvailability(snapshot.availableItems());
+        List<IngredientRef> roots = target.inputs().stream()
+                .map(root -> new IngredientRef(root.alternatives(),
+                        Math.toIntExact(Math.min(Integer.MAX_VALUE,
+                                (long) root.count() * Math.max(1, repeatCount)))))
+                .toList();
         PureRecipePlanner.Result result = PureRecipePlanner.resolve(
-                snapshot.recipeGraph(), stock, target.inputs(), maxSteps,
+                snapshot.recipeGraph(), stock, roots, maxSteps,
                 maxSearchStates, maxMemoizedFailures);
         com.huanghuang.rsintegration.command.PerformanceMonitor.recordPurePlanningSearch(result);
         return result;

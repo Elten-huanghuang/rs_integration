@@ -38,7 +38,7 @@ public final class TlmAltarStructure {
             for (BlockPos pos : positions) {
                 minX = Math.min(minX, pos.getX()); minY = Math.min(minY, pos.getY()); minZ = Math.min(minZ, pos.getZ());
                 maxX = Math.max(maxX, pos.getX()); maxY = Math.max(maxY, pos.getY()); maxZ = Math.max(maxZ, pos.getZ());
-                if (!level.isLoaded(pos)) level.getChunk(pos);
+                if (!level.hasChunkAt(pos)) continue;
                 BlockEntity candidate = level.getBlockEntity(pos);
                 if (candidate == null || !TLMReflection.altarBEClass.isInstance(candidate)) continue;
                 Object value = Reflect.getMethodOrThrow(TLMReflection.altarBEClass,

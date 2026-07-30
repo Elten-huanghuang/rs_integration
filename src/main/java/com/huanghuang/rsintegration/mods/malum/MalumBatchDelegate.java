@@ -80,8 +80,8 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
         this.player = player;
 
         if (!level.isLoaded(pos)) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Batch-Malum] Chunk unloaded at {} — force-loading", pos);
-            level.getChunk(pos);
+            player.sendSystemMessage(Component.translatable("rsi.error.chunk_unloaded"));
+            return false;
         }
         BlockEntity be = level.getBlockEntity(pos);
         if (be == null || !MalumReflection.spiritAltarBEClass.isInstance(be)) {

@@ -119,7 +119,7 @@ public final class CraftingTableBatchDelegate extends AbstractBatchDelegate {
     @Override
     public boolean tryStartWithMaterials(ServerPlayer player, List<ItemStack> materials,
                                          ExtractionLedger sharedLedger) {
-        myLevel.getChunk(myPos);
+        if (!myLevel.hasChunkAt(myPos)) return false;
 
         BlockEntity be = myLevel.getBlockEntity(myPos);
         if (be == null) return false;

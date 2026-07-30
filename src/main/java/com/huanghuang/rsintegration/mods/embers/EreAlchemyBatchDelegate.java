@@ -68,17 +68,9 @@ extends AbstractBatchDelegate {
         this.level = lvl;
         this.machinePos = pos;
         this.player = player;
-        if (!lvl.isLoaded(pos)) {
-            lvl.getChunk(pos);
-        }
-        int minCX = pos.getX() - 3 >> 4;
-        int maxCX = pos.getX() + 3 >> 4;
-        int minCZ = pos.getZ() - 3 >> 4;
-        int maxCZ = pos.getZ() + 3 >> 4;
-        for (int cx = minCX; cx <= maxCX; ++cx) {
-            for (int cz = minCZ; cz <= maxCZ; ++cz) {
-                lvl.getChunk(cx, cz);
-            }
+        if (!ChunkUtils.isAreaLoaded(lvl, pos, 3)) {
+            player.sendSystemMessage(Component.translatable("rsi.error.chunk_unloaded"));
+            return false;
         }
         BlockEntity be = lvl.getBlockEntity(pos);
         if (be == null || !EmbersReflection.alchemyTabletBEClass.isInstance(be)) {
@@ -234,10 +226,7 @@ extends AbstractBatchDelegate {
             for (int i = 0; i < this.code.size(); ++i) {
                 PedestalInfo pi = this.pedestals.get(i);
                 BlockPos bottomPos = pi.pos().below();
-                if (!this.level.isLoaded(bottomPos)) {
-                    RSIntegrationMod.LOGGER.warn("[RSI-Embers] Bottom pedestal chunk unloaded at {} \u2014 force-loading", (Object)bottomPos);
-                    ChunkUtils.loadChunk((ServerLevel) this.level, bottomPos);
-                }
+                if (!this.level.isLoaded(bottomPos)) return false;
                 BlockEntity bottomBE = this.level.getBlockEntity(bottomPos);
                 if (bottomBE != null && EmbersReflection.alchemyPedestalBEClass.isInstance(bottomBE)) {
                     Object bottomInv = Reflect.getField((Object)bottomBE, "inventory").orElse(null);
@@ -340,7 +329,7 @@ extends AbstractBatchDelegate {
 
         // Fallback: result may be in the IBin below the tablet
         BlockPos below = this.machinePos.below();
-        ChunkUtils.loadChunk((ServerLevel)this.level, (BlockPos)below);
+        if (!this.level.isLoaded(below)) return ItemStack.EMPTY;
         BlockEntity be = this.level.getBlockEntity(below);
         RSIntegrationMod.LOGGER.debug("[RSI-Embers] collectResult: IBin below check — EmbersReflection.ibinClass={} be={} isInstance={}",
                 (Object)(EmbersReflection.ibinClass != null), (Object)(be != null),
@@ -389,17 +378,9 @@ extends AbstractBatchDelegate {
         }
         ServerLevel lvl = CraftPacketUtils.resolveLevel((MinecraftServer)player.server, (ResourceLocation)dim, (ServerPlayer)player);
         if (lvl != null) {
-            if (!lvl.isLoaded(pos)) {
-                lvl.getChunk(pos);
-            }
-            int minCX = pos.getX() - 3 >> 4;
-            int maxCX = pos.getX() + 3 >> 4;
-            int minCZ = pos.getZ() - 3 >> 4;
-            int maxCZ = pos.getZ() + 3 >> 4;
-            for (int cx = minCX; cx <= maxCX; ++cx) {
-                for (int cz = minCZ; cz <= maxCZ; ++cz) {
-                    lvl.getChunk(cx, cz);
-                }
+            if (!ChunkUtils.isAreaLoaded(lvl, pos, 3)) {
+                warnings.add(Component.translatable("rsi.error.chunk_unloaded"));
+                return warnings;
             }
             BlockEntity be = lvl.getBlockEntity(pos);
             if (EmbersReflection.alchemyTabletBEClass == null || be == null || !EmbersReflection.alchemyTabletBEClass.isInstance(be)) {

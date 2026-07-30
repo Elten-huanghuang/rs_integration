@@ -152,7 +152,7 @@ public final class CuisineBoardBatchDelegate extends AbstractBatchDelegate {
         this.resultItem = ItemStack.EMPTY;
 
         forceChunkLoad(true);
-        myLevel.getChunk(myPos);
+        if (!myLevel.hasChunkAt(myPos)) return false;
 
         BlockEntity be = myLevel.getBlockEntity(myPos);
         if (be == null || !isCuisineBE(be)) {
@@ -605,7 +605,7 @@ public final class CuisineBoardBatchDelegate extends AbstractBatchDelegate {
     // -- cleanup --
 
     private void clearAndRefund() {
-        myLevel.getChunk(myPos);
+        if (!myLevel.hasChunkAt(myPos)) return;
         BlockEntity be = myLevel.getBlockEntity(myPos);
         if (be == null || !isCuisineBE(be)) return;
 

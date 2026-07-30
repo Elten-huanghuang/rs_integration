@@ -134,7 +134,7 @@ public final class CrabTrapBatchDelegate extends AbstractBatchDelegate {
 
         if (materials.isEmpty() || wrapper == null) return false;
 
-        myLevel.getChunk(myPos);
+        if (!myLevel.hasChunkAt(myPos)) return false;
 
         BlockEntity be = myLevel.getBlockEntity(myPos);
         if (be == null || !CrabbersDelightReflection.crabTrapBEClass.isInstance(be)) {
@@ -253,7 +253,7 @@ public final class CrabTrapBatchDelegate extends AbstractBatchDelegate {
     }
 
     private void clearMachineSlotsAndRefund() {
-        myLevel.getChunk(myPos);
+        if (!myLevel.hasChunkAt(myPos)) return;
         BlockEntity be = myLevel.getBlockEntity(myPos);
         if (be == null) return;
         if (!CrabbersDelightReflection.crabTrapBEClass.isInstance(be)) return;

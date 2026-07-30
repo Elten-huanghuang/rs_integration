@@ -176,7 +176,7 @@ public final class FermentationTankBatchDelegate extends AbstractBatchDelegate {
         this.craftDone = false;
 
         forceChunkLoad(true);
-        myLevel.getChunk(myPos);
+        if (!myLevel.hasChunkAt(myPos)) return false;
 
         BlockEntity be = myLevel.getBlockEntity(myPos);
         if (be == null || !isFermentationBE(be)) {
@@ -1044,7 +1044,7 @@ public final class FermentationTankBatchDelegate extends AbstractBatchDelegate {
     // -- cleanup --
 
     private void clearAndRefund() {
-        myLevel.getChunk(myPos);
+        if (!myLevel.hasChunkAt(myPos)) return;
         BlockEntity be = myLevel.getBlockEntity(myPos);
         if (be == null || !isFermentationBE(be)) return;
 

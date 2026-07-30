@@ -15,15 +15,15 @@ import net.minecraftforge.network.simple.SimpleChannel;
  *
  * <p>Protocol version is strictly enforced — a remote running a different
  * rs_integration protocol is rejected at connection time (with a clear error)
- * instead of silently connecting with a mismatched packet-id table. A remote
- * without the mod at all is still allowed to connect (the mod is simply inert
- * there). Bump {@link #PROTOCOL_VERSION} whenever any packet's wire format, or
- * the set/ids of registered packets, changes.</p>
+ * instead of silently connecting with a mismatched packet-id table. When both
+ * sides expose this channel, their versions must match exactly. Bump
+ * {@link #PROTOCOL_VERSION} whenever any packet's wire format, or the set/ids
+ * of registered packets, changes.</p>
  */
 public final class NetworkHandler {
 
     /** Bump this whenever packet serialization or the registered packet set changes. */
-    private static final String PROTOCOL_VERSION = "25";
+    private static final String PROTOCOL_VERSION = "27";
 
     public static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
             new ResourceLocation(RSIntegrationMod.MOD_ID, "main"),

@@ -128,7 +128,7 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
         this.usingSharedLedger = true;
         this.craftDone = false;
 
-        myLevel.getChunk(myPos);
+        if (!myLevel.hasChunkAt(myPos)) return false;
 
         BlockEntity be = myLevel.getBlockEntity(myPos);
         if (be == null) {
@@ -321,7 +321,7 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
     }
 
     private void clearMachineSlotsAndRefund() {
-        myLevel.getChunk(myPos);
+        if (!myLevel.hasChunkAt(myPos)) return;
         BlockEntity be = myLevel.getBlockEntity(myPos);
         if (be == null) return;
         if (!ImmersalsDelightReflection.enchantalCoolerBEClass.isInstance(be)) return;

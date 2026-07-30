@@ -117,7 +117,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
         this.myPos = pos;
         this.player = player;
 
-        ChunkUtils.loadChunk(level, pos);
+        if (!level.hasChunkAt(pos)) return false;
         BlockEntity be = level.getBlockEntity(pos);
         var blockState = level.getBlockState(pos);
 

@@ -94,4 +94,6 @@ public final class NetworkPacketIds {
     public static final int VILLAGER_RESTOCK_RESULT = 121;
     public static final int REFORGING_RESTOCK_REQUEST = 122;
     public static final int REFORGING_RESTOCK_RESULT = 123;
+    public static final int ANVIL_MEMORY_REQUEST = 124;
+    public static final int ANVIL_MEMORY_SYNC = 125;
 }

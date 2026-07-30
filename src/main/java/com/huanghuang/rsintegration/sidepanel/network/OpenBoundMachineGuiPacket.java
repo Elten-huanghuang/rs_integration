@@ -172,6 +172,10 @@ public final class OpenBoundMachineGuiPacket {
                 player.sendSystemMessage(Component.translatable("rsi.error.dim_not_loaded"));
                 return;
             }
+            if (!level.hasChunkAt(packet.pos)) {
+                player.sendSystemMessage(Component.translatable("rsi.error.chunk_unloaded"));
+                return;
+            }
             if (!ProtectionChecker.canInteract(player, level, packet.pos)) {
                 player.sendSystemMessage(Component.translatable("rsi.error.protected_block"));
                 return;
@@ -180,7 +184,6 @@ public final class OpenBoundMachineGuiPacket {
             boolean isStonecutter = false;
             boolean isSmithing = false;
             if (level != null) {
-                ChunkUtils.loadChunk(level, packet.pos);
                 ResourceLocation currentBlock = ForgeRegistries.BLOCKS.getKey(
                         level.getBlockState(packet.pos).getBlock());
                 if (ApotheosisLibraryBinding.isLibrary(bindingEntry.blockRegKey())
@@ -256,7 +259,10 @@ public final class OpenBoundMachineGuiPacket {
                                         BlockPos pos, ResourceLocation recipeId) {
         var levelOpt = player.server.getLevel(dimKey);
         if (levelOpt == null) return;
-        ChunkUtils.loadChunk(levelOpt, pos);
+        if (!levelOpt.hasChunkAt(pos)) {
+            player.sendSystemMessage(Component.translatable("rsi.error.chunk_unloaded"));
+            return;
+        }
 
         Recipe<?> recipe = levelOpt.getRecipeManager().byKey(recipeId).orElse(null);
         if (recipe == null) {

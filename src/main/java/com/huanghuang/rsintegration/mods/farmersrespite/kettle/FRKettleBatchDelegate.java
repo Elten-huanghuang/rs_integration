@@ -212,7 +212,7 @@ public final class FRKettleBatchDelegate extends AbstractBatchDelegate {
         this.filledInputSlots.clear();
 
         forceChunkLoad(true);
-        myLevel.getChunk(myPos);
+        if (!myLevel.hasChunkAt(myPos)) return false;
 
         BlockEntity be = myLevel.getBlockEntity(myPos);
         if (be == null || !isFRKettleBE(be)) {

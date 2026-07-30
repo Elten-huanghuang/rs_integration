@@ -63,7 +63,7 @@ public final class AetherworksBatchDelegate extends AbstractBatchDelegate {
         this.level = lvl;
         this.machinePos = pos;
 
-        ChunkUtils.loadChunk(lvl, pos);
+        if (!lvl.hasChunkAt(pos)) return false;
 
         BlockEntity be = lvl.getBlockEntity(pos);
         if (be == null || !AetherworksReflection.anvilBEClass.isInstance(be)) {

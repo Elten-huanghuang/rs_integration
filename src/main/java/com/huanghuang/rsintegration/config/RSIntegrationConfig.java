@@ -12,6 +12,9 @@ import net.minecraftforge.registries.ForgeRegistries;
 import java.util.List;
 
 public final class RSIntegrationConfig {
+    public static final int REPEAT_COUNT_DEFAULT = 1024;
+    public static final int REPEAT_COUNT_ABSOLUTE_MAX = 1024;
+    public static final int SERVER_CONFIG_SCHEMA = 2;
     public static final int DEFAULT_CRAFTING_PLANNING_WORKERS = CraftingPlanningConfig.DEFAULT_WORKERS;
     public static final int DEFAULT_CRAFTING_PLANNING_QUEUE_CAPACITY =
             CraftingPlanningConfig.DEFAULT_QUEUE_CAPACITY;
@@ -101,6 +104,13 @@ public final class RSIntegrationConfig {
 
     public static ForgeConfigSpec.BooleanValue ENABLE_CONTAINER_TRANSFER;
     public static ForgeConfigSpec.BooleanValue ENABLE_RS_SIDE_PANEL;
+    public static ForgeConfigSpec.BooleanValue ENABLE_ANVIL_MEMORY;
+    public static ForgeConfigSpec.IntValue ANVIL_MEMORY_RESTOCK_TARGET;
+    public static ForgeConfigSpec.BooleanValue ANVIL_MEMORY_REMEMBER_NBT;
+    public static ForgeConfigSpec.BooleanValue ANVIL_MEMORY_PREFER_PLAYER_INVENTORY;
+    public static ForgeConfigSpec.BooleanValue ANVIL_MEMORY_BOOKMARK_MISSING;
+    public static ForgeConfigSpec.BooleanValue ANVIL_MEMORY_IPN_COMPAT;
+    public static ForgeConfigSpec.ConfigValue<List<? extends String>> ANVIL_MEMORY_ADAPTERS;
     public static ForgeConfigSpec.BooleanValue ENABLE_RS_PASSIVE_EFFECTS;
     public static ForgeConfigSpec.ConfigValue<List<? extends String>> PASSIVE_TICK_ITEMS;
     public static ForgeConfigSpec.IntValue NINE_SWORD_MAX_COUNT;
@@ -120,6 +130,7 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.IntValue MACHINE_HUB_TOGGLE_KEY;
     public static ForgeConfigSpec.ConfigValue<List<? extends String>> CUSTOM_GUI_MACHINE_MODS;
     public static ForgeConfigSpec.IntValue REPEAT_COUNT_MAX;
+    public static ForgeConfigSpec.IntValue SERVER_CONFIG_SCHEMA_VERSION;
     public static ForgeConfigSpec.ConfigValue<List<? extends String>> PROTECTED_ITEMS;
     public static ForgeConfigSpec.IntValue PROTECTED_RESERVE;
     public static ForgeConfigSpec.IntValue CONTAINER_TRANSFER_KEY;
@@ -497,6 +508,10 @@ public final class RSIntegrationConfig {
 
         //  SERVER: per-world tuning
 
+        SERVER_CONFIG_SCHEMA_VERSION = s
+                .comment("Internal server-config schema version. Do not edit manually.")
+                .defineInRange("configSchemaVersion", 1, 1, SERVER_CONFIG_SCHEMA);
+
         s.push("integrations");
         CROCKPOT_FILLER_ITEM = s
                 .comment("Default filler item for CrockPot recipes when input slots are not",
@@ -581,7 +596,8 @@ public final class RSIntegrationConfig {
                 .comment("Maximum repeat count allowed in the CraftingPlanScreen.",
                         "Higher values allow more concurrent crafts but increase server load.",
                         "Range: 1-1024.")
-                .defineInRange("repeatCountMax", 64, 1, 1024);
+                .defineInRange("repeatCountMax", REPEAT_COUNT_DEFAULT,
+                        1, REPEAT_COUNT_ABSOLUTE_MAX);
         CRAFTING_MAX_DEPTH = s
                 .comment("Maximum recursion depth for crafting resolution.",
                         "Limits how many nested sub-recipes the resolver can chain.",
@@ -756,6 +772,31 @@ public final class RSIntegrationConfig {
                 .defineInRange("sidePanelExtractionTimeout", 2000, 500, 10000);
         s.pop();
 
+        s.push("anvilMemory");
+        ENABLE_ANVIL_MEMORY = s
+                .comment("Enable per-player material memory and restocking on supported anvils.")
+                .define("enabled", true);
+        ANVIL_MEMORY_RESTOCK_TARGET = s
+                .comment("Target material count when a memory entry is clicked; capped by max stack size.")
+                .defineInRange("restockTarget", 64, 1, 64);
+        ANVIL_MEMORY_REMEMBER_NBT = s
+                .comment("Treat the same item with different NBT as separate remembered materials.")
+                .define("rememberNbt", true);
+        ANVIL_MEMORY_PREFER_PLAYER_INVENTORY = s
+                .comment("Take matching materials from the player inventory before the RS network.")
+                .define("preferPlayerInventory", true);
+        ANVIL_MEMORY_BOOKMARK_MISSING = s
+                .comment("Ask the client to add a still-missing material to JEI bookmarks.")
+                .define("bookmarkMissing", true);
+        ANVIL_MEMORY_IPN_COMPAT = s
+                .comment("Let Inventory Profiles Next fast-rename restoration fill its remaining",
+                        "material-slot shortage from RS after IPN has restored the player inventory.")
+                .define("ipnFastRenameCompat", true);
+        ANVIL_MEMORY_ADAPTERS = s
+                .comment("Enabled adapter ids. Mod integrations can register more adapters in code.")
+                .defineList("adapters", List.of("minecraft_anvil"), value -> value instanceof String id && !id.isBlank());
+        s.pop();
+
         s.push("rateLimits");
         GUI_OPEN_RATE_LIMIT_MS = s
                 .comment("Minimum interval in milliseconds between remote GUI open requests.",
@@ -817,6 +858,11 @@ public final class RSIntegrationConfig {
     }
 
     private RSIntegrationConfig() {}
+
+    public static int migrateRepeatCountMax(int schema, int currentValue) {
+        return schema < SERVER_CONFIG_SCHEMA && currentValue == 64
+                ? REPEAT_COUNT_DEFAULT : currentValue;
+    }
 
     public static void saveClientConfig() {
         if (clientModConfig != null) clientModConfig.save();

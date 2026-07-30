@@ -412,6 +412,7 @@
   "rsi.plan.materials": "材料",
   "rsi.plan.tooltip.available": "库存",
   "rsi.plan.repeat_count": "次数:",
+  "rsi.plan.max": "最大",
 
   "rsi.async.chain_started": "§a已启动多方块合成链（%s 步）。完成后物品将送入 RS 网络。",
   "rsi.async.cancel_button": "[取消合成]",
@@ -870,5 +871,15 @@
   "rsi.apotheosis.spawner.stat.silent": "静音",
   "rsi.apotheosis.spawner.stat.baby": "幼年形态",
   "rsi.ftb_quest.missing_bookmarked": "缺少 %s x %s，已加入 JEI 收藏",
-  "rsi.ftb_quest.missing": "缺少 %s x %s，当前无法使用 JEI 收藏"
+  "rsi.ftb_quest.missing": "缺少 %s x %s，当前无法使用 JEI 收藏",
+  "rsi.anvil_memory.swap": "交换铁砧输入槽",
+  "rsi.anvil_memory.restock": "点击补货",
+  "rsi.anvil_memory.complete": "补货完成（物品栏 %s，RS %s）",
+  "rsi.anvil_memory.partial": "部分补货，仍缺少 %s",
+  "rsi.anvil_memory.no_network": "无可用 RS 网络，仍缺少 %s",
+  "rsi.anvil_memory.no_permission": "没有 RS 提取权限，仍缺少 %s",
+  "rsi.anvil_memory.occupied": "材料槽中已有其他物品",
+  "rsi.anvil_memory.rejected": "该材料不能放入当前铁砧的材料槽",
+  "rsi.anvil_memory.swapped": "已交换铁砧输入槽",
+  "rsi.anvil_memory.invalid": "铁砧记忆当前不可用"
 }

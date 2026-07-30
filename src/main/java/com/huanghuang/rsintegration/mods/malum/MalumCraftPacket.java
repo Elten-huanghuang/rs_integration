@@ -6,6 +6,7 @@ import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
+import com.huanghuang.rsintegration.network.ProtectionChecker;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftingResolver;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
@@ -102,7 +103,14 @@ public final class MalumCraftPacket {
             }
         }
 
-        ChunkUtils.loadChunk(level, pos);
+        if (!level.hasChunkAt(pos)) {
+            player.sendSystemMessage(Component.translatable("rsi.error.chunk_unloaded"));
+            return;
+        }
+        if (!ProtectionChecker.canInteract(player, level, pos)) {
+            player.sendSystemMessage(Component.translatable("rsi.error.protection_denied"));
+            return;
+        }
         BlockEntity be = level.getBlockEntity(pos);
         Object altar = castSpiritAltar(be);
         if (altar == null) {

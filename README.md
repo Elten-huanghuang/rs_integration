@@ -54,6 +54,20 @@ RS Integration lets Refined Storage operate machines from other mods. Choose an 
 - `Ctrl` + left-drag across RS slots extracts one item from each visited slot.
 - A draggable side panel exposes RS contents and machine tabs from other screens, with pinyin-aware search.
 
+### JEI registration and recipe entry points
+
+- RSI registers as a JEI plugin and adds its craft action to supported vanilla and modded recipe layouts. The action validates the bound machine, builds the recursive material plan, and opens its preview; recipes backed by a remotely accessible bound machine also receive an Open Machine button.
+- Three dedicated JEI categories are registered: FTB Quests item submission, the Distant Worlds Lithum Altar, and Project MMO probabilistic salvage. Player-specific FTB Quest entries are added dynamically after quest data synchronizes.
+- The Lithum Core and PMMO salvage block are registered as catalysts for their categories. PMMO salvage data received after initial registration is also added to JEI at runtime.
+- RSI registers a universal RS recipe-transfer handler plus a dedicated 13-recipe-slot transfer handler for the Eidolon Worktable. Categories, catalysts, and entry points load only when their target mod is installed and the corresponding integration is enabled.
+
+### HUDs and in-world prompts
+
+- **Aetherium Anvil / Forge Tool Station HUD**: looking at either machine shows its slotted item, current/required hammer hits, forge temperature, valid recipe temperature range, ember storage and per-hit cost, mistakes, and invalid-recipe warnings. Tool Stations also show target temperature and temperature rate; the footer reports configured temperature bounds, lever binding, Auto Refill, and Auto Hammer state.
+- **Distant Worlds Lithum Altar HUD**: looking at a Lithum Core shows idle/working state, the current recipe or output, energy/capacity, recovery rate, and the item/count on all eight surrounding pedestals. It can be disabled with the client option `distantWorlds.enableHud`.
+- **Craft progress HUD**: active asynchronous crafts display their target, overall percentage, completed/running node counts, current steps, and machine state in a right-side panel. It can be hidden or restored from the progress screen opened with `P`.
+- **Binding hint HUD**: while holding a compatible Network Linker and looking at a supported machine or altar, a hotbar-level prompt indicates whether the current action will bind or unbind it.
+
 ### Auto Eat
 
 Open an RS crafting grid to consume food directly from the network:
@@ -86,6 +100,12 @@ Open an RS crafting grid to consume food directly from the network:
 
 - **Reforging restock**: press Space in Apotheosis or Ancient Reforging screens to pull reforging materials from RS; missing items are bookmarked in JEI.
 - **Remote side panel**: press `Y` to browse and search RS contents from other screens and open JEI uses or recipes.
+
+### Special automation compatibility
+
+- **Automatic Embers alchemy inference**: after an Embers Rekindled Alchemy Tablet is bound, RSI can place materials, spark the tablet, evaluate black/white pin feedback, and eliminate candidate alchemy codes through repeated trials. Successful codes are saved and reused; Calculate mode can use a deterministic layout without trial and error.
+- **Automatic Aetherium Anvil hammering**: while holding a Tinker Hammer, enabling Auto Hammer in the anvil settings makes RSI strike whenever the anvil's hit cooldown permits. The same screen configures temperature bounds, forge-lever temperature control, and automatic material refilling.
+- **Dimensional Magnet collection for mutant remains**: Distant Worlds Wither Totems and Charged Wither Totems (`wither_totem` / `charged_wither_totem`) are converted from direct inventory rewards into magnet-compatible drops. A bound Dimensional Magnet can send them straight to RS instead of placing them in the player's inventory.
 
 ### Apotheosis Spawner Upgrades
 
@@ -199,8 +219,8 @@ The table lists dedicated recipe integrations registered by the current code. Re
 | Forbidden & Arcanus | Hephaestus Forge, Clibano, smithing/apply-modifier flow |
 | Wizards Reborn | Wissen Crystallizer, Arcane Iterator, Arcane Workbench, Crystal rituals |
 | Touhou Little Maid | Maid Altar, including automatic P-point replenishment from RS |
-| Embers Rekindled | Alchemy Tablet, including inferred and deterministic layouts |
-| Aetherworks | Aetherium Anvil and Tool Station |
+| Embers Rekindled | Alchemy Tablet, including automatic trial-and-error code inference, saved inference results, and deterministic layouts |
+| Aetherworks | Aetherium Anvil and Forge Tool Station, including automatic hammering, material refilling, forge-lever temperature control, and temperature/ember/hit-progress HUDs |
 | The Aether | Freezer, Incubator, and Altar |
 | Crock Pot | Crock Pot and Portable Crock Pot |
 | Farmer's Delight | Cooking Pot and Skillet |
@@ -212,7 +232,7 @@ The table lists dedicated recipe integrations registered by the current code. Re
 | Avaritia | Compressed through Extreme six-tier crafting tables, four-tier Neutron Compressors, and Extreme Smithing |
 | SlashBlade | NBT-sensitive crafting recipes |
 | Confluence | Workshop |
-| Distant Worlds | Lithum Altar and related interaction/HUD support |
+| Distant Worlds | Lithum Altar and related interactions; crosshair HUD for recipe, energy, recovery, and all eight pedestal states |
 | Lychee | Virtual item-inside/soaking and block-interaction recipes; block interactions can run through a bound Mechanical Press |
 | Farming for Blockheads | Market exchanges as virtual recipes and recursive crafting intermediates |
 | Project MMO | Probabilistic salvage recipes with recursive material planning, level checks, XP, secondary outputs, and configurable multiblock binding |

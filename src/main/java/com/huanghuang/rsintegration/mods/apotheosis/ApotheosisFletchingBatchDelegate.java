@@ -148,7 +148,7 @@ public final class ApotheosisFletchingBatchDelegate extends AbstractBatchDelegat
         craftDone = false;
         cachedResults.clear();
         if (materials.size() != INPUT_COUNT || !isFletchingTable(level, pos)) return false;
-        level.getChunk(pos);
+        if (!level.hasChunkAt(pos)) return false;
 
         AbstractContainerMenu created = createMenu(player);
         if (!(created instanceof FletchingContainer fletching)) return false;

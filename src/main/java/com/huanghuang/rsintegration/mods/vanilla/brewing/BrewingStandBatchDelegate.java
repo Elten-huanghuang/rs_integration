@@ -44,7 +44,7 @@ public final class BrewingStandBatchDelegate extends AbstractBatchDelegate {
         this.recipe = VanillaBrewingCatalog.byId(recipeId);
         this.placed = false;
         if (level == null || recipe == null) return false;
-        ChunkUtils.loadChunk(level, pos);
+        if (!level.hasChunkAt(pos)) return false;
         BlockEntity blockEntity = level.getBlockEntity(pos);
         if (!(blockEntity instanceof BrewingStandBlockEntity brewingStand)) return false;
         if (!isEmpty(brewingStand)) return false;

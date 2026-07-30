@@ -27,12 +27,14 @@ public class ConfigSyncPacket {
     public final boolean enableDistantWorlds;
     public final boolean enableEmbersAlchemyCalc;
     public final int recipeTreeMaxCandidates;
+    public final int repeatCountMax;
 
     public ConfigSyncPacket(boolean enableMachineGuiTabs, int machineTabThreshold,
                             boolean enableAutoEat, boolean enableJei, boolean enableJeiMarquee,
                             boolean enableJeiBookmarkMarquee, boolean enableGridSwipeExtract,
                             boolean enableApotheosis, boolean enableDistantWorlds,
-                            boolean enableEmbersAlchemyCalc, int recipeTreeMaxCandidates) {
+                            boolean enableEmbersAlchemyCalc, int recipeTreeMaxCandidates,
+                            int repeatCountMax) {
         this.enableMachineGuiTabs = enableMachineGuiTabs;
         this.machineTabThreshold = machineTabThreshold;
         this.enableAutoEat = enableAutoEat;
@@ -44,6 +46,7 @@ public class ConfigSyncPacket {
         this.enableDistantWorlds = enableDistantWorlds;
         this.enableEmbersAlchemyCalc = enableEmbersAlchemyCalc;
         this.recipeTreeMaxCandidates = recipeTreeMaxCandidates;
+        this.repeatCountMax = repeatCountMax;
     }
 
     public static ConfigSyncPacket fromServerConfig() {
@@ -58,7 +61,8 @@ public class ConfigSyncPacket {
                 com.huanghuang.rsintegration.config.RSIntegrationConfig.ENABLE_APOTHEOSIS.get(),
                 com.huanghuang.rsintegration.config.RSIntegrationConfig.ENABLE_DISTANT_WORLDS.get(),
                 com.huanghuang.rsintegration.config.RSIntegrationConfig.ENABLE_EMBERS_ALCHEMY_CALC.get(),
-                com.huanghuang.rsintegration.config.RSIntegrationConfig.RECIPE_TREE_MAX_CANDIDATES.get());
+                com.huanghuang.rsintegration.config.RSIntegrationConfig.RECIPE_TREE_MAX_CANDIDATES.get(),
+                com.huanghuang.rsintegration.config.RSIntegrationConfig.REPEAT_COUNT_MAX.get());
     }
 
     public static void encode(ConfigSyncPacket packet, FriendlyByteBuf buf) {
@@ -73,6 +77,7 @@ public class ConfigSyncPacket {
         buf.writeBoolean(packet.enableDistantWorlds);
         buf.writeBoolean(packet.enableEmbersAlchemyCalc);
         buf.writeVarInt(packet.recipeTreeMaxCandidates);
+        buf.writeVarInt(packet.repeatCountMax);
     }
 
     public static ConfigSyncPacket decode(FriendlyByteBuf buf) {
@@ -80,7 +85,10 @@ public class ConfigSyncPacket {
                 buf.readBoolean(), buf.readBoolean(), buf.readBoolean(), buf.readBoolean(),
                 buf.readBoolean(), buf.readBoolean(), buf.readBoolean(),
                 // Clamp to the config's own declared range (2-32).
-                Math.max(2, Math.min(buf.readVarInt(), 32)));
+                Math.max(2, Math.min(buf.readVarInt(), 32)),
+                // Server-authoritative crafting request limit.
+                Math.max(1, Math.min(buf.readVarInt(),
+                        com.huanghuang.rsintegration.config.RSIntegrationConfig.REPEAT_COUNT_ABSOLUTE_MAX)));
     }
 
     public static void register() {

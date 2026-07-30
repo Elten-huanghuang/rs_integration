@@ -144,7 +144,7 @@ public final class SteamerBatchDelegate extends AbstractBatchDelegate {
         ItemStack input = materials.get(0).copyWithCount(1);
 
         forceChunkLoad(true);
-        myLevel.getChunk(myPos);
+        if (!myLevel.hasChunkAt(myPos)) return false;
 
         // Find pot base -- the BE lives in the bottom pot block.
         // myPos might be the rack or lid position if the user bound those.
@@ -571,7 +571,7 @@ public final class SteamerBatchDelegate extends AbstractBatchDelegate {
 
     private void clearAndRefund() {
         BlockPos pos = potBasePos != null ? potBasePos : myPos;
-        myLevel.getChunk(pos);
+        if (!myLevel.hasChunkAt(pos)) return;
         BlockEntity be = myLevel.getBlockEntity(pos);
         if (be == null || !isSteamerBE(be)) return;
 

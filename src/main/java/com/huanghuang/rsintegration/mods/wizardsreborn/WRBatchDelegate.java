@@ -170,8 +170,8 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         this.player = player;
 
         if (!level.isLoaded(pos)) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Batch-WR] Chunk unloaded at {} — force-loading", pos);
-            level.getChunk(pos);
+            player.sendSystemMessage(Component.translatable("rsi.error.chunk_unloaded"));
+            return false;
         }
         BlockEntity blockEntity = level.getBlockEntity(pos);
         if (blockEntity == null) {

@@ -1,0 +1,36 @@
+package com.huanghuang.rsintegration.anvilmemory;
+
+import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.world.inventory.AnvilMenu;
+
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
+
+public final class AnvilMemoryAdapters {
+    private static final List<AnvilMemoryAdapter> ADAPTERS = new CopyOnWriteArrayList<>();
+
+    static {
+        register(new AnvilMemoryAdapter() {
+            public String id() { return "minecraft_anvil"; }
+            public boolean supports(AbstractContainerMenu menu) { return menu instanceof AnvilMenu; }
+            public int primarySlot() { return 0; }
+            public int materialSlot() { return 1; }
+        });
+    }
+
+    private AnvilMemoryAdapters() {}
+
+    public static void register(AnvilMemoryAdapter adapter) {
+        if (adapter == null || adapter.id() == null || adapter.id().isBlank()) {
+            throw new IllegalArgumentException("Anvil memory adapter must have an id");
+        }
+        if (ADAPTERS.stream().anyMatch(existing -> existing.id().equals(adapter.id()))) {
+            throw new IllegalArgumentException("Duplicate anvil memory adapter: " + adapter.id());
+        }
+        ADAPTERS.add(adapter);
+    }
+
+    public static AnvilMemoryAdapter find(AbstractContainerMenu menu) {
+        return ADAPTERS.stream().filter(adapter -> adapter.supports(menu)).findFirst().orElse(null);
+    }
+}

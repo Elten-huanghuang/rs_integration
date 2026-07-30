@@ -9,10 +9,12 @@ import com.huanghuang.rsintegration.crafting.planning.PureRecipePlanner;
 import com.huanghuang.rsintegration.crafting.planning.AsyncPlanningCoordinator;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph;
 import com.huanghuang.rsintegration.crafting.planning.PlanningSnapshot;
+import com.huanghuang.rsintegration.mods.farmingforblockheads.MarketRecipeWrapper;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import io.netty.buffer.Unpooled;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Ingredient;
 import org.junit.jupiter.api.Test;
@@ -44,6 +46,14 @@ class GenericCraftPacketTest extends BootstrapTest {
                 List.of(), List.of(), Map.of());
 
         assertTrue(GenericCraftPacket.canUsePrecomputedPlan(complete));
+    }
+
+    @Test
+    void runtimeVirtualRecipesDoNotUsePhysicalMachineSlotPlanning() {
+        MarketRecipeWrapper market = new MarketRecipeWrapper(UUID.randomUUID(),
+                new ItemStack(Items.DIAMOND), new ItemStack(Items.EMERALD));
+
+        assertFalse(GenericCraftPacket.usesPhysicalMachineInputSlots(market));
     }
 
     @Test

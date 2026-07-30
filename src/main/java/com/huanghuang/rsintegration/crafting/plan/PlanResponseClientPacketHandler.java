@@ -75,14 +75,16 @@ final class PlanResponseClientPacketHandler {
         }
         if (mc.screen instanceof CraftingPlanScreen existing
                 && plan.recipeId() != null
+                && !plan.recipeId().isEmpty()
                 && !plan.recipeId().equals(existing.getRecipeId())) {
             RSIntegrationMod.LOGGER.debug("[RSI-PlanPkt] Dropping stale response: received={} active={}",
                     plan.recipeId(), existing.getRecipeId());
             return;
         }
         if (mc.screen instanceof CraftingPlanScreen existing
-                && plan.recipeId() != null
-                && plan.recipeId().equals(existing.getRecipeId())) {
+                && requestId != 0L
+                && (plan.recipeId() == null || plan.recipeId().isEmpty()
+                || plan.recipeId().equals(existing.getRecipeId()))) {
             RSIntegrationMod.LOGGER.debug("[RSI-PlanPkt] openScreen UPDATE: refreshing plan for {}",
                     plan.recipeId());
             existing.acceptResponse(requestId, plan);

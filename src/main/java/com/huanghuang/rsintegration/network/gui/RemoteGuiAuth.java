@@ -26,8 +26,8 @@ import java.util.concurrent.ConcurrentHashMap;
  * <p><b>Safety:</b> Authorizations auto-expire after {@link #AUTH_TTL_MS} to prevent
  * permanent ghost-container access.  The {@code expectedBlock} field prevents
  * ghost-container access if the machine block is mined while the GUI is open.
- * Chunk force-loading via {@link ForcedChunkTicketManager} prevents dupes from chunk
- * unloads mid-interaction.</p>
+ * A retention ticket is acquired only after the target chunk is known to be
+ * loaded, preventing unloads and dupes during an active interaction.</p>
  */
 public final class RemoteGuiAuth {
     private static final long AUTH_TTL_MS = 5 * 60 * 1000; // 5 minutes
@@ -41,7 +41,7 @@ public final class RemoteGuiAuth {
     /**
      * ForcedChunkTicketManager provides the process-wide refcount. Forge does NOT reference-count
      * tickets — a ticket is keyed by (modId, owner=BlockPos) and stored as a
-     * set, so two players force-loading the same machine's chunk share one
+     * set, so two players retaining the same machine's chunk share one
      * ticket and the first release unforces it for everyone. We track viewers
      * per exact ticket owner and only call forceChunk(false) when the last
      * viewer of that machine leaves. Different machines in the same chunk use
@@ -55,8 +55,8 @@ public final class RemoteGuiAuth {
     public static void authorize(ServerPlayer player, ResourceKey<Level> dim, BlockPos pos, String expectedBlock) {
         // Release any prior authorization first. Navigating machine→machine
         // without closing the container overwrites the ACTIVE entry; without this
-        // the old machine's force-load ticket is never released and leaks a
-        // permanently force-loaded chunk for the rest of the session.
+        // the old machine's retention ticket is never released and leaks a
+        // permanently retained chunk for the rest of the session.
         releaseAndRemove(player.getUUID());
 
         int staleId = player.containerMenu != null ? player.containerMenu.containerId : -1;
@@ -158,7 +158,7 @@ public final class RemoteGuiAuth {
         ForcedChunkTicketManager.clear(server);
     }
 
-    /** Release chunk force-load and remove the authorization. */
+    /** Release the active-chunk retention ticket and remove the authorization. */
     private static void releaseAndRemove(UUID playerId) {
         var auth = ACTIVE.remove(playerId);
         if (auth == null) return;

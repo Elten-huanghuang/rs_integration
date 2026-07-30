@@ -71,6 +71,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.function.Predicate;
 
 /**
  * Orchestrates execution of a crafting chain that may contain both vanilla
@@ -1123,10 +1124,19 @@ public final class AsyncCraftChain {
         List<BoundMachine> eligible = new ArrayList<>();
         boolean validationThrew = false;
         boolean retryableRejection = false;
+        boolean protectionRejection = false;
         String fatalDetail = "";
         Component fatalUserMessage = null;
         for (BoundMachine machine : available) {
             try {
+                ResourceKey<Level> dimKey = ResourceKey.create(
+                        net.minecraft.core.registries.Registries.DIMENSION, machine.dim());
+                ServerLevel machineLevel = server.getLevel(dimKey);
+                if (machineLevel == null
+                        || !ProtectionChecker.canInteract(online, machineLevel, machine.pos())) {
+                    protectionRejection = true;
+                    continue;
+                }
                 IBatchDelegate candidate = eligible.isEmpty() ? delegate
                         : step.inferMode() ? step.modType().createInferDelegate() : createDelegate(step.modType());
                 if (candidate == null) {
@@ -1163,6 +1173,10 @@ public final class AsyncCraftChain {
             }
         }
         if (eligible.isEmpty()) {
+            if (protectionRejection && !retryableRejection && !validationThrew) {
+                return PreparationResult.fatal("all loaded machines denied by protection provider",
+                        Component.translatable("rsi.error.protection_denied"));
+            }
             if (!retryableRejection && !validationThrew && !fatalDetail.isEmpty()) {
                 return PreparationResult.fatal(fatalDetail, fatalUserMessage);
             }
@@ -2549,14 +2563,32 @@ public final class AsyncCraftChain {
             return startGenericStep(initialDelegate, step, online);
         }
 
+        MachineCandidateSelection candidateSelection = filterMachineCandidates(
+                machines,
+                machine -> {
+                    ResourceKey<Level> dimKey = ResourceKey.create(
+                            net.minecraft.core.registries.Registries.DIMENSION, machine.dim());
+                    ServerLevel machineLevel = server.getLevel(dimKey);
+                    return machineLevel != null && machineLevel.hasChunkAt(machine.pos());
+                },
+                machine -> {
+                    ResourceKey<Level> dimKey = ResourceKey.create(
+                            net.minecraft.core.registries.Registries.DIMENSION, machine.dim());
+                    ServerLevel machineLevel = server.getLevel(dimKey);
+                    return machineLevel != null
+                            && ProtectionChecker.canInteract(online, machineLevel, machine.pos());
+                });
+
         IBatchDelegate delegate = null;
         // Try each bound machine until one is ready. Retryable preparation never
         // reaches material reservation or ledger commit.
         BoundMachine matchedMachine = null;
         boolean retryableRejection = false;
+        boolean unloadedRejection = candidateSelection.unloadedRejected();
+        boolean protectionRejection = candidateSelection.protectionRejected();
         String fatalDetail = "";
         Component fatalUserMessage = null;
-        for (BoundMachine m : machines) {
+        for (BoundMachine m : candidateSelection.usable()) {
             try {
                 IBatchDelegate candidate = delegate == null ? initialDelegate
                         : step.inferMode() ? step.modType().createInferDelegate() : createDelegate(step.modType());
@@ -2599,22 +2631,12 @@ public final class AsyncCraftChain {
                     fatalDetail);
             machineStartFailureMessage = fatalUserMessage != null
                     ? fatalUserMessage
+                    : protectionRejection
+                    ? Component.translatable("rsi.error.protection_denied")
+                    : unloadedRejection
+                    ? Component.translatable("rsi.error.chunk_unloaded")
                     : Component.translatable("rsi.async.error.machine_valid_failed", step.recipeId());
             return null;
-        }
-
-        // Protection check
-        try {
-            var dimKey = ResourceKey.create(
-                    net.minecraft.core.registries.Registries.DIMENSION, matchedMachine.dim());
-            ServerLevel machineLevel = server.getLevel(dimKey);
-            if (machineLevel != null
-                    && !ProtectionChecker.canInteract(online, machineLevel, matchedMachine.pos())) {
-                online.sendSystemMessage(Component.translatable("rsi.error.protection_denied"));
-                return null;
-            }
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn(ctx.format("Protection check failed"), e);
         }
 
         final IBatchDelegate startedDelegate = delegate;
@@ -2839,6 +2861,32 @@ public final class AsyncCraftChain {
         RSIntegrationMod.LOGGER.debug(ctx.format("Generic step started OK: recipe={}"),
                 step.recipeId());
         return delegate;
+    }
+
+    record MachineCandidateSelection(List<BoundMachine> usable,
+                                     boolean unloadedRejected,
+                                     boolean protectionRejected) {}
+
+    static MachineCandidateSelection filterMachineCandidates(
+            List<BoundMachine> machines,
+            Predicate<BoundMachine> loaded,
+            Predicate<BoundMachine> permitted) {
+        List<BoundMachine> usable = new ArrayList<>();
+        boolean unloadedRejected = false;
+        boolean protectionRejected = false;
+        for (BoundMachine machine : machines) {
+            if (!loaded.test(machine)) {
+                unloadedRejected = true;
+                continue;
+            }
+            if (!permitted.test(machine)) {
+                protectionRejected = true;
+                continue;
+            }
+            usable.add(machine);
+        }
+        return new MachineCandidateSelection(
+                List.copyOf(usable), unloadedRejected, protectionRejected);
     }
 
     //  parallel (load-balanced) step

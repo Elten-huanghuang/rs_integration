@@ -143,7 +143,7 @@ public final class KettleBatchDelegate extends AbstractBatchDelegate {
         this.craftDone = false;
 
         forceChunkLoad(true);
-        myLevel.getChunk(myPos);
+        if (!myLevel.hasChunkAt(myPos)) return false;
 
         BlockEntity be = findKettleBE();
         if (be == null) {

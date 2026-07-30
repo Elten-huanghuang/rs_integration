@@ -53,7 +53,7 @@ public final class LycheeBlockInteractingBatchDelegate extends GenericBatchDeleg
 
     private static boolean isHydraulicPress(@Nullable ServerLevel level, @Nullable BlockPos pos) {
         if (level == null || pos == null) return false;
-        if (!level.isLoaded(pos)) level.getChunk(pos);
+        if (!level.hasChunkAt(pos)) return false;
         return HYDRAULIC_PRESS.equals(ForgeRegistries.BLOCKS.getKey(
                 level.getBlockState(pos).getBlock()));
     }
