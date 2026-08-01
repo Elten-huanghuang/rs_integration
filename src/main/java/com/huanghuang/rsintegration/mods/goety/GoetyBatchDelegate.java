@@ -40,6 +40,7 @@ import org.jetbrains.annotations.NotNull;
 
 import javax.annotation.Nullable;
 import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -56,6 +57,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
     private List<Object> filledPedestals;
     private int soulCost;
     private boolean ritualEverSeenActive;
+    private boolean prerequisiteBlocked;
     private long ritualIdleSinceGameTime = -1L;
     private static final int RITUAL_IDLE_STABILITY_TICKS = 20;
     private ItemStack activationExtractedFromPlayer;
@@ -74,6 +76,9 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
                                      @Nullable ResourceLocation dim, BlockPos pos) {
         if (validateAndInit(player, recipeId, dim, pos)) {
             return PreparationResult.ready();
+        }
+        if (prerequisiteBlocked) {
+            return PreparationResult.fatal("Goety ritual prerequisites not met for " + recipeId);
         }
         if (altar != null && Reflect.getField(altar, GoetyReflection.F_CURRENT_RITUAL_RECIPE).orElse(null) != null) {
             return PreparationResult.retry("Goety altar is still processing");
@@ -100,6 +105,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         this.myDim = level.dimension();
         this.myPos = pos;
         this.player = player;
+        this.prerequisiteBlocked = false;
         // Set machineDim NOW so resolveMachineLevel() resolves the machine's own
         // dimension during validation (e.g. checkStructureRequirements). The chain
         // otherwise calls setMachineDim only AFTER validateAndInit returns true, so
@@ -169,10 +175,12 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
 
         Object ritualObj = Reflect.invoke(ritualRecipe, GoetyReflection.M_GET_RITUAL).orElse(null);
         if (ritualObj == null) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Batch-Goety] validateAndInit [WARN-6] ritual is null for recipe {} — deferring to tryStartSingleCraft check", recipeId);
-            // Old code tolerated null here; tryStartSingleCraft has the real null guard.
-            // Skip ritual-type checks and pedestal scan — nothing to derive from.
-            // Still do the altar-idle check (independent of ritualObj).
+            RSIntegrationMod.LOGGER.error(
+                    "[RSI-Batch-Goety] validateAndInit [FAIL-6] ritual is null for recipe {}", recipeId);
+            player.sendSystemMessage(Component.translatable(
+                    "rsi.goety.error.prerequisite_check_failed"));
+            prerequisiteBlocked = true;
+            return false;
         } else {
             if (GoetyReflection.convertRitualClass != null && GoetyReflection.convertRitualClass.isInstance(ritualObj)) {
                 RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] validateAndInit [FAIL-7] convert ritual blocked: recipe={}", recipeId);
@@ -217,16 +225,23 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
                     }
                 }
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.warn("[RSI-Batch-Goety] validateAndInit [9/9] pedestal scan failed — proceeding without pedestal check", e);
+                RSIntegrationMod.LOGGER.warn(
+                        "[RSI-Batch-Goety] validateAndInit [FAIL-9] pedestal scan failed; blocking before extraction",
+                        e);
+                player.sendSystemMessage(Component.translatable(
+                        "rsi.goety.error.prerequisite_check_failed"));
+                prerequisiteBlocked = true;
+                return false;
             }
         } else {
             RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] validateAndInit [9/9] pedestal scan skipped (ritual is null)");
         }
 
-        // Structure/dimension pre-check: some rituals require specific multiblocks
-        // (e.g. Nether-only).  Reject mismatched altars at validation time so the
-        // same-dimension priority sort can fall back to a correct-dimension machine.
-        if (!checkStructureRequirements(ritualRecipe)) {
+        // Full preflight runs while the chain is only probing machines, before its
+        // shared material ledger reserves or commits anything. It is repeated at
+        // start time to catch research/structure/player-state changes after preview.
+        if (!checkRitualPrerequisites(ritualRecipe, ritualObj)) {
+            prerequisiteBlocked = true;
             return false;
         }
 
@@ -1400,42 +1415,113 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
     }
 
     private boolean checkResearchRequirement(Object recipe) {
-        if (GoetyReflection.researchListClass == null) return true;
+        String researchId;
         try {
-            String researchId = Reflect.<String>invoke(recipe, "getResearch").orElse(null);
-            if (researchId == null || researchId.isEmpty()) return true;
-
+            Object value = recipe.getClass().getMethod("getResearch").invoke(recipe);
+            researchId = value instanceof String string ? string : null;
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn(
+                    "[RSI-Batch-Goety] Research requirement lookup failed; blocking ritual before extraction", e);
+            player.sendSystemMessage(Component.translatable(
+                    "rsi.goety.error.prerequisite_check_failed"));
+            return false;
+        }
+        if (researchId == null || researchId.isEmpty()) return true;
+        Component researchName = resolveResearchName(researchId);
+        if (GoetyReflection.researchListClass == null || GoetyReflection.seHelperClass == null) {
+            rejectUnverifiablePrerequisite("research reflection unavailable", researchId);
+            player.sendSystemMessage(Component.translatable(
+                    "rsi.goety.error.research_check_failed", researchName));
+            return false;
+        }
+        try {
             Object research = GoetyReflection.researchListClass.getMethod("getResearch", String.class)
                     .invoke(null, researchId);
-            if (research == null) return true;
+            if (research == null) {
+                rejectUnverifiablePrerequisite("unknown research id", researchId);
+                player.sendSystemMessage(Component.translatable(
+                        "rsi.goety.error.research_check_failed", researchName));
+                return false;
+            }
 
-            boolean hasIt = (boolean) GoetyReflection.seHelperClass.getMethod("hasResearch",
-                    Player.class, research.getClass())
-                    .invoke(null, player, research);
+            Method hasResearch = findCompatibleStaticMethod(GoetyReflection.seHelperClass,
+                    "hasResearch", player, research);
+            if (hasResearch == null) {
+                rejectUnverifiablePrerequisite("hasResearch method unavailable", researchId);
+                player.sendSystemMessage(Component.translatable(
+                        "rsi.goety.error.research_check_failed", researchName));
+                return false;
+            }
+            boolean hasIt = Boolean.TRUE.equals(hasResearch.invoke(null, player, research));
             if (!hasIt) {
                 player.sendSystemMessage(Component.translatable(
-                        "rsi.goety.error.research_required", resolveResearchName(researchId)));
+                        "rsi.goety.error.research_required", researchName));
                 return false;
             }
             return true;
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] Research check failed, skipping", e);
-            return true;
+            RSIntegrationMod.LOGGER.warn(
+                    "[RSI-Batch-Goety] Research check failed; blocking ritual {} before extraction",
+                    ((Recipe<?>) ritualRecipe).getId(), e);
+            player.sendSystemMessage(Component.translatable(
+                    "rsi.goety.error.research_check_failed", researchName));
+            return false;
         }
     }
 
+    static Method findCompatibleStaticMethod(Class<?> owner, String name, Object... arguments) {
+        if (owner == null || name == null) return null;
+        methods:
+        for (Method method : owner.getMethods()) {
+            if (!method.getName().equals(name) || !Modifier.isStatic(method.getModifiers())
+                    || method.getParameterCount() != arguments.length
+                    || (method.getReturnType() != boolean.class
+                    && method.getReturnType() != Boolean.class)) continue;
+            Class<?>[] parameters = method.getParameterTypes();
+            for (int i = 0; i < parameters.length; i++) {
+                if (arguments[i] != null && !parameters[i].isInstance(arguments[i])) continue methods;
+            }
+            return method;
+        }
+        return null;
+    }
+
+    private void rejectUnverifiablePrerequisite(String reason, String detail) {
+        ResourceLocation id = ritualRecipe instanceof Recipe<?> recipe ? recipe.getId() : null;
+        RSIntegrationMod.LOGGER.error(
+                "[RSI-Batch-Goety] Blocking ritual {} before extraction: {} ({})",
+                id, reason, detail);
+    }
+
     private boolean checkSacrificeRequirement(Object recipe) {
-        boolean requires = Reflect.<Boolean>invoke(recipe, "requiresSacrifice").orElse(false);
+        boolean requires;
+        try {
+            requires = Boolean.TRUE.equals(
+                    recipe.getClass().getMethod("requiresSacrifice").invoke(recipe));
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn(
+                    "[RSI-Batch-Goety] Sacrifice check failed; blocking ritual before extraction", e);
+            player.sendSystemMessage(Component.translatable(
+                    "rsi.goety.error.prerequisite_check_failed"));
+            return false;
+        }
         if (!requires) return true;
-        Component name = Reflect.<Component>invoke(recipe, "getEntityToSacrificeDisplayName")
-                .orElse(Component.literal("?"));
+        Component name = displayComponent(
+                Reflect.invoke(recipe, "getEntityToSacrificeDisplayName").orElse(null));
         player.sendSystemMessage(Component.translatable("rsi.goety.error.requires_sacrifice", name));
         return false;
     }
 
+    static Component displayComponent(Object value) {
+        if (value instanceof Component component) return component;
+        if (value instanceof String text && !text.isEmpty()) return Component.literal(text);
+        return Component.literal("?");
+    }
+
     private boolean checkStructureRequirements(Object recipe) {
         try {
-            String craftType = Reflect.<String>invoke(recipe, "getCraftType").orElse(null);
+            Object craftTypeValue = recipe.getClass().getMethod("getCraftType").invoke(recipe);
+            String craftType = craftTypeValue instanceof String string ? string : null;
             if (craftType == null || craftType.isEmpty()) return true;
             ServerLevel level = resolveMachineLevel(player);
             Method m = GoetyReflection.ritualRequirementsClass.getMethod("getProperStructure",
@@ -1448,8 +1534,11 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             }
             return true;
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] Structure check failed, skipping", e);
-            return true;
+            RSIntegrationMod.LOGGER.warn(
+                    "[RSI-Batch-Goety] Structure check failed; blocking ritual before extraction", e);
+            player.sendSystemMessage(Component.translatable(
+                    "rsi.goety.error.prerequisite_check_failed"));
+            return false;
         }
     }
 
@@ -1499,7 +1588,11 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
                 return false;
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] Enchant check failed", e);
+            RSIntegrationMod.LOGGER.warn(
+                    "[RSI-Batch-Goety] Enchantment check failed; blocking ritual before extraction", e);
+            player.sendSystemMessage(Component.translatable(
+                    "rsi.goety.error.prerequisite_check_failed"));
+            return false;
         }
         return true;
     }
@@ -1585,68 +1678,176 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
 
     // ── Plan-time validation ─────────────────────────────────────
 
-    public static List<Component> getPlanWarnings(ServerPlayer player, Recipe<?> recipe,
-                                               @Nullable ResourceLocation dim,
-                                               @Nullable net.minecraft.core.BlockPos pos) {
-        List<Component> warnings = new ArrayList<>();
+    public record PlanPrerequisiteCheck(List<Component> warnings, boolean blocked) {
+        public PlanPrerequisiteCheck {
+            warnings = List.copyOf(warnings);
+        }
+    }
 
-        if (GoetyReflection.ritualRecipeClass == null || !GoetyReflection.ritualRecipeClass.isInstance(recipe)) return warnings;
+    public static List<Component> getPlanWarnings(ServerPlayer player, Recipe<?> recipe,
+                                                  @Nullable ResourceLocation dim,
+                                                  @Nullable net.minecraft.core.BlockPos pos) {
+        return checkPlanPrerequisites(player, recipe, dim, pos).warnings();
+    }
+
+    public static PlanPrerequisiteCheck checkPlanPrerequisites(
+            ServerPlayer player, Recipe<?> recipe,
+            @Nullable ResourceLocation dim,
+            @Nullable net.minecraft.core.BlockPos pos) {
+        List<Component> warnings = new ArrayList<>();
+        boolean blocked = false;
+
+        if (GoetyReflection.ritualRecipeClass == null
+                || !GoetyReflection.ritualRecipeClass.isInstance(recipe)) {
+            return new PlanPrerequisiteCheck(warnings, false);
+        }
 
         // Research check
-        String researchId = Reflect.<String>invoke(recipe, "getResearch").orElse(null);
+        String researchId = null;
+        try {
+            Object value = recipe.getClass().getMethod("getResearch").invoke(recipe);
+            researchId = value instanceof String string ? string : null;
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn(
+                    "[RSI-Batch-Goety] Plan research lookup failed; blocking ritual", e);
+            warnings.add(Component.translatable(
+                    "rsi.goety.warn.prerequisite_check_failed"));
+            blocked = true;
+        }
         if (researchId != null && !researchId.isEmpty()) {
             boolean hasResearch = false;
+            boolean checkAvailable = false;
             try {
                 if (GoetyReflection.researchListClass != null && GoetyReflection.seHelperClass != null) {
                     Object research = GoetyReflection.researchListClass.getMethod("getResearch", String.class)
                             .invoke(null, researchId);
                     if (research != null) {
-                        hasResearch = (boolean) GoetyReflection.seHelperClass.getMethod("hasResearch",
-                                Player.class, research.getClass())
-                                .invoke(null, player, research);
-                    }
-                }
-            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] Research verification skipped", e); }
-            if (!hasResearch) {
-                warnings.add(Component.translatable(
-                        "rsi.goety.warn.research_missing",
-                        resolveResearchName(researchId)));
-            }
-        }
-
-        // Structure/craftType check
-        if (pos != null && dim != null) {
-            try {
-                String craftType = Reflect.<String>invoke(recipe, "getCraftType").orElse(null);
-                if (craftType != null && !craftType.isEmpty()) {
-                    ServerLevel level = CraftPacketUtils.resolveLevel(player.server, dim, player);
-                    if (level != null && level.isLoaded(pos)) {
-                        BlockEntity be = level.getBlockEntity(pos);
-                        if (GoetyReflection.darkAltarBEClass != null && GoetyReflection.darkAltarBEClass.isInstance(be)) {
-                            Method m = GoetyReflection.ritualRequirementsClass.getMethod("getProperStructure",
-                                    String.class, GoetyReflection.darkAltarBEClass, BlockPos.class, Level.class);
-                            boolean valid = (boolean) m.invoke(null, craftType, be, pos, level);
-                            if (!valid) {
-                                warnings.add(Component.translatable(
-                                        "rsi.goety.warn.structure_mismatch", resolveCraftTypeName(craftType)));
-                            }
+                        Method hasResearchMethod = findCompatibleStaticMethod(
+                                GoetyReflection.seHelperClass, "hasResearch", player, research);
+                        if (hasResearchMethod != null) {
+                            hasResearch = Boolean.TRUE.equals(
+                                    hasResearchMethod.invoke(null, player, research));
+                            checkAvailable = true;
                         }
                     }
                 }
-            } catch (Exception e) {
-                RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] Plan structure check failed", e);
+            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] Research verification skipped", e); }
+            if (!checkAvailable) {
+                warnings.add(Component.translatable(
+                        "rsi.goety.warn.research_check_failed",
+                        resolveResearchName(researchId)));
+                blocked = true;
+            } else if (!hasResearch) {
+                warnings.add(Component.translatable(
+                        "rsi.goety.warn.research_missing",
+                        resolveResearchName(researchId)));
+                blocked = true;
             }
-        } else if (dim == null || pos == null) {
-            try {
-                String craftType = Reflect.<String>invoke(recipe, "getCraftType").orElse(null);
-                if (craftType != null && !craftType.isEmpty()) {
-                    warnings.add(Component.translatable(
-                            "rsi.goety.warn.no_bound_altar", resolveCraftTypeName(craftType)));
-                }
-            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] CraftType resolution skipped", e); }
         }
 
-        return warnings;
+        Object ritual = null;
+        try {
+            ritual = recipe.getClass().getMethod(GoetyReflection.M_GET_RITUAL).invoke(recipe);
+            if (ritual == null) {
+                warnings.add(Component.translatable(
+                        "rsi.goety.warn.prerequisite_check_failed"));
+                blocked = true;
+            }
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn(
+                    "[RSI-Batch-Goety] Plan ritual lookup failed; blocking ritual", e);
+            warnings.add(Component.translatable(
+                    "rsi.goety.warn.prerequisite_check_failed"));
+            blocked = true;
+        }
+
+        try {
+            boolean requiresSacrifice = Boolean.TRUE.equals(
+                    recipe.getClass().getMethod("requiresSacrifice").invoke(recipe));
+            if (requiresSacrifice) {
+                Component name = displayComponent(
+                        Reflect.invoke(recipe, "getEntityToSacrificeDisplayName").orElse(null));
+                warnings.add(Component.translatable(
+                        "rsi.goety.error.requires_sacrifice", name));
+                blocked = true;
+            }
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn(
+                    "[RSI-Batch-Goety] Plan sacrifice lookup failed; blocking ritual", e);
+            warnings.add(Component.translatable(
+                    "rsi.goety.warn.prerequisite_check_failed"));
+            blocked = true;
+        }
+
+        // Structure/craftType check
+        try {
+            Object craftTypeValue = recipe.getClass().getMethod("getCraftType").invoke(recipe);
+            String craftType = craftTypeValue instanceof String string ? string : null;
+            if (craftType != null && !craftType.isEmpty()) {
+                if (pos != null && dim != null) {
+                    ServerLevel level = CraftPacketUtils.resolveLevel(player.server, dim, player);
+                    BlockEntity be = level != null && level.isLoaded(pos)
+                            ? level.getBlockEntity(pos) : null;
+                    Method structureCheck = findCompatibleStaticMethod(
+                            GoetyReflection.ritualRequirementsClass,
+                            "getProperStructure", craftType, be, pos, level);
+                    if (level == null || be == null
+                            || GoetyReflection.darkAltarBEClass == null
+                            || !GoetyReflection.darkAltarBEClass.isInstance(be)
+                            || structureCheck == null) {
+                        warnings.add(Component.translatable(
+                                "rsi.goety.warn.prerequisite_check_failed"));
+                        blocked = true;
+                    } else if (!Boolean.TRUE.equals(
+                            structureCheck.invoke(null, craftType, be, pos, level))) {
+                        warnings.add(Component.translatable(
+                                "rsi.goety.warn.structure_mismatch",
+                                resolveCraftTypeName(craftType)));
+                        blocked = true;
+                    }
+                } else {
+                    warnings.add(Component.translatable(
+                            "rsi.goety.warn.no_bound_altar",
+                            resolveCraftTypeName(craftType)));
+                    blocked = true;
+                }
+            }
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn(
+                    "[RSI-Batch-Goety] Plan structure check failed; blocking ritual", e);
+            warnings.add(Component.translatable(
+                    "rsi.goety.warn.prerequisite_check_failed"));
+            blocked = true;
+        }
+
+        if (ritual != null && GoetyReflection.enchantItemRitualClass != null
+                && GoetyReflection.enchantItemRitualClass.isInstance(ritual)) {
+            try {
+                Object xpValue = recipe.getClass().getMethod("getXPLevelCost").invoke(recipe);
+                int xpCost = xpValue instanceof Number number ? number.intValue() : 0;
+                if (xpCost > player.experienceLevel) {
+                    warnings.add(Component.translatable(
+                            "rsi.goety.error.insufficient_xp",
+                            xpCost, player.experienceLevel));
+                    blocked = true;
+                }
+                Object enchantment = recipe.getClass()
+                        .getMethod(GoetyReflection.M_GET_ENCHANTMENT).invoke(recipe);
+                if (enchantment == null) {
+                    warnings.add(Component.translatable(
+                            "rsi.goety.error.no_enchantment"));
+                    blocked = true;
+                }
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.warn(
+                        "[RSI-Batch-Goety] Plan enchantment check failed; blocking ritual", e);
+                warnings.add(Component.translatable(
+                        "rsi.goety.warn.prerequisite_check_failed"));
+                blocked = true;
+            }
+        }
+
+        return new PlanPrerequisiteCheck(warnings, blocked);
     }
 
     /**

@@ -39,6 +39,12 @@ import java.util.List;
 public final class PlanWarnings {
     private PlanWarnings() {}
 
+    public record Result(List<Component> warnings, boolean blocksExecution) {
+        public Result {
+            warnings = List.copyOf(warnings);
+        }
+    }
+
     public static int botaniaManaCost(Recipe<?> recipe) {
         int cost = botaniaInt(recipe, "vazkii.botania.api.recipe.ManaInfusionRecipe", "getManaToConsume");
         if (cost >= 0) return cost;
@@ -90,7 +96,18 @@ public final class PlanWarnings {
      */
     public static List<Component> collect(String typeId, ServerPlayer player, Recipe<?> recipe,
                                         @Nullable ResourceLocation dim, @Nullable BlockPos pos) {
+        return collectResult(typeId, player, recipe, dim, pos).warnings();
+    }
+
+    /**
+     * Collects warnings together with whether the current machine state is known
+     * to be unusable. Most integration warnings are informational; Goety ritual
+     * prerequisites are authoritative because starting anyway can consume inputs.
+     */
+    public static Result collectResult(String typeId, ServerPlayer player, Recipe<?> recipe,
+                                       @Nullable ResourceLocation dim, @Nullable BlockPos pos) {
         List<Component> warnings = new ArrayList<>();
+        boolean blocksExecution = false;
         switch (typeId) {
             case ModIds.AETHER:
             case "aether_freezer":
@@ -99,7 +116,10 @@ public final class PlanWarnings {
                 warnings.addAll(AetherFurnaceBatchDelegate.getPlanWarnings(player, recipe, dim, pos));
                 break;
             case ModIds.GOETY:
-                warnings.addAll(GoetyBatchDelegate.getPlanWarnings(player, recipe, dim, pos));
+                GoetyBatchDelegate.PlanPrerequisiteCheck goetyCheck =
+                        GoetyBatchDelegate.checkPlanPrerequisites(player, recipe, dim, pos);
+                warnings.addAll(goetyCheck.warnings());
+                blocksExecution = goetyCheck.blocked();
                 break;
             case ModIds.FORBIDDEN_ARCANUS:
                 warnings.addAll(FaBatchDelegate.getPlanWarnings(player, recipe, dim, pos));
@@ -179,6 +199,6 @@ public final class PlanWarnings {
             default:
                 break;
         }
-        return warnings;
+        return new Result(warnings, blocksExecution);
     }
 }
