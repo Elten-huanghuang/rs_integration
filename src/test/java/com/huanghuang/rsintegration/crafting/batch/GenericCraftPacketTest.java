@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.CraftingResolver;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.OutputDestination;
+import com.huanghuang.rsintegration.crafting.RecipeIndex;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.crafting.planning.PureRecipePlanner;
 import com.huanghuang.rsintegration.crafting.planning.AsyncPlanningCoordinator;
@@ -165,6 +166,33 @@ class GenericCraftPacketTest extends BootstrapTest {
                 Ingredient.of(Items.NETHERITE_INGOT),
                 new ItemStack(Items.NETHERITE_CHESTPLATE));
         assertTrue(GenericCraftPacket.requiresBoundMachine(smithing, ModType.GENERIC));
+    }
+
+    @Test
+    void pureCraftingStepRetainsSameOutputMachineRecipeAsAlternative() {
+        ShapelessRecipe crafting = new ShapelessRecipe(
+                new ResourceLocation("goety", "magic_emerald_craft"), "",
+                net.minecraft.world.item.crafting.CraftingBookCategory.MISC,
+                new ItemStack(Items.EMERALD),
+                net.minecraft.core.NonNullList.of(Ingredient.EMPTY, Ingredient.of(Items.LAPIS_LAZULI)));
+        ShapelessRecipe infuser = new ShapelessRecipe(
+                new ResourceLocation("goety", "magic_emerald"), "",
+                net.minecraft.world.item.crafting.CraftingBookCategory.MISC,
+                new ItemStack(Items.EMERALD),
+                net.minecraft.core.NonNullList.of(Ingredient.EMPTY, Ingredient.of(Items.REDSTONE)));
+        ResourceLocation craftingType = new ResourceLocation("minecraft", "crafting");
+        var step = new CraftingResolver.ResolutionStep(crafting.getId(), ModType.GENERIC,
+                craftingType, List.of(), List.of(), false, 1, null, null);
+        Map<net.minecraft.world.item.Item, List<RecipeIndex.Entry>> index = Map.of(
+                Items.EMERALD, List.of(
+                        new RecipeIndex.Entry(crafting, ModType.GENERIC, craftingType),
+                        new RecipeIndex.Entry(infuser, ModType.CUSTOM_GUI, craftingType)));
+
+        var enriched = GenericCraftPacket.attachIndexedAlternatives(
+                List.of(step), index, net.minecraft.core.RegistryAccess.EMPTY);
+
+        assertEquals(List.of(infuser.getId()), enriched.get(0).alternativeIds());
+        assertEquals(List.of(ModType.CUSTOM_GUI.id()), enriched.get(0).alternativeModTypes());
     }
 
     @Test
