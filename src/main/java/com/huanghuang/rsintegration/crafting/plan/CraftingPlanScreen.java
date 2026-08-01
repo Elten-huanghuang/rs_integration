@@ -457,13 +457,15 @@ public final class CraftingPlanScreen extends Screen {
                     .build());
         }
 
-        addRenderableWidget(Button.builder(
+        Button confirmButton = Button.builder(
                         Component.translatable(selectedPath.isDirty()
                                 ? "rsi.plan.confirm_branches" : "rsi.plan.confirm"),
                         btn -> onConfirm())
                 .pos(width / 2 - btnW - 10, btnY)
                 .size(selectedPath.isDirty() ? btnW + 20 : btnW, 20)
-                .build());
+                .build();
+        confirmButton.active = plan.success() || selectedPath.isDirty();
+        addRenderableWidget(confirmButton);
 
         addRenderableWidget(Button.builder(
                         Component.translatable("rsi.plan.cancel"),
@@ -500,7 +502,7 @@ public final class CraftingPlanScreen extends Screen {
     }
 
     private void onConfirm() {
-        if (maxCraftablePending) return;
+        if (maxCraftablePending || (!plan.success() && !selectedPath.isDirty())) return;
         String recipeId = plan.recipeId();
         ResourceLocation targetId = ResourceLocation.tryParse(recipeId);
         if (QuestSubmissionTargetIds

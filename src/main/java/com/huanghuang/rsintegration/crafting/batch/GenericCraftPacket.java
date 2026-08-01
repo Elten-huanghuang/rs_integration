@@ -2303,6 +2303,7 @@ public final class GenericCraftPacket {
         // ── Add the target recipe itself as the last step so its grid is visible ──
         // Components, not Strings: a dedicated server cannot resolve rsi.* keys.
         List<Component> modWarnings = new ArrayList<>();
+        boolean blockingPrerequisiteFailure = false;
         // Items the plan's intermediate steps actually produce. When the target's
         // ingredient is a tag with no member in stock (e.g. a wood-tag gun slot),
         // the display representative should be whichever member the plan crafts
@@ -2422,7 +2423,10 @@ public final class GenericCraftPacket {
             // Collect plan-time mod warnings (Goety research/structure, FA essences).
             // These render in the "unavailable" area, not inside step cards.
             if (recipeModType != null) {
-                modWarnings.addAll(PlanWarnings.collect(recipeModType.id(), player, recipe, dim, pos));
+                PlanWarnings.Result warningResult = PlanWarnings.collectResult(
+                        recipeModType.id(), player, recipe, dim, pos);
+                modWarnings.addAll(warningResult.warnings());
+                blockingPrerequisiteFailure |= warningResult.blocksExecution();
             }
 
             // Arcane Iterator per-level chain: rewrite the target step's center
@@ -2551,7 +2555,7 @@ public final class GenericCraftPacket {
         Map<IngredientKey, PlanResponse.Availability> materials =
                 new LinkedHashMap<>(materialBill.materials());
         Map<IngredientKey, Integer> leftovers = materialBill.leftovers();
-        boolean feasible = materialBill.feasible();
+        boolean feasible = materialBill.feasible() && !blockingPrerequisiteFailure;
 
         if (RSIntegrationMod.LOGGER.isDebugEnabled()) {
             long shortageCount = materials.values().stream().filter(a -> !a.isEnough()).count();
