@@ -256,6 +256,12 @@ public final class RSIntegrationMod {
             LOGGER.info("[RSI-Config] Migrated repeatCountMax from 64 to {}",
                     migratedMax);
         }
+        var currentAdapters = RSIntegrationConfig.ANVIL_MEMORY_ADAPTERS.get();
+        var migratedAdapters = RSIntegrationConfig.migrateAnvilMemoryAdapters(schema, currentAdapters);
+        if (!migratedAdapters.equals(currentAdapters)) {
+            RSIntegrationConfig.ANVIL_MEMORY_ADAPTERS.set(migratedAdapters);
+            LOGGER.info("[RSI-Config] Enabled new anvil memory adapters: {}", migratedAdapters);
+        }
         RSIntegrationConfig.SERVER_CONFIG_SCHEMA_VERSION
                 .set(RSIntegrationConfig.SERVER_CONFIG_SCHEMA);
         config.save();

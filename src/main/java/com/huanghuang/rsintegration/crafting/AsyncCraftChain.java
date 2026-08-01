@@ -47,6 +47,7 @@ import com.huanghuang.rsintegration.network.ProtectionChecker;
 import com.huanghuang.rsintegration.util.CraftLogContext;
 import com.huanghuang.rsintegration.util.Diagnostics;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
+import com.huanghuang.rsintegration.mods.vanilla.SmithingRecipeHandler;
 import com.huanghuang.rsintegration.util.PlayerUtils;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
@@ -1098,9 +1099,8 @@ public final class AsyncCraftChain {
     private PreparationResult prepareGraphNode(NodeId nodeId,
                                                CraftingResolver.ResolutionStep step,
                                                ServerPlayer online) {
-        String subTypeHint = AltarBindingRegistry.recipeSubTypeHint(step.recipeId());
-        List<BoundMachine> machines = deduplicateMachines(AltarBindingRegistry.getBoundMachinesForType(
-                online, step.modType(), subTypeHint));
+        List<BoundMachine> machines = deduplicateMachines(AltarBindingRegistry.getBoundMachinesForRecipe(
+                online, step.modType(), step.recipeId()));
         machines.sort((a, b) -> {
             ResourceLocation playerDim = online.level().dimension().location();
             boolean aSame = a.dim().equals(playerDim);
@@ -2372,15 +2372,19 @@ public final class AsyncCraftChain {
                 List<IngredientSpec> specs =
                         CraftPacketUtils.extractIngredientSpecs(recipe);
                 if (specs == null || specs.isEmpty()) continue;
+                List<ItemStack> consumedInputs = new ArrayList<>();
 
                 for (IngredientSpec spec : specs) {
                     if (spec.isEmpty()) continue;
                     int stillNeeded = CraftPacketUtils.requiredCount(spec, executions);
+                    boolean captured = false;
                     var iter = workingInventory.iterator();
                     while (iter.hasNext() && stillNeeded > 0) {
                         ItemStack vi = iter.next();
                         if (spec.ingredient().test(vi)) {
                             int take = Math.min(stillNeeded, vi.getCount());
+                            if (!captured) consumedInputs.add(vi.copyWithCount(1));
+                            captured = true;
                             vi.shrink(take);
                             stillNeeded -= take;
                             if (vi.isEmpty()) iter.remove();
@@ -2407,11 +2411,18 @@ public final class AsyncCraftChain {
                             }
                             return false;
                         }
+                        if (!captured) consumedInputs.add(reserved.copyWithCount(1));
                     }
                 }
 
-                ItemStack result = ModRecipeHandlers.tryGetResultItem(
-                        recipe, server.overworld().registryAccess());
+                ItemStack result;
+                if (recipe instanceof net.minecraft.world.item.crafting.SmithingTransformRecipe smithing) {
+                    result = SmithingRecipeHandler.assembleTransform(
+                            smithing, consumedInputs, server.overworld().registryAccess());
+                } else {
+                    result = ModRecipeHandlers.tryGetResultItem(
+                            recipe, server.overworld().registryAccess());
+                }
                 if (!result.isEmpty()) {
                     addToInventory(workingInventory,
                             result.copyWithCount(StepExecutor.mulCount(result.getCount(), executions)));
@@ -2496,10 +2507,8 @@ public final class AsyncCraftChain {
         // Extract machine sub-type from recipe ID (e.g. "wissen_crystallizer"
         // from "wizards_reborn:wissen_crystallizer/earth_crystal_seed") so we
         // only probe machines of the correct type, not every binding for the mod.
-        String subTypeHint = AltarBindingRegistry.recipeSubTypeHint(step.recipeId());
-
-        List<BoundMachine> machines = AltarBindingRegistry.getBoundMachinesForType(
-                online, step.modType(), subTypeHint);
+        List<BoundMachine> machines = AltarBindingRegistry.getBoundMachinesForRecipe(
+                online, step.modType(), step.recipeId());
         if (machines.isEmpty()) {
             waitingForMachineLease = false;
             // Diagnostic: also check how many bindings exist for this mod type
@@ -2508,7 +2517,7 @@ public final class AsyncCraftChain {
             int totalForMod = AltarBindingRegistry.getBoundMachinesForType(
                     online, step.modType()).size();
             RSIntegrationMod.LOGGER.warn(ctx.format("No bound machine for mod type {} subType={} (total {} bindings for this mod)"),
-                    step.modType(), subTypeHint != null ? subTypeHint : "*", totalForMod);
+                    step.modType(), AltarBindingRegistry.recipeSubTypeHint(step.recipeId()), totalForMod);
             if (totalForMod > 0) {
                 // Machines of this mod ARE bound, but none match the sub-type filter
                 online.sendSystemMessage(Component.translatable(
@@ -2596,7 +2605,7 @@ public final class AsyncCraftChain {
         // without a physical machine.  Use the shared-ledger preReserve flow so
         // intermediate outputs from prior chain steps (in virtualInventory) are
         // visible to subsequent steps.
-        if (initialDelegate instanceof GenericBatchDelegate) {
+        if (initialDelegate.getClass() == GenericBatchDelegate.class) {
             if (!PreparationMessageScope.validate(
                     initialDelegate, online, step.recipeId(), null, BlockPos.ZERO)) {
                 return null;

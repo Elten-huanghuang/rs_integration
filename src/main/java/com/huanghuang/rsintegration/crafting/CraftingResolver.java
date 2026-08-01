@@ -643,6 +643,8 @@ public final class CraftingResolver {
             }
 
             int batches = Math.max(1, (int) Math.ceil((double) remaining / a.netGain));
+            int selfConsumed = selfConsumedPerBatch(a.entry, a.output,
+                    ctx.level.registryAccess());
 
             ctx.beginUndo();
             edges.beginUndo();
@@ -654,8 +656,22 @@ public final class CraftingResolver {
                 for (StackKey inKey : inKeys) {
                     edges.addEdge(inKey, outKey);
                 }
-                allOk = StepExecutor.craftBatched(
-                        a.entry, ctx, depth, altIds, altModTypes, edges, batches);
+                int batchesLeft = batches;
+                do {
+                    int stageBatches = batchesLeft;
+                    if (selfConsumed > 0) {
+                        Ingredient exactOutput = ingredientOf(a.output, a.output.hasTag());
+                        stageBatches = Math.min(batchesLeft,
+                                ctx.countMatching(exactOutput) / selfConsumed);
+                        if (stageBatches <= 0) {
+                            allOk = false;
+                            break;
+                        }
+                    }
+                    allOk = StepExecutor.craftBatched(
+                            a.entry, ctx, depth, altIds, altModTypes, edges, stageBatches);
+                    batchesLeft -= stageBatches;
+                } while (allOk && batchesLeft > 0);
             } finally {
                 ctx.resolving.remove(bk);
                 ctx.resolvingOutputs.remove(outKey);
@@ -839,6 +855,11 @@ public final class CraftingResolver {
 
     private static int netGainPerBatch(RecipeIndex.Entry entry, ItemStack output,
                                         net.minecraft.core.RegistryAccess access) {
+        return output.getCount() - selfConsumedPerBatch(entry, output, access);
+    }
+
+    private static int selfConsumedPerBatch(RecipeIndex.Entry entry, ItemStack output,
+                                             net.minecraft.core.RegistryAccess access) {
         if (entry.recipe() instanceof CraftingRecipe cr) {
             int selfConsumed = 0;
             for (IngredientSpec spec : CraftPacketUtils.extractCraftingIngredientSpecs(cr)) {
@@ -847,7 +868,7 @@ public final class CraftingResolver {
                     selfConsumed += spec.count();
                 }
             }
-            return output.getCount() - selfConsumed;
+            return selfConsumed;
         }
         List<IngredientSpec> specs = CraftPacketUtils.extractIngredientSpecs(entry.recipe());
         if (isIngredientDataBroken(specs)) {
@@ -857,16 +878,16 @@ public final class CraftingResolver {
                 Ingredient ing = ingredientOf(stack, stack.hasTag());
                 if (ing.test(output)) selfConsumed += stack.getCount();
             }
-            return output.getCount() - selfConsumed;
+            return selfConsumed;
         }
-        if (specs == null || specs.isEmpty()) return output.getCount();
+        if (specs == null || specs.isEmpty()) return 0;
         int selfConsumed = 0;
         for (IngredientSpec spec : specs) {
             if (spec.isEmpty()) continue;
             if (spec.role() != DemandRole.CATALYST && spec.ingredient().test(output))
                 selfConsumed += spec.count();
         }
-        return output.getCount() - selfConsumed;
+        return selfConsumed;
     }
 
     private static String branchKey(ResourceLocation recipeId, ItemStack output) {

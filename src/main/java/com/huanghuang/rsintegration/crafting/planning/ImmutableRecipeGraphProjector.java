@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting.planning;
 
 import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.CraftPlanningRevision;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
@@ -52,7 +53,10 @@ public final class ImmutableRecipeGraphProjector {
             long started = System.nanoTime();
             ImmutableRecipeGraph graph = project(level);
             cachedProjection = new CachedProjection(source, revision, graph);
-            PerformanceMonitor.recordRecipeGraphProjection(false, System.nanoTime() - started);
+            long elapsedNanos = System.nanoTime() - started;
+            PerformanceMonitor.recordRecipeGraphProjection(false, elapsedNanos);
+            RSIntegrationMod.LOGGER.info("[RecipeGraph] projected {} recipes in {}ms",
+                    graph.recipesById().size(), elapsedNanos / 1_000_000L);
             return graph;
         }
     }
@@ -67,10 +71,8 @@ public final class ImmutableRecipeGraphProjector {
                         || !seen.add(recipe.getId())) continue;
                 ItemStack output = recipe.getResultItem(level.registryAccess());
                 if (output.isEmpty()) continue;
-                List<IngredientSpec> specs = CraftPacketUtils.extractIngredientSpecs(recipe);
-                if (specs == null || specs.isEmpty()) {
-                    specs = CraftPacketUtils.extractCraftingIngredientSpecs(recipe);
-                }
+                List<IngredientSpec> specs =
+                        CraftPacketUtils.extractCraftingIngredientSpecs(recipe);
                 List<IngredientRef> inputs = new ArrayList<>();
                 boolean valid = true;
                 for (IngredientSpec spec : specs) {

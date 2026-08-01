@@ -14,7 +14,7 @@ import java.util.List;
 import java.util.function.Supplier;
 
 public record AnvilMemoryRequestPacket(Action action, String adapterId, int memoryIndex) {
-    public enum Action { SYNC, RESTOCK, SWAP, IPN_RESTOCK }
+    public enum Action { SYNC, RESTOCK, SWAP, IPN_RESTOCK, REMEMBER_RESULT }
 
     public static void encode(AnvilMemoryRequestPacket packet, FriendlyByteBuf buf) {
         buf.writeEnum(packet.action); buf.writeUtf(packet.adapterId, 64); buf.writeVarInt(packet.memoryIndex);
@@ -39,6 +39,8 @@ public record AnvilMemoryRequestPacket(Action action, String adapterId, int memo
         }
         if (request.action == Action.SYNC) {
             AnvilMemoryNetworkHandler.sendSync(player, adapter);
+        } else if (request.action == Action.REMEMBER_RESULT) {
+            rememberResultMaterial(player, adapter);
         } else if (request.action == Action.SWAP) {
             swap(player, adapter);
         } else if (request.action == Action.IPN_RESTOCK) {
@@ -47,6 +49,15 @@ public record AnvilMemoryRequestPacket(Action action, String adapterId, int memo
         } else {
             restock(player, adapter, request.memoryIndex);
         }
+    }
+
+    private static void rememberResultMaterial(ServerPlayer player, AnvilMemoryAdapter adapter) {
+        var result = player.containerMenu.getSlot(adapter.resultSlot());
+        ItemStack material = adapter.rememberedMaterial(player.containerMenu);
+        if (result.getItem().isEmpty() || !result.mayPickup(player) || material.isEmpty()) return;
+        AnvilMemoryData.remember(player, adapter.id(), material,
+                RSIntegrationConfig.ANVIL_MEMORY_REMEMBER_NBT.get());
+        AnvilMemoryNetworkHandler.sendSync(player, adapter);
     }
 
     private static boolean valid(AnvilMemoryAdapter adapter, String requestedId) {

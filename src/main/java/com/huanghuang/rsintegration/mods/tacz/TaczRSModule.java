@@ -2,7 +2,6 @@ package com.huanghuang.rsintegration.mods.tacz;
 
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
-import com.huanghuang.rsintegration.crafting.batch.GenericBatchDelegate;
 import com.huanghuang.rsintegration.mods.IModIntegration;
 import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
@@ -35,7 +34,7 @@ public final class TaczRSModule implements IModIntegration {
                 new String[]{"com.tacz.guns.crafting.GunSmithTableRecipe"},
                 new String[]{"gun_smith_table_a", "gun_smith_table_b", "gun_smith_table_c"},
                 new String[0],
-                GenericBatchDelegate::new);
+                TaczBatchDelegate::new);
         ModType.configureJei("tacz",
                 null,
                 new String[][]{{"com.tacz.guns.crafting.GunSmithTableRecipe", "tacz"}},

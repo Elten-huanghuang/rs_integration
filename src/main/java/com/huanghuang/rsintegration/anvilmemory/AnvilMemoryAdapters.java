@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.anvilmemory;
 
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.AnvilMenu;
+import net.minecraftforge.registries.ForgeRegistries;
 
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -16,9 +17,31 @@ public final class AnvilMemoryAdapters {
             public int primarySlot() { return 0; }
             public int materialSlot() { return 1; }
         });
+        register(menuAdapter("goety_dark_anvil", "goety:dark_anvil"));
+        register(menuAdapter("irons_spellbooks_arcane_anvil", "irons_spellbooks:arcane_anvil_menu"));
     }
 
     private AnvilMemoryAdapters() {}
+
+    private static AnvilMemoryAdapter menuAdapter(String id, String menuId) {
+        return new AnvilMemoryAdapter() {
+            public String id() { return id; }
+            public boolean supports(AbstractContainerMenu menu) {
+                return menuId.equals(menuTypeId(menu));
+            }
+            public int primarySlot() { return 0; }
+            public int materialSlot() { return 1; }
+        };
+    }
+
+    private static String menuTypeId(AbstractContainerMenu menu) {
+        try {
+            var key = ForgeRegistries.MENU_TYPES.getKey(menu.getType());
+            return key == null ? null : key.toString();
+        } catch (UnsupportedOperationException ignored) {
+            return null;
+        }
+    }
 
     public static void register(AnvilMemoryAdapter adapter) {
         if (adapter == null || adapter.id() == null || adapter.id().isBlank()) {

@@ -14,7 +14,9 @@ import java.util.List;
 public final class RSIntegrationConfig {
     public static final int REPEAT_COUNT_DEFAULT = 1024;
     public static final int REPEAT_COUNT_ABSOLUTE_MAX = 1024;
-    public static final int SERVER_CONFIG_SCHEMA = 2;
+    public static final int SERVER_CONFIG_SCHEMA = 3;
+    public static final List<String> DEFAULT_ANVIL_MEMORY_ADAPTERS = List.of(
+            "minecraft_anvil", "goety_dark_anvil", "irons_spellbooks_arcane_anvil");
     public static final int DEFAULT_CRAFTING_PLANNING_WORKERS = CraftingPlanningConfig.DEFAULT_WORKERS;
     public static final int DEFAULT_CRAFTING_PLANNING_QUEUE_CAPACITY =
             CraftingPlanningConfig.DEFAULT_QUEUE_CAPACITY;
@@ -794,7 +796,8 @@ public final class RSIntegrationConfig {
                 .define("ipnFastRenameCompat", true);
         ANVIL_MEMORY_ADAPTERS = s
                 .comment("Enabled adapter ids. Mod integrations can register more adapters in code.")
-                .defineList("adapters", List.of("minecraft_anvil"), value -> value instanceof String id && !id.isBlank());
+                .defineList("adapters", DEFAULT_ANVIL_MEMORY_ADAPTERS,
+                        value -> value instanceof String id && !id.isBlank());
         s.pop();
 
         s.push("rateLimits");
@@ -860,8 +863,14 @@ public final class RSIntegrationConfig {
     private RSIntegrationConfig() {}
 
     public static int migrateRepeatCountMax(int schema, int currentValue) {
-        return schema < SERVER_CONFIG_SCHEMA && currentValue == 64
+        return schema < 2 && currentValue == 64
                 ? REPEAT_COUNT_DEFAULT : currentValue;
+    }
+
+    public static List<? extends String> migrateAnvilMemoryAdapters(
+            int schema, List<? extends String> currentValue) {
+        return schema < 3 && currentValue.equals(List.of("minecraft_anvil"))
+                ? DEFAULT_ANVIL_MEMORY_ADAPTERS : currentValue;
     }
 
     public static void saveClientConfig() {

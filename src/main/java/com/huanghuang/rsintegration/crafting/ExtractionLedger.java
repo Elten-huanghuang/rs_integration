@@ -705,22 +705,6 @@ public final class ExtractionLedger implements AutoCloseable {
             case PLAYER_INVENTORY -> {
                 ItemStack extracted = extractFromSlots(entry, player.getInventory().items);
                 if (extracted.getCount() < entry.count) {
-                    ItemStack off = extractFromSlots(entry, player.getInventory().offhand,
-                            entry.count - extracted.getCount());
-                    if (!off.isEmpty()) {
-                        if (extracted.isEmpty()) extracted = off;
-                        else extracted.grow(off.getCount());
-                    }
-                }
-                if (extracted.getCount() < entry.count) {
-                    ItemStack armor = extractFromSlots(entry, player.getInventory().armor,
-                            entry.count - extracted.getCount());
-                    if (!armor.isEmpty()) {
-                        if (extracted.isEmpty()) extracted = armor;
-                        else extracted.grow(armor.getCount());
-                    }
-                }
-                if (extracted.getCount() < entry.count) {
                     ItemStack bp = extractFromBackpackSlots(entry, player,
                             entry.count - extracted.getCount());
                     if (!bp.isEmpty()) {
@@ -819,9 +803,7 @@ public final class ExtractionLedger implements AutoCloseable {
 
     private int countExactAvailableInInventory(ServerPlayer player, ItemStack template) {
         CraftingResolver.StackKey key = CraftingResolver.StackKey.of(template, true);
-        int available = countExact(player.getInventory().items, template)
-                + countExact(player.getInventory().offhand, template)
-                + countExact(player.getInventory().armor, template);
+        int available = countExact(player.getInventory().items, template);
         for (IItemHandler backpack : findAllBackpackInventories(player)) {
             for (int slot = 0; slot < backpack.getSlots(); slot++) {
                 ItemStack stored = backpack.getStackInSlot(slot);
@@ -1081,21 +1063,13 @@ public final class ExtractionLedger implements AutoCloseable {
         return null;
     }
 
-    /** Collect internal inventories of all backpacks found on the player (including curio slots). */
+    /** Collect consumable backpack inventories from the main inventory and Curios. */
     static List<IItemHandler> findAllBackpackInventories(ServerPlayer player) {
         List<IItemHandler> result = new ArrayList<>();
         if (!ModList.get().isLoaded(ModIds.SOPHISTICATED_BACKPACKS)) return result;
 
         // Main inventory
         for (ItemStack stack : player.getInventory().items) {
-            IItemHandler h = getBackpackInventory(stack);
-            if (h != null) result.add(h);
-        }
-        // Offhand
-        IItemHandler off = getBackpackInventory(player.getOffhandItem());
-        if (off != null) result.add(off);
-        // Armor
-        for (ItemStack stack : player.getInventory().armor) {
             IItemHandler h = getBackpackInventory(stack);
             if (h != null) result.add(h);
         }

@@ -169,9 +169,25 @@ public final class PureRecipePlanner {
                         stepLimitReached = true;
                         continue;
                     }
-                    int batches = batchesFor(needed, candidate.outputCount());
+                    int selfConsumed = selfConsumedPerBatch(candidate, wanted);
+                    int netGain = candidate.outputCount() - selfConsumed;
+                    int batches = batchesFor(needed,
+                            selfConsumed > 0 ? netGain : candidate.outputCount());
                     if (batches <= 0) continue;
-                    List<Task> branch = recipeBranch(candidate, batches, ingredient.count(), rest);
+                    int scheduledBatches = batches;
+                    int consumeCount = ingredient.count();
+                    List<Task> continuation = rest;
+                    if (selfConsumed > 0) {
+                        if (netGain <= 0) continue;
+                        scheduledBatches = Math.min(batches, have / selfConsumed);
+                        if (scheduledBatches <= 0) continue;
+                        consumeCount = 0;
+                        continuation = new ArrayList<>(rest.size() + 1);
+                        continuation.add(new DemandTask(ingredient));
+                        continuation.addAll(rest);
+                    }
+                    List<Task> branch = recipeBranch(candidate, scheduledBatches,
+                            consumeCount, continuation);
                     if (branch == null) continue;
                     resolving.add(wanted);
                     if (solve(branch)) return true;
@@ -219,8 +235,20 @@ public final class PureRecipePlanner {
         }
 
         private static int batchesFor(int needed, int outputCount) {
+            if (outputCount <= 0) return -1;
             long batches = ((long) needed + outputCount - 1L) / outputCount;
             return batches > Integer.MAX_VALUE ? -1 : (int) Math.max(1L, batches);
+        }
+
+        private static int selfConsumedPerBatch(RecipeNode candidate, MaterialRef output) {
+            long consumed = 0;
+            for (IngredientRef input : candidate.inputs()) {
+                if (input.alternatives().contains(output)) {
+                    consumed += input.count();
+                    if (consumed > Integer.MAX_VALUE) return Integer.MAX_VALUE;
+                }
+            }
+            return (int) consumed;
         }
 
         private static int scheduledRecipes(List<Task> pending) {

@@ -27,7 +27,6 @@ public final class MaterialSources {
      * Count all items in a player's main inventory, keyed by
      * {@link StackKey} (item + NBT tag) for NBT-aware identity.
      * Only counts the main inventory (36 slots) — not armor or offhand,
-     * matching what {@code ExtractionLedger.extractOne} actually extracts from.
      */
     public static Map<StackKey, Integer> countInventory(Player player) {
         Map<StackKey, Integer> map = new HashMap<>();

@@ -61,6 +61,8 @@ public final class RecipeIndex {
         long start = System.currentTimeMillis();
         try {
             get(level);
+            com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraphProjector
+                    .capture(level);
             RSIntegrationMod.LOGGER.info("[RecipeIndex] server-start warm-up completed in {}ms",
                     System.currentTimeMillis() - start);
         } catch (RuntimeException | LinkageError e) {
