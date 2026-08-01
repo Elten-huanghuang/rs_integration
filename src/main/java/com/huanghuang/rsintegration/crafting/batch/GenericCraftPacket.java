@@ -1934,10 +1934,12 @@ public final class GenericCraftPacket {
         List<ResolutionStep> resolutionSteps = null;
         CraftPlanGraph planGraph = null;
         List<ResourceLocation> stepIds;
+        boolean usedPurePlan = false;
 
         if (canUsePrecomputedPlan(precomputedPlan) && effectiveOverrides.isEmpty()) {
             resolutionSteps = PurePlanAdapter.toResolutionSteps(precomputedPlan,
                     planningSnapshot.recipeGraph());
+            usedPurePlan = true;
             for (var unresolved : precomputedPlan.missing()) {
                 if (!unresolved.alternatives().isEmpty()) {
                     missing.add(unresolved.alternatives().get(0).itemId().toString());
@@ -2005,6 +2007,14 @@ public final class GenericCraftPacket {
                 stepIds.size(), diagStepCounts.size(), diagStepCounts);
 
         // Build modType lookup from typed resolution results and recipe dimensions
+        // Pure planning intentionally projects only ordinary crafting recipes. Restore
+        // same-output machine recipes from the complete server index so the plan tree can
+        // offer a bound machine path even when crafting was selected as the primary path.
+        Map<Item, List<RecipeIndex.Entry>> recipeIndex = RecipeIndex.get(player.serverLevel());
+        if (usedPurePlan && resolutionSteps != null) {
+            resolutionSteps = attachIndexedAlternatives(
+                    resolutionSteps, recipeIndex, player.serverLevel().registryAccess());
+        }
         Map<ResourceLocation, ModType> modTypeByRecipe = new HashMap<>();
         Map<ResourceLocation, Integer> recipeWidths = new HashMap<>();
         Map<ResourceLocation, Integer> recipeHeights = new HashMap<>();
@@ -2026,7 +2036,6 @@ public final class GenericCraftPacket {
         }
         // RecipeIndex for OR alternative material checks — allows alternatives
         // whose ingredients are craftable (not just directly available).
-        Map<Item, List<RecipeIndex.Entry>> recipeIndex = RecipeIndex.get(player.serverLevel());
         // Display copy: decremented on each match so the same tag ingredient
         // showing up N times doesn't pick the same item N times (e.g. 1 cherry
         // + 1 acacia shown as 2 acacia when both are logs).
@@ -2907,6 +2916,53 @@ public final class GenericCraftPacket {
 
     static boolean canUsePrecomputedPlan(@Nullable PureRecipePlanner.Result result) {
         return result != null && result.feasible();
+    }
+
+    static List<ResolutionStep> attachIndexedAlternatives(
+            List<ResolutionStep> steps,
+            Map<Item, List<RecipeIndex.Entry>> recipeIndex,
+            net.minecraft.core.RegistryAccess access) {
+        if (steps.isEmpty() || recipeIndex.isEmpty()) return steps;
+
+        Map<ResourceLocation, RecipeIndex.Entry> entriesById = new LinkedHashMap<>();
+        for (List<RecipeIndex.Entry> entries : recipeIndex.values()) {
+            for (RecipeIndex.Entry entry : entries) {
+                entriesById.putIfAbsent(entry.recipe().getId(), entry);
+            }
+        }
+
+        List<ResolutionStep> enriched = new ArrayList<>(steps.size());
+        for (ResolutionStep step : steps) {
+            RecipeIndex.Entry primary = entriesById.get(step.recipeId());
+            if (primary == null) {
+                enriched.add(step);
+                continue;
+            }
+            ItemStack output = ModRecipeHandlers.tryGetResultItem(primary.recipe(), access);
+            List<RecipeIndex.Entry> sameItem = output.isEmpty()
+                    ? null : recipeIndex.get(output.getItem());
+            if (sameItem == null || sameItem.size() < 2) {
+                enriched.add(step);
+                continue;
+            }
+
+            LinkedHashMap<ResourceLocation, String> alternatives = new LinkedHashMap<>();
+            for (RecipeIndex.Entry candidate : sameItem) {
+                ResourceLocation candidateId = candidate.recipe().getId();
+                if (candidateId.equals(step.recipeId())) continue;
+                ItemStack candidateOutput = ModRecipeHandlers.tryGetResultItem(candidate.recipe(), access);
+                if (!ItemStack.isSameItemSameTags(output, candidateOutput)) continue;
+                alternatives.putIfAbsent(candidateId, candidate.modType().id());
+            }
+            if (alternatives.isEmpty()) {
+                enriched.add(step);
+                continue;
+            }
+            enriched.add(new ResolutionStep(step.recipeId(), step.modType(), step.recipeTypeId(),
+                    List.copyOf(alternatives.keySet()), List.copyOf(alternatives.values()),
+                    step.inferMode(), step.executions(), step.syntheticInput(), step.syntheticOutput()));
+        }
+        return List.copyOf(enriched);
     }
 
     static boolean usesPhysicalMachineInputSlots(Recipe<?> recipe) {
