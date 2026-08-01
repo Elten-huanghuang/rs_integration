@@ -8,6 +8,7 @@ import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.util.ModIds;
+import com.huanghuang.rsintegration.mods.tacz.TaczWorkbenchCompatibility;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
@@ -439,7 +440,10 @@ public final class AltarBindingRegistry {
      */
     public static boolean hasBindingForRecipe(ServerPlayer player, net.minecraft.world.item.crafting.Recipe<?> recipe) {
         ModType type = ModType.classifyRecipe(recipe);
-        if (type == null || type == ModType.GENERIC) return true;
+        if (type == null || type == ModType.GENERIC) {
+            return !(recipe instanceof net.minecraft.world.item.crafting.SmithingTransformRecipe)
+                    && !(recipe instanceof net.minecraft.world.item.crafting.SmithingTrimRecipe);
+        }
         // Prefer the recipe registry type for Aether machines. This remains
         // stable when Aether renames Java recipe classes and prevents the broad
         // parent `aether` fallback from hiding freezer/incubator/altar recipes.
@@ -453,6 +457,10 @@ public final class AltarBindingRegistry {
                 default -> null;
             };
             if (mapped != null && ModType.byId(mapped) != null) type = ModType.byId(mapped);
+        }
+
+        if (ModIds.TACZ.equals(type.id())) {
+            return !getBoundMachinesForRecipe(player, type, recipe.getId()).isEmpty();
         }
 
         String subType = recipeSubTypeHint(recipe.getId());
@@ -634,6 +642,12 @@ public final class AltarBindingRegistry {
         return getBoundMachinesForType(player, type, null);
     }
 
+    /** Enumerate machines that can execute this exact recipe. */
+    public static List<BoundMachine> getBoundMachinesForRecipe(
+            ServerPlayer player, ModType type, ResourceLocation recipeId) {
+        return getBoundMachinesForType(player, type, recipeSubTypeHint(recipeId), recipeId);
+    }
+
     /**
      * Enumerate all bound machines of a given mod type, optionally filtered
      * by a machine sub-type hint (e.g. "wissen_crystallizer" for WR recipes).
@@ -648,8 +662,15 @@ public final class AltarBindingRegistry {
 
     public static List<BoundMachine> getBoundMachinesForType(ServerPlayer player, ModType type,
                                                               @Nullable String subTypeHint) {
+        return getBoundMachinesForType(player, type, subTypeHint, null);
+    }
+
+    private static List<BoundMachine> getBoundMachinesForType(
+            ServerPlayer player, ModType type, @Nullable String subTypeHint,
+            @Nullable ResourceLocation recipeId) {
         List<BoundMachine> result = new ArrayList<>();
-        forEachInventoryGroup(player, stacks -> collectBindingsForType(stacks, type, subTypeHint, player, result));
+        forEachInventoryGroup(player, stacks -> collectBindingsForType(
+                stacks, type, subTypeHint, recipeId, player, result));
         // Aether fallback: the generic "aether" ModType acts as a recipe
         // classifier but machines are bound under concrete sub-types.
         if ("aether".equals(type.id()) && result.isEmpty()) {
@@ -657,7 +678,7 @@ public final class AltarBindingRegistry {
                 ModType subType = ModType.byId(subId);
                 if (subType != ModType.GENERIC) {
                     forEachInventoryGroup(player, stacks ->
-                            collectBindingsForType(stacks, subType, subTypeHint, player, result));
+                            collectBindingsForType(stacks, subType, subTypeHint, recipeId, player, result));
                 }
             }
         }
@@ -690,6 +711,7 @@ public final class AltarBindingRegistry {
 
     private static void collectBindingsForType(List<ItemStack> stacks, ModType type,
                                                 String subTypeHint,
+                                                @Nullable ResourceLocation recipeId,
                                                 ServerPlayer player,
                                                 List<BoundMachine> out) {
         // Normalize recipe sub-type hint to canonical machine prefix.
@@ -705,6 +727,10 @@ public final class AltarBindingRegistry {
                         && !(com.huanghuang.rsintegration.mods.pmmo.PmmoRSModule.TYPE_ID
                         .equals(type.id()) && isPmmoSalvageBinding(entry))) continue;
                 if (!isExecutableBinding(type, entry.blockKey())) continue;
+                if (recipeId != null && ModIds.TACZ.equals(type.id())
+                        && !TaczWorkbenchCompatibility.accepts(entry.displayStack(), recipeId)) {
+                    continue;
+                }
                 if (normalized != null && entry.blockKey() != null
                         && !entry.blockKey().toLowerCase(java.util.Locale.ROOT).contains(normalized)) {
                     continue;

@@ -17,6 +17,8 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Ingredient;
+import net.minecraft.world.item.crafting.ShapelessRecipe;
+import net.minecraft.world.item.crafting.SmithingTransformRecipe;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -46,6 +48,30 @@ class GenericCraftPacketTest extends BootstrapTest {
                 List.of(), List.of(), Map.of());
 
         assertTrue(GenericCraftPacket.canUsePrecomputedPlan(complete));
+    }
+
+    @Test
+    void detectsSelfAmplifyingCraftingRecipe() {
+        ShapelessRecipe duplicate = new ShapelessRecipe(new ResourceLocation("test", "duplicate"), "",
+                net.minecraft.world.item.crafting.CraftingBookCategory.MISC,
+                new ItemStack(Items.PAPER, 2),
+                net.minecraft.core.NonNullList.of(Ingredient.EMPTY,
+                        Ingredient.of(Items.PAPER), Ingredient.of(Items.STONE)));
+
+        assertTrue(GenericCraftPacket.isSelfAmplifyingRecipe(
+                duplicate, net.minecraft.core.RegistryAccess.EMPTY));
+    }
+
+    @Test
+    void ordinaryCraftingRecipeIsNotSelfAmplifying() {
+        ShapelessRecipe ordinary = new ShapelessRecipe(new ResourceLocation("test", "ordinary"), "",
+                net.minecraft.world.item.crafting.CraftingBookCategory.MISC,
+                new ItemStack(Items.PAPER),
+                net.minecraft.core.NonNullList.of(Ingredient.EMPTY,
+                        Ingredient.of(Items.SUGAR_CANE)));
+
+        assertFalse(GenericCraftPacket.isSelfAmplifyingRecipe(
+                ordinary, net.minecraft.core.RegistryAccess.EMPTY));
     }
 
     @Test
@@ -124,6 +150,21 @@ class GenericCraftPacketTest extends BootstrapTest {
         assertTrue(GenericCraftPacket.smithingAsyncSteps(
                 List.of(intermediate), new ResourceLocation("test", "divine_gold_helmet"), 1)
                 .isEmpty());
+    }
+
+    @Test
+    void physicalMachineRecipesRequireABindingContext() {
+        assertTrue(GenericCraftPacket.requiresBoundMachine(ModType.CUSTOM_GUI));
+        assertFalse(GenericCraftPacket.requiresBoundMachine(ModType.GENERIC));
+        assertFalse(GenericCraftPacket.requiresBoundMachine(null));
+
+        SmithingTransformRecipe smithing = new SmithingTransformRecipe(
+                new ResourceLocation("test", "smithing_gate"),
+                Ingredient.of(Items.NETHERITE_UPGRADE_SMITHING_TEMPLATE),
+                Ingredient.of(Items.DIAMOND_CHESTPLATE),
+                Ingredient.of(Items.NETHERITE_INGOT),
+                new ItemStack(Items.NETHERITE_CHESTPLATE));
+        assertTrue(GenericCraftPacket.requiresBoundMachine(smithing, ModType.GENERIC));
     }
 
     @Test

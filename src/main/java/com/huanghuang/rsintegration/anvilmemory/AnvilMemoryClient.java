@@ -79,6 +79,9 @@ public final class AnvilMemoryClient {
                 event.getMouseX(), event.getMouseY())) {
             scheduleIpnRestock(screen, adapter);
         }
+        if (adapter.resultSlot(screen).contains(event.getMouseX(), event.getMouseY())) {
+            send(AnvilMemoryRequestPacket.Action.REMEMBER_RESULT, adapter.id(), 0);
+        }
         var panel = adapter.memoryPanel(screen);
         for (int i = 0; i < memories.size(); i++) {
             var row = new AnvilMemoryClientAdapter.Bounds(panel.x() + 2, panel.y() + 2 + i * 20, 18, 18);

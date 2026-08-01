@@ -215,6 +215,11 @@ final class CandidateEngine {
     }
 
     private static boolean isMachineAvailable(RecipeIndex.Entry entry, ResolutionContext ctx) {
+        if (entry.recipe() instanceof net.minecraft.world.item.crafting.SmithingTransformRecipe
+                || entry.recipe() instanceof net.minecraft.world.item.crafting.SmithingTrimRecipe) {
+            if (ctx.player == null) return false;
+            return AltarBindingRegistry.hasBindingForRecipe(ctx.player, entry.recipe());
+        }
         if (entry.modType() == ModType.GENERIC || entry.modType().isVirtual()) return true;
         if (ctx.player == null) return false;
         return AltarBindingRegistry.hasBindingForRecipe(ctx.player, entry.recipe());

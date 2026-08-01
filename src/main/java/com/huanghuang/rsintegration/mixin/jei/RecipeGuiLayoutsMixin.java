@@ -37,7 +37,6 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.renderer.Rect2i;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
@@ -119,7 +118,6 @@ public class RecipeGuiLayoutsMixin {
 
         if (!RSIntegrationConfig.ENABLE_JEI.get()) return;
 
-        AbstractContainerMenu container = getParentContainer();
         var player = Minecraft.getInstance().player;
         if (player == null) return;  // Unlikely but possible during screen transitions
 
@@ -264,7 +262,7 @@ public class RecipeGuiLayoutsMixin {
                 bindingDim = player.level().dimension().location();
                 machinePos = player.blockPosition();
             } else {
-                BindingStorage.BindingEntry binding = findBinding(container, filter);
+                BindingStorage.BindingEntry binding = findBinding(filter);
                 if (binding == null) {
                     if (isFa) faNoBinding++;
                 if (isFaOrTlm) {
@@ -1443,7 +1441,7 @@ public class RecipeGuiLayoutsMixin {
     }
 
     @Unique
-    private static BindingStorage.BindingEntry findBinding(@javax.annotation.Nullable AbstractContainerMenu container, String filter) {
+    private static BindingStorage.BindingEntry findBinding(String filter) {
         var player = Minecraft.getInstance().player;
         if (player == null) return null;
 
@@ -1452,18 +1450,6 @@ public class RecipeGuiLayoutsMixin {
 		boolean debugYhk = filter != null && filter.startsWith("youkaishomecoming");
 		boolean debug = debugFaTlm || debugVanilla || debugYhk;
         List<String> allBlockKeys = debug ? new ArrayList<>() : null;
-
-        if (container != null) {
-            for (net.minecraft.world.inventory.Slot slot : container.slots) {
-                ItemStack stack = slot.getItem();
-                if (!stack.isEmpty()) {
-                    for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
-                        if (debug) allBlockKeys.add(entry.blockKey());
-                        if (rsi$bindingMatchesFilter(entry, filter)) return entry;
-                    }
-                }
-            }
-        }
 
         var inv = player.getInventory();
         for (ItemStack stack : inv.items) {
@@ -1705,12 +1691,4 @@ public class RecipeGuiLayoutsMixin {
         return false;
     }
 
-    @Unique
-    private static AbstractContainerMenu getParentContainer() {
-        var player = Minecraft.getInstance().player;
-        if (player != null && player.containerMenu != null) {
-            return player.containerMenu;
-        }
-        return null;
-    }
 }

@@ -10,6 +10,10 @@ public interface AnvilMemoryAdapter {
     int primarySlot();
     int materialSlot();
 
+    default int resultSlot() {
+        return 2;
+    }
+
     default ItemStack rememberedMaterial(AbstractContainerMenu menu) {
         return menu.getSlot(materialSlot()).getItem();
     }

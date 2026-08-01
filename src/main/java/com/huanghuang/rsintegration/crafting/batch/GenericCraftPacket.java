@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.crafting.batch;
 
 import com.huanghuang.rsintegration.compat.ftbquests.ExternalItemProgressBridge;
 import com.huanghuang.rsintegration.crafting.graph.CraftNode;
+import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.crafting.graph.NodeId;
 import com.huanghuang.rsintegration.crafting.plan.PlanGraphView;
 import com.huanghuang.rsintegration.crafting.plan.PlanMaterialBill;
@@ -42,6 +43,7 @@ import com.huanghuang.rsintegration.mods.apotheosis.ApotheosisGemCuttingCatalog;
 import com.huanghuang.rsintegration.mods.arsnouveau.ArsDynamicApparatusRecipe;
 import com.huanghuang.rsintegration.mods.forbidden.FaRitualHelper;
 import com.huanghuang.rsintegration.mods.forbidden.FaRitualWrapper;
+import com.huanghuang.rsintegration.mods.vanilla.SmithingRecipeHandler;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.crafting.AsyncCraftChain;
@@ -663,9 +665,8 @@ public final class GenericCraftPacket {
     }
 
     static ResolutionStep smithingTerminalStep(ResourceLocation recipeId, int repeatCount) {
-        // Smithing tables are virtual in the execution model. Keeping the
-        // terminal generic lets the chain consume the freshly produced base
-        // item without requiring a second machine binding.
+        // The request is binding-gated before the chain starts. Keeping this
+        // terminal generic lets it assemble from freshly produced inputs.
         return new ResolutionStep(recipeId, ModType.GENERIC,
                 new ResourceLocation("minecraft:smithing"), List.of(), List.of(), false,
                 Math.max(1, repeatCount));
@@ -763,6 +764,10 @@ public final class GenericCraftPacket {
             specs = new ArrayList<>();
         }
 
+        if (recipe instanceof SmithingTransformRecipe smithingRecipe) {
+            specs = SmithingRecipeHandler.requireExactBase(smithingRecipe, specs, baseItem);
+        }
+
         // Group non-empty ingredients by item type with total count
         Map<String, IngredientNeed> grouped = new LinkedHashMap<>();
         for (IngredientSpec spec : specs) {
@@ -772,6 +777,12 @@ public final class GenericCraftPacket {
         }
 
         ModType modType = ModType.classifyRecipe(recipe);
+        if (requiresBoundMachine(recipe, modType)
+                && !AltarBindingRegistry.hasBindingForRecipe(player, recipe)) {
+            player.sendSystemMessage(Component.translatable(
+                    "rsi.generic.error.no_bound_machine", modType.id()));
+            return;
+        }
         if (modType != null && modType.isVirtual()) {
             ModRecipeHandler virtualHandler = ModRecipeHandlers.handlerFor(recipe);
             if (virtualHandler == null || virtualHandler.modType() != modType
@@ -797,7 +808,7 @@ public final class GenericCraftPacket {
                 && !(recipe instanceof CraftingRecipe) && modType != null) {
             String reqKeyword = getMachineKeywordForRecipe(recipe);
             for (var m : AltarBindingRegistry
-                    .getBoundMachinesForType(player, modType)) {
+                    .getBoundMachinesForRecipe(player, modType, recipeId)) {
                 if (reqKeyword != null && m.blockKey() != null && !m.blockKey().contains(reqKeyword))
                     continue;
                 effectiveDim = m.dim();
@@ -809,8 +820,8 @@ public final class GenericCraftPacket {
             }
         }
 
-        // Smithing recipes don't need a bound machine — they compute results
-        // directly via getResultItem().  Skip the async chain path.
+        // Smithing is authorized by its bound table above, then assembled
+        // directly from the concrete extracted inputs below.
         if (!(recipe instanceof CraftingRecipe) && effectiveDim != null && effectivePos != null
                 && network != null && ((modType != null && modType.isVirtual())
                 || RSIntegrationConfig.ENABLE_MULTIBLOCK_AUTO_CRAFTING.get())
@@ -1061,11 +1072,8 @@ public final class GenericCraftPacket {
         // Guard: non-CraftingRecipe mod recipes REQUIRE a bound machine.
         // Falling through to grouped extraction would consume items without
         // actually running the machine crafting.
-        // Exception: smithing recipes can produce results directly via
-        // getResultItem() (e.g. netherite upgrade) without a machine.
         if (!(recipe instanceof CraftingRecipe) && modType != null && modType != ModType.GENERIC
                 && !modType.isVirtual()
-                && modType != ModType.byId("smithing")
                 && (effectiveDim == null || effectivePos == null)) {
             player.sendSystemMessage(Component.translatable(
                     "rsi.generic.error.no_bound_machine", modType.id()));
@@ -1180,7 +1188,11 @@ public final class GenericCraftPacket {
                 // carries forward to the output. getResultItem() returns a
                 // bare template that silently discards all stored data.
                 ItemStack result;
-                if (recipe instanceof CraftingRecipe cr) {
+                if (recipe instanceof SmithingTransformRecipe smithingRecipe) {
+                    result = SmithingRecipeHandler.assembleTransform(
+                            smithingRecipe, allExtracted,
+                            player.serverLevel().registryAccess());
+                } else if (recipe instanceof CraftingRecipe cr) {
                     // Reconstruct the actual crafting grid layout from the
                     // extracted pool — allExtracted is grouped/deduped, not
                     // slot-aligned. Build a pool copy and split(1) from it so
@@ -1550,6 +1562,12 @@ public final class GenericCraftPacket {
             sink.error(Component.translatable("rsi.generic.error.recipe_not_found", recipeId.toString()));
             return;
         }
+        ModType previewModType = ModType.classifyRecipe(recipe);
+        if (requiresBoundMachine(recipe, previewModType)
+                && !AltarBindingRegistry.hasBindingForRecipe(player, recipe)) {
+            sink.error(Component.translatable("rsi.plan.failure.no_bound_machine"));
+            return;
+        }
 
         // FA ApplyModifierRecipe: if JEI provides a base item, build a full
         // recursive plan so the player can see what materials are needed.
@@ -1584,6 +1602,7 @@ public final class GenericCraftPacket {
         // array here drives the target-step block to emit N chained PlanSteps so the
         // plan tree shows the full leveling chain. Null for every other recipe.
         ItemStack[] levelBooks = null;
+        ItemStack selectedSmithingBase = ItemStack.EMPTY;
         // Highest matching intermediate book already present in RS/player storage.
         // Zero means the chain must start from a plain book.
         int iteratorStartLevel = 0;
@@ -1824,6 +1843,27 @@ public final class GenericCraftPacket {
                     !(recipe instanceof CraftingRecipe));
         }
 
+        ItemStack smithingOutput = targetOutput;
+        if (recipe instanceof SmithingTransformRecipe smithingRecipe) {
+            selectedSmithingBase = SmithingRecipeHandler.selectAvailableBase(
+                    smithingRecipe, available, repeatCount);
+            if (!selectedSmithingBase.isEmpty()) {
+                recipeSpecs = SmithingRecipeHandler.requireExactBase(
+                        smithingRecipe, recipeSpecs, selectedSmithingBase);
+                recipeIngredients = expandIngredientSpecs(recipeSpecs);
+                displayIngredients = recipeSpecs.stream()
+                        .filter(spec -> !spec.isEmpty())
+                        .map(IngredientSpec::ingredient)
+                        .toList();
+                ItemStack assembled = SmithingRecipeHandler.assembleWithBase(
+                        smithingRecipe, selectedSmithingBase,
+                        player.serverLevel().registryAccess());
+                if (!assembled.isEmpty()) smithingOutput = assembled;
+            }
+        }
+
+        final ItemStack planTargetOutput = smithingOutput;
+
         PlanCache.Entry cached = PLAN_CACHE.get(cacheKey, System.nanoTime());
         if (cached != null && PlanningStateValidator.sameState(cached.snapshot(), planningSnapshot)) {
             RSIntegrationMod.debug("[RSI-tryBuildPlan] Validated cache hit: recipeId={}", recipeId);
@@ -2028,6 +2068,14 @@ public final class GenericCraftPacket {
             }
             ResolutionStep representative = usedTypedResolver ? resolutionSteps.get(mi) : null;
             String mergeKey = id.toString();
+            Recipe<?> mergeRecipe = resolveRecipe(player.serverLevel(), id);
+            if (mergeRecipe != null && isSelfAmplifyingRecipe(
+                    mergeRecipe, player.serverLevel().registryAccess())) {
+                // Each stage consumes output from the preceding stage. Folding
+                // 1, 2, 4 executions into one x7 step would require seven seed
+                // items up front and destroy the producer dependency chain.
+                mergeKey += "|amplification-stage:" + mi;
+            }
             if (representative != null && representative.syntheticInput() != null
                     && representative.syntheticOutput() != null) {
                 mergeKey += "|" + IngredientKey.of(representative.syntheticInput()).hashCode()
@@ -2296,6 +2344,12 @@ public final class GenericCraftPacket {
                 // Mod recipe: linear layout — re-read specs for per-ingredient counts
                 // (displayIngredients is no longer unrolled per-unit).
                 List<IngredientSpec> targetSpecs = CraftPacketUtils.extractIngredientSpecs(recipe);
+                if (targetSpecs != null
+                        && recipe instanceof SmithingTransformRecipe smithingRecipe
+                        && !selectedSmithingBase.isEmpty()) {
+                    targetSpecs = SmithingRecipeHandler.requireExactBase(
+                            smithingRecipe, targetSpecs, selectedSmithingBase);
+                }
                 if (targetSpecs != null) {
                     for (IngredientSpec spec : targetSpecs) {
                         if (spec.isEmpty()) continue;
@@ -2319,8 +2373,8 @@ public final class GenericCraftPacket {
             // same base Item but have different NBT and are different products.
             List<ResourceLocation> targetAlts = new ArrayList<>();
             List<String> targetAltModTypes = new ArrayList<>();
-            List<RecipeIndex.Entry> targetEntries = recipeIndex.get(targetOutput.getItem());
-            boolean targetHasTag = targetOutput.hasTag();
+            List<RecipeIndex.Entry> targetEntries = recipeIndex.get(planTargetOutput.getItem());
+            boolean targetHasTag = planTargetOutput.hasTag();
             if (targetEntries != null) {
                 for (RecipeIndex.Entry e : targetEntries) {
                     if (e.recipe().getId().equals(recipeId)) continue;
@@ -2332,7 +2386,7 @@ public final class GenericCraftPacket {
                         } else {
                             altOut = ModRecipeHandlers.tryGetResultItem(e.recipe(), player.serverLevel().registryAccess());
                         }
-                        if (!ItemStack.isSameItemSameTags(altOut, targetOutput)) continue;
+                        if (!ItemStack.isSameItemSameTags(altOut, planTargetOutput)) continue;
                     }
                     List<Ingredient> altIngs;
                     if (e.recipe() instanceof CraftingRecipe cr) {
@@ -2375,7 +2429,7 @@ public final class GenericCraftPacket {
                 targetInputs.set(0, levelBooks[levelBooks.length - 2].copy());
             }
 
-            steps.add(new PlanStep(recipeId, targetOutput, repeatCount, targetInputs,
+            steps.add(new PlanStep(recipeId, planTargetOutput, repeatCount, targetInputs,
                     targetAlts, recipeModType, targetDepth, !targetAlts.isEmpty(),
                     targetW, targetH, targetAltModTypes));
 
@@ -2397,7 +2451,7 @@ public final class GenericCraftPacket {
             if (RSIntegrationMod.LOGGER.isDebugEnabled()) {
                 StringBuilder sb = new StringBuilder("[RSI-Generic] Target step: ")
                         .append(recipeId).append(" -> ")
-                        .append(net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(targetOutput.getItem()))
+                        .append(net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(planTargetOutput.getItem()))
                         .append(" [");
                 for (ItemStack in : targetInputs) {
                     if (in.isEmpty()) sb.append("EMPTY ");
@@ -2483,7 +2537,7 @@ public final class GenericCraftPacket {
 
         PlanGraphView planGraphView = planGraph != null ? PlanGraphView.from(planGraph) : null;
         PlanMaterialBill.Result materialBill = PlanMaterialBill.summarize(
-                neededCounts, itemSource, itemAvailable, available, targetOutput,
+                neededCounts, itemSource, itemAvailable, available, planTargetOutput,
                 steps, repeatCount, planGraphView, !missing.isEmpty());
         Map<IngredientKey, PlanResponse.Availability> materials =
                 new LinkedHashMap<>(materialBill.materials());
@@ -2500,7 +2554,7 @@ public final class GenericCraftPacket {
         // name for every step that references it, producing an unreadable wall.
         List<String> dedupedMissing = missing.stream().distinct().toList();
 
-        String targetName = targetOutput.getHoverName().getString();
+        String targetName = planTargetOutput.getHoverName().getString();
 
         // ── Embers Alchemy: lookup cached codes from prior inference ──
         EmbersPlanInfo embersInfo = EmbersPlanInfo.build(
@@ -2569,9 +2623,11 @@ public final class GenericCraftPacket {
         boolean allExecutionMachinesLeased = false;
         if (recipeModType != null && boundMachineTypes.contains(recipeModType.id())) {
             List<AltarBindingRegistry.BoundMachine> executionMachines =
-                    AltarBindingRegistry.getBoundMachinesForType(player, recipeModType);
+                    AltarBindingRegistry.getBoundMachinesForRecipe(
+                            player, recipeModType, recipeId);
             executionMachines = LoadBalancer.filterAvailable(executionMachines, player.getServer());
-            allExecutionMachinesLeased = AsyncCraftManager.getInstance()
+            allExecutionMachinesLeased = !executionMachines.isEmpty()
+                    && AsyncCraftManager.getInstance()
                     .areAllMachinesLeased(executionMachines, recipeModType.id());
             if (allExecutionMachinesLeased) feasible = false;
         }
@@ -2631,7 +2687,7 @@ public final class GenericCraftPacket {
         PlanResponseDraft responseDraft = new PlanResponseDraft(
                 feasible,
                 targetName,
-                targetOutput,
+                planTargetOutput,
                 steps,
                 materials,
                 dedupedMissing,
@@ -2650,7 +2706,7 @@ public final class GenericCraftPacket {
                 embersInfo.canInfer(),
                 embersInfo.codeFromCache(),
                 executionMachineSupportsGui,
-                baseItem,
+                !selectedSmithingBase.isEmpty() ? selectedSmithingBase : baseItem,
                 boundMachineTypes,
                 leftovers,
                 clickedOutput,
@@ -2855,6 +2911,32 @@ public final class GenericCraftPacket {
 
     static boolean usesPhysicalMachineInputSlots(Recipe<?> recipe) {
         return !(recipe instanceof CraftingRecipe) && recipe.getType() != null;
+    }
+
+    static boolean requiresBoundMachine(@Nullable ModType modType) {
+        return modType != null && modType != ModType.GENERIC && !modType.isVirtual();
+    }
+
+    static boolean requiresBoundMachine(Recipe<?> recipe, @Nullable ModType modType) {
+        return recipe instanceof SmithingTransformRecipe
+                || recipe instanceof SmithingTrimRecipe
+                || requiresBoundMachine(modType);
+    }
+
+    static boolean isSelfAmplifyingRecipe(Recipe<?> recipe,
+                                          net.minecraft.core.RegistryAccess access) {
+        ItemStack output = RecipeIndex.tryGetResultItem(recipe, access);
+        if (output.isEmpty()) return false;
+        List<IngredientSpec> specs = recipe instanceof CraftingRecipe crafting
+                ? CraftPacketUtils.extractCraftingIngredientSpecs(crafting)
+                : CraftPacketUtils.extractIngredientSpecs(recipe);
+        if (specs == null || specs.isEmpty()) return false;
+        long selfConsumed = 0;
+        for (IngredientSpec spec : specs) {
+            if (spec.isEmpty() || spec.role() == DemandRole.CATALYST) continue;
+            if (spec.ingredient().test(output)) selfConsumed += spec.count();
+        }
+        return selfConsumed > 0 && output.getCount() > selfConsumed;
     }
 
     static boolean matchesAsyncRequest(PlanningSnapshot snapshot, UUID playerId,
