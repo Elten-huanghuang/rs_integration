@@ -27,7 +27,7 @@ public abstract class AutoPotionTickerMixin {
         if (disk == null) return;
 
         int requiredCount = (int) TEConfig.infinite_potion_number.get().doubleValue();
-        for (ItemStack stack : disk.getStacks()) {
+        for (ItemStack stack : disk.getInternalStacks()) {
             if (stack.getCount() < requiredCount) continue;
             if (stack.getItem() instanceof EffectPotionItem potion) {
                 player.addEffect(new MobEffectInstance(

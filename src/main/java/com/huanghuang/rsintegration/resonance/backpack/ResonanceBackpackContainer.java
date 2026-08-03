@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.resonance.backpack;
 import com.huanghuang.rsintegration.ModItems;
 import com.huanghuang.rsintegration.resonance.disk.ResonanceDiskWrapper;
 import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.Container;
 import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.entity.player.Inventory;
@@ -24,7 +25,8 @@ public class ResonanceBackpackContainer extends AbstractContainerMenu {
                                       ResonanceDiskWrapper disk) {
         super(ModItems.RESONANCE_BACKPACK.get(), containerId);
         this.disk = disk;
-        this.diskInventory = new ResonanceDiskInventory(disk);
+        this.diskInventory = new ResonanceDiskInventory(disk,
+                playerInv.player instanceof ServerPlayer serverPlayer ? serverPlayer : null);
         layoutSlots(playerInv, true);
     }
 

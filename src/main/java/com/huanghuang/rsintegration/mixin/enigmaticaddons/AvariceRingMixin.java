@@ -32,7 +32,7 @@ public abstract class AvariceRingMixin {
         if (player instanceof ServerPlayer sp) {
             ResonanceDiskWrapper disk = RSInventoryBridge.getResonanceDisk(sp);
             if (disk == null) return;
-            diskGems = rsi$countGems(disk.getStacks());
+            diskGems = rsi$countGems(disk.getInternalStacks());
         } else if (player.level().isClientSide()) {
             diskGems = ClientDiskData.getGemCount();
         } else {

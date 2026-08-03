@@ -43,7 +43,7 @@ public abstract class AddonEventHandlerMixin {
         if (player instanceof ServerPlayer sp) {
             ResonanceDiskWrapper disk = RSInventoryBridge.getResonanceDisk(sp);
             if (disk != null) {
-                for (ItemStack stack : disk.getStacks()) {
+                for (ItemStack stack : disk.getInternalStacks()) {
                     // 如果 RS 盘内的物品和模组正在查询的物品一致，返回 true
                     if (!stack.isEmpty() && stack.getItem() == item) {
                         return true;

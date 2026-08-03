@@ -38,7 +38,7 @@ public abstract class BuffItemMixin {
         ResonanceDiskWrapper disk = RSInventoryBridge.getResonanceDisk(player);
         if (disk == null) return;
 
-        for (ItemStack stack : disk.getStacks()) {
+        for (ItemStack stack : disk.getInternalStacks()) {
             if (stack.isEmpty()) continue;
             try {
                 applyBuff.invoke(null, player, stack);

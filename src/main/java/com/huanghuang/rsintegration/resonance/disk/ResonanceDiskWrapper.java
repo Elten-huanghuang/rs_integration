@@ -1,6 +1,8 @@
 package com.huanghuang.rsintegration.resonance.disk;
 
+import com.refinedmods.refinedstorage.api.network.node.INetworkNode;
 import com.refinedmods.refinedstorage.api.storage.AccessType;
+import com.refinedmods.refinedstorage.api.storage.cache.InvalidateCause;
 import com.refinedmods.refinedstorage.api.storage.disk.IStorageDisk;
 import com.refinedmods.refinedstorage.api.storage.disk.IStorageDiskContainerContext;
 import com.refinedmods.refinedstorage.api.storage.disk.IStorageDiskListener;
@@ -29,6 +31,9 @@ public final class ResonanceDiskWrapper implements IStorageDisk<ItemStack> {
 
     private final IStorageDisk<ItemStack> delegate;
     private int abilityMask;
+    private IStorageDiskContainerContext containerContext;
+    private int mutationDepth;
+    private boolean mutationDirty;
 
     public ResonanceDiskWrapper(IStorageDisk<ItemStack> delegate) {
         this(delegate, 0);
@@ -99,7 +104,18 @@ public final class ResonanceDiskWrapper implements IStorageDisk<ItemStack> {
     public ItemStack manualInsert(int slot, ItemStack stack, int size, Action action) {
         ItemStack tagged = stack.copy();
         tagged.getOrCreateTag().putInt(RSI_SLOT_TAG, slot);
-        return delegate.insert(tagged, size, action);
+        int storedBefore = delegate.getStored();
+        ItemStack remainder = delegate.insert(tagged, size, action);
+        if (action == Action.PERFORM && delegate.getStored() != storedBefore) markInternalMutation();
+        return remainder;
+    }
+
+    /** Inserts an internal stack without assigning a logical backpack slot yet. */
+    public ItemStack manualInsertUnassigned(ItemStack stack, int size, Action action) {
+        int storedBefore = delegate.getStored();
+        ItemStack remainder = delegate.insert(stack.copy(), size, action);
+        if (action == Action.PERFORM && delegate.getStored() != storedBefore) markInternalMutation();
+        return remainder;
     }
 
     @Override
@@ -109,12 +125,21 @@ public final class ResonanceDiskWrapper implements IStorageDisk<ItemStack> {
 
     @Override
     public Collection<ItemStack> getStacks() {
+        // Resonance slots are private capability/passive state, not ordinary RS
+        // storage. Exposing them here makes the RS cache advertise items that
+        // insert/extract intentionally reject, producing unusable materials and
+        // stale grid entries after a backpack mutation.
+        return List.of();
+    }
+
+    /** Snapshot for explicitly integrated resonance features only. */
+    public List<ItemStack> getInternalStacks() {
         List<ItemStack> raw = new ArrayList<>();
         for (ItemStack s : delegate.getStacks()) raw.add(s.copy());
         raw.sort(Comparator.comparingInt(s ->
                 s.getTag() != null ? s.getTag().getInt(RSI_SLOT_TAG) : Integer.MAX_VALUE));
         for (ItemStack s : raw) rsi$stripSlotTag(s);
-        return raw;
+        return List.copyOf(raw);
     }
 
     @Override
@@ -139,74 +164,92 @@ public final class ResonanceDiskWrapper implements IStorageDisk<ItemStack> {
         // extraction must include the complete NBT identity or RS may debit a
         // different variant and the slot mutation will be rejected.
         ItemStack result = delegate.extract(tagged, size, flags | IComparer.COMPARE_NBT, action);
+        if (action == Action.PERFORM && !result.isEmpty()) markInternalMutation();
         if (!result.isEmpty()) rsi$stripSlotTag(result);
         return result;
     }
 
     /** Moves one exact stored variant to a different logical slot identity. */
     public boolean moveSlot(ItemStack exactStoredStack, int newSlot) {
-        if (exactStoredStack.isEmpty()) return false;
-        ItemStack simulated = delegate.extract(
-                exactStoredStack, exactStoredStack.getCount(), 0, Action.SIMULATE);
-        if (!sameExactTaggedStack(exactStoredStack, simulated)) return false;
-        ItemStack removed = delegate.extract(exactStoredStack, exactStoredStack.getCount(), 0, Action.PERFORM);
-        if (!sameExactTaggedStack(exactStoredStack, removed)) {
-            if (!removed.isEmpty()) delegate.insert(removed, removed.getCount(), Action.PERFORM);
-            return false;
-        }
-        removed.getOrCreateTag().putInt(RSI_SLOT_TAG, newSlot);
-        ItemStack remainder = delegate.insert(removed, removed.getCount(), Action.PERFORM);
-        if (remainder.isEmpty()) return true;
+        beginMutation();
+        try {
+            if (exactStoredStack.isEmpty()) return false;
+            ItemStack simulated = delegate.extract(
+                    exactStoredStack, exactStoredStack.getCount(), 0, Action.SIMULATE);
+            if (!sameExactTaggedStack(exactStoredStack, simulated)) return false;
+            ItemStack removed = delegate.extract(exactStoredStack, exactStoredStack.getCount(), 0, Action.PERFORM);
+            if (!removed.isEmpty()) markInternalMutation();
+            if (!sameExactTaggedStack(exactStoredStack, removed)) {
+                if (!removed.isEmpty()) delegate.insert(removed, removed.getCount(), Action.PERFORM);
+                return false;
+            }
+            removed.getOrCreateTag().putInt(RSI_SLOT_TAG, newSlot);
+            ItemStack remainder = delegate.insert(removed, removed.getCount(), Action.PERFORM);
+            if (remainder.isEmpty()) return true;
 
-        // Best-effort rollback under the original exact identity.
-        int inserted = removed.getCount() - remainder.getCount();
-        if (inserted > 0) delegate.extract(removed, inserted, 0, Action.PERFORM);
-        delegate.insert(exactStoredStack, exactStoredStack.getCount(), Action.PERFORM);
-        return false;
+            // Best-effort rollback under the original exact identity.
+            int inserted = removed.getCount() - remainder.getCount();
+            if (inserted > 0) delegate.extract(removed, inserted, 0, Action.PERFORM);
+            delegate.insert(exactStoredStack, exactStoredStack.getCount(), Action.PERFORM);
+            return false;
+        } finally {
+            endMutation();
+        }
     }
 
     /** Repairs legacy stacks of items that must occupy one logical slot per item. */
     public int splitLogicallyNonStackableStacks() {
-        List<ItemStack> snapshot = new ArrayList<>();
-        Set<Integer> usedSlots = new HashSet<>();
-        for (ItemStack stored : delegate.getStacks()) {
-            ItemStack exact = stored.copy();
-            snapshot.add(exact);
-            CompoundTag tag = exact.getTag();
-            if (tag != null && tag.contains(RSI_SLOT_TAG)) usedSlots.add(tag.getInt(RSI_SLOT_TAG));
-        }
-
-        int split = 0;
-        int nextSlot = 0;
-        for (ItemStack exact : snapshot) {
-            if (exact.getCount() <= 1 || !isLogicallyNonStackable(exact)) continue;
-            ItemStack removed = delegate.extract(exact, exact.getCount(), 0, Action.PERFORM);
-            if (removed.getCount() != exact.getCount()) {
-                if (!removed.isEmpty()) delegate.insert(removed, removed.getCount(), Action.PERFORM);
-                continue;
-            }
-
-            for (int i = 0; i < removed.getCount(); i++) {
-                while (usedSlots.contains(nextSlot)) nextSlot++;
-                ItemStack single = removed.copyWithCount(1);
-                single.getOrCreateTag().putInt(RSI_SLOT_TAG, nextSlot);
-                ItemStack remainder = delegate.insert(single, 1, Action.PERFORM);
-                if (remainder.isEmpty()) {
-                    usedSlots.add(nextSlot++);
-                } else {
-                    // Preserve the item even if the delegate unexpectedly rejects
-                    // the repaired identity.
-                    ItemStack fallback = exact.copyWithCount(1);
-                    delegate.insert(fallback, 1, Action.PERFORM);
+        beginMutation();
+        try {
+            List<ItemStack> snapshot = new ArrayList<>();
+            Set<Integer> usedSlots = new HashSet<>();
+            for (ItemStack stored : delegate.getStacks()) {
+                ItemStack exact = stored.copy();
+                snapshot.add(exact);
+                CompoundTag tag = exact.getTag();
+                if (tag != null && tag.contains(RSI_SLOT_TAG)) {
+                    usedSlots.add(tag.getInt(RSI_SLOT_TAG));
                 }
             }
-            split += removed.getCount() - 1;
+
+            int split = 0;
+            int nextSlot = 0;
+            for (ItemStack exact : snapshot) {
+                if (exact.getCount() <= 1 || !isLogicallyNonStackable(exact)) continue;
+                ItemStack removed = delegate.extract(exact, exact.getCount(), 0, Action.PERFORM);
+                if (!removed.isEmpty()) markInternalMutation();
+                if (removed.getCount() != exact.getCount()) {
+                    if (!removed.isEmpty()) {
+                        delegate.insert(removed, removed.getCount(), Action.PERFORM);
+                    }
+                    continue;
+                }
+
+                for (int i = 0; i < removed.getCount(); i++) {
+                    while (usedSlots.contains(nextSlot)) nextSlot++;
+                    ItemStack single = removed.copyWithCount(1);
+                    single.getOrCreateTag().putInt(RSI_SLOT_TAG, nextSlot);
+                    ItemStack remainder = delegate.insert(single, 1, Action.PERFORM);
+                    if (remainder.isEmpty()) {
+                        usedSlots.add(nextSlot++);
+                    } else {
+                        // Preserve the item even if the delegate unexpectedly rejects
+                        // the repaired identity.
+                        ItemStack fallback = exact.copyWithCount(1);
+                        delegate.insert(fallback, 1, Action.PERFORM);
+                    }
+                }
+                split += removed.getCount() - 1;
+            }
+            return split;
+        } finally {
+            endMutation();
         }
-        return split;
     }
 
     public ItemStack manualExtractExact(ItemStack exactTaggedStack, int size, int flags, Action action) {
         ItemStack result = delegate.extract(exactTaggedStack, size, flags | IComparer.COMPARE_NBT, action);
+        if (action == Action.PERFORM && !result.isEmpty()) markInternalMutation();
         if (!result.isEmpty()) rsi$stripSlotTag(result);
         return result;
     }
@@ -219,53 +262,65 @@ public final class ResonanceDiskWrapper implements IStorageDisk<ItemStack> {
 
     /** Atomically reconcile one logical backpack slot against the disk delegate. */
     public SlotMutationResult reconcileSlot(int slot, ItemStack previous, ItemStack requested) {
-        ItemStack oldStack = sanitized(previous);
-        ItemStack newStack = sanitized(requested);
-        if (sameStack(oldStack, newStack)) return SlotMutationResult.SUCCESS;
-        if (!newStack.isEmpty() && newStack.getCount() > (isLogicallyNonStackable(newStack) ? 1 : newStack.getMaxStackSize()))
-            return SlotMutationResult.REJECTED;
+        beginMutation();
+        try {
+            ItemStack oldStack = sanitized(previous);
+            ItemStack newStack = sanitized(requested);
+            if (sameStack(oldStack, newStack)) return SlotMutationResult.SUCCESS;
+            if (!newStack.isEmpty() && newStack.getCount()
+                    > (isLogicallyNonStackable(newStack) ? 1 : newStack.getMaxStackSize())) {
+                return SlotMutationResult.REJECTED;
+            }
 
-        if (!oldStack.isEmpty() && !newStack.isEmpty()
-                && isSameVariant(oldStack, newStack)) {
-            int delta = newStack.getCount() - oldStack.getCount();
-            return delta > 0
-                    ? insertExact(slot, newStack, delta)
-                    : extractExact(slot, oldStack, -delta);
-        }
+            if (!oldStack.isEmpty() && !newStack.isEmpty()
+                    && isSameVariant(oldStack, newStack)) {
+                int delta = newStack.getCount() - oldStack.getCount();
+                return delta > 0
+                        ? insertExact(slot, newStack, delta)
+                        : extractExact(slot, oldStack, -delta);
+            }
 
-        if (!oldStack.isEmpty()) {
-            ItemStack simulated = manualExtract(slot, oldStack, oldStack.getCount(), 0, Action.SIMULATE);
-            if (!sameExtractedVariant(oldStack, simulated)) return SlotMutationResult.REJECTED;
-        }
-        if (!newStack.isEmpty()
-                && getCapacity() - getStored() + oldStack.getCount() < newStack.getCount()) {
-            return SlotMutationResult.REJECTED;
-        }
+            if (!oldStack.isEmpty()) {
+                ItemStack simulated = manualExtract(
+                        slot, oldStack, oldStack.getCount(), 0, Action.SIMULATE);
+                if (!sameExtractedVariant(oldStack, simulated)) {
+                    return SlotMutationResult.REJECTED;
+                }
+            }
+            if (!newStack.isEmpty()
+                    && getCapacity() - getStored() + oldStack.getCount() < newStack.getCount()) {
+                return SlotMutationResult.REJECTED;
+            }
 
-        ItemStack removed = ItemStack.EMPTY;
-        if (!oldStack.isEmpty()) {
-            removed = manualExtract(slot, oldStack, oldStack.getCount(), 0, Action.PERFORM);
-            if (!sameExtractedVariant(oldStack, removed)) {
+            ItemStack removed = ItemStack.EMPTY;
+            if (!oldStack.isEmpty()) {
+                removed = manualExtract(slot, oldStack, oldStack.getCount(), 0, Action.PERFORM);
+                if (!sameExtractedVariant(oldStack, removed)) {
+                    return restore(slot, removed)
+                            ? SlotMutationResult.REJECTED : SlotMutationResult.RECOVERY_FAILED;
+                }
+            }
+
+            if (newStack.isEmpty()) return SlotMutationResult.SUCCESS;
+            ItemStack simulatedRemainder = manualInsert(
+                    slot, newStack, newStack.getCount(), Action.SIMULATE);
+            if (!simulatedRemainder.isEmpty()) {
                 return restore(slot, removed)
                         ? SlotMutationResult.REJECTED : SlotMutationResult.RECOVERY_FAILED;
             }
-        }
 
-        if (newStack.isEmpty()) return SlotMutationResult.SUCCESS;
-        ItemStack simulatedRemainder = manualInsert(slot, newStack, newStack.getCount(), Action.SIMULATE);
-        if (!simulatedRemainder.isEmpty()) {
-            return restore(slot, removed)
+            ItemStack remainder = manualInsert(
+                    slot, newStack, newStack.getCount(), Action.PERFORM);
+            if (remainder.isEmpty()) return SlotMutationResult.SUCCESS;
+
+            int inserted = newStack.getCount() - remainder.getCount();
+            boolean removedNew = inserted <= 0 || extractedExactly(slot, newStack, inserted);
+            boolean restoredOld = restore(slot, removed);
+            return removedNew && restoredOld
                     ? SlotMutationResult.REJECTED : SlotMutationResult.RECOVERY_FAILED;
+        } finally {
+            endMutation();
         }
-
-        ItemStack remainder = manualInsert(slot, newStack, newStack.getCount(), Action.PERFORM);
-        if (remainder.isEmpty()) return SlotMutationResult.SUCCESS;
-
-        int inserted = newStack.getCount() - remainder.getCount();
-        boolean removedNew = inserted <= 0 || extractedExactly(slot, newStack, inserted);
-        boolean restoredOld = restore(slot, removed);
-        return removedNew && restoredOld
-                ? SlotMutationResult.REJECTED : SlotMutationResult.RECOVERY_FAILED;
     }
 
     public int simulateInsertCount(int slot, ItemStack stack, int size) {
@@ -360,7 +415,35 @@ public final class ResonanceDiskWrapper implements IStorageDisk<ItemStack> {
 
     @Override
     public void setSettings(IStorageDiskListener listener, IStorageDiskContainerContext context) {
+        this.containerContext = context;
         delegate.setSettings(listener, context);
+    }
+
+    private void beginMutation() {
+        mutationDepth++;
+    }
+
+    private void endMutation() {
+        if (--mutationDepth == 0 && mutationDirty) {
+            mutationDirty = false;
+            invalidatePublicStorageView();
+        }
+    }
+
+    private void markInternalMutation() {
+        mutationDirty = true;
+        if (mutationDepth == 0) {
+            mutationDirty = false;
+            invalidatePublicStorageView();
+        }
+    }
+
+    private void invalidatePublicStorageView() {
+        if (!(containerContext instanceof INetworkNode node)) return;
+        var network = node.getNetwork();
+        if (network != null && network.getItemStorageCache() != null) {
+            network.getItemStorageCache().invalidate(InvalidateCause.DISK_INVENTORY_CHANGED);
+        }
     }
 
     @Override

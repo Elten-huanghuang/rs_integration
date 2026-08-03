@@ -52,7 +52,7 @@ public abstract class YuushaNineSwordBooksMixin {
         ResonanceDiskWrapper disk = RSInventoryBridge.getResonanceDisk(sp);
         if (disk == null) return 0;
         int count = 0;
-        for (ItemStack s : disk.getStacks()) {
+        for (ItemStack s : disk.getInternalStacks()) {
             if (!s.isEmpty() && s.getItem() instanceof mods.flammpfeil.slashblade.item.ItemSlashBlade) {
                 count++;
             }
@@ -66,7 +66,7 @@ public abstract class YuushaNineSwordBooksMixin {
         ResonanceDiskWrapper disk = RSInventoryBridge.getResonanceDisk(sp);
         if (disk == null) return 0f;
         float total = 0f;
-        for (ItemStack s : disk.getStacks()) {
+        for (ItemStack s : disk.getInternalStacks()) {
             if (!s.isEmpty() && s.getItem() instanceof mods.flammpfeil.slashblade.item.ItemSlashBlade blade) {
                 var mods = blade.getAttributeModifiers(EquipmentSlot.MAINHAND, s);
                 for (var mod : mods.get(Attributes.ATTACK_DAMAGE)) {
