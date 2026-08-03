@@ -50,6 +50,7 @@
     "distantworlds.DistantWorldsItemHelperMixin",
     "reliquary.PyromancerStaffMixin",
     "enigmaticaddons.AvariceRingMixin",
+    "enigmaticaddons.ArtificialFlowerMixin",
     "moonstone.NineSwordBooksMixin",
     "enigmaticlegacy.SuperpositionHandlerMixin",
     "enigmaticlegacy.AddonEventHandlerMixin",

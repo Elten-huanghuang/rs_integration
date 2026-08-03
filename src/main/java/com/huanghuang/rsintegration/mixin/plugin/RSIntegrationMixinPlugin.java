@@ -125,6 +125,11 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
             // Target is Enigmatic Addons; body calls Enigmatic Legacy's SuperpositionHandler.
             return isClassPresent("com.aizistral.enigmaticlegacy.handlers.SuperpositionHandler");
         }
+        if (mixinClassName.contains("enigmaticaddons.ArtificialFlowerMixin")) {
+            return isClassPresent("auviotre.enigmatic.addon.handlers.SuperAddonHandler")
+                    && hasMethod(targetClassName, "onEffectApply")
+                    && hasMethod("auviotre.enigmatic.addon.handlers.SuperAddonHandler", "getAllItem");
+        }
         if (mixinClassName.contains("moonstone.NineSwordBooks")) {
             // Target is Moonstone; body uses Curios' SlotContext.
             return isClassPresent("top.theillusivec4.curios.api.SlotContext");

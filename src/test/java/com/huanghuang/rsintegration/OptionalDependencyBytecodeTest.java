@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration;
 
 import com.huanghuang.rsintegration.crafting.plan.PlanWarnings;
+import com.huanghuang.rsintegration.mixin.enigmaticaddons.ArtificialFlowerMixin;
 import com.huanghuang.rsintegration.mixin.jei.RecipeGuiLayoutsMixin;
 import com.huanghuang.rsintegration.mixin.wizardterracurios.BuffItemMixin;
 import com.huanghuang.rsintegration.mods.pmmo.client.PmmoSalvageAccess;
@@ -116,6 +117,55 @@ class OptionalDependencyBytecodeTest {
 
         assertFalse(hasShadow.get(), "optional-mod mixin must not require target members via @Shadow");
         assertEquals(0, injectRequire.get(), "optional target method must use require = 0");
+    }
+
+    @Test
+    void artificialFlowerCompatibilityOnlyExtendsNativeDebuffLookup() throws IOException {
+        byte[] bytecode = classBytes(ArtificialFlowerMixin.class);
+        AtomicReference<String> targetMethod = new AtomicReference<>();
+        AtomicReference<Integer> redirectRequire = new AtomicReference<>();
+
+        new ClassReader(bytecode).accept(new ClassVisitor(Opcodes.ASM9) {
+            @Override
+            public MethodVisitor visitMethod(int access, String name, String descriptor,
+                                             String signature, String[] exceptions) {
+                return new MethodVisitor(Opcodes.ASM9) {
+                    @Override
+                    public AnnotationVisitor visitAnnotation(String annotationDescriptor,
+                                                             boolean visible) {
+                        AnnotationVisitor delegate = super.visitAnnotation(annotationDescriptor, visible);
+                        if (!name.equals("rsi$includeDiskFlowers")
+                                || !"Lorg/spongepowered/asm/mixin/injection/Redirect;"
+                                .equals(annotationDescriptor)) {
+                            return delegate;
+                        }
+                        return new AnnotationVisitor(Opcodes.ASM9, delegate) {
+                            @Override
+                            public void visit(String key, Object value) {
+                                if ("require".equals(key)) redirectRequire.set((Integer) value);
+                                super.visit(key, value);
+                            }
+
+                            @Override
+                            public AnnotationVisitor visitArray(String key) {
+                                AnnotationVisitor arrayDelegate = super.visitArray(key);
+                                if (!"method".equals(key)) return arrayDelegate;
+                                return new AnnotationVisitor(Opcodes.ASM9, arrayDelegate) {
+                                    @Override
+                                    public void visit(String ignored, Object value) {
+                                        targetMethod.set((String) value);
+                                        super.visit(ignored, value);
+                                    }
+                                };
+                            }
+                        };
+                    }
+                };
+            }
+        }, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+
+        assertEquals("onEffectApply", targetMethod.get());
+        assertEquals(0, redirectRequire.get());
     }
 
     private static void assertNoBotaniaTypeReference(Class<?> type) throws IOException {
