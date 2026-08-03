@@ -46,7 +46,7 @@ public abstract class SuperpositionHandlerMixin {
         if (disk == null) return;
 
         ResourceLocation target = BuiltInRegistries.ITEM.getKey(item);
-        for (ItemStack stack : disk.getStacks()) {
+        for (ItemStack stack : disk.getInternalStacks()) {
             if (!stack.isEmpty() && stack.is(item)) {
                 cir.setReturnValue(true);
                 if (rsi$diagCount < 5) {

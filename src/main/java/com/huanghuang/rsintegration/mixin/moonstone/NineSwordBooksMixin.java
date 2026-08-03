@@ -119,7 +119,7 @@ public abstract class NineSwordBooksMixin {
         if (needed <= 0) return 0;
 
         int extraSize = 0;
-        for (ItemStack sword : disk.getStacks()) {
+        for (ItemStack sword : disk.getInternalStacks()) {
             if (needed <= 0) break;
             if (sword.isEmpty()) continue;
 

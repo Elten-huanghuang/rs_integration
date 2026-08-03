@@ -75,10 +75,18 @@ public final class PassiveEffectEngine {
         }
     }
 
+    public static void refreshPlayer(ServerPlayer player) {
+        INetwork network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
+        ResonanceDiskWrapper disk = network == null ? null : findResonanceDisk(network);
+        if (disk == null) DISK_CACHE.remove(player.getUUID());
+        else DISK_CACHE.put(player.getUUID(), disk);
+        syncDiskState(player, disk);
+    }
+
     private static void syncDiskState(ServerPlayer player, @Nullable ResonanceDiskWrapper disk) {
         int gemCount = 0;
         if (disk != null) {
-            for (ItemStack stack : disk.getStacks()) {
+            for (ItemStack stack : disk.getInternalStacks()) {
                 if (!stack.isEmpty() && stack.is(net.minecraftforge.common.Tags.Items.GEMS)) {
                     gemCount += stack.getCount();
                 }

@@ -2,6 +2,8 @@ package com.huanghuang.rsintegration.resonance.backpack;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.resonance.disk.ResonanceDiskWrapper;
+import com.huanghuang.rsintegration.resonance.passive.PassiveEffectEngine;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.Container;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
@@ -12,6 +14,7 @@ public class ResonanceDiskInventory implements Container {
     private static final String RSI_SLOT_TAG = "RSISlot";
 
     private final ResonanceDiskWrapper disk;
+    private final ServerPlayer owner;
     private final ItemStack[] slots = new ItemStack[SLOTS];
     private final ItemStack[] committed = new ItemStack[SLOTS];
     private final int[] backingSlots = new int[SLOTS];
@@ -19,7 +22,12 @@ public class ResonanceDiskInventory implements Container {
     private boolean reloadedAfterRecoveryFailure;
 
     public ResonanceDiskInventory(ResonanceDiskWrapper disk) {
+        this(disk, null);
+    }
+
+    public ResonanceDiskInventory(ResonanceDiskWrapper disk, ServerPlayer owner) {
         this.disk = disk;
+        this.owner = owner;
         for (int i = 0; i < SLOTS; i++) {
             slots[i] = ItemStack.EMPTY;
             committed[i] = ItemStack.EMPTY;
@@ -207,7 +215,9 @@ public class ResonanceDiskInventory implements Container {
             RSIntegrationMod.LOGGER.warn("[RSI-Backpack] Rejected slot {} mutation: {} x{} -> {} x{}",
                     index, previous.getItem(), previous.getCount(), requested.getItem(), requested.getCount());
         }
-        return result == ResonanceDiskWrapper.SlotMutationResult.SUCCESS;
+        boolean success = result == ResonanceDiskWrapper.SlotMutationResult.SUCCESS;
+        if (success && owner != null) PassiveEffectEngine.refreshPlayer(owner);
+        return success;
     }
 
     private void reloadFromDisk() {

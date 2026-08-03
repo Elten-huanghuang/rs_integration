@@ -55,7 +55,7 @@ public final class LycheeVirtualCatalysts {
     public static int catalystMask(@Nullable ResonanceDiskWrapper disk) {
         if (disk == null) return 0;
         int mask = 0;
-        for (ItemStack stack : disk.getStacks()) {
+        for (ItemStack stack : disk.getInternalStacks()) {
             if (stack.isEmpty()) continue;
             ResourceLocation id = BuiltInRegistries.ITEM.getKey(stack.getItem());
             if (POWDER_SNOW_BUCKET_ID.equals(id)) mask |= POWDER_SNOW_BUCKET;
