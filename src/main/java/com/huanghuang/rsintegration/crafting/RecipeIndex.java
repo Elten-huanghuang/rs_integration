@@ -49,8 +49,61 @@ public final class RecipeIndex {
 
     private static volatile Map<Item, List<Entry>> index;
     private static volatile RecipeManager source;
+    private static BuildState warmUpState;
 
     private RecipeIndex() {}
+
+    /** Retained for integrations compiled against the original eager entry point. */
+    public static void warmUp(Level level) {
+        long start = System.currentTimeMillis();
+        try {
+            get(level);
+            com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraphProjector
+                    .capture(level);
+            RSIntegrationMod.LOGGER.info("[RecipeIndex] explicit warm-up completed in {}ms",
+                    System.currentTimeMillis() - start);
+        } catch (RuntimeException | LinkageError e) {
+            invalidate();
+            RSIntegrationMod.LOGGER.warn(
+                    "[RecipeIndex] explicit warm-up failed; first craft request will retry", e);
+        }
+    }
+
+    public static synchronized void scheduleWarmUp(Level level) {
+        RecipeManager manager = level.getRecipeManager();
+        if (index != null && source == manager) return;
+        if (warmUpState == null || !warmUpState.matches(manager)) {
+            CraftPacketUtils.clearIngredientCache();
+            warmUpState = new BuildState(manager);
+        }
+    }
+
+    public static void tickWarmUp(Level level, long budgetNanos) {
+        boolean completed = false;
+        synchronized (RecipeIndex.class) {
+            RecipeManager manager = level.getRecipeManager();
+            if (index != null && source == manager) {
+                warmUpState = null;
+                return;
+            }
+            if (warmUpState == null || !warmUpState.matches(manager)) scheduleWarmUp(level);
+            try {
+                long deadline = System.nanoTime() + Math.max(1L, budgetNanos);
+                if (warmUpState.advance(level, deadline)) {
+                    publishWarmUp(warmUpState);
+                    completed = true;
+                }
+            } catch (RuntimeException | LinkageError e) {
+                warmUpState = null;
+                RSIntegrationMod.LOGGER.warn(
+                        "[RecipeIndex] incremental warm-up failed; first craft request will retry", e);
+            }
+        }
+        if (completed) {
+            com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraphProjector
+                    .scheduleWarmUp(level);
+        }
+    }
 
     public static Map<Item, List<Entry>> get(Level level) {
         RecipeManager rm = level.getRecipeManager();
@@ -61,6 +114,12 @@ public final class RecipeIndex {
         synchronized (RecipeIndex.class) {
             idx = index;
             if (idx != null && source == rm) return idx;
+            if (warmUpState != null && warmUpState.matches(rm)) {
+                while (!warmUpState.advance(level, Long.MAX_VALUE)) {
+                    // Complete any remaining scheduled work for this immediate request.
+                }
+                return publishWarmUp(warmUpState);
+            }
 
             long diagTimer = Diagnostics.startTimer();
             long start = System.currentTimeMillis();
@@ -71,62 +130,10 @@ public final class RecipeIndex {
             // Keep same-output recipes from different machines. Candidate scoring may prefer
             // ordinary crafting, but removing an alternative here makes it vanish from recursion.
             for (Recipe<?> recipe : rm.getRecipes()) {
-                if (!seen.add(recipe.getId())) continue;
-
-                ModRecipeHandler handler = ModRecipeHandlers.handlerFor(recipe);
-                ModType type;
-                ItemStack result;
-
-                if (handler != null) {
-                    type = ModType.classifyRecipe(recipe);
-                    if (type == null) type = handler.modType();
-                    result = ModRecipeHandlers.tryGetResultItem(recipe, level.registryAccess());
-                } else if (recipe instanceof CraftingRecipe cr
-                        && ModType.classifyRecipe(recipe) == null) {
-                    // Vanilla / CraftTweaker / datapack crafting recipe — no handler needed
-                    type = ModType.GENERIC;
-                    result = cr.getResultItem(level.registryAccess());
-                } else {
-                    skippedUnknown++;
-                    continue;
-                }
-
-                if (result.isEmpty()) {
-                    skippedEmptyResult++;
-                    continue;
-                }
-
-                // Filter identity recipes (output matches one of the inputs).
-                // A .copy() recipe (e.g. CraftTweaker arcanum_lens → arcanum_lens)
-                // creates circular dependencies and has no crafting value.
-                if (isIdentityRecipe(recipe, result, handler)) {
-                    skippedIdentity++;
-                    continue;
-                }
-
-                ResourceLocation typeId = recipe.getType() != null
-                        ? ForgeRegistries.RECIPE_TYPES.getKey(recipe.getType())
-                        : null;
-                // Runtime recipes can expose a stable RecipeType without
-                // registering it in Forge's frozen registry. Preserve that ID
-                // instead of flattening every synthetic machine recipe to
-                // minecraft:crafting.
-                if (typeId == null && recipe.getType() != null) {
-                    typeId = ResourceLocation.tryParse(recipe.getType().toString());
-                }
-                if (typeId == null) typeId = new ResourceLocation("minecraft:crafting");
-
-                Entry entry = new Entry(recipe, type, typeId);
-                idx.computeIfAbsent(result.getItem(), k -> new ArrayList<>()).add(entry);
-
-                // Secondary outputs
-                if (handler != null) {
-                    for (ItemStack sec : handler.getSecondaryOutputs(recipe, level.registryAccess())) {
-                        if (!sec.isEmpty()) {
-                            idx.computeIfAbsent(sec.getItem(), k -> new ArrayList<>()).add(entry);
-                        }
-                    }
-                }
+                IndexOutcome outcome = indexRecipe(level, idx, seen, recipe);
+                if (outcome == IndexOutcome.UNKNOWN) skippedUnknown++;
+                else if (outcome == IndexOutcome.EMPTY_RESULT) skippedEmptyResult++;
+                else if (outcome == IndexOutcome.IDENTITY) skippedIdentity++;
             }
 
             // ── FA rituals (FARegistries.RITUAL, not RecipeManager) ──────
@@ -162,6 +169,127 @@ public final class RecipeIndex {
                     idx.size(), seen.size(), elapsed, skippedUnknown, skippedEmptyResult,
                     skippedIdentity, faIndexed, marketIndexed, distantWorldsIndexed);
             return idx;
+        }
+    }
+
+    private static IndexOutcome indexRecipe(Level level, Map<Item, List<Entry>> target,
+                                            Set<ResourceLocation> seen, Recipe<?> recipe) {
+        if (!seen.add(recipe.getId())) return IndexOutcome.DUPLICATE;
+
+        ModRecipeHandler handler = ModRecipeHandlers.handlerFor(recipe);
+        ModType type;
+        ItemStack result;
+        if (handler != null) {
+            type = ModType.classifyRecipe(recipe);
+            if (type == null) type = handler.modType();
+            result = ModRecipeHandlers.tryGetResultItem(recipe, level.registryAccess());
+        } else if (recipe instanceof CraftingRecipe crafting
+                && ModType.classifyRecipe(recipe) == null) {
+            type = ModType.GENERIC;
+            result = crafting.getResultItem(level.registryAccess());
+        } else {
+            return IndexOutcome.UNKNOWN;
+        }
+
+        if (result.isEmpty()) return IndexOutcome.EMPTY_RESULT;
+        if (isIdentityRecipe(recipe, result, handler)) return IndexOutcome.IDENTITY;
+
+        ResourceLocation typeId = recipe.getType() != null
+                ? ForgeRegistries.RECIPE_TYPES.getKey(recipe.getType()) : null;
+        if (typeId == null && recipe.getType() != null) {
+            typeId = ResourceLocation.tryParse(recipe.getType().toString());
+        }
+        if (typeId == null) typeId = new ResourceLocation("minecraft:crafting");
+
+        Entry entry = new Entry(recipe, type, typeId);
+        target.computeIfAbsent(result.getItem(), key -> new ArrayList<>()).add(entry);
+        if (handler != null) {
+            for (ItemStack secondary : handler.getSecondaryOutputs(recipe, level.registryAccess())) {
+                if (!secondary.isEmpty()) {
+                    target.computeIfAbsent(secondary.getItem(), key -> new ArrayList<>()).add(entry);
+                }
+            }
+        }
+        return IndexOutcome.INDEXED;
+    }
+
+    private static Map<Item, List<Entry>> publishWarmUp(BuildState state) {
+        index = state.index;
+        source = state.source;
+        warmUpState = null;
+
+        long elapsed = System.currentTimeMillis() - state.startedMillis;
+        Diagnostics.stopTimer("RecipeIndex.build", state.diagTimer);
+        Diagnostics.record(Diagnostics.Category.INDEX_BUILD,
+                state.index.size() + " items, " + state.seen.size() + " entries, " + elapsed + "ms"
+                        + " incremental (skipped: " + state.skippedUnknown + " unknown, "
+                        + state.skippedEmptyResult + " empty-result, " + state.skippedIdentity
+                        + " identity, " + state.faIndexed + " FA rituals, "
+                        + state.marketIndexed + " market, " + state.distantWorldsIndexed
+                        + " Distant Worlds Firon, " + state.pmmoSalvageIndexed
+                        + " PMMO salvage, " + state.brewingIndexed + " brewing)");
+        RSIntegrationMod.LOGGER.info(
+                "[RecipeIndex] incrementally built: {} items, {} entries over {}ms",
+                state.index.size(), state.seen.size(), elapsed);
+        return state.index;
+    }
+
+    private enum IndexOutcome {
+        INDEXED, DUPLICATE, UNKNOWN, EMPTY_RESULT, IDENTITY
+    }
+
+    private static final class BuildState {
+        private final RecipeManager source;
+        private final Iterator<Recipe<?>> recipes;
+        private final Map<Item, List<Entry>> index = new HashMap<>();
+        private final Set<ResourceLocation> seen = new HashSet<>();
+        private final long diagTimer = Diagnostics.startTimer();
+        private final long startedMillis = System.currentTimeMillis();
+        private int extraPhase;
+        private int skippedUnknown;
+        private int skippedEmptyResult;
+        private int skippedIdentity;
+        private int faIndexed;
+        private int marketIndexed;
+        private int distantWorldsIndexed;
+        private int pmmoSalvageIndexed;
+        private int brewingIndexed;
+
+        private BuildState(RecipeManager source) {
+            this.source = source;
+            this.recipes = new ArrayList<Recipe<?>>(source.getRecipes()).iterator();
+        }
+
+        private boolean matches(RecipeManager manager) {
+            return source == manager;
+        }
+
+        private boolean advance(Level level, long deadlineNanos) {
+            int processed = 0;
+            while (recipes.hasNext()
+                    && (processed++ == 0 || System.nanoTime() < deadlineNanos)) {
+                IndexOutcome outcome = indexRecipe(level, index, seen, recipes.next());
+                if (outcome == IndexOutcome.UNKNOWN) skippedUnknown++;
+                else if (outcome == IndexOutcome.EMPTY_RESULT) skippedEmptyResult++;
+                else if (outcome == IndexOutcome.IDENTITY) skippedIdentity++;
+            }
+            if (recipes.hasNext()) return false;
+
+            int phases = 0;
+            while (extraPhase < 6
+                    && (phases++ == 0 || System.nanoTime() < deadlineNanos)) {
+                switch (extraPhase++) {
+                    case 0 -> faIndexed = indexFARituals(level, index, seen);
+                    case 1 -> marketIndexed = indexMarketEntries(index, seen);
+                    case 2 -> indexGemCutting(level, index, seen);
+                    case 3 -> distantWorldsIndexed = indexDistantWorldsFiron(index, seen);
+                    case 4 -> pmmoSalvageIndexed = indexPmmoSalvage(index, seen);
+                    case 5 -> brewingIndexed = com.huanghuang.rsintegration.mods.vanilla.brewing
+                            .VanillaBrewingCatalog.index(level, index, seen);
+                    default -> { }
+                }
+            }
+            return extraPhase >= 6;
         }
     }
 
@@ -516,8 +644,11 @@ public final class RecipeIndex {
 
     /** Invalidate the cached index (e.g. on recipe reload). */
     public static void invalidate() {
-        index = null;
-        source = null;
+        synchronized (RecipeIndex.class) {
+            index = null;
+            source = null;
+            warmUpState = null;
+        }
         com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraphProjector.clearCache();
         com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket.clearPlanCache();
     }
