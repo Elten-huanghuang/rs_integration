@@ -18,16 +18,26 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RecipeGraphWarmUpContractTest {
     @Test
-    void serverStartupDoesNotSynchronouslyBuildRecipeGraph() throws IOException {
-        Set<String> calls = methodCalls(RSIntegrationMod.class, "onCommonSetup");
+    void serverStartupSchedulesIncrementalWarmUp() throws IOException {
+        Set<String> calls = methodCalls(RSIntegrationMod.class, null);
 
         assertFalse(calls.contains(owner(RecipeIndex.class) + ".warmUp"));
         assertFalse(calls.contains(owner(ImmutableRecipeGraphProjector.class) + ".capture"));
+        assertTrue(calls.contains(owner(RecipeIndex.class) + ".scheduleWarmUp"));
+        assertTrue(calls.contains(owner(RecipeIndex.class) + ".tickWarmUp"));
+        assertTrue(calls.contains(owner(ImmutableRecipeGraphProjector.class) + ".tickWarmUp"));
+    }
+
+    @Test
+    void explicitWarmUpEntryPointRemainsBinaryCompatible() throws IOException {
+        Set<String> calls = methodCalls(RecipeIndex.class, "warmUp");
+
+        assertTrue(calls.contains(owner(ImmutableRecipeGraphProjector.class) + ".capture"));
     }
 
     @Test
     void craftingProjectionBypassesGenericReflectiveExtraction() throws IOException {
-        Set<String> calls = methodCalls(ImmutableRecipeGraphProjector.class, "project");
+        Set<String> calls = methodCalls(ImmutableRecipeGraphProjector.class, "projectEntry");
         String utilityOwner = owner(CraftPacketUtils.class);
 
         assertTrue(calls.contains(utilityOwner + ".extractCraftingIngredientSpecs"));
@@ -40,7 +50,7 @@ class RecipeGraphWarmUpContractTest {
             @Override
             public MethodVisitor visitMethod(int access, String name, String descriptor,
                                              String signature, String[] exceptions) {
-                if (!name.equals(targetMethod)) return null;
+                if (targetMethod != null && !name.equals(targetMethod)) return null;
                 return new MethodVisitor(Opcodes.ASM9) {
                     @Override
                     public void visitMethodInsn(int opcode, String owner, String name,

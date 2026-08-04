@@ -69,6 +69,7 @@ import net.minecraftforge.common.ForgeConfigSpec;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.common.world.ForgeChunkManager;
 import net.minecraftforge.event.entity.player.PlayerEvent;
+import net.minecraftforge.event.server.ServerStartedEvent;
 import net.minecraftforge.event.server.ServerStoppingEvent;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.fml.DistExecutor;
@@ -547,6 +548,16 @@ public final class RSIntegrationMod {
                 com.huanghuang.rsintegration.autoeat.AutoEatRateLimiter.onPlayerLogout(sp.getUUID());
             }
         });
+        MinecraftForge.EVENT_BUS.addListener((ServerStartedEvent e) ->
+                com.huanghuang.rsintegration.crafting.RecipeIndex
+                        .scheduleWarmUp(e.getServer().overworld()));
+        MinecraftForge.EVENT_BUS.addListener((net.minecraftforge.event.TickEvent.ServerTickEvent e) -> {
+            if (e.phase != net.minecraftforge.event.TickEvent.Phase.END) return;
+            var level = e.getServer().overworld();
+            com.huanghuang.rsintegration.crafting.RecipeIndex.tickWarmUp(level, 1_000_000L);
+            com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraphProjector
+                    .tickWarmUp(level, 1_000_000L);
+        });
         // Cross-dimension: unpin the old dimension's IStorageCache listener
         // and re-register against the new dimension's network.
         MinecraftForge.EVENT_BUS.addListener((PlayerEvent.PlayerChangedDimensionEvent e) -> {
@@ -567,6 +578,7 @@ public final class RSIntegrationMod {
         // materials are refunded rather than silently lost.
         MinecraftForge.EVENT_BUS.addListener((ServerStoppingEvent e) -> {
             com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket.cancelAllPlanning();
+            com.huanghuang.rsintegration.crafting.RecipeIndex.invalidate();
             AsyncCraftManager.abortAll();
             RemoteGuiAuth.clearServerState();
             RSSidePanelNetworkHandler.clearServerState();

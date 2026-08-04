@@ -118,6 +118,10 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
                     && hasMethod(targetClassName, "syncTeamData")
                     && hasMethod(targetClassName, "updateTaskProgress");
         }
+        if (mixinClassName.contains("ftbquests.ClearRepeatCooldownMessageMixin")) {
+            return isClassPresent("dev.ftb.mods.ftbquests.net.ClearRepeatCooldownMessage")
+                    && hasMethod(targetClassName, "lambda$handle$0");
+        }
         if (mixinClassName.contains("namelesstrinkets")) {
             return isClassPresent("com.cozary.nameless_trinkets.items.trinkets.SuperMagnet")
                     && hasMethod(targetClassName, "curioTick");

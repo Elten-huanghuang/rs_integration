@@ -12,5 +12,8 @@ class FtbQuestMixinPluginTest {
         assertFalse(plugin.shouldApplyMixin(
                 "dev.ftb.mods.ftbquests.client.FTBQuestsNetClient",
                 "com.huanghuang.rsintegration.mixin.ftbquests.FTBQuestsNetClientMixin"));
+        assertFalse(plugin.shouldApplyMixin(
+                "dev.ftb.mods.ftbquests.net.ClearRepeatCooldownMessage",
+                "com.huanghuang.rsintegration.mixin.ftbquests.ClearRepeatCooldownMessageMixin"));
     }
 }

@@ -23,6 +23,7 @@ import net.minecraftforge.common.crafting.StrictNBTIngredient;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -31,6 +32,7 @@ import java.util.Set;
 /** Reads live recipe objects on the server thread and projects them into immutable values. */
 public final class ImmutableRecipeGraphProjector {
     private static volatile CachedProjection cachedProjection;
+    private static ProjectionBuildState warmUpState;
 
     private ImmutableRecipeGraphProjector() {}
 
@@ -50,49 +52,107 @@ public final class ImmutableRecipeGraphProjector {
                 PerformanceMonitor.recordRecipeGraphProjection(true, 0L);
                 return cached.graph();
             }
-            long started = System.nanoTime();
-            ImmutableRecipeGraph graph = project(level);
-            cachedProjection = new CachedProjection(source, revision, graph);
-            long elapsedNanos = System.nanoTime() - started;
-            PerformanceMonitor.recordRecipeGraphProjection(false, elapsedNanos);
-            RSIntegrationMod.LOGGER.info("[RecipeGraph] projected {} recipes in {}ms",
-                    graph.recipesById().size(), elapsedNanos / 1_000_000L);
-            return graph;
-        }
-    }
-
-    private static ImmutableRecipeGraph project(Level level) {
-        Map<MaterialRef, List<RecipeNode>> projected = new HashMap<>();
-        Set<ResourceLocation> seen = new HashSet<>();
-        for (List<RecipeIndex.Entry> entries : RecipeIndex.get(level).values()) {
-            for (RecipeIndex.Entry entry : entries) {
-                if (entry.modType() != ModType.GENERIC
-                        || !(entry.recipe() instanceof CraftingRecipe recipe)
-                        || !seen.add(recipe.getId())) continue;
-                ItemStack output = recipe.getResultItem(level.registryAccess());
-                if (output.isEmpty()) continue;
-                List<IngredientSpec> specs =
-                        CraftPacketUtils.extractCraftingIngredientSpecs(recipe);
-                List<IngredientRef> inputs = new ArrayList<>();
-                boolean valid = true;
-                for (IngredientSpec spec : specs) {
-                    if (spec.isEmpty()) continue;
-                    IngredientRef input = projectIngredient(spec);
-                    if (input == null) { valid = false; break; }
-                    inputs.add(input);
-                }
-                if (!valid) continue;
-                MaterialRef outputRef = material(output, output.hasTag());
-                RecipeNode node = new RecipeNode(recipe.getId(), outputRef,
-                        Math.max(1, output.getCount()), inputs);
-                projected.computeIfAbsent(outputRef, ignored -> new ArrayList<>()).add(node);
+            if (warmUpState == null || !warmUpState.matches(source, revision)) {
+                warmUpState = new ProjectionBuildState(source, revision, RecipeIndex.get(level));
             }
+            while (!warmUpState.advance(level, Long.MAX_VALUE)) {
+                // Complete any remaining scheduled work for this immediate request.
+            }
+            return publish(warmUpState);
         }
-        return new ImmutableRecipeGraph(projected);
     }
 
-    public static void clearCache() {
+    public static synchronized void scheduleWarmUp(Level level) {
+        RecipeManager source = level.getRecipeManager();
+        long revision = CraftPlanningRevision.current();
+        if (cachedProjection != null && cachedProjection.matches(source, revision)) return;
+        if (warmUpState == null || !warmUpState.matches(source, revision)) {
+            warmUpState = new ProjectionBuildState(source, revision, RecipeIndex.get(level));
+        }
+    }
+
+    public static synchronized void tickWarmUp(Level level, long budgetNanos) {
+        if (warmUpState == null) return;
+        RecipeManager source = level.getRecipeManager();
+        long revision = CraftPlanningRevision.current();
+        if (!warmUpState.matches(source, revision)) {
+            warmUpState = null;
+            return;
+        }
+        long deadline = System.nanoTime() + Math.max(1L, budgetNanos);
+        if (warmUpState.advance(level, deadline)) publish(warmUpState);
+    }
+
+    private static ImmutableRecipeGraph publish(ProjectionBuildState state) {
+        ImmutableRecipeGraph graph = new ImmutableRecipeGraph(state.projected);
+        cachedProjection = new CachedProjection(state.source, state.revision, graph);
+        warmUpState = null;
+        PerformanceMonitor.recordRecipeGraphProjection(false, state.workNanos);
+        RSIntegrationMod.LOGGER.info("[RecipeGraph] incrementally projected {} recipes in {}ms CPU",
+                graph.recipesById().size(), state.workNanos / 1_000_000L);
+        return graph;
+    }
+
+    private static void projectEntry(Level level, Map<MaterialRef, List<RecipeNode>> projected,
+                                     Set<ResourceLocation> seen, RecipeIndex.Entry entry) {
+        if (entry.modType() != ModType.GENERIC
+                || !(entry.recipe() instanceof CraftingRecipe recipe)
+                || !seen.add(recipe.getId())) return;
+        ItemStack output = recipe.getResultItem(level.registryAccess());
+        if (output.isEmpty()) return;
+        List<IngredientSpec> specs = CraftPacketUtils.extractCraftingIngredientSpecs(recipe);
+        List<IngredientRef> inputs = new ArrayList<>();
+        for (IngredientSpec spec : specs) {
+            if (spec.isEmpty()) continue;
+            IngredientRef input = projectIngredient(spec);
+            if (input == null) return;
+            inputs.add(input);
+        }
+        MaterialRef outputRef = material(output, output.hasTag());
+        RecipeNode node = new RecipeNode(recipe.getId(), outputRef,
+                Math.max(1, output.getCount()), inputs);
+        projected.computeIfAbsent(outputRef, ignored -> new ArrayList<>()).add(node);
+    }
+
+    private static final class ProjectionBuildState {
+        private final RecipeManager source;
+        private final long revision;
+        private final Iterator<List<RecipeIndex.Entry>> groups;
+        private final Map<MaterialRef, List<RecipeNode>> projected = new HashMap<>();
+        private final Set<ResourceLocation> seen = new HashSet<>();
+        private Iterator<RecipeIndex.Entry> current = List.<RecipeIndex.Entry>of().iterator();
+        private long workNanos;
+
+        private ProjectionBuildState(RecipeManager source, long revision,
+                                     Map<?, List<RecipeIndex.Entry>> index) {
+            this.source = source;
+            this.revision = revision;
+            this.groups = index.values().iterator();
+        }
+
+        private boolean matches(RecipeManager manager, long currentRevision) {
+            return source == manager && revision == currentRevision;
+        }
+
+        private boolean advance(Level level, long deadlineNanos) {
+            long started = System.nanoTime();
+            int processed = 0;
+            while (processed++ == 0 || System.nanoTime() < deadlineNanos) {
+                while (!current.hasNext() && groups.hasNext()) current = groups.next().iterator();
+                if (!current.hasNext()) {
+                    workNanos += System.nanoTime() - started;
+                    return true;
+                }
+                projectEntry(level, projected, seen, current.next());
+            }
+            workNanos += System.nanoTime() - started;
+            return false;
+        }
+    }
+
+    public static synchronized void clearCache() {
         cachedProjection = null;
+        warmUpState = null;
     }
 
     public static Map<MaterialRef, Integer> projectAvailability(Map<StackKey, Integer> available) {
