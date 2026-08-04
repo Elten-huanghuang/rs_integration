@@ -32,6 +32,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class PlanGraphViewTest extends BootstrapTest {
 
@@ -93,13 +94,14 @@ class PlanGraphViewTest extends BootstrapTest {
                 List.of(), java.util.Map.of(), List.of(), "test:root",
                 null, null, 0, 0, 0, List.of(), 1,
                 null, null, null, 0, false, false, false, null,
-                java.util.Set.of(), java.util.Map.of(), null, graph);
+                java.util.Set.of(), java.util.Map.of(), null, graph, true);
         FriendlyByteBuf buf = new FriendlyByteBuf(Unpooled.buffer());
         new PlanResponsePacket(plan).encode(buf);
         int encodedSize = buf.readableBytes();
 
         // Decode and check graph decoded correctly
         PlanResponse decoded = PlanResponsePacket.decode(buf).plan();
+        assertTrue(decoded.executionBlocked());
         assertNotNull(decoded.graph());
         assertEquals(graph.topologicalOrder(), decoded.graph().topologicalOrder());
         assertEquals(graph.edges().size(), decoded.graph().edges().size());
