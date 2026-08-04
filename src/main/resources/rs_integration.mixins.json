@@ -69,6 +69,7 @@
   ],
   "client": [
     "apotheosis.EnchLibraryScreenMixin",
+    "ftbquests.FTBQuestsNetClientMixin",
     "jei.GuiIconToggleButtonAccessor",
     "jei.RecipeGuiLayoutsMixin",
     "jei.RecipesGuiMixin",

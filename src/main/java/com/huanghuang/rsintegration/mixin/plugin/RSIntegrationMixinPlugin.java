@@ -113,6 +113,11 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
             return isClassPresent("dev.ftb.mods.ftbquests.quest.task.Task")
                     && hasMethod(targetClassName, "checkTaskSequence");
         }
+        if (mixinClassName.contains("ftbquests.FTBQuestsNetClientMixin")) {
+            return isClassPresent("dev.ftb.mods.ftbquests.client.FTBQuestsNetClient")
+                    && hasMethod(targetClassName, "syncTeamData")
+                    && hasMethod(targetClassName, "updateTaskProgress");
+        }
         if (mixinClassName.contains("namelesstrinkets")) {
             return isClassPresent("com.cozary.nameless_trinkets.items.trinkets.SuperMagnet")
                     && hasMethod(targetClassName, "curioTick");
