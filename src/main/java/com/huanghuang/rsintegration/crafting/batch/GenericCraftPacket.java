@@ -83,6 +83,7 @@ import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.Level;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.nbt.CompoundTag;
@@ -104,12 +105,16 @@ import java.lang.reflect.Method;
 import java.util.*;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 public final class GenericCraftPacket {
+    private static final int MAX_DEFERRED_WARM_UP_REQUESTS = 128;
     private static final LogSampler FAILURE_LOG_SAMPLER = new LogSampler(2_000);
     private static volatile PlanRequestService PLAN_REQUESTS = newDefaultPlanRequestService();
+    private static final DeferredCraftRequestQueue<Consumer<ServerPlayer>> WARM_UP_REQUESTS =
+            new DeferredCraftRequestQueue<>(MAX_DEFERRED_WARM_UP_REQUESTS);
 
     private static PlanRequestService newDefaultPlanRequestService() {
         return newPlanRequestService(CraftingPlanningConfig.defaults());
@@ -422,32 +427,77 @@ public final class GenericCraftPacket {
         RSIntegrationMod.debug("[RSI-Generic] handle() enqueueWork: recipeId={} preview={}",
                 packet.recipeId, packet.preview);
         context.enqueueWork(() -> {
-            try {
-                if (packet.preview) {
-                    RSIntegrationMod.debug("[RSI-Generic] handle() → tryBuildPlan: recipeId={}", packet.recipeId);
-                    if (packet.maximize) {
-                        findMaxCraftable(player, packet, previewGeneration);
-                    } else {
-                        tryBuildPlan(player, packet.recipeId, packet.forcedRecipes,
-                                packet.dim, packet.pos, packet.repeatCount, packet.baseItem,
-                                packet.targetOutput, packet.requestId, previewGeneration);
-                    }
-                } else {
-                    RSIntegrationMod.debug("[RSI-Generic] handle() → tryResolve: recipeId={} forced={}", packet.recipeId, packet.forcedRecipes.size());
-                    tryResolve(player, packet.recipeId, packet.forcedRecipes, packet.dim, packet.pos,
-                            packet.repeatCount, packet.inferMode, packet.baseItem, packet.targetOutput,
-                            packet.outputDestination);
-                }
-            } catch (Throwable e) {
-                RSIntegrationMod.LOGGER.error("[RSI-Generic] Failed for {}:", packet.recipeId, e);
-                try {
-                    player.sendSystemMessage(buildFailureMessage(e, packet.recipeId));
-                } catch (Exception ex) {
-                    RSIntegrationMod.LOGGER.error("[RSI-Generic] Failed to send error message to player", ex);
-                }
+            Consumer<ServerPlayer> action = readyPlayer ->
+                    executeRequest(readyPlayer, packet, previewGeneration);
+            if (warmUpReady(player.serverLevel())) {
+                action.accept(player);
+                return;
             }
+            boolean queued = WARM_UP_REQUESTS.offer(new DeferredCraftRequestQueue.Entry<>(
+                    player.getUUID(), packet.preview, previewGeneration, action));
+            if (!queued) {
+                player.sendSystemMessage(Component.translatable("rsi.plan.failure.planner_busy"));
+                return;
+            }
+            RSIntegrationMod.debug(
+                    "[RSI-Generic] deferred until recipe warm-up: recipeId={} preview={} queued={}",
+                    packet.recipeId, packet.preview, WARM_UP_REQUESTS.size());
         });
         context.setPacketHandled(true);
+    }
+
+    private static boolean warmUpReady(ServerLevel level) {
+        return RecipeIndex.isReady(level) && ImmutableRecipeGraphProjector.isReady(level);
+    }
+
+    private static void executeRequest(ServerPlayer player, GenericCraftPacket packet,
+                                       long previewGeneration) {
+        try {
+            if (packet.preview) {
+                if (!PLAN_REQUESTS.isCurrent(player.getUUID(), previewGeneration)) return;
+                RSIntegrationMod.debug(
+                        "[RSI-Generic] handle() -> tryBuildPlan: recipeId={}", packet.recipeId);
+                if (packet.maximize) {
+                    findMaxCraftable(player, packet, previewGeneration);
+                } else {
+                    tryBuildPlan(player, packet.recipeId, packet.forcedRecipes,
+                            packet.dim, packet.pos, packet.repeatCount, packet.baseItem,
+                            packet.targetOutput, packet.requestId, previewGeneration);
+                }
+            } else {
+                RSIntegrationMod.debug(
+                        "[RSI-Generic] handle() -> tryResolve: recipeId={} forced={}",
+                        packet.recipeId, packet.forcedRecipes.size());
+                tryResolve(player, packet.recipeId, packet.forcedRecipes, packet.dim, packet.pos,
+                        packet.repeatCount, packet.inferMode, packet.baseItem, packet.targetOutput,
+                        packet.outputDestination);
+            }
+        } catch (Throwable e) {
+            RSIntegrationMod.LOGGER.error("[RSI-Generic] Failed for {}:", packet.recipeId, e);
+            try {
+                player.sendSystemMessage(buildFailureMessage(e, packet.recipeId));
+            } catch (Exception ex) {
+                RSIntegrationMod.LOGGER.error(
+                        "[RSI-Generic] Failed to send error message to player", ex);
+            }
+        }
+    }
+
+    /** Runs at most one valid deferred request after both warm-up stages are ready. */
+    public static void tickWarmUpRequests(MinecraftServer server) {
+        if (!warmUpReady(server.overworld())) return;
+        int remaining = WARM_UP_REQUESTS.size();
+        while (remaining-- > 0) {
+            DeferredCraftRequestQueue.Entry<Consumer<ServerPlayer>> request =
+                    WARM_UP_REQUESTS.poll();
+            if (request == null) return;
+            ServerPlayer player = server.getPlayerList().getPlayer(request.playerId());
+            if (player == null) continue;
+            if (request.preview()
+                    && !PLAN_REQUESTS.isCurrent(request.playerId(), request.generation())) continue;
+            request.payload().accept(player);
+            return;
+        }
     }
 
     /**
@@ -3014,6 +3064,7 @@ public final class GenericCraftPacket {
     }
 
     public static void onPlayerLogout(UUID playerId) {
+        WARM_UP_REQUESTS.removePlayer(playerId);
         PLAN_REQUESTS.forget(playerId);
         PLAN_CACHE.removePlayer(playerId);
     }
@@ -3023,6 +3074,7 @@ public final class GenericCraftPacket {
         PlanRequestService stopped = PLAN_REQUESTS;
         PLAN_REQUESTS = newDefaultPlanRequestService();
         stopped.close();
+        WARM_UP_REQUESTS.clear();
         ImmutableRecipeGraphProjector.clearCache();
     }
 

@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.crafting.planning;
 
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.RecipeIndex;
+import com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import org.junit.jupiter.api.Test;
 import org.objectweb.asm.ClassReader;
@@ -26,6 +27,15 @@ class RecipeGraphWarmUpContractTest {
         assertTrue(calls.contains(owner(RecipeIndex.class) + ".scheduleWarmUp"));
         assertTrue(calls.contains(owner(RecipeIndex.class) + ".tickWarmUp"));
         assertTrue(calls.contains(owner(ImmutableRecipeGraphProjector.class) + ".tickWarmUp"));
+        assertTrue(calls.contains(owner(GenericCraftPacket.class) + ".tickWarmUpRequests"));
+    }
+
+    @Test
+    void playerCraftRequestsWaitForBothWarmUpStages() throws IOException {
+        Set<String> calls = methodCalls(GenericCraftPacket.class, "warmUpReady");
+
+        assertTrue(calls.contains(owner(RecipeIndex.class) + ".isReady"));
+        assertTrue(calls.contains(owner(ImmutableRecipeGraphProjector.class) + ".isReady"));
     }
 
     @Test

@@ -21,6 +21,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.BooleanSupplier;
 import net.minecraft.world.item.crafting.Ingredient;
 
 /** Builds deterministic synthetic recipes from the live Forge brewing registry. */
@@ -31,40 +32,147 @@ public final class VanillaBrewingCatalog {
 
     public static synchronized int index(Level level, Map<Item, List<RecipeIndex.Entry>> index,
                                          Set<ResourceLocation> seen) {
-        List<ItemStack> inputs = inputCandidates();
-        List<ItemStack> reagents = itemCandidates();
+        IncrementalIndex build = incrementalIndex(level, index, seen);
+        while (!build.advance(() -> false)) { }
+        return build.indexedCount();
+    }
 
-        // Container and ordinary potion mixes registered through PotionBrewing
-        // are separate from Forge's IBrewingRecipe registry. Modded potion
-        // families commonly use this path for bottle -> splash -> lingering.
-        List<ItemStack> potionReagents = reagents.stream()
-                .filter(PotionBrewing::isIngredient).toList();
-        for (ItemStack input : inputs) {
-            for (ItemStack reagent : potionReagents) {
-                if (!PotionBrewing.hasMix(input, reagent)) continue;
-                addDefinition(input, reagent, PotionBrewing.mix(reagent, input), index, seen);
+    public static synchronized IncrementalIndex incrementalIndex(
+            Level level, Map<Item, List<RecipeIndex.Entry>> index,
+            Set<ResourceLocation> seen) {
+        return new IncrementalIndex(index, seen, inputCandidates(), itemCandidates());
+    }
+
+    /** Splits registry probing into resumable units while retaining main-thread access. */
+    public static final class IncrementalIndex {
+        private final Map<Item, List<RecipeIndex.Entry>> index;
+        private final Set<ResourceLocation> seen;
+        private final List<ItemStack> inputs;
+        private final List<ItemStack> reagents;
+        private final List<ItemStack> potionReagents;
+        private final List<IBrewingRecipe> forgeRecipes;
+        private int phase;
+        private int inputIndex;
+        private int reagentIndex;
+        private int forgeIndex;
+        private int filterIndex;
+        private int definitionIndex;
+        private int indexedCount;
+        private IBrewingRecipe currentForgeRecipe;
+        private final List<ItemStack> acceptedInputs = new ArrayList<>();
+        private final List<ItemStack> acceptedReagents = new ArrayList<>();
+        private List<VanillaBrewingRecipeDefinition> existingDefinitions = List.of();
+
+        private IncrementalIndex(Map<Item, List<RecipeIndex.Entry>> index,
+                                 Set<ResourceLocation> seen,
+                                 List<ItemStack> inputs, List<ItemStack> reagents) {
+            this.index = index;
+            this.seen = seen;
+            this.inputs = inputs;
+            this.reagents = reagents;
+            this.potionReagents = reagents.stream().filter(PotionBrewing::isIngredient).toList();
+            this.forgeRecipes = List.copyOf(BrewingRecipeRegistry.getRecipes());
+        }
+
+        public boolean advance(BooleanSupplier budgetExpired) {
+            synchronized (VanillaBrewingCatalog.class) {
+                return advanceLocked(budgetExpired);
             }
         }
 
-        for (IBrewingRecipe brewing : BrewingRecipeRegistry.getRecipes()) {
-            indexDeclaredMappings(brewing, index, seen);
-            List<ItemStack> acceptedInputs = inputs.stream().filter(brewing::isInput).toList();
-            List<ItemStack> acceptedReagents = reagents.stream().filter(brewing::isIngredient).toList();
-            for (ItemStack input : acceptedInputs) {
-                for (ItemStack reagent : acceptedReagents) {
-                    addDefinition(input, reagent,
-                            brewing.getOutput(input.copy(), reagent.copy()), index, seen);
+        private boolean advanceLocked(BooleanSupplier budgetExpired) {
+            int processed = 0;
+            while (processed++ == 0 || !budgetExpired.getAsBoolean()) {
+                if (phase == 0) {
+                    if (!advancePotionMix()) {
+                        phase = 1;
+                        inputIndex = reagentIndex = 0;
+                    }
+                } else if (phase == 1) {
+                    if (!advanceForgeRecipe()) {
+                        phase = 2;
+                        existingDefinitions = List.copyOf(BY_ID.values());
+                    }
+                } else if (phase == 2) {
+                    if (!advanceExistingDefinition()) phase = 3;
+                } else {
+                    return true;
                 }
             }
+            return phase >= 3;
         }
-        for (VanillaBrewingRecipeDefinition definition : BY_ID.values()) {
-            if (!seen.add(definition.getId())) continue;
-            index.computeIfAbsent(definition.outputUnit().getItem(), ignored -> new ArrayList<>())
-                    .add(new RecipeIndex.Entry(definition,
-                            ModType.byId("vanilla_brewing_stand"),
-                            new ResourceLocation("minecraft", "brewing"), true));
+
+        public int indexedCount() {
+            return indexedCount;
         }
-        return BY_ID.size();
+
+        private boolean advancePotionMix() {
+            if (inputIndex >= inputs.size() || potionReagents.isEmpty()) return false;
+            ItemStack input = inputs.get(inputIndex);
+            ItemStack reagent = potionReagents.get(reagentIndex++);
+            if (PotionBrewing.hasMix(input, reagent)) {
+                int before = seen.size();
+                addDefinition(input, reagent, PotionBrewing.mix(reagent, input), index, seen);
+                if (seen.size() > before) indexedCount++;
+            }
+            if (reagentIndex >= potionReagents.size()) {
+                reagentIndex = 0;
+                inputIndex++;
+            }
+            return inputIndex < inputs.size();
+        }
+
+        private boolean advanceForgeRecipe() {
+            if (currentForgeRecipe == null) {
+                if (forgeIndex >= forgeRecipes.size()) return false;
+                currentForgeRecipe = forgeRecipes.get(forgeIndex++);
+                indexDeclaredMappings(currentForgeRecipe, index, seen);
+                acceptedInputs.clear();
+                acceptedReagents.clear();
+                filterIndex = -inputs.size();
+                inputIndex = reagentIndex = 0;
+            }
+            if (filterIndex < 0) {
+                ItemStack candidate = inputs.get(inputs.size() + filterIndex++);
+                if (currentForgeRecipe.isInput(candidate)) acceptedInputs.add(candidate);
+                return true;
+            }
+            if (filterIndex < reagents.size()) {
+                ItemStack candidate = reagents.get(filterIndex++);
+                if (currentForgeRecipe.isIngredient(candidate)) acceptedReagents.add(candidate);
+                return true;
+            }
+            if (acceptedInputs.isEmpty() || acceptedReagents.isEmpty()) {
+                currentForgeRecipe = null;
+                return forgeIndex < forgeRecipes.size();
+            }
+            ItemStack input = acceptedInputs.get(inputIndex);
+            ItemStack reagent = acceptedReagents.get(reagentIndex++);
+            int before = seen.size();
+            addDefinition(input, reagent,
+                    currentForgeRecipe.getOutput(input.copy(), reagent.copy()), index, seen);
+            if (seen.size() > before) indexedCount++;
+            if (reagentIndex >= acceptedReagents.size()) {
+                reagentIndex = 0;
+                inputIndex++;
+            }
+            if (inputIndex >= acceptedInputs.size()) currentForgeRecipe = null;
+            return currentForgeRecipe != null || forgeIndex < forgeRecipes.size();
+        }
+
+        private boolean advanceExistingDefinition() {
+            if (definitionIndex >= existingDefinitions.size()) return false;
+            VanillaBrewingRecipeDefinition definition =
+                    existingDefinitions.get(definitionIndex++);
+            if (seen.add(definition.getId())) {
+                index.computeIfAbsent(definition.outputUnit().getItem(), ignored -> new ArrayList<>())
+                        .add(new RecipeIndex.Entry(definition,
+                                ModType.byId("vanilla_brewing_stand"),
+                                new ResourceLocation("minecraft", "brewing"), true));
+                indexedCount++;
+            }
+            return definitionIndex < existingDefinitions.size();
+        }
     }
 
     /**

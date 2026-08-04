@@ -546,6 +546,8 @@ public final class RSIntegrationMod {
             if (e.getEntity() instanceof ServerPlayer sp) {
                 AsyncCraftManager.getInstance().cancelAllForPlayer(sp.getUUID());
                 com.huanghuang.rsintegration.autoeat.AutoEatRateLimiter.onPlayerLogout(sp.getUUID());
+                com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket
+                        .onPlayerLogout(sp.getUUID());
             }
         });
         MinecraftForge.EVENT_BUS.addListener((ServerStartedEvent e) ->
@@ -557,6 +559,8 @@ public final class RSIntegrationMod {
             com.huanghuang.rsintegration.crafting.RecipeIndex.tickWarmUp(level, 1_000_000L);
             com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraphProjector
                     .tickWarmUp(level, 1_000_000L);
+            com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket
+                    .tickWarmUpRequests(e.getServer());
         });
         // Cross-dimension: unpin the old dimension's IStorageCache listener
         // and re-register against the new dimension's network.
