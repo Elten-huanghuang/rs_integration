@@ -52,26 +52,6 @@ public final class RecipeIndex {
 
     private RecipeIndex() {}
 
-    /**
-     * Builds the first index before normal server ticks begin. Third-party recipe
-     * handlers are intentionally kept on the server thread; moving them to a
-     * worker would make registry and reflective mod access unsafe.
-     */
-    public static void warmUp(Level level) {
-        long start = System.currentTimeMillis();
-        try {
-            get(level);
-            com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraphProjector
-                    .capture(level);
-            RSIntegrationMod.LOGGER.info("[RecipeIndex] server-start warm-up completed in {}ms",
-                    System.currentTimeMillis() - start);
-        } catch (RuntimeException | LinkageError e) {
-            invalidate();
-            RSIntegrationMod.LOGGER.warn(
-                    "[RecipeIndex] server-start warm-up failed; first craft request will retry", e);
-        }
-    }
-
     public static Map<Item, List<Entry>> get(Level level) {
         RecipeManager rm = level.getRecipeManager();
         Map<Item, List<Entry>> idx = index;

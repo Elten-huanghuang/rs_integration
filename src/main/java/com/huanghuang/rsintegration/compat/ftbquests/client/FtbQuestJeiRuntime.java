@@ -16,7 +16,6 @@ public final class FtbQuestJeiRuntime {
     private static final List<QuestSubmissionSnapshot> REGISTERED = new ArrayList<>();
     private static IJeiRuntime runtime;
     private static boolean waiting;
-    private static int refreshTicker;
 
     private FtbQuestJeiRuntime() {}
 
@@ -35,10 +34,7 @@ public final class FtbQuestJeiRuntime {
     @SubscribeEvent
     public static void onClientTick(TickEvent.ClientTickEvent event) {
         if (event.phase != TickEvent.Phase.END || runtime == null) return;
-        if (waiting || ++refreshTicker >= 40) {
-            refreshTicker = 0;
-            refreshIfReady();
-        }
+        if (waiting) refreshIfReady();
     }
 
     public static void requestRefresh() {

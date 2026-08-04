@@ -15,6 +15,8 @@ public final class TickSimulator {
 
     private static Map<Item, WhitelistEntry> whitelist = Map.of();
     private static int lastConfigHash = -1;
+    private static final Map<ResonanceDiskWrapper, MatchedStackCache> MATCH_CACHE =
+            Collections.synchronizedMap(new WeakHashMap<>());
 
     private TickSimulator() {}
 
@@ -24,7 +26,7 @@ public final class TickSimulator {
 
         // The delegate owns mutable ItemStack instances. Extraction and reinsertion may
         // mutate or reuse them, so each tick must work from an exact, detached snapshot.
-        for (MatchedStack matched : snapshotMatchedStacks(disk.delegate().getStacks())) {
+        for (MatchedStack matched : matchedStacks(disk)) {
             ItemStack stack = matched.stack();
             WhitelistEntry entry = matched.entry();
             if (entry.mutates) {
@@ -53,6 +55,18 @@ public final class TickSimulator {
 
     static List<ItemStack> snapshotStacks(Collection<ItemStack> stacks) {
         return stacks.stream().map(ItemStack::copy).toList();
+    }
+
+    private static List<MatchedStack> matchedStacks(ResonanceDiskWrapper disk) {
+        long revision = disk.contentRevision();
+        MatchedStackCache cached = MATCH_CACHE.get(disk);
+        if (cached != null && cached.revision() == revision
+                && cached.whitelistHash() == lastConfigHash) {
+            return cached.stacks();
+        }
+        List<MatchedStack> stacks = snapshotMatchedStacks(disk.delegate().getStacks());
+        MATCH_CACHE.put(disk, new MatchedStackCache(revision, lastConfigHash, stacks));
+        return stacks;
     }
 
     private static List<MatchedStack> snapshotMatchedStacks(Collection<ItemStack> stacks) {
@@ -101,4 +115,5 @@ public final class TickSimulator {
 
     private record WhitelistEntry(String itemId, boolean mutates) {}
     private record MatchedStack(ItemStack stack, WhitelistEntry entry) {}
+    private record MatchedStackCache(long revision, int whitelistHash, List<MatchedStack> stacks) {}
 }

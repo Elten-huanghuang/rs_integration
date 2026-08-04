@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.crafting.planning;
 
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.RecipeIndex;
+import com.huanghuang.rsintegration.RSIntegrationMod;
 import org.junit.jupiter.api.Test;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassVisitor;
@@ -17,10 +18,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RecipeGraphWarmUpContractTest {
     @Test
-    void serverWarmUpAlsoBuildsImmutableRecipeGraph() throws IOException {
-        Set<String> calls = methodCalls(RecipeIndex.class, "warmUp");
+    void serverStartupDoesNotSynchronouslyBuildRecipeGraph() throws IOException {
+        Set<String> calls = methodCalls(RSIntegrationMod.class, "onCommonSetup");
 
-        assertTrue(calls.contains(owner(ImmutableRecipeGraphProjector.class) + ".capture"));
+        assertFalse(calls.contains(owner(RecipeIndex.class) + ".warmUp"));
+        assertFalse(calls.contains(owner(ImmutableRecipeGraphProjector.class) + ".capture"));
     }
 
     @Test

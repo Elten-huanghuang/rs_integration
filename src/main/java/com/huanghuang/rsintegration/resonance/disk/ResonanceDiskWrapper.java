@@ -34,6 +34,7 @@ public final class ResonanceDiskWrapper implements IStorageDisk<ItemStack> {
     private IStorageDiskContainerContext containerContext;
     private int mutationDepth;
     private boolean mutationDirty;
+    private long contentRevision;
 
     public ResonanceDiskWrapper(IStorageDisk<ItemStack> delegate) {
         this(delegate, 0);
@@ -83,6 +84,10 @@ public final class ResonanceDiskWrapper implements IStorageDisk<ItemStack> {
 
     public int abilityMask() {
         return abilityMask;
+    }
+
+    public long contentRevision() {
+        return contentRevision;
     }
 
     public boolean hasAbility(int ability) {
@@ -439,6 +444,7 @@ public final class ResonanceDiskWrapper implements IStorageDisk<ItemStack> {
     }
 
     private void invalidatePublicStorageView() {
+        contentRevision++;
         if (!(containerContext instanceof INetworkNode node)) return;
         var network = node.getNetwork();
         if (network != null && network.getItemStorageCache() != null) {
