@@ -187,12 +187,8 @@ class PureRecipePlannerPropertyTest {
                                                            IngredientRef ingredient) {
         Set<Map<MaterialRef, Integer>> consumed = new HashSet<>();
         for (Map<MaterialRef, Integer> state : states) {
-            for (MaterialRef alternative : ingredient.alternatives()) {
-                int have = state.getOrDefault(alternative, 0);
-                if (have >= ingredient.count()) {
-                    consumed.add(withCount(state, alternative, have - ingredient.count()));
-                }
-            }
+            consumeCombinations(state, ingredient.alternatives(), 0,
+                    ingredient.count(), consumed);
         }
         return consumed;
     }
@@ -201,13 +197,29 @@ class PureRecipePlannerPropertyTest {
                                              Map<MaterialRef, Integer> stock,
                                              IngredientRef ingredient,
                                              List<ReferenceTask> rest, int steps) {
-        for (MaterialRef alternative : ingredient.alternatives()) {
-            int have = stock.getOrDefault(alternative, 0);
-            if (have >= ingredient.count()) {
-                queue.addLast(new ReferenceState(
-                        withCount(stock, alternative, have - ingredient.count()),
-                        List.copyOf(rest), steps));
-            }
+        Set<Map<MaterialRef, Integer>> consumed = new HashSet<>();
+        consumeCombinations(stock, ingredient.alternatives(), 0,
+                ingredient.count(), consumed);
+        for (Map<MaterialRef, Integer> result : consumed) {
+            queue.addLast(new ReferenceState(result, List.copyOf(rest), steps));
+        }
+    }
+
+    private static void consumeCombinations(Map<MaterialRef, Integer> stock,
+                                            List<MaterialRef> alternatives, int index,
+                                            int remaining,
+                                            Set<Map<MaterialRef, Integer>> results) {
+        if (remaining == 0) {
+            results.add(Map.copyOf(stock));
+            return;
+        }
+        if (index >= alternatives.size()) return;
+
+        MaterialRef material = alternatives.get(index);
+        int have = stock.getOrDefault(material, 0);
+        for (int take = 0; take <= Math.min(have, remaining); take++) {
+            consumeCombinations(take == 0 ? stock : withCount(stock, material, have - take),
+                    alternatives, index + 1, remaining - take, results);
         }
     }
 

@@ -6,6 +6,7 @@ import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.Recip
 import net.minecraft.resources.ResourceLocation;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -158,6 +159,14 @@ public final class PureRecipePlanner {
                 backtracks++;
             }
 
+            Map<MaterialRef, Integer> combinedConsumption = consumeAcrossAlternatives(
+                    ingredient, rest);
+            if (combinedConsumption != null) {
+                if (solve(rest)) return true;
+                combinedConsumption.forEach(this::setStock);
+                backtracks++;
+            }
+
             for (MaterialRef wanted : ingredient.alternatives()) {
                 PlanningThreadContext.throwIfCancelled();
                 if (resolving.contains(wanted)) continue;
@@ -200,6 +209,61 @@ public final class PureRecipePlanner {
                 deepestFailure = ingredient;
             }
             return false;
+        }
+
+        /**
+         * A tag ingredient is satisfied by the aggregate stock of all matching variants.
+         * Keep singleton demands in the remaining task list reserved where possible so a
+         * broad tag (for example wool or fuels) does not consume a later exact material.
+         */
+        private Map<MaterialRef, Integer> consumeAcrossAlternatives(
+                IngredientRef ingredient, List<Task> rest) {
+            List<MaterialRef> stocked = ingredient.alternatives().stream()
+                    .filter(material -> stock.getOrDefault(material, 0) > 0)
+                    .sorted(Comparator
+                            .comparingLong((MaterialRef material) ->
+                                    (long) stock.getOrDefault(material, 0)
+                                            - singletonDemand(rest, material))
+                            .reversed()
+                            .thenComparingInt(material -> -stock.getOrDefault(material, 0)))
+                    .toList();
+            if (stocked.size() < 2) return null;
+
+            long total = 0L;
+            for (MaterialRef material : stocked) {
+                total += stock.getOrDefault(material, 0);
+                if (total >= ingredient.count()) break;
+            }
+            if (total < ingredient.count()) return null;
+
+            int remaining = ingredient.count();
+            int contributors = 0;
+            Map<MaterialRef, Integer> previous = new HashMap<>();
+            for (MaterialRef material : stocked) {
+                int have = stock.getOrDefault(material, 0);
+                int take = Math.min(have, remaining);
+                if (take <= 0) continue;
+                previous.put(material, have);
+                setStock(material, have - take);
+                remaining -= take;
+                contributors++;
+                if (remaining == 0) break;
+            }
+            if (contributors > 1) return previous;
+            previous.forEach(this::setStock);
+            return null;
+        }
+
+        private static long singletonDemand(List<Task> tasks, MaterialRef material) {
+            long demand = 0L;
+            for (Task task : tasks) {
+                if (!(task instanceof DemandTask needed)
+                        || needed.ingredient().alternatives().size() != 1
+                        || !needed.ingredient().alternatives().get(0).equals(material)) continue;
+                demand = Math.min(Integer.MAX_VALUE,
+                        demand + needed.ingredient().count());
+            }
+            return demand;
         }
 
         private boolean completeRecipe(CompleteRecipeTask completed, List<Task> rest) {

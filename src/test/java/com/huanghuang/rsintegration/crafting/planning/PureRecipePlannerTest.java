@@ -6,6 +6,8 @@ import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.Recip
 import net.minecraft.resources.ResourceLocation;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CancellationException;
@@ -145,6 +147,40 @@ class PureRecipePlannerTest {
         assertTrue(result.feasible());
         assertEquals(0, result.remaining().size());
         assertTrue(result.backtracks() > 0);
+    }
+
+    @Test
+    void aggregatesTagVariantsWhilePreservingLaterExactDemand() {
+        MaterialRef whiteWool = material("white_wool");
+        MaterialRef blackWool = material("black_wool");
+        IngredientRef anyWool = new IngredientRef(List.of(whiteWool, blackWool), 6);
+
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(
+                new ImmutableRecipeGraph(Map.of()), Map.of(whiteWool, 4, blackWool, 4),
+                List.of(anyWool, ingredient(whiteWool, 2)), 20);
+
+        assertTrue(result.feasible());
+        assertEquals(PureRecipePlanner.Status.SUCCESS, result.status());
+        assertTrue(result.remaining().isEmpty());
+    }
+
+    @Test
+    void largeTagUsesAggregateStockWithoutRecipeSearch() {
+        List<MaterialRef> fuels = new ArrayList<>();
+        Map<MaterialRef, Integer> stock = new LinkedHashMap<>();
+        for (int i = 0; i < 128; i++) {
+            MaterialRef fuel = material("fuel_" + i);
+            fuels.add(fuel);
+            stock.put(fuel, 1);
+        }
+
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(
+                new ImmutableRecipeGraph(Map.of()), stock,
+                List.of(new IngredientRef(fuels, 96)), 20);
+
+        assertTrue(result.feasible());
+        assertEquals(PureRecipePlanner.Status.SUCCESS, result.status());
+        assertTrue(result.expandedStates() <= 2);
     }
 
     @Test
