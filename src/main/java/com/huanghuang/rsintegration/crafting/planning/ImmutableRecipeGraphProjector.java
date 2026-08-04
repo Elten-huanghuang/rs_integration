@@ -36,6 +36,12 @@ public final class ImmutableRecipeGraphProjector {
 
     private ImmutableRecipeGraphProjector() {}
 
+    public static boolean isReady(Level level) {
+        CachedProjection ready = cachedProjection;
+        return ready != null && ready.matches(
+                level.getRecipeManager(), CraftPlanningRevision.current());
+    }
+
     public static ImmutableRecipeGraph capture(Level level) {
         PlanningThreadContext.requireMainThread("recipe graph projection");
         RecipeManager source = level.getRecipeManager();
@@ -72,15 +78,26 @@ public final class ImmutableRecipeGraphProjector {
     }
 
     public static synchronized void tickWarmUp(Level level, long budgetNanos) {
-        if (warmUpState == null) return;
         RecipeManager source = level.getRecipeManager();
         long revision = CraftPlanningRevision.current();
-        if (!warmUpState.matches(source, revision)) {
-            warmUpState = null;
-            return;
+        if (cachedProjection != null && cachedProjection.matches(source, revision)) return;
+        if (warmUpState == null) {
+            if (!RecipeIndex.isReady(level)) return;
+            warmUpState = new ProjectionBuildState(source, revision, RecipeIndex.get(level));
         }
+        if (!warmUpState.matches(source, revision)) {
+            if (!RecipeIndex.isReady(level)) {
+                warmUpState = null;
+                return;
+            }
+            warmUpState = new ProjectionBuildState(source, revision, RecipeIndex.get(level));
+        }
+        ProjectionBuildState state = warmUpState;
+        long startedNanos = System.nanoTime();
         long deadline = System.nanoTime() + Math.max(1L, budgetNanos);
-        if (warmUpState.advance(level, deadline)) publish(warmUpState);
+        boolean done = state.advance(level, deadline);
+        state.reportBudgetOverrun(System.nanoTime() - startedNanos, budgetNanos);
+        if (done) publish(state);
     }
 
     private static ImmutableRecipeGraph publish(ProjectionBuildState state) {
@@ -122,6 +139,8 @@ public final class ImmutableRecipeGraphProjector {
         private final Set<ResourceLocation> seen = new HashSet<>();
         private Iterator<RecipeIndex.Entry> current = List.<RecipeIndex.Entry>of().iterator();
         private long workNanos;
+        private String lastRecipe = "initialization";
+        private boolean budgetOverrunReported;
 
         private ProjectionBuildState(RecipeManager source, long revision,
                                      Map<?, List<RecipeIndex.Entry>> index) {
@@ -143,10 +162,22 @@ public final class ImmutableRecipeGraphProjector {
                     workNanos += System.nanoTime() - started;
                     return true;
                 }
-                projectEntry(level, projected, seen, current.next());
+                RecipeIndex.Entry entry = current.next();
+                lastRecipe = entry.recipe().getId().toString();
+                projectEntry(level, projected, seen, entry);
             }
             workNanos += System.nanoTime() - started;
             return false;
+        }
+
+        private void reportBudgetOverrun(long elapsedNanos, long budgetNanos) {
+            long threshold = Math.max(5_000_000L, Math.max(1L, budgetNanos) * 4L);
+            if (budgetOverrunReported || elapsedNanos <= threshold) return;
+            budgetOverrunReported = true;
+            RSIntegrationMod.LOGGER.warn(
+                    "[RecipeGraph] projection unit '{}' took {}ms (tick budget {}ms)",
+                    lastRecipe, elapsedNanos / 1_000_000L,
+                    Math.max(1L, budgetNanos) / 1_000_000.0D);
         }
     }
 

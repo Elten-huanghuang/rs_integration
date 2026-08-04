@@ -53,6 +53,11 @@ public final class RecipeIndex {
 
     private RecipeIndex() {}
 
+    public static boolean isReady(Level level) {
+        Map<Item, List<Entry>> ready = index;
+        return ready != null && source == level.getRecipeManager();
+    }
+
     /** Retained for integrations compiled against the original eager entry point. */
     public static void warmUp(Level level) {
         long start = System.currentTimeMillis();
@@ -88,9 +93,13 @@ public final class RecipeIndex {
             }
             if (warmUpState == null || !warmUpState.matches(manager)) scheduleWarmUp(level);
             try {
+                BuildState state = warmUpState;
+                long startedNanos = System.nanoTime();
                 long deadline = System.nanoTime() + Math.max(1L, budgetNanos);
-                if (warmUpState.advance(level, deadline)) {
-                    publishWarmUp(warmUpState);
+                boolean done = state.advance(level, deadline);
+                state.reportBudgetOverrun(System.nanoTime() - startedNanos, budgetNanos);
+                if (done) {
+                    publishWarmUp(state);
                     completed = true;
                 }
             } catch (RuntimeException | LinkageError e) {
@@ -254,6 +263,10 @@ public final class RecipeIndex {
         private int distantWorldsIndexed;
         private int pmmoSalvageIndexed;
         private int brewingIndexed;
+        private com.huanghuang.rsintegration.mods.vanilla.brewing.VanillaBrewingCatalog
+                .IncrementalIndex brewingBuild;
+        private String lastUnit = "initialization";
+        private boolean budgetOverrunReported;
 
         private BuildState(RecipeManager source) {
             this.source = source;
@@ -268,7 +281,9 @@ public final class RecipeIndex {
             int processed = 0;
             while (recipes.hasNext()
                     && (processed++ == 0 || System.nanoTime() < deadlineNanos)) {
-                IndexOutcome outcome = indexRecipe(level, index, seen, recipes.next());
+                Recipe<?> recipe = recipes.next();
+                lastUnit = recipe.getId().toString();
+                IndexOutcome outcome = indexRecipe(level, index, seen, recipe);
                 if (outcome == IndexOutcome.UNKNOWN) skippedUnknown++;
                 else if (outcome == IndexOutcome.EMPTY_RESULT) skippedEmptyResult++;
                 else if (outcome == IndexOutcome.IDENTITY) skippedIdentity++;
@@ -278,18 +293,57 @@ public final class RecipeIndex {
             int phases = 0;
             while (extraPhase < 6
                     && (phases++ == 0 || System.nanoTime() < deadlineNanos)) {
-                switch (extraPhase++) {
-                    case 0 -> faIndexed = indexFARituals(level, index, seen);
-                    case 1 -> marketIndexed = indexMarketEntries(index, seen);
-                    case 2 -> indexGemCutting(level, index, seen);
-                    case 3 -> distantWorldsIndexed = indexDistantWorldsFiron(index, seen);
-                    case 4 -> pmmoSalvageIndexed = indexPmmoSalvage(index, seen);
-                    case 5 -> brewingIndexed = com.huanghuang.rsintegration.mods.vanilla.brewing
-                            .VanillaBrewingCatalog.index(level, index, seen);
+                switch (extraPhase) {
+                    case 0 -> {
+                        lastUnit = "forbidden_arcanus rituals";
+                        faIndexed = indexFARituals(level, index, seen);
+                        extraPhase++;
+                    }
+                    case 1 -> {
+                        lastUnit = "farming_for_blockheads market";
+                        marketIndexed = indexMarketEntries(index, seen);
+                        extraPhase++;
+                    }
+                    case 2 -> {
+                        lastUnit = "apotheosis gem cutting";
+                        indexGemCutting(level, index, seen);
+                        extraPhase++;
+                    }
+                    case 3 -> {
+                        lastUnit = "distant_worlds firon";
+                        distantWorldsIndexed = indexDistantWorldsFiron(index, seen);
+                        extraPhase++;
+                    }
+                    case 4 -> {
+                        lastUnit = "pmmo salvage";
+                        pmmoSalvageIndexed = indexPmmoSalvage(index, seen);
+                        extraPhase++;
+                    }
+                    case 5 -> {
+                        lastUnit = "vanilla brewing";
+                        if (brewingBuild == null) {
+                            brewingBuild = com.huanghuang.rsintegration.mods.vanilla.brewing
+                                    .VanillaBrewingCatalog.incrementalIndex(level, index, seen);
+                        }
+                        if (brewingBuild.advance(() -> System.nanoTime() >= deadlineNanos)) {
+                            brewingIndexed = brewingBuild.indexedCount();
+                            extraPhase++;
+                        }
+                    }
                     default -> { }
                 }
             }
             return extraPhase >= 6;
+        }
+
+        private void reportBudgetOverrun(long elapsedNanos, long budgetNanos) {
+            long threshold = Math.max(5_000_000L, Math.max(1L, budgetNanos) * 4L);
+            if (budgetOverrunReported || elapsedNanos <= threshold) return;
+            budgetOverrunReported = true;
+            RSIntegrationMod.LOGGER.warn(
+                    "[RecipeIndex] warm-up unit '{}' took {}ms (tick budget {}ms)",
+                    lastUnit, elapsedNanos / 1_000_000L,
+                    Math.max(1L, budgetNanos) / 1_000_000.0D);
         }
     }
 
