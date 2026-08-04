@@ -500,6 +500,10 @@ public final class GenericCraftPacket {
         }
     }
 
+    public static boolean hasDeferredWarmUpRequests() {
+        return WARM_UP_REQUESTS.size() > 0;
+    }
+
     /**
      * Converts common outer-layer failures into stable, translated messages.
      * The complete exception remains in the server log for diagnostics; raw
