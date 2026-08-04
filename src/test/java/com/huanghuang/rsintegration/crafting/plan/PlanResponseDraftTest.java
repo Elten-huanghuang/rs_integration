@@ -34,7 +34,7 @@ class PlanResponseDraftTest extends BootstrapTest {
         PlanResponseDraft draft = new PlanResponseDraft(true, "diamond", target, steps,
                 materials, List.of(), "test:recipe", null, null, 0, 0, 0,
                 List.of(Component.literal("warning")), 1, code, null, null, 0L,
-                false, false, false, base, machines, Map.of(), target, null);
+                false, false, false, base, machines, Map.of(), target, null, true);
 
         target.setCount(64);
         input.setCount(64);
@@ -45,6 +45,7 @@ class PlanResponseDraftTest extends BootstrapTest {
         machines.clear();
 
         PlanResponse response = draft.toResponse();
+        assertEquals(true, response.executionBlocked());
         assertEquals(2, response.targetResult().getCount());
         assertEquals(3, response.steps().get(0).inputs().get(0).getCount());
         assertEquals(1, response.baseItem().getCount());

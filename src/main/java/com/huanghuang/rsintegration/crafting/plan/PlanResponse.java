@@ -44,7 +44,8 @@ public record PlanResponse(
         Set<String> boundMachineTypes,        // v3.4 availability passport: modType ids of machines the player has bound
         Map<IngredientKey, Integer> leftovers, // overproduction keyed by exact item+NBT
         @Nullable ItemStack clickedOutput,    // JEI ghost-output the player clicked (NBT-variant target, e.g. WR leveled book)
-        @Nullable PlanGraphView graph          // server-authored DAG view; null on legacy/fallback plans
+        @Nullable PlanGraphView graph,         // server-authored DAG view; null on legacy/fallback plans
+        boolean executionBlocked               // hard prerequisite failure, independent of material availability
 ) {
     public Availability availability(ItemStack stack) {
         return materials.get(IngredientKey.of(stack));
@@ -59,6 +60,26 @@ public record PlanResponse(
         public boolean isPartial() { return available > 0 && available < needed; }
     }
 
+    /** Backward-compat: plans without an explicit hard prerequisite gate. */
+    public PlanResponse(boolean success, String targetName, ItemStack targetResult,
+                        List<PlanStep> steps, Map<IngredientKey, Availability> materials,
+                        List<String> missing, String recipeId,
+                        @Nullable String executionModTypeId, @Nullable String executionDim,
+                        int executionPosX, int executionPosY, int executionPosZ,
+                        List<Component> modWarnings, int repeatCount,
+                        @Nullable int[] embersCode, @Nullable Component[] embersAspectNames,
+                        @Nullable Component[] embersInputNames, long embersSeed,
+                        boolean embersCanInfer, boolean embersCodeFromCache,
+                        boolean executionMachineSupportsGui, @Nullable ItemStack baseItem,
+                        Set<String> boundMachineTypes, Map<IngredientKey, Integer> leftovers,
+                        @Nullable ItemStack clickedOutput, @Nullable PlanGraphView graph) {
+        this(success, targetName, targetResult, steps, materials, missing, recipeId,
+                executionModTypeId, executionDim, executionPosX, executionPosY, executionPosZ,
+                modWarnings, repeatCount, embersCode, embersAspectNames, embersInputNames,
+                embersSeed, embersCanInfer, embersCodeFromCache, executionMachineSupportsGui,
+                baseItem, boundMachineTypes, leftovers, clickedOutput, graph, false);
+    }
+
     /** Backward-compat: no execution routing info (vanilla/generic path). */
     public PlanResponse(boolean success, String targetName, ItemStack targetResult,
                         List<PlanStep> steps, Map<IngredientKey, Availability> materials,
@@ -66,7 +87,7 @@ public record PlanResponse(
         this(success, targetName, targetResult, steps, materials, missing, recipeId,
                 null, null, 0, 0, 0, Collections.emptyList(), 1,
                 null, null, null, 0, false, false, false, null, Collections.emptySet(),
-                Collections.emptyMap(), null, null);
+                Collections.emptyMap(), null, null, false);
     }
 
     /** Backward-compat: no mod warnings. */
@@ -80,7 +101,7 @@ public record PlanResponse(
                 executionModTypeId, executionDim, executionPosX, executionPosY, executionPosZ,
                 Collections.emptyList(), 1,
                 null, null, null, 0, false, false, false, null, Collections.emptySet(),
-                Collections.emptyMap(), null, null);
+                Collections.emptyMap(), null, null, false);
     }
 
     /** Backward-compat: no embers data. */
@@ -95,6 +116,6 @@ public record PlanResponse(
                 executionModTypeId, executionDim, executionPosX, executionPosY, executionPosZ,
                 modWarnings, repeatCount,
                 null, null, null, 0, false, false, false, null, Collections.emptySet(),
-                Collections.emptyMap(), null, null);
+                Collections.emptyMap(), null, null, false);
     }
 }

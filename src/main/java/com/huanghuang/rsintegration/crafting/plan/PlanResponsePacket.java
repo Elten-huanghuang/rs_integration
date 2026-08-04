@@ -169,6 +169,8 @@ public final class PlanResponsePacket {
         // Server-authored DAG view — protocol v8 tail
         buf.writeBoolean(plan.graph() != null);
         if (plan.graph() != null) writeGraph(buf, plan.graph());
+        // Keep hard prerequisite gating independent from material feasibility.
+        buf.writeBoolean(plan.executionBlocked());
         buf.writeBoolean(requestId != 0L);
         if (requestId != 0L) buf.writeVarLong(requestId);
         PerformanceMonitor.recordPlanPacketBytes(buf.writerIndex() - startIndex);
@@ -279,6 +281,7 @@ public final class PlanResponsePacket {
         // Server-authored DAG view — required protocol field.
         boolean hasGraph = buf.readBoolean();
         PlanGraphView graph = hasGraph ? readGraph(buf) : null;
+        boolean executionBlocked = buf.readBoolean();
         // requestId follows graph and is a required protocol field.
         long requestId = 0L;
         if (buf.readBoolean()) {
@@ -296,7 +299,7 @@ public final class PlanResponsePacket {
                 execModType, execDim, execX, execY, execZ, modWarnings, repeatCount,
                 embersCode, embersAspectNames, embersInputNames, embersSeed, embersCanInfer,
                 embersCodeFromCache, executionMachineSupportsGui, baseItem, boundMachineTypes,
-                leftovers, clickedOutput, graph), requestId);
+                leftovers, clickedOutput, graph, executionBlocked), requestId);
     }
 
     private static void writeGraph(FriendlyByteBuf buf, PlanGraphView graph) {

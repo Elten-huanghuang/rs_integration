@@ -464,7 +464,7 @@ public final class CraftingPlanScreen extends Screen {
                 .pos(width / 2 - btnW - 10, btnY)
                 .size(selectedPath.isDirty() ? btnW + 20 : btnW, 20)
                 .build();
-        confirmButton.active = plan.success() || selectedPath.isDirty();
+        confirmButton.active = !plan.executionBlocked() || selectedPath.isDirty();
         addRenderableWidget(confirmButton);
 
         addRenderableWidget(Button.builder(
@@ -502,7 +502,7 @@ public final class CraftingPlanScreen extends Screen {
     }
 
     private void onConfirm() {
-        if (maxCraftablePending || (!plan.success() && !selectedPath.isDirty())) return;
+        if (maxCraftablePending || (plan.executionBlocked() && !selectedPath.isDirty())) return;
         String recipeId = plan.recipeId();
         ResourceLocation targetId = ResourceLocation.tryParse(recipeId);
         if (QuestSubmissionTargetIds

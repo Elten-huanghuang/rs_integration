@@ -2555,7 +2555,7 @@ public final class GenericCraftPacket {
         Map<IngredientKey, PlanResponse.Availability> materials =
                 new LinkedHashMap<>(materialBill.materials());
         Map<IngredientKey, Integer> leftovers = materialBill.leftovers();
-        boolean feasible = materialBill.feasible() && !blockingPrerequisiteFailure;
+        boolean feasible = materialBill.feasible();
 
         if (RSIntegrationMod.LOGGER.isDebugEnabled()) {
             long shortageCount = materials.values().stream().filter(a -> !a.isEnough()).count();
@@ -2723,7 +2723,8 @@ public final class GenericCraftPacket {
                 boundMachineTypes,
                 leftovers,
                 clickedOutput,
-                planGraphView
+                planGraphView,
+                blockingPrerequisiteFailure
         );
 
         int responseStepCount = steps.size();
