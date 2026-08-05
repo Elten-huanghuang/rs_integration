@@ -14,6 +14,8 @@
     "minecraft.ItemEntityAccessor",
     "ftbquests.SubmitTaskMessageMixin",
     "ftbquests.InventoryTaskAutoSubmissionMixin",
+    "ftbquests.ClaimAllRewardsMessageMixin",
+    "ftbquests.ItemRewardMixin",
     "ftbquests.ItemTaskSequenceAccessor",
     "majruszsdifficulty.MajruszTreasureBagItemEntityMixin",
     "minecraft.ServerPlayerTickMixin",
