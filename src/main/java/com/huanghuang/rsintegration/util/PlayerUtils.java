@@ -11,6 +11,7 @@ import net.minecraftforge.items.ItemHandlerHelper;
 
 import javax.annotation.Nullable;
 import java.util.UUID;
+import java.util.function.Consumer;
 
 public final class PlayerUtils {
 
@@ -24,6 +25,32 @@ public final class PlayerUtils {
 
     public static boolean isPlayerOnline(ServerPlayer player) {
         return player != null && !player.hasDisconnected();
+    }
+
+    /**
+     * Insert into the main inventory without ever presenting it with an
+     * over-sized stack. Some modded inventory implementations place an input
+     * stack into an empty slot verbatim instead of enforcing its item limit.
+     */
+    public static ItemStack insertIntoPlayerInventory(ServerPlayer player, ItemStack stack) {
+        ItemStack remainder = insertMaxSizedChunks(stack, player.getInventory()::add);
+        player.getInventory().setChanged();
+        player.inventoryMenu.broadcastChanges();
+        return remainder;
+    }
+
+    static ItemStack insertMaxSizedChunks(ItemStack stack, Consumer<ItemStack> insertion) {
+        if (stack.isEmpty()) return ItemStack.EMPTY;
+
+        ItemStack pending = stack.copy();
+        int remainderCount = 0;
+        int maxStackSize = Math.max(1, pending.getMaxStackSize());
+        while (!pending.isEmpty()) {
+            ItemStack chunk = pending.split(Math.min(maxStackSize, pending.getCount()));
+            insertion.accept(chunk);
+            remainderCount += chunk.getCount();
+        }
+        return remainderCount == 0 ? ItemStack.EMPTY : stack.copyWithCount(remainderCount);
     }
 
     /** Send a system message to the player, guarding against disconnected state. */

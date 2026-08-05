@@ -239,18 +239,22 @@ public final class PlanTreeModel {
     }
 
     /**
-     * Fold separate execution nodes of the same recipe into one visual row.
+     * Fold equivalent sibling references into one visual row.  Produced nodes
+     * retain the recipe-aware key so different machine choices remain distinct;
+     * raw-material leaves use their item/NBT identity and are always coalesced.
      * The server graph remains unchanged; this only aggregates the tree view.
      */
     private static void mergeEquivalentProducedChildren(PlanTreeNode parent) {
-        Map<VisualRecipeKey, PlanTreeNode> merged = new LinkedHashMap<>();
+        Map<VisualKey, PlanTreeNode> merged = new LinkedHashMap<>();
         List<PlanTreeNode> result = new java.util.ArrayList<>();
         for (PlanTreeNode child : parent.children) {
-            if (child.step == null || child.cycle || child.unresolved > 0) {
+            if (child.cycle || child.unresolved > 0) {
                 result.add(child);
                 continue;
             }
-            VisualRecipeKey key = new VisualRecipeKey(child.step.recipeId(),
+            VisualKey key = child.step == null
+                    ? new MaterialVisualKey(child.key, child.initialSource)
+                    : new VisualRecipeKey(child.step.recipeId(),
                     child.step.modType() == null ? "" : child.step.modType().id(),
                     child.key, child.outputKindOrdinal);
             PlanTreeNode existing = merged.get(key);
@@ -261,7 +265,9 @@ public final class PlanTreeModel {
             }
             existing.amount += child.amount;
             existing.edgeQuantity += child.edgeQuantity;
-            existing.available += child.available;
+            // Availability is a shared inventory total, not a per-branch
+            // quantity.  Keep one copy while summing the branch demand.
+            existing.available = Math.max(existing.available, child.available);
             existing.needed += child.needed;
             existing.children.addAll(child.children);
             mergeEquivalentProducedChildren(existing);
@@ -270,9 +276,13 @@ public final class PlanTreeModel {
         parent.children.addAll(result);
     }
 
+    private sealed interface VisualKey permits VisualRecipeKey, MaterialVisualKey {}
+
     private record VisualRecipeKey(net.minecraft.resources.ResourceLocation recipeId,
                                    String modType, IngredientKey output,
-                                   int outputKindOrdinal) {}
+                                   int outputKindOrdinal) implements VisualKey {}
+
+    private record MaterialVisualKey(IngredientKey material, boolean initialSource) implements VisualKey {}
 
     private static List<GraphReference> mergeRootEdges(List<PlanGraphView.RootEdgeView> edges) {
         Map<GraphReferenceKey, GraphReference> merged = new LinkedHashMap<>();

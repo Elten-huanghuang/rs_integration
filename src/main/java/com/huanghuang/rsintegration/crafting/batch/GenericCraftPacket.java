@@ -75,6 +75,7 @@ import com.huanghuang.rsintegration.recipe.WRRecipeHandler;
 import com.huanghuang.rsintegration.util.TextBuilder;
 import com.huanghuang.rsintegration.util.ModIds;
 import com.huanghuang.rsintegration.util.LogSampler;
+import com.huanghuang.rsintegration.util.PlayerUtils;
 import com.huanghuang.rsintegration.util.Reflect;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.network.FriendlyByteBuf;
@@ -466,8 +467,8 @@ public final class GenericCraftPacket {
                 }
             } else {
                 RSIntegrationMod.debug(
-                        "[RSI-Generic] handle() -> tryResolve: recipeId={} forced={}",
-                        packet.recipeId, packet.forcedRecipes.size());
+                        "[RSI-Generic] handle() -> tryResolve: recipeId={} forced={} destination={}",
+                        packet.recipeId, packet.forcedRecipes.size(), packet.outputDestination);
                 tryResolve(player, packet.recipeId, packet.forcedRecipes, packet.dim, packet.pos,
                         packet.repeatCount, packet.inferMode, packet.baseItem, packet.targetOutput,
                         packet.outputDestination);
@@ -1288,9 +1289,7 @@ public final class GenericCraftPacket {
                         // identical stacks.
                         ItemStack leftover = result.copy();
                         if (outputDestination == OutputDestination.PLAYER_INVENTORY) {
-                            player.getInventory().add(leftover);
-                            player.getInventory().setChanged();
-                            player.inventoryMenu.broadcastChanges();
+                            leftover = PlayerUtils.insertIntoPlayerInventory(player, leftover);
                         }
                         if (outputDestination == OutputDestination.RS_NETWORK || !leftover.isEmpty()) {
                             ItemStack rsCandidate = leftover.copy();
@@ -1922,6 +1921,20 @@ public final class GenericCraftPacket {
         if (cached != null && PlanningStateValidator.sameState(cached.snapshot(), planningSnapshot)) {
             RSIntegrationMod.debug("[RSI-tryBuildPlan] Validated cache hit: recipeId={}", recipeId);
             sink.success(cached.plan(), planningSnapshot);
+            return;
+        }
+
+        // A Market trade is a fixed one-input/one-output exchange. When its
+        // payment is already present, recursive resolution cannot add useful
+        // work, but expanding a large repeat count through the generic resolver
+        // performs thousands of main-thread inventory probes. Build the exact
+        // same terminal plan arithmetically in constant time. If payment is not
+        // directly available, retain the generic path so it can craft the cost.
+        if (recipe instanceof com.huanghuang.rsintegration.mods.farmingforblockheads.MarketRecipeWrapper market
+                && effectiveOverrides.isEmpty()
+                && tryBuildDirectMarketPlan(player, market, recipeId, repeatCount,
+                planTargetOutput, dim, pos, available, planningSnapshot, cacheKey,
+                planStartNanos, sink)) {
             return;
         }
 
@@ -2829,6 +2842,88 @@ public final class GenericCraftPacket {
             }
         }
         return false;
+    }
+
+    static MarketTradeAvailability marketTradeAvailability(
+            com.huanghuang.rsintegration.mods.farmingforblockheads.MarketRecipeWrapper recipe,
+            Map<StackKey, Integer> available, int repeatCount) {
+        ItemStack cost = recipe.costItem();
+        Ingredient costIngredient = Ingredient.of(cost);
+        long matching = 0L;
+        for (Map.Entry<StackKey, Integer> entry : available.entrySet()) {
+            if (entry.getValue() > 0 && costIngredient.test(entry.getKey().toStack())) {
+                matching = Math.min(Integer.MAX_VALUE, matching + entry.getValue());
+            }
+        }
+        long required = (long) Math.max(1, cost.getCount()) * Math.max(1, repeatCount);
+        int boundedRequired = (int) Math.min(Integer.MAX_VALUE, required);
+        int boundedAvailable = (int) matching;
+        return new MarketTradeAvailability(boundedRequired, boundedAvailable,
+                matching >= required);
+    }
+
+    record MarketTradeAvailability(int required, int available, boolean feasible) {}
+
+    private static boolean tryBuildDirectMarketPlan(
+            ServerPlayer player,
+            com.huanghuang.rsintegration.mods.farmingforblockheads.MarketRecipeWrapper recipe,
+            ResourceLocation recipeId, int repeatCount, ItemStack targetOutput,
+            @Nullable ResourceLocation dim, @Nullable net.minecraft.core.BlockPos pos,
+            Map<StackKey, Integer> available, PlanningSnapshot snapshot,
+            PlanCache.Key cacheKey, long planStartNanos, PlanResultSink sink) {
+        MarketTradeAvailability trade = marketTradeAvailability(recipe, available, repeatCount);
+        if (!trade.feasible()) return false;
+
+        ItemStack cost = recipe.costItem();
+        ModType modType = ModType.FARMINGFORBLOCKHEADS_MARKET;
+        Map<IngredientKey, PlanResponse.Availability> materials = Map.of(
+                IngredientKey.of(cost),
+                new PlanResponse.Availability(trade.required(), trade.available()));
+        List<PlanStep> steps = List.of(new PlanStep(recipeId, targetOutput, repeatCount,
+                List.of(cost), Collections.emptyList(), modType, 0, false));
+        List<Component> warnings = MarketBatchDelegate.getPlanWarnings(player, recipe, dim, pos);
+        boolean supportsGui = false;
+        if (dim != null && pos != null) {
+            ServerLevel level = player.getServer().getLevel(
+                    ResourceKey.create(Registries.DIMENSION, dim));
+            supportsGui = level != null && BindingEventHandler.supportsGuiAt(level, pos);
+        }
+        Set<String> boundTypes = Set.of("vanilla_furnace", modType.id());
+        PlanResponse response = new PlanResponseDraft(
+                true,
+                targetOutput.getHoverName().getString(),
+                targetOutput,
+                steps,
+                materials,
+                List.of(),
+                recipeId.toString(),
+                modType.id(),
+                dim != null ? dim.toString() : null,
+                pos != null ? pos.getX() : 0,
+                pos != null ? pos.getY() : 0,
+                pos != null ? pos.getZ() : 0,
+                warnings,
+                repeatCount,
+                null, null, null, 0L, false, false,
+                supportsGui,
+                null,
+                boundTypes,
+                Map.of(),
+                null,
+                null,
+                false).toResponse();
+
+        if (snapshot.requestGeneration() != 0L
+                && !PLAN_REQUESTS.isCurrent(player.getUUID(), snapshot.requestGeneration())) {
+            return true;
+        }
+        PLAN_CACHE.put(cacheKey, response, snapshot, System.nanoTime());
+        sink.success(response, snapshot);
+        PerformanceMonitor.recordPlanBuild(System.nanoTime() - planStartNanos, 1);
+        RSIntegrationMod.debug(
+                "[RSI-Market] Direct plan: recipe={} repeat={} required={} available={}",
+                recipeId, repeatCount, trade.required(), trade.available());
+        return true;
     }
 
     static List<IngredientSpec> extractPlanIngredientSpecs(CraftingRecipe recipe) {

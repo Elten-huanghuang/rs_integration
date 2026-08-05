@@ -127,6 +127,47 @@ class PlanTreeModelGraphTest extends BootstrapTest {
     }
 
     @Test
+    void equivalentRawMaterialsMergeWhenSameRecipeBranchesAreFolded() {
+        PlanGraphView.NodeView first = new PlanGraphView.NodeView(30,
+                new ResourceLocation("test", "unpack"), "generic", 1,
+                new ItemStack(Items.IRON_INGOT), List.of(), List.of(
+                new PlanGraphView.OutputView(0, new ItemStack(Items.IRON_INGOT), 1, 0)));
+        PlanGraphView.NodeView second = new PlanGraphView.NodeView(31,
+                new ResourceLocation("test", "unpack"), "generic", 1,
+                new ItemStack(Items.IRON_INGOT), List.of(), List.of(
+                new PlanGraphView.OutputView(0, new ItemStack(Items.IRON_INGOT), 1, 0)));
+        PlanGraphView.NodeView consumer = new PlanGraphView.NodeView(32,
+                new ResourceLocation("test", "consumer"), "generic", 1,
+                new ItemStack(Items.DIAMOND), List.of(), List.of(
+                new PlanGraphView.OutputView(0, new ItemStack(Items.DIAMOND), 1, 0)));
+        PlanGraphView.SourceView initial = new PlanGraphView.SourceView(true, -1, -1);
+        PlanGraphView graph = new PlanGraphView(1, List.of(first, second, consumer), List.of(
+                new PlanGraphView.EdgeView(32, 0,
+                        new PlanGraphView.SourceView(false, 30, 0),
+                        new ItemStack(Items.IRON_INGOT), 1),
+                new PlanGraphView.EdgeView(32, 0,
+                        new PlanGraphView.SourceView(false, 31, 0),
+                        new ItemStack(Items.IRON_INGOT), 1),
+                new PlanGraphView.EdgeView(30, 0, initial, new ItemStack(Items.COAL), 1),
+                new PlanGraphView.EdgeView(31, 0, initial, new ItemStack(Items.COAL), 2)),
+                List.of(new PlanGraphView.RootView(new ItemStack(Items.DIAMOND), 1, 0, List.of(
+                        new PlanGraphView.RootEdgeView(new PlanGraphView.SourceView(false, 32, 0),
+                                new ItemStack(Items.DIAMOND), 1)))),
+                List.of(), List.of(30, 31, 32));
+        PlanResponse plan = new PlanResponse(true, "root", new ItemStack(Items.DIAMOND),
+                List.of(), Map.of(), List.of(), "test:root", null, null, 0, 0, 0,
+                List.of(), 1, null, null, null, 0, false, false, false, null,
+                Set.of(), Map.of(), null, graph);
+
+        PlanTreeModel tree = PlanTreeModel.from(plan);
+        PlanTreeNode merged = tree.root.children.get(0).children.get(0);
+        assertEquals(1, tree.root.children.get(0).children.size());
+        assertEquals(2, merged.amount);
+        assertEquals(1, merged.children.size());
+        assertEquals(3, merged.children.get(0).amount);
+    }
+
+    @Test
     void grossDemandUsesGraphQuantitiesWithoutRescalingReusableRoots() {
         PlanGraphView.SourceView initial = new PlanGraphView.SourceView(true, -1, -1);
         PlanGraphView graph = new PlanGraphView(1, List.of(), List.of(), List.of(
