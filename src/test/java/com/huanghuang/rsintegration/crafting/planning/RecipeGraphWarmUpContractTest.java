@@ -46,6 +46,14 @@ class RecipeGraphWarmUpContractTest {
     }
 
     @Test
+    void ordinaryIndexAccessNeverFinishesWarmUpSynchronously() throws IOException {
+        Set<String> calls = methodCalls(RecipeIndex.class, "get");
+
+        assertFalse(calls.contains(owner(RecipeIndex.class) + "$BuildState.advance"));
+        assertTrue(calls.contains(owner(RecipeIndex.class) + ".scheduleWarmUp"));
+    }
+
+    @Test
     void craftingProjectionBypassesGenericReflectiveExtraction() throws IOException {
         Set<String> calls = methodCalls(ImmutableRecipeGraphProjector.class, "projectEntry");
         String utilityOwner = owner(CraftPacketUtils.class);

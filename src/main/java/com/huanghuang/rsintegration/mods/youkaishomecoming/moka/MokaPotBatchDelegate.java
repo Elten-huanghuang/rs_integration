@@ -79,6 +79,15 @@ public final class MokaPotBatchDelegate extends AbstractBatchDelegate {
         }
         this.recipe = found;
         this.craftDone = false;
+        BlockEntity existing = level.getBlockEntity(pos);
+        IItemHandler existingInventory = existing != null && isMokaBE(existing)
+                ? getInventory(existing) : null;
+        if (existingInventory == null || existingInventory.getSlots() <= OUTPUT_SLOT) return false;
+        for (int slot = 0; slot < INPUT_SLOTS; slot++) {
+            if (!existingInventory.getStackInSlot(slot).isEmpty()) return false;
+        }
+        if (!existingInventory.getStackInSlot(CONTAINER_SLOT).isEmpty()
+                || !existingInventory.getStackInSlot(OUTPUT_SLOT).isEmpty()) return false;
         return true;
     }
 

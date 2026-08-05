@@ -10,6 +10,8 @@ import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
+import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.MachineSlotOwnershipPolicy;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import net.minecraft.core.BlockPos;
@@ -51,6 +53,12 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
     // FURNACE path state
     private AbstractFurnaceBlockEntity furnaceBE;
     private MachineKind kind;
+    private boolean furnaceInventoryLease;
+    private ItemStack baselineFurnaceFuel = ItemStack.EMPTY;
+    private ItemStack suppliedFurnaceInput = ItemStack.EMPTY;
+    private int suppliedFurnaceInputCount;
+    private ItemStack suppliedFurnaceFuel = ItemStack.EMPTY;
+    private int suppliedFurnaceFuelCount;
 
     private enum MachineKind {
         FURNACE,
@@ -141,6 +149,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         this.pendingResult = ItemStack.EMPTY;
         this.craftDone = false;
         this.furnaceBE = null;
+        resetFurnaceOwnership();
 
         ServerLevel level = CraftPacketUtils.resolveLevel(player.server, dim, player);
         if (level == null) {
@@ -218,24 +227,11 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
                 return false;
             }
 
-            // The chain owns only an idle machine. Existing output cannot be
-            // distinguished from this craft's product after automation starts.
-            if (!fbe.getItem(2).isEmpty()) {
-                player.sendSystemMessage(Component.translatable("rsi.vanilla.error.furnace_occupied"));
+            // A finished manual output is drained at dispatch time. An occupied
+            // input means the manual operation still owns this furnace, so the
+            // chain keeps this order in its retry queue without reserving items.
+            if (!fbe.getItem(0).isEmpty()) {
                 return false;
-            }
-
-            ItemStack slot0 = fbe.getItem(0);
-            if (!slot0.isEmpty()) {
-                List<Ingredient> ingredients = recipe.getIngredients();
-                boolean matches = false;
-                for (Ingredient ing : ingredients) {
-                    if (ing.test(slot0)) { matches = true; break; }
-                }
-                if (!matches) {
-                    player.sendSystemMessage(Component.translatable("rsi.vanilla.error.furnace_occupied"));
-                    return false;
-                }
             }
 
             this.furnaceBE = fbe;
@@ -389,6 +385,8 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         }
 
         // Phase 2: Commit BEFORE placing — commit failure leaves the furnace untouched
+        if (!acquireFurnaceInventory()) return false;
+
         if (!usingSharedLedger && ledger != null && !ledger.isCommitted()) {
             if (!ledger.commit(network, player)) {
                 player.sendSystemMessage(Component.translatable(
@@ -400,6 +398,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         // Phase 3: Place REAL input (post-commit) on furnace
         if (!inputTemplate.isEmpty()) {
             furnaceBE.setItem(0, inputTemplate.copy());
+            recordFurnaceInput(inputTemplate);
             BrickFurnaceCompat.invalidateRecipeCache(furnaceBE);
         }
 
@@ -407,7 +406,9 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         if (!ensureFuel(player)) {
             // Discard input from furnace — abort() refunds the ledger, so
             // refunding the physical item here would double-refund.
-            furnaceBE.setItem(0, ItemStack.EMPTY);
+            removeOwnedFurnaceInput(!usingSharedLedger);
+            refundLeftoverFuel();
+            resetFurnaceOwnership();
             player.sendSystemMessage(Component.translatable("rsi.vanilla.error.no_fuel"));
             return false;
         }
@@ -415,22 +416,24 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         furnaceBE.setChanged();
         myLevel.sendBlockUpdated(myPos,
                 myLevel.getBlockState(myPos), myLevel.getBlockState(myPos), 3);
+        markCraftStarted();
         return true;
     }
 
     private boolean tryStartFurnaceWithMaterials(List<ItemStack> materials) {
         if (materials.isEmpty()) return false;
+        if (!acquireFurnaceInventory()) return false;
 
         // Place pre-reserved input (chain already committed the ledger)
         furnaceBE.setItem(0, materials.get(0).copy());
+        recordFurnaceInput(materials.get(0));
         BrickFurnaceCompat.invalidateRecipeCache(furnaceBE);
 
         // Auto-supply fuel (extracts directly from RS, outside ledger)
         if (!ensureFuel(player)) {
-            ItemStack refund = furnaceBE.getItem(0);
-            if (!refund.isEmpty()) {
-                furnaceBE.setItem(0, ItemStack.EMPTY);
-            }
+            removeOwnedFurnaceInput(false);
+            refundLeftoverFuel();
+            resetFurnaceOwnership();
             player.sendSystemMessage(Component.translatable("rsi.vanilla.error.no_fuel"));
             return false;
         }
@@ -438,6 +441,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         furnaceBE.setChanged();
         myLevel.sendBlockUpdated(myPos,
                 myLevel.getBlockState(myPos), myLevel.getBlockState(myPos), 3);
+        markCraftStarted();
         return true;
     }
 
@@ -476,6 +480,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
             ItemStack merged = existing.copy();
             merged.grow(extra.getCount());
             furnaceBE.setItem(1, merged);
+            recordFurnaceFuel(extra);
             return true;
         }
 
@@ -506,6 +511,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         ItemStack extracted = extractExactFuel(fuelType, amount);
         if (extracted.isEmpty()) return false;
         furnaceBE.setItem(1, extracted.copy());
+        recordFurnaceFuel(extracted);
         player.displayClientMessage(
                 Component.translatable("rsi.vanilla.info.fuel_supplied", extracted.getCount()), true);
         return true;
@@ -525,16 +531,90 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
 
     /** Refund any whole (unburned) fuel items left in slot 1 back to RS. */
     private void refundLeftoverFuel() {
-        if (furnaceBE == null) return;
+        if (furnaceBE == null || !furnaceInventoryLease) return;
         ItemStack fuel = furnaceBE.getItem(1);
         if (fuel.isEmpty() || BrickFurnaceCompat.effectiveBurnTicks(
                 furnaceBE, fuel, fuelRecipeType()) <= 0) return;
-        furnaceBE.setItem(1, ItemStack.EMPTY);
+        int refundable = MachineSlotOwnershipPolicy.removableAddedCount(
+                baselineFurnaceFuel, suppliedFurnaceFuel, suppliedFurnaceFuelCount, fuel);
+        if (refundable <= 0) return;
+        ItemStack refund = fuel.copyWithCount(refundable);
+        ItemStack retained = fuel.copy();
+        retained.shrink(refundable);
+        furnaceBE.setItem(1, retained.isEmpty() ? ItemStack.EMPTY : retained);
         furnaceBE.setChanged();
-        refundToRSNetwork(fuel);
+        refundToRSNetwork(refund);
+        suppliedFurnaceFuelCount = Math.max(0, suppliedFurnaceFuelCount - refundable);
     }
 
     // ── VIRTUAL path ──────────────────────────────────────────────
+
+    private boolean acquireFurnaceInventory() {
+        if (furnaceBE == null || furnaceInventoryLease || !furnaceBE.getItem(0).isEmpty()) {
+            return false;
+        }
+
+        // Publish the completed manual job before leasing the empty lane.
+        ItemStack priorOutput = furnaceBE.getItem(2).copy();
+        if (!priorOutput.isEmpty()) {
+            furnaceBE.setItem(2, ItemStack.EMPTY);
+            furnaceBE.setChanged();
+            refundToRSNetwork(priorOutput);
+        }
+        if (!furnaceBE.getItem(2).isEmpty()) return false;
+
+        baselineFurnaceFuel = furnaceBE.getItem(1).copy();
+        suppliedFurnaceInput = ItemStack.EMPTY;
+        suppliedFurnaceInputCount = 0;
+        suppliedFurnaceFuel = ItemStack.EMPTY;
+        suppliedFurnaceFuelCount = 0;
+        furnaceInventoryLease = true;
+        return true;
+    }
+
+    private void recordFurnaceInput(ItemStack input) {
+        if (!furnaceInventoryLease || input.isEmpty()) return;
+        suppliedFurnaceInput = input.copyWithCount(1);
+        suppliedFurnaceInputCount += input.getCount();
+    }
+
+    private void recordFurnaceFuel(ItemStack fuel) {
+        if (!furnaceInventoryLease || fuel.isEmpty()) return;
+        if (!suppliedFurnaceFuel.isEmpty()
+                && !ItemStack.isSameItemSameTags(suppliedFurnaceFuel, fuel)) {
+            throw new IllegalStateException("Furnace fuel ownership type changed");
+        }
+        suppliedFurnaceFuel = fuel.copyWithCount(1);
+        suppliedFurnaceFuelCount += fuel.getCount();
+    }
+
+    private void removeOwnedFurnaceInput(boolean refund) {
+        if (furnaceBE == null || !furnaceInventoryLease) return;
+        ItemStack current = furnaceBE.getItem(0);
+        int removable = MachineSlotOwnershipPolicy.removableAddedCount(
+                ItemStack.EMPTY, suppliedFurnaceInput, suppliedFurnaceInputCount, current);
+        if (removable <= 0) return;
+        ItemStack removed = current.copyWithCount(removable);
+        ItemStack retained = current.copy();
+        retained.shrink(removable);
+        furnaceBE.setItem(0, retained.isEmpty() ? ItemStack.EMPTY : retained);
+        suppliedFurnaceInputCount = Math.max(0, suppliedFurnaceInputCount - removable);
+        if (refund) refundToRSNetwork(removed);
+    }
+
+    private void resetFurnaceOwnership() {
+        furnaceInventoryLease = false;
+        baselineFurnaceFuel = ItemStack.EMPTY;
+        suppliedFurnaceInput = ItemStack.EMPTY;
+        suppliedFurnaceInputCount = 0;
+        suppliedFurnaceFuel = ItemStack.EMPTY;
+        suppliedFurnaceFuelCount = 0;
+    }
+
+    private boolean matchesFurnaceOutput(ItemStack output) {
+        ExpectedProduction expected = getExpectedProduction();
+        return expected != null && IBatchDelegate.matchesProducedItem(output, expected.item());
+    }
 
     private boolean tryStartVirtual(ServerPlayer player) {
         List<IngredientSpec> specs = CraftPacketUtils.extractIngredientSpecs(recipe);
@@ -732,13 +812,21 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
     @NotNull
     @Override
     protected CraftObservation observeMachineCraft(@NotNull ServerLevel level, @NotNull BlockEntity be) {
+        if (kind == MachineKind.FURNACE && be instanceof AbstractFurnaceBlockEntity current) {
+            ItemStack output = current.getItem(2);
+            if (!output.isEmpty()) {
+                return matchesFurnaceOutput(output)
+                        ? doneObservation()
+                        : failObservation("furnace output slot contains another item");
+            }
+        }
         if (kind == MachineKind.FURNACE && BrickFurnaceCompat.isBrickFurnace(be)) {
             BrickFurnaceCompat.Eligibility eligibility = BrickFurnaceCompat.canExecute(be, recipe);
             if (!eligibility.allowed()) return failObservation(eligibility.detail());
             // Very fast configurations can finish between dispatch and the first
             // observation. Once output exists, an empty input and recipe cache are
             // normal completion state, not evidence that the recipe was rejected.
-            if (!furnaceBE.getItem(2).isEmpty()) return doneObservation();
+            if (matchesFurnaceOutput(furnaceBE.getItem(2))) return doneObservation();
             AbstractCookingRecipe actual = BrickFurnaceCompat.resolvedRecipe(be);
             if (actual == null) return failObservation("Brick Furnace did not accept the input recipe");
             if (!actual.getId().equals(recipe.getId())) {
@@ -772,7 +860,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         ItemStack result = furnaceBE.getItem(2);
         // Once AbstractBatchDelegate has observed WORKING, consumed input is
         // sufficient proof of completion even if automation already took output.
-        return !result.isEmpty() || furnaceBE.getItem(0).isEmpty();
+        return matchesFurnaceOutput(result) || furnaceBE.getItem(0).isEmpty();
     }
 
     @Override
@@ -789,13 +877,16 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
 
         if (furnaceBE == null) return ItemStack.EMPTY;
 
-        ItemStack result = furnaceBE.getItem(2).copy();
-        if (!result.isEmpty()) {
-            furnaceBE.setItem(2, ItemStack.EMPTY);
-            // Clear input slot too (it was consumed)
-            furnaceBE.setItem(0, ItemStack.EMPTY);
-            furnaceBE.setChanged();
-        }
+        ItemStack visible = furnaceBE.getItem(2);
+        if (!matchesFurnaceOutput(visible)) return ItemStack.EMPTY;
+        ExpectedProduction expected = getExpectedProduction();
+        int amount = expected == null ? visible.getCount()
+                : Math.min(visible.getCount(), expected.count());
+        ItemStack result = visible.copyWithCount(amount);
+        ItemStack retained = visible.copy();
+        retained.shrink(amount);
+        furnaceBE.setItem(2, retained.isEmpty() ? ItemStack.EMPTY : retained);
+        furnaceBE.setChanged();
         return result;
     }
 
@@ -811,24 +902,21 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
             // refundLedger = true. Refunding here as well would return the same
             // material twice. The ledger holding this input is the deciding
             // factor, so defer to it whenever it is the shared chain ledger.
-            boolean refundToRS = player == null && !usingSharedLedger;
-
-            ItemStack slot0 = furnaceBE.getItem(0);
-            if (!slot0.isEmpty()) {
-                furnaceBE.setItem(0, ItemStack.EMPTY);
-                if (refundToRS) refundToRSNetwork(slot0);
-            }
+            boolean refundToRS = !usingSharedLedger;
+            removeOwnedFurnaceInput(refundToRS);
             // Output slot (slot 2): the transformed result is not a ledger-managed input.
             // On abort, clear it to prevent residue, but do NOT refund — collectResult()
             // is the only path that should collect the output. Refunding here would risk
             // double-collection if collectResult() already ran or races with cleanup.
             ItemStack slot2 = furnaceBE.getItem(2);
-            if (!slot2.isEmpty()) {
+            if (!slot2.isEmpty() && matchesFurnaceOutput(slot2)
+                    && phase != CraftPhase.WAITING_FOR_START) {
                 furnaceBE.setItem(2, ItemStack.EMPTY);
                 // Do NOT refund output slot to network (no `if (refundToRS) refund...`)
             }
             // Fuel is outside the ledger, always refund unburned fuel
             refundLeftoverFuel();
+            resetFurnaceOwnership();
             furnaceBE.setChanged();
         }
         if (kind == MachineKind.CAMPFIRE && campfireBE != null) {
@@ -847,10 +935,20 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
+    protected void clearMissingMachineState(@Nullable ServerPlayer player) {
+        resetFurnaceOwnership();
+        pendingResult = ItemStack.EMPTY;
+        craftDone = false;
+        resetState();
+    }
+
+    @Override
     public void onBatchFinished(@NotNull ServerPlayer player) {
+        if (!markTerminalCleanup()) return;
         campfireForceLoad(false);
         if (kind == MachineKind.FURNACE) {
             refundLeftoverFuel();
+            resetFurnaceOwnership();
         }
         pendingResult = ItemStack.EMPTY;
         craftDone = false;

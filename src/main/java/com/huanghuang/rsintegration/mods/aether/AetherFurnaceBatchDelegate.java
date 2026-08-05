@@ -7,6 +7,8 @@ import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.MachineSlotOwnershipPolicy;
 import com.huanghuang.rsintegration.mixin.minecraft.AbstractFurnaceAccessor;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
@@ -60,6 +62,12 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
     private BlockPos myPos;
     private Recipe<?> recipe;
     private boolean isIncubator;
+    private boolean inventoryLease;
+    private ItemStack baselineFuel = ItemStack.EMPTY;
+    private ItemStack suppliedInput = ItemStack.EMPTY;
+    private int suppliedInputCount;
+    private ItemStack suppliedFuel = ItemStack.EMPTY;
+    private int suppliedFuelCount;
 
     @Override
     public boolean validateAndInit(ServerPlayer player, ResourceLocation recipeId,
@@ -80,6 +88,7 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
             return false;
         }
         this.recipe = found;
+        resetInventoryOwnership();
         BlockEntity be = level.getBlockEntity(pos);
         this.isIncubator = be != null && be.getClass().getName().endsWith(".IncubatorBlockEntity");
 
@@ -91,6 +100,10 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
                     be.getClass().getSimpleName()));
             return false;
         }
+        if (be == null) return false;
+        IItemHandler inventory = getInventory(be);
+        if (inventory == null || inventory.getSlots() < (isIncubator ? 2 : 3)) return false;
+        if (!inventory.getStackInSlot(0).isEmpty()) return false;
 
         RSIntegrationMod.LOGGER.debug("[RSI-Batch-Aether] validateAndInit OK: recipe={} isIncubator={}", recipeId, isIncubator);
         return true;
@@ -139,7 +152,7 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
             if (!ledger.commit(network, player)) return false;
 
             this.usingSharedLedger = false;
-            if (!tryStartWithMaterials(player, materials, ledger)) {
+            if (!tryStartWithMaterialsImpl(player, materials, false)) {
                 // Craft couldn't start — refund materials back to RS.
                 for (ItemStack mat : materials) {
                     if (!mat.isEmpty())
@@ -155,8 +168,13 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
     @Override
     public boolean tryStartWithMaterials(ServerPlayer player, List<ItemStack> materials,
                                          ExtractionLedger sharedLedger) {
+        return tryStartWithMaterialsImpl(player, materials, true);
+    }
+
+    private boolean tryStartWithMaterialsImpl(ServerPlayer player, List<ItemStack> materials,
+                                              boolean shared) {
         this.player = player;
-        this.usingSharedLedger = true;
+        this.usingSharedLedger = shared;
         this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
 
         if (!myLevel.hasChunkAt(myPos)) return false;
@@ -167,34 +185,31 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
             return false;
         }
 
-        IItemHandler handler = be.getCapability(
-                net.minecraftforge.common.capabilities.ForgeCapabilities.ITEM_HANDLER, null)
-                .orElse(null);
+        IItemHandler handler = getInventory(be);
         if (handler == null) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-Aether] No IItemHandler at {}", myPos);
             return false;
         }
-        if (!isIncubator && !handler.getStackInSlot(2).isEmpty()) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Batch-Aether] Output slot occupied at {}", myPos);
-            return false;
-        }
+        if (!acquireInventory(be, handler)) return false;
 
         forceChunkLoad(true);
 
         // ── Phase 1: Insert into input slot (slot 0 for all three machines) ──
-        ItemStack inputSlot = handler.getStackInSlot(0);
-        if (!inputSlot.isEmpty()) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Batch-Aether] Input slot occupied at {}", myPos);
-            return false;
-        }
-
         if (!materials.isEmpty() && !materials.get(0).isEmpty()) {
             ItemStack toInsert = materials.get(0).copyWithCount(1);
-            ItemStack remainder = handler.insertItem(0, toInsert, false);
-            if (!remainder.isEmpty() && network != null) {
-                network.insertItem(remainder, remainder.getCount(),
-                        com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+            if (!handler.insertItem(0, toInsert, true).isEmpty()) {
+                resetInventoryOwnership();
+                forceChunkLoad(false);
+                return false;
             }
+            ItemStack remainder = handler.insertItem(0, toInsert, false);
+            if (!remainder.isEmpty()) {
+                resetInventoryOwnership();
+                forceChunkLoad(false);
+                return false;
+            }
+            suppliedInput = toInsert.copyWithCount(1);
+            suppliedInputCount = toInsert.getCount();
         }
 
         // ── Phase 2: Ensure fuel (slot 1 for all three machines) ──
@@ -203,19 +218,37 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
         // Icestone, Ambrosium, etc.) rarely lasts a whole craft. Any unconsumed
         // remainder is refunded to RS when the batch finishes.
         if (network != null) {
-            fillFuelSlot(be, handler, network);
+            ItemStack insertedFuel = fillFuelSlot(be, handler, network);
+            if (!insertedFuel.isEmpty()) {
+                suppliedFuel = insertedFuel.copyWithCount(1);
+                suppliedFuelCount += insertedFuel.getCount();
+            }
         }
 
         be.setChanged();
+        markCraftStarted();
         RSIntegrationMod.LOGGER.debug("[RSI-Batch-Aether] Materials inserted at {}, waiting for cooking", myPos);
         return true;
+    }
+
+    @Override
+    @NotNull
+    protected CraftObservation observeMachineCraft(@NotNull ServerLevel level,
+                                                    @NotNull BlockEntity be) {
+        if (be instanceof AbstractFurnaceBlockEntity furnace) {
+            ItemStack output = furnace.getItem(2);
+            if (!output.isEmpty() && !matchesExpectedOutput(output)) {
+                return failObservation("Aether furnace output slot contains another item");
+            }
+        }
+        return super.observeMachineCraft(level, be);
     }
 
     @Override
     protected boolean isMachineCraftFinished(ServerLevel level, BlockEntity be) {
         if (be instanceof AbstractFurnaceBlockEntity furnace) {
             // Output may already have been extracted after the input was consumed.
-            return !furnace.getItem(2).isEmpty() || furnace.getItem(0).isEmpty();
+            return matchesExpectedOutput(furnace.getItem(2)) || furnace.getItem(0).isEmpty();
         }
 
         // Incubator: no output slot; completion is detected by cooking progress
@@ -238,8 +271,15 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
         if (be == null) return ItemStack.EMPTY;
 
         if (be instanceof AbstractFurnaceBlockEntity furnace) {
-            ItemStack result = furnace.getItem(2).copy();
-            furnace.setItem(2, ItemStack.EMPTY);
+            ItemStack visible = furnace.getItem(2);
+            if (!matchesExpectedOutput(visible)) return ItemStack.EMPTY;
+            ExpectedProduction expected = getExpectedProduction();
+            int amount = expected == null ? visible.getCount()
+                    : Math.min(visible.getCount(), expected.count());
+            ItemStack result = visible.copyWithCount(amount);
+            ItemStack retained = visible.copy();
+            retained.shrink(amount);
+            furnace.setItem(2, retained.isEmpty() ? ItemStack.EMPTY : retained);
             furnace.setChanged();
             return result;
         }
@@ -255,28 +295,28 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
         // via refundCommitted(), so we just void the machine slots.
         // In the private-ledger (direct) path we need to refund back to RS.
         if (be instanceof AbstractFurnaceBlockEntity furnace) {
-            ItemStack slot0 = furnace.getItem(0);
-            if (!slot0.isEmpty()) {
-                furnace.setItem(0, ItemStack.EMPTY);
-                if (!usingSharedLedger) refundToRSNetwork(slot0);
-            }
+            removeOwnedInput(furnace, !usingSharedLedger);
             ItemStack slot2 = furnace.getItem(2);
-            if (!slot2.isEmpty()) {
+            if (!slot2.isEmpty() && matchesExpectedOutput(slot2)
+                    && phase != CraftPhase.WAITING_FOR_START) {
                 furnace.setItem(2, ItemStack.EMPTY);
-                if (!usingSharedLedger) refundToRSNetwork(slot2);
             }
             furnace.setChanged();
         } else {
-            IItemHandler handler = be.getCapability(
-                    net.minecraftforge.common.capabilities.ForgeCapabilities.ITEM_HANDLER, null)
-                    .orElse(null);
+            IItemHandler handler = getInventory(be);
             if (handler != null) {
-                ItemStack slot0 = handler.extractItem(0, 64, false);
-                if (!slot0.isEmpty() && !usingSharedLedger) refundToRSNetwork(slot0);
+                removeOwnedInput(handler, !usingSharedLedger);
             }
         }
         refundLeftoverFuel(be);
+        resetInventoryOwnership();
         forceChunkLoad(false);
+    }
+
+    @Override
+    protected void clearMissingMachineState(@Nullable ServerPlayer player) {
+        resetInventoryOwnership();
+        resetState();
     }
 
     private void refundToRSNetwork(ItemStack stack) {
@@ -293,14 +333,17 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public void onBatchFinished(@NotNull ServerPlayer player) {
+        if (!markTerminalCleanup()) return;
         forceChunkLoad(false);
         if (!myLevel.hasChunkAt(myPos)) {
-            network = null;
+            resetInventoryOwnership();
+            resetState();
             return;
         }
         BlockEntity be = myLevel.getBlockEntity(myPos);
         if (be != null) refundLeftoverFuel(be);
-        network = null;
+        resetInventoryOwnership();
+        resetState();
     }
 
     @Override
@@ -374,29 +417,31 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
      * the slot up to its stack limit; any unconsumed remainder is refunded to RS when
      * the batch finishes via {@link #refundLeftoverFuel}.
      */
-    private static void fillFuelSlot(BlockEntity be, IItemHandler handler, INetwork network) {
+    private static ItemStack fillFuelSlot(BlockEntity be, IItemHandler handler, INetwork network) {
         ItemStack fuelSlot = handler.getStackInSlot(1);
 
         // Slot occupied by a non-fuel item — leave it alone.
-        if (!fuelSlot.isEmpty() && !isValidFuelForMachine(be, fuelSlot)) return;
+        if (!fuelSlot.isEmpty() && !isValidFuelForMachine(be, fuelSlot)) return ItemStack.EMPTY;
 
         // Match the existing fuel type, else pick any valid fuel present in RS.
         ItemStack fuelType = fuelSlot.isEmpty() ? findFuelInNetwork(be, network) : fuelSlot;
-        if (fuelType.isEmpty()) return;
+        if (fuelType.isEmpty()) return ItemStack.EMPTY;
 
         int slotLimit = Math.min(handler.getSlotLimit(1), fuelType.getMaxStackSize());
         int room = slotLimit - fuelSlot.getCount();
-        if (room <= 0) return;
+        if (room <= 0) return ItemStack.EMPTY;
 
         ItemStack extracted = network.extractItem(fuelType.copyWithCount(1), room,
                 com.refinedmods.refinedstorage.api.util.Action.PERFORM);
-        if (extracted.isEmpty()) return;
+        if (extracted.isEmpty()) return ItemStack.EMPTY;
 
         ItemStack remainder = handler.insertItem(1, extracted, false);
         if (!remainder.isEmpty()) {
             network.insertItem(remainder, remainder.getCount(),
                     com.refinedmods.refinedstorage.api.util.Action.PERFORM);
         }
+        int inserted = extracted.getCount() - remainder.getCount();
+        return inserted > 0 ? extracted.copyWithCount(inserted) : ItemStack.EMPTY;
     }
 
     /** Find the first valid fuel type for this machine present in the RS network. */
@@ -409,16 +454,82 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
         return ItemStack.EMPTY;
     }
 
+    @Nullable
+    private static IItemHandler getInventory(BlockEntity be) {
+        return be.getCapability(
+                net.minecraftforge.common.capabilities.ForgeCapabilities.ITEM_HANDLER, null)
+                .resolve().orElse(null);
+    }
+
+    private boolean acquireInventory(BlockEntity be, IItemHandler handler) {
+        if (inventoryLease || !handler.getStackInSlot(0).isEmpty()) return false;
+        if (!isIncubator) {
+            ItemStack priorOutput = handler.getStackInSlot(2);
+            if (!priorOutput.isEmpty()) {
+                ItemStack removed = handler.extractItem(2, priorOutput.getCount(), false);
+                if (removed.isEmpty()) return false;
+                refundToRSNetwork(removed);
+                be.setChanged();
+            }
+            if (!handler.getStackInSlot(2).isEmpty()) return false;
+        }
+        baselineFuel = handler.getStackInSlot(1).copy();
+        suppliedInput = ItemStack.EMPTY;
+        suppliedInputCount = 0;
+        suppliedFuel = ItemStack.EMPTY;
+        suppliedFuelCount = 0;
+        inventoryLease = true;
+        return true;
+    }
+
+    private void removeOwnedInput(AbstractFurnaceBlockEntity furnace, boolean refund) {
+        if (!inventoryLease) return;
+        ItemStack current = furnace.getItem(0);
+        int removable = MachineSlotOwnershipPolicy.removableAddedCount(
+                ItemStack.EMPTY, suppliedInput, suppliedInputCount, current);
+        if (removable <= 0) return;
+        ItemStack removed = current.copyWithCount(removable);
+        ItemStack retained = current.copy();
+        retained.shrink(removable);
+        furnace.setItem(0, retained.isEmpty() ? ItemStack.EMPTY : retained);
+        if (refund) refundToRSNetwork(removed);
+    }
+
+    private void removeOwnedInput(IItemHandler handler, boolean refund) {
+        if (!inventoryLease) return;
+        ItemStack current = handler.getStackInSlot(0);
+        int removable = MachineSlotOwnershipPolicy.removableAddedCount(
+                ItemStack.EMPTY, suppliedInput, suppliedInputCount, current);
+        if (removable <= 0) return;
+        ItemStack removed = handler.extractItem(0, removable, false);
+        if (!removed.isEmpty() && refund) refundToRSNetwork(removed);
+    }
+
+    private boolean matchesExpectedOutput(ItemStack output) {
+        ExpectedProduction expected = getExpectedProduction();
+        return expected != null && IBatchDelegate.matchesProducedItem(output, expected.item());
+    }
+
+    private void resetInventoryOwnership() {
+        inventoryLease = false;
+        baselineFuel = ItemStack.EMPTY;
+        suppliedInput = ItemStack.EMPTY;
+        suppliedInputCount = 0;
+        suppliedFuel = ItemStack.EMPTY;
+        suppliedFuelCount = 0;
+    }
+
     /** Refund any unconsumed fuel left in slot 1 back to RS (or the player). */
     private void refundLeftoverFuel(BlockEntity be) {
-        if (be == null) return;
-        IItemHandler handler = be.getCapability(
-                net.minecraftforge.common.capabilities.ForgeCapabilities.ITEM_HANDLER, null)
-                .orElse(null);
+        if (be == null || !inventoryLease) return;
+        IItemHandler handler = getInventory(be);
         if (handler == null) return;
         ItemStack fuel = handler.getStackInSlot(1);
         if (fuel.isEmpty() || !isValidFuelForMachine(be, fuel)) return;
-        ItemStack extracted = handler.extractItem(1, fuel.getCount(), false);
+        int refundable = MachineSlotOwnershipPolicy.removableAddedCount(
+                baselineFuel, suppliedFuel, suppliedFuelCount, fuel);
+        if (refundable <= 0) return;
+        ItemStack extracted = handler.extractItem(1, refundable, false);
         if (!extracted.isEmpty()) refundToRSNetwork(extracted);
     }
 

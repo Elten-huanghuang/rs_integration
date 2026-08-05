@@ -246,6 +246,7 @@
   "rsi.malum_crucible.warn.already_crafting": "§eSpirit Crucible is currently working, please wait",
   "rsi.malum_crucible.warn.catalyst_mismatch": "§eCrucible already has a different catalyst — clear it first",
   "rsi.malum_crucible.error.no_catalyst": "§cFailed to place catalyst in the crucible",
+  "rsi.malum_crucible.error.recipe_rejected": "§cThe Spirit Crucible did not accept recipe %s; check its catalyst, spirits, and multiblock structure",
   "rsi.malum_crucible.warn.spirit_required": "§7Spirit requirements: %s",
   "rsi.malum_crucible.warn.spirit_slots_insufficient": "§eCrucible has %s spirit slots, recipe needs %s",
 
@@ -408,7 +409,10 @@
   "rsi.plan.materials": "Materials",
   "rsi.plan.tooltip.available": "Available",
   "rsi.plan.repeat_count": "Repeat:",
-  "rsi.plan.max": "Max",
+  "rsi.plan.bookmark_missing": "Add to JEI bookmarks (missing: %s)",
+  "rsi.plan.bookmark_added": "Added %s to JEI bookmarks",
+  "rsi.plan.bookmark_exists": "%s is already in JEI bookmarks",
+  "rsi.plan.bookmark_unavailable": "JEI bookmarks are unavailable for %s",
 
   "rsi.async.chain_started": "§aMulti-step crafting chain started (%s steps). Items will be delivered to the RS network when complete.",
   "rsi.async.cancel_button": "[Cancel]",
@@ -705,6 +709,7 @@
   "rsi.clibano.error.structure_missing": "§cThe Clibano structure is incomplete; its main block could not be found",
   "rsi.cooler.fuel_warning": "§7The Enchantal Cooler uses Lapis Lazuli as fuel.",
   "rsi.cooler.no_fuel": "§7No Lapis Lazuli available — cannot start cooling.",
+  "rsi.cooler.machine_busy": "§cEnchantal Cooler is already processing another recipe; wait for it to finish.",
   "rsi.batch.mod.aether": "Aether Furnace",
   "rsi.batch.mod.aether_freezer": "Aether Freezer",
   "rsi.batch.mod.aether_incubator": "Aether Incubator",

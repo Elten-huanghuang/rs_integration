@@ -554,10 +554,13 @@ public final class RSIntegrationMod {
                 com.huanghuang.rsintegration.crafting.RecipeIndex
                         .scheduleWarmUp(e.getServer().overworld()));
         MinecraftForge.EVENT_BUS.addListener((net.minecraftforge.event.TickEvent.ServerTickEvent e) -> {
-            if (e.phase != net.minecraftforge.event.TickEvent.Phase.END) return;
+            if (e.phase == net.minecraftforge.event.TickEvent.Phase.START) {
+                com.huanghuang.rsintegration.crafting.planning.WarmUpBudgetPolicy.beginTick();
+                return;
+            }
             var level = e.getServer().overworld();
             var budgets = com.huanghuang.rsintegration.crafting.planning.WarmUpBudgetPolicy
-                    .select(com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket
+                    .selectForCurrentTick(com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket
                             .hasDeferredWarmUpRequests());
             if (com.huanghuang.rsintegration.crafting.RecipeIndex.isReady(level)) {
                 com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraphProjector

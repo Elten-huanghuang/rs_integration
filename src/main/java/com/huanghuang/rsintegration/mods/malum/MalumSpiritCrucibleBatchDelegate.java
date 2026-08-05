@@ -409,6 +409,11 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
             return false;
         }
 
+        if (!activateExpectedRecipe(be, player)) {
+            clearUncommittedPlacements();
+            return false;
+        }
+
         // ── Commit ──
         if (!usingSharedLedger) {
             if (!localLedger.commit(this.network, player)) {
@@ -421,7 +426,6 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
 
         be.setChanged();
         this.craftStarted = true;
-        this.craftWasSeenActive = false;
         RSIntegrationMod.LOGGER.debug("[RSI-Crucible] Craft started for {} at {}", recipe.getId(), myPos);
         return true;
         } finally {
@@ -471,6 +475,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
         this.invCatalyst = readHandler(be, "inventory");
         this.invSpirits = readHandler(be, "spiritInventory");
         if (invCatalyst == null || invSpirits == null) return false;
+        if (Reflect.getField(be, "recipe").orElse(null) != null) return false;
 
         // Place materials in order: [catalyst, spirit1, spirit2, ...]
         int matIdx = 0;
@@ -496,12 +501,55 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
             spiritSlot++;
         }
 
+        if (!activateExpectedRecipe(be, player)) return false;
+
         be.setChanged();
         this.craftStarted = true;
-        this.craftWasSeenActive = false;
         RSIntegrationMod.LOGGER.debug("[RSI-Crucible] Craft started with materials for {} at {}",
                 recipe.getId(), myPos);
         return true;
+    }
+
+    private boolean activateExpectedRecipe(BlockEntity be, ServerPlayer player) {
+        if (refreshRecipeSelection(be, recipe)) {
+            craftWasSeenActive = true;
+            return true;
+        }
+        RSIntegrationMod.LOGGER.warn(
+                "[RSI-Crucible] Core rejected recipe {} after material placement at {}",
+                recipe.getId(), myPos);
+        player.sendSystemMessage(Component.translatable(
+                "rsi.malum_crucible.error.recipe_rejected", recipe.getId().toString()));
+        return false;
+    }
+
+    /** Malum 1.6.6 resolves the active focusing recipe only when core.init() runs. */
+    static boolean refreshRecipeSelection(Object crucible, Recipe<?> expected) {
+        if (crucible == null || expected == null) return false;
+        try {
+            java.lang.reflect.Method init = crucible.getClass().getMethod("init");
+            init.setAccessible(true);
+            init.invoke(crucible);
+
+            Field recipeField = null;
+            for (Class<?> current = crucible.getClass();
+                 current != null && current != Object.class;
+                 current = current.getSuperclass()) {
+                try {
+                    recipeField = current.getDeclaredField("recipe");
+                    break;
+                } catch (NoSuchFieldException ignored) {
+                    // Continue through compatibility subclasses.
+                }
+            }
+            if (recipeField == null) return false;
+            recipeField.setAccessible(true);
+            Object active = recipeField.get(crucible);
+            if (!(active instanceof Recipe<?> activeRecipe)) return false;
+            return activeRecipe == expected || activeRecipe.getId().equals(expected.getId());
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            return false;
+        }
     }
 
     // ── isMachineCraftFinished ───────────────────────────────────

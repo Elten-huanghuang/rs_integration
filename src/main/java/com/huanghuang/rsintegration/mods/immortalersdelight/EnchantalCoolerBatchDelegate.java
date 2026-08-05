@@ -20,6 +20,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
+import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraftforge.items.IItemHandler;
@@ -27,7 +28,9 @@ import org.jetbrains.annotations.NotNull;
 
 import javax.annotation.Nullable;
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
@@ -46,10 +49,17 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
     private BlockPos myPos;
     private Recipe<?> recipe;
     private boolean craftDone;
+    private boolean inventoryLease;
+    private boolean craftObservedWorking;
+    private final ItemStack[] baselineSlots = new ItemStack[7];
+    private final ItemStack[] suppliedSlotTypes = new ItemStack[7];
+    private final int[] suppliedSlotCounts = new int[7];
 
     // Cached reflection
     private static volatile Field inventoryField;
     private static volatile Field residualDyeField;
+    private static volatile Field cookingTotalTimeField;
+    private static volatile Method isFuelMethod;
     private static volatile boolean reflectionProbed;
 
 
@@ -73,6 +83,17 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
         }
         this.recipe = found;
         this.craftDone = false;
+        resetInventoryLease();
+
+        BlockEntity be = level.getBlockEntity(pos);
+        if (be == null || !ImmersalsDelightReflection.enchantalCoolerBEClass.isInstance(be)) {
+            return false;
+        }
+        IItemHandler handler = getInventory(be);
+        if (handler == null || handler.getSlots() < baselineSlots.length) return false;
+        if (getCookingProgress(be) > 0 || !areInputsEmpty(handler)) {
+            return false;
+        }
         return true;
     }
 
@@ -99,7 +120,7 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
             if (!ledger.commit(network, player)) return false;
 
             this.usingSharedLedger = false;
-            if (!tryStartWithMaterials(player, materials, ledger)) {
+            if (!tryStartWithMaterialsImpl(player, materials, false)) {
                 for (ItemStack mat : materials) {
                     if (!mat.isEmpty())
                         network.insertItem(mat.copy(), mat.getCount(),
@@ -124,9 +145,15 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
     @Override
     public boolean tryStartWithMaterials(ServerPlayer player, List<ItemStack> materials,
                                          ExtractionLedger sharedLedger) {
+        return tryStartWithMaterialsImpl(player, materials, true);
+    }
+
+    private boolean tryStartWithMaterialsImpl(ServerPlayer player, List<ItemStack> materials,
+                                              boolean shared) {
         this.player = player;
-        this.usingSharedLedger = true;
+        this.usingSharedLedger = shared;
         this.craftDone = false;
+        this.craftObservedWorking = false;
 
         if (!myLevel.hasChunkAt(myPos)) return false;
 
@@ -145,20 +172,43 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-Cooler] Cannot access item handler");
             return false;
         }
-        if (!itemHandler.getStackInSlot(OUTPUT_SLOT).isEmpty()) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Batch-Cooler] Output slot occupied at {}", myPos);
-            return false;
-        }
-
-        forceChunkLoad(true);
-
         long materialCount = materials.stream().filter(s -> !s.isEmpty()).count();
         if (materialCount > INPUT_SLOTS) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-Cooler] Recipe {} has {} ingredients but only {} input slots",
                     recipe.getId(), materialCount, INPUT_SLOTS);
-            forceChunkLoad(false);
             return false;
         }
+
+        this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+        if (network == null) {
+            player.sendSystemMessage(Component.translatable("rsi.generic.error.network_unavailable"));
+            return false;
+        }
+
+        if (!drainCompletedManualOutput(itemHandler, be)
+                || !acquireIdleInventory(itemHandler, be)) {
+            RSIntegrationMod.LOGGER.warn(
+                    "[RSI-Batch-Cooler] Refusing recipe {} because cooler at {} is already busy",
+                    recipe.getId(), myPos);
+            return false;
+        }
+
+        // Validate every input insertion before mutating fuel, containers, or recipe slots.
+        int simulatedSlot = 0;
+        for (ItemStack mat : materials) {
+            if (mat.isEmpty()) continue;
+            ItemStack single = mat.copyWithCount(1);
+            if (!itemHandler.insertItem(simulatedSlot, single, true).isEmpty()) {
+                resetInventoryLease();
+                RSIntegrationMod.LOGGER.warn(
+                        "[RSI-Batch-Cooler] Input slot {} rejected {} during preflight",
+                        simulatedSlot, single);
+                return false;
+            }
+            simulatedSlot++;
+        }
+
+        forceChunkLoad(true);
 
         // Phase 1: Insert ingredients into input slots 0..3
         int slot = 0;
@@ -168,39 +218,27 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
             ItemStack remainder = itemHandler.insertItem(slot, single, false);
             if (!remainder.isEmpty()) {
                 RSIntegrationMod.LOGGER.warn("[RSI-Batch-Cooler] Failed to insert into slot {}: {}",
-                        slot, remainder.getHoverName().getString());
-                for (int back = 0; back < slot; back++) {
-                    ItemStack refund = itemHandler.extractItem(back, 64, false);
-                    if (!refund.isEmpty() && !usingSharedLedger && network != null)
-                        network.insertItem(refund, refund.getCount(),
-                                com.refinedmods.refinedstorage.api.util.Action.PERFORM);
-                }
-                be.setChanged();
-                return false;
+                        slot, remainder);
+                return rollbackRejectedStart(itemHandler, be);
             }
+            recordSlotSupply(slot, single, 1);
             slot++;
         }
         be.setChanged();
 
         // Phase 2: Ensure fuel (lapis lazuli) in slot 6, top up to a full stack
-        this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
         ItemStack fuelSlot = itemHandler.getStackInSlot(FUEL_SLOT);
         int existingFuel = fuelSlot.is(Items.LAPIS_LAZULI) ? fuelSlot.getCount() : 0;
         int needed = 64 - existingFuel;
-        if (needed > 0 && network != null) {
+        if (needed > 0) {
             int inserted = tryInsertFuelFromRS(itemHandler, needed);
             if (inserted > 0) {
+                recordSlotSupply(FUEL_SLOT, new ItemStack(Items.LAPIS_LAZULI), inserted);
                 be.setChanged();
             }
-            if (inserted == 0 && !hasResidualDye(be)) {
-                for (int back = 0; back < INPUT_SLOTS; back++) {
-                    ItemStack refund = itemHandler.extractItem(back, 64, false);
-                    if (!refund.isEmpty() && !usingSharedLedger)
-                        network.insertItem(refund, refund.getCount(),
-                                com.refinedmods.refinedstorage.api.util.Action.PERFORM);
-                }
+            if (!hasResidualDye(be) && !hasUsableFuel(be, itemHandler.getStackInSlot(FUEL_SLOT))) {
                 player.sendSystemMessage(Component.translatable("rsi.cooler.no_fuel"));
-                return false;
+                return rollbackRejectedStart(itemHandler, be);
             }
         }
 
@@ -216,43 +254,39 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
             if (!existing.isEmpty() && !ItemStack.isSameItemSameTags(existing, container)) {
                 RSIntegrationMod.LOGGER.warn("[RSI-Batch-Cooler] Recipe {} needs container {}, but slot contains {}",
                         recipe.getId(), container, existing);
-                rollbackInputs(itemHandler, slot);
-                be.setChanged();
-                return false;
+                return rollbackRejectedStart(itemHandler, be);
             }
             if (existing.isEmpty()) {
-                if (network == null) {
-                    rollbackInputs(itemHandler, slot);
-                    be.setChanged();
-                    return false;
-                }
                 ItemStack extracted = network.extractItem(container.copyWithCount(1), 1,
                         com.refinedmods.refinedstorage.api.util.Action.PERFORM);
                 if (extracted.isEmpty()) {
                     RSIntegrationMod.LOGGER.warn("[RSI-Batch-Cooler] Required container unavailable for recipe {}: {}",
                             recipe.getId(), container);
-                    rollbackInputs(itemHandler, slot);
-                    be.setChanged();
-                    return false;
+                    return rollbackRejectedStart(itemHandler, be);
                 }
                 ItemStack simulated = itemHandler.insertItem(CONTAINER_SLOT, extracted, true);
                 if (!simulated.isEmpty()) {
                     refundToRSNetwork(extracted);
-                    rollbackInputs(itemHandler, slot);
-                    be.setChanged();
-                    return false;
+                    return rollbackRejectedStart(itemHandler, be);
                 }
                 ItemStack remainder = itemHandler.insertItem(CONTAINER_SLOT, extracted, false);
                 if (!remainder.isEmpty()) {
                     refundToRSNetwork(remainder);
-                    rollbackInputs(itemHandler, slot);
-                    be.setChanged();
-                    return false;
+                    return rollbackRejectedStart(itemHandler, be);
                 }
+                recordSlotSupply(CONTAINER_SLOT, extracted, extracted.getCount());
                 be.setChanged();
             }
         }
 
+        if (!matchesExpectedRecipe(itemHandler)) {
+            RSIntegrationMod.LOGGER.warn(
+                    "[RSI-Batch-Cooler] Inserted inputs resolved to a different or invalid recipe at {}",
+                    myPos);
+            return rollbackRejectedStart(itemHandler, be);
+        }
+
+        markCraftStarted();
         RSIntegrationMod.LOGGER.debug("[RSI-Batch-Cooler] Materials inserted, cooling should start next tick");
         return true;
     }
@@ -276,6 +310,37 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
+    @NotNull
+    protected CraftObservation observeMachineCraft(@NotNull ServerLevel level,
+                                                    @NotNull BlockEntity be) {
+        if (!ImmersalsDelightReflection.enchantalCoolerBEClass.isInstance(be)) {
+            return failObservation("enchantal cooler block entity changed");
+        }
+        IItemHandler handler = getInventory(be);
+        if (handler == null || handler.getSlots() < 7) {
+            return failObservation("enchantal cooler inventory unavailable");
+        }
+
+        ItemStack output = handler.getStackInSlot(OUTPUT_SLOT);
+        if (!output.isEmpty()) {
+            return isExpectedOutput(output)
+                    ? doneObservation()
+                    : failObservation("enchantal cooler output slot was occupied by another item");
+        }
+
+        int progress = getCookingProgress(be);
+        if (progress > 0) {
+            craftObservedWorking = true;
+            return workingObservation();
+        }
+        if (craftObservedWorking && areInputsEmpty(handler)) return doneObservation();
+        if (!areOwnedInputsPresent(handler)) {
+            return failObservation("enchantal cooler inputs changed before the recipe started");
+        }
+        return new CraftObservation(phase);
+    }
+
+    @Override
     protected boolean isMachineCraftFinished(ServerLevel level, BlockEntity be) {
         if (!ImmersalsDelightReflection.enchantalCoolerBEClass.isInstance(be)) return false;
 
@@ -283,11 +348,7 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
         if (itemHandler == null) return false;
 
         ItemStack output = itemHandler.getStackInSlot(OUTPUT_SLOT);
-        boolean inputsEmpty = true;
-        for (int slot = 0; slot < INPUT_SLOTS; slot++) {
-            inputsEmpty &= itemHandler.getStackInSlot(slot).isEmpty();
-        }
-        return !output.isEmpty() || inputsEmpty;
+        return isExpectedOutput(output) || (craftObservedWorking && areInputsEmpty(itemHandler));
     }
 
     @Override
@@ -298,7 +359,12 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
         IItemHandler itemHandler = getInventory(be);
         if (itemHandler == null) return ItemStack.EMPTY;
 
-        ItemStack result = itemHandler.extractItem(OUTPUT_SLOT, 64, false);
+        ItemStack visible = itemHandler.getStackInSlot(OUTPUT_SLOT);
+        if (!isExpectedOutput(visible)) return ItemStack.EMPTY;
+        ExpectedProduction expected = getExpectedProduction();
+        int amount = expected == null ? visible.getCount()
+                : Math.min(visible.getCount(), expected.count());
+        ItemStack result = itemHandler.extractItem(OUTPUT_SLOT, amount, false);
         be.setChanged();
         craftDone = true;
         return result;
@@ -306,50 +372,185 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     protected void clearMachineState(BlockEntity be, ServerPlayer player) {
-        clearMachineSlotsAndRefund();
-        forceChunkLoad(false);
+        IItemHandler handler = getInventory(be);
+        if (handler != null && handler.getSlots() >= 7) {
+            cleanupOwnedSlots(handler, !usingSharedLedger);
+            be.setChanged();
+        } else {
+            resetInventoryLease();
+        }
         craftDone = false;
-        network = null;
+        craftObservedWorking = false;
+        resetState();
     }
 
     @Override
     public void onBatchFinished(@NotNull ServerPlayer player) {
-        forceChunkLoad(false);
-        clearMachineSlotsAndRefund();
+        if (!markTerminalCleanup()) return;
+        if (myLevel.hasChunkAt(myPos)) {
+            BlockEntity be = myLevel.getBlockEntity(myPos);
+            if (be != null && ImmersalsDelightReflection.enchantalCoolerBEClass.isInstance(be)) {
+                IItemHandler handler = getInventory(be);
+                if (handler != null && handler.getSlots() >= 7) {
+                    cleanupOwnedSlots(handler, !usingSharedLedger);
+                    be.setChanged();
+                }
+            }
+        }
+        resetInventoryLease();
         craftDone = false;
-        network = null;
+        craftObservedWorking = false;
+        resetState();
     }
 
-    private void clearMachineSlotsAndRefund() {
-        if (!myLevel.hasChunkAt(myPos)) return;
-        BlockEntity be = myLevel.getBlockEntity(myPos);
-        if (be == null) return;
-        if (!ImmersalsDelightReflection.enchantalCoolerBEClass.isInstance(be)) return;
-
-        IItemHandler handler = getInventory(be);
-        if (handler == null || handler.getSlots() < 7) return;
-
+    private void cleanupOwnedSlots(IItemHandler handler, boolean refundInputs) {
+        if (!inventoryLease) return;
         for (int slot = 0; slot < INPUT_SLOTS; slot++) {
-            ItemStack s = handler.extractItem(slot, 64, false);
-            if (!s.isEmpty() && !usingSharedLedger) refundToRSNetwork(s);
+            ItemStack removed = extractOwnedSlotDelta(handler, slot);
+            if (!removed.isEmpty() && refundInputs) refundToRSNetwork(removed);
         }
         // Container is out-of-band (not in shared ledger) — refund unconditionally
-        ItemStack container = handler.extractItem(CONTAINER_SLOT, 64, false);
+        ItemStack container = extractOwnedSlotDelta(handler, CONTAINER_SLOT);
         if (!container.isEmpty()) refundToRSNetwork(container);
-        ItemStack out = handler.extractItem(OUTPUT_SLOT, 64, false);
-        // Output is not part of the shared input ledger; do not discard it during cleanup.
-        if (!out.isEmpty()) refundToRSNetwork(out);
         // Fuel is out-of-band (not in shared ledger) — refund unconditionally
-        ItemStack fuel = handler.extractItem(FUEL_SLOT, 64, false);
+        ItemStack fuel = extractOwnedSlotDelta(handler, FUEL_SLOT);
         if (!fuel.isEmpty()) refundToRSNetwork(fuel);
-        be.setChanged();
+        resetInventoryLease();
     }
 
-    private void rollbackInputs(IItemHandler handler, int insertedSlots) {
-        for (int back = 0; back < insertedSlots; back++) {
-            ItemStack refund = handler.extractItem(back, 64, false);
-            if (!refund.isEmpty() && !usingSharedLedger) refundToRSNetwork(refund);
+    private void resetInventoryLease() {
+        inventoryLease = false;
+        Arrays.fill(baselineSlots, ItemStack.EMPTY);
+        Arrays.fill(suppliedSlotTypes, ItemStack.EMPTY);
+        Arrays.fill(suppliedSlotCounts, 0);
+    }
+
+    private boolean acquireIdleInventory(IItemHandler handler, BlockEntity be) {
+        if (inventoryLease) return false;
+        List<ItemStack> inputs = new ArrayList<>(INPUT_SLOTS);
+        for (int slot = 0; slot < INPUT_SLOTS; slot++) {
+            inputs.add(handler.getStackInSlot(slot).copy());
         }
+        if (!EnchantalCoolerInventoryPolicy.isIdle(
+                inputs, handler.getStackInSlot(OUTPUT_SLOT), getCookingProgress(be))) {
+            return false;
+        }
+
+        for (int slot = 0; slot < baselineSlots.length; slot++) {
+            baselineSlots[slot] = handler.getStackInSlot(slot).copy();
+            suppliedSlotTypes[slot] = ItemStack.EMPTY;
+            suppliedSlotCounts[slot] = 0;
+        }
+        inventoryLease = true;
+        return true;
+    }
+
+    private boolean drainCompletedManualOutput(IItemHandler handler, BlockEntity be) {
+        if (getCookingProgress(be) > 0 || !areInputsEmpty(handler)) return false;
+        ItemStack output = handler.getStackInSlot(OUTPUT_SLOT);
+        if (output.isEmpty()) return true;
+        ItemStack removed = handler.extractItem(OUTPUT_SLOT, output.getCount(), false);
+        if (removed.isEmpty()) return false;
+        refundToRSNetwork(removed);
+        be.setChanged();
+        return handler.getStackInSlot(OUTPUT_SLOT).isEmpty();
+    }
+
+    private void recordSlotSupply(int slot, ItemStack supplied, int count) {
+        if (!inventoryLease || slot < 0 || slot >= suppliedSlotCounts.length
+                || supplied.isEmpty() || count <= 0) {
+            return;
+        }
+        ItemStack existingType = suppliedSlotTypes[slot];
+        if (!existingType.isEmpty() && !ItemStack.isSameItemSameTags(existingType, supplied)) {
+            throw new IllegalStateException("Enchantal Cooler slot ownership type changed");
+        }
+        suppliedSlotTypes[slot] = supplied.copyWithCount(1);
+        suppliedSlotCounts[slot] += count;
+    }
+
+    private ItemStack extractOwnedSlotDelta(IItemHandler handler, int slot) {
+        if (!inventoryLease || slot < 0 || slot >= suppliedSlotCounts.length) {
+            return ItemStack.EMPTY;
+        }
+        int removable = EnchantalCoolerInventoryPolicy.removableAddedCount(
+                baselineSlots[slot], suppliedSlotTypes[slot], suppliedSlotCounts[slot],
+                handler.getStackInSlot(slot));
+        if (removable <= 0) return ItemStack.EMPTY;
+
+        ItemStack removed = handler.extractItem(slot, removable, false);
+        if (!removed.isEmpty()) {
+            suppliedSlotCounts[slot] = Math.max(0,
+                    suppliedSlotCounts[slot] - removed.getCount());
+            if (suppliedSlotCounts[slot] == 0) suppliedSlotTypes[slot] = ItemStack.EMPTY;
+        }
+        return removed;
+    }
+
+    private boolean matchesExpectedRecipe(IItemHandler handler) {
+        if (recipe == null || myLevel == null) return false;
+        SimpleContainer inputs = new SimpleContainer(INPUT_SLOTS);
+        for (int slot = 0; slot < INPUT_SLOTS; slot++) {
+            inputs.setItem(slot, handler.getStackInSlot(slot).copy());
+        }
+        try {
+            @SuppressWarnings("rawtypes")
+            Recipe rawRecipe = recipe;
+            @SuppressWarnings("unchecked")
+            boolean matches = rawRecipe.matches(inputs, myLevel);
+            return matches;
+        } catch (RuntimeException e) {
+            RSIntegrationMod.LOGGER.warn(
+                    "[RSI-Batch-Cooler] Recipe {} rejected its prepared input inventory",
+                    recipe.getId(), e);
+            return false;
+        }
+    }
+
+    private boolean isExpectedOutput(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return false;
+        ExpectedProduction expected = getExpectedProduction();
+        return expected != null && !expected.item().isEmpty()
+                && ItemStack.isSameItemSameTags(expected.item(), stack);
+    }
+
+    private static boolean areInputsEmpty(IItemHandler handler) {
+        for (int slot = 0; slot < INPUT_SLOTS; slot++) {
+            if (!handler.getStackInSlot(slot).isEmpty()) return false;
+        }
+        return true;
+    }
+
+    private boolean areOwnedInputsPresent(IItemHandler handler) {
+        if (!inventoryLease) return false;
+        for (int slot = 0; slot < INPUT_SLOTS; slot++) {
+            int suppliedCount = suppliedSlotCounts[slot];
+            if (suppliedCount <= 0) continue;
+            ItemStack current = handler.getStackInSlot(slot);
+            if (current.isEmpty()
+                    || !ItemStack.isSameItemSameTags(suppliedSlotTypes[slot], current)
+                    || current.getCount() < suppliedCount) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean rollbackRejectedStart(IItemHandler handler, BlockEntity be) {
+        // The committed local/shared ledger refunds inputs. Fuel and containers are
+        // out-of-band and are returned by ownership-aware cleanup.
+        cleanupOwnedSlots(handler, false);
+        be.setChanged();
+        forceChunkLoad(false);
+        return false;
+    }
+
+    @Override
+    protected void clearMissingMachineState(@Nullable ServerPlayer player) {
+        resetInventoryLease();
+        craftDone = false;
+        craftObservedWorking = false;
+        resetState();
     }
 
     private void refundToRSNetwork(ItemStack stack) {
@@ -460,14 +661,38 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
 
     private static void probeReflection() {
         if (reflectionProbed) return;
-        reflectionProbed = true;
-        try {
-            inventoryField = ImmersalsDelightReflection.enchantalCoolerBEClass.getDeclaredField("inventory");
-            inventoryField.setAccessible(true);
-            residualDyeField = ImmersalsDelightReflection.enchantalCoolerBEClass.getDeclaredField("residualDye");
-            residualDyeField.setAccessible(true);
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Batch-Cooler] Reflection probe failed", e);
+        synchronized (EnchantalCoolerBatchDelegate.class) {
+            if (reflectionProbed) return;
+            Class<?> coolerClass = ImmersalsDelightReflection.enchantalCoolerBEClass;
+            try {
+                inventoryField = coolerClass.getDeclaredField("inventory");
+                inventoryField.setAccessible(true);
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.warn(
+                        "[RSI-Batch-Cooler] Inventory reflection probe failed", e);
+            }
+            try {
+                residualDyeField = coolerClass.getDeclaredField("residualDye");
+                residualDyeField.setAccessible(true);
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.warn(
+                        "[RSI-Batch-Cooler] Residual dye reflection probe failed", e);
+            }
+            try {
+                cookingTotalTimeField = coolerClass.getDeclaredField("cookingTotalTime");
+                cookingTotalTimeField.setAccessible(true);
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.warn(
+                        "[RSI-Batch-Cooler] Cooking progress reflection probe failed", e);
+            }
+            try {
+                isFuelMethod = coolerClass.getMethod("isFuel", ItemStack.class);
+                isFuelMethod.setAccessible(true);
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.warn(
+                        "[RSI-Batch-Cooler] Fuel validation reflection probe failed", e);
+            }
+            reflectionProbed = true;
         }
     }
 
@@ -488,6 +713,31 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
         try {
             return residualDyeField.getInt(be) > 0;
         } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private static int getCookingProgress(BlockEntity be) {
+        probeReflection();
+        if (cookingTotalTimeField == null) return Integer.MAX_VALUE;
+        try {
+            return Math.max(0, cookingTotalTimeField.getInt(be));
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug(
+                    "[RSI-Batch-Cooler] Cooking progress access failed", e);
+            return Integer.MAX_VALUE;
+        }
+    }
+
+    private static boolean hasUsableFuel(BlockEntity be, ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return false;
+        probeReflection();
+        if (isFuelMethod == null) return false;
+        try {
+            return Boolean.TRUE.equals(isFuelMethod.invoke(be, stack));
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug(
+                    "[RSI-Batch-Cooler] Fuel validation failed", e);
             return false;
         }
     }

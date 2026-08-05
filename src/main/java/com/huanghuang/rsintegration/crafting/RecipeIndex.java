@@ -62,7 +62,7 @@ public final class RecipeIndex {
     public static void warmUp(Level level) {
         long start = System.currentTimeMillis();
         try {
-            get(level);
+            buildSynchronously(level);
             com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraphProjector
                     .capture(level);
             RSIntegrationMod.LOGGER.info("[RecipeIndex] explicit warm-up completed in {}ms",
@@ -114,12 +114,27 @@ public final class RecipeIndex {
         }
     }
 
+    /**
+     * Returns a published index only. A request must wait for the incremental warm-up
+     * scheduler instead of synchronously consuming an unbounded server tick budget.
+     */
     public static Map<Item, List<Entry>> get(Level level) {
+        RecipeManager manager = level.getRecipeManager();
+        Map<Item, List<Entry>> ready = index;
+        if (ready != null && source == manager) return ready;
+        synchronized (RecipeIndex.class) {
+            ready = index;
+            if (ready != null && source == manager) return ready;
+            if (warmUpState == null || !warmUpState.matches(manager)) scheduleWarmUp(level);
+            throw new IllegalStateException(
+                    "Recipe index is warming up; retry after RecipeIndex.isReady(level)");
+        }
+    }
+
+    private static Map<Item, List<Entry>> buildSynchronously(Level level) {
         RecipeManager rm = level.getRecipeManager();
         Map<Item, List<Entry>> idx = index;
         if (idx != null && source == rm) return idx;
-        CraftPacketUtils.clearIngredientCache();
-
         synchronized (RecipeIndex.class) {
             idx = index;
             if (idx != null && source == rm) return idx;
