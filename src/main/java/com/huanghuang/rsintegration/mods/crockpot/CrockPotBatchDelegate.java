@@ -1,8 +1,8 @@
 package com.huanghuang.rsintegration.mods.crockpot;
 
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
-
-import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
+import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.MachineSlotOwnershipPolicy;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
@@ -11,7 +11,6 @@ import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.IngredientMatcher;
 import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
-import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.recipe.CrockPotRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.reflection.probes.CrockPotReflection;
@@ -43,6 +42,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Arrays;
 
 /** Batch delegate for Crock Pot cooking recipes (all pot levels). */
 public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
@@ -55,6 +55,12 @@ public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
     private boolean craftDone;
     private int potLevel;        // block's actual pot level (input slot count)
     private int recipeMinLevel;  // recipe's minimum required pot level
+    private ItemStack suppliedFuelType = ItemStack.EMPTY;
+    private int suppliedFuelCount;
+    private ItemStack baselineFuel = ItemStack.EMPTY;
+    private ItemStack[] suppliedInputTypes = new ItemStack[0];
+    private int[] suppliedInputCounts = new int[0];
+    private boolean inventoryLease;
 
     // Food-value category constraint state
     private boolean hasCatConstraints;
@@ -86,9 +92,12 @@ public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
         }
         this.recipe = found;
         this.craftDone = false;
+        this.suppliedFuelType = ItemStack.EMPTY;
+        this.suppliedFuelCount = 0;
         this.recipeMinLevel = CrockPotRecipeHandler.getPotLevel(found);
         this.potLevel = getBlockPotLevel(level, pos);
         if (potLevel <= 0) this.potLevel = recipeMinLevel;
+        resetInventoryOwnership();
 
         if (potLevel < recipeMinLevel) {
             player.sendSystemMessage(Component.translatable(
@@ -96,6 +105,14 @@ public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-CrockPot] Block potLevel={} < recipeMinLevel={} for {}",
                     potLevel, recipeMinLevel, recipeId);
             return false;
+        }
+
+        BlockEntity be = level.getBlockEntity(pos);
+        IItemHandler inventory = be != null && CrockPotReflection.crockPotBEClass.isInstance(be)
+                ? getItemHandler(be) : null;
+        if (inventory == null || inventory.getSlots() < potLevel + 2) return false;
+        for (int slot = 0; slot < potLevel; slot++) {
+            if (!inventory.getStackInSlot(slot).isEmpty()) return false;
         }
 
         // Parse category constraints
@@ -188,7 +205,7 @@ public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
             if (!ledger.commit(network, player)) return false;
 
             this.usingSharedLedger = false;
-            if (!tryStartWithMaterials(player, materials, ledger)) {
+            if (!tryStartWithMaterialsImpl(player, materials, ledger, false)) {
                 for (ItemStack mat : materials) {
                     if (!mat.isEmpty())
                         network.insertItem(mat.copy(), mat.getCount(), Action.PERFORM);
@@ -202,9 +219,15 @@ public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
     @Override
     public boolean tryStartWithMaterials(ServerPlayer player, List<ItemStack> materials,
                                          ExtractionLedger sharedLedger) {
+        return tryStartWithMaterialsImpl(player, materials, sharedLedger, true);
+    }
+
+    private boolean tryStartWithMaterialsImpl(ServerPlayer player, List<ItemStack> materials,
+                                              ExtractionLedger sharedLedger,
+                                              boolean shared) {
         this.player = player;
         this.sharedLedger = sharedLedger;
-        this.usingSharedLedger = true;
+        this.usingSharedLedger = shared;
         this.craftDone = false;
 
         if (!myLevel.hasChunkAt(myPos)) return false;
@@ -226,9 +249,26 @@ public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
                     itemHandler != null ? itemHandler.getSlots() : 0, expectedSlots);
             return false;
         }
-        if (!itemHandler.getStackInSlot(potLevel + 1).isEmpty()) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Batch-CrockPot] Output slot occupied at {}", myPos);
+        this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+        if (network == null || !acquireInventory(itemHandler, be)) return false;
+
+        int requestedSlots = materials.stream()
+                .filter(stack -> !stack.isEmpty())
+                .mapToInt(ItemStack::getCount)
+                .sum();
+        if (requestedSlots > potLevel) {
+            resetInventoryOwnership();
             return false;
+        }
+        int simulatedSlot = 0;
+        for (ItemStack material : materials) {
+            for (int i = 0; i < material.getCount(); i++) {
+                ItemStack single = material.copyWithCount(1);
+                if (!itemHandler.insertItem(simulatedSlot++, single, true).isEmpty()) {
+                    resetInventoryOwnership();
+                    return false;
+                }
+            }
         }
 
         forceChunkLoad(true);
@@ -247,57 +287,25 @@ public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
                 ItemStack remainder = itemHandler.insertItem(slot, single, false);
                 if (!remainder.isEmpty()) {
                     RSIntegrationMod.LOGGER.warn("[RSI-Batch-CrockPot] Failed to insert into slot {}: {}", slot,
-                            remainder.getHoverName().getString());
-                    for (int back = 0; back <= slot; back++) {
-                        ItemStack refund = itemHandler.extractItem(back, 64, false);
-                        if (!refund.isEmpty() && !usingSharedLedger && network != null)
-                            network.insertItem(refund, refund.getCount(), Action.PERFORM);
-                    }
-                    be.setChanged();
-                    return false;
+                            remainder);
+                    return rollbackRejectedStart(itemHandler, be);
                 }
+                suppliedInputTypes[slot] = single.copyWithCount(1);
+                suppliedInputCounts[slot]++;
                 slot++;
             }
         }
         be.setChanged();
 
-        // Handle fuel
-        this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
-        ItemStack fuelSlot = itemHandler.getStackInSlot(potLevel);
-        if (fuelSlot.isEmpty() || !isFuel(fuelSlot)) {
-            if (network != null) {
-                ItemStack fuel = extractFuel(network, player);
-                if (!fuel.isEmpty()) {
-                    ItemStack fuelRemainder = itemHandler.insertItem(potLevel, fuel, false);
-                    if (!fuelRemainder.isEmpty() && network != null) {
-                        network.insertItem(fuelRemainder, fuelRemainder.getCount(), Action.PERFORM);
-                    }
-                    be.setChanged();
-                }
-            }
+        // Fuel is outside the material ledger. Fill the slot so short-burning
+        // fallback fuels cannot strand an otherwise valid asynchronous craft.
+        boolean fuelReady = topUpFuel(itemHandler);
+        if (!fuelReady && !isBurning(be)) {
+            player.sendSystemMessage(Component.translatable("rsi.crockpot.no_fuel"));
+            return rollbackRejectedStart(itemHandler, be);
         }
-
-        if (!isBurning(be)) {
-            ItemStack fuelNow = itemHandler.getStackInSlot(potLevel);
-            if (!isFuel(fuelNow) && network != null) {
-                ItemStack fuel = extractFuel(network, player);
-                if (!fuel.isEmpty()) {
-                    ItemStack fuelRemainder = itemHandler.insertItem(potLevel, fuel, false);
-                    if (!fuelRemainder.isEmpty() && network != null) {
-                        network.insertItem(fuelRemainder, fuelRemainder.getCount(), Action.PERFORM);
-                    }
-                    be.setChanged();
-                } else {
-                    for (int back = 0; back < potLevel; back++) {
-                        ItemStack refund = itemHandler.extractItem(back, 64, false);
-                        if (!refund.isEmpty() && !usingSharedLedger && network != null)
-                            network.insertItem(refund, refund.getCount(), Action.PERFORM);
-                    }
-                    player.sendSystemMessage(Component.translatable("rsi.crockpot.no_fuel"));
-                    return false;
-                }
-            }
-        }
+        be.setChanged();
+        markCraftStarted();
 
         RSIntegrationMod.LOGGER.debug("[RSI-Batch-CrockPot] Materials inserted, cooking should start next tick");
         return true;
@@ -321,6 +329,33 @@ public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
                 && output.getCount() >= expected.count();
     }
 
+    @NotNull
+    @Override
+    protected CraftObservation observeMachineCraft(@NotNull ServerLevel level, @NotNull BlockEntity be) {
+        IItemHandler observedHandler = getItemHandler(be);
+        if (observedHandler != null) {
+            ItemStack visibleOutput = observedHandler.getStackInSlot(potLevel + 1);
+            if (!visibleOutput.isEmpty() && !isExpectedOutput(visibleOutput)) {
+                return failObservation("Crock Pot output slot contains another item");
+            }
+        }
+        if (isMachineCraftFinished(level, be)) return doneObservation();
+
+        IItemHandler itemHandler = getItemHandler(be);
+        if (itemHandler == null || itemHandler.getSlots() < potLevel + 2) {
+            return failObservation("Crock Pot item handler unavailable");
+        }
+        if (!isBurning(be)) {
+            this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+            if (topUpFuel(itemHandler)) {
+                be.setChanged();
+            } else {
+                warnOnce("fuel-empty", "[RSI-Batch-CrockPot] Waiting for fuel at {}", myPos);
+            }
+        }
+        return workingObservation();
+    }
+
     @Override
     public ItemStack collectResult(ServerPlayer player) {
         BlockEntity be = myLevel.getBlockEntity(myPos);
@@ -329,7 +364,12 @@ public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
         IItemHandler itemHandler = getItemHandler(be);
         if (itemHandler == null) return ItemStack.EMPTY;
 
-        ItemStack result = itemHandler.extractItem(potLevel + 1, 64, false);
+        ItemStack visible = itemHandler.getStackInSlot(potLevel + 1);
+        if (!isExpectedOutput(visible)) return ItemStack.EMPTY;
+        ExpectedProduction expected = getExpectedProduction();
+        int amount = expected == null ? visible.getCount()
+                : Math.min(visible.getCount(), expected.count());
+        ItemStack result = itemHandler.extractItem(potLevel + 1, amount, false);
         be.setChanged();
         craftDone = true;
         return result;
@@ -340,14 +380,17 @@ public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
         clearMachineSlotsAndRefund();
         forceChunkLoad(false);
         craftDone = false;
+        resetInventoryOwnership();
     }
 
     @Override
     public void onBatchFinished(@NotNull ServerPlayer player) {
+        if (!markTerminalCleanup()) return;
         forceChunkLoad(false);
         clearMachineSlotsAndRefund();
         craftDone = false;
-        network = null;
+        resetInventoryOwnership();
+        resetState();
     }
 
     @Override
@@ -667,59 +710,58 @@ public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
         return stack.getBurnTime(null) > 0;
     }
 
-    private static ItemStack extractFuel(INetwork network, ServerPlayer player) {
-        // 1. Try the configured priority list in order — take the first one the
-        //    network can supply. Items resolve from RSIntegrationConfig.CROCKPOT_FUEL_PRIORITY.
-        for (String id : RSIntegrationConfig.CROCKPOT_FUEL_PRIORITY.get()) {
-            ResourceLocation rl = ResourceLocation.tryParse(id);
-            if (rl == null) continue;
-            Item pref = net.minecraftforge.registries.ForgeRegistries.ITEMS.getValue(rl);
-            if (pref == null || pref == Items.AIR) continue;
-            ItemStack probe = new ItemStack(pref);
-            if (!isFuel(probe)) continue; // datapack may have stripped burn time
-            ItemStack extracted = network.extractItem(probe, 1, Action.PERFORM);
-            if (!extracted.isEmpty()) return extracted;
+    private boolean topUpFuel(IItemHandler handler) {
+        int fuelSlot = potLevel;
+        ItemStack current = handler.getStackInSlot(fuelSlot);
+        if (!current.isEmpty() && !isFuel(current)) return false;
+
+        if (current.isEmpty() && !suppliedFuelType.isEmpty()) {
+            suppliedFuelType = ItemStack.EMPTY;
+            suppliedFuelCount = 0;
+        }
+        if (network == null) return isFuel(current);
+
+        ItemStack fuelType = current.isEmpty() ? selectFuel(network) : current.copyWithCount(1);
+        if (fuelType.isEmpty()) return isFuel(current);
+
+        if (!suppliedFuelType.isEmpty()
+                && !ItemStack.isSameItemSameTags(suppliedFuelType, fuelType)) {
+            suppliedFuelType = ItemStack.EMPTY;
+            suppliedFuelCount = 0;
         }
 
-        // 2. Fallback: any burnable solid item, preferring the largest stack so we
-        //    drain bulk clutter first. Skip anything unsafe to burn (see isSafeBulkFuel):
-        //    tools/bows have burn time but are valuable; container fuels strand a
-        //    container in the single fuel slot; NBT items may be enchanted/named.
-        ItemStack best = ItemStack.EMPTY;
-        int bestCount = 0;
-        for (var entry : network.getItemStorageCache().getList().getStacks()) {
-            ItemStack stack = entry.getStack();
-            if (stack.isEmpty()) continue;
-            if (stack.getBurnTime(null) <= 0) continue;
-            if (!isSafeBulkFuel(stack)) continue;
-            if (stack.getCount() > bestCount) {
-                bestCount = stack.getCount();
-                best = stack;
+        int room = CrockPotFuelPolicy.insertionRoom(
+                current, fuelType, handler.getSlotLimit(fuelSlot));
+        if (room <= 0) return isFuel(current);
+
+        ItemStack extracted = network.extractItem(fuelType.copyWithCount(1), room, Action.PERFORM);
+        if (extracted.isEmpty()) return isFuel(current);
+
+        ItemStack remainder = handler.insertItem(fuelSlot, extracted, false);
+        int inserted = extracted.getCount() - remainder.getCount();
+        if (!remainder.isEmpty()) {
+            network.insertItem(remainder, remainder.getCount(), Action.PERFORM);
+        }
+        if (inserted > 0) {
+            if (suppliedFuelType.isEmpty()) {
+                suppliedFuelType = extracted.copyWithCount(1);
             }
+            suppliedFuelCount += inserted;
+            RSIntegrationMod.LOGGER.debug(
+                    "[RSI-Batch-CrockPot] Supplied {} fuel item(s) at {}", inserted, myPos);
         }
-        if (!best.isEmpty()) {
-            var extracted = network.extractItem(best.copyWithCount(1), 1, Action.PERFORM);
-            if (!extracted.isEmpty()) return extracted;
-        }
-        return ItemStack.EMPTY;
+        return isFuel(handler.getStackInSlot(fuelSlot));
     }
 
-    /**
-     * Whether a burnable item is safe to auto-consume as bulk fuel. Excludes:
-     * <ul>
-     *   <li>Damageable items — bows, fishing rods, wooden tools all have burn time
-     *       but are gear a player never wants silently burned;</li>
-     *   <li>Container-return fuels (lava bucket, etc.) — the empty container would
-     *       be stranded in the single fuel slot;</li>
-     *   <li>Items carrying NBT — may be enchanted, renamed, or hold custom data.</li>
-     * </ul>
-     * The configured fuel-priority list bypasses this check, so coal/charcoal
-     * are always eligible.
-     */
-    private static boolean isSafeBulkFuel(ItemStack stack) {
-        if (stack.isDamageableItem()) return false;
-        if (!stack.getCraftingRemainingItem().isEmpty()) return false;
-        return !stack.hasTag();
+    private static ItemStack selectFuel(INetwork network) {
+        List<ItemStack> candidates = new ArrayList<>();
+        for (var entry : network.getItemStorageCache().getList().getStacks()) {
+            candidates.add(entry.getStack());
+        }
+        ItemStack selected = CrockPotFuelPolicy.select(
+                candidates, RSIntegrationConfig.CROCKPOT_FUEL_PRIORITY.get(),
+                stack -> stack.getBurnTime(null));
+        return selected != null ? selected : ItemStack.EMPTY;
     }
 
     private void clearMachineSlotsAndRefund() {
@@ -730,15 +772,81 @@ public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
             return;
 
         IItemHandler handler = getItemHandler(be);
-        if (handler == null || handler.getSlots() < 6) return;
+        if (handler == null || handler.getSlots() < potLevel + 2) return;
 
+        if (!inventoryLease) return;
         for (int slot = 0; slot < potLevel; slot++) {
-            ItemStack s = handler.extractItem(slot, 64, false);
+            ItemStack current = handler.getStackInSlot(slot);
+            int removable = MachineSlotOwnershipPolicy.removableAddedCount(
+                    ItemStack.EMPTY, suppliedInputTypes[slot], suppliedInputCounts[slot], current);
+            if (removable <= 0) continue;
+            ItemStack s = handler.extractItem(slot, removable, false);
             if (!s.isEmpty() && !usingSharedLedger) refundToRSNetwork(s);
         }
-        ItemStack out = handler.extractItem(potLevel + 1, 64, false);
-        if (!out.isEmpty() && !usingSharedLedger) refundToRSNetwork(out);
+        ItemStack visibleOut = handler.getStackInSlot(potLevel + 1);
+        if (!visibleOut.isEmpty() && isExpectedOutput(visibleOut)) {
+            ItemStack out = handler.extractItem(potLevel + 1, visibleOut.getCount(), false);
+            if (!out.isEmpty() && !usingSharedLedger) refundToRSNetwork(out);
+        }
+        refundSuppliedFuel(handler);
         be.setChanged();
+    }
+
+    private boolean rollbackRejectedStart(IItemHandler handler, BlockEntity be) {
+        clearMachineSlotsAndRefund();
+        be.setChanged();
+        forceChunkLoad(false);
+        resetInventoryOwnership();
+        return false;
+    }
+
+    private void refundSuppliedFuel(IItemHandler handler) {
+        ItemStack current = handler.getStackInSlot(potLevel);
+        int refundable = MachineSlotOwnershipPolicy.removableAddedCount(
+                baselineFuel, suppliedFuelType, suppliedFuelCount, current);
+        if (refundable > 0) {
+            ItemStack refund = handler.extractItem(potLevel, refundable, false);
+            if (!refund.isEmpty()) refundToRSNetwork(refund);
+        }
+        suppliedFuelType = ItemStack.EMPTY;
+        suppliedFuelCount = 0;
+    }
+
+    private boolean acquireInventory(IItemHandler handler, BlockEntity be) {
+        if (inventoryLease) return false;
+        for (int slot = 0; slot < potLevel; slot++) {
+            if (!handler.getStackInSlot(slot).isEmpty()) return false;
+        }
+        ItemStack output = handler.getStackInSlot(potLevel + 1);
+        if (!output.isEmpty()) {
+            ItemStack removed = handler.extractItem(potLevel + 1, output.getCount(), false);
+            if (removed.isEmpty()) return false;
+            refundToRSNetwork(removed);
+            be.setChanged();
+        }
+        if (!handler.getStackInSlot(potLevel + 1).isEmpty()) return false;
+        baselineFuel = handler.getStackInSlot(potLevel).copy();
+        suppliedInputTypes = new ItemStack[potLevel];
+        suppliedInputCounts = new int[potLevel];
+        Arrays.fill(suppliedInputTypes, ItemStack.EMPTY);
+        suppliedFuelType = ItemStack.EMPTY;
+        suppliedFuelCount = 0;
+        inventoryLease = true;
+        return true;
+    }
+
+    private boolean isExpectedOutput(ItemStack stack) {
+        ExpectedProduction expected = getExpectedProduction();
+        return expected != null && IBatchDelegate.matchesProducedItem(stack, expected.item());
+    }
+
+    private void resetInventoryOwnership() {
+        inventoryLease = false;
+        baselineFuel = ItemStack.EMPTY;
+        suppliedFuelType = ItemStack.EMPTY;
+        suppliedFuelCount = 0;
+        suppliedInputTypes = new ItemStack[0];
+        suppliedInputCounts = new int[0];
     }
 
     private void refundToRSNetwork(ItemStack stack) {

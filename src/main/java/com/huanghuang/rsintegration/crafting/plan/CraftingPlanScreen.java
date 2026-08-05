@@ -21,6 +21,7 @@ import com.huanghuang.rsintegration.crafting.tree.PlanTreeNode;
 import com.huanghuang.rsintegration.crafting.tree.PlanTreeRenderer;
 import com.huanghuang.rsintegration.crafting.tree.RecipePreviewRenderer;
 import com.huanghuang.rsintegration.crafting.tree.SelectedPath;
+import com.huanghuang.rsintegration.mixin.jei.BookmarkOverlayAccessor;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler;
 import com.huanghuang.rsintegration.sidepanel.client.GuiNavStack;
@@ -31,6 +32,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.resources.language.I18n;
 import org.lwjgl.glfw.GLFW;
@@ -43,6 +45,9 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import net.minecraftforge.fml.loading.FMLPaths;
+import mezz.jei.api.constants.VanillaTypes;
+import mezz.jei.gui.bookmarks.IngredientBookmark;
+import mezz.jei.gui.overlay.bookmarks.BookmarkOverlay;
 
 import javax.annotation.Nullable;
 import java.nio.file.Path;
@@ -104,14 +109,21 @@ public final class CraftingPlanScreen extends Screen {
     private int scrollbarGrabDy;
     private int repeatRowY;
     // repeat button hitboxes — set during render
-    private final int[] repeatBtnX = new int[9], repeatBtnY = new int[9];
-    private final int[] repeatBtnW = new int[9], repeatBtnH = new int[9];
+    private static final int REPEAT_BUTTON_COUNT = 8;
+    private static final int REPEAT_BUTTON_W = 22;
+    private static final int REPEAT_BUTTON_H = 14;
+    private static final int REPEAT_BUTTON_GAP = 3;
+    private static final int REPEAT_INPUT_W = 57;
+    private final int[] repeatBtnX = new int[REPEAT_BUTTON_COUNT];
+    private final int[] repeatBtnY = new int[REPEAT_BUTTON_COUNT];
+    private final int[] repeatBtnW = new int[REPEAT_BUTTON_COUNT];
+    private final int[] repeatBtnH = new int[REPEAT_BUTTON_COUNT];
     private int countPillX, countPillY, countPillW, countPillH;
-    private String repeatBuf = "1";
-    private long lastKeyTime;
+    @Nullable
+    private EditBox repeatCountBox;
+    private boolean updatingRepeatCountBox;
     private int planRefreshTick = -1;
     private int lastRefreshCount = 1;
-    private boolean maxCraftablePending;
     private int ticksOpen;
     private int mouseX, mouseY;
 
@@ -138,6 +150,10 @@ public final class CraftingPlanScreen extends Screen {
     private final List<CostHit> costHits = new ArrayList<>();
     private record CostHit(int x, int y, int w, int h, IngredientKey key) {}
     private record StripEntry(ItemStack display, IngredientKey key, int count, int available, boolean enough) {}
+    private final List<BookmarkHit> bookmarkHits = new ArrayList<>();
+    private record BookmarkHit(int x, int y, int w, int h, ItemStack stack, int missingCount) {}
+    @Nullable
+    private BookmarkHit hoveredBookmark;
     // Card-view fold toggle hitboxes (rebuilt each frame, read during mouseClicked).
     // One per rendered step card (expanded chevron OR collapsed row), so every step
     // stays clickable — not just the last one drawn.
@@ -295,7 +311,6 @@ public final class CraftingPlanScreen extends Screen {
         } else {
             activeRequestId = requestId;
         }
-        maxCraftablePending = false;
         if (newPlan.recipeId() == null || newPlan.recipeId().isEmpty()) {
             if (minecraft != null && minecraft.player != null && !newPlan.modWarnings().isEmpty()) {
                 minecraft.player.displayClientMessage(newPlan.modWarnings().get(0), false);
@@ -367,8 +382,6 @@ public final class CraftingPlanScreen extends Screen {
     protected void init() {
         super.init();
         currentRepeat = clampRepeatCount(plan.repeatCount());
-        repeatBuf = Integer.toString(currentRepeat);
-        lastKeyTime = 0;
         lastRefreshCount = currentRepeat;
         altChoices.clear();
         Font font = minecraft.font;
@@ -428,6 +441,7 @@ public final class CraftingPlanScreen extends Screen {
         int matGridH = visibleMatRows * (SLOT_SIZE + 8) + 4;
         materialAreaHeight = (plan.materials().isEmpty() ? 0 : font.lineHeight + 6 + matGridH + 8);
         layoutBottomStack();
+        createRepeatCountInput(font);
 
         int btnW = 80;
         int btnY = height - 24;
@@ -491,6 +505,96 @@ public final class CraftingPlanScreen extends Screen {
                 viewMode == ViewMode.TREE ? "rsi.plan.view_tree" : "rsi.plan.view_card");
     }
 
+    private record RepeatRowLayout(int rowX, int rowW, int cardY, int buttonY,
+                                   int inputX, int inputY, int inputH) {}
+
+    private RepeatRowLayout repeatRowLayout(Font font) {
+        int groupW = 4 * REPEAT_BUTTON_W + 3 * REPEAT_BUTTON_GAP;
+        int innerGap = 12;
+        int contentW = groupW + innerGap + REPEAT_INPUT_W + innerGap + groupW;
+        int rowW = contentW + 28;
+        int rowX = width / 2 - rowW / 2;
+        int cardY = repeatRowY + font.lineHeight + 4;
+        int cardH = 22;
+        int buttonY = cardY + (cardH - REPEAT_BUTTON_H) / 2;
+        int inputH = font.lineHeight + 6;
+        int startX = rowX + 14;
+        int inputX = startX + groupW + innerGap;
+        int inputY = cardY + (cardH - inputH) / 2;
+        return new RepeatRowLayout(rowX, rowW, cardY, buttonY,
+                inputX, inputY, inputH);
+    }
+
+    private void createRepeatCountInput(Font font) {
+        RepeatRowLayout layout = repeatRowLayout(font);
+        repeatCountBox = new EditBox(font, layout.inputX(), layout.inputY(),
+                REPEAT_INPUT_W, layout.inputH(), Component.translatable("rsi.plan.repeat_count"));
+        repeatCountBox.setBordered(false);
+        repeatCountBox.setTextColor(0xFFC8E6C9);
+        repeatCountBox.setTextColorUneditable(0xFF8CB795);
+        repeatCountBox.setMaxLength(Integer.toString(repeatCountLimit()).length());
+        repeatCountBox.setFilter(value -> value.isEmpty()
+                || value.chars().allMatch(Character::isDigit));
+        updatingRepeatCountBox = true;
+        repeatCountBox.setValue(Integer.toString(currentRepeat));
+        updatingRepeatCountBox = false;
+        repeatCountBox.setResponder(this::onRepeatCountEdited);
+        addWidget(repeatCountBox);
+    }
+
+    private void onRepeatCountEdited(String value) {
+        if (updatingRepeatCountBox || value.isEmpty()) return;
+        try {
+            long parsed = Long.parseLong(value);
+            if (parsed < 1L) return;
+            int normalized = clampRepeatCount(parsed);
+            setRepeatCount(normalized, parsed != normalized);
+        } catch (NumberFormatException ignored) {
+            setRepeatCount(repeatCountLimit(), true);
+        }
+    }
+
+    private void setRepeatCount(int count, boolean updateInput) {
+        int normalized = clampRepeatCount(count);
+        boolean changed = normalized != currentRepeat;
+        currentRepeat = normalized;
+        if (updateInput && repeatCountBox != null
+                && !Integer.toString(normalized).equals(repeatCountBox.getValue())) {
+            updatingRepeatCountBox = true;
+            repeatCountBox.setValue(Integer.toString(normalized));
+            updatingRepeatCountBox = false;
+        }
+        if (changed) requestPlanRefresh();
+    }
+
+    private void commitRepeatCountInput() {
+        if (repeatCountBox == null) return;
+        long requested = currentRepeat;
+        try {
+            if (!repeatCountBox.getValue().isEmpty()) {
+                requested = Long.parseLong(repeatCountBox.getValue());
+            }
+        } catch (NumberFormatException ignored) {
+            requested = repeatCountLimit();
+        }
+        setRepeatCount(clampRepeatCount(requested), true);
+    }
+
+    private void focusRepeatCountInput() {
+        if (repeatCountBox == null) return;
+        setFocused(repeatCountBox);
+        repeatCountBox.setFocused(true);
+        repeatCountBox.setCursorPosition(repeatCountBox.getValue().length());
+        repeatCountBox.setHighlightPos(0);
+    }
+
+    private void unfocusRepeatCountInput() {
+        if (repeatCountBox == null || !repeatCountBox.isFocused()) return;
+        commitRepeatCountInput();
+        repeatCountBox.setFocused(false);
+        setFocused(null);
+    }
+
     private void selectOutputDestination(OutputDestination destination) {
         OutputDestination selected = destination == null
                 ? OutputDestination.RS_NETWORK : destination;
@@ -502,7 +606,8 @@ public final class CraftingPlanScreen extends Screen {
     }
 
     private void onConfirm() {
-        if (maxCraftablePending || (plan.executionBlocked() && !selectedPath.isDirty())) return;
+        commitRepeatCountInput();
+        if (plan.executionBlocked() && !selectedPath.isDirty()) return;
         String recipeId = plan.recipeId();
         ResourceLocation targetId = ResourceLocation.tryParse(recipeId);
         if (QuestSubmissionTargetIds
@@ -590,6 +695,43 @@ public final class CraftingPlanScreen extends Screen {
         }
     }
 
+    private void registerBookmarkHit(ItemStack stack, int x, int y, int width, int height,
+                                     int missingCount) {
+        BookmarkHit hit = new BookmarkHit(x, y, width, height,
+                stack.copyWithCount(1), Math.max(1, missingCount));
+        bookmarkHits.add(hit);
+        if (mouseX >= x && mouseX < x + width && mouseY >= y && mouseY < y + height) {
+            hoveredBookmark = hit;
+        }
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private void bookmarkMissingMaterial(BookmarkHit hit) {
+        var runtime = RSJeiPlugin.getRuntime();
+        if (runtime == null || !(runtime.getBookmarkOverlay() instanceof BookmarkOverlay overlay)) {
+            showBookmarkMessage("rsi.plan.bookmark_unavailable", hit.stack());
+            return;
+        }
+        var typed = runtime.getIngredientManager().createTypedIngredient(
+                VanillaTypes.ITEM_STACK, hit.stack().copyWithCount(1));
+        if (typed.isEmpty()) {
+            showBookmarkMessage("rsi.plan.bookmark_unavailable", hit.stack());
+            return;
+        }
+        var bookmark = IngredientBookmark.create(typed.get(), runtime.getIngredientManager());
+        boolean added = ((BookmarkOverlayAccessor) overlay)
+                .rsIntegration$getBookmarkList().add(bookmark);
+        showBookmarkMessage(added ? "rsi.plan.bookmark_added" : "rsi.plan.bookmark_exists",
+                hit.stack());
+    }
+
+    private void showBookmarkMessage(String key, ItemStack stack) {
+        if (minecraft != null && minecraft.player != null) {
+            minecraft.player.displayClientMessage(
+                    Component.translatable(key, stack.getHoverName()), true);
+        }
+    }
+
     private void onOpenMachine() {
         ResourceLocation dim = ResourceLocation.tryParse(plan.executionDim());
         if (dim == null) return;
@@ -607,35 +749,10 @@ public final class CraftingPlanScreen extends Screen {
         planRefreshTick = ticksOpen + 10;
     }
 
-    private void startMaxCraftableSearch() {
-        ResourceLocation recipeId = ResourceLocation.tryParse(plan.recipeId());
-        if (recipeId == null || maxCraftablePending) return;
-        ResourceLocation execDim = null;
-        net.minecraft.core.BlockPos execPos = null;
-        if (plan.executionDim() != null && !plan.executionDim().isEmpty()) {
-            execDim = ResourceLocation.tryParse(plan.executionDim());
-            execPos = new net.minecraft.core.BlockPos(
-                    plan.executionPosX(), plan.executionPosY(), plan.executionPosZ());
-        }
-        long requestId = nextRequestId++;
-        if (nextRequestId <= 0 || nextRequestId > 0x7FFF_FFFF_FFFF_FFFFL) nextRequestId = 1L;
-        activeRequestId = requestId;
-        maxCraftablePending = true;
-        BatchCraftNetworkHandler.CHANNEL.sendToServer(GenericCraftPacket.maxPreview(
-                recipeId, exportForcedSelections(), execDim, execPos, plan.baseItem(),
-                executionTarget(plan.clickedOutput(), plan.targetResult()), requestId));
-    }
-
-    private void cancelPendingMaxCraftableSearch() {
-        if (!maxCraftablePending) return;
-        maxCraftablePending = false;
-        activeRequestId = nextRequestId++;
-        if (nextRequestId <= 0 || nextRequestId > 0x7FFF_FFFF_FFFF_FFFFL) nextRequestId = 1L;
-    }
-
     @Override
     public void tick() {
         super.tick();
+        if (repeatCountBox != null) repeatCountBox.tick();
         ticksOpen++;
         if (planRefreshTick >= 0 && ticksOpen >= planRefreshTick) {
             planRefreshTick = -1;
@@ -651,6 +768,8 @@ public final class CraftingPlanScreen extends Screen {
         this.mouseX = mouseX;
         this.mouseY = mouseY;
         hoveredItemForTooltip = ItemStack.EMPTY;
+        bookmarkHits.clear();
+        hoveredBookmark = null;
         float fade = Math.min(1f, ticksOpen / 8f);
         float ease = UIRenderer.easeOutCubic(fade);
 
@@ -818,7 +937,7 @@ public final class CraftingPlanScreen extends Screen {
                         hoveredTooltipY = my;
                         hoveredTooltipAvail = avail;
                         hoveredTooltipNeeded = need;
-                    });
+                    }, this::registerBookmarkHit);
             if (materialScroll > materialMaxScroll) materialScroll = materialMaxScroll;
             // Draggable scrollbar — grid begins below the header row (top+4 + lineHeight+4).
             int gridTop = materialAreaTop + 8 + font.lineHeight;
@@ -891,13 +1010,11 @@ public final class CraftingPlanScreen extends Screen {
 
     private void drawRepeatRow(GuiGraphics gfx, Font font) {
         String[] leftLabels = {"1", "-10", "-5", "-"};
-        String[] rightLabels = {"+", "+5", "+10", "+64",
-                Component.translatable("rsi.plan.max").getString()};
+        String[] rightLabels = {"+", "+5", "+10", "+64"};
 
-        int btnW = 22, btnH = 14;
-        int gap = 3;
-        String countStr = Integer.toString(currentRepeat);
-        int pillW = Math.max(32, font.width(countStr) + 20);
+        int btnW = REPEAT_BUTTON_W, btnH = REPEAT_BUTTON_H;
+        int gap = REPEAT_BUTTON_GAP;
+        int pillW = REPEAT_INPUT_W;
         int pillH = font.lineHeight + 6;
         int innerGap = 12;
 
@@ -944,10 +1061,11 @@ public final class CraftingPlanScreen extends Screen {
         // ── Count pill ──
         int pillX = bx + innerGap - gap;
         countPillX = pillX; countPillY = cardY + (cardH - pillH) / 2; countPillW = pillW; countPillH = pillH;
-        UIRenderer.pillBadge(gfx, font, countPillX, countPillY, pillW, pillH,
-                0xCC1B5E20, 0xFFC8E6C9, countStr);
+        UIRenderer.rounded(gfx, countPillX, countPillY, pillW, pillH,
+                pillH / 2f, 0xCC1B5E20);
+        renderRepeatCountInput(gfx, font);
 
-        // ── Right buttons: +, +5, +10, +64, Max ──
+        // ── Right buttons: +, +5, +10, +64 ──
         bx = pillX + pillW + innerGap - gap;
         for (int i = 0; i < rightLabels.length; i++) {
             int idx = leftLabels.length + i;
@@ -964,6 +1082,21 @@ public final class CraftingPlanScreen extends Screen {
     }
 
     // ── Step card ─────────────────────────────────────────────────
+
+    private void renderRepeatCountInput(GuiGraphics gfx, Font font) {
+        if (repeatCountBox == null) return;
+        String value = repeatCountBox.getValue();
+        if (repeatCountBox.isFocused()) {
+            repeatCountBox.setX(countPillX + 6);
+            repeatCountBox.setWidth(countPillW - 12);
+        } else {
+            int textWidth = Math.max(1, font.width(value));
+            repeatCountBox.setX(countPillX + (countPillW - textWidth) / 2);
+            repeatCountBox.setWidth(textWidth + 2);
+        }
+        repeatCountBox.setY(countPillY);
+        repeatCountBox.render(gfx, mouseX, mouseY, 0f);
+    }
 
     private static final int GRID_SLOT = 18;
     private static final int GRID_GAP = 1;
@@ -1701,6 +1834,27 @@ public final class CraftingPlanScreen extends Screen {
         int slotY = rowY + (STRIP_ROW_H - 16) / 2;
         for (StripEntry e : entries) {
             gfx.renderItem(e.display(), sx, slotY);
+            if (!leftover && !e.enough()) {
+                int buttonX = sx + 8;
+                int buttonY = slotY;
+                int buttonSize = 8;
+                int screenX = (int) Math.round(buttonX * treeZoom + treePanX);
+                int screenY = (int) Math.round(buttonY * treeZoom + treePanY);
+                int screenSize = Math.max(1, (int) Math.round(buttonSize * treeZoom));
+                boolean buttonHovered = mouseX >= screenX && mouseX < screenX + screenSize
+                        && mouseY >= screenY && mouseY < screenY + screenSize;
+                PlanRenderEngine.drawBookmarkAddButton(gfx, buttonX, buttonY,
+                        buttonSize, buttonHovered);
+                int hitLeft = Math.max(screenX, treeViewLeft);
+                int hitTop = Math.max(screenY, treeViewTop);
+                int hitRight = Math.min(screenX + screenSize, treeViewRight);
+                int hitBottom = Math.min(screenY + screenSize, treeViewBottom);
+                if (hitRight > hitLeft && hitBottom > hitTop) {
+                    registerBookmarkHit(e.display(), hitLeft, hitTop,
+                            hitRight - hitLeft, hitBottom - hitTop,
+                            Math.max(1, e.count() - e.available()));
+                }
+            }
             String cnt = stripCountText(e, leftover);
             int cntCol = leftover ? 0xFFF0B37A : (e.enough() ? 0xFFD8E8DC : 0xFFE0533B);
             gfx.drawString(font, cnt, sx + 18, textY, cntCol, false);
@@ -2036,11 +2190,9 @@ public final class CraftingPlanScreen extends Screen {
             // the debounced refresh (requestPlanRefresh) re-resolves after scrolling stops.
             PlanTreeNode node = nodeAt(mouseX, mouseY);
             if (node != null && node == treeModel.root) {
-                cancelPendingMaxCraftableSearch();
                 int stepBy = hasShiftDown() ? 10 : 1;
                 int dir = delta > 0 ? 1 : -1;
-                currentRepeat = clampRepeatCount(currentRepeat + dir * stepBy);
-                requestPlanRefresh();
+                setRepeatCount(clampRepeatCount(currentRepeat + (long) dir * stepBy), true);
                 return true;
             }
             treePanY += delta * 20;
@@ -2080,6 +2232,28 @@ public final class CraftingPlanScreen extends Screen {
 
     @Override
     public boolean mouseClicked(double mx, double my, int button) {
+        if (button == 0) {
+            boolean overRepeatInput = mx >= countPillX && mx < countPillX + countPillW
+                    && my >= countPillY && my < countPillY + countPillH;
+            if (!overRepeatInput) unfocusRepeatCountInput();
+            for (BookmarkHit hit : bookmarkHits) {
+                if (mx >= hit.x() && mx < hit.x() + hit.w()
+                        && my >= hit.y() && my < hit.y() + hit.h()) {
+                    bookmarkMissingMaterial(hit);
+                    return true;
+                }
+            }
+            if (overRepeatInput) {
+                if (repeatCountBox != null && repeatCountBox.isFocused()) {
+                    repeatCountBox.setX(countPillX + 6);
+                    repeatCountBox.setWidth(countPillW - 12);
+                    repeatCountBox.mouseClicked(mx, my, button);
+                } else {
+                    focusRepeatCountInput();
+                }
+                return true;
+            }
+        }
         if (button == 0 && outputSelectorH > 0
                 && mx >= outputSelectorX && mx < outputSelectorX + outputSegmentW
                 && my >= outputSelectorY && my < outputSelectorY + outputSelectorH) {
@@ -2186,28 +2360,22 @@ public final class CraftingPlanScreen extends Screen {
             }
         }
         if (button == 0) {
-            // Repeat row quick-set buttons (9 total)
+            // Repeat row quick-set buttons.
             for (int i = 0; i < repeatBtnX.length; i++) {
                 if (mx >= repeatBtnX[i] && mx <= repeatBtnX[i] + repeatBtnW[i]
                         && my >= repeatBtnY[i] && my <= repeatBtnY[i] + repeatBtnH[i]) {
-                    if (i == 8) {
-                        startMaxCraftableSearch();
-                        return true;
-                    }
-                    cancelPendingMaxCraftableSearch();
+                    int requested = currentRepeat;
                     switch (i) {
-                        case 0: currentRepeat = 1; break;
-                        case 1: currentRepeat = Math.max(1, currentRepeat - 10); break;
-                        case 2: currentRepeat = Math.max(1, currentRepeat - 5); break;
-                        case 3: currentRepeat = Math.max(1, currentRepeat - 1); break;
-                        case 4: currentRepeat = clampRepeatCount(currentRepeat + 1); break;
-                        case 5: currentRepeat = clampRepeatCount(currentRepeat + 5); break;
-                        case 6: currentRepeat = clampRepeatCount(currentRepeat + 10); break;
-                        case 7: currentRepeat = clampRepeatCount(currentRepeat + 64L); break;
+                        case 0: requested = 1; break;
+                        case 1: requested = Math.max(1, currentRepeat - 10); break;
+                        case 2: requested = Math.max(1, currentRepeat - 5); break;
+                        case 3: requested = Math.max(1, currentRepeat - 1); break;
+                        case 4: requested = clampRepeatCount(currentRepeat + 1L); break;
+                        case 5: requested = clampRepeatCount(currentRepeat + 5L); break;
+                        case 6: requested = clampRepeatCount(currentRepeat + 10L); break;
+                        case 7: requested = clampRepeatCount(currentRepeat + 64L); break;
                     }
-                    repeatBuf = Integer.toString(currentRepeat);
-                    lastKeyTime = 0;
-                    requestPlanRefresh();
+                    setRepeatCount(requested, true);
                     return true;
                 }
             }
@@ -2248,6 +2416,17 @@ public final class CraftingPlanScreen extends Screen {
 
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        if (repeatCountBox != null && repeatCountBox.isFocused()) {
+            if (keyCode == GLFW.GLFW_KEY_ENTER || keyCode == GLFW.GLFW_KEY_KP_ENTER) {
+                unfocusRepeatCountInput();
+                return true;
+            }
+            if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
+                unfocusRepeatCountInput();
+                return true;
+            }
+            return super.keyPressed(keyCode, scanCode, modifiers);
+        }
         boolean ctrl = (modifiers & GLFW.GLFW_MOD_CONTROL) != 0;
         // Ctrl+0 — reset camera. Must precede the digit handler, which also matches KEY_0.
         if (ctrl && keyCode == GLFW.GLFW_KEY_0) {
@@ -2287,30 +2466,6 @@ public final class CraftingPlanScreen extends Screen {
         // Enter — one-click start (§2.5 speedrun): apply branch selections and execute.
         if (keyCode == GLFW.GLFW_KEY_ENTER || keyCode == GLFW.GLFW_KEY_KP_ENTER) {
             onConfirm();
-            return true;
-        }
-        // Digit keys accumulate the whole-plan repeat count (ignored while Ctrl is held).
-        if (!ctrl && keyCode >= GLFW.GLFW_KEY_0 && keyCode <= GLFW.GLFW_KEY_9) {
-            cancelPendingMaxCraftableSearch();
-            long now = System.currentTimeMillis();
-            if (now - lastKeyTime > 600) repeatBuf = "";
-            lastKeyTime = now;
-            repeatBuf += (char)('0' + (keyCode - GLFW.GLFW_KEY_0));
-            try {
-                currentRepeat = clampRepeatCount(Long.parseLong(repeatBuf));
-                repeatBuf = Integer.toString(currentRepeat);
-            } catch (NumberFormatException ignored) {
-                currentRepeat = repeatCountLimit();
-                repeatBuf = Integer.toString(currentRepeat);
-            }
-            requestPlanRefresh();
-            return true;
-        }
-        if (keyCode == GLFW.GLFW_KEY_BACKSPACE || keyCode == GLFW.GLFW_KEY_DELETE) {
-            cancelPendingMaxCraftableSearch();
-            repeatBuf = "1";
-            currentRepeat = 1;
-            lastKeyTime = 0;
             return true;
         }
         return super.keyPressed(keyCode, scanCode, modifiers);
@@ -2418,6 +2573,14 @@ public final class CraftingPlanScreen extends Screen {
      *  Builds the component list via {@code getTooltipLines()} so Forge's
      *  {@code RenderTooltipEvent} fires and Legendary Tooltips can intercept. */
     private void renderDeferredTooltip(GuiGraphics gfx, Font font) {
+        if (hoveredBookmark != null) {
+            gfx.renderComponentTooltip(font, List.of(
+                    hoveredBookmark.stack().getHoverName(),
+                    Component.translatable("rsi.plan.bookmark_missing",
+                            hoveredBookmark.missingCount()).withStyle(ChatFormatting.GREEN)),
+                    mouseX, mouseY);
+            return;
+        }
         if (hoveredItemForTooltip.isEmpty()) return;
 
         List<net.minecraft.network.chat.Component> lines = new ArrayList<>(

@@ -247,6 +247,7 @@
   "rsi.malum_crucible.warn.already_crafting": "§e精魂坩埚正在合成中，请稍后再试",
   "rsi.malum_crucible.warn.catalyst_mismatch": "§e坩埚中已有不匹配的催化剂 — 请先取出",
   "rsi.malum_crucible.error.no_catalyst": "§c无法将催化剂放入坩埚",
+  "rsi.malum_crucible.error.recipe_rejected": "§c精魂坩埚未接受配方 %s，请检查催化剂、灵魂材料和多方块结构",
   "rsi.malum_crucible.warn.spirit_required": "§7精魂需求: %s",
   "rsi.malum_crucible.warn.spirit_slots_insufficient": "§e坩埚只有 %s 个精魂槽位，配方需要 %s 个",
 
@@ -412,7 +413,10 @@
   "rsi.plan.materials": "材料",
   "rsi.plan.tooltip.available": "库存",
   "rsi.plan.repeat_count": "次数:",
-  "rsi.plan.max": "最大",
+  "rsi.plan.bookmark_missing": "加入 JEI 收藏（缺少：%s）",
+  "rsi.plan.bookmark_added": "已将 %s 加入 JEI 收藏",
+  "rsi.plan.bookmark_exists": "%s 已在 JEI 收藏中",
+  "rsi.plan.bookmark_unavailable": "无法将 %s 加入 JEI 收藏",
 
   "rsi.async.chain_started": "§a已启动多方块合成链（%s 步）。完成后物品将送入 RS 网络。",
   "rsi.async.cancel_button": "[取消合成]",
@@ -709,6 +713,7 @@
   "rsi.aether.error.machine_type_mismatch": "§c绑定机器类型不匹配：配方需要 %s 但绑定的是 %s。请绑定正确的天境机器类型。",
   "rsi.cooler.fuel_warning": "§7魔凝机使用青金石作为燃料",
   "rsi.cooler.no_fuel": "§7没有青金石 — 无法开始制冷",
+  "rsi.cooler.machine_busy": "§c魔凝机正在处理其他配方，请等待完成后再下单",
   "rsi.batch.mod.aether": "天境熔炉",
   "rsi.batch.mod.aether_freezer": "天境冷冻器",
   "rsi.batch.mod.aether_incubator": "天境孵化器",

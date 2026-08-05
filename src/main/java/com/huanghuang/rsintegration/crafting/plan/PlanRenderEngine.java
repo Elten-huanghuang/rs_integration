@@ -190,7 +190,8 @@ public final class PlanRenderEngine {
                                    int contentW, int areaHeight,
                                    Map<IngredientKey, PlanResponse.Availability> materials,
                                    int mouseX, int mouseY, int scrollOffset,
-                                   MaterialTooltipSink tooltipSink) {
+                                   MaterialTooltipSink tooltipSink,
+                                   MaterialBookmarkSink bookmarkSink) {
         UIRenderer.roundedGradient(gfx, left, top, contentW, areaHeight, 6f,
                 0xE6141E18, 0xE6101814);
         gfx.fill(left + 1, top + 2, left + 4, top + areaHeight - 2, 0xFF44AA66);
@@ -252,6 +253,25 @@ public final class PlanRenderEngine {
                 // vanilla stack-count overlay to avoid a second number.
                 gfx.renderItemDecorations(font, stack, cx + 1, cy + 1, "");
 
+                if (have < needed) {
+                    int bookmarkX = cx + 9;
+                    int bookmarkY = cy;
+                    int bookmarkSize = 9;
+                    boolean bookmarkHovered = mouseY >= gridTop && mouseY <= gridBottom
+                            && mouseX >= bookmarkX && mouseX < bookmarkX + bookmarkSize
+                            && mouseY >= bookmarkY && mouseY < bookmarkY + bookmarkSize;
+                    drawBookmarkAddButton(gfx, bookmarkX, bookmarkY,
+                            bookmarkSize, bookmarkHovered);
+                    if (bookmarkSink != null) {
+                        int hitTop = Math.max(bookmarkY, gridTop);
+                        int hitBottom = Math.min(bookmarkY + bookmarkSize, gridBottom);
+                        if (hitBottom > hitTop) {
+                            bookmarkSink.addBookmarkButton(stack, bookmarkX, hitTop,
+                                    bookmarkSize, hitBottom - hitTop, needed - have);
+                        }
+                    }
+                }
+
                 if (tooltipSink != null
                         && mouseY >= gridTop && mouseY <= gridBottom
                         && mouseX >= cx - 1 && mouseX <= cx + SLOT_SIZE + 1
@@ -296,6 +316,23 @@ public final class PlanRenderEngine {
     @FunctionalInterface
     public interface MaterialTooltipSink {
         void setHoveredItem(ItemStack stack, int mouseX, int mouseY, int available, int needed);
+    }
+
+    @FunctionalInterface
+    public interface MaterialBookmarkSink {
+        void addBookmarkButton(ItemStack stack, int x, int y, int width, int height,
+                               int missingCount);
+    }
+
+    /** Compact overlay control that keeps the existing material-cell geometry unchanged. */
+    public static void drawBookmarkAddButton(GuiGraphics gfx, int x, int y, int size,
+                                             boolean hovered) {
+        UIRenderer.rounded(gfx, x, y, size, size, 2f,
+                hovered ? 0xEE338855 : 0xDD182A20);
+        int color = hovered ? 0xFFFFFFFF : 0xFF9BE7B5;
+        int center = size / 2;
+        gfx.fill(x + 2, y + center, x + size - 2, y + center + 1, color);
+        gfx.fill(x + center, y + 2, x + center + 1, y + size - 2, color);
     }
 
     // ── Formatting helpers ────────────────────────────────────────────

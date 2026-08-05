@@ -20,4 +20,20 @@ class WarmUpBudgetPolicyTest {
         assertEquals(8_000_000L, budgets.recipeIndexNanos());
         assertEquals(4_000_000L, budgets.recipeGraphNanos());
     }
+
+    @Test
+    void busyTickShrinksWarmUpToAvailableHeadroom() {
+        WarmUpBudgetPolicy.Budgets budgets = WarmUpBudgetPolicy.select(true, 43_000_000L);
+
+        assertEquals(2_000_000L, budgets.recipeIndexNanos());
+        assertEquals(2_000_000L, budgets.recipeGraphNanos());
+    }
+
+    @Test
+    void overloadedTickStillMakesBoundedProgress() {
+        WarmUpBudgetPolicy.Budgets budgets = WarmUpBudgetPolicy.select(false, 60_000_000L);
+
+        assertEquals(250_000L, budgets.recipeIndexNanos());
+        assertEquals(250_000L, budgets.recipeGraphNanos());
+    }
 }

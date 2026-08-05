@@ -527,7 +527,8 @@ public final class RSIntegrationConfig {
                         "The first item the RS network can supply is used. When none of these",
                         "are available, the system falls back to any safe bulk fuel (never tools,",
                         "bows, container fuels like lava buckets, or NBT/enchanted items).",
-                        "If the fuel slot already holds a valid fuel, nothing is inserted.",
+                        "An existing valid fuel stack is topped up to the slot limit; unused",
+                        "automatically supplied fuel is returned after the craft finishes.",
                         "Format: \"modid:item_id\" per line.")
                 .defineList("crockpotFuelPriority",
                         List.of("minecraft:coal", "minecraft:charcoal", "minecraft:coal_block"),
