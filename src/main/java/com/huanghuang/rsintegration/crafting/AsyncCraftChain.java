@@ -3,6 +3,8 @@ package com.huanghuang.rsintegration.crafting;
 import com.huanghuang.rsintegration.compat.ftbquests.ExternalItemProgressBridge;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.mods.crockpot.CrockPotBatchDelegate;
+import com.huanghuang.rsintegration.mods.embers.EreAlchemyDelegateMode;
+import com.huanghuang.rsintegration.mods.embers.KnownCodeSavedData;
 import com.huanghuang.rsintegration.util.InsertedStackDelta;
 import com.huanghuang.rsintegration.util.LogSampler;
 
@@ -918,9 +920,7 @@ public final class AsyncCraftChain {
         int idx = stepIndex(nodeId);
         CraftingResolver.ResolutionStep step = steps.get(idx);
         if (step.recipeId().equals(CraftingResolver.TAINT_EARTH_HEART_STEP)) return true;
-        IBatchDelegate probe = step.inferMode()
-                ? step.modType().createInferDelegate()
-                : createDelegate(step.modType());
+        IBatchDelegate probe = createStepDelegate(step);
         GraphConcurrencyPolicy.Decision decision = concurrencyDecision(step, probe);
         if (decision.exclusive()) {
             RSIntegrationMod.LOGGER.debug(
@@ -1107,8 +1107,7 @@ public final class AsyncCraftChain {
             boolean bSame = b.dim().equals(playerDim);
             return aSame == bSame ? 0 : aSame ? -1 : 1;
         });
-        IBatchDelegate delegate = step.inferMode()
-                ? step.modType().createInferDelegate() : createDelegate(step.modType());
+        IBatchDelegate delegate = createStepDelegate(step);
         if (delegate == null) {
             return PreparationResult.fatal("No delegate for mod type " + step.modType().id());
         }
@@ -1152,8 +1151,7 @@ public final class AsyncCraftChain {
                     protectionRejection = true;
                     continue;
                 }
-                IBatchDelegate candidate = eligible.isEmpty() ? delegate
-                        : step.inferMode() ? step.modType().createInferDelegate() : createDelegate(step.modType());
+                IBatchDelegate candidate = eligible.isEmpty() ? delegate : createStepDelegate(step);
                 if (candidate == null) {
                     fatalDetail = "delegate factory returned null for " + step.modType().id();
                     continue;
@@ -2493,8 +2491,7 @@ public final class AsyncCraftChain {
     private IBatchDelegate startModStep(CraftingResolver.ResolutionStep step, ServerPlayer online) {
         machineStartFailureMessage = null;
         if (step.modType().isVirtual()) {
-            IBatchDelegate virtualDelegate = step.inferMode()
-                    ? step.modType().createInferDelegate() : createDelegate(step.modType());
+            IBatchDelegate virtualDelegate = createStepDelegate(step);
             if (virtualDelegate == null || !PreparationMessageScope.validate(
                     virtualDelegate, online, step.recipeId(), null, BlockPos.ZERO)) {
                 return null;
@@ -2596,9 +2593,7 @@ public final class AsyncCraftChain {
             // Fall through: single-machine path below
         }
 
-        IBatchDelegate initialDelegate = step.inferMode()
-                ? step.modType().createInferDelegate()
-                : createDelegate(step.modType());
+        IBatchDelegate initialDelegate = createStepDelegate(step);
         if (initialDelegate == null) return null;
 
         // GenericBatchDelegate computes the result from pre-reserved materials
@@ -2643,8 +2638,7 @@ public final class AsyncCraftChain {
         Component fatalUserMessage = null;
         for (BoundMachine m : candidateSelection.usable()) {
             try {
-                IBatchDelegate candidate = delegate == null ? initialDelegate
-                        : step.inferMode() ? step.modType().createInferDelegate() : createDelegate(step.modType());
+                IBatchDelegate candidate = delegate == null ? initialDelegate : createStepDelegate(step);
                 if (candidate == null) continue;
                 IBatchDelegate.PreparationResult preparation = PreparationMessageScope.prepare(
                         candidate, online, step.recipeId(), m.dim(), m.pos());
@@ -2993,8 +2987,7 @@ public final class AsyncCraftChain {
         // one delegate per machine. Pass the same recipe-aware capability contract
         // used by graph execution; otherwise the operation kernel accepts the group
         // but rejects every child as capability-exclusive after materials are committed.
-        IBatchDelegate capabilityProbe = step.inferMode()
-                ? step.modType().createInferDelegate() : createDelegate(step.modType());
+        IBatchDelegate capabilityProbe = createStepDelegate(step);
         var capabilityDecision = concurrencyDecision(step, capabilityProbe);
         if (capabilityDecision.exclusive()) {
             RSIntegrationMod.LOGGER.debug(ctx.format(
@@ -3621,11 +3614,7 @@ public final class AsyncCraftChain {
     }
 
     private ItemStack insertIntoPlayerInventory(ServerPlayer player, ItemStack stack) {
-        ItemStack remainder = stack.copy();
-        player.getInventory().add(remainder);
-        player.getInventory().setChanged();
-        player.inventoryMenu.broadcastChanges();
-        return remainder;
+        return PlayerUtils.insertIntoPlayerInventory(player, stack);
     }
 
     private void fireOnDone() {
@@ -3983,6 +3972,22 @@ public final class AsyncCraftChain {
     }
 
     //  delegate factory
+
+    private IBatchDelegate createStepDelegate(CraftingResolver.ResolutionStep step) {
+        boolean codeKnown = false;
+        if (step.inferMode()
+                && com.huanghuang.rsintegration.util.ModIds.ID_EMBERS_ALCHEMY
+                .equals(step.modType().id())) {
+            ServerPlayer player = resolvePlayer();
+            ServerLevel dataLevel = player != null ? player.serverLevel() : server.overworld();
+            KnownCodeSavedData savedData = KnownCodeSavedData.get(dataLevel);
+            savedData.setWorldSeed(dataLevel.getSeed());
+            codeKnown = savedData.hasCode(step.recipeId().toString());
+        }
+        boolean useInference = EreAlchemyDelegateMode.shouldUseInference(
+                step.modType().id(), step.inferMode(), codeKnown);
+        return useInference ? step.modType().createInferDelegate() : createDelegate(step.modType());
+    }
 
     private static IBatchDelegate createDelegate(ModType type) {
         // 1. Check version-specific delegate registry first

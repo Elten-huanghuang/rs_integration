@@ -417,6 +417,10 @@
   "rsi.plan.bookmark_added": "已将 %s 加入 JEI 收藏",
   "rsi.plan.bookmark_exists": "%s 已在 JEI 收藏中",
   "rsi.plan.bookmark_unavailable": "无法将 %s 加入 JEI 收藏",
+  "rsi.plan.bookmark_all.action": "全部加入 JEI 收藏",
+  "rsi.plan.bookmark_all.tooltip": "将所有缺失的最终原材料加入 JEI 收藏",
+  "rsi.plan.bookmark_all.result": "JEI 收藏：新增 %s 种，已存在 %s 种，无法加入 %s 种",
+  "rsi.plan.bookmark_all.unavailable": "JEI 收藏当前不可用",
 
   "rsi.async.chain_started": "§a已启动多方块合成链（%s 步）。完成后物品将送入 RS 网络。",
   "rsi.async.cancel_button": "[取消合成]",

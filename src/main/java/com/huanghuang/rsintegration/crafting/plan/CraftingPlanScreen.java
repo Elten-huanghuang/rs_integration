@@ -48,6 +48,7 @@ import net.minecraftforge.fml.loading.FMLPaths;
 import mezz.jei.api.constants.VanillaTypes;
 import mezz.jei.gui.bookmarks.IngredientBookmark;
 import mezz.jei.gui.overlay.bookmarks.BookmarkOverlay;
+import mezz.jei.api.runtime.IJeiRuntime;
 
 import javax.annotation.Nullable;
 import java.nio.file.Path;
@@ -152,6 +153,9 @@ public final class CraftingPlanScreen extends Screen {
     private record StripEntry(ItemStack display, IngredientKey key, int count, int available, boolean enough) {}
     private final List<BookmarkHit> bookmarkHits = new ArrayList<>();
     private record BookmarkHit(int x, int y, int w, int h, ItemStack stack, int missingCount) {}
+    private enum BookmarkResult { ADDED, EXISTS, UNAVAILABLE }
+    private int bookmarkAllActionX, bookmarkAllActionY;
+    private int bookmarkAllActionW, bookmarkAllActionH;
     @Nullable
     private BookmarkHit hoveredBookmark;
     // Card-view fold toggle hitboxes (rebuilt each frame, read during mouseClicked).
@@ -498,6 +502,7 @@ public final class CraftingPlanScreen extends Screen {
                 .pos(width - 78, 6)
                 .size(68, 18)
                 .build());
+
     }
 
     private Component viewToggleLabel() {
@@ -712,23 +717,59 @@ public final class CraftingPlanScreen extends Screen {
             showBookmarkMessage("rsi.plan.bookmark_unavailable", hit.stack());
             return;
         }
-        var typed = runtime.getIngredientManager().createTypedIngredient(
-                VanillaTypes.ITEM_STACK, hit.stack().copyWithCount(1));
-        if (typed.isEmpty()) {
-            showBookmarkMessage("rsi.plan.bookmark_unavailable", hit.stack());
+        BookmarkResult result = addJeiBookmark(runtime, overlay, hit.stack());
+        showBookmarkMessage(switch (result) {
+            case ADDED -> "rsi.plan.bookmark_added";
+            case EXISTS -> "rsi.plan.bookmark_exists";
+            case UNAVAILABLE -> "rsi.plan.bookmark_unavailable";
+        }, hit.stack());
+    }
+
+    private void bookmarkAllMissingMaterials() {
+        List<ItemStack> missing = MissingMaterialBookmarkList.from(plan);
+        IJeiRuntime runtime = RSJeiPlugin.getRuntime();
+        if (runtime == null || !(runtime.getBookmarkOverlay() instanceof BookmarkOverlay overlay)) {
+            showBookmarkBatchMessage("rsi.plan.bookmark_all.unavailable");
             return;
+        }
+
+        int added = 0;
+        int existing = 0;
+        int unavailable = 0;
+        for (ItemStack stack : missing) {
+            switch (addJeiBookmark(runtime, overlay, stack)) {
+                case ADDED -> added++;
+                case EXISTS -> existing++;
+                case UNAVAILABLE -> unavailable++;
+            }
+        }
+        showBookmarkBatchMessage("rsi.plan.bookmark_all.result", added, existing, unavailable);
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private BookmarkResult addJeiBookmark(IJeiRuntime runtime, BookmarkOverlay overlay,
+                                          ItemStack stack) {
+        var typed = runtime.getIngredientManager().createTypedIngredient(
+                VanillaTypes.ITEM_STACK, stack.copyWithCount(1));
+        if (typed.isEmpty()) {
+            return BookmarkResult.UNAVAILABLE;
         }
         var bookmark = IngredientBookmark.create(typed.get(), runtime.getIngredientManager());
         boolean added = ((BookmarkOverlayAccessor) overlay)
                 .rsIntegration$getBookmarkList().add(bookmark);
-        showBookmarkMessage(added ? "rsi.plan.bookmark_added" : "rsi.plan.bookmark_exists",
-                hit.stack());
+        return added ? BookmarkResult.ADDED : BookmarkResult.EXISTS;
     }
 
     private void showBookmarkMessage(String key, ItemStack stack) {
         if (minecraft != null && minecraft.player != null) {
             minecraft.player.displayClientMessage(
                     Component.translatable(key, stack.getHoverName()), true);
+        }
+    }
+
+    private void showBookmarkBatchMessage(String key, Object... args) {
+        if (minecraft != null && minecraft.player != null) {
+            minecraft.player.displayClientMessage(Component.translatable(key, args), true);
         }
     }
 
@@ -769,6 +810,8 @@ public final class CraftingPlanScreen extends Screen {
         this.mouseY = mouseY;
         hoveredItemForTooltip = ItemStack.EMPTY;
         bookmarkHits.clear();
+        bookmarkAllActionW = 0;
+        bookmarkAllActionH = 0;
         hoveredBookmark = null;
         float fade = Math.min(1f, ticksOpen / 8f);
         float ease = UIRenderer.easeOutCubic(fade);
@@ -1034,6 +1077,7 @@ public final class CraftingPlanScreen extends Screen {
         int labelW = font.width(label);
         UIRenderer.textBackdrop(gfx, font, rowX + (rowW - labelW) / 2, repeatRowY, label, C_TEXT_BACKDROP);
         gfx.drawString(font, label, rowX + (rowW - labelW) / 2, repeatRowY, 0xFFCCCCCC);
+        renderBookmarkAllAction(gfx, font, 20, repeatRowY);
 
         // ── Button card ──
         int cardY = repeatRowY + font.lineHeight + 4;
@@ -1630,6 +1674,7 @@ public final class CraftingPlanScreen extends Screen {
             String hdr = Component.translatable("rsi.plan.missing_header").getString();
             UIRenderer.textBackdrop(gfx, font, left + 10, my, hdr, C_TEXT_BACKDROP);
             gfx.drawString(font, hdr, left + 10, my, 0xFFFF6666);
+
             my += font.lineHeight + 4;
             String joined = String.join(", ", plan.missing());
             for (String line : UIRenderer.wrapLines(font, "  " + joined, maxLineW)) {
@@ -1646,6 +1691,31 @@ public final class CraftingPlanScreen extends Screen {
                 gfx.drawString(font, display, left + 10, my, 0xFFDDAA00);
                 my += font.lineHeight + 4;
             }
+        }
+    }
+
+    private void renderBookmarkAllAction(GuiGraphics gfx, Font font, int x, int y) {
+        if (MissingMaterialBookmarkList.from(plan).isEmpty()) return;
+
+        String action = Component.translatable("rsi.plan.bookmark_all.action").getString();
+        int accentW = 3;
+        int accentGap = 6;
+        int textX = x + accentW + accentGap;
+        bookmarkAllActionX = x;
+        bookmarkAllActionY = y - 2;
+        bookmarkAllActionW = accentW + accentGap + font.width(action);
+        bookmarkAllActionH = font.lineHeight + 4;
+        boolean hovered = mouseX >= bookmarkAllActionX
+                && mouseX < bookmarkAllActionX + bookmarkAllActionW
+                && mouseY >= bookmarkAllActionY
+                && mouseY < bookmarkAllActionY + bookmarkAllActionH;
+        gfx.fill(x, y - 2, x + accentW, y + font.lineHeight + 2,
+                hovered ? 0xFF69D98A : C_ACCENT_NEUTRAL);
+        gfx.drawString(font, action, textX, y,
+                hovered ? 0xFFA8E6B5 : 0xFF78B889, false);
+        if (hovered) {
+            gfx.fill(textX, y + font.lineHeight + 1,
+                    textX + font.width(action), y + font.lineHeight + 2, 0xCC78D891);
         }
     }
 
@@ -2236,6 +2306,12 @@ public final class CraftingPlanScreen extends Screen {
             boolean overRepeatInput = mx >= countPillX && mx < countPillX + countPillW
                     && my >= countPillY && my < countPillY + countPillH;
             if (!overRepeatInput) unfocusRepeatCountInput();
+            if (bookmarkAllActionW > 0
+                    && mx >= bookmarkAllActionX && mx < bookmarkAllActionX + bookmarkAllActionW
+                    && my >= bookmarkAllActionY && my < bookmarkAllActionY + bookmarkAllActionH) {
+                bookmarkAllMissingMaterials();
+                return true;
+            }
             for (BookmarkHit hit : bookmarkHits) {
                 if (mx >= hit.x() && mx < hit.x() + hit.w()
                         && my >= hit.y() && my < hit.y() + hit.h()) {

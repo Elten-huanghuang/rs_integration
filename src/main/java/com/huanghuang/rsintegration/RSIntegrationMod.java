@@ -98,7 +98,7 @@ public final class RSIntegrationMod {
             "botania_mana_pool", "botania_pure_daisy", "botania_runic_altar",
             "botania_terra_plate", "confluence", "crabbersdelight", "crockpot",
             "distant_worlds_lithum_altar", "eidolon", "eidolon_worktable",
-            "embers_alchemy", "farmersdelight", "farmersdelight_cooking_pot",
+            "farmersdelight", "farmersdelight_cooking_pot",
             "farmersdelight_skillet", "farmersrespite", "farmersrespite_kettle",
             "forbidden_arcanus", "forbidden_arcanus_clibano", "goety",
             "goety_cursed_infuser", "immortalers_delight", "ironfurnaces_blast_furnace",

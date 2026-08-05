@@ -9,16 +9,16 @@ class WarmUpBudgetPolicyTest {
     void backgroundWarmUpUsesModerateBudgets() {
         WarmUpBudgetPolicy.Budgets budgets = WarmUpBudgetPolicy.select(false);
 
-        assertEquals(4_000_000L, budgets.recipeIndexNanos());
-        assertEquals(2_000_000L, budgets.recipeGraphNanos());
+        assertEquals(16_000_000L, budgets.recipeIndexNanos());
+        assertEquals(8_000_000L, budgets.recipeGraphNanos());
     }
 
     @Test
     void waitingCraftRequestTemporarilyRaisesBudgets() {
         WarmUpBudgetPolicy.Budgets budgets = WarmUpBudgetPolicy.select(true);
 
-        assertEquals(8_000_000L, budgets.recipeIndexNanos());
-        assertEquals(4_000_000L, budgets.recipeGraphNanos());
+        assertEquals(24_000_000L, budgets.recipeIndexNanos());
+        assertEquals(12_000_000L, budgets.recipeGraphNanos());
     }
 
     @Test

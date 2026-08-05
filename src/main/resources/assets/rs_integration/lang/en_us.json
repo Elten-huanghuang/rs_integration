@@ -413,6 +413,10 @@
   "rsi.plan.bookmark_added": "Added %s to JEI bookmarks",
   "rsi.plan.bookmark_exists": "%s is already in JEI bookmarks",
   "rsi.plan.bookmark_unavailable": "JEI bookmarks are unavailable for %s",
+  "rsi.plan.bookmark_all.action": "Bookmark all in JEI",
+  "rsi.plan.bookmark_all.tooltip": "Add all missing raw materials to JEI bookmarks",
+  "rsi.plan.bookmark_all.result": "JEI bookmarks: %s added, %s already present, %s unavailable",
+  "rsi.plan.bookmark_all.unavailable": "JEI bookmarks are unavailable",
 
   "rsi.async.chain_started": "§aMulti-step crafting chain started (%s steps). Items will be delivered to the RS network when complete.",
   "rsi.async.cancel_button": "[Cancel]",

@@ -84,6 +84,23 @@ class GenericCraftPacketTest extends BootstrapTest {
     }
 
     @Test
+    void marketRepeatAvailabilityUsesArithmeticInsteadOfExpandedIngredients() {
+        MarketRecipeWrapper market = new MarketRecipeWrapper(UUID.randomUUID(),
+                new ItemStack(Items.TOTEM_OF_UNDYING), new ItemStack(Items.EMERALD, 32));
+        Map<CraftingResolver.StackKey, Integer> available = Map.of(
+                new CraftingResolver.StackKey(Items.EMERALD, null), 2048);
+
+        var exact = GenericCraftPacket.marketTradeAvailability(market, available, 64);
+        var shortage = GenericCraftPacket.marketTradeAvailability(market, available, 65);
+
+        assertEquals(2048, exact.required());
+        assertEquals(2048, exact.available());
+        assertTrue(exact.feasible());
+        assertEquals(2080, shortage.required());
+        assertFalse(shortage.feasible());
+    }
+
+    @Test
     void asyncResultMustRemainBoundToItsOriginalRequest() {
         UUID playerId = UUID.randomUUID();
         ResourceLocation recipeId = new ResourceLocation("test", "recipe");

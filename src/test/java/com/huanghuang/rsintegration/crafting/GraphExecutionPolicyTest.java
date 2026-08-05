@@ -1,6 +1,8 @@
 package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.mods.embers.EreAlchemyRSModule;
+import com.huanghuang.rsintegration.util.ModIds;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -56,6 +58,21 @@ class GraphExecutionPolicyTest {
 
         assertTrue(decision.useGraphExecutor());
         assertEquals(GraphExecutionPolicy.Reason.GRAPH_COMPLETE, decision.reason());
+    }
+
+    @Test
+    void embersAlchemyUsesFlatExecutionForTabletLocking() {
+        EreAlchemyRSModule.INSTANCE.registerModType();
+        ModType alchemy = ModType.byId(ModIds.ID_EMBERS_ALCHEMY);
+
+        GraphExecutionPolicy.Decision decision = GraphExecutionPolicy.decide(false, alchemy);
+
+        assertFalse(decision.useGraphExecutor());
+        assertEquals(ModType.GraphExecutionAudit.FLAT_REQUIRED,
+                alchemy.graphExecutionAudit());
+        assertEquals(GraphExecutionPolicy.Reason.MOD_REQUIRES_FLAT_EXECUTION,
+                decision.reason());
+        assertTrue(decision.detail().contains("tablet locking"));
     }
 
     @Test
