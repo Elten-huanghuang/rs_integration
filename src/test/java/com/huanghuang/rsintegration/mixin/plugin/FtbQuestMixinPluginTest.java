@@ -15,5 +15,11 @@ class FtbQuestMixinPluginTest {
         assertFalse(plugin.shouldApplyMixin(
                 "dev.ftb.mods.ftbquests.net.ClearRepeatCooldownMessage",
                 "com.huanghuang.rsintegration.mixin.ftbquests.ClearRepeatCooldownMessageMixin"));
+        assertFalse(plugin.shouldApplyMixin(
+                "dev.ftb.mods.ftbquests.quest.reward.ItemReward",
+                "com.huanghuang.rsintegration.mixin.ftbquests.ItemRewardMixin"));
+        assertFalse(plugin.shouldApplyMixin(
+                "dev.ftb.mods.ftbquests.net.ClaimAllRewardsMessage",
+                "com.huanghuang.rsintegration.mixin.ftbquests.ClaimAllRewardsMessageMixin"));
     }
 }

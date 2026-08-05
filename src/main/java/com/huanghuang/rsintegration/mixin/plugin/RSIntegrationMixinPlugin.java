@@ -109,6 +109,14 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
             return isClassPresent("dev.ftb.mods.ftbquests.util.FTBQuestsInventoryListener")
                     && hasMethod(targetClassName, "lambda$detect$0");
         }
+        if (mixinClassName.contains("ftbquests.ClaimAllRewardsMessageMixin")) {
+            return isClassPresent("dev.ftb.mods.ftbquests.net.ClaimAllRewardsMessage")
+                    && hasMethod(targetClassName, "lambda$handle$1");
+        }
+        if (mixinClassName.contains("ftbquests.ItemRewardMixin")) {
+            return isClassPresent("dev.ftb.mods.ftbquests.quest.reward.ItemReward")
+                    && hasMethod(targetClassName, "claim");
+        }
         if (mixinClassName.contains("ftbquests.ItemTaskSequenceAccessor")) {
             return isClassPresent("dev.ftb.mods.ftbquests.quest.task.Task")
                     && hasMethod(targetClassName, "checkTaskSequence");
