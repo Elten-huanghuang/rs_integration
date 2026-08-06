@@ -30,6 +30,13 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
 
     @Override
     public boolean shouldApplyMixin(String targetClassName, String mixinClassName) {
+        if (isYzzzOwnedRefinedStorageMixin(mixinClassName)) {
+            String simpleName = mixinClassName.substring(mixinClassName.lastIndexOf('.') + 1);
+            if (isClassPresent("me.realseek.yzzzfix.mixin.refinedstorage." + simpleName)) {
+                return false;
+            }
+        }
+
         // Guard mixins whose BODY hard-references a *second* mod's class (beyond
         // their @Mixin target). Mixin's framework only auto-skips a mixin when its
         // @Mixin TARGET class is absent; a body reference to another absent mod
@@ -196,6 +203,11 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
             return isClassPresent("com.majruszlibrary.item.ItemHelper");
         }
         return true;
+    }
+
+    static boolean isYzzzOwnedRefinedStorageMixin(String mixinClassName) {
+        return mixinClassName.endsWith(".refinedstorage.CraftingGridBehaviorMixin")
+                || mixinClassName.endsWith(".refinedstorage.IngredientTrackerMixin");
     }
 
     @Override

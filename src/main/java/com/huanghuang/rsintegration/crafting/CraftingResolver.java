@@ -283,7 +283,10 @@ public final class CraftingResolver {
                 missingOut);
 
         EdgeTracker edges = new EdgeTracker();
-        for (IngredientSpec spec : coalesceRootSpecs(needed)) {
+        List<IngredientSpec> rootsToResolve = new ArrayList<>(coalesceRootSpecs(needed));
+        rootsToResolve.sort(java.util.Comparator.comparingInt(spec ->
+                spec.role() == DemandRole.CATALYST ? 1 : 0));
+        for (IngredientSpec spec : rootsToResolve) {
             if (spec.isEmpty()) continue;
             if (!ensureIngredient(spec.ingredient(), spec.count(), ctx, 0, edges)) {
                 if (missingOut != null) {
@@ -347,6 +350,14 @@ public final class CraftingResolver {
         List<IngredientSpec> rootsToResolve = singleVariantRoots
                 ? StepExecutor.machineSpecsForGraph(needed)
                 : coalesceRootSpecs(needed);
+        if (!singleVariantRoots) {
+            // Resolve reusable catalysts after ordinary inputs. This lets an
+            // intermediate CraftTweaker recipe return a shared catalyst before
+            // the terminal root reserves it.
+            rootsToResolve = new ArrayList<>(rootsToResolve);
+            rootsToResolve.sort(java.util.Comparator.comparingInt(spec ->
+                    spec.role() == DemandRole.CATALYST ? 1 : 0));
+        }
         for (int rootIndex = 0; rootIndex < rootsToResolve.size(); rootIndex++) {
             IngredientSpec spec = rootsToResolve.get(rootIndex);
             if (spec.isEmpty()) continue;
@@ -402,7 +413,10 @@ public final class CraftingResolver {
                 buildPreferredRecipes(level));
 
         EdgeTracker edges = new EdgeTracker();
-        for (IngredientSpec spec : coalesceRootSpecs(needed)) {
+        List<IngredientSpec> rootsToResolve = new ArrayList<>(coalesceRootSpecs(needed));
+        rootsToResolve.sort(java.util.Comparator.comparingInt(spec ->
+                spec.role() == DemandRole.CATALYST ? 1 : 0));
+        for (IngredientSpec spec : rootsToResolve) {
             if (spec.isEmpty()) continue;
             if (!ensureIngredient(spec.ingredient(), spec.count(), ctx, 0, edges)) {
                 if (missingOut != null) {

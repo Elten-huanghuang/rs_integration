@@ -9,11 +9,13 @@ final class RSSidePanelClientPacketHandler {
     private RSSidePanelClientPacketHandler() {}
 
     static void onSync(RSSidePanelSyncPacket packet) {
+        if (!RSSidePanelModule.isEnabled()) return;
         if (Minecraft.getInstance().player == null) return;
         RSSidePanelClient.onSyncReceived(packet);
     }
 
     static void onDelta(RSSidePanelDeltaPacket packet) {
+        if (!RSSidePanelModule.isEnabled()) return;
         if (Minecraft.getInstance().player == null) return;
         for (RSSidePanelDeltaPacket.Entry entry : packet.entries) {
             RSSidePanelClient.onDeltaReceived(
@@ -22,6 +24,7 @@ final class RSSidePanelClientPacketHandler {
     }
 
     static void onOperationResult(RSSidePanelOperationResultPacket packet) {
+        if (!RSSidePanelModule.isEnabled()) return;
         RSSidePanelClient.onOperationResult(packet);
     }
 }

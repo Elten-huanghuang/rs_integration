@@ -10,7 +10,7 @@
 
 RS Integration lets Refined Storage operate machines from other mods. Choose an item in JEI and it checks materials, resolves prerequisite recipes, operates bound machines, and returns the result to the RS network.
 
-**Current version: 1.3.1 | Minecraft 1.20.1**
+**Current version: 1.3.1-fix | Minecraft 1.20.1**
 
 ## Requirements
 
