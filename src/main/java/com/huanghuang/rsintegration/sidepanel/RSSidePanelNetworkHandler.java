@@ -46,6 +46,7 @@ public final class RSSidePanelNetworkHandler {
 
     // ── Pending deltas per player — collected during a tick, flushed at end ──
     private static final AtomicBatchQueue<UUID, RSSidePanelDeltaPacket.Entry> pendingDeltas = new AtomicBatchQueue<>();
+    private static final Map<UUID, Set<UUID>> synchronizedStackIds = new ConcurrentHashMap<>();
     // ── Machine status: last-pushed snapshot per (player, dim, pos) for diff ──
     private static final Map<UUID, Map<String, MachineStatus>> lastPushedStatuses = new ConcurrentHashMap<>();
     private static final Set<UUID> dirtyMachinePlayers = ConcurrentHashMap.newKeySet();
@@ -153,7 +154,9 @@ public final class RSSidePanelNetworkHandler {
             // Consolidate: if same UUID appears multiple times in this batch,
             // only keep the last entry (most recent count wins).
             Map<UUID, RSSidePanelDeltaPacket.Entry> consolidated = new LinkedHashMap<>();
+            Set<UUID> trackedIds = synchronizedStackIds.get(playerId);
             for (RSSidePanelDeltaPacket.Entry d : deltas) {
+                if (trackedIds != null && !trackedIds.contains(d.stackId)) continue;
                 consolidated.put(d.stackId, d);
             }
             RSSidePanelDeltaPacket.sendBatch(player, new ArrayList<>(consolidated.values()));
@@ -283,6 +286,7 @@ public final class RSSidePanelNetworkHandler {
                                 List<Boolean> craftableFlags,
                                 int totalSlotCount, boolean networkAvailable,
                                 String networkName) {
+        synchronizedStackIds.put(player.getUUID(), Set.copyOf(ids));
         // Build binding info list from player's inventory bindings
         List<BindingInfo> bindings = new ArrayList<>();
         try {
@@ -578,6 +582,7 @@ public final class RSSidePanelNetworkHandler {
         }
         RSSidePanelRequestPacket.cancelRefresh(playerId);
         pendingDeltas.clear(playerId);
+        synchronizedStackIds.remove(playerId);
         com.huanghuang.rsintegration.network.RSIntegrationNetwork.invalidateNetworkResolution(playerId);
     }
 
@@ -595,6 +600,7 @@ public final class RSSidePanelNetworkHandler {
         }
         playerListeners.clear();
         pendingDeltas.clear();
+        synchronizedStackIds.clear();
         dirtyMachinePlayers.clear();
         lastPushedStatuses.clear();
         syncGenerations.clear();

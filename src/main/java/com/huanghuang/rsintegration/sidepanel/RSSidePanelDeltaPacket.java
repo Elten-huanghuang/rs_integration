@@ -7,6 +7,7 @@ import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.fml.DistExecutor;
 import net.minecraftforge.network.NetworkEvent;
 import net.minecraftforge.network.PacketDistributor;
+import io.netty.handler.codec.DecoderException;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -19,6 +20,9 @@ import java.util.function.Supplier;
  * Each entry carries the RS {@code StackListEntry} UUID for stable identity.
  */
 public final class RSSidePanelDeltaPacket {
+
+    /** Keep incremental updates bounded like full snapshots. */
+    static final int MAX_ENTRIES = 120;
 
     /** A single delta entry within a batch. */
     public static final class Entry {
@@ -64,12 +68,18 @@ public final class RSSidePanelDeltaPacket {
     /** Send a batch of deltas collected over a tick. */
     public static void sendBatch(ServerPlayer player, List<Entry> entries) {
         if (entries.isEmpty()) return;
-        RSSidePanelNetworkHandler.CHANNEL.send(
-                PacketDistributor.PLAYER.with(() -> player),
-                new RSSidePanelDeltaPacket(entries));
+        for (int from = 0; from < entries.size(); from += MAX_ENTRIES) {
+            int to = Math.min(from + MAX_ENTRIES, entries.size());
+            RSSidePanelNetworkHandler.CHANNEL.send(
+                    PacketDistributor.PLAYER.with(() -> player),
+                    new RSSidePanelDeltaPacket(new ArrayList<>(entries.subList(from, to))));
+        }
     }
 
     void encode(FriendlyByteBuf buf) {
+        if (entries.size() > MAX_ENTRIES) {
+            throw new IllegalArgumentException("too many side-panel delta entries: " + entries.size());
+        }
         buf.writeVarInt(entries.size());
         for (Entry e : entries) {
             buf.writeUUID(e.stackId);
@@ -85,7 +95,10 @@ public final class RSSidePanelDeltaPacket {
     }
 
     static RSSidePanelDeltaPacket decode(FriendlyByteBuf buf) {
-        int count = Math.max(0, Math.min(buf.readVarInt(), 4096));
+        int count = buf.readVarInt();
+        if (count < 0 || count > MAX_ENTRIES) {
+            throw new DecoderException("side-panel delta entry count out of bounds: " + count);
+        }
         List<Entry> entries = new ArrayList<>(count);
         for (int i = 0; i < count; i++) {
             UUID id = buf.readUUID();
