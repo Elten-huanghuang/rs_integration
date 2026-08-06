@@ -170,6 +170,7 @@ public final class RSSidePanelClient {
     private static volatile boolean keyMappingsRegistered;
 
     public static void registerKeyMappings() {
+        if (!RSSidePanelModule.isEnabled()) return;
         if (keyMappingsRegistered) return;
         keyMappingsRegistered = true;
         KEY_TOGGLE_PANEL = new KeyMapping(
@@ -185,6 +186,7 @@ public final class RSSidePanelClient {
     }
 
     public static void init() {
+        if (!RSSidePanelModule.isEnabled()) return;
         panelX = RSIntegrationConfig.RS_SIDE_PANEL_X.get();
         panelY = RSIntegrationConfig.RS_SIDE_PANEL_Y.get();
         panelHidden = RSIntegrationConfig.RS_SIDE_PANEL_HIDDEN.get();

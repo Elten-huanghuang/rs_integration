@@ -219,9 +219,7 @@ final class SyncHandler {
                     RSSidePanelClient.panels.add(ps);
                     RSSidePanelClient.totalSlotCount++;
                     animId = id;
-                } else {
-                    return;
-                }
+                } else return;
             }
         }
 

@@ -258,14 +258,23 @@ final class StepExecutor {
             CraftingResolver.EdgeTracker edges, int batches) {
         if (depth > maxDepth() || ctx.steps.size() + 1 > maxSteps()) return null;
         List<InputDemand> inputs = new ArrayList<>();
-        int index = 0;
         // Machine specs describe physical slots. Keep equal predicates as separate
         // ports: two wool slots may legally choose different colours, while each
         // individual slot must still be backed by one concrete stack variant.
-        for (IngredientSpec spec : machineSpecsForGraph(specs)) {
-            if (spec.isEmpty()) continue;
+        List<IngredientSpec> physicalSpecs = machineSpecsForGraph(specs);
+        // Resolve consumed inputs before reusable catalysts. A CraftTweaker
+        // recipe can use the same catalyst in both a terminal recipe and an
+        // intermediate recipe; resolving the catalyst first temporarily
+        // removes it from the planning pool and makes the intermediate look
+        // unavailable even though its recipe returns the catalyst.
+        List<Integer> resolutionOrder = new ArrayList<>(physicalSpecs.size());
+        for (int i = 0; i < physicalSpecs.size(); i++) resolutionOrder.add(i);
+        resolutionOrder.sort(Comparator
+                .comparingInt((Integer i) -> physicalSpecs.get(i).role() == DemandRole.CATALYST ? 1 : 0));
+        for (int originalIndex : resolutionOrder) {
+            IngredientSpec spec = physicalSpecs.get(originalIndex);
             int quantity = CraftPacketUtils.requiredCount(spec, batches);
-            InputPortId port = new InputPortId(nodeId, index++);
+            InputPortId port = new InputPortId(nodeId, originalIndex);
             Ingredient plannedIngredient = ensureSingleVariantMachineInput(
                     spec.ingredient(), quantity, ctx, depth + 1, edges, port, null);
             if (plannedIngredient == null) {

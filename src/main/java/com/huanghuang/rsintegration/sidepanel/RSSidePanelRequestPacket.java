@@ -47,9 +47,9 @@ public final class RSSidePanelRequestPacket {
     private static final java.util.Map<UUID, RefreshTask> REFRESH_TASKS = new java.util.concurrent.ConcurrentHashMap<>();
     private static final int ENTRIES_PER_TICK = 64;
 
-    static void refreshOnServerThread(ServerPlayer player, boolean forceFullSync) {
+    static boolean refreshOnServerThread(ServerPlayer player, boolean forceFullSync) {
         UUID id = player.getUUID();
-        REFRESH_TASKS.remove(id);
+        if (REFRESH_TASKS.containsKey(id)) return true;
         INetwork network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
         if (network == null) {
             network = RSSidePanelNetworkHandler.getListenerNetwork(id);
@@ -57,33 +57,63 @@ public final class RSSidePanelRequestPacket {
         if (network == null) {
             RSSidePanelNetworkHandler.unregisterListener(id);
             RSSidePanelNetworkHandler.sendSync(player, Collections.emptyList(), Collections.emptyList(), Collections.emptyList(), Collections.emptyList(), 0, false, "");
-            return;
+            return false;
         }
         try {
             RSSidePanelNetworkHandler.registerListener(player, network);
             IStorageCache<ItemStack> cache = network.getItemStorageCache();
             if (cache == null) {
                 RSSidePanelNetworkHandler.sendSync(player, Collections.emptyList(), Collections.emptyList(), Collections.emptyList(), Collections.emptyList(), 0, true, "");
-                return;
+                return false;
             }
             var list = cache.getList();
             if (list == null) {
                 RSSidePanelNetworkHandler.sendSync(player, Collections.emptyList(), Collections.emptyList(), Collections.emptyList(), Collections.emptyList(), 0, true, "");
-                return;
+                return false;
             }
             // Snapshot both the collection and each mutable stack before the
             // refresh is spread across later server ticks.
             var available = list.getStacks();
             int snapshotLimit = SidePanelSyncPolicy.snapshotLimit(
                     RSIntegrationConfig.RS_SIDE_PANEL_MAX_SLOTS.get(), available.size());
-            List<StackListEntry<ItemStack>> snapshot = available.stream()
-                    .limit(snapshotLimit)
-                    .map(entry -> new StackListEntry<>(entry.getId(), entry.getStack().copy()))
-                    .toList();
-            REFRESH_TASKS.put(id, new RefreshTask(player, network, snapshot.iterator()));
+            List<StackListEntry<ItemStack>> snapshot = new ArrayList<>(snapshotLimit);
+            Set<UUID> included = new HashSet<>();
+            var priorityTimestamps = RSSidePanelNetworkHandler.snapshotPriorities(id);
+            java.util.Map<UUID, Long> acknowledgedPriorities = new java.util.LinkedHashMap<>();
+            for (var priority : priorityTimestamps.entrySet()) {
+                if (snapshot.size() >= snapshotLimit) break;
+                UUID preferredId = priority.getKey();
+                ItemStack current = list.get(preferredId);
+                if (current != null && !current.isEmpty()) {
+                    snapshot.add(new StackListEntry<>(preferredId, current.copy()));
+                    included.add(preferredId);
+                }
+                acknowledgedPriorities.put(preferredId, priority.getValue());
+            }
+            for (UUID preferredId : RSSidePanelNetworkHandler.trackedStackIds(id)) {
+                if (snapshot.size() >= snapshotLimit) break;
+                if (included.contains(preferredId)) continue;
+                ItemStack current = list.get(preferredId);
+                if (current != null && !current.isEmpty()) {
+                    snapshot.add(new StackListEntry<>(preferredId, current.copy()));
+                    included.add(preferredId);
+                }
+            }
+            for (StackListEntry<ItemStack> entry : available) {
+                if (snapshot.size() >= snapshotLimit) break;
+                if (entry == null || !included.add(entry.getId())) continue;
+                ItemStack stack = entry.getStack();
+                if (stack != null && !stack.isEmpty()) {
+                    snapshot.add(new StackListEntry<>(entry.getId(), stack.copy()));
+                }
+            }
+            REFRESH_TASKS.put(id, new RefreshTask(player, network, snapshot.iterator(),
+                    available.size(), acknowledgedPriorities));
+            return true;
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI] SidePanel refresh setup failed", e);
             RSSidePanelNetworkHandler.sendSync(player, Collections.emptyList(), Collections.emptyList(), Collections.emptyList(), Collections.emptyList(), 0, true, "");
+            return false;
         }
     }
 
@@ -100,6 +130,8 @@ public final class RSSidePanelRequestPacket {
 
     static void cancelRefresh(UUID playerId) { REFRESH_TASKS.remove(playerId); }
 
+    static boolean hasRefresh(UUID playerId) { return REFRESH_TASKS.containsKey(playerId); }
+
     private static final class RefreshTask {
         final UUID playerId;
         final ServerPlayer player;
@@ -111,11 +143,15 @@ public final class RSSidePanelRequestPacket {
         final List<Boolean> craftable = new ArrayList<>();
         int total;
         final Set<String> craftableKeys = new HashSet<>();
+        final java.util.Map<UUID, Long> priorityTimestamps;
         final String networkName;
 
         RefreshTask(ServerPlayer player, INetwork network,
-                    java.util.Iterator<StackListEntry<ItemStack>> entries) {
+                    java.util.Iterator<StackListEntry<ItemStack>> entries,
+                    int totalSlotCount, java.util.Map<UUID, Long> priorityTimestamps) {
             this.player = player; this.playerId = player.getUUID(); this.network = network; this.entries = entries;
+            this.total = Math.max(0, totalSlotCount);
+            this.priorityTimestamps = java.util.Map.copyOf(priorityTimestamps);
             this.networkName = resolveNetworkName(network);
             try {
                 var manager = network.getCraftingManager();
@@ -140,11 +176,13 @@ public final class RSSidePanelRequestPacket {
                 try {
                     ItemStack stored = entry.getStack();
                     if (stored == null || stored.isEmpty()) continue;
-                    total++;
                     UUID id = entry.getId();
                     ids.add(id); items.add(stored.copy());
                     var tracked = tracker != null ? tracker.get(stored) : null;
-                    timestamps.add(tracked != null ? tracked.getTime() : 0L);
+                    long trackedTime = tracked != null ? tracked.getTime() : 0L;
+                    timestamps.add(trackedTime > 0L
+                            ? trackedTime
+                            : priorityTimestamps.getOrDefault(id, 0L));
                     var itemKey = net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(stored.getItem());
                     craftable.add(itemKey != null && craftableKeys.contains(itemKey.toString()));
                 } catch (RuntimeException ignored) {
@@ -153,6 +191,11 @@ public final class RSSidePanelRequestPacket {
             }
             if (entries.hasNext()) return true;
             RSSidePanelNetworkHandler.sendSync(player, ids, items, timestamps, craftable, total, true, networkName);
+            if (RSSidePanelNetworkHandler.acknowledgeSnapshotPriorities(
+                    playerId, priorityTimestamps)) {
+                RSSidePanelNetworkHandler.schedulePriorityRefresh(
+                        playerId, player.getServer().getTickCount());
+            }
             return false;
         }
     }
@@ -169,6 +212,10 @@ public final class RSSidePanelRequestPacket {
     static void handle(RSSidePanelRequestPacket packet,
                        Supplier<NetworkEvent.Context> contextSupplier) {
         NetworkEvent.Context context = contextSupplier.get();
+        if (!RSSidePanelModule.isEnabled()) {
+            context.setPacketHandled(true);
+            return;
+        }
         ServerPlayer player = context.getSender();
         if (player == null || player instanceof net.minecraftforge.common.util.FakePlayer) {
             context.setPacketHandled(true);

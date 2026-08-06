@@ -47,6 +47,10 @@ public final class RSSidePanelNetworkHandler {
     // ── Pending deltas per player — collected during a tick, flushed at end ──
     private static final AtomicBatchQueue<UUID, RSSidePanelDeltaPacket.Entry> pendingDeltas = new AtomicBatchQueue<>();
     private static final Map<UUID, Set<UUID>> synchronizedStackIds = new ConcurrentHashMap<>();
+    private static final Map<UUID, Map<UUID, Long>> pendingSnapshotPriorities = new ConcurrentHashMap<>();
+    private static final Map<UUID, Long> nextPriorityRefreshTick = new ConcurrentHashMap<>();
+    private static final int PRIORITY_REFRESH_INTERVAL_TICKS = 20;
+    private static final int MAX_SNAPSHOT_PRIORITIES = 256;
     // ── Machine status: last-pushed snapshot per (player, dim, pos) for diff ──
     private static final Map<UUID, Map<String, MachineStatus>> lastPushedStatuses = new ConcurrentHashMap<>();
     private static final Set<UUID> dirtyMachinePlayers = ConcurrentHashMap.newKeySet();
@@ -135,6 +139,8 @@ public final class RSSidePanelNetworkHandler {
             }
         }
 
+        flushPriorityRefreshes(event.getServer());
+
         if (pendingDeltas.keysSnapshot().isEmpty()) return;
 
         RSIntegrationMod.LOGGER.debug("[RSI-Delta] Tick-end flush: {} players with pending deltas",
@@ -151,13 +157,29 @@ public final class RSSidePanelNetworkHandler {
                 continue;
             }
 
-            // Consolidate: if same UUID appears multiple times in this batch,
-            // only keep the last entry (most recent count wins).
+            // Resolve each UUID to its final state before classifying it as
+            // tracked or new. This prevents a zero-then-positive change in
+            // one flush window from producing a stale removal packet.
+            Map<UUID, RSSidePanelDeltaPacket.Entry> latestById = new LinkedHashMap<>();
+            for (RSSidePanelDeltaPacket.Entry d : deltas) latestById.put(d.stackId, d);
             Map<UUID, RSSidePanelDeltaPacket.Entry> consolidated = new LinkedHashMap<>();
             Set<UUID> trackedIds = synchronizedStackIds.get(playerId);
-            for (RSSidePanelDeltaPacket.Entry d : deltas) {
-                if (trackedIds != null && !trackedIds.contains(d.stackId)) continue;
-                consolidated.put(d.stackId, d);
+            Set<UUID> removedTrackedIds = new HashSet<>();
+            for (RSSidePanelDeltaPacket.Entry d : latestById.values()) {
+                if (trackedIds != null && trackedIds.contains(d.stackId)) {
+                    consolidated.put(d.stackId, d);
+                    if (d.stack.getCount() <= 0) removedTrackedIds.add(d.stackId);
+                } else if (d.stack.getCount() > 0) {
+                    rememberSnapshotPriority(playerId, d.stackId, d.timestamp,
+                            event.getServer().getTickCount());
+                }
+            }
+            if (!removedTrackedIds.isEmpty()) {
+                synchronizedStackIds.computeIfPresent(playerId, (ignored, ids) -> {
+                    Set<UUID> remaining = new HashSet<>(ids);
+                    remaining.removeAll(removedTrackedIds);
+                    return Set.copyOf(remaining);
+                });
             }
             RSSidePanelDeltaPacket.sendBatch(player, new ArrayList<>(consolidated.values()));
         }
@@ -253,17 +275,19 @@ public final class RSSidePanelNetworkHandler {
 
 
     public static void sendRequestSync() {
+        if (!RSSidePanelModule.isEnabled()) return;
         CHANNEL.sendToServer(new RSSidePanelRequestPacket(true, false));
     }
 
     public static void sendCloseRequest() {
+        if (!RSSidePanelModule.isEnabled()) return;
         CHANNEL.sendToServer(new RSSidePanelRequestPacket(false, true));
     }
 
     /** Starts a server-thread refresh. The task scheduler hook is kept here so
      * packet handling never performs an unbounded scan before enqueueing. */
-    public static void startRefresh(ServerPlayer player, boolean forceFullSync) {
-        RSSidePanelRequestPacket.refreshOnServerThread(player, forceFullSync);
+    public static boolean startRefresh(ServerPlayer player, boolean forceFullSync) {
+        return RSSidePanelRequestPacket.refreshOnServerThread(player, forceFullSync);
     }
 
     public static void sendBindingSync(ServerPlayer player) {
@@ -434,24 +458,17 @@ public final class RSSidePanelNetworkHandler {
         if (cache == null) return false;
 
         UUID pid = player.getUUID();
-        boolean isNew = !playerListeners.containsKey(pid);
+        ListenerEntry existing = playerListeners.get(pid);
+        if (existing != null && existing.network == network && existing.cache == cache) {
+            refreshCraftableKeys(network, existing.craftableKeys);
+            return false;
+        }
+        boolean isNew = existing == null;
         unregisterListener(pid);
 
         // Snapshot craftable item keys
         var craftableKeys = new HashSet<ResourceLocation>();
-        try {
-            var cm = network.getCraftingManager();
-            if (cm != null) {
-                for (var pattern : cm.getPatterns()) {
-                    for (ItemStack out : pattern.getOutputs()) {
-                        if (!out.isEmpty()) {
-                            var k = net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(out.getItem());
-                            if (k != null) craftableKeys.add(k);
-                        }
-                    }
-                }
-            }
-        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Craftable probe failed", e); }
+        refreshCraftableKeys(network, craftableKeys);
 
         var tracker = network.getItemStorageTracker();
         final ListenerEntry[] entryHolder = new ListenerEntry[1];
@@ -467,6 +484,8 @@ public final class RSSidePanelNetworkHandler {
                 RSIntegrationMod.LOGGER.warn("[RSI] Storage cache invalidated for player {} — attempting re-registration", pid);
                 if (!playerListeners.remove(pid, entry)) return;
                 pendingDeltas.clear(pid);
+                pendingSnapshotPriorities.remove(pid);
+                nextPriorityRefreshTick.remove(pid);
                 com.huanghuang.rsintegration.network.RSIntegrationNetwork.invalidateNetworkResolution(pid);
 
                 // Attempt immediate re-registration on the new cache.
@@ -544,10 +563,12 @@ public final class RSSidePanelNetworkHandler {
                 long ts = System.currentTimeMillis();
                 if (tracker != null) {
                     var trackerEntry = tracker.get(stack);
-                    if (trackerEntry != null) ts = trackerEntry.getTime();
+                    if (trackerEntry != null && trackerEntry.getTime() > 0L) {
+                        ts = trackerEntry.getTime();
+                    }
                 }
                 var k = net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(stack.getItem());
-                boolean craftable = k != null && craftableKeys.contains(k);
+                boolean craftable = k != null && entryHolder[0].craftableKeys.contains(k);
 
                 RSIntegrationMod.LOGGER.debug("[RSI-Delta] Queueing delta: player={} id={} item={} count={} craftable={}",
                         player.getName().getString(), stackId,
@@ -568,6 +589,7 @@ public final class RSSidePanelNetworkHandler {
         };
         cache.addListener(listener);
         ListenerEntry entry = new ListenerEntry(listener, cache, network);
+        entry.craftableKeys.addAll(craftableKeys);
         entryHolder[0] = entry;
         playerListeners.put(pid, entry);
         return isNew;
@@ -583,6 +605,8 @@ public final class RSSidePanelNetworkHandler {
         RSSidePanelRequestPacket.cancelRefresh(playerId);
         pendingDeltas.clear(playerId);
         synchronizedStackIds.remove(playerId);
+        pendingSnapshotPriorities.remove(playerId);
+        nextPriorityRefreshTick.remove(playerId);
         com.huanghuang.rsintegration.network.RSIntegrationNetwork.invalidateNetworkResolution(playerId);
     }
 
@@ -601,6 +625,8 @@ public final class RSSidePanelNetworkHandler {
         playerListeners.clear();
         pendingDeltas.clear();
         synchronizedStackIds.clear();
+        pendingSnapshotPriorities.clear();
+        nextPriorityRefreshTick.clear();
         dirtyMachinePlayers.clear();
         lastPushedStatuses.clear();
         syncGenerations.clear();
@@ -617,9 +643,88 @@ public final class RSSidePanelNetworkHandler {
         return playerListeners.containsKey(playerId);
     }
 
+    private static void refreshCraftableKeys(
+            com.refinedmods.refinedstorage.api.network.INetwork network,
+            Set<ResourceLocation> target) {
+        target.clear();
+        try {
+            var cm = network.getCraftingManager();
+            if (cm != null) {
+                for (var pattern : cm.getPatterns()) {
+                    for (ItemStack out : pattern.getOutputs()) {
+                        if (!out.isEmpty()) {
+                            var key = net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(out.getItem());
+                            if (key != null) target.add(key);
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI] Craftable probe failed", e);
+        }
+    }
+
+    private static void rememberSnapshotPriority(UUID playerId, UUID stackId,
+                                                 long timestamp, long currentTick) {
+        Map<UUID, Long> priorities = pendingSnapshotPriorities.computeIfAbsent(
+                playerId, ignored -> new ConcurrentHashMap<>());
+        SidePanelSyncPolicy.rememberPriority(priorities, stackId,
+                timestamp > 0L ? timestamp : System.currentTimeMillis(),
+                MAX_SNAPSHOT_PRIORITIES);
+        nextPriorityRefreshTick.putIfAbsent(
+                playerId, currentTick + PRIORITY_REFRESH_INTERVAL_TICKS);
+    }
+
+    private static void flushPriorityRefreshes(net.minecraft.server.MinecraftServer server) {
+        long currentTick = server.getTickCount();
+        for (Map.Entry<UUID, Long> entry : List.copyOf(nextPriorityRefreshTick.entrySet())) {
+            if (currentTick < entry.getValue()) continue;
+            UUID playerId = entry.getKey();
+            if (RSSidePanelRequestPacket.hasRefresh(playerId)) continue;
+            if (!nextPriorityRefreshTick.remove(playerId, entry.getValue())) continue;
+            ServerPlayer player = findPlayer(server, playerId);
+            if (player == null) {
+                pendingSnapshotPriorities.remove(playerId);
+                continue;
+            }
+            if (pendingSnapshotPriorities.containsKey(playerId)
+                    && !startRefresh(player, true)) {
+                nextPriorityRefreshTick.putIfAbsent(
+                        playerId, currentTick + PRIORITY_REFRESH_INTERVAL_TICKS);
+            }
+        }
+    }
+
     static com.refinedmods.refinedstorage.api.network.INetwork getListenerNetwork(UUID playerId) {
         ListenerEntry entry = playerListeners.get(playerId);
         return entry != null ? entry.network : null;
+    }
+
+    static Set<UUID> trackedStackIds(UUID playerId) {
+        Set<UUID> ids = synchronizedStackIds.get(playerId);
+        return ids == null ? Set.of() : ids;
+    }
+
+    static Map<UUID, Long> snapshotPriorities(UUID playerId) {
+        Map<UUID, Long> priorities = pendingSnapshotPriorities.get(playerId);
+        if (priorities == null || priorities.isEmpty()) return Map.of();
+        return SidePanelSyncPolicy.newestPrioritiesFirst(priorities);
+    }
+
+    static boolean acknowledgeSnapshotPriorities(UUID playerId, Map<UUID, Long> included) {
+        Map<UUID, Long> priorities = pendingSnapshotPriorities.get(playerId);
+        if (priorities == null) return false;
+        included.forEach((stackId, timestamp) -> priorities.remove(stackId, timestamp));
+        if (priorities.isEmpty()) {
+            pendingSnapshotPriorities.remove(playerId, priorities);
+            return false;
+        }
+        return true;
+    }
+
+    static void schedulePriorityRefresh(UUID playerId, long currentTick) {
+        nextPriorityRefreshTick.putIfAbsent(
+                playerId, currentTick + PRIORITY_REFRESH_INTERVAL_TICKS);
     }
 
     @SubscribeEvent
@@ -654,6 +759,7 @@ public final class RSSidePanelNetworkHandler {
         final IStorageCacheListener<ItemStack> listener;
         final IStorageCache<ItemStack> cache;
         final com.refinedmods.refinedstorage.api.network.INetwork network;
+        final Set<ResourceLocation> craftableKeys;
 
         ListenerEntry(IStorageCacheListener<ItemStack> listener,
                       IStorageCache<ItemStack> cache,
@@ -661,6 +767,7 @@ public final class RSSidePanelNetworkHandler {
             this.listener = listener;
             this.cache = cache;
             this.network = network;
+            this.craftableKeys = ConcurrentHashMap.newKeySet();
         }
     }
 }

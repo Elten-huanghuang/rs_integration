@@ -7,6 +7,8 @@ import com.huanghuang.rsintegration.util.Reflect;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraftforge.fml.ModList;
 
@@ -21,9 +23,8 @@ import java.util.UUID;
  *
  * <p>All checks are performed via reflection so that these mods remain
  * optional dependencies. A loaded provider that cannot be queried is treated
- * as indeterminate and logged. Only a provider result that can be resolved to
- * another owner is denied; API drift must not lock owners out of their own
- * machines.</p>
+ * as indeterminate, logged, and denied. This prevents API drift from silently
+ * bypassing protection on multiplayer servers.</p>
  */
 public final class ProtectionChecker {
 
@@ -127,6 +128,9 @@ public final class ProtectionChecker {
 
     private static boolean checkFTBChunks(ServerPlayer player, ServerLevel level, BlockPos pos) {
         try {
+            Boolean apiDecision = checkFTBChunksPublicApi(player, pos);
+            if (apiDecision != null) return apiDecision;
+
             // 1. Load ClaimedChunks manager
             Optional<Class<?>> ccClass = Reflect.forName(
                     "dev.ftb.mods.ftbchunks.data.ClaimedChunks");
@@ -170,7 +174,47 @@ public final class ProtectionChecker {
 
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("{} FTB Chunks check error; treating result as unknown", TAG, e);
-            return ProtectionFailurePolicy.allowUnknown();
+            return ProtectionFailurePolicy.permitsUnknown();
+        }
+    }
+
+    /**
+     * Uses the supported FTB Chunks API when available. The provider owns the
+     * complete policy decision, including teams, allies, bypass permissions,
+     * fake-player rules, and wilderness restrictions.
+     */
+    @Nullable
+    private static Boolean checkFTBChunksPublicApi(ServerPlayer player, BlockPos pos) {
+        try {
+            Optional<Class<?>> apiClass = Reflect.forName(
+                    "dev.ftb.mods.ftbchunks.api.FTBChunksAPI");
+            Optional<Class<?>> protectionClass = Reflect.forName(
+                    "dev.ftb.mods.ftbchunks.api.Protection");
+            if (apiClass.isEmpty() || protectionClass.isEmpty()) return null;
+
+            Object api = invokeStatic(apiClass.get(), "api");
+            if (api == null) return null;
+            Optional<Object> managerLoaded = invokeInstance(api, "isManagerLoaded");
+            if (managerLoaded.isPresent()
+                    && managerLoaded.get() instanceof Boolean loaded
+                    && !loaded) {
+                return null;
+            }
+
+            Object manager = invokeInstance(api, "getManager").orElse(null);
+            if (manager == null) return null;
+            Object protection = protectionClass.get().getField("INTERACT_BLOCK").get(null);
+            Method check = Reflect.findMethod(manager.getClass(),
+                    "shouldPreventInteraction", new Class<?>[]{
+                            Entity.class, InteractionHand.class, BlockPos.class,
+                            protectionClass.get(), Entity.class});
+            if (check == null) return null;
+            Object prevented = check.invoke(
+                    manager, player, InteractionHand.MAIN_HAND, pos, protection, null);
+            return prevented instanceof Boolean value ? !value : null;
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            RSIntegrationMod.LOGGER.debug("{} FTB Chunks public API probe failed", TAG, e);
+            return null;
         }
     }
 
@@ -488,15 +532,15 @@ public final class ProtectionChecker {
 
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("{} Cadmus check error; treating result as unknown", TAG, e);
-            return ProtectionFailurePolicy.allowUnknown();
+            return ProtectionFailurePolicy.permitsUnknown();
         }
     }
 
     static boolean resolveUnknown(String provider, String detail) {
         if (FAILURE_LOGS.allow(provider + ':' + detail)) {
-            RSIntegrationMod.LOGGER.warn("{} {} protection lookup failed ({}); allowing interaction because no explicit denial was returned",
+            RSIntegrationMod.LOGGER.warn("{} {} protection lookup failed ({}); denying interaction because permission could not be verified",
                     TAG, provider, detail);
         }
-        return ProtectionFailurePolicy.allowUnknown();
+        return ProtectionFailurePolicy.permitsUnknown();
     }
 }
