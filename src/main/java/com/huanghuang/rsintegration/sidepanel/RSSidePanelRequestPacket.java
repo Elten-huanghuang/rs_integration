@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.sidepanel;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.storage.cache.IStorageCache;
@@ -51,6 +52,9 @@ public final class RSSidePanelRequestPacket {
         REFRESH_TASKS.remove(id);
         INetwork network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
         if (network == null) {
+            network = RSSidePanelNetworkHandler.getListenerNetwork(id);
+        }
+        if (network == null) {
             RSSidePanelNetworkHandler.unregisterListener(id);
             RSSidePanelNetworkHandler.sendSync(player, Collections.emptyList(), Collections.emptyList(), Collections.emptyList(), Collections.emptyList(), 0, false, "");
             return;
@@ -69,7 +73,11 @@ public final class RSSidePanelRequestPacket {
             }
             // Snapshot both the collection and each mutable stack before the
             // refresh is spread across later server ticks.
-            List<StackListEntry<ItemStack>> snapshot = list.getStacks().stream()
+            var available = list.getStacks();
+            int snapshotLimit = SidePanelSyncPolicy.snapshotLimit(
+                    RSIntegrationConfig.RS_SIDE_PANEL_MAX_SLOTS.get(), available.size());
+            List<StackListEntry<ItemStack>> snapshot = available.stream()
+                    .limit(snapshotLimit)
                     .map(entry -> new StackListEntry<>(entry.getId(), entry.getStack().copy()))
                     .toList();
             REFRESH_TASKS.put(id, new RefreshTask(player, network, snapshot.iterator()));

@@ -85,9 +85,11 @@ final class SidePanelTickManager {
             SearchController.pullJeiFilter();
 
         // Periodic full sync
-        int syncInterval = RSIntegrationConfig.SIDE_PANEL_SYNC_INTERVAL.get();
+        int syncInterval = SidePanelSyncPolicy.requestInterval(
+                RSIntegrationConfig.SIDE_PANEL_SYNC_INTERVAL.get(),
+                RSSidePanelClient.networkAvailable);
         if (RSSidePanelClient.tickCounter % syncInterval == 0
-                && RSSidePanelClient.networkAvailable && !RSSidePanelClient.panelHidden) {
+                && !RSSidePanelClient.panelHidden) {
             RSSidePanelNetworkHandler.sendRequestSync();
         }
 

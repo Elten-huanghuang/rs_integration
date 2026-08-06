@@ -121,7 +121,13 @@ final class AetherworksHelper {
                     m_ts_recipe_getTemperatureRate = AetherworksReflection.toolStationRecipeClass.getMethod("getTemperatureRate");
 
                     Class<?> awReg = AetherworksReflection.awRegistryClass;
-                    Field f2 = awReg.getField("TOOL_STATION");
+                    Field f2;
+                    try {
+                        f2 = awReg.getField("TOOL_STATION_RECIPE");
+                    } catch (NoSuchFieldException ignored) {
+                        // Compatibility with older Aetherworks builds.
+                        f2 = awReg.getField("TOOL_STATION");
+                    }
                     Object ro2 = f2.get(null);
                     tsRecipeType = ro2.getClass().getMethod("get").invoke(ro2);
                 } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Aetherworks] reflection probe failed", e); }

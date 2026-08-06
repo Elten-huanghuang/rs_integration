@@ -1608,8 +1608,15 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
                         setContainerItem(be, i, ItemStack.EMPTY);
                         if (fromMachine.isEmpty()) {
                             fromMachine = stack;
+                        } else if (ItemStack.isSameItemSameTags(stack, fromMachine)) {
+                            // A crystallizer may distribute one declared output
+                            // across several slots. Keep every matching unit in
+                            // the value returned to the chain so output
+                            // accounting observes the full recipe count.
+                            fromMachine.grow(stack.getCount());
                         } else {
-                            // Multiple outputs — insert extras directly into RS
+                            // Distinct by-products are not representable in the
+                            // delegate's single-stack return value.
                             if (network != null) {
                                 ItemStack leftover = network.insertItem(stack, stack.getCount(),
                                         com.refinedmods.refinedstorage.api.util.Action.PERFORM);

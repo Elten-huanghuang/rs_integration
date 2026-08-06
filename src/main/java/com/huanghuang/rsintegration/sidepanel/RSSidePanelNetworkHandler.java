@@ -611,6 +611,11 @@ public final class RSSidePanelNetworkHandler {
         return playerListeners.containsKey(playerId);
     }
 
+    static com.refinedmods.refinedstorage.api.network.INetwork getListenerNetwork(UUID playerId) {
+        ListenerEntry entry = playerListeners.get(playerId);
+        return entry != null ? entry.network : null;
+    }
+
     @SubscribeEvent
     public static void onPlayerLogout(PlayerEvent.PlayerLoggedOutEvent event) {
         if (event.getEntity() instanceof ServerPlayer sp) {
