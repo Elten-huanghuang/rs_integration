@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.sidepanel;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.sidepanel.data.BindingCache;
 import com.huanghuang.rsintegration.sidepanel.data.BindingInfo;
 import net.minecraft.world.item.ItemStack;
@@ -65,7 +66,7 @@ final class SyncHandler {
         if (packet.totalChunks != expectedChunks) return;
 
         chunkAccum.put(packet.chunkIndex, packet);
-        RSIntegrationMod.LOGGER.debug("[RSI] Chunk {}/{} received", packet.chunkIndex + 1, expectedChunks);
+        RSIntegrationMod.LOGGER.trace("[RSI] Chunk {}/{} received", packet.chunkIndex + 1, expectedChunks);
 
         if (chunkAccum.size() == expectedChunks) {
             List<UUID> allIds = new ArrayList<>();
@@ -105,8 +106,18 @@ final class SyncHandler {
                                   String networkName, List<BindingInfo> bindings) {
         int prevSize = RSSidePanelClient.panels.size();
         boolean wasAvailable = RSSidePanelClient.networkAvailable;
+        if (SidePanelSyncPolicy.shouldRetainCurrentEntries(prevSize, items.size(), networkAvailable)) {
+            RSSidePanelClient.networkAvailable = false;
+            RSSidePanelClient.networkName = networkName;
+            RSSidePanelClient.displayDirty = true;
+            BindingCache.getInstance().updateBindings(bindings);
+            RSIntegrationMod.LOGGER.debug(
+                    "[RSI] Network temporarily unavailable; retaining {} cached panel entries and retrying",
+                    prevSize);
+            return;
+        }
         if (items.isEmpty() && prevSize > 0) {
-            RSIntegrationMod.LOGGER.warn("[RSI] Received empty sync — clearing {} panel entries. networkAvailable was {}, now {}",
+            RSIntegrationMod.LOGGER.debug("[RSI] Applying empty sync and clearing {} panel entries. networkAvailable was {}, now {}",
                     prevSize, wasAvailable, networkAvailable);
         }
         RSSidePanelClient.panels.clear();
@@ -201,12 +212,15 @@ final class SyncHandler {
                     mergeTarget.timestamp = timestamp;
                     mergeTarget.craftable = craftable;
                     animId = mergeTarget.getId();
-                } else {
+                } else if (RSSidePanelClient.panels.size()
+                        < RSIntegrationConfig.RS_SIDE_PANEL_MAX_SLOTS.get()) {
                     PanelStack ps = new PanelStack(id, stack, timestamp, craftable);
                     RSSidePanelClient.idToIndex.put(id, RSSidePanelClient.panels.size());
                     RSSidePanelClient.panels.add(ps);
                     RSSidePanelClient.totalSlotCount++;
                     animId = id;
+                } else {
+                    return;
                 }
             }
         }

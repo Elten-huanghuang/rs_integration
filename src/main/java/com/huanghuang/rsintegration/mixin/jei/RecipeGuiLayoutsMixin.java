@@ -94,15 +94,15 @@ public class RecipeGuiLayoutsMixin {
     @Inject(method = "setRecipeLayoutsWithButtons", at = @At("HEAD"))
     private void rsi$onLayoutsSetHead(List<RecipeLayoutWithButtons<?>> layouts, CallbackInfo ci) {
         if (layouts == null || layouts.isEmpty()) {
-            RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] setRecipeLayoutsWithButtons HEAD: EMPTY list");
+            RSIntegrationMod.LOGGER.trace("[RSI-JEI-Mixin] setRecipeLayoutsWithButtons HEAD: EMPTY list");
         } else {
             try {
                 String catUid = layouts.get(0).recipeLayout().getRecipeCategory()
                         .getRecipeType().getUid().toString();
-                RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] setRecipeLayoutsWithButtons HEAD: {} recipes, uid={}",
+                RSIntegrationMod.LOGGER.trace("[RSI-JEI-Mixin] setRecipeLayoutsWithButtons HEAD: {} recipes, uid={}",
                         layouts.size(), catUid);
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] setRecipeLayoutsWithButtons HEAD: {} recipes, uid=?",
+                RSIntegrationMod.LOGGER.trace("[RSI-JEI-Mixin] setRecipeLayoutsWithButtons HEAD: {} recipes, uid=?",
                         layouts.size(), e);
             }
         }
@@ -397,7 +397,7 @@ public class RecipeGuiLayoutsMixin {
             }
         }
 
-        RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] Layouts processed: totalRecipes={} buttonsAdded={} "
+        RSIntegrationMod.LOGGER.trace("[RSI-JEI-Mixin] Layouts processed: totalRecipes={} buttonsAdded={} "
                         + "skipped(filter={} recipeId={} binding={} noRecipe={}) "
                         + "| FA: seen={} noRecipe={} noFilter={} noRecipeId={} noBinding={}",
                 totalRecipes, buttonsAdded,
@@ -819,7 +819,7 @@ public class RecipeGuiLayoutsMixin {
 
         // Returning null is the normal case for any recipe RS Integration doesn't bind
         // (vanilla crafting/anvil, unsupported mods) — keep at debug to avoid log spam.
-        RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] getBindingFilter returned NULL: uid={} class={}",
+        RSIntegrationMod.LOGGER.trace("[RSI-JEI-Mixin] getBindingFilter returned NULL: uid={} class={}",
                     rsi$safeCategoryUid(recipeLayout), recipe.getClass().getName());
         return null;
     }
@@ -1473,7 +1473,7 @@ public class RecipeGuiLayoutsMixin {
         }
 
         if (debug) {
-            RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] findBinding(filter={}) found no match. All blockKeys in inv: {}",
+            RSIntegrationMod.LOGGER.trace("[RSI-JEI-Mixin] findBinding(filter={}) found no match. All blockKeys in inv: {}",
                     filter, allBlockKeys.isEmpty() ? "<none>" : String.join(", ", allBlockKeys));
         }
 

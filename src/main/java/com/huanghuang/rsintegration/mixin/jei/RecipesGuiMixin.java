@@ -54,11 +54,11 @@ public abstract class RecipesGuiMixin {
                     long t = System.currentTimeMillis();
                     if (missLastLogged == 0 || t - missLastLogged > 1000) {
                         missLastLogged = t;
-                        RSIntegrationMod.LOGGER.debug("[RSI-RecipesGui] Miss: ({},{}) mgBtns={} plusBtns={}",
+                        RSIntegrationMod.LOGGER.trace("[RSI-RecipesGui] Miss: ({},{}) mgBtns={} plusBtns={}",
                                 (int) mouseX, (int) mouseY, mgSize, plusSize);
                         if (plusSize > 0) {
                             int[] p0 = AltarCraftButtons.getPositions().get(0);
-                            RSIntegrationMod.LOGGER.debug("[RSI-RecipesGui] Plus[0]=({},{},{},{}) last=({},{},{},{})",
+                            RSIntegrationMod.LOGGER.trace("[RSI-RecipesGui] Plus[0]=({},{},{},{}) last=({},{},{},{})",
                                     p0[0], p0[1], p0[2], p0[3],
                                     AltarCraftButtons.getPositions().get(plusSize - 1)[0],
                                     AltarCraftButtons.getPositions().get(plusSize - 1)[1],
