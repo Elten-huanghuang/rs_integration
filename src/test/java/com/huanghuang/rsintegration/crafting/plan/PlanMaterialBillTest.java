@@ -77,6 +77,28 @@ class PlanMaterialBillTest extends BootstrapTest {
     }
 
     @Test
+    void taggedVanillaIngredientCountsAllDamageAndNbtVariants() {
+        ItemStack template = new ItemStack(Items.IRON_HELMET);
+        template.setDamageValue(10);
+        ItemStack other = new ItemStack(Items.IRON_HELMET);
+        other.setDamageValue(80);
+        other.getOrCreateTag().putString("modifier", "other");
+
+        PlanMaterialBill.Result result = PlanMaterialBill.summarize(
+                Map.of(Items.IRON_HELMET, 2),
+                Map.of(Items.IRON_HELMET, Ingredient.of(template)),
+                Map.of(Items.IRON_HELMET, 2),
+                Map.of(
+                        new StackKey(Items.IRON_HELMET, template.getTag().toString()), 1,
+                        new StackKey(Items.IRON_HELMET, other.getTag().toString()), 1),
+                new ItemStack(Items.EMERALD), List.of(), 1, null, false);
+
+        assertTrue(result.feasible());
+        assertEquals(new PlanResponse.Availability(2, 2),
+                result.materials().get(IngredientKey.of(new ItemStack(Items.IRON_HELMET))));
+    }
+
+    @Test
     void reportsNonTargetOverproductionAsLeftovers() {
         PlanMaterialBill.Result result = PlanMaterialBill.summarize(
                 mapOf(Items.DIAMOND, -1, Items.GOLD_INGOT, -3),

@@ -67,7 +67,8 @@
     "yuusha.YuushaNineSwordBooksMixin",
     "namelesstrinkets.SuperMagnetMixin",
     "wizardterracurios.BuffItemMixin",
-    "terraequipment.AutoPotionTickerMixin"
+    "terraequipment.AutoPotionTickerMixin",
+    "slashblade.RecipeManagerMixin"
   ],
   "client": [
     "apotheosis.EnchLibraryScreenMixin",

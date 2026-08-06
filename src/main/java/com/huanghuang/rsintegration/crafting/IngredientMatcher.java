@@ -8,6 +8,7 @@ import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.alchemy.PotionUtils;
 import net.minecraft.world.item.alchemy.Potions;
+import net.minecraftforge.common.crafting.StrictNBTIngredient;
 import net.minecraftforge.registries.ForgeRegistries;
 
 import java.util.Objects;
@@ -56,6 +57,23 @@ public final class IngredientMatcher {
             }
         }
         return false;
+    }
+
+    /**
+     * Returns whether this ingredient actually rejects tagless stacks of every
+     * displayed item. A tagged display stack alone does not imply strict NBT:
+     * vanilla {@link Ingredient} compares only the item, even when it was built
+     * from an ItemStack carrying damage or other tags.
+     */
+    public static boolean requiresNbt(Ingredient ingredient) {
+        if (ingredient instanceof StrictNBTIngredient) return true;
+        boolean hasTaggedCandidate = false;
+        for (ItemStack candidate : ingredient.getItems()) {
+            if (candidate.isEmpty()) continue;
+            hasTaggedCandidate |= candidate.hasTag();
+            if (ingredient.test(new ItemStack(candidate.getItem()))) return false;
+        }
+        return hasTaggedCandidate;
     }
 
     /** Thirst Was Taken adds a non-brewing "Purity" tag to water bottles. */

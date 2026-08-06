@@ -183,6 +183,13 @@ class GenericCraftPacketTest extends BootstrapTest {
                 Ingredient.of(Items.NETHERITE_INGOT),
                 new ItemStack(Items.NETHERITE_CHESTPLATE));
         assertTrue(GenericCraftPacket.requiresBoundMachine(smithing, ModType.GENERIC));
+
+        ShapelessRecipe customCrafting = new ShapelessRecipe(
+                new ResourceLocation("slashblade", "custom_crafting_gate"), "",
+                net.minecraft.world.item.crafting.CraftingBookCategory.MISC,
+                new ItemStack(Items.DIAMOND),
+                net.minecraft.core.NonNullList.of(Ingredient.EMPTY, Ingredient.of(Items.STICK)));
+        assertFalse(GenericCraftPacket.requiresBoundMachine(customCrafting, ModType.CUSTOM_GUI));
     }
 
     @Test

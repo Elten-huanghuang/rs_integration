@@ -3128,6 +3128,7 @@ public final class GenericCraftPacket {
     }
 
     static boolean requiresBoundMachine(Recipe<?> recipe, @Nullable ModType modType) {
+        if (recipe instanceof CraftingRecipe) return false;
         return recipe instanceof SmithingTransformRecipe
                 || recipe instanceof SmithingTrimRecipe
                 || requiresBoundMachine(modType);

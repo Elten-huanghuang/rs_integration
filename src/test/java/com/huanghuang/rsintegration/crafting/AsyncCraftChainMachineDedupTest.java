@@ -11,6 +11,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraftforge.common.crafting.StrictNBTIngredient;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -61,7 +62,7 @@ class AsyncCraftChainMachineDedupTest extends BootstrapTest {
     }
 
     @Test
-    void taglessGraphAllocationUsesIngredientReservation() {
+    void graphReservationFollowsIngredientMatchingSemantics() {
         ItemStack plain = new ItemStack(Items.DIAMOND);
         assertFalse(AsyncCraftChain.requiresExactGraphReservation(Ingredient.of(plain)));
 
@@ -69,7 +70,9 @@ class AsyncCraftChainMachineDedupTest extends BootstrapTest {
         CompoundTag tag = new CompoundTag();
         tag.putString("itemModifier", "celestial_forge:sluggish");
         modified.setTag(tag);
-        assertTrue(AsyncCraftChain.requiresExactGraphReservation(Ingredient.of(modified)));
+        assertFalse(AsyncCraftChain.requiresExactGraphReservation(Ingredient.of(modified)),
+                "vanilla Ingredient ignores NBT even when its display stack has a tag");
+        assertTrue(AsyncCraftChain.requiresExactGraphReservation(StrictNBTIngredient.of(modified)));
     }
 
     @Test
