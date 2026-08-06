@@ -1559,7 +1559,7 @@ public final class AsyncCraftChain {
         List<ItemStack> removed = new ArrayList<>();
         for (ItemStack stack : stacks) {
             if (remaining <= 0) break;
-            if (stack.isEmpty() || !MaterialKey.of(stack).equals(material)) continue;
+            if (stack.isEmpty() || !MaterialMatcher.matchesExact(material, stack)) continue;
             int take = Math.min(remaining, stack.getCount());
             removed.add(stack.copyWithCount(take));
             stack.shrink(take);
@@ -1816,14 +1816,8 @@ public final class AsyncCraftChain {
     }
 
     static boolean requiresExactGraphReservation(Ingredient ingredient) {
-        if (ingredient == null || ingredient.isEmpty()) return false;
-        for (ItemStack template : ingredient.getItems()) {
-            if (!template.isEmpty() && template.hasTag()
-                    && template.getTag() != null && !template.getTag().isEmpty()) {
-                return true;
-            }
-        }
-        return false;
+        return ingredient != null && !ingredient.isEmpty()
+                && IngredientMatcher.requiresNbt(ingredient);
     }
 
     static ItemStack takeMatching(

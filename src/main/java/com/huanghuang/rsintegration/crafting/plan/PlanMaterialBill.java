@@ -7,7 +7,6 @@ import com.huanghuang.rsintegration.crafting.tree.PlanTreeModel;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
-import net.minecraftforge.common.crafting.StrictNBTIngredient;
 
 import javax.annotation.Nullable;
 import java.util.Collections;
@@ -74,7 +73,7 @@ public final class PlanMaterialBill {
                 continue;
             }
 
-            boolean nbtStrict = source != null && isNbtStrict(source);
+            boolean nbtStrict = source != null && IngredientMatcher.requiresNbt(source);
             int have = nbtStrict
                     ? countNbtMatching(source, stackAvailable)
                     : itemAvailable.getOrDefault(displayItem, 0);
@@ -117,16 +116,6 @@ public final class PlanMaterialBill {
             displayMaterials.putIfAbsent(entry.getKey(), entry.getValue());
         }
         return displayMaterials;
-    }
-
-    private static boolean isNbtStrict(Ingredient ingredient) {
-        if (ingredient instanceof StrictNBTIngredient) return true;
-        ItemStack[] items = ingredient.getItems();
-        if (items.length == 0) return false;
-        for (ItemStack stack : items) {
-            if (stack.isEmpty() || !stack.hasTag()) return false;
-        }
-        return true;
     }
 
     private static int countNbtMatching(Ingredient ingredient, Map<StackKey, Integer> available) {

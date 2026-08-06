@@ -145,6 +145,10 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
             // Target is Chapter of Yuusha; body uses SlashBlade's ItemSlashBlade.
             return isClassPresent("mods.flammpfeil.slashblade.item.ItemSlashBlade");
         }
+        if (mixinClassName.contains("slashblade.RecipeManagerMixin")) {
+            return isClassPresent(
+                    "mods.flammpfeil.slashblade.recipe.SlashBladeSmithingRecipe$Serializer");
+        }
         if (mixinClassName.contains("AddonEventHandler")) {
             // Target is Enigmatic Addons; body calls Enigmatic Legacy's SuperpositionHandler.
             return isClassPresent("com.aizistral.enigmaticlegacy.handlers.SuperpositionHandler");

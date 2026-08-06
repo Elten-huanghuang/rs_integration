@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.CraftPlanningRevision;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
+import com.huanghuang.rsintegration.crafting.IngredientMatcher;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.RecipeIndex;
 import com.huanghuang.rsintegration.command.PerformanceMonitor;
@@ -18,7 +19,6 @@ import net.minecraft.world.item.crafting.CraftingRecipe;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.RecipeManager;
 import net.minecraft.world.level.Level;
-import net.minecraftforge.common.crafting.StrictNBTIngredient;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -203,7 +203,7 @@ public final class ImmutableRecipeGraphProjector {
 
     public static IngredientRef projectIngredient(IngredientSpec spec) {
         Ingredient ingredient = spec.ingredient();
-        boolean strictNbt = ingredient instanceof StrictNBTIngredient || allCandidatesHaveNbt(ingredient);
+        boolean strictNbt = IngredientMatcher.requiresNbt(ingredient);
         Set<MaterialRef> alternatives = new LinkedHashSet<>();
         for (ItemStack candidate : ingredient.getItems()) {
             if (!candidate.isEmpty()) alternatives.add(material(candidate, strictNbt));
@@ -216,15 +216,6 @@ public final class ImmutableRecipeGraphProjector {
         ResourceLocation id = BuiltInRegistries.ITEM.getKey(stack.getItem());
         if (id == null) throw new IllegalArgumentException("Unregistered item in planning snapshot");
         return new MaterialRef(id, includeNbt && stack.getTag() != null ? stack.getTag().toString() : "");
-    }
-
-    private static boolean allCandidatesHaveNbt(Ingredient ingredient) {
-        ItemStack[] candidates = ingredient.getItems();
-        if (candidates.length == 0) return false;
-        for (ItemStack candidate : candidates) {
-            if (candidate.isEmpty() || !candidate.hasTag()) return false;
-        }
-        return true;
     }
 
     private record CachedProjection(RecipeManager source, long revision,
