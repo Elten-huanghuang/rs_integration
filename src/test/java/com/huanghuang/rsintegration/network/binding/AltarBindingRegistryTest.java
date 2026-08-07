@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.network.binding;
 
 import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.util.ModIds;
 import net.minecraft.resources.ResourceLocation;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -24,6 +25,14 @@ class AltarBindingRegistryTest {
         if (ModType.byId("pmmo_salvage") == ModType.GENERIC) {
             ModType.register("pmmo_salvage", new String[0], new String[]{"pmmo_salvage"},
                     new String[]{"pmmo_salvage"}, () -> null);
+        }
+        if (ModType.byId(ModIds.ID_ARS_APPARATUS) == ModType.GENERIC) {
+            ModType.register(ModIds.ID_ARS_APPARATUS, new String[0], new String[]{"apparatus"},
+                    new String[]{"apparatus"}, () -> null);
+        }
+        if (ModType.byId(ModIds.ID_ARS_IMBUEMENT) == ModType.GENERIC) {
+            ModType.register(ModIds.ID_ARS_IMBUEMENT, new String[0], new String[]{"imbuement"},
+                    new String[]{"imbuement"}, () -> null);
         }
     }
 
@@ -67,11 +76,29 @@ class AltarBindingRegistryTest {
     }
 
     @Test
+    void arsExtensionsTierFoldersDoNotRestrictArsMachineBindings() {
+        ResourceLocation lesserRecipe = new ResourceLocation(
+                "ars_extensions", "lesser/ring_of_lesser_mana_regen");
+
+        assertNull(AltarBindingRegistry.normalizeSubType(
+                AltarBindingRegistry.recipeSubTypeHint(lesserRecipe),
+                ModType.byId(ModIds.ID_ARS_APPARATUS)));
+        assertNull(AltarBindingRegistry.normalizeSubType(
+                "greater", ModType.byId(ModIds.ID_ARS_APPARATUS)));
+        assertNull(AltarBindingRegistry.normalizeSubType(
+                "ultimate", ModType.byId(ModIds.ID_ARS_APPARATUS)));
+        assertNull(AltarBindingRegistry.normalizeSubType(
+                "greater", ModType.byId(ModIds.ID_ARS_IMBUEMENT)));
+    }
+
+    @Test
     void scriptOwnedRecipeIdsDoNotExposeArbitraryMachineSubtypes() {
         assertNull(AltarBindingRegistry.recipeSubTypeHint(
                 new ResourceLocation("crafttweaker", "custom_group/machine_recipe")));
         assertNull(AltarBindingRegistry.recipeSubTypeHint(
                 new ResourceLocation("malum", "kjs/content_hash")));
+        assertNull(AltarBindingRegistry.recipeSubTypeHint(
+                new ResourceLocation("ars_nouveau", "kjs/71pk1d1jqrkd401c8e93sx7gy")));
         assertNull(AltarBindingRegistry.recipeSubTypeHint(null));
     }
 

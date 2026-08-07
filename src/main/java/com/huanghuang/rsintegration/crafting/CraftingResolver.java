@@ -787,10 +787,7 @@ public final class CraftingResolver {
         Set<StackKey> inputs = new HashSet<>();
         if (recipe instanceof CraftingRecipe cr) {
             for (Ingredient ing : cr.getIngredients()) {
-                if (ing.isEmpty()) continue;
-                for (ItemStack stack : ing.getItems()) {
-                    if (!stack.isEmpty()) inputs.add(StackKey.of(stack, stack.hasTag()));
-                }
+                addCycleGuardInputKeys(inputs, ing);
             }
             return inputs;
         }
@@ -798,9 +795,7 @@ public final class CraftingResolver {
         if (specs != null && !isIngredientDataBroken(specs)) {
             for (IngredientSpec spec : specs) {
                 if (spec.isEmpty()) continue;
-                for (ItemStack stack : spec.ingredient().getItems()) {
-                    if (!stack.isEmpty()) inputs.add(StackKey.of(stack, stack.hasTag()));
-                }
+                addCycleGuardInputKeys(inputs, spec.ingredient());
             }
             return inputs;
         }
@@ -811,6 +806,43 @@ public final class CraftingResolver {
                 inputs.add(StackKey.of(stack, stack.hasTag()));
             }
         }
+        return inputs;
+    }
+
+    /**
+     * Add only unambiguous inputs to the ping-pong guard. An Ingredient backed by
+     * a tag is an OR, not a requirement for every item returned by
+     * {@link Ingredient#getItems()}. Adding every tag variant creates false edges
+     * such as chiseled quartz -> quartz slab when the recipe actually consumed a
+     * quartz block, causing a valid conversion chain to be rejected as cyclic.
+     */
+    private static void addCycleGuardInputKeys(Set<StackKey> inputs, Ingredient ingredient) {
+        if (ingredient == null || ingredient.isEmpty()) return;
+        ItemStack[] options = ingredient.getItems();
+        if (options.length == 0) return;
+
+        Item firstItem = null;
+        for (ItemStack option : options) {
+            if (option.isEmpty()) continue;
+            if (firstItem == null) {
+                firstItem = option.getItem();
+            } else if (option.getItem() != firstItem) {
+                // Multiple item types mean this is an alternative ingredient.
+                // The concrete option is selected later by the executor, so no
+                // dependency edge can be inferred safely here.
+                return;
+            }
+        }
+
+        for (ItemStack option : options) {
+            if (!option.isEmpty()) inputs.add(StackKey.of(option, option.hasTag()));
+        }
+    }
+
+    /** Package-private probe used by the resolver regression tests. */
+    static Set<StackKey> cycleGuardInputKeys(Ingredient ingredient) {
+        Set<StackKey> inputs = new HashSet<>();
+        addCycleGuardInputKeys(inputs, ingredient);
         return inputs;
     }
 

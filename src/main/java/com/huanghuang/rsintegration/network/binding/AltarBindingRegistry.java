@@ -809,6 +809,14 @@ public final class AltarBindingRegistry {
         if (type.id().startsWith("vanilla_") || "smithing".equals(type.id())) {
             return null;
         }
+        // Ars recipe IDs may be grouped by content tier rather than machine
+        // type. Ars Extensions, for example, uses greater/ and ultimate/ for
+        // recipes that still run on the normal Enchanting Apparatus. The
+        // concrete Ars ModType already distinguishes apparatus from imbuement.
+        if (ModIds.ID_ARS_APPARATUS.equals(type.id())
+                || ModIds.ID_ARS_IMBUEMENT.equals(type.id())) {
+            return null;
+        }
         if (ModIds.WIZARDS_REBORN.equals(type.id())) {
             if ("crystal_infusion".equals(hint)) {
                 return "crystal_ritual";

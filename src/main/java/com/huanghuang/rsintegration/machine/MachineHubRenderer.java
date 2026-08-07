@@ -112,8 +112,13 @@ public final class MachineHubRenderer {
         int xW = font.width(xMark);
         int xX = x + totalW - PADDING - xW - 4;
         int xY = y + PADDING + (TITLE_H - font.lineHeight) / 2;
-        boolean closeHovered = mouseX >= xX - 2 && mouseX < xX + xW + 2
-                && mouseY >= xY - 2 && mouseY < xY + font.lineHeight + 2;
+        int closeX = x + totalW - 20;
+        int closeY = y + 3;
+        int closeW = 16;
+        int closeH = 16;
+        MachineHub.setCloseButtonBounds(closeX, closeY, closeW, closeH);
+        boolean closeHovered = mouseX >= closeX && mouseX < closeX + closeW
+                && mouseY >= closeY && mouseY < closeY + closeH;
         MachineHub.setCloseButtonHovered(closeHovered);
         int closeColor = closeHovered ? 0xFFFF3333 : TEXT_PRIMARY;
         g.drawString(font, xMark, xX, xY, closeColor);

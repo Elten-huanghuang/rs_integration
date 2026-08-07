@@ -55,6 +55,7 @@ public final class MachineHub {
     private final List<BindingInfo> filteredMachines = new ArrayList<>();
     private int hoveredIndex = -1;
     private boolean closeButtonHovered;
+    private int closeButtonX, closeButtonY, closeButtonW, closeButtonH;
     private String filterText = "";
     private int scrollOffset;
 
@@ -91,6 +92,18 @@ public final class MachineHub {
     public static void setHoveredIndex(int idx) { INSTANCE.hoveredIndex = idx; }
     public static boolean isCloseButtonHovered() { return INSTANCE.closeButtonHovered; }
     public static void setCloseButtonHovered(boolean v) { INSTANCE.closeButtonHovered = v; }
+    public static void setCloseButtonBounds(int x, int y, int w, int h) {
+        INSTANCE.closeButtonX = x;
+        INSTANCE.closeButtonY = y;
+        INSTANCE.closeButtonW = w;
+        INSTANCE.closeButtonH = h;
+    }
+    public static boolean isCloseButtonAt(double mouseX, double mouseY) {
+        return mouseX >= INSTANCE.closeButtonX
+                && mouseX < INSTANCE.closeButtonX + INSTANCE.closeButtonW
+                && mouseY >= INSTANCE.closeButtonY
+                && mouseY < INSTANCE.closeButtonY + INSTANCE.closeButtonH;
+    }
     public static List<BindingInfo> getMachines() { return INSTANCE.filteredMachines; }
     public static List<BindingInfo> getAllMachines() { return INSTANCE.machines; }
     public static String getFilterText() { return INSTANCE.filterText; }
@@ -238,6 +251,10 @@ public final class MachineHub {
         INSTANCE.filterText = "";
         INSTANCE.scrollOffset = 0;
         INSTANCE.hoveredIndex = -1;
+        INSTANCE.closeButtonHovered = false;
+        INSTANCE.closeButtonW = 0;
+        INSTANCE.closeButtonH = 0;
+        INSTANCE.isDragging = false;
     }
 
     /** Clear all state on logout to prevent cross-server contamination. */

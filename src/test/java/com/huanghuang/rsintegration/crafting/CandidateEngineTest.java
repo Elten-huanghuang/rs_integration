@@ -59,4 +59,12 @@ class CandidateEngineTest extends BootstrapTest {
         assertTrue(demands.values().stream().anyMatch(d -> d.required() == 2));
         assertTrue(demands.values().stream().anyMatch(d -> d.required() == 1));
     }
+
+    @Test
+    void cycleGuardDoesNotTreatOrIngredientVariantsAsConsumedInputs() {
+        assertEquals(1, CraftingResolver.cycleGuardInputKeys(
+                Ingredient.of(Items.QUARTZ_BLOCK)).size());
+        assertTrue(CraftingResolver.cycleGuardInputKeys(
+                Ingredient.of(Items.CHISELED_QUARTZ_BLOCK, Items.QUARTZ_BLOCK)).isEmpty());
+    }
 }
