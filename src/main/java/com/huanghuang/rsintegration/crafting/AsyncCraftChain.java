@@ -6,6 +6,7 @@ import com.huanghuang.rsintegration.mods.crockpot.CrockPotBatchDelegate;
 import com.huanghuang.rsintegration.mods.embers.EreAlchemyDelegateMode;
 import com.huanghuang.rsintegration.mods.embers.KnownCodeSavedData;
 import com.huanghuang.rsintegration.util.InsertedStackDelta;
+import com.huanghuang.rsintegration.util.TrackedNetworkInsertion;
 import com.huanghuang.rsintegration.util.LogSampler;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
@@ -1423,13 +1424,7 @@ public final class AsyncCraftChain {
             ItemStack leftover = producer.copy();
             try {
                 if (network != null) {
-                    leftover = network.insertItem(leftover, leftover.getCount(),
-                            com.refinedmods.refinedstorage.api.util.Action.PERFORM);
-                    ItemStack inserted = InsertedStackDelta.between(producer, leftover);
-                    var tracker = network.getItemStorageTracker();
-                    if (!inserted.isEmpty() && tracker != null) {
-                        tracker.changed(online, inserted.copy());
-                    }
+                    leftover = TrackedNetworkInsertion.insert(network, online, producer);
                 }
             } catch (RuntimeException exception) {
                 RSIntegrationMod.LOGGER.warn(ctx.format(
@@ -3460,10 +3455,7 @@ public final class AsyncCraftChain {
             if (online != null) {
                 ItemStack leftover = owed.copy();
                 if (network != null) {
-                    leftover = network.insertItem(owed.copy(), owed.getCount(),
-                            com.refinedmods.refinedstorage.api.util.Action.PERFORM);
-                    var tracker = network.getItemStorageTracker();
-                    if (tracker != null) tracker.changed(online, owed.copy());
+                    leftover = TrackedNetworkInsertion.insert(network, online, owed);
                 }
                 if (!leftover.isEmpty()) safeGiveToPlayer(online, leftover);
             } else if (!insertOrDropAtSpawn(owed.copy())) {
@@ -3485,12 +3477,7 @@ public final class AsyncCraftChain {
         while (iter.hasNext()) {
             ItemStack vi = iter.next();
             if (!vi.isEmpty()) {
-                ItemStack leftover = network.insertItem(vi.copy(), vi.getCount(),
-                        com.refinedmods.refinedstorage.api.util.Action.PERFORM);
-                if (online != null) {
-                    var tracker = network.getItemStorageTracker();
-                    if (tracker != null) tracker.changed(online, vi.copy());
-                }
+                ItemStack leftover = TrackedNetworkInsertion.insert(network, online, vi);
                 if (online != null && !leftover.isEmpty()) {
                     safeGiveToPlayer(online, leftover);
                 } else if (online == null && !leftover.isEmpty()) {
@@ -3516,8 +3503,7 @@ public final class AsyncCraftChain {
      */
     private boolean insertOrDropAtSpawn(ItemStack stack) {
         if (network != null) {
-            ItemStack stillLeft = network.insertItem(stack.copy(), stack.getCount(),
-                    com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+            ItemStack stillLeft = TrackedNetworkInsertion.insert(network, resolvePlayer(), stack);
             if (stillLeft.isEmpty()) return true;
             stack = stillLeft;
         }
@@ -3571,12 +3557,9 @@ public final class AsyncCraftChain {
                     ItemStack leftover = playerOutput ? insertIntoPlayerInventory(online, vi) : vi.copy();
                     ItemStack rsCandidate = leftover.copy();
                     if (!leftover.isEmpty()) {
-                        leftover = network.insertItem(rsCandidate.copy(), rsCandidate.getCount(),
-                                com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                        leftover = TrackedNetworkInsertion.insert(network, online, rsCandidate);
                     }
-                    var tracker = network.getItemStorageTracker();
                     ItemStack inserted = InsertedStackDelta.between(vi, leftover);
-                    if (!inserted.isEmpty() && tracker != null) tracker.changed(online, inserted.copy());
                     if (targetOutput != null && vi.is(targetOutput.getItem())) {
                         ExternalItemProgressBridge.enqueueCrafted(
                                 online, inserted);

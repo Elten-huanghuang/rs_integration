@@ -7,6 +7,7 @@ import com.huanghuang.rsintegration.crafting.graph.NodeId;
 import com.huanghuang.rsintegration.crafting.plan.PlanGraphView;
 import com.huanghuang.rsintegration.crafting.plan.PlanMaterialBill;
 import com.huanghuang.rsintegration.util.InsertedStackDelta;
+import com.huanghuang.rsintegration.util.TrackedNetworkInsertion;
 
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 
@@ -1292,11 +1293,7 @@ public final class GenericCraftPacket {
                             leftover = PlayerUtils.insertIntoPlayerInventory(player, leftover);
                         }
                         if (outputDestination == OutputDestination.RS_NETWORK || !leftover.isEmpty()) {
-                            ItemStack rsCandidate = leftover.copy();
-                            leftover = network.insertItem(leftover.copy(), leftover.getCount(),
-                                    com.refinedmods.refinedstorage.api.util.Action.PERFORM);
-                            var tracker = network.getItemStorageTracker();
-                            if (tracker != null) tracker.changed(player, rsCandidate);
+                            leftover = TrackedNetworkInsertion.insert(network, player, leftover);
                         }
                         ItemStack inserted = InsertedStackDelta.between(result, leftover);
                         ExternalItemProgressBridge.enqueueCrafted(player, inserted);
@@ -1336,11 +1333,7 @@ public final class GenericCraftPacket {
                         }
                         for (ItemStack remainder : CraftPacketUtils.getRecipeRemainders(cr, slotAligned)) {
                             if (!remainder.isEmpty()) {
-                                ItemStack leftover = network.insertItem(remainder.copy(),
-                                        remainder.getCount(),
-                                        com.refinedmods.refinedstorage.api.util.Action.PERFORM);
-                                var tracker = network.getItemStorageTracker();
-                                if (tracker != null) tracker.changed(player, remainder.copy());
+                                ItemStack leftover = TrackedNetworkInsertion.insert(network, player, remainder);
                                 if (!leftover.isEmpty()) {
                                     safeGiveToPlayer(player, leftover);
                                 }
@@ -1353,10 +1346,7 @@ public final class GenericCraftPacket {
                         for (ItemStack refundStack : allExtracted) {
                             if (refundStack.isEmpty()) continue;
                             ItemStack refund = refundStack.copy();
-                            ItemStack leftover = network.insertItem(refund, refund.getCount(),
-                                    com.refinedmods.refinedstorage.api.util.Action.PERFORM);
-                            var tracker = network.getItemStorageTracker();
-                            if (tracker != null) tracker.changed(player, refund.copy());
+                            ItemStack leftover = TrackedNetworkInsertion.insert(network, player, refund);
                             if (!leftover.isEmpty()) {
                                 safeGiveToPlayer(player, leftover);
                             }

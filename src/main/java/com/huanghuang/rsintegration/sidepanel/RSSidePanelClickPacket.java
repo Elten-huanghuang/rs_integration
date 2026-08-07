@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.sidepanel;
 
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
+import com.huanghuang.rsintegration.util.TrackedNetworkInsertion;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
@@ -396,21 +397,15 @@ public final class RSSidePanelClickPacket {
 
             ItemStack template = serverCarried.copy();
 
-            // Record modification time — matches RS tracker.changed() before insert
-            var tracker = network.getItemStorageTracker();
-            if (tracker != null) {
-                tracker.changed(player, template.copy());
-            }
-
             if (isRightClick) {
                 // Right-click: insert single item — matches RS onInsert single path
                 template.setCount(1);
-                ItemStack remainder = network.insertItem(template.copy(), 1, Action.PERFORM);
+                ItemStack remainder = TrackedNetworkInsertion.insert(network, player, template);
                 if (remainder.isEmpty()) serverCarried.shrink(1);
             } else {
                 // Left-click: insert entire stack — matches RS onInsert full-stack path
                 int count = serverCarried.getCount();
-                ItemStack remainder = network.insertItem(template.copy(), count, Action.PERFORM);
+                ItemStack remainder = TrackedNetworkInsertion.insert(network, player, template);
                 int inserted = count - remainder.getCount();
                 if (inserted > 0) serverCarried.shrink(inserted);
             }

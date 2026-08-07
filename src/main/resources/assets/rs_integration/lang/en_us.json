@@ -13,6 +13,8 @@
   "item.rs_integration.rs_magnet_upgrade.tooltip": "Transfers nearby items directly into the bound RS network",
   "item.rs_integration.rs_pickup_upgrade": "RS Pickup Upgrade",
   "item.rs_integration.rs_feeding_upgrade": "RS Feeding Upgrade",
+  "upgrade.rs_integration.rs_feeding": "RS Feeding",
+  "upgrade.rs_integration.rs_feeding.tooltip": "RS Feeding Settings",
   "item.rs_integration.rs_refill_upgrade": "RS Refill Upgrade",
   "item.sophisticatedbackpacks.rs_network.bound": "Bound to RS Network",
   "item.sophisticatedbackpacks.rs_network.unbound": "Unbound - Shift+Right-Click RS Controller",

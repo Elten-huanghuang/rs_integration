@@ -8,6 +8,7 @@ import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.mixin.forbidden.ClibanoMainBlockEntityAccessor;
 import com.huanghuang.rsintegration.util.InsertedStackDelta;
 import com.huanghuang.rsintegration.util.PlayerUtils;
+import com.huanghuang.rsintegration.util.TrackedNetworkInsertion;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;
 import com.stal111.forbidden_arcanus.common.block.entity.clibano.ClibanoFireType;
@@ -347,7 +348,7 @@ public final class ClibanoBatchDelegate extends AbstractBatchDelegate {
                 safeRestoreOutput(inventory, slot, extracted);
                 return false;
             }
-            ItemStack remainder = network.insertItem(extracted.copy(), extracted.getCount(), Action.PERFORM);
+            ItemStack remainder = TrackedNetworkInsertion.insert(network, player, extracted);
             if (!remainder.isEmpty()) {
                 safeRestoreOutput(inventory, slot, remainder);
                 return false;
@@ -523,7 +524,7 @@ public final class ClibanoBatchDelegate extends AbstractBatchDelegate {
         if (stack == null || stack.isEmpty()) return;
         ItemStack remainder = stack.copy();
         if (network != null) {
-            remainder = network.insertItem(remainder, remainder.getCount(), Action.PERFORM);
+            remainder = TrackedNetworkInsertion.insert(network, player, remainder);
             if (remainder.isEmpty()) return;
         }
         if (player != null && !player.hasDisconnected()) {

@@ -4,7 +4,6 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.mojang.authlib.GameProfile;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.storage.cache.IStorageCache;
-import com.refinedmods.refinedstorage.api.storage.tracker.IStorageTracker;
 import com.refinedmods.refinedstorage.api.util.Action;
 import com.refinedmods.refinedstorage.api.util.IComparer;
 import com.refinedmods.refinedstorage.api.util.StackListEntry;
@@ -56,12 +55,8 @@ public final class BackpackRSUtils {
             }
         }
 
-        ItemStack remaining = network.insertItem(stack.copy(), stack.getCount(), Action.PERFORM);
-        IStorageTracker tracker = network.getItemStorageTracker();
-        if (tracker != null) {
-            Player fakePlayer = getOrCreateFakePlayer((ServerLevel) level, backpackUuid);
-            tracker.changed(fakePlayer, remaining.isEmpty() ? stack.copy() : remaining.copy());
-        }
+        Player fakePlayer = getOrCreateFakePlayer((ServerLevel) level, backpackUuid);
+        ItemStack remaining = TrackedNetworkInsertion.insert(network, fakePlayer, stack);
 
         if (remaining.isEmpty()) {
             itemEntity.setItem(ItemStack.EMPTY);
@@ -94,18 +89,9 @@ public final class BackpackRSUtils {
             }
         }
 
-        Action action = simulate ? Action.SIMULATE : Action.PERFORM;
-        ItemStack remaining = network.insertItem(stack.copy(), stack.getCount(), action);
-
-        if (!simulate) {
-            IStorageTracker tracker = network.getItemStorageTracker();
-            if (tracker != null) {
-                Player fakePlayer = getOrCreateFakePlayer((ServerLevel) world, backpackUuid);
-                tracker.changed(fakePlayer, remaining.isEmpty() ? stack.copy() : remaining.copy());
-            }
-        }
-
-        return remaining;
+        if (simulate) return network.insertItem(stack.copy(), stack.getCount(), Action.SIMULATE);
+        Player fakePlayer = getOrCreateFakePlayer((ServerLevel) world, backpackUuid);
+        return TrackedNetworkInsertion.insert(network, fakePlayer, stack);
     }
 
     public static List<ItemStack> handleRSRestock(ContentsFilterLogic filter, IStorageWrapper storageWrapper,

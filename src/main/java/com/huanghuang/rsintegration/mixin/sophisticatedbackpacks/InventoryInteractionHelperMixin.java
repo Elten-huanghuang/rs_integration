@@ -1,9 +1,9 @@
 package com.huanghuang.rsintegration.mixin.sophisticatedbackpacks;
 
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.util.TrackedNetworkInsertion;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.network.security.Permission;
-import com.refinedmods.refinedstorage.api.util.Action;
 import com.refinedmods.refinedstorage.apiimpl.network.node.GridNetworkNode;
 import com.refinedmods.refinedstorage.blockentity.grid.GridBlockEntity;
 import net.minecraft.core.BlockPos;
@@ -91,17 +91,7 @@ public class InventoryInteractionHelperMixin {
             if (stack.isEmpty() || !upgrade.getFilterLogic().matchesFilter(stack)) continue;
             int originalCount = stack.getCount();
             ItemStack input = stack.copy();
-            ItemStack simulatedRemainder = network.insertItem(
-                    input.copy(), originalCount, Action.SIMULATE);
-            int accepted = originalCount - simulatedRemainder.getCount();
-            if (accepted <= 0) continue;
-
-            // RS updates its own tracker before insertion, so cache listeners see
-            // the new timestamp while processing the synchronous storage delta.
-            var tracker = network.getItemStorageTracker();
-            if (tracker != null) tracker.changed(player, input.copyWithCount(accepted));
-
-            ItemStack remainder = network.insertItem(input, originalCount, Action.PERFORM);
+            ItemStack remainder = TrackedNetworkInsertion.insert(network, player, input);
             int inserted = originalCount - remainder.getCount();
             if (inserted <= 0) continue;
             s2 += inserted;
