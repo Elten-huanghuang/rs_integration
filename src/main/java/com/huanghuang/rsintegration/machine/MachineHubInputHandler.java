@@ -34,8 +34,9 @@ public final class MachineHubInputHandler {
 
         // Close button — must be checked BEFORE tryStartDrag, otherwise
         // drag consumes all title bar clicks and the button is unreachable.
-        if (MachineHub.isCloseButtonHovered() && button == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
-            MachineHub.hide();
+        if (button == GLFW.GLFW_MOUSE_BUTTON_LEFT
+                && MachineHub.isCloseButtonAt(mouseX, mouseY)) {
+            MachineHub.hideImmediate();
             return true;
         }
 
@@ -105,12 +106,7 @@ public final class MachineHubInputHandler {
         if (!MachineHub.isVisible()) return false;
 
         if (keyCode == GLFW.GLFW_KEY_ESCAPE || keyCode == GLFW.GLFW_KEY_E) {
-            if (!MachineHub.getFilterText().isEmpty()) {
-                // Escape first clears filter, second closes hub
-                MachineHub.clearFilter();
-                return true;
-            }
-            MachineHub.hide();
+            MachineHub.hideImmediate();
             return true;
         }
 
