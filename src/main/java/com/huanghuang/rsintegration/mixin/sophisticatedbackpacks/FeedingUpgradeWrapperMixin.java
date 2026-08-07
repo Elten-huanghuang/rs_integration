@@ -1,6 +1,8 @@
 package com.huanghuang.rsintegration.mixin.sophisticatedbackpacks;
 
 import com.huanghuang.rsintegration.util.BackpackRSUtils;
+import com.huanghuang.rsintegration.util.RSFeedingPolicy;
+import com.huanghuang.rsintegration.util.TrackedNetworkInsertion;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.storage.cache.IStorageCache;
 import com.refinedmods.refinedstorage.api.util.Action;
@@ -11,16 +13,20 @@ import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.food.FoodProperties;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.items.ItemHandlerHelper;
+import net.minecraftforge.event.ForgeEventFactory;
 import net.minecraft.world.level.Level;
 import net.p3pp3rf1y.sophisticatedcore.api.IStorageWrapper;
 import net.p3pp3rf1y.sophisticatedcore.upgrades.FilterLogic;
 import net.p3pp3rf1y.sophisticatedcore.upgrades.UpgradeWrapperBase;
 import net.p3pp3rf1y.sophisticatedcore.upgrades.feeding.FeedingUpgradeItem;
 import net.p3pp3rf1y.sophisticatedcore.upgrades.feeding.FeedingUpgradeWrapper;
+import net.p3pp3rf1y.sophisticatedcore.upgrades.feeding.HungerLevel;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
@@ -54,6 +60,12 @@ public abstract class FeedingUpgradeWrapperMixin
 
     @Shadow(remap = false)
     public abstract FilterLogic getFilterLogic();
+
+    @Shadow(remap = false)
+    public abstract HungerLevel getFeedAtHungerLevel();
+
+    @Shadow(remap = false)
+    public abstract boolean shouldFeedImmediatelyWhenHurt();
 
     @Inject(method = "<init>", at = @At(value = "RETURN"), remap = false)
     private void onInit(IStorageWrapper storageWrapper, ItemStack upgrade,
@@ -101,23 +113,44 @@ public abstract class FeedingUpgradeWrapperMixin
             if (!filter.matchesFilter(rsStack)) continue;
 
             FoodProperties foodProps = rsStack.getItem().getFoodProperties(rsStack, player);
-            if (foodProps == null) continue;
+            if (foodProps == null || foodProps.getNutrition() <= 0) continue;
 
             int foodValue = foodProps.getNutrition();
-            if (!rsi$isHungryEnough(missingFood, foodValue)) continue;
+            boolean hurt = player.getHealth() < player.getMaxHealth() - 0.1F;
+            RSFeedingPolicy.HungerRule hungerRule = RSFeedingPolicy.HungerRule.valueOf(
+                    getFeedAtHungerLevel().name());
+            if (!RSFeedingPolicy.canFeed(hungerRule, missingFood, foodValue,
+                    hurt, shouldFeedImmediatelyWhenHurt())) continue;
 
             ItemStack extracted = network.extractItem(rsStack.copy(), 1,
                     IComparer.COMPARE_NBT, Action.PERFORM);
             if (extracted.isEmpty()) continue;
 
-            player.getFoodData().eat(foodProps.getNutrition(), foodProps.getSaturationModifier());
-
-            ItemStack remainder = extracted.getCraftingRemainingItem();
-            if (!remainder.isEmpty()) {
-                ItemStack leftover = network.insertItem(remainder, remainder.getCount(), Action.PERFORM);
-                if (!leftover.isEmpty()) {
-                    ItemHandlerHelper.giveItemToPlayer(player, leftover);
+            ItemStack previousMainHand = player.getMainHandItem();
+            ItemStack food = extracted.copyWithCount(1);
+            ItemStack remainder = ItemStack.EMPTY;
+            boolean consumed = false;
+            try {
+                player.getInventory().items.set(player.getInventory().selected, extracted);
+                if (food.use(level, player, InteractionHand.MAIN_HAND).getResult() == InteractionResult.CONSUME) {
+                    ItemStack consumedSnapshot = food.copy();
+                    ItemStack finished = food.getItem().finishUsingItem(food, level, player);
+                    remainder = ForgeEventFactory.onItemUseFinish(player, consumedSnapshot, 0, finished);
+                    consumed = true;
                 }
+            } finally {
+                player.getInventory().items.set(player.getInventory().selected, previousMainHand);
+            }
+
+            if (!consumed) {
+                ItemStack leftover = network.insertItem(extracted.copy(), extracted.getCount(), Action.PERFORM);
+                if (!leftover.isEmpty()) ItemHandlerHelper.giveItemToPlayer(player, leftover);
+                continue;
+            }
+
+            if (!remainder.isEmpty()) {
+                ItemStack leftover = TrackedNetworkInsertion.insert(network, player, remainder);
+                if (!leftover.isEmpty()) ItemHandlerHelper.giveItemToPlayer(player, leftover);
             }
 
             cir.setReturnValue(true);
@@ -127,10 +160,5 @@ public abstract class FeedingUpgradeWrapperMixin
 
         cir.setReturnValue(false);
         cir.cancel();
-    }
-
-    @Unique
-    private static boolean rsi$isHungryEnough(int missingFood, int foodValue) {
-        return foodValue <= missingFood;
     }
 }

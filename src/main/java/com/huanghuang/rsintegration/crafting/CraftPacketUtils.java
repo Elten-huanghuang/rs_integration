@@ -14,6 +14,7 @@ import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.util.CraftLogContext;
 import com.huanghuang.rsintegration.util.PlayerUtils;
 import com.huanghuang.rsintegration.util.Reflect;
+import com.huanghuang.rsintegration.util.TrackedNetworkInsertion;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.NonNullList;
@@ -330,10 +331,7 @@ public final class CraftPacketUtils {
                     if (network == null) {
                         PlayerUtils.safeGiveToPlayer(player, vi.copy(), null);
                     } else {
-                        var tracker = network.getItemStorageTracker();
-                        if (tracker != null) tracker.changed(player, vi.copy());
-                        ItemStack remainder = network.insertItem(vi.copy(), vi.getCount(),
-                                com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                        ItemStack remainder = TrackedNetworkInsertion.insert(network, player, vi);
                         if (!remainder.isEmpty()) {
                             PlayerUtils.safeGiveToPlayer(player, remainder, network);
                         }

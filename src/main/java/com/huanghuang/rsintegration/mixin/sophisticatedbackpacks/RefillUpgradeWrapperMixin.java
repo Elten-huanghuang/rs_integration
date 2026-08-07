@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.mixin.sophisticatedbackpacks;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.util.BackpackRSUtils;
+import com.huanghuang.rsintegration.util.TrackedNetworkInsertion;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.storage.cache.IStorageCache;
 import com.refinedmods.refinedstorage.api.util.Action;
@@ -175,7 +176,7 @@ public abstract class RefillUpgradeWrapperMixin
                 missing -= filled;
 
                 if (!remainder.isEmpty()) {
-                    ItemStack leftover = network.insertItem(remainder, remainder.getCount(), Action.PERFORM);
+                    ItemStack leftover = TrackedNetworkInsertion.insert(network, player, remainder);
                     if (!leftover.isEmpty()) {
                         ItemHandlerHelper.giveItemToPlayer(player, leftover);
                     }

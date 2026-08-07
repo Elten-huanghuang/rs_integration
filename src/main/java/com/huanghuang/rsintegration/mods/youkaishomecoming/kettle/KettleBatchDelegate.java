@@ -6,6 +6,8 @@ import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.reflection.probes.YHKReflection;
+import com.huanghuang.rsintegration.util.PlayerUtils;
+import com.huanghuang.rsintegration.util.TrackedNetworkInsertion;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.core.BlockPos;
@@ -358,8 +360,12 @@ public final class KettleBatchDelegate extends AbstractBatchDelegate {
                     if (!result.isEmpty()) {
                         if (network == null)
                             this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, be.getBlockPos());
-                        if (network != null)
-                            network.insertItem(result, result.getCount(), Action.PERFORM);
+                        if (network != null) {
+                            ItemStack remainder = TrackedNetworkInsertion.insert(network, player, result);
+                            if (!remainder.isEmpty()) PlayerUtils.safeGiveToPlayer(player, remainder, network);
+                        } else {
+                            PlayerUtils.safeGiveToPlayer(player, result, null);
+                        }
                     }
                 }
             }

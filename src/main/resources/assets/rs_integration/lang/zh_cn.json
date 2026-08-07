@@ -13,6 +13,8 @@
   "item.rs_integration.rs_magnet_upgrade.tooltip": "将附近物品直接传送到绑定的 RS 网络",
   "item.rs_integration.rs_pickup_upgrade": "次元拾取升级",
   "item.rs_integration.rs_feeding_upgrade": "次元喂食升级",
+  "upgrade.rs_integration.rs_feeding": "次元喂食",
+  "upgrade.rs_integration.rs_feeding.tooltip": "次元喂食设置",
   "item.rs_integration.rs_refill_upgrade": "次元补货升级",
   "item.sophisticatedbackpacks.rs_network.bound": "已绑定到 RS 网络",
   "item.sophisticatedbackpacks.rs_network.unbound": "未绑定 - 潜行右键 RS 控制器",

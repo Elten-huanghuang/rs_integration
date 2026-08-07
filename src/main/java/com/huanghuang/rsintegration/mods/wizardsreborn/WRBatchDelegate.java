@@ -20,6 +20,7 @@ import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.recipe.WRRecipeHandler;
 import com.huanghuang.rsintegration.util.Reflect;
+import com.huanghuang.rsintegration.util.TrackedNetworkInsertion;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
@@ -1618,8 +1619,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
                             // Distinct by-products are not representable in the
                             // delegate's single-stack return value.
                             if (network != null) {
-                                ItemStack leftover = network.insertItem(stack, stack.getCount(),
-                                        com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                                ItemStack leftover = TrackedNetworkInsertion.insert(network, player, stack);
                                 if (!leftover.isEmpty()) {
                                     ItemHandlerHelper.giveItemToPlayer(player, leftover);
                                 }
@@ -1677,8 +1677,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
                             fromMachine = stack;
                         } else {
                             if (network != null) {
-                                ItemStack leftover = network.insertItem(stack, stack.getCount(),
-                                        com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                                ItemStack leftover = TrackedNetworkInsertion.insert(network, player, stack);
                                 if (!leftover.isEmpty())
                                     ItemHandlerHelper.giveItemToPlayer(player, leftover);
                             } else {
@@ -1703,8 +1702,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
                                         fromMachine = r;
                                     } else {
                                         if (network != null) {
-                                            ItemStack leftover = network.insertItem(r, r.getCount(),
-                                                    com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                                            ItemStack leftover = TrackedNetworkInsertion.insert(network, player, r);
                                             if (!leftover.isEmpty())
                                                 ItemHandlerHelper.giveItemToPlayer(player, leftover);
                                         } else {
@@ -1760,8 +1758,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
                                         fromMachine = taken;
                                     } else {
                                         if (network != null) {
-                                            ItemStack leftover = network.insertItem(taken, taken.getCount(),
-                                                    com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                                            ItemStack leftover = TrackedNetworkInsertion.insert(network, player, taken);
                                             if (!leftover.isEmpty()) {
                                                 ItemHandlerHelper.giveItemToPlayer(player, leftover);
                                             }

@@ -7,6 +7,7 @@ import com.huanghuang.rsintegration.network.ProtectionChecker;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.util.ChunkUtils;
+import com.huanghuang.rsintegration.util.TrackedNetworkInsertion;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.core.BlockPos;
@@ -131,7 +132,7 @@ public final class MachineCollectPacket {
                 if (packet.toRS) {
                     INetwork network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
                     if (network != null) {
-                        ItemStack leftover = network.insertItem(output, output.getCount(), Action.PERFORM);
+                        ItemStack leftover = TrackedNetworkInsertion.insert(network, player, output);
                         if (!leftover.isEmpty()) player.drop(leftover, false);
                     } else player.drop(output, false);
                 } else if (!player.getInventory().add(output)) player.drop(output, false);
@@ -157,7 +158,7 @@ public final class MachineCollectPacket {
             if (packet.toRS) {
                 INetwork network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
                 if (network != null) {
-                    ItemStack leftover = network.insertItem(output, output.getCount(), Action.PERFORM);
+                    ItemStack leftover = TrackedNetworkInsertion.insert(network, player, output);
                     if (!leftover.isEmpty()) {
                         player.drop(leftover, false);
                     }

@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.autoeat.network.AutoEatSyncPacket;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;
+import com.huanghuang.rsintegration.util.TrackedNetworkInsertion;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.network.grid.INetworkAwareGrid;
 import com.refinedmods.refinedstorage.api.network.grid.GridType;
@@ -332,7 +333,7 @@ public final class AutoEatEngine {
             remainder = fireEatEvent(player, beforeEat, remainder);
             // Recover container items (bowls, bottles, etc.) returned by eat()
             if (!remainder.isEmpty()) {
-                ItemStack leftover = network.insertItem(remainder, remainder.getCount(), Action.PERFORM);
+                ItemStack leftover = TrackedNetworkInsertion.insert(network, player, remainder);
                 if (!leftover.isEmpty()) {
                     if (!player.getInventory().add(leftover)) {
                         player.drop(leftover, false);
@@ -478,7 +479,7 @@ public final class AutoEatEngine {
                 } catch (Throwable ignored) {}
             }
             if (!remainder.isEmpty()) {
-                ItemStack leftover = network.insertItem(remainder, remainder.getCount(), Action.PERFORM);
+                ItemStack leftover = TrackedNetworkInsertion.insert(network, player, remainder);
                 if (!leftover.isEmpty()) {
                     if (!player.getInventory().add(leftover)) {
                         player.drop(leftover, false);
@@ -631,7 +632,7 @@ public final class AutoEatEngine {
             } catch (Throwable ignored) {}
 
             if (!remainder.isEmpty()) {
-                ItemStack leftover = network.insertItem(remainder, remainder.getCount(), Action.PERFORM);
+                ItemStack leftover = TrackedNetworkInsertion.insert(network, player, remainder);
                 if (!leftover.isEmpty()) {
                     if (!player.getInventory().add(leftover)) {
                         player.drop(leftover, false);

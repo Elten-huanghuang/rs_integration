@@ -9,6 +9,8 @@ import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.reflection.probes.FarmingForBlockheadsReflection;
 import com.huanghuang.rsintegration.util.Reflect;
+import com.huanghuang.rsintegration.util.PlayerUtils;
+import com.huanghuang.rsintegration.util.TrackedNetworkInsertion;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
@@ -84,8 +86,8 @@ public final class MarketBatchDelegate extends AbstractBatchDelegate {
         // ledger-overloaded tryStartSingleCraft + collectResult instead.
         ItemStack result = wrapper.getResultItem(player.serverLevel().registryAccess());
         if (!result.isEmpty()) {
-            network.insertItem(result.copy(), result.getCount(),
-                    com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+            ItemStack remainder = TrackedNetworkInsertion.insert(network, player, result);
+            if (!remainder.isEmpty()) PlayerUtils.safeGiveToPlayer(player, remainder, network);
             resultInserted = true;
         }
 

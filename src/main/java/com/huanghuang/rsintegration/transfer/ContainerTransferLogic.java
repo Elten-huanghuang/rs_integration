@@ -4,8 +4,8 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.util.InsertedStackDelta;
 import com.huanghuang.rsintegration.util.ModIds;
+import com.huanghuang.rsintegration.util.TrackedNetworkInsertion;
 import com.refinedmods.refinedstorage.api.network.INetwork;
-import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.inventory.AbstractContainerMenu;
@@ -115,11 +115,7 @@ final class ContainerTransferLogic {
 
             int count = stack.getCount();
             ItemStack input = stack.copy();
-            ItemStack remaining = network.insertItem(input, count, Action.PERFORM);
-            var tracker = network.getItemStorageTracker();
-            if (tracker != null && remaining.getCount() < count) {
-                tracker.changed(player, input.copyWithCount(count - remaining.getCount()));
-            }
+            ItemStack remaining = TrackedNetworkInsertion.insert(network, player, input);
             InsertedStackDelta.report(player, input, remaining);
 
             if (remaining.isEmpty()) {
