@@ -717,7 +717,7 @@ public final class CraftPacketUtils {
         if (crystalItems.isEmpty()) {
             RSIntegrationMod.LOGGER.debug("[RSI] filterWRCrystal: no crystal items identified for recipe class {}, returning {} unfiltered ingredients",
                     className, ingredients.size());
-            return ingredients;
+            return normalizeWRCrystalInfusionIngredients(recipe, ingredients);
         }
 
         List<Ingredient> filtered = new ArrayList<>();
@@ -728,9 +728,67 @@ public final class CraftPacketUtils {
             }
             if (!isCrystal) filtered.add(ing);
         }
+        filtered = normalizeWRCrystalInfusionIngredients(recipe, filtered);
         RSIntegrationMod.LOGGER.debug("[RSI] filterWRCrystal: recipe={}, removed {} crystal ingredient(s), kept {} material ingredient(s)",
                 className, ingredients.size() - filtered.size(), filtered.size());
         return filtered;
+    }
+
+    /**
+     * Crystal Infusion checks its inputs by item, while some generated recipe
+     * ingredients retain the NBT from the JEI display stack.  In particular,
+     * the gold-crown infusion accepts any {@code tarnished_helmet} state; the
+     * durability/attribute NBT is runtime state and is intentionally ignored.
+     * Keep this exception scoped to the known recipe and an ingredient whose
+     * candidates are all that one item, so other NBT-sensitive recipes remain
+     * unchanged.
+     */
+    private static List<Ingredient> normalizeWRCrystalInfusionIngredients(
+            Object recipe, List<Ingredient> ingredients) {
+        if (!(recipe instanceof Recipe<?> r)
+                || !isNbtInsensitiveWRCrystalInfusion(r.getId(), null)) {
+            return ingredients;
+        }
+
+        List<Ingredient> normalized = new ArrayList<>(ingredients.size());
+        boolean changed = false;
+        for (Ingredient ingredient : ingredients) {
+            ItemStack[] candidates = ingredient.getItems();
+            Item targetItem = null;
+            boolean targetOnly = candidates.length > 0;
+            for (ItemStack candidate : candidates) {
+                ResourceLocation itemId = candidate.isEmpty() ? null
+                        : net.minecraftforge.registries.ForgeRegistries.ITEMS
+                                .getKey(candidate.getItem());
+                if (candidate.isEmpty()
+                        || !isNbtInsensitiveWRCrystalInfusion(r.getId(), itemId)) {
+                    targetOnly = false;
+                    break;
+                }
+                targetItem = candidate.getItem();
+            }
+            if (targetOnly && targetItem != null) {
+                normalized.add(Ingredient.of(targetItem));
+                changed = true;
+                continue;
+            }
+            normalized.add(ingredient);
+        }
+        if (changed) {
+            RSIntegrationMod.LOGGER.debug(
+                    "[RSI] Crystal Infusion {}: normalized tarnished helmet ingredient to ignore NBT",
+                    r.getId());
+        }
+        return changed ? normalized : ingredients;
+    }
+
+    static boolean isNbtInsensitiveWRCrystalInfusion(@Nullable ResourceLocation recipeId,
+                                                      @Nullable ResourceLocation itemId) {
+        return recipeId != null
+                && new ResourceLocation("wizards_reborn", "crystal_infusion/irons_spellbooks_gold_crown")
+                        .equals(recipeId)
+                && (itemId == null
+                    || new ResourceLocation("irons_spellbooks", "tarnished_helmet").equals(itemId));
     }
 
     /**
