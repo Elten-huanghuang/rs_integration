@@ -37,6 +37,7 @@ public final class AutoEatEngine {
 
     private static final String NBT_KEY = "rsi:food_blacklist";
     private static final String EFFECT_NBT_KEY = "rsi:food_effect_blacklist";
+    private static final ResourceLocation GNAWS_GIFT = new ResourceLocation("crockpot", "gnaws_gift");
     private static final int MAX_BLACKLIST_SIZE = 512;
     private static final Set<UUID> runningTasks = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
@@ -440,15 +441,20 @@ public final class AutoEatEngine {
             } catch (Throwable ignored) {}
         }
 
+        MobEffect gnawsGift = ForgeRegistries.MOB_EFFECTS.getValue(GNAWS_GIFT);
+        boolean hasGnawsGift = gnawsGift != null && player.hasEffect(gnawsGift);
+
         int count = extracted.getCount();
         int eaten = 0;
         for (int i = 0; i < count; i++) {
-            // Stop force-feeding once hunger is full. STACK mode's only goal is
-            // topping up hunger, so eating past full just destroys the surplus
-            // (saturation clamps). Respect always-edible foods (golden apple).
+            // Stop ordinary force-feeding once hunger is full. Respect
+            // always-edible foods (golden apple) and CrockPot's Gnaw's Gift,
+            // which normally enables eating via its right-click event handler
+            // (bypassed by direct auto-eating).
             net.minecraft.world.food.FoodProperties fp = extracted.getFoodProperties(player);
             boolean alwaysEat = fp != null && fp.canAlwaysEat();
-            if (!player.canEat(alwaysEat)) {
+            boolean ignoreFullHunger = AutoEatHungerPolicy.canIgnoreFullHunger(alwaysEat, hasGnawsGift);
+            if (!player.canEat(ignoreFullHunger)) {
                 if (!extracted.isEmpty()) {
                     network.insertItem(extracted, extracted.getCount(), Action.PERFORM);
                 }
