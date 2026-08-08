@@ -77,8 +77,11 @@ public final class LegacyFlatExecutionService {
         chain.setOutputDestination(outputDestination);
         AsyncCraftManager.getInstance().submit(chain);
         completionWiring.accept(chain);
-        player.sendSystemMessage(
-                TextBuilder.translate("rsi.async.chain_started", displayedSteps).build());
+        player.sendSystemMessage(TextBuilder.translate(
+                outputDestination == OutputDestination.PLAYER_INVENTORY
+                        ? "rsi.async.chain_started_player"
+                        : "rsi.async.chain_started",
+                displayedSteps).build());
         return chain;
     }
 }

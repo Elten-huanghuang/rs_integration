@@ -258,6 +258,27 @@ class MaterialBrokerTest extends BootstrapTest {
     }
 
     @Test
+    void taglessProducerDeclarationCarriesRuntimeNbtToConsumer() {
+        MaterialBroker broker = new MaterialBroker();
+        MaterialKey declared = MaterialKey.of(new ItemStack(Items.POTION));
+        ItemStack actual = new ItemStack(Items.POTION, 4);
+        CompoundTag tag = new CompoundTag();
+        tag.putInt("Purity", 3);
+        actual.setTag(tag);
+        MaterialSource producer = new MaterialSource.ProducerOutput(
+                new OutputPortId(new NodeId(9), 0));
+        broker.publishActual(producer, declared, actual);
+
+        MaterialBroker.ReservationToken token = broker.reserve(new NodeId(10),
+                List.of(new MaterialBroker.Request(producer, declared, 4)));
+        assertNotNull(token);
+        ItemStack checkedOut = broker.producerFragments(token).get(0);
+
+        assertEquals(4, checkedOut.getCount());
+        assertEquals(3, checkedOut.getTag().getInt("Purity"));
+    }
+
+    @Test
     void checkoutSeparatesExactInitialAndProducerFragments() {
         MaterialBroker broker = new MaterialBroker();
         ItemStack initialStack = new ItemStack(Items.DIAMOND, 2);

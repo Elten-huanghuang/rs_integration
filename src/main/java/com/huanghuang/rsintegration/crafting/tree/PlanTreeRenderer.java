@@ -295,7 +295,7 @@ public final class PlanTreeRenderer {
             case ModIds.MALUM -> 0xFF442288;
             case ModIds.EIDOLON -> 0xFF226644;
             case ModIds.FORBIDDEN_ARCANUS -> 0xFF663322;
-            case ModIds.GOETY -> 0xFF222244;
+            case ModIds.GOETY, "goety_brazier" -> 0xFF222244;
             case ModIds.WIZARDS_REBORN -> 0xFF444466;
             case ModIds.EMBERS -> 0xFFCC6633;
             case ModIds.AETHERWORKS -> 0xFF3388AA;

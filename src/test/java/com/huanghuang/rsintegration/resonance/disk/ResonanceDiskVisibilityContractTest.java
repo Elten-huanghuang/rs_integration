@@ -58,6 +58,45 @@ class ResonanceDiskVisibilityContractTest {
     }
 
     @Test
+    void publicRsExtractionIsRejectedWithoutTouchingTheDelegate() throws IOException {
+        byte[] bytes = Files.readAllBytes(CLASS_ROOT.resolve(WRAPPER + ".class"));
+        boolean[] found = {false};
+        boolean[] returnsEmptyStack = {false};
+        boolean[] readsDelegate = {false};
+
+        new ClassReader(bytes).accept(new ClassVisitor(Opcodes.ASM9) {
+            @Override
+            public MethodVisitor visitMethod(int access, String name, String descriptor,
+                                             String signature, String[] exceptions) {
+                if (!"extract".equals(name)
+                        || !descriptor.startsWith("(Lnet/minecraft/world/item/ItemStack;")) {
+                    return null;
+                }
+                found[0] = true;
+                return new MethodVisitor(Opcodes.ASM9) {
+                    @Override
+                    public void visitFieldInsn(int opcode, String owner, String fieldName,
+                                               String fieldDescriptor) {
+                        if (opcode == Opcodes.GETSTATIC
+                                && "net/minecraft/world/item/ItemStack".equals(owner)
+                                && "EMPTY".equals(fieldName)) {
+                            returnsEmptyStack[0] = true;
+                        }
+                        if (opcode == Opcodes.GETFIELD && WRAPPER.equals(owner)
+                                && "delegate".equals(fieldName)) {
+                            readsDelegate[0] = true;
+                        }
+                    }
+                };
+            }
+        }, ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+
+        assertTrue(found[0]);
+        assertTrue(returnsEmptyStack[0], "RS extraction must reject resonance contents");
+        assertFalse(readsDelegate[0], "RS extraction must not debit the resonance delegate");
+    }
+
+    @Test
     void integrationsNeverCallThePublicRsView() throws IOException {
         List<String> callers = new ArrayList<>();
         try (Stream<Path> classes = Files.walk(CLASS_ROOT)) {

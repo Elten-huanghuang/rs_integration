@@ -755,7 +755,7 @@ public class RecipeGuiLayoutsMixin {
                 && RSIntegrationConfig.ENABLE_PMMO.get()) {
             return com.huanghuang.rsintegration.mods.pmmo.PmmoRSModule.TYPE_ID;
         }
-        if (rsi$isGoetyRitual(recipe)) return ModIds.GOETY;
+        if (rsi$isGoetyRitual(recipe)) return com.huanghuang.rsintegration.mods.goety.GoetyBindingRules.ALTAR_FILTER;
 
         // YHK cooking pot recipes: 3 ModTypes share 1 JEI UID, so we use
         // result.getCraftingRemainingItem() to pick the right pot type.
@@ -801,7 +801,7 @@ public class RecipeGuiLayoutsMixin {
         String recipeClassName = recipe.getClass().getName();
 
         if (recipeClassName.equals("com.Polarice3.Goety.common.crafting.BrazierRecipe"))
-            return ModIds.GOETY;
+            return com.huanghuang.rsintegration.mods.goety.GoetyBindingRules.BRAZIER_FILTER;
 
         // Avaritia — multiple sub-types with different filters; not resolved by single-ModType lookup
         if (recipeClassName.startsWith("committee.nova.mods.avaritia.common.crafting.recipe.")) {
@@ -1484,6 +1484,10 @@ public class RecipeGuiLayoutsMixin {
     private static boolean rsi$bindingMatchesFilter(BindingStorage.BindingEntry entry, String filter) {
         String blockKey = entry.blockKey();
         if (blockKey == null || filter == null) return false;
+        if (com.huanghuang.rsintegration.mods.goety.GoetyBindingRules.isGoetyMachineFilter(filter)) {
+            return com.huanghuang.rsintegration.mods.goety.GoetyBindingRules.matches(
+                    blockKey, entry.blockRegKey(), filter);
+        }
         if (blockKey.contains(filter)) return true;
         if ("pmmo_salvage".equals(filter)) {
             ResourceLocation configured = com.huanghuang.rsintegration.mods.pmmo.client

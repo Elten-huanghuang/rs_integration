@@ -102,9 +102,28 @@ public final class CraftPacketUtils {
 
     public static Component describeIngredient(Ingredient ingredient) {
         for (ItemStack stack : ingredient.getItems()) {
-            if (!stack.isEmpty()) return stack.getHoverName();
+            if (!stack.isEmpty()) {
+                if (!stack.hasTag()) {
+                    return missingMaterialName(stack.getDescriptionId());
+                }
+                return stack.getHoverName();
+            }
         }
         return Component.translatable("rsi.plan.unknown_item");
+    }
+
+    /**
+     * Builds a client-resolved item name for missing-material messages.
+     * Some mod items use a parameterized base translation even though recipe
+     * ingredients expose an NBT-less template stack. Supply a neutral value for
+     * those templates so their raw {@code %s} placeholder is never shown.
+     */
+    static Component missingMaterialName(@Nonnull String descriptionId) {
+        if ("item.apotheosis.potion_charm".equals(descriptionId)) {
+            return Component.translatable(descriptionId,
+                    Component.translatable("item.minecraft.potion"));
+        }
+        return Component.translatable(descriptionId);
     }
 
     /**
@@ -131,7 +150,7 @@ public final class CraftPacketUtils {
             // overflow marker, for instance) is passed through verbatim.
             String key = entry.getKey();
             result.append(looksLikeTranslationKey(key)
-                    ? Component.translatable(key)
+                    ? missingMaterialName(key)
                     : Component.literal(key));
             if (entry.getValue() > 1) {
                 result.append(" x").append(String.valueOf(entry.getValue()));

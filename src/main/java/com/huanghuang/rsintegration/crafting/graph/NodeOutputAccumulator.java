@@ -34,7 +34,8 @@ public final class NodeOutputAccumulator {
             if (remaining <= 0) continue;
             for (ItemStack stack : pending) {
                 if (remaining <= 0) break;
-                if (stack.isEmpty() || !MaterialMatcher.matchesExact(declaration.material(), stack)) continue;
+                if (stack.isEmpty()
+                        || !MaterialMatcher.matchesOutputDeclaration(declaration.material(), stack)) continue;
                 int take = Math.min(remaining, stack.getCount());
                 ItemStack fragment = stack.copyWithCount(take);
                 stack.shrink(take);

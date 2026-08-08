@@ -18,8 +18,42 @@ import java.util.List;
 
 public final class GoetyRecipeHandler extends AbstractRecipeHandler {
 
+    private final String modTypeId;
+    private final String supportedRecipeClass;
+
+    private GoetyRecipeHandler(String modTypeId, String supportedRecipeClass) {
+        this.modTypeId = modTypeId;
+        this.supportedRecipeClass = supportedRecipeClass;
+    }
+
+    public static GoetyRecipeHandler ritual() {
+        return new GoetyRecipeHandler("goety", RITUAL_CLASS);
+    }
+
+    public static GoetyRecipeHandler brazier() {
+        return new GoetyRecipeHandler(
+                com.huanghuang.rsintegration.mods.goety.GoetyRSModule.BRAZIER_TYPE_ID,
+                BRAZIER_CLASS);
+    }
+
     @Override
-    public ModType modType() { return ModType.byId("goety"); }
+    public ModType modType() { return ModType.byId(modTypeId); }
+
+    @Override
+    public boolean cacheByRecipeClass() {
+        // RitualRecipe automation eligibility depends on the individual recipe:
+        // sacrifice, conversion and teleport rituals share the same Java class
+        // as ordinary craft rituals. A class-level negative cache entry would
+        // therefore hide every later craft ritual from the recursive index.
+        return !RITUAL_CLASS.equals(supportedRecipeClass);
+    }
+
+    @Override
+    public boolean preferHandlerIngredients() {
+        // Goety ritual inputs include the activation item in addition to the
+        // ordinary ingredient list. Generic extraction cannot see that item.
+        return true;
+    }
 
     private static final String RITUAL_CLASS = "com.Polarice3.Goety.common.crafting.RitualRecipe";
     private static final String BRAZIER_CLASS = "com.Polarice3.Goety.common.crafting.BrazierRecipe";
@@ -32,8 +66,7 @@ public final class GoetyRecipeHandler extends AbstractRecipeHandler {
         // PulverizeRecipe, CursedInfuserRecipes, SoulAbsorberRecipes,
         // BrewingRecipe, ModCookingRecipe, TaglockRecipe, etc. require
         // machines or mechanics that RS cannot control.
-        if (!cn.equals(RITUAL_CLASS) && !cn.equals(BRAZIER_CLASS))
-            return false;
+        if (!cn.equals(supportedRecipeClass)) return false;
 
         // Filter out rituals that can't be automated safely:
         // ConvertRitual (converts mobs), TeleportRitual (teleports players).
@@ -147,12 +180,14 @@ public final class GoetyRecipeHandler extends AbstractRecipeHandler {
 
         // Include the activation item (scroll/wand) so it appears in the
         // crafting plan tree and is accounted for during material reservation.
-        try {
-            var act = Reflect.invoke(recipe, "getActivationItem");
-            if (act.isPresent() && act.get() instanceof Ingredient aing && !aing.isEmpty()) {
-                result.add(new IngredientSpec(aing, 1));
-            }
-        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Goety] getActivationItem probe failed", e); }
+        if (RITUAL_CLASS.equals(supportedRecipeClass)) {
+            try {
+                var act = Reflect.invoke(recipe, "getActivationItem");
+                if (act.isPresent() && act.get() instanceof Ingredient aing && !aing.isEmpty()) {
+                    result.add(new IngredientSpec(aing, 1));
+                }
+            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Goety] getActivationItem probe failed", e); }
+        }
 
         return result.isEmpty() ? null : result;
     }

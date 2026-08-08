@@ -1554,7 +1554,7 @@ public final class AsyncCraftChain {
         List<ItemStack> removed = new ArrayList<>();
         for (ItemStack stack : stacks) {
             if (remaining <= 0) break;
-            if (stack.isEmpty() || !MaterialMatcher.matchesExact(material, stack)) continue;
+            if (stack.isEmpty() || !MaterialMatcher.matchesOutputDeclaration(material, stack)) continue;
             int take = Math.min(remaining, stack.getCount());
             removed.add(stack.copyWithCount(take));
             stack.shrink(take);
@@ -4000,10 +4000,7 @@ public final class AsyncCraftChain {
      * this runs server-side, where item translation keys cannot be resolved.
      */
     private static Component nameIngredientSafe(Ingredient ing) {
-        for (ItemStack stack : ing.getItems()) {
-            if (!stack.isEmpty()) return stack.getHoverName();
-        }
-        return Component.translatable("rsi.plan.unknown_item");
+        return CraftPacketUtils.describeIngredient(ing);
     }
 
     private void logMissingIngredient(Ingredient ing, ResourceLocation stepId) {

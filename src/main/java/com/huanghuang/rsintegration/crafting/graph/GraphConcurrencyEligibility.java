@@ -12,10 +12,10 @@ public final class GraphConcurrencyEligibility {
             "touhou_little_maid", "youkaishomecoming_steamer",
             "youkaishomecoming_cooking_small", "youkaishomecoming_cooking_short",
             "youkaishomecoming_cooking_large", "farmersdelight_skillet",
-            "vanilla_campfire", "goety");
+            "vanilla_campfire", "goety", "goety_brazier");
 
     private static final Set<String> RITUAL_TYPES = Set.of(
-            "goety", "forbidden_arcanus", "malum", "touhou_little_maid",
+            "goety", "goety_brazier", "forbidden_arcanus", "malum", "touhou_little_maid",
             "aether_altar", "embers_alchemy");
 
     private GraphConcurrencyEligibility() {}

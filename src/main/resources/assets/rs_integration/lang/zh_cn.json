@@ -333,7 +333,10 @@
   "rsi.batch.mod.farmersrespite_kettle": "茶壶冲泡",
   "rsi.batch.mod.farmersrespite": "茶壶冲泡",
   "rsi.farmersrespite.kettle.non_water_input": "§c该配方需要非水液体作为输入，无法免费提供，请手动操作",
+  "rsi.farmersrespite.kettle.wrong_fluid": "§c水壶中已有与配方不匹配的液体，已保留原有液体，请先处理后再试",
+  "rsi.farmersrespite.kettle.native_input_requires_empty": "§c瓶装茶或咖啡必须通过水壶原生容器槽倒入，请先清空水壶后重试",
   "rsi.batch.mod.goety": "巫法仪式",
+  "rsi.batch.mod.goety_brazier": "亡灵火盆",
   "rsi.batch.mod.malum": "精魂灌注",
   "rsi.batch.mod.malum_spirit_crucible": "精魂坩埚",
   "rsi.batch.mod.malum_runic_workbench": "符文工作台",
@@ -425,6 +428,7 @@
   "rsi.plan.bookmark_all.unavailable": "JEI 收藏当前不可用",
 
   "rsi.async.chain_started": "§a已启动多方块合成链（%s 步）。完成后物品将送入 RS 网络。",
+  "rsi.async.chain_started_player": "§a已启动多方块合成链（%s 步）。完成后最终产物将送入玩家背包。",
   "rsi.async.cancel_button": "[取消合成]",
   "rsi.async.cancelled": "§c合成链已取消。",
   "rsi.async.no_chain": "§c没有正在进行的合成链。",

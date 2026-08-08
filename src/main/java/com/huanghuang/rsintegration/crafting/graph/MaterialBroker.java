@@ -102,7 +102,10 @@ public final class MaterialBroker {
         if (stack.isEmpty() || stack.getCount() <= 0) {
             throw new IllegalArgumentException("published stack must be non-empty");
         }
-        if (!MaterialMatcher.matchesExact(material, stack)) {
+        boolean matches = source instanceof MaterialSource.ProducerOutput
+                ? MaterialMatcher.matchesOutputDeclaration(material, stack)
+                : MaterialMatcher.matchesExact(material, stack);
+        if (!matches) {
             throw new IllegalArgumentException("published stack does not match material key");
         }
         long lotId = nextLotId++;
@@ -202,7 +205,7 @@ public final class MaterialBroker {
             int refundable = Math.min(claim.quantity, lot.committed);
             for (ItemStack stack : remaining) {
                 if (refundable <= 0) break;
-                if (stack.isEmpty() || !MaterialMatcher.matchesExact(lot.material, stack)) continue;
+                if (stack.isEmpty() || !MaterialMatcher.sameRuntimeFragment(lot.stack, stack)) continue;
                 int giveBack = Math.min(refundable, stack.getCount());
                 stack.shrink(giveBack);
                 lot.committed -= giveBack;

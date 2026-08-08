@@ -116,6 +116,7 @@ public final class PlanWarnings {
                 warnings.addAll(AetherFurnaceBatchDelegate.getPlanWarnings(player, recipe, dim, pos));
                 break;
             case ModIds.GOETY:
+            case "goety_brazier":
                 GoetyBatchDelegate.PlanPrerequisiteCheck goetyCheck =
                         GoetyBatchDelegate.checkPlanPrerequisites(player, recipe, dim, pos);
                 warnings.addAll(goetyCheck.warnings());

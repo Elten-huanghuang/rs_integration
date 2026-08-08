@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.resonance.backpack;
 
 import com.huanghuang.rsintegration.ModItems;
 import com.huanghuang.rsintegration.resonance.disk.ResonanceDiskWrapper;
+import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.Container;
@@ -12,6 +13,8 @@ import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
 
+import javax.annotation.Nullable;
+
 public class ResonanceBackpackContainer extends AbstractContainerMenu {
 
     static final int DISK_SLOTS = 36;
@@ -20,11 +23,20 @@ public class ResonanceBackpackContainer extends AbstractContainerMenu {
 
     private final Container diskInventory;
     final ResonanceDiskWrapper disk;
+    @Nullable
+    private final INetwork ownerNetwork;
 
     public ResonanceBackpackContainer(int containerId, Inventory playerInv,
                                       ResonanceDiskWrapper disk) {
+        this(containerId, playerInv, disk, null);
+    }
+
+    public ResonanceBackpackContainer(int containerId, Inventory playerInv,
+                                      ResonanceDiskWrapper disk,
+                                      @Nullable INetwork ownerNetwork) {
         super(ModItems.RESONANCE_BACKPACK.get(), containerId);
         this.disk = disk;
+        this.ownerNetwork = ownerNetwork;
         this.diskInventory = new ResonanceDiskInventory(disk,
                 playerInv.player instanceof ServerPlayer serverPlayer ? serverPlayer : null);
         layoutSlots(playerInv, true);
@@ -34,8 +46,14 @@ public class ResonanceBackpackContainer extends AbstractContainerMenu {
                                       FriendlyByteBuf buf) {
         super(ModItems.RESONANCE_BACKPACK.get(), containerId);
         this.disk = null;
+        this.ownerNetwork = null;
         this.diskInventory = new SimpleContainer(DISK_SLOTS);
         layoutSlots(playerInv, false);
+    }
+
+    @Nullable
+    public INetwork getOwnerNetwork() {
+        return ownerNetwork;
     }
 
     private void layoutSlots(Inventory playerInv, boolean serverSide) {
