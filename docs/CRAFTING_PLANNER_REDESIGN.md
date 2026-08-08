@@ -13,7 +13,7 @@
 - 第 1 步在提交后台 pure planner 之前执行带库存的需求树走查。走查按物料扣减库存，标签候选使用“存在一个可满足候选”的语义；检测到缺失 producer、环或节点上限时，保守地选择 typed resolver。
 - 同一个预览请求只选择一个 planner。pure planner 返回失败结果时不再自动再次调用 typed resolver；异步基础设施异常仍保留原有恢复路径。
 
-需求树走查上限是服务端配置 `craftingPureDemandMaxNodes`，默认 `512`，范围 `64-4096`。它位于 `craftingPlanning` 配置组，与客户端配方树渲染用的 `recipeTreeMaxNodes` 独立。达到上限只会让请求转到 typed resolver，不会把“不确定”误判成 pure 完整。
+需求树走查上限是服务端配置 `autoCrafting.craftingPureDemandMaxNodes`，默认 `512`，范围 `64-4096`。它位于服务端配置的 `autoCrafting` 段，与客户端配方树渲染用的 `recipeTreeMaxNodes` 独立。达到上限只会让请求转到 typed resolver，不会把“不确定”误判成 pure 完整。
 
 当前提交还没有实现 max-craftable 的 `FEASIBLE/INFEASIBLE/UNKNOWN` 三态，也没有实现 pure 与 typed 分开的 deadline；这两项仍按迁移计划的第 2、3 步处理。
 
@@ -572,7 +572,7 @@ planner.pureTimeBudgetMs = 1000
 planner.typedMainThreadBudgetMs = 200
 planner.pureOperationBudget = 750000
 planner.maxSteps = 512
-planner.routeTraversalMaxNodes = config.craftingPureDemandMaxNodes (default 512, range 64-4096)
+planner.routeTraversalMaxNodes = config.autoCrafting.craftingPureDemandMaxNodes (default 512, range 64-4096)
 planner.maxCostPropagationRounds = 24
 planner.searchStateLimit = 65536
 planner.failureCacheLimit = 8192
