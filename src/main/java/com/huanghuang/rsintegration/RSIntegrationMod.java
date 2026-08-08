@@ -97,7 +97,7 @@ public final class RSIntegrationMod {
             "distant_worlds_lithum_altar", "eidolon", "eidolon_worktable",
             "farmersdelight", "farmersdelight_cooking_pot",
             "farmersdelight_skillet", "farmersrespite", "farmersrespite_kettle",
-            "forbidden_arcanus", "forbidden_arcanus_clibano", "goety",
+            "forbidden_arcanus", "forbidden_arcanus_clibano", "goety", "goety_brazier",
             "goety_cursed_infuser", "immortalers_delight", "ironfurnaces_blast_furnace",
             "ironfurnaces_furnace", "ironfurnaces_smoker", "lychee_item_inside_virtual",
             "lychee_block_interacting",

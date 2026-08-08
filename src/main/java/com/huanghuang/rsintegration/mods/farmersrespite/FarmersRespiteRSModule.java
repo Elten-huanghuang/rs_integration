@@ -4,6 +4,8 @@ import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.mods.IModIntegration;
 import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
+import com.huanghuang.rsintegration.recipe.FarmersRespiteRecipeHandler;
+import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import net.minecraftforge.common.ForgeConfigSpec;
 import net.minecraftforge.fml.DistExecutor;
 
@@ -61,7 +63,9 @@ public final class FarmersRespiteRSModule implements IModIntegration {
     }
 
     @Override
-    public void registerRecipeHandler() {}
+    public void registerRecipeHandler() {
+        ModRecipeHandlers.register(new FarmersRespiteRecipeHandler());
+    }
 
     @Override
     public void registerNetworkPackets() {}

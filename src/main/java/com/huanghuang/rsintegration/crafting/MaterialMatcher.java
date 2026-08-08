@@ -39,6 +39,18 @@ public final class MaterialMatcher {
     }
 
     /**
+     * Match a physical machine result against its recipe declaration. A tagless
+     * declaration means the recipe promises an item type, while integrations may
+     * still attach runtime state such as drink purity. Tagged declarations remain
+     * exact so distinct recipe variants cannot satisfy each other.
+     */
+    public static boolean matchesOutputDeclaration(MaterialKey declared, ItemStack stack) {
+        Objects.requireNonNull(declared, "declared");
+        if (stack == null || stack.isEmpty() || stack.getItem() != declared.item()) return false;
+        return declared.tag() == null || matchesExact(declared, stack);
+    }
+
+    /**
      * SlashBlade assembly adds mutable capability data after the recipe result is
      * declared. Standalone blade items are identified by item id; the shared blade
      * item additionally retains its stable named-blade translation key.
@@ -85,9 +97,6 @@ public final class MaterialMatcher {
 
     /** Capture accepts exact NBT when specified and otherwise conservatively accepts the same item. */
     public static boolean matchesCaptureExpectation(MaterialKey expected, ItemStack stack) {
-        if (stack == null || stack.isEmpty() || expected == null || stack.getItem() != expected.item()) {
-            return false;
-        }
-        return expected.tag() == null || MaterialKey.of(stack).equals(expected);
+        return expected != null && matchesOutputDeclaration(expected, stack);
     }
 }

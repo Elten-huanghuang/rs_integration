@@ -54,6 +54,24 @@ class NodeOutputAccumulatorTest extends BootstrapTest {
     }
 
     @Test
+    void taglessRecipeOutputAcceptsAndPreservesRuntimeNbt() {
+        MaterialKey declared = MaterialKey.of(new ItemStack(Items.POTION));
+        OutputPortId port = new OutputPortId(new NodeId(1), 0);
+        NodeOutputAccumulator accumulator = new NodeOutputAccumulator(
+                List.of(new OutputDeclaration(port, declared, 4, OutputKind.PRIMARY)));
+        ItemStack actual = new ItemStack(Items.POTION, 4);
+        CompoundTag tag = new CompoundTag();
+        tag.putInt("Purity", 3);
+        actual.setTag(tag);
+
+        NodeOutputAccumulator.Publication publication = accumulator.add(List.of(actual)).get(0);
+
+        assertTrue(accumulator.isComplete());
+        assertEquals(4, publication.stack().getCount());
+        assertEquals(3, publication.stack().getTag().getInt("Purity"));
+    }
+
+    @Test
     void reportsEveryUnmetDeclarationWithoutDrainingSurplus() {
         NodeId node = new NodeId(2);
         OutputDeclaration primary = new OutputDeclaration(new OutputPortId(node, 0),

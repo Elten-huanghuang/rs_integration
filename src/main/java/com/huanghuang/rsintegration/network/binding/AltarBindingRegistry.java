@@ -894,7 +894,8 @@ public final class AltarBindingRegistry {
         // Goety recipe folders identify content groups, not machine subtypes.
         // Confluence workshop recipe IDs likewise use folders such as "goety/"
         // to group imported recipes; every one executes on the same workshop.
-        if (ModIds.GOETY.equals(type.id()) || "confluence".equals(type.id())) {
+        if (ModIds.GOETY.equals(type.id()) || "goety_brazier".equals(type.id())
+                || "confluence".equals(type.id())) {
             return null;
         }
         // farmersrespite_kettle is a leaf type — every KettleRecipe runs on the

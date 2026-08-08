@@ -698,7 +698,10 @@ public final class GenericCraftPacket {
                 (p, rem) -> tryResolve(p, recipeId, forcedRecipes, dim, pos, rem,
                         inferMode, baseItem, targetOutput, outputDestination)));
         player.sendSystemMessage(TextBuilder.translate(
-                "rsi.async.chain_started", chain.stepsCount()).build());
+                outputDestination == OutputDestination.PLAYER_INVENTORY
+                        ? "rsi.async.chain_started_player"
+                        : "rsi.async.chain_started",
+                chain.stepsCount()).build());
     }
 
     /** Execute a resolver-expanded GENERIC-only chain once. */

@@ -50,7 +50,7 @@ public final class OpenResonanceBackpackPacket {
             NetworkHooks.openScreen(player,
                     new SimpleMenuProvider(
                             (containerId, inv, p) -> new ResonanceBackpackContainer(
-                                    containerId, inv, wrapper),
+                                    containerId, inv, wrapper, network),
                             Component.translatable("rsi.resonance_backpack.title")),
                     buf -> {});
         });

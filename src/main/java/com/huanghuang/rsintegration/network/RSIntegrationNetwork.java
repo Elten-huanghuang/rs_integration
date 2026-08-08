@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.network;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.command.PerformanceMonitor;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
+import com.huanghuang.rsintegration.resonance.backpack.ResonanceBackpackContainer;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.network.security.Permission;
 import com.refinedmods.refinedstorage.api.network.grid.INetworkAwareGrid;
@@ -55,6 +56,13 @@ public final class RSIntegrationNetwork {
 
     @Nullable
     private static INetwork resolveNetworkFromPlayerUncached(ServerPlayer player) {
+        if (player.containerMenu instanceof ResonanceBackpackContainer backpack) {
+            // Resolve the parent RS network only. ResonanceDiskWrapper keeps its
+            // private contents out of the RS cache and rejects public extraction.
+            INetwork network = backpack.getOwnerNetwork();
+            if (network != null) return network;
+        }
+
         INetwork net = getNetworkFromContainer(player.containerMenu);
         if (net != null) return net;
 

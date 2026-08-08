@@ -20,6 +20,8 @@ class GraphConcurrencyEligibilityTest {
                 capability("malum", "recipe.SpiritInfusionRecipe", false).supportOffsets().size());
         assertEquals(BatchConcurrencyCapabilities.SideEffects.ADJACENT_MACHINE,
                 capability("goety", "recipe.Any", false).sideEffects());
+        assertEquals(BatchConcurrencyCapabilities.SideEffects.ADJACENT_MACHINE,
+                capability("goety_brazier", "recipe.BrazierRecipe", false).sideEffects());
         assertEquals(BatchConcurrencyCapabilities.OutputOwnership.DELEGATE_RESULT,
                 capability("forbidden_arcanus", "recipe.Ritual", false).outputOwnership());
     }
