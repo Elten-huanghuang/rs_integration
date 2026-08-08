@@ -63,6 +63,7 @@ import com.huanghuang.rsintegration.crafting.planning.PlanningSnapshotFactory;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraphProjector;
 import com.huanghuang.rsintegration.crafting.planning.PurePlanAdapter;
+import com.huanghuang.rsintegration.crafting.planning.PureDemandTreeInspector;
 import com.huanghuang.rsintegration.crafting.planning.PureRecipePlanner;
 import com.huanghuang.rsintegration.crafting.planning.SynchronousFallbackReason;
 import com.huanghuang.rsintegration.crafting.planning.PlanCache;
@@ -81,6 +82,7 @@ import com.huanghuang.rsintegration.util.Reflect;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
@@ -1936,9 +1938,19 @@ public final class GenericCraftPacket {
             return;
         }
 
-        boolean hasProjectedTarget = planningSnapshot.recipeGraph().recipesByOutput().values().stream()
-                .flatMap(List::stream).anyMatch(node -> node.recipeId().equals(recipeId));
-        if (!asyncAttempted && !planningSnapshot.mainThreadOnly() && hasProjectedTarget) {
+        PureDemandTreeInspector.Result demandTree = PureDemandTreeInspector.inspect(
+                planningSnapshot.recipeGraph(), routingAvailability(planningSnapshot.availableItems()),
+                recipeId, repeatCount);
+        boolean pureRoute = demandTree.complete()
+                && effectiveOverrides.isEmpty()
+                && !planningSnapshot.mainThreadOnly();
+        boolean typedResolverAvailable = RSIntegrationConfig.ENABLE_MULTIBLOCK_AUTO_CRAFTING.get()
+                && network != null;
+        RSIntegrationMod.debug(
+                "[RSI-plan] planner route recipe={} pure={} coverage={} nodes={} unresolved={} overrides={} mainThreadOnly={}",
+                recipeId, pureRoute, demandTree.status(), demandTree.visitedNodes(),
+                demandTree.unresolved(), !effectiveOverrides.isEmpty(), planningSnapshot.mainThreadOnly());
+        if (!asyncAttempted && pureRoute) {
             PLAN_REQUESTS.submit(planningSnapshot, repeatCount, player.getServer()::execute,
                     RSIntegrationConfig.CRAFTING_MAX_STEPS.get(), completed ->
                             tryBuildPlan(player, recipeId, forcedRecipes, dim, pos, repeatCount,
@@ -1968,11 +1980,22 @@ public final class GenericCraftPacket {
         var synchronousFallbackReason = pendingFallbackReason != null
                 ? java.util.Optional.of(pendingFallbackReason)
                 : asyncAttempted
-                        ? SynchronousFallbackReason.fromPureResult(precomputedPlan)
-                        : SynchronousFallbackReason.whenAsyncUnavailable(
-                                planningSnapshot.mainThreadOnly(), hasProjectedTarget);
+                        ? java.util.Optional.<SynchronousFallbackReason>empty()
+                        : SynchronousFallbackReason.whenPureRouteUnavailable(
+                                planningSnapshot.mainThreadOnly(), !effectiveOverrides.isEmpty(),
+                                demandTree.complete());
         synchronousFallbackReason.ifPresent(reason ->
                 PerformanceMonitor.recordSynchronousPlanningFallback(reason, recipeId));
+
+        boolean terminalPureResult = precomputedPlan != null && pendingFallbackReason == null;
+        boolean selectedPureResolver = terminalPureResult && effectiveOverrides.isEmpty();
+        boolean needsTypedResolver = !selectedPureResolver;
+        if (needsTypedResolver && !typedResolverAvailable) {
+            sink.error(Component.translatable(network == null
+                    ? "rsi.generic.error.network_unavailable"
+                    : "rsi.generic.error.multiblock_auto_craft_disabled"));
+            return;
+        }
 
         // Arcane Iterator plans should start from the highest matching enchanted
         // book the player already owns, rather than always rebuilding from a plain
@@ -2001,21 +2024,20 @@ public final class GenericCraftPacket {
         List<ResourceLocation> stepIds;
         boolean usedPurePlan = false;
 
-        if (canUsePrecomputedPlan(precomputedPlan) && effectiveOverrides.isEmpty()) {
+        boolean selectedTypedResolver = false;
+        if (canUsePrecomputedPlan(precomputedPlan) && selectedPureResolver) {
             resolutionSteps = PurePlanAdapter.toResolutionSteps(precomputedPlan,
                     planningSnapshot.recipeGraph());
             usedPurePlan = true;
+        } else if (selectedPureResolver) {
             for (var unresolved : precomputedPlan.missing()) {
                 if (!unresolved.alternatives().isEmpty()) {
                     missing.add(unresolved.alternatives().get(0).itemId().toString());
                 }
             }
-        } else if (RSIntegrationConfig.ENABLE_MULTIBLOCK_AUTO_CRAFTING.get() && network != null) {
-            // The async projection intentionally contains CraftingRecipe entries only. An
-            // infeasible pure result may therefore mean that a missing input is produced by
-            // a virtual recipe (Market, Lychee, etc.), not that the complete plan is
-            // infeasible. Re-run the typed resolver so the execution DAG and tree retain
-            // those intermediate nodes.
+            resolutionSteps = List.of();
+        } else {
+            selectedTypedResolver = true;
             long typedResolverStarted = System.nanoTime();
             try {
                 planGraph = usesPhysicalMachineInputSlots(recipe)
@@ -2054,20 +2076,11 @@ public final class GenericCraftPacket {
                 }
             }
         }
-        if (resolutionSteps == null || resolutionSteps.isEmpty()) {
-            List<ItemStack> availableStacks = new ArrayList<>();
-            for (var e : available.entrySet()) {
-                ItemStack s = new ItemStack(e.getKey().item(), e.getValue());
-                if (e.getKey().tag() != null) {
-                    try { s.setTag(net.minecraft.nbt.TagParser.parseTag(e.getKey().tag())); } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] NBT parse failed for key {}", e.getKey(), ex); }
-                }
-                availableStacks.add(s);
-            }
-            stepIds = CraftingResolver.resolveStepsForIngredients(
-                    recipeIngredients, availableStacks, player.serverLevel(), missing, forcedOverrides);
-        } else {
-            stepIds = resolutionSteps.stream()
+        if (selectedPureResolver || selectedTypedResolver) {
+            stepIds = resolutionSteps == null ? List.of() : resolutionSteps.stream()
                     .map(ResolutionStep::recipeId).collect(Collectors.toList());
+        } else {
+            throw new IllegalStateException("No crafting planner selected for " + recipeId);
         }
 
         // Diagnostic: log stepId distribution before dedup
@@ -3073,6 +3086,22 @@ public final class GenericCraftPacket {
 
     static boolean canUsePrecomputedPlan(@Nullable PureRecipePlanner.Result result) {
         return result != null && result.feasible();
+    }
+
+    /** Projects each physical stack once so broad and exact-NBT demands cannot reuse it. */
+    private static Map<ImmutableRecipeGraph.MaterialRef, Integer> routingAvailability(
+            Map<StackKey, Integer> available) {
+        Map<ImmutableRecipeGraph.MaterialRef, Integer> projected = new HashMap<>();
+        for (Map.Entry<StackKey, Integer> entry : available.entrySet()) {
+            int count = entry.getValue() == null ? 0 : entry.getValue();
+            ResourceLocation itemId = BuiltInRegistries.ITEM.getKey(entry.getKey().item());
+            if (itemId == null || count <= 0) continue;
+            String nbt = entry.getKey().tag() == null ? "" : entry.getKey().tag();
+            var material = new ImmutableRecipeGraph.MaterialRef(itemId, nbt);
+            projected.merge(material, count,
+                    (left, right) -> (int) Math.min(Integer.MAX_VALUE, (long) left + right));
+        }
+        return Map.copyOf(projected);
     }
 
     static List<ResolutionStep> attachIndexedAlternatives(

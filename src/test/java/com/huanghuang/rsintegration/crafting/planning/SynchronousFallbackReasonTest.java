@@ -3,7 +3,6 @@ package com.huanghuang.rsintegration.crafting.planning;
 import net.minecraft.resources.ResourceLocation;
 import org.junit.jupiter.api.Test;
 
-import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CancellationException;
@@ -15,28 +14,18 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class SynchronousFallbackReasonTest {
     @Test
-    void classifiesUnavailableAsyncInputs() {
+    void classifiesPureRouteInputs() {
         assertEquals(SynchronousFallbackReason.MAIN_THREAD_ONLY,
-                SynchronousFallbackReason.whenAsyncUnavailable(true, false).orElseThrow());
-        assertEquals(SynchronousFallbackReason.TARGET_NOT_PROJECTED,
-                SynchronousFallbackReason.whenAsyncUnavailable(false, false).orElseThrow());
-        assertTrue(SynchronousFallbackReason.whenAsyncUnavailable(false, true).isEmpty());
-    }
-
-    @Test
-    void classifiesEveryNonSuccessfulPureResult() {
-        assertEquals(SynchronousFallbackReason.PURE_UNRESOLVABLE,
-                SynchronousFallbackReason.fromPureResult(
-                        result(PureRecipePlanner.Status.UNRESOLVABLE)).orElseThrow());
-        assertEquals(SynchronousFallbackReason.STEP_LIMIT,
-                SynchronousFallbackReason.fromPureResult(
-                        result(PureRecipePlanner.Status.STEP_LIMIT)).orElseThrow());
-        assertEquals(SynchronousFallbackReason.SEARCH_LIMIT,
-                SynchronousFallbackReason.fromPureResult(
-                        result(PureRecipePlanner.Status.SEARCH_LIMIT)).orElseThrow());
-        assertTrue(SynchronousFallbackReason.fromPureResult(
-                result(PureRecipePlanner.Status.SUCCESS)).isEmpty());
-        assertTrue(SynchronousFallbackReason.fromPureResult(null).isEmpty());
+                SynchronousFallbackReason.whenPureRouteUnavailable(true, true, false)
+                        .orElseThrow());
+        assertEquals(SynchronousFallbackReason.RECIPE_OVERRIDES,
+                SynchronousFallbackReason.whenPureRouteUnavailable(false, true, false)
+                        .orElseThrow());
+        assertEquals(SynchronousFallbackReason.INCOMPLETE_DEMAND_TREE,
+                SynchronousFallbackReason.whenPureRouteUnavailable(false, false, false)
+                        .orElseThrow());
+        assertTrue(SynchronousFallbackReason.whenPureRouteUnavailable(false, false, true)
+                .isEmpty());
     }
 
     @Test
@@ -60,11 +49,6 @@ class SynchronousFallbackReasonTest {
         assertEquals(SynchronousFallbackReason.ASYNC_FAILURE,
                 SynchronousFallbackReason.fromAsyncFailure(
                         new IllegalStateException("failed")).orElseThrow());
-    }
-
-    private static PureRecipePlanner.Result result(PureRecipePlanner.Status status) {
-        return new PureRecipePlanner.Result(status == PureRecipePlanner.Status.SUCCESS,
-                List.of(), List.of(), Map.of(), status, 0, 0, 0);
     }
 
     private static PlanningSnapshot snapshot() {

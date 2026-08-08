@@ -162,6 +162,7 @@
   "rsi.generic.error.no_bound_machine": "§c未绑定 %s 机器，请在终端中 Shift+右击机器方块进行绑定",
   "rsi.generic.error.craft_failed": "§cRS 自动合成失败: %s",
   "rsi.generic.error.network_unavailable": "§c未找到可用的 RS 网络。请打开 RS 终端，或提供已绑定的网络访问物品后再开始递归合成。",
+  "rsi.generic.error.multiblock_auto_craft_disabled": "§c该配方需要特殊配方规划器，但服务端已禁用多方块递归合成。",
   "rsi.progress.reason.network_unavailable": "RS 网络不可用",
   "rsi.progress.reason.no_bound_machine": "尚未绑定所需机器",
   "rsi.progress.reason.input_conflict": "机器输入槽与计划材料冲突",
