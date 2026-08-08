@@ -2,7 +2,8 @@ package com.huanghuang.rsintegration.config;
 
 /** Validated server-side resource limits for asynchronous craft planning. */
 public record CraftingPlanningConfig(int workers, int queueCapacity,
-                                     int maxSearchStates, int maxMemoizedFailures) {
+                                     int maxSearchStates, int maxMemoizedFailures,
+                                     int maxDemandTreeNodes) {
     public static final int MIN_WORKERS = 1;
     public static final int MAX_WORKERS = 8;
     public static final int DEFAULT_WORKERS = Math.max(MIN_WORKERS, Math.min(4,
@@ -16,6 +17,9 @@ public record CraftingPlanningConfig(int workers, int queueCapacity,
     public static final int MIN_MEMOIZED_FAILURES = 0;
     public static final int MAX_MEMOIZED_FAILURES = 65_536;
     public static final int DEFAULT_MEMOIZED_FAILURES = 8_192;
+    public static final int MIN_DEMAND_TREE_NODES = 64;
+    public static final int MAX_DEMAND_TREE_NODES = 4_096;
+    public static final int DEFAULT_DEMAND_TREE_NODES = 512;
 
     public CraftingPlanningConfig {
         requireRange("workers", workers, MIN_WORKERS, MAX_WORKERS);
@@ -23,11 +27,14 @@ public record CraftingPlanningConfig(int workers, int queueCapacity,
         requireRange("maxSearchStates", maxSearchStates, MIN_SEARCH_STATES, MAX_SEARCH_STATES);
         requireRange("maxMemoizedFailures", maxMemoizedFailures,
                 MIN_MEMOIZED_FAILURES, MAX_MEMOIZED_FAILURES);
+        requireRange("maxDemandTreeNodes", maxDemandTreeNodes,
+                MIN_DEMAND_TREE_NODES, MAX_DEMAND_TREE_NODES);
     }
 
     public static CraftingPlanningConfig defaults() {
         return new CraftingPlanningConfig(DEFAULT_WORKERS, DEFAULT_QUEUE_CAPACITY,
-                DEFAULT_SEARCH_STATES, DEFAULT_MEMOIZED_FAILURES);
+                DEFAULT_SEARCH_STATES, DEFAULT_MEMOIZED_FAILURES,
+                DEFAULT_DEMAND_TREE_NODES);
     }
 
     /** Snapshot the currently loaded Forge server config. */
@@ -36,7 +43,8 @@ public record CraftingPlanningConfig(int workers, int queueCapacity,
                 RSIntegrationConfig.CRAFTING_PLANNING_WORKERS.get(),
                 RSIntegrationConfig.CRAFTING_PLANNING_QUEUE_CAPACITY.get(),
                 RSIntegrationConfig.CRAFTING_PURE_SEARCH_MAX_STATES.get(),
-                RSIntegrationConfig.CRAFTING_PURE_SEARCH_MAX_MEMOIZED_FAILURES.get());
+                RSIntegrationConfig.CRAFTING_PURE_SEARCH_MAX_MEMOIZED_FAILURES.get(),
+                RSIntegrationConfig.CRAFTING_PURE_DEMAND_MAX_NODES.get());
     }
 
     private static void requireRange(String name, int value, int minimum, int maximum) {

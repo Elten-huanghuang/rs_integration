@@ -1940,7 +1940,7 @@ public final class GenericCraftPacket {
 
         PureDemandTreeInspector.Result demandTree = PureDemandTreeInspector.inspect(
                 planningSnapshot.recipeGraph(), routingAvailability(planningSnapshot.availableItems()),
-                recipeId, repeatCount);
+                recipeId, repeatCount, RSIntegrationConfig.CRAFTING_PURE_DEMAND_MAX_NODES.get());
         boolean pureRoute = demandTree.complete()
                 && effectiveOverrides.isEmpty()
                 && !planningSnapshot.mainThreadOnly();
