@@ -1877,16 +1877,21 @@ public final class GenericCraftPacket {
             planningSnapshot = precomputedSnapshot;
             available = precomputedSnapshot.availableItems();
         } else {
-            available = MaterialSources.listAllAvailable(player, network);
-            planningSnapshot = PlanningSnapshotFactory.capture(
-                    player.getUUID(), previewGeneration, recipeId, available,
-                    effectiveOverrides,
-                    recipe instanceof CraftingRecipe
-                            ? ImmutableRecipeGraphProjector.capture(player.serverLevel())
-                            : new ImmutableRecipeGraph(Map.of()),
-                    PlanningStateValidator.networkFingerprint(network, available),
-                    PlanningStateValidator.bindingFingerprint(player, planDimKey, planLookupPos),
-                    !(recipe instanceof CraftingRecipe));
+            long snapshotStarted = System.nanoTime();
+            try {
+                available = MaterialSources.listAllAvailable(player, network);
+                planningSnapshot = PlanningSnapshotFactory.capture(
+                        player.getUUID(), previewGeneration, recipeId, available,
+                        effectiveOverrides,
+                        recipe instanceof CraftingRecipe
+                                ? ImmutableRecipeGraphProjector.capture(player.serverLevel())
+                                : new ImmutableRecipeGraph(Map.of()),
+                        PlanningStateValidator.networkFingerprint(network, available),
+                        PlanningStateValidator.bindingFingerprint(player, planDimKey, planLookupPos),
+                        !(recipe instanceof CraftingRecipe));
+            } finally {
+                PerformanceMonitor.recordPlanningSnapshot(System.nanoTime() - snapshotStarted);
+            }
         }
 
         ItemStack smithingOutput = targetOutput;
@@ -2011,13 +2016,18 @@ public final class GenericCraftPacket {
             // a virtual recipe (Market, Lychee, etc.), not that the complete plan is
             // infeasible. Re-run the typed resolver so the execution DAG and tree retain
             // those intermediate nodes.
-            planGraph = usesPhysicalMachineInputSlots(recipe)
-                    ? CraftingResolver.resolveMachineGraphForSpecsWithTypes(
-                            recipeSpecs, available, player.serverLevel(),
-                            player, network, missing, forcedOverrides, true)
-                    : CraftingResolver.resolveGraphForSpecsWithTypes(
-                            recipeSpecs, available, player.serverLevel(),
-                            player, network, missing, forcedOverrides, true);
+            long typedResolverStarted = System.nanoTime();
+            try {
+                planGraph = usesPhysicalMachineInputSlots(recipe)
+                        ? CraftingResolver.resolveMachineGraphForSpecsWithTypes(
+                                recipeSpecs, available, player.serverLevel(),
+                                player, network, missing, forcedOverrides, true)
+                        : CraftingResolver.resolveGraphForSpecsWithTypes(
+                                recipeSpecs, available, player.serverLevel(),
+                                player, network, missing, forcedOverrides, true);
+            } finally {
+                PerformanceMonitor.recordTypedResolver(System.nanoTime() - typedResolverStarted);
+            }
             Map<NodeId,
                     CraftNode> graphNodes = planGraph.nodesById();
             resolutionSteps = planGraph.topologicalOrder().stream()

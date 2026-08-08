@@ -63,6 +63,14 @@ public final class PerformanceMonitor {
     private static final AtomicLong purePlanningMemoHits = new AtomicLong();
     private static final AtomicLong purePlanningStepLimits = new AtomicLong();
     private static final AtomicLong purePlanningSearchLimits = new AtomicLong();
+    private static final AtomicLong planningSnapshotCaptures = new AtomicLong();
+    private static final AtomicLong planningSnapshotNanos = new AtomicLong();
+    private static final AtomicLong planningSnapshotMaxNanos = new AtomicLong();
+    private static final AtomicLong purePlanningNanos = new AtomicLong();
+    private static final AtomicLong purePlanningMaxNanos = new AtomicLong();
+    private static final AtomicLong typedResolverCalls = new AtomicLong();
+    private static final AtomicLong typedResolverNanos = new AtomicLong();
+    private static final AtomicLong typedResolverMaxNanos = new AtomicLong();
     private static final AtomicLongArray synchronousPlanningFallbacks =
             new AtomicLongArray(SynchronousFallbackReason.values().length);
     private static final AtomicLong delegateObserveCalls = new AtomicLong();
@@ -141,15 +149,30 @@ public final class PerformanceMonitor {
         planningQueueDepth.set(Math.max(0, queuedTasks));
     }
     public static void recordPurePlanningSearch(PureRecipePlanner.Result result) {
+        recordPurePlanningSearch(result, 0L);
+    }
+    public static void recordPurePlanningSearch(PureRecipePlanner.Result result, long nanosElapsed) {
         purePlanningSearches.incrementAndGet();
         purePlanningExpandedStates.addAndGet(result.expandedStates());
         purePlanningBacktracks.addAndGet(result.backtracks());
         purePlanningMemoHits.addAndGet(result.memoHits());
+        purePlanningNanos.addAndGet(Math.max(0L, nanosElapsed));
+        purePlanningMaxNanos.updateAndGet(previous -> Math.max(previous, nanosElapsed));
         if (result.status() == PureRecipePlanner.Status.STEP_LIMIT) {
             purePlanningStepLimits.incrementAndGet();
         } else if (result.status() == PureRecipePlanner.Status.SEARCH_LIMIT) {
             purePlanningSearchLimits.incrementAndGet();
         }
+    }
+    public static void recordPlanningSnapshot(long nanosElapsed) {
+        planningSnapshotCaptures.incrementAndGet();
+        planningSnapshotNanos.addAndGet(Math.max(0L, nanosElapsed));
+        planningSnapshotMaxNanos.updateAndGet(previous -> Math.max(previous, nanosElapsed));
+    }
+    public static void recordTypedResolver(long nanosElapsed) {
+        typedResolverCalls.incrementAndGet();
+        typedResolverNanos.addAndGet(Math.max(0L, nanosElapsed));
+        typedResolverMaxNanos.updateAndGet(previous -> Math.max(previous, nanosElapsed));
     }
     public static void recordSynchronousPlanningFallback(
             SynchronousFallbackReason reason, ResourceLocation recipeId) {
@@ -240,6 +263,18 @@ public final class PerformanceMonitor {
              + "/" + purePlanningBacktracks.get()
              + "/" + purePlanningMemoHits.get()
              + " limits=" + purePlanningStepLimits.get() + "/" + purePlanningSearchLimits.get()
+             + " phaseSnapshot=" + planningSnapshotCaptures.get() + "/"
+             + (planningSnapshotCaptures.get() == 0 ? 0
+                     : planningSnapshotNanos.get() / planningSnapshotCaptures.get() / 1000) + "/"
+             + planningSnapshotMaxNanos.get() / 1000 + "us"
+             + " phasePure=" + purePlanningSearches.get() + "/"
+             + (purePlanningSearches.get() == 0 ? 0
+                     : purePlanningNanos.get() / purePlanningSearches.get() / 1000) + "/"
+             + purePlanningMaxNanos.get() / 1000 + "us"
+             + " phaseTyped=" + typedResolverCalls.get() + "/"
+             + (typedResolverCalls.get() == 0 ? 0
+                     : typedResolverNanos.get() / typedResolverCalls.get() / 1000) + "/"
+             + typedResolverMaxNanos.get() / 1000 + "us"
              + " syncFallback=" + synchronousPlanningFallbackSummary()
              + " delegateObserve=" + delegateObserveCalls.get() + "/"
              + (delegateObserveCalls.get() == 0 ? 0 : delegateObserveNanos.get() / delegateObserveCalls.get() / 1000)
