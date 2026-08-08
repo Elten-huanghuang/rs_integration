@@ -1,0 +1,191 @@
+package com.huanghuang.rsintegration.crafting.planning;
+
+import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.IngredientRef;
+import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.MaterialRef;
+import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.RecipeNode;
+import net.minecraft.resources.ResourceLocation;
+import org.junit.jupiter.api.Test;
+
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+class PureDemandTreeInspectorTest {
+    @Test
+    void acceptsRecursivelyProjectedDemandTree() {
+        MaterialRef log = material("log");
+        MaterialRef plank = material("plank");
+        MaterialRef target = material("target");
+        RecipeNode planks = recipe("planks", plank, 4, ingredient(log, 1));
+        RecipeNode assemble = recipe("assemble", target, 1, ingredient(plank, 2));
+
+        var result = PureDemandTreeInspector.inspect(graph(planks, assemble), Map.of(log, 1),
+                assemble.recipeId(), 1);
+
+        assertTrue(result.complete());
+        assertEquals(PureDemandTreeInspector.Status.COMPLETE, result.status());
+    }
+
+    @Test
+    void routesMissingUnprojectedDependencyToTypedPlanner() {
+        MaterialRef special = material("special_intermediate");
+        RecipeNode target = recipe("target", material("result"), 1, ingredient(special, 1));
+
+        var result = PureDemandTreeInspector.inspect(graph(target), Map.of(),
+                target.recipeId(), 1);
+
+        assertFalse(result.complete());
+        assertEquals(PureDemandTreeInspector.Status.INCOMPLETE, result.status());
+        assertEquals(special, result.unresolved());
+    }
+
+    @Test
+    void inventoryPrunesAnUnprojectedDependency() {
+        MaterialRef special = material("special_intermediate");
+        RecipeNode target = recipe("target", material("result"), 1, ingredient(special, 3));
+
+        var result = PureDemandTreeInspector.inspect(graph(target), Map.of(special, 3),
+                target.recipeId(), 1);
+
+        assertTrue(result.complete());
+        assertEquals(0, result.visitedNodes());
+    }
+
+    @Test
+    void tagNeedsOnlyOneCompletableAlternative() {
+        MaterialRef unsupported = material("unsupported_ingot");
+        MaterialRef supported = material("supported_ingot");
+        MaterialRef ore = material("ore");
+        RecipeNode smelt = recipe("smelt", supported, 1, ingredient(ore, 1));
+        RecipeNode target = recipe("target", material("result"), 1,
+                new IngredientRef(List.of(unsupported, supported), 1));
+
+        var result = PureDemandTreeInspector.inspect(graph(smelt, target), Map.of(ore, 1),
+                target.recipeId(), 1);
+
+        assertTrue(result.complete());
+    }
+
+    @Test
+    void partialTagStockDoesNotReduceThePurePlannerProductionDemand() {
+        MaterialRef unsupported = material("unsupported_ingot");
+        MaterialRef supported = material("supported_ingot");
+        MaterialRef ore = material("ore");
+        RecipeNode smelt = recipe("smelt", supported, 1, ingredient(ore, 1));
+        RecipeNode target = recipe("target", material("result"), 1,
+                new IngredientRef(List.of(unsupported, supported), 2));
+
+        var result = PureDemandTreeInspector.inspect(graph(smelt, target),
+                Map.of(unsupported, 1, ore, 1), target.recipeId(), 1);
+
+        assertFalse(result.complete());
+    }
+
+    @Test
+    void doesNotReuseOneStackAcrossTwoInputs() {
+        MaterialRef token = material("token");
+        RecipeNode target = recipe("target", material("result"), 1,
+                ingredient(token, 1), ingredient(token, 1));
+
+        var result = PureDemandTreeInspector.inspect(graph(target), Map.of(token, 1),
+                target.recipeId(), 1);
+
+        assertFalse(result.complete());
+    }
+
+    @Test
+    void doesNotDoubleCountNbtStackForPlainAndExactDemands() {
+        MaterialRef plain = material("charm");
+        MaterialRef exact = new MaterialRef(plain.itemId(), "{quality:1}");
+        RecipeNode target = recipe("target", material("result"), 1,
+                ingredient(plain, 1), ingredient(exact, 1));
+
+        var result = PureDemandTreeInspector.inspect(graph(target), Map.of(exact, 1),
+                target.recipeId(), 1);
+
+        assertFalse(result.complete());
+    }
+
+    @Test
+    void repeatCountConsumesDistinctInventory() {
+        MaterialRef token = material("token");
+        RecipeNode target = recipe("target", material("result"), 1, ingredient(token, 1));
+
+        assertTrue(PureDemandTreeInspector.inspect(graph(target), Map.of(token, 2),
+                target.recipeId(), 2).complete());
+        assertFalse(PureDemandTreeInspector.inspect(graph(target), Map.of(token, 1),
+                target.recipeId(), 2).complete());
+    }
+
+    @Test
+    void cycleTerminatesConservatively() {
+        MaterialRef left = material("left");
+        MaterialRef right = material("right");
+        RecipeNode leftFromRight = recipe("left_from_right", left, 1, ingredient(right, 1));
+        RecipeNode rightFromLeft = recipe("right_from_left", right, 1, ingredient(left, 1));
+        RecipeNode target = recipe("target", material("result"), 1, ingredient(left, 1));
+
+        var result = PureDemandTreeInspector.inspect(
+                graph(leftFromRight, rightFromLeft, target), Map.of(), target.recipeId(), 1);
+
+        assertFalse(result.complete());
+        assertEquals(PureDemandTreeInspector.Status.INCOMPLETE, result.status());
+    }
+
+    @Test
+    void nodeBudgetOverflowRoutesConservatively() {
+        MaterialRef source = material("source");
+        MaterialRef raw = material("raw");
+        MaterialRef middle = material("middle");
+        RecipeNode rawRecipe = recipe("raw", raw, 1, ingredient(source, 1));
+        RecipeNode middleRecipe = recipe("middle", middle, 1, ingredient(raw, 1));
+        RecipeNode target = recipe("target", material("result"), 1, ingredient(middle, 1));
+
+        var result = PureDemandTreeInspector.inspect(graph(rawRecipe, middleRecipe, target),
+                Map.of(source, 1), target.recipeId(), 1, 1);
+
+        assertFalse(result.complete());
+        assertEquals(PureDemandTreeInspector.Status.NODE_LIMIT, result.status());
+    }
+
+    @Test
+    void missingTargetProjectionRoutesConservatively() {
+        ResourceLocation target = id("not_projected");
+
+        var result = PureDemandTreeInspector.inspect(new ImmutableRecipeGraph(Map.of()), Map.of(),
+                target, 1);
+
+        assertFalse(result.complete());
+        assertEquals(PureDemandTreeInspector.Status.TARGET_NOT_PROJECTED, result.status());
+    }
+
+    private static ImmutableRecipeGraph graph(RecipeNode... recipes) {
+        Map<MaterialRef, List<RecipeNode>> byOutput = new LinkedHashMap<>();
+        for (RecipeNode recipe : recipes) {
+            byOutput.computeIfAbsent(recipe.output(), ignored -> new java.util.ArrayList<>())
+                    .add(recipe);
+        }
+        return new ImmutableRecipeGraph(byOutput);
+    }
+
+    private static RecipeNode recipe(String name, MaterialRef output, int outputCount,
+                                     IngredientRef... inputs) {
+        return new RecipeNode(id(name), output, outputCount, List.of(inputs));
+    }
+
+    private static IngredientRef ingredient(MaterialRef material, int count) {
+        return new IngredientRef(List.of(material), count);
+    }
+
+    private static MaterialRef material(String name) {
+        return new MaterialRef(id(name), "");
+    }
+
+    private static ResourceLocation id(String name) {
+        return new ResourceLocation("test", name);
+    }
+}
