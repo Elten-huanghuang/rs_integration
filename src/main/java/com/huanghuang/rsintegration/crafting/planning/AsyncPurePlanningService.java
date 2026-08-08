@@ -62,10 +62,12 @@ public final class AsyncPurePlanningService {
                         Math.toIntExact(Math.min(Integer.MAX_VALUE,
                                 (long) root.count() * Math.max(1, repeatCount)))))
                 .toList();
+        long searchStarted = System.nanoTime();
         PureRecipePlanner.Result result = PureRecipePlanner.resolve(
                 snapshot.recipeGraph(), stock, roots, maxSteps,
                 maxSearchStates, maxMemoizedFailures);
-        com.huanghuang.rsintegration.command.PerformanceMonitor.recordPurePlanningSearch(result);
+        com.huanghuang.rsintegration.command.PerformanceMonitor.recordPurePlanningSearch(
+                result, System.nanoTime() - searchStarted);
         return result;
     }
 
