@@ -24,6 +24,8 @@ public final class RSIntegrationConfig {
             CraftingPlanningConfig.DEFAULT_SEARCH_STATES;
     public static final int DEFAULT_CRAFTING_PURE_SEARCH_MAX_MEMOIZED_FAILURES =
             CraftingPlanningConfig.DEFAULT_MEMOIZED_FAILURES;
+    public static final int DEFAULT_CRAFTING_PURE_DEMAND_MAX_NODES =
+            CraftingPlanningConfig.DEFAULT_DEMAND_TREE_NODES;
     public static final int DEFAULT_CRAFTING_RESOLVE_TIMEOUT_MS = 2_000;
     public static final int DEFAULT_CRAFTING_MAX_ENSURE_CALLS = 10_000;
     public static final int DEFAULT_CRAFTING_PREVIEW_RATE_LIMIT_MS =
@@ -147,6 +149,7 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.IntValue CRAFTING_PLANNING_QUEUE_CAPACITY;
     public static ForgeConfigSpec.IntValue CRAFTING_PURE_SEARCH_MAX_STATES;
     public static ForgeConfigSpec.IntValue CRAFTING_PURE_SEARCH_MAX_MEMOIZED_FAILURES;
+    public static ForgeConfigSpec.IntValue CRAFTING_PURE_DEMAND_MAX_NODES;
     public static ForgeConfigSpec.IntValue CRAFTING_PREVIEW_RATE_LIMIT_MS;
     public static ForgeConfigSpec.IntValue CRAFTING_PLAN_CACHE_TTL_MS;
     public static ForgeConfigSpec.IntValue CRAFTING_PLAN_CACHE_MAX_ENTRIES;
@@ -644,6 +647,14 @@ public final class RSIntegrationConfig {
                         DEFAULT_CRAFTING_PURE_SEARCH_MAX_MEMOIZED_FAILURES,
                         CraftingPlanningConfig.MIN_MEMOIZED_FAILURES,
                         CraftingPlanningConfig.MAX_MEMOIZED_FAILURES);
+        CRAFTING_PURE_DEMAND_MAX_NODES = s
+                .comment("Maximum nodes inspected by the inventory-aware pure demand-tree route check.",
+                        "If the bound is reached, the request is conservatively sent to the typed resolver.",
+                        "Range: 64-4096.")
+                .defineInRange("craftingPureDemandMaxNodes",
+                        DEFAULT_CRAFTING_PURE_DEMAND_MAX_NODES,
+                        CraftingPlanningConfig.MIN_DEMAND_TREE_NODES,
+                        CraftingPlanningConfig.MAX_DEMAND_TREE_NODES);
         CRAFTING_PREVIEW_RATE_LIMIT_MS = s
                 .comment("Minimum interval in milliseconds between craft preview requests.",
                         "Range: 10-2000.")

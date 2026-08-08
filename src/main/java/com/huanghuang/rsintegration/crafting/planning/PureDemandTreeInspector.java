@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.crafting.planning;
 
+import com.huanghuang.rsintegration.config.CraftingPlanningConfig;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.IngredientRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.MaterialRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.RecipeNode;
@@ -14,22 +15,21 @@ import java.util.Set;
 
 /** Bounded inventory-aware check that pure planning covers the requested demand tree. */
 public final class PureDemandTreeInspector {
-    static final int DEFAULT_MAX_NODES = 512;
-
     private PureDemandTreeInspector() {}
 
     public static Result inspect(ImmutableRecipeGraph graph,
                                  Map<MaterialRef, Integer> available,
                                  ResourceLocation targetRecipeId,
                                  int repeatCount) {
-        return inspect(graph, available, targetRecipeId, repeatCount, DEFAULT_MAX_NODES);
+        return inspect(graph, available, targetRecipeId, repeatCount,
+                CraftingPlanningConfig.DEFAULT_DEMAND_TREE_NODES);
     }
 
-    static Result inspect(ImmutableRecipeGraph graph,
-                          Map<MaterialRef, Integer> available,
-                          ResourceLocation targetRecipeId,
-                          int repeatCount,
-                          int maxNodes) {
+    public static Result inspect(ImmutableRecipeGraph graph,
+                                 Map<MaterialRef, Integer> available,
+                                 ResourceLocation targetRecipeId,
+                                 int repeatCount,
+                                 int maxNodes) {
         RecipeNode target = graph.recipesById().get(targetRecipeId);
         if (target == null) return new Result(Status.TARGET_NOT_PROJECTED, 0, null);
 
