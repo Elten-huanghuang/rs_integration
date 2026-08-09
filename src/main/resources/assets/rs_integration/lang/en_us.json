@@ -408,6 +408,7 @@
   "rsi.plan.failure.nbt_mismatch": "Failure reason: the item exists, but its data does not match the recipe",
   "rsi.plan.failure.planner_busy": "The crafting planner is busy. Please try again shortly.",
   "rsi.plan.failure.max_craftable_unknown": "The recipe is too complex to determine the maximum craftable amount.",
+  "rsi.plan.failure.time_limit": "Craft planning exceeded its time limit. Reduce the amount or adjust the recipe and try again.",
   "rsi.plan.missing_header": "Unavailable:",
   "rsi.plan.missing_more": "... (+%s more)",
   

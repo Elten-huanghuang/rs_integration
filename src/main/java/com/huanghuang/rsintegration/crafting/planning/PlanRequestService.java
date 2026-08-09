@@ -18,6 +18,7 @@ public final class PlanRequestService implements AutoCloseable {
     private final AsyncMaxCraftablePlanningService maxCraftablePlanning;
     private final int maxSearchStates;
     private final int maxMemoizedFailures;
+    private final int pureTimeoutMs;
 
     public PlanRequestService(int parallelism) {
         this(parallelism,
@@ -30,17 +31,28 @@ public final class PlanRequestService implements AutoCloseable {
                 com.huanghuang.rsintegration.config.RSIntegrationConfig
                         .DEFAULT_CRAFTING_PURE_SEARCH_MAX_STATES,
                 com.huanghuang.rsintegration.config.RSIntegrationConfig
-                        .DEFAULT_CRAFTING_PURE_SEARCH_MAX_MEMOIZED_FAILURES);
+                        .DEFAULT_CRAFTING_PURE_SEARCH_MAX_MEMOIZED_FAILURES,
+                com.huanghuang.rsintegration.config.RSIntegrationConfig
+                        .DEFAULT_CRAFTING_PURE_PLANNING_TIMEOUT_MS);
     }
 
     public PlanRequestService(int parallelism, int queueCapacity,
                               int maxSearchStates, int maxMemoizedFailures) {
+        this(parallelism, queueCapacity, maxSearchStates, maxMemoizedFailures,
+                com.huanghuang.rsintegration.config.RSIntegrationConfig
+                        .DEFAULT_CRAFTING_PURE_PLANNING_TIMEOUT_MS);
+    }
+
+    public PlanRequestService(int parallelism, int queueCapacity,
+                              int maxSearchStates, int maxMemoizedFailures,
+                              int pureTimeoutMs) {
         coordinator = new AsyncPlanningCoordinator(parallelism, queueCapacity);
         purePlanning = new AsyncPurePlanningService(coordinator);
         responsePlanning = new AsyncPlanResponseService(coordinator);
         maxCraftablePlanning = new AsyncMaxCraftablePlanningService(coordinator);
         this.maxSearchStates = Math.max(1, maxSearchStates);
         this.maxMemoizedFailures = Math.max(0, maxMemoizedFailures);
+        this.pureTimeoutMs = Math.max(1, pureTimeoutMs);
     }
 
     public long begin(UUID playerId) {
@@ -64,7 +76,7 @@ public final class PlanRequestService implements AutoCloseable {
                        int maxSteps, Consumer<AsyncPurePlanningService.CompletedPlan> commit,
                        Consumer<Throwable> rollback) {
         purePlanning.submit(snapshot, repeatCount, serverExecutor, maxSteps,
-                maxSearchStates, maxMemoizedFailures, commit, rollback);
+                maxSearchStates, maxMemoizedFailures, pureTimeoutMs, commit, rollback);
     }
 
     public void submitResponse(PlanningSnapshot snapshot, PlanResponseDraft draft,
@@ -79,7 +91,7 @@ public final class PlanRequestService implements AutoCloseable {
                                    int maxSteps, Consumer<MaxCraftableResult> commit,
                                    Consumer<Throwable> rollback) {
         maxCraftablePlanning.submit(snapshot, limit, serverExecutor, maxSteps,
-                maxSearchStates, maxMemoizedFailures,
+                maxSearchStates, maxMemoizedFailures, pureTimeoutMs,
                 result -> commit.accept(new MaxCraftableResult(result.determined(), result.maximum(),
                         result.plan(), result.snapshot())), rollback);
     }

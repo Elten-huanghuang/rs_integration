@@ -37,9 +37,17 @@ public final class PureRecipePlanner {
     }
 
     static Result resolve(ImmutableRecipeGraph graph, Map<MaterialRef, Integer> available,
+                           List<IngredientRef> roots, int maxSteps, int maxSearchStates,
+                           int maxMemoizedFailures) {
+        return resolve(graph, available, roots, maxSteps, maxSearchStates,
+                maxMemoizedFailures, Long.MAX_VALUE);
+    }
+
+    static Result resolve(ImmutableRecipeGraph graph, Map<MaterialRef, Integer> available,
                           List<IngredientRef> roots, int maxSteps, int maxSearchStates,
-                          int maxMemoizedFailures) {
-        Search search = new Search(graph, available, maxSteps, maxSearchStates, maxMemoizedFailures);
+                          int maxMemoizedFailures, long deadlineNanos) {
+        Search search = new Search(graph, available, maxSteps, maxSearchStates,
+                maxMemoizedFailures, deadlineNanos);
         List<Task> pending = roots.stream().map(DemandTask::new).map(Task.class::cast).toList();
         Status status;
         try {
@@ -47,6 +55,8 @@ public final class PureRecipePlanner {
                     : search.stepLimitReached ? Status.STEP_LIMIT : Status.UNRESOLVABLE;
         } catch (SearchLimitException ignored) {
             status = Status.SEARCH_LIMIT;
+        } catch (TimeLimitException ignored) {
+            status = Status.TIME_LIMIT;
         }
         List<IngredientRef> missing = status == Status.SUCCESS || roots.isEmpty()
                 ? List.of() : List.of(search.deepestFailure != null ? search.deepestFailure : roots.get(0));
@@ -56,7 +66,7 @@ public final class PureRecipePlanner {
                 search.expandedStates, search.backtracks, search.memoHits);
     }
 
-    public enum Status { SUCCESS, UNRESOLVABLE, STEP_LIMIT, SEARCH_LIMIT }
+    public enum Status { SUCCESS, UNRESOLVABLE, STEP_LIMIT, SEARCH_LIMIT, TIME_LIMIT }
 
     public enum Feasibility {
         FEASIBLE,
@@ -67,7 +77,7 @@ public final class PureRecipePlanner {
             return switch (status) {
                 case SUCCESS -> FEASIBLE;
                 case UNRESOLVABLE -> INFEASIBLE;
-                case STEP_LIMIT, SEARCH_LIMIT -> UNKNOWN;
+                case STEP_LIMIT, SEARCH_LIMIT, TIME_LIMIT -> UNKNOWN;
             };
         }
     }
@@ -112,6 +122,7 @@ public final class PureRecipePlanner {
         private final int maxSteps;
         private final int maxSearchStates;
         private final int maxMemoizedFailures;
+        private final long deadlineNanos;
         private final List<PlannedStep> steps = new ArrayList<>();
         private final Set<MaterialRef> resolving = new HashSet<>();
         private final Set<FailureKey> failedStates = new HashSet<>();
@@ -124,7 +135,8 @@ public final class PureRecipePlanner {
         private int callDepth;
 
         private Search(ImmutableRecipeGraph graph, Map<MaterialRef, Integer> available,
-                       int maxSteps, int maxSearchStates, int maxMemoizedFailures) {
+                       int maxSteps, int maxSearchStates, int maxMemoizedFailures,
+                       long deadlineNanos) {
             this.graph = graph;
             available.forEach((material, count) -> {
                 if (count != null && count > 0) stock.put(material, count);
@@ -133,10 +145,15 @@ public final class PureRecipePlanner {
             this.maxSteps = Math.max(1, maxSteps);
             this.maxSearchStates = Math.max(1, maxSearchStates);
             this.maxMemoizedFailures = Math.max(0, maxMemoizedFailures);
+            this.deadlineNanos = deadlineNanos;
         }
 
         private boolean solve(List<Task> pending) {
             PlanningThreadContext.throwIfCancelled();
+            if (deadlineNanos != Long.MAX_VALUE
+                    && System.nanoTime() - deadlineNanos >= 0L) {
+                throw new TimeLimitException();
+            }
             if (++callDepth > MAX_SEARCH_CALL_DEPTH) {
                 callDepth--;
                 throw new SearchLimitException();
@@ -350,6 +367,12 @@ public final class PureRecipePlanner {
 
     private static final class SearchLimitException extends RuntimeException {
         private SearchLimitException() {
+            super(null, null, false, false);
+        }
+    }
+
+    private static final class TimeLimitException extends RuntimeException {
+        private TimeLimitException() {
             super(null, null, false, false);
         }
     }

@@ -21,29 +21,38 @@ final class AsyncMaxCraftablePlanningService {
     }
 
     void submit(PlanningSnapshot snapshot, int limit, Executor serverExecutor, int maxSteps,
-                int maxSearchStates, int maxMemoizedFailures,
+                int maxSearchStates, int maxMemoizedFailures, int timeoutMs,
                 Consumer<CompletedSearch> commit, Consumer<Throwable> rollback) {
         coordinator.submit(snapshot, ignored -> compute(snapshot, limit, maxSteps,
-                        maxSearchStates, maxMemoizedFailures), serverExecutor,
+                        maxSearchStates, maxMemoizedFailures, timeoutMs), serverExecutor,
                 current -> current.recipeRevision() == snapshot.recipeRevision(),
                 commit, rollback);
     }
 
     static CompletedSearch compute(PlanningSnapshot snapshot, int limit, int maxSteps,
                                    int maxSearchStates, int maxMemoizedFailures) {
+        return compute(snapshot, limit, maxSteps, maxSearchStates, maxMemoizedFailures,
+                com.huanghuang.rsintegration.config.CraftingPlanningConfig.DEFAULT_PURE_TIMEOUT_MS);
+    }
+
+    static CompletedSearch compute(PlanningSnapshot snapshot, int limit, int maxSteps,
+                                   int maxSearchStates, int maxMemoizedFailures,
+                                   int timeoutMs) {
         RecipeNode target = snapshot.recipeGraph().recipesById().get(snapshot.recipeId());
         if (target == null) return new CompletedSearch(false, 0, null, snapshot);
         Map<MaterialRef, Integer> stock =
                 ImmutableRecipeGraphProjector.projectAvailability(snapshot.availableItems());
         MaxCraftableSearch search = new MaxCraftableSearch(limit);
         PureRecipePlanner.Result best = null;
+        long deadlineNanos = AsyncPurePlanningService.deadlineAfterMillis(
+                System.nanoTime(), timeoutMs);
         OptionalInt probe;
         while ((probe = search.nextProbe()).isPresent()) {
             PlanningThreadContext.throwIfCancelled();
             int count = probe.getAsInt();
             PureRecipePlanner.Result result = PureRecipePlanner.resolve(
                     snapshot.recipeGraph(), stock, scale(target.inputs(), count), maxSteps,
-                    maxSearchStates, maxMemoizedFailures);
+                    maxSearchStates, maxMemoizedFailures, deadlineNanos);
             Verdict verdict = switch (result.feasibility()) {
                 case FEASIBLE -> Verdict.FEASIBLE;
                 case INFEASIBLE -> Verdict.INFEASIBLE;

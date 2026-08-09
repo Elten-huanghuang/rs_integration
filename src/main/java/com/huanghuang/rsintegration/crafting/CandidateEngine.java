@@ -56,6 +56,7 @@ final class CandidateEngine {
 
         long loopStart = System.nanoTime();
         for (int idx = 0; idx < items.length; idx++) {
+            if (ctx.timedOut()) break;
             ItemStack stack = items[idx];
             if (stack.isEmpty()) continue;
             Item item = stack.getItem();
@@ -68,6 +69,7 @@ final class CandidateEngine {
             itemsWithRecipes++;
 
             for (RecipeIndex.Entry entry : recipes) {
+                if (ctx.timedOut()) break;
                 ResourceLocation rid = entry.recipe().getId();
                 if (byId.containsKey(rid)) continue; // already collected
                 if (entry.modType() != ModType.GENERIC) {
@@ -124,6 +126,14 @@ final class CandidateEngine {
             vanillaCount++;
             ItemStack output = ModRecipeHandlers.tryGetResultItem(cr, ctx.level.registryAccess());
             if (passesOutputCheck(entry, output, ingredient, ingredientAllNbt, nbtStrict, diag)) {
+                if (variantGuardEnabled()
+                        && NonProductiveTagConversionGuard.shouldSkip(ingredient, cr, output)) {
+                    ctx.diag("candidate SKIP " + entry.recipe().getId()
+                            + ": non-productive tag conversion");
+                    if (diag != null) logDiag(diag, null, entry, 0, entry.modType(), true,
+                            "Non-productive tag conversion");
+                    continue;
+                }
                 dedup.put(entry.recipe().getId(), entry);
             }
         }
@@ -183,6 +193,14 @@ final class CandidateEngine {
         }
 
         return result;
+    }
+
+    private static boolean variantGuardEnabled() {
+        try {
+            return RSIntegrationConfig.ENABLE_CRAFTING_VARIANT_CONVERSION_GUARD.get();
+        } catch (Exception ignored) {
+            return true;
+        }
     }
 
     static int compareCandidateIds(ResourceLocation idA, ResourceLocation idB,

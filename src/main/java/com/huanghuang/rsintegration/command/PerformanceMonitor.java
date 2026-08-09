@@ -162,6 +162,8 @@ public final class PerformanceMonitor {
             purePlanningStepLimits.incrementAndGet();
         } else if (result.status() == PureRecipePlanner.Status.SEARCH_LIMIT) {
             purePlanningSearchLimits.incrementAndGet();
+        } else if (result.status() == PureRecipePlanner.Status.TIME_LIMIT) {
+            resolveTimeouts.incrementAndGet();
         }
     }
     public static void recordPlanningSnapshot(long nanosElapsed) {

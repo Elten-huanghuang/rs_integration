@@ -17,6 +17,7 @@ import com.huanghuang.rsintegration.config.CraftingPlanningConfig;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.CraftingResolver;
+import com.huanghuang.rsintegration.crafting.CraftingPlanningTimeoutException;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.ResolutionStep;
 import com.huanghuang.rsintegration.crafting.ExecutionEquivalence;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
@@ -131,7 +132,8 @@ public final class GenericCraftPacket {
     private static PlanRequestService newPlanRequestService(CraftingPlanningConfig config) {
         return new PlanRequestService(
                 config.workers(), config.queueCapacity(),
-                config.maxSearchStates(), config.maxMemoizedFailures());
+                config.maxSearchStates(), config.maxMemoizedFailures(),
+                config.pureTimeoutMs());
     }
 
     // Time-based plan cache — serves both dedup and compute-avoidance.
@@ -1992,6 +1994,11 @@ public final class GenericCraftPacket {
                 PerformanceMonitor.recordSynchronousPlanningFallback(reason, recipeId));
 
         boolean terminalPureResult = precomputedPlan != null && pendingFallbackReason == null;
+        if (terminalPureResult
+                && precomputedPlan.feasibility() == PureRecipePlanner.Feasibility.UNKNOWN) {
+            sink.error(Component.translatable("rsi.plan.failure.time_limit"));
+            return;
+        }
         boolean selectedPureResolver = terminalPureResult && effectiveOverrides.isEmpty();
         boolean needsTypedResolver = !selectedPureResolver;
         if (needsTypedResolver && !typedResolverAvailable) {
@@ -2044,13 +2051,18 @@ public final class GenericCraftPacket {
             selectedTypedResolver = true;
             long typedResolverStarted = System.nanoTime();
             try {
+                int typedTimeoutMs = RSIntegrationConfig.CRAFTING_TYPED_PREVIEW_TIMEOUT_MS.get();
                 planGraph = usesPhysicalMachineInputSlots(recipe)
                         ? CraftingResolver.resolveMachineGraphForSpecsWithTypes(
                                 recipeSpecs, available, player.serverLevel(),
-                                player, network, missing, forcedOverrides, true)
+                                player, network, missing, forcedOverrides, true, typedTimeoutMs)
                         : CraftingResolver.resolveGraphForSpecsWithTypes(
                                 recipeSpecs, available, player.serverLevel(),
-                                player, network, missing, forcedOverrides, true);
+                                player, network, missing, forcedOverrides, true, typedTimeoutMs);
+            } catch (CraftingPlanningTimeoutException timeout) {
+                PerformanceMonitor.recordResolveTimeout();
+                sink.error(Component.translatable("rsi.plan.failure.time_limit"));
+                return;
             } finally {
                 PerformanceMonitor.recordTypedResolver(System.nanoTime() - typedResolverStarted);
             }

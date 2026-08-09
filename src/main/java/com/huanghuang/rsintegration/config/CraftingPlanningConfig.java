@@ -3,7 +3,8 @@ package com.huanghuang.rsintegration.config;
 /** Validated server-side resource limits for asynchronous craft planning. */
 public record CraftingPlanningConfig(int workers, int queueCapacity,
                                      int maxSearchStates, int maxMemoizedFailures,
-                                     int maxDemandTreeNodes) {
+                                     int maxDemandTreeNodes, int pureTimeoutMs,
+                                     int typedPreviewTimeoutMs) {
     public static final int MIN_WORKERS = 1;
     public static final int MAX_WORKERS = 8;
     public static final int DEFAULT_WORKERS = Math.max(MIN_WORKERS, Math.min(4,
@@ -20,6 +21,12 @@ public record CraftingPlanningConfig(int workers, int queueCapacity,
     public static final int MIN_DEMAND_TREE_NODES = 64;
     public static final int MAX_DEMAND_TREE_NODES = 4_096;
     public static final int DEFAULT_DEMAND_TREE_NODES = 512;
+    public static final int MIN_PURE_TIMEOUT_MS = 50;
+    public static final int MAX_PURE_TIMEOUT_MS = 5_000;
+    public static final int DEFAULT_PURE_TIMEOUT_MS = 500;
+    public static final int MIN_TYPED_PREVIEW_TIMEOUT_MS = 10;
+    public static final int MAX_TYPED_PREVIEW_TIMEOUT_MS = 500;
+    public static final int DEFAULT_TYPED_PREVIEW_TIMEOUT_MS = 50;
 
     public CraftingPlanningConfig {
         requireRange("workers", workers, MIN_WORKERS, MAX_WORKERS);
@@ -29,12 +36,17 @@ public record CraftingPlanningConfig(int workers, int queueCapacity,
                 MIN_MEMOIZED_FAILURES, MAX_MEMOIZED_FAILURES);
         requireRange("maxDemandTreeNodes", maxDemandTreeNodes,
                 MIN_DEMAND_TREE_NODES, MAX_DEMAND_TREE_NODES);
+        requireRange("pureTimeoutMs", pureTimeoutMs,
+                MIN_PURE_TIMEOUT_MS, MAX_PURE_TIMEOUT_MS);
+        requireRange("typedPreviewTimeoutMs", typedPreviewTimeoutMs,
+                MIN_TYPED_PREVIEW_TIMEOUT_MS, MAX_TYPED_PREVIEW_TIMEOUT_MS);
     }
 
     public static CraftingPlanningConfig defaults() {
         return new CraftingPlanningConfig(DEFAULT_WORKERS, DEFAULT_QUEUE_CAPACITY,
                 DEFAULT_SEARCH_STATES, DEFAULT_MEMOIZED_FAILURES,
-                DEFAULT_DEMAND_TREE_NODES);
+                DEFAULT_DEMAND_TREE_NODES, DEFAULT_PURE_TIMEOUT_MS,
+                DEFAULT_TYPED_PREVIEW_TIMEOUT_MS);
     }
 
     /** Snapshot the currently loaded Forge server config. */
@@ -44,7 +56,9 @@ public record CraftingPlanningConfig(int workers, int queueCapacity,
                 RSIntegrationConfig.CRAFTING_PLANNING_QUEUE_CAPACITY.get(),
                 RSIntegrationConfig.CRAFTING_PURE_SEARCH_MAX_STATES.get(),
                 RSIntegrationConfig.CRAFTING_PURE_SEARCH_MAX_MEMOIZED_FAILURES.get(),
-                RSIntegrationConfig.CRAFTING_PURE_DEMAND_MAX_NODES.get());
+                RSIntegrationConfig.CRAFTING_PURE_DEMAND_MAX_NODES.get(),
+                RSIntegrationConfig.CRAFTING_PURE_PLANNING_TIMEOUT_MS.get(),
+                RSIntegrationConfig.CRAFTING_TYPED_PREVIEW_TIMEOUT_MS.get());
     }
 
     private static void requireRange(String name, int value, int minimum, int maximum) {
