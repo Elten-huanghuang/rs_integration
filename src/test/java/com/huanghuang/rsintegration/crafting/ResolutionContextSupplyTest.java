@@ -83,6 +83,41 @@ class ResolutionContextSupplyTest extends BootstrapTest {
     }
 
     @Test
+    void outerRollbackRestoresConsumptionCommittedByInnerTransaction() {
+        ResolutionContext context = new ResolutionContext(null, Map.of(),
+                List.of(new ItemStack(Items.GOLD_INGOT, 3)), null);
+        context.beginUndo();
+        context.beginUndo();
+        assertTrue(context.consumeMatchingDetailed(Ingredient.of(Items.GOLD_INGOT), 2).complete());
+        context.commitUndo();
+        context.rollback();
+
+        assertTrue(context.consumeMatchingDetailed(Ingredient.of(Items.GOLD_INGOT), 3).complete());
+    }
+
+    @Test
+    void exactConsumptionIgnoresLargeUnrelatedInventory() {
+        List<ItemStack> inventory = new java.util.ArrayList<>();
+        inventory.add(new ItemStack(Items.DIAMOND, 2));
+        for (int i = 0; i < 2_000; i++) {
+            ItemStack unrelated = new ItemStack(Items.COBBLESTONE, 1);
+            CompoundTag tag = new CompoundTag();
+            tag.putInt("variant", i);
+            unrelated.setTag(tag);
+            inventory.add(unrelated);
+        }
+        ResolutionContext context = new ResolutionContext(null, Map.of(), inventory, null);
+
+        ResolutionContext.SupplyConsumption result = context.consumeMatchingDetailed(
+                Ingredient.of(Items.DIAMOND), 2);
+
+        assertTrue(result.complete());
+        assertEquals(1, result.slices().size());
+        assertEquals(MaterialKey.of(new ItemStack(Items.DIAMOND)), result.slices().get(0).material());
+        assertEquals(2_000, context.countMatching(Ingredient.of(Items.COBBLESTONE)));
+    }
+
+    @Test
     void oneDemandCanConsumeInitialAndProducerSupplyWithoutLosingProvenance() {
         ResolutionContext context = new ResolutionContext(null, Map.of(),
                 List.of(new ItemStack(Items.IRON_INGOT, 2)), null);
