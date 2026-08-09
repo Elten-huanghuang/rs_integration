@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.graph.AllocationId;
 import com.huanghuang.rsintegration.crafting.graph.CraftNode;
@@ -51,9 +52,16 @@ final class ResolutionContext {
     final List<CraftingResolver.ResolutionStep> steps;
     final Set<String> resolving;
     final Set<CraftingResolver.StackKey> resolvingOutputs;
+    final Deque<Set<Item>> activeConversionFamilies = new ArrayDeque<>();
     final long deadlineNanos;
     final boolean abortOnTimeout;
     int ensureCalls;
+    int depthGuardHits;
+    int deepestGuardDepth;
+    int depthGuardLimit;
+    int stepGuardHits;
+    int largestGuardStepCount;
+    int stepGuardLimit;
     final Deque<UndoEntry> undoStack = new ArrayDeque<>();
     final Deque<Integer> undoCheckpoints = new ArrayDeque<>();
     final Deque<SupplyUndoEntry> supplyUndoStack = new ArrayDeque<>();
@@ -186,6 +194,42 @@ final class ResolutionContext {
 
     void diag(String msg) {
         if (diagLog != null) diagLog.add(msg);
+    }
+
+    void pushConversionFamily(Set<Item> family) {
+        if (family != null && !family.isEmpty()) activeConversionFamilies.addLast(family);
+    }
+
+    void popConversionFamily(Set<Item> family) {
+        if (family != null && !family.isEmpty()) activeConversionFamilies.removeLastOccurrence(family);
+    }
+
+    boolean shouldSkipActiveConversion(net.minecraft.world.item.crafting.CraftingRecipe recipe,
+                                       ItemStack output) {
+        for (Set<Item> family : activeConversionFamilies) {
+            if (NonProductiveTagConversionGuard.shouldSkipForFamily(family, recipe, output)) return true;
+        }
+        return false;
+    }
+
+    void recordDepthGuard(int depth, int maxDepth) {
+        depthGuardHits++;
+        deepestGuardDepth = Math.max(deepestGuardDepth, depth);
+        depthGuardLimit = maxDepth;
+    }
+
+    void recordStepGuard(int steps, int maxSteps) {
+        stepGuardHits++;
+        largestGuardStepCount = Math.max(largestGuardStepCount, steps);
+        stepGuardLimit = maxSteps;
+    }
+
+    void logGuardSummary() {
+        if (depthGuardHits == 0 && stepGuardHits == 0) return;
+        RSIntegrationMod.debug("[RSI-Step] resolution guards depthHits={} deepestDepth={}/{} "
+                        + "stepHits={} largestStepCount={}/{}",
+                depthGuardHits, deepestGuardDepth, depthGuardLimit,
+                stepGuardHits, largestGuardStepCount, stepGuardLimit);
     }
 
     boolean timedOut() {

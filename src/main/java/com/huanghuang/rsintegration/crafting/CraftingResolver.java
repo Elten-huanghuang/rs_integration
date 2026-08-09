@@ -422,6 +422,7 @@ public final class CraftingResolver {
                 ctx.graphNodes, ctx.graphAllocations, roots, ctx.graphUnresolved,
                 ctx.graphNodes.stream().map(CraftNode::id).toList());
         CraftPlanValidator.validate(graph);
+        ctx.logGuardSummary();
         return graph;
     }
 
@@ -697,6 +698,10 @@ public final class CraftingResolver {
             edges.beginUndo();
             ctx.resolving.add(bk);
             ctx.resolvingOutputs.add(outKey);
+            Set<Set<Item>> conversionFamilies = a.entry.recipe() instanceof CraftingRecipe cr
+                    ? NonProductiveTagConversionGuard.conversionFamilies(cr, a.output)
+                    : Set.of();
+            for (Set<Item> family : conversionFamilies) ctx.pushConversionFamily(family);
 
             boolean allOk;
             try {
@@ -722,6 +727,7 @@ public final class CraftingResolver {
             } finally {
                 ctx.resolving.remove(bk);
                 ctx.resolvingOutputs.remove(outKey);
+                for (Set<Item> family : conversionFamilies) ctx.popConversionFamily(family);
             }
 
             if (!allOk) {
