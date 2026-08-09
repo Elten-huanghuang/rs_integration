@@ -126,8 +126,10 @@ final class CandidateEngine {
             vanillaCount++;
             ItemStack output = ModRecipeHandlers.tryGetResultItem(cr, ctx.level.registryAccess());
             if (passesOutputCheck(entry, output, ingredient, ingredientAllNbt, nbtStrict, diag)) {
-                if (variantGuardEnabled()
-                        && NonProductiveTagConversionGuard.shouldSkip(ingredient, cr, output)) {
+                boolean skipConversion = variantGuardEnabled()
+                        && (NonProductiveTagConversionGuard.shouldSkip(ingredient, cr, output)
+                        || ctx.shouldSkipActiveConversion(cr, output));
+                if (skipConversion) {
                     ctx.diag("candidate SKIP " + entry.recipe().getId()
                             + ": non-productive tag conversion");
                     if (diag != null) logDiag(diag, null, entry, 0, entry.modType(), true,

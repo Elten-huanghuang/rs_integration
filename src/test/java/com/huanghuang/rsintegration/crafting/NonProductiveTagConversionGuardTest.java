@@ -4,6 +4,7 @@ import net.minecraft.SharedConstants;
 import net.minecraft.core.NonNullList;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.Bootstrap;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.CraftingBookCategory;
@@ -12,6 +13,11 @@ import net.minecraft.world.item.crafting.ShapelessRecipe;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -45,6 +51,58 @@ class NonProductiveTagConversionGuardTest {
                 Ingredient.of(Items.RED_WOOL), recolor, new ItemStack(Items.RED_WOOL)));
         assertFalse(NonProductiveTagConversionGuard.shouldSkip(
                 wool, fromString, new ItemStack(Items.WHITE_WOOL)));
+    }
+
+    @Test
+    void blocksExactRecolorWhenFamilyIsAlreadyActive() {
+        Set<Item> woolFamily = Set.of(
+                Items.WHITE_WOOL, Items.RED_WOOL, Items.BLUE_WOOL);
+        ShapelessRecipe recolor = recipe("recolor_exact", new ItemStack(Items.RED_WOOL),
+                Ingredient.of(Items.BLUE_WOOL), Ingredient.of(Items.RED_DYE));
+
+        assertTrue(NonProductiveTagConversionGuard.shouldSkipForFamily(
+                woolFamily, recolor, new ItemStack(Items.RED_WOOL)));
+    }
+
+    @Test
+    void recordsBroadFamilyFromConversionRecipe() {
+        Ingredient wool = Ingredient.of(Items.WHITE_WOOL, Items.RED_WOOL, Items.BLUE_WOOL);
+        ShapelessRecipe recolor = recipe("recolor_family", new ItemStack(Items.RED_WOOL),
+                wool, Ingredient.of(Items.RED_DYE));
+
+        assertTrue(NonProductiveTagConversionGuard.conversionFamilies(
+                recolor, new ItemStack(Items.RED_WOOL)).stream().anyMatch(
+                        family -> family.containsAll(Set.of(Items.WHITE_WOOL, Items.RED_WOOL,
+                                Items.BLUE_WOOL))));
+    }
+
+    @Test
+    void activeFamilyStateIsScopedToTheCurrentBranch() {
+        Set<Item> woolFamily = Set.of(Items.WHITE_WOOL, Items.RED_WOOL, Items.BLUE_WOOL);
+        ShapelessRecipe recolor = recipe("recolor_branch", new ItemStack(Items.RED_WOOL),
+                Ingredient.of(Items.BLUE_WOOL), Ingredient.of(Items.RED_DYE));
+        ResolutionContext context = new ResolutionContext(null, Map.of(), List.of(), null);
+
+        context.pushConversionFamily(woolFamily);
+        assertTrue(context.shouldSkipActiveConversion(recolor, new ItemStack(Items.RED_WOOL)));
+        context.popConversionFamily(woolFamily);
+        assertFalse(context.shouldSkipActiveConversion(recolor, new ItemStack(Items.RED_WOOL)));
+    }
+
+    @Test
+    void guardHitsAreAggregatedPerResolutionContext() {
+        ResolutionContext context = new ResolutionContext(null, Map.of(), List.of(), null);
+
+        context.recordDepthGuard(9, 8);
+        context.recordDepthGuard(11, 8);
+        context.recordStepGuard(64, 64);
+
+        assertEquals(2, context.depthGuardHits);
+        assertEquals(11, context.deepestGuardDepth);
+        assertEquals(8, context.depthGuardLimit);
+        assertEquals(1, context.stepGuardHits);
+        assertEquals(64, context.largestGuardStepCount);
+        assertEquals(64, context.stepGuardLimit);
     }
 
     @Test

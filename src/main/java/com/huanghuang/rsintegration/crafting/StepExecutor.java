@@ -60,11 +60,11 @@ final class StepExecutor {
             return false;
         }
         if (depth > maxDepth()) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Step] resolution guard DEPTH depth={} maxDepth={}", depth, maxDepth());
+            ctx.recordDepthGuard(depth, maxDepth());
             return false;
         }
         if (ctx.steps.size() + 1 > maxSteps()) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Step] resolution guard STEPS steps={} maxSteps={}", ctx.steps.size(), maxSteps());
+            ctx.recordStepGuard(ctx.steps.size(), maxSteps());
             return false;
         }
 
@@ -113,11 +113,11 @@ final class StepExecutor {
             return false;
         }
         if (depth > maxDepth()) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Step] resolution guard DEPTH depth={} maxDepth={}", depth, maxDepth());
+            ctx.recordDepthGuard(depth, maxDepth());
             return false;
         }
         if (ctx.steps.size() + 1 > maxSteps()) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Step] resolution guard STEPS steps={} maxSteps={}", ctx.steps.size(), maxSteps());
+            ctx.recordStepGuard(ctx.steps.size(), maxSteps());
             return false;
         }
 
