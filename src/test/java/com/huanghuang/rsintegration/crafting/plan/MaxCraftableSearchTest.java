@@ -6,6 +6,8 @@ import java.util.OptionalInt;
 import java.util.function.IntPredicate;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class MaxCraftableSearchTest {
 
@@ -34,6 +36,18 @@ class MaxCraftableSearchTest {
             search.accept(candidate, candidate <= 73);
         }
         assertEquals(73, search.result());
+    }
+
+    @Test
+    void stopsWithoutInventingMaximumWhenProbeIsUnknown() {
+        MaxCraftableSearch search = new MaxCraftableSearch(1024);
+        int candidate = search.nextProbe().orElseThrow();
+
+        search.accept(candidate, MaxCraftableSearch.Verdict.UNKNOWN);
+
+        assertTrue(search.isUnknown());
+        assertTrue(search.nextProbe().isEmpty());
+        assertThrows(IllegalStateException.class, search::result);
     }
 
     private static int runSearch(int limit, int current, boolean currentFeasible,

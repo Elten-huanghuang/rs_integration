@@ -80,11 +80,12 @@ public final class PlanRequestService implements AutoCloseable {
                                    Consumer<Throwable> rollback) {
         maxCraftablePlanning.submit(snapshot, limit, serverExecutor, maxSteps,
                 maxSearchStates, maxMemoizedFailures,
-                result -> commit.accept(new MaxCraftableResult(result.maximum(), result.plan(),
-                        result.snapshot())), rollback);
+                result -> commit.accept(new MaxCraftableResult(result.determined(), result.maximum(),
+                        result.plan(), result.snapshot())), rollback);
     }
 
-    public record MaxCraftableResult(int maximum, PureRecipePlanner.Result plan,
+    public record MaxCraftableResult(boolean determined, int maximum,
+                                     PureRecipePlanner.Result plan,
                                      PlanningSnapshot snapshot) {}
 
 

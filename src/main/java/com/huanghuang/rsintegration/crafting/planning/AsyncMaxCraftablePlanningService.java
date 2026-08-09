@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting.planning;
 
 import com.huanghuang.rsintegration.crafting.plan.MaxCraftableSearch;
+import com.huanghuang.rsintegration.crafting.plan.MaxCraftableSearch.Verdict;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.IngredientRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.MaterialRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.RecipeNode;
@@ -31,7 +32,7 @@ final class AsyncMaxCraftablePlanningService {
     static CompletedSearch compute(PlanningSnapshot snapshot, int limit, int maxSteps,
                                    int maxSearchStates, int maxMemoizedFailures) {
         RecipeNode target = snapshot.recipeGraph().recipesById().get(snapshot.recipeId());
-        if (target == null) return new CompletedSearch(0, null, snapshot);
+        if (target == null) return new CompletedSearch(false, 0, null, snapshot);
         Map<MaterialRef, Integer> stock =
                 ImmutableRecipeGraphProjector.projectAvailability(snapshot.availableItems());
         MaxCraftableSearch search = new MaxCraftableSearch(limit);
@@ -43,10 +44,16 @@ final class AsyncMaxCraftablePlanningService {
             PureRecipePlanner.Result result = PureRecipePlanner.resolve(
                     snapshot.recipeGraph(), stock, scale(target.inputs(), count), maxSteps,
                     maxSearchStates, maxMemoizedFailures);
-            search.accept(count, result.feasible());
-            if (result.feasible()) best = result;
+            Verdict verdict = switch (result.feasibility()) {
+                case FEASIBLE -> Verdict.FEASIBLE;
+                case INFEASIBLE -> Verdict.INFEASIBLE;
+                case UNKNOWN -> Verdict.UNKNOWN;
+            };
+            search.accept(count, verdict);
+            if (verdict == Verdict.FEASIBLE) best = result;
         }
-        return new CompletedSearch(search.result(), best, snapshot);
+        if (search.isUnknown()) return new CompletedSearch(false, 0, best, snapshot);
+        return new CompletedSearch(true, search.result(), best, snapshot);
     }
 
     private static List<IngredientRef> scale(List<IngredientRef> roots, int multiplier) {
@@ -55,6 +62,6 @@ final class AsyncMaxCraftablePlanningService {
                         (long) root.count() * multiplier)))).toList();
     }
 
-    record CompletedSearch(int maximum, PureRecipePlanner.Result plan,
+    record CompletedSearch(boolean determined, int maximum, PureRecipePlanner.Result plan,
                            PlanningSnapshot snapshot) {}
 }
