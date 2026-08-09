@@ -49,6 +49,11 @@ public final class PerformanceMonitor {
     private static final AtomicLong recipeGraphProjectionHits = new AtomicLong();
     private static final AtomicLong recipeGraphProjectionBuildNanos = new AtomicLong();
     private static final AtomicLong recipeGraphProjectionMaxNanos = new AtomicLong();
+    private static final AtomicLong recipeCatalogBuilds = new AtomicLong();
+    private static final AtomicLong recipeCatalogBuildNanos = new AtomicLong();
+    private static final AtomicLong recipeCatalogBuildMaxNanos = new AtomicLong();
+    private static final AtomicLong recipeCatalogGraphNanos = new AtomicLong();
+    private static final AtomicLong recipeCatalogRecipes = new AtomicLong();
     private static final AtomicLong planningSubmitted = new AtomicLong();
     private static final AtomicLong planningCompleted = new AtomicLong();
     private static final AtomicLong planningRejected = new AtomicLong();
@@ -125,6 +130,13 @@ public final class PerformanceMonitor {
         }
         recipeGraphProjectionBuildNanos.addAndGet(Math.max(0L, buildNanos));
         recipeGraphProjectionMaxNanos.updateAndGet(previous -> Math.max(previous, buildNanos));
+    }
+    public static void recordRecipeCatalogBuild(long buildNanos, long graphNanos, int recipes) {
+        recipeCatalogBuilds.incrementAndGet();
+        recipeCatalogBuildNanos.addAndGet(Math.max(0L, buildNanos));
+        recipeCatalogBuildMaxNanos.updateAndGet(previous -> Math.max(previous, buildNanos));
+        recipeCatalogGraphNanos.addAndGet(Math.max(0L, graphNanos));
+        recipeCatalogRecipes.set(Math.max(0, recipes));
     }
     public static void recordPlanningSubmitted(int activeWorkers, int queuedTasks) {
         planningSubmitted.incrementAndGet();
@@ -253,6 +265,13 @@ public final class PerformanceMonitor {
                      ? recipeGraphProjectionBuildNanos.get()
                      / (recipeGraphProjectionCalls.get() - recipeGraphProjectionHits.get()) / 1000 : 0)
              + "/" + recipeGraphProjectionMaxNanos.get() / 1000 + "us"
+             + " recipeCatalog=" + recipeCatalogBuilds.get() + "/"
+             + (recipeCatalogBuilds.get() == 0 ? 0
+                     : recipeCatalogBuildNanos.get() / recipeCatalogBuilds.get() / 1000) + "/"
+             + recipeCatalogBuildMaxNanos.get() / 1000 + "us"
+             + " graph=" + (recipeCatalogBuilds.get() == 0 ? 0
+                     : recipeCatalogGraphNanos.get() / recipeCatalogBuilds.get() / 1000) + "us"
+             + " recipes=" + recipeCatalogRecipes.get()
              + " planningPool=" + planningSubmitted.get() + "/" + planningCompleted.get()
              + "/" + planningRejected.get() + "/" + planningCancelled.get()
              + " active=" + planningWorkerActive.get()

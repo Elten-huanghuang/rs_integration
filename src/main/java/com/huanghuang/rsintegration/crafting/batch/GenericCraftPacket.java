@@ -439,6 +439,11 @@ public final class GenericCraftPacket {
                 action.accept(player);
                 return;
             }
+            if (RecipeIndex.generationBuildFailed()) {
+                player.sendSystemMessage(Component.translatable(
+                        "rsi.plan.failure.catalog_unavailable"));
+                return;
+            }
             boolean queued = WARM_UP_REQUESTS.offer(new DeferredCraftRequestQueue.Entry<>(
                     player.getUUID(), packet.preview, previewGeneration, action));
             if (!queued) {
@@ -453,7 +458,7 @@ public final class GenericCraftPacket {
     }
 
     private static boolean warmUpReady(ServerLevel level) {
-        return RecipeIndex.isReady(level) && ImmutableRecipeGraphProjector.isReady(level);
+        return RecipeIndex.isReady(level);
     }
 
     private static void executeRequest(ServerPlayer player, GenericCraftPacket packet,
@@ -489,8 +494,19 @@ public final class GenericCraftPacket {
         }
     }
 
-    /** Runs at most one valid deferred request after both warm-up stages are ready. */
+    /** Runs at most one valid deferred request after a complete generation is ready. */
     public static void tickWarmUpRequests(MinecraftServer server) {
+        if (RecipeIndex.generationBuildFailed()) {
+            DeferredCraftRequestQueue.Entry<Consumer<ServerPlayer>> request;
+            while ((request = WARM_UP_REQUESTS.poll()) != null) {
+                ServerPlayer player = server.getPlayerList().getPlayer(request.playerId());
+                if (player != null) {
+                    player.sendSystemMessage(Component.translatable(
+                            "rsi.plan.failure.catalog_unavailable"));
+                }
+            }
+            return;
+        }
         if (!warmUpReady(server.overworld())) return;
         int remaining = WARM_UP_REQUESTS.size();
         while (remaining-- > 0) {
@@ -504,10 +520,6 @@ public final class GenericCraftPacket {
             request.payload().accept(player);
             return;
         }
-    }
-
-    public static boolean hasDeferredWarmUpRequests() {
-        return WARM_UP_REQUESTS.size() > 0;
     }
 
     /**

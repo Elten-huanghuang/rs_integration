@@ -26,7 +26,7 @@ public record CraftingPlanningConfig(int workers, int queueCapacity,
     public static final int DEFAULT_PURE_TIMEOUT_MS = 500;
     public static final int MIN_TYPED_PREVIEW_TIMEOUT_MS = 10;
     public static final int MAX_TYPED_PREVIEW_TIMEOUT_MS = 500;
-    public static final int DEFAULT_TYPED_PREVIEW_TIMEOUT_MS = 200;
+    public static final int DEFAULT_TYPED_PREVIEW_TIMEOUT_MS = 400;
 
     public CraftingPlanningConfig {
         requireRange("workers", workers, MIN_WORKERS, MAX_WORKERS);

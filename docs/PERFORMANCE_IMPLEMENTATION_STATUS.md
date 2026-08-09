@@ -1,5 +1,14 @@
 # Performance Implementation Status
 
+## 2026-08-09 配方目录启动期编译
+
+- `RecipeIndex` 与 `ImmutableRecipeGraph` 现在由同一次服务端安全捕获生成，不再先用 tick 预算分批建立索引、完成后再第二次遍历索引投影纯图。
+- 初次启动在 `ServerStartedEvent` 返回前完成目录 generation；`/reload` 在新配方已经应用、向客户端同步前重建。索引与纯图全部完成后才发布 ready 状态，普通预览请求只读取已发布 generation，不参与构建，也不会通过提高 tick 预算追赶预热。
+- `/reload` 会递增 `CraftPlanningRevision`，同时清理旧索引、纯图和计划缓存。新旧 revision 不能混用，修复了只按 `RecipeManager` 对象身份判断时可能继续读取旧索引的问题。
+- 普通 `CraftingRecipe` 的输出提取和纯图节点投影已合并到一个遍历中，避免重复调用 `getResultItem`。第三方 handler 仍在服务端加载线程读取，不能为了表面上的异步化把实时 Forge/模组对象送入后台线程。
+- `/rsi_debug perf` 新增 `recipeCatalog=次数/平均/最大`、其中的 `graph` CPU 和配方数量；完成日志同时记录最慢配方 ID 和耗时。原日志中的几十秒是 tick 节流后的墙钟等待，新指标记录实际构建 CPU。
+- 当前代价是世界加载或 `/reload` 会增加一次真实目录构建耗时。这是显式加载成本，不会延后到玩家第一次打开配方树；具体耗时必须在目标整合包中复测后再决定是否需要针对最慢 handler 做专项优化。
+
 已完成：
 
 - 计划节点上限与进度协议上限统一为 4096。

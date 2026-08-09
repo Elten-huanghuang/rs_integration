@@ -13,6 +13,9 @@ import com.huanghuang.rsintegration.mods.pmmo.PmmoSalvageCatalog;
 import com.huanghuang.rsintegration.mods.pmmo.PmmoRSModule;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
+import com.huanghuang.rsintegration.command.PerformanceMonitor;
+import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph;
+import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraphProjector;
 import com.huanghuang.rsintegration.util.Diagnostics;
 import com.huanghuang.rsintegration.util.ModIds;
 import com.huanghuang.rsintegration.util.Reflect;
@@ -49,112 +52,79 @@ public final class RecipeIndex {
 
     private static volatile Map<Item, List<Entry>> index;
     private static volatile RecipeManager source;
-    private static BuildState warmUpState;
+    private static volatile long sourceRevision;
+    private static volatile boolean generationBuildFailed;
 
     private RecipeIndex() {}
 
     public static boolean isReady(Level level) {
         Map<Item, List<Entry>> ready = index;
-        return ready != null && source == level.getRecipeManager();
+        return ready != null
+                && source == level.getRecipeManager()
+                && sourceRevision == CraftPlanningRevision.current()
+                && ImmutableRecipeGraphProjector.isReady(level);
+    }
+
+    public static boolean generationBuildFailed() {
+        return generationBuildFailed;
     }
 
     /** Retained for integrations compiled against the original eager entry point. */
     public static void warmUp(Level level) {
         long start = System.currentTimeMillis();
+        generationBuildFailed = false;
         try {
             buildSynchronously(level);
-            com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraphProjector
-                    .capture(level);
-            RSIntegrationMod.LOGGER.info("[RecipeIndex] explicit warm-up completed in {}ms",
+            RSIntegrationMod.LOGGER.info("[RecipeCatalog] generation ready in {}ms",
                     System.currentTimeMillis() - start);
         } catch (RuntimeException | LinkageError e) {
             invalidate();
+            generationBuildFailed = true;
             RSIntegrationMod.LOGGER.warn(
-                    "[RecipeIndex] explicit warm-up failed; first craft request will retry", e);
-        }
-    }
-
-    public static synchronized void scheduleWarmUp(Level level) {
-        RecipeManager manager = level.getRecipeManager();
-        if (index != null && source == manager) return;
-        if (warmUpState == null || !warmUpState.matches(manager)) {
-            CraftPacketUtils.clearIngredientCache();
-            warmUpState = new BuildState(manager);
-        }
-    }
-
-    public static void tickWarmUp(Level level, long budgetNanos) {
-        boolean completed = false;
-        synchronized (RecipeIndex.class) {
-            RecipeManager manager = level.getRecipeManager();
-            if (index != null && source == manager) {
-                warmUpState = null;
-                return;
-            }
-            if (warmUpState == null || !warmUpState.matches(manager)) scheduleWarmUp(level);
-            try {
-                BuildState state = warmUpState;
-                long startedNanos = System.nanoTime();
-                long deadline = System.nanoTime() + Math.max(1L, budgetNanos);
-                boolean done = state.advance(level, deadline);
-                state.reportBudgetOverrun(System.nanoTime() - startedNanos, budgetNanos);
-                if (done) {
-                    publishWarmUp(state);
-                    completed = true;
-                }
-            } catch (RuntimeException | LinkageError e) {
-                warmUpState = null;
-                RSIntegrationMod.LOGGER.warn(
-                        "[RecipeIndex] incremental warm-up failed; first craft request will retry", e);
-            }
-        }
-        if (completed) {
-            com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraphProjector
-                    .scheduleWarmUp(level);
+                    "[RecipeCatalog] generation build failed; planning remains unavailable", e);
         }
     }
 
     /**
-     * Returns a published index only. A request must wait for the incremental warm-up
-     * scheduler instead of synchronously consuming an unbounded server tick budget.
+     * Returns only a complete generation published during startup or reload.
      */
     public static Map<Item, List<Entry>> get(Level level) {
         RecipeManager manager = level.getRecipeManager();
         Map<Item, List<Entry>> ready = index;
-        if (ready != null && source == manager) return ready;
-        synchronized (RecipeIndex.class) {
-            ready = index;
-            if (ready != null && source == manager) return ready;
-            if (warmUpState == null || !warmUpState.matches(manager)) scheduleWarmUp(level);
-            throw new IllegalStateException(
-                    "Recipe index is warming up; retry after RecipeIndex.isReady(level)");
-        }
+        if (ready != null && source == manager
+                && sourceRevision == CraftPlanningRevision.current()
+                && ImmutableRecipeGraphProjector.isReady(level)) return ready;
+        throw new IllegalStateException("Recipe catalog generation is unavailable");
     }
 
     private static Map<Item, List<Entry>> buildSynchronously(Level level) {
         RecipeManager rm = level.getRecipeManager();
+        long revision = CraftPlanningRevision.current();
         Map<Item, List<Entry>> idx = index;
-        if (idx != null && source == rm) return idx;
+        if (idx != null && source == rm && sourceRevision == revision
+                && ImmutableRecipeGraphProjector.isReady(level)) return idx;
         synchronized (RecipeIndex.class) {
             idx = index;
-            if (idx != null && source == rm) return idx;
-            if (warmUpState != null && warmUpState.matches(rm)) {
-                while (!warmUpState.advance(level, Long.MAX_VALUE)) {
-                    // Complete any remaining scheduled work for this immediate request.
-                }
-                return publishWarmUp(warmUpState);
-            }
+            if (idx != null && source == rm && sourceRevision == revision
+                    && ImmutableRecipeGraphProjector.isReady(level)) return idx;
 
+            CraftPacketUtils.clearIngredientCache();
             long diagTimer = Diagnostics.startTimer();
             long start = System.currentTimeMillis();
+            long startedNanos = System.nanoTime();
             idx = new HashMap<>();
             Set<ResourceLocation> seen = new HashSet<>();
-            int skippedUnknown = 0, skippedEmptyResult = 0, skippedNoHandler = 0, skippedIdentity = 0;
+            Map<ImmutableRecipeGraph.MaterialRef, List<ImmutableRecipeGraph.RecipeNode>> projected =
+                    new HashMap<>();
+            BuildTiming timing = new BuildTiming();
+            int skippedUnknown = 0, skippedEmptyResult = 0, skippedIdentity = 0;
 
             // Keep same-output recipes from different machines. Candidate scoring may prefer
             // ordinary crafting, but removing an alternative here makes it vanish from recursion.
             for (Recipe<?> recipe : rm.getRecipes()) {
-                IndexOutcome outcome = indexRecipe(level, idx, seen, recipe);
+                long recipeStarted = System.nanoTime();
+                IndexOutcome outcome = indexRecipe(level, idx, seen, projected, timing, recipe);
+                timing.recordRecipe(recipe, System.nanoTime() - recipeStarted);
                 if (outcome == IndexOutcome.UNKNOWN) skippedUnknown++;
                 else if (outcome == IndexOutcome.EMPTY_RESULT) skippedEmptyResult++;
                 else if (outcome == IndexOutcome.IDENTITY) skippedIdentity++;
@@ -173,10 +143,17 @@ public final class RecipeIndex {
             int brewingIndexed = com.huanghuang.rsintegration.mods.vanilla.brewing
                     .VanillaBrewingCatalog.index(level, idx, seen);
 
-            index = idx;
+            Map<Item, List<Entry>> publishedIndex = freezeIndex(idx);
+            ImmutableRecipeGraph graph = new ImmutableRecipeGraph(projected);
+            ImmutableRecipeGraphProjector.publishCompiled(rm, revision, graph, timing.graphNanos);
+            index = publishedIndex;
             source = rm;
+            sourceRevision = revision;
 
             long elapsed = System.currentTimeMillis() - start;
+            long totalNanos = System.nanoTime() - startedNanos;
+            PerformanceMonitor.recordRecipeCatalogBuild(
+                    totalNanos, timing.graphNanos, rm.getRecipes().size());
             Diagnostics.stopTimer("RecipeIndex.build", diagTimer);
             Diagnostics.record(Diagnostics.Category.INDEX_BUILD,
                     idx.size() + " items, " + seen.size() + " entries, " + elapsed + "ms"
@@ -187,17 +164,22 @@ public final class RecipeIndex {
                     + ", " + distantWorldsIndexed + " Distant Worlds Firon"
                     + ", " + pmmoSalvageIndexed + " PMMO salvage"
                     + ", " + brewingIndexed + " brewing");
-            RSIntegrationMod.LOGGER.info("[RecipeIndex] built: {} items, {} entries in {}ms"
-                            + " (skipped: {} unknown, {} empty-result, {} identity"
-                            + ", {} FA rituals, {} market, {} Distant Worlds Firon)",
-                    idx.size(), seen.size(), elapsed, skippedUnknown, skippedEmptyResult,
-                    skippedIdentity, faIndexed, marketIndexed, distantWorldsIndexed);
-            return idx;
+            RSIntegrationMod.LOGGER.info("[RecipeCatalog] built: {} items, {} entries, {} pure recipes"
+                            + " in {}ms (graph {}ms; skipped: {} unknown, {} empty-result, {} identity"
+                            + ", {} FA rituals, {} market, {} Distant Worlds Firon; slowest {} {}ms)",
+                    idx.size(), seen.size(), graph.recipesById().size(), elapsed,
+                    timing.graphNanos / 1_000_000L, skippedUnknown, skippedEmptyResult,
+                    skippedIdentity, faIndexed, marketIndexed, distantWorldsIndexed,
+                    timing.slowestRecipe, timing.slowestRecipeNanos / 1_000_000L);
+            return publishedIndex;
         }
     }
 
     private static IndexOutcome indexRecipe(Level level, Map<Item, List<Entry>> target,
-                                            Set<ResourceLocation> seen, Recipe<?> recipe) {
+                                            Set<ResourceLocation> seen,
+                                            Map<ImmutableRecipeGraph.MaterialRef,
+                                                    List<ImmutableRecipeGraph.RecipeNode>> projected,
+                                            BuildTiming timing, Recipe<?> recipe) {
         if (!seen.add(recipe.getId())) return IndexOutcome.DUPLICATE;
 
         ModRecipeHandler handler = ModRecipeHandlers.handlerFor(recipe);
@@ -227,6 +209,15 @@ public final class RecipeIndex {
 
         Entry entry = new Entry(recipe, type, typeId);
         target.computeIfAbsent(result.getItem(), key -> new ArrayList<>()).add(entry);
+        if (type == ModType.GENERIC && recipe instanceof CraftingRecipe crafting) {
+            long graphStarted = System.nanoTime();
+            ImmutableRecipeGraph.RecipeNode node =
+                    ImmutableRecipeGraphProjector.projectCraftingRecipe(crafting, result);
+            timing.graphNanos += System.nanoTime() - graphStarted;
+            if (node != null) {
+                projected.computeIfAbsent(node.output(), ignored -> new ArrayList<>()).add(node);
+            }
+        }
         if (handler != null) {
             for (ItemStack secondary : handler.getSecondaryOutputs(recipe, level.registryAccess())) {
                 if (!secondary.isEmpty()) {
@@ -237,129 +228,26 @@ public final class RecipeIndex {
         return IndexOutcome.INDEXED;
     }
 
-    private static Map<Item, List<Entry>> publishWarmUp(BuildState state) {
-        index = state.index;
-        source = state.source;
-        warmUpState = null;
+    private static Map<Item, List<Entry>> freezeIndex(Map<Item, List<Entry>> mutable) {
+        Map<Item, List<Entry>> frozen = new HashMap<>(mutable.size());
+        mutable.forEach((item, entries) -> frozen.put(item, List.copyOf(entries)));
+        return Map.copyOf(frozen);
+    }
 
-        long elapsed = System.currentTimeMillis() - state.startedMillis;
-        Diagnostics.stopTimer("RecipeIndex.build", state.diagTimer);
-        Diagnostics.record(Diagnostics.Category.INDEX_BUILD,
-                state.index.size() + " items, " + state.seen.size() + " entries, " + elapsed + "ms"
-                        + " incremental (skipped: " + state.skippedUnknown + " unknown, "
-                        + state.skippedEmptyResult + " empty-result, " + state.skippedIdentity
-                        + " identity, " + state.faIndexed + " FA rituals, "
-                        + state.marketIndexed + " market, " + state.distantWorldsIndexed
-                        + " Distant Worlds Firon, " + state.pmmoSalvageIndexed
-                        + " PMMO salvage, " + state.brewingIndexed + " brewing)");
-        RSIntegrationMod.LOGGER.info(
-                "[RecipeIndex] incrementally built: {} items, {} entries over {}ms",
-                state.index.size(), state.seen.size(), elapsed);
-        return state.index;
+    private static final class BuildTiming {
+        private long graphNanos;
+        private long slowestRecipeNanos;
+        private ResourceLocation slowestRecipe = new ResourceLocation("minecraft", "empty");
+
+        private void recordRecipe(Recipe<?> recipe, long elapsedNanos) {
+            if (elapsedNanos <= slowestRecipeNanos) return;
+            slowestRecipeNanos = elapsedNanos;
+            slowestRecipe = recipe.getId();
+        }
     }
 
     private enum IndexOutcome {
         INDEXED, DUPLICATE, UNKNOWN, EMPTY_RESULT, IDENTITY
-    }
-
-    private static final class BuildState {
-        private final RecipeManager source;
-        private final Iterator<Recipe<?>> recipes;
-        private final Map<Item, List<Entry>> index = new HashMap<>();
-        private final Set<ResourceLocation> seen = new HashSet<>();
-        private final long diagTimer = Diagnostics.startTimer();
-        private final long startedMillis = System.currentTimeMillis();
-        private int extraPhase;
-        private int skippedUnknown;
-        private int skippedEmptyResult;
-        private int skippedIdentity;
-        private int faIndexed;
-        private int marketIndexed;
-        private int distantWorldsIndexed;
-        private int pmmoSalvageIndexed;
-        private int brewingIndexed;
-        private com.huanghuang.rsintegration.mods.vanilla.brewing.VanillaBrewingCatalog
-                .IncrementalIndex brewingBuild;
-        private String lastUnit = "initialization";
-        private boolean budgetOverrunReported;
-
-        private BuildState(RecipeManager source) {
-            this.source = source;
-            this.recipes = new ArrayList<Recipe<?>>(source.getRecipes()).iterator();
-        }
-
-        private boolean matches(RecipeManager manager) {
-            return source == manager;
-        }
-
-        private boolean advance(Level level, long deadlineNanos) {
-            int processed = 0;
-            while (recipes.hasNext()
-                    && (processed++ == 0 || System.nanoTime() < deadlineNanos)) {
-                Recipe<?> recipe = recipes.next();
-                lastUnit = recipe.getId().toString();
-                IndexOutcome outcome = indexRecipe(level, index, seen, recipe);
-                if (outcome == IndexOutcome.UNKNOWN) skippedUnknown++;
-                else if (outcome == IndexOutcome.EMPTY_RESULT) skippedEmptyResult++;
-                else if (outcome == IndexOutcome.IDENTITY) skippedIdentity++;
-            }
-            if (recipes.hasNext()) return false;
-
-            int phases = 0;
-            while (extraPhase < 6
-                    && (phases++ == 0 || System.nanoTime() < deadlineNanos)) {
-                switch (extraPhase) {
-                    case 0 -> {
-                        lastUnit = "forbidden_arcanus rituals";
-                        faIndexed = indexFARituals(level, index, seen);
-                        extraPhase++;
-                    }
-                    case 1 -> {
-                        lastUnit = "farming_for_blockheads market";
-                        marketIndexed = indexMarketEntries(index, seen);
-                        extraPhase++;
-                    }
-                    case 2 -> {
-                        lastUnit = "apotheosis gem cutting";
-                        indexGemCutting(level, index, seen);
-                        extraPhase++;
-                    }
-                    case 3 -> {
-                        lastUnit = "distant_worlds firon";
-                        distantWorldsIndexed = indexDistantWorldsFiron(index, seen);
-                        extraPhase++;
-                    }
-                    case 4 -> {
-                        lastUnit = "pmmo salvage";
-                        pmmoSalvageIndexed = indexPmmoSalvage(index, seen);
-                        extraPhase++;
-                    }
-                    case 5 -> {
-                        lastUnit = "vanilla brewing";
-                        if (brewingBuild == null) {
-                            brewingBuild = com.huanghuang.rsintegration.mods.vanilla.brewing
-                                    .VanillaBrewingCatalog.incrementalIndex(level, index, seen);
-                        }
-                        if (brewingBuild.advance(() -> System.nanoTime() >= deadlineNanos)) {
-                            brewingIndexed = brewingBuild.indexedCount();
-                            extraPhase++;
-                        }
-                    }
-                    default -> { }
-                }
-            }
-            return extraPhase >= 6;
-        }
-
-        private void reportBudgetOverrun(long elapsedNanos, long budgetNanos) {
-            long threshold = Math.max(5_000_000L, Math.max(1L, budgetNanos) * 4L);
-            if (budgetOverrunReported || elapsedNanos <= threshold) return;
-            budgetOverrunReported = true;
-            RSIntegrationMod.LOGGER.warn(
-                    "[RecipeIndex] warm-up unit '{}' took {}ms (tick budget {}ms)",
-                    lastUnit, elapsedNanos / 1_000_000L,
-                    Math.max(1L, budgetNanos) / 1_000_000.0D);
-        }
     }
 
     private static int indexPmmoSalvage(Map<Item, List<Entry>> idx,
@@ -716,7 +604,8 @@ public final class RecipeIndex {
         synchronized (RecipeIndex.class) {
             index = null;
             source = null;
-            warmUpState = null;
+            sourceRevision = 0L;
+            generationBuildFailed = false;
         }
         com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraphProjector.clearCache();
         com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket.clearPlanCache();
