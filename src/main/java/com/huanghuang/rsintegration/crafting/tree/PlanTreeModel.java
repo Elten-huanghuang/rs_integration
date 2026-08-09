@@ -107,6 +107,7 @@ public final class PlanTreeModel {
         // the same producer output so a recipe that consumes four units from one
         // batch is rendered as one "x4" producer reference, not four "x1" nodes.
         Set<Integer> path = new HashSet<>();
+        Set<Integer> expandedProducers = new HashSet<>();
         List<PlanGraphView.RootEdgeView> rootEdges = new java.util.ArrayList<>();
         Map<IngredientKey, UnresolvedReference> unresolvedRoots = new LinkedHashMap<>();
         for (PlanGraphView.RootView demand : graph.roots()) {
@@ -120,7 +121,7 @@ public final class PlanTreeModel {
         }
         for (GraphReference edge : mergeRootEdges(rootEdges)) {
             root.children.add(buildGraphReference(edge.source(), edge.material(), edge.quantity(),
-                    1, graph, nodes, path, plan));
+                    1, graph, nodes, path, expandedProducers, plan));
         }
         for (UnresolvedReference missingRef : unresolvedRoots.values()) {
             PlanTreeNode missing = new PlanTreeNode(IngredientKey.of(missingRef.display()),
@@ -148,9 +149,10 @@ public final class PlanTreeModel {
                     quantity, 1, step, nodeId);
             omitted.limited = step.alternatives().size() > maxTreeCandidates();
             applyAvailability(omitted, plan, display);
+            expandedProducers.add(nodeId);
             for (GraphReference edge : mergeConsumerEdges(graph, nodeId)) {
                 omitted.children.add(buildGraphReference(edge.source(), edge.material(), edge.quantity(),
-                        2, graph, nodes, new HashSet<>(Set.of(nodeId)), plan));
+                        2, graph, nodes, new HashSet<>(Set.of(nodeId)), expandedProducers, plan));
             }
             root.children.add(omitted);
             renderedRecipes.add(graphNode.recipeId());
@@ -169,6 +171,7 @@ public final class PlanTreeModel {
                                                      PlanGraphView graph,
                                                      Map<Integer, PlanGraphView.NodeView> nodes,
                                                      Set<Integer> path,
+                                                     Set<Integer> expandedProducers,
                                                      PlanResponse plan) {
         if (source.initial()) {
             PlanTreeNode leaf = new PlanTreeNode(IngredientKey.of(material), material,
@@ -210,9 +213,17 @@ public final class PlanTreeModel {
         }
         applyAvailability(node, plan, display);
 
+        // A DAG producer may feed several consumers. The tree keeps a visual
+        // reference at every edge, but expands that producer's input cost only
+        // once so shared surplus is not counted once per downstream branch.
+        if (!expandedProducers.add(producer.nodeId())) {
+            path.remove(producer.nodeId());
+            return node;
+        }
+
         for (GraphReference edge : mergeConsumerEdges(graph, producer.nodeId())) {
             PlanTreeNode child = buildGraphReference(edge.source(), edge.material(), edge.quantity(),
-                    depth + 1, graph, nodes, path, plan);
+                    depth + 1, graph, nodes, path, expandedProducers, plan);
             node.children.add(child);
         }
         // Unresolved demand is a separate portion of the input port. Keep it as
@@ -248,7 +259,7 @@ public final class PlanTreeModel {
         Map<VisualKey, PlanTreeNode> merged = new LinkedHashMap<>();
         List<PlanTreeNode> result = new java.util.ArrayList<>();
         for (PlanTreeNode child : parent.children) {
-            if (child.cycle || child.unresolved > 0) {
+            if (child.cycle) {
                 result.add(child);
                 continue;
             }
@@ -265,10 +276,11 @@ public final class PlanTreeModel {
             }
             existing.amount += child.amount;
             existing.edgeQuantity += child.edgeQuantity;
+            existing.unresolved += child.unresolved;
             // Availability is a shared inventory total, not a per-branch
-            // quantity.  Keep one copy while summing the branch demand.
+            // quantity. Keep one copy; amount carries the summed branch demand.
             existing.available = Math.max(existing.available, child.available);
-            existing.needed += child.needed;
+            existing.needed = Math.max(existing.needed, child.needed);
             existing.children.addAll(child.children);
             mergeEquivalentProducedChildren(existing);
         }
