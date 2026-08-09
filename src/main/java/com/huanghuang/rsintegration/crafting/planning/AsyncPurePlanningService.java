@@ -21,20 +21,23 @@ public final class AsyncPurePlanningService {
     public void submit(PlanningSnapshot snapshot, Executor serverExecutor, int maxSteps,
                        Consumer<CompletedPlan> commit,
                        Consumer<Throwable> rollback) {
-        submit(snapshot, serverExecutor, maxSteps,
+        submit(snapshot, 1, serverExecutor, maxSteps,
                 CraftingPlanningConfig.DEFAULT_SEARCH_STATES,
-                CraftingPlanningConfig.DEFAULT_MEMOIZED_FAILURES, commit, rollback);
+                CraftingPlanningConfig.DEFAULT_MEMOIZED_FAILURES,
+                CraftingPlanningConfig.DEFAULT_PURE_TIMEOUT_MS, commit, rollback);
     }
 
     public void submit(PlanningSnapshot snapshot, Executor serverExecutor, int maxSteps,
                        int maxSearchStates, int maxMemoizedFailures,
                        Consumer<CompletedPlan> commit, Consumer<Throwable> rollback) {
         submit(snapshot, 1, serverExecutor, maxSteps, maxSearchStates,
-                maxMemoizedFailures, commit, rollback);
+                maxMemoizedFailures, CraftingPlanningConfig.DEFAULT_PURE_TIMEOUT_MS,
+                commit, rollback);
     }
 
     public void submit(PlanningSnapshot snapshot, int repeatCount, Executor serverExecutor,
                        int maxSteps, int maxSearchStates, int maxMemoizedFailures,
+                       int timeoutMs,
                        Consumer<CompletedPlan> commit, Consumer<Throwable> rollback) {
         if (snapshot.mainThreadOnly()) {
             serverExecutor.execute(() -> rollback.accept(
@@ -42,14 +45,15 @@ public final class AsyncPurePlanningService {
             return;
         }
         coordinator.submit(snapshot, ignored -> compute(snapshot, repeatCount, maxSteps,
-                        maxSearchStates, maxMemoizedFailures), serverExecutor,
+                        maxSearchStates, maxMemoizedFailures, timeoutMs), serverExecutor,
                 current -> current.recipeRevision() == snapshot.recipeRevision(),
                 result -> commit.accept(new CompletedPlan(snapshot, result)), rollback);
     }
 
     private static PureRecipePlanner.Result compute(PlanningSnapshot snapshot, int repeatCount,
                                                      int maxSteps,
-                                                     int maxSearchStates, int maxMemoizedFailures) {
+                                                     int maxSearchStates, int maxMemoizedFailures,
+                                                     int timeoutMs) {
         PlanningThreadContext.throwIfCancelled();
         RecipeNode target = snapshot.recipeGraph().recipesById().get(snapshot.recipeId());
         if (target == null) {
@@ -63,12 +67,19 @@ public final class AsyncPurePlanningService {
                                 (long) root.count() * Math.max(1, repeatCount)))))
                 .toList();
         long searchStarted = System.nanoTime();
+        long deadlineNanos = deadlineAfterMillis(searchStarted, timeoutMs);
         PureRecipePlanner.Result result = PureRecipePlanner.resolve(
                 snapshot.recipeGraph(), stock, roots, maxSteps,
-                maxSearchStates, maxMemoizedFailures);
+                maxSearchStates, maxMemoizedFailures, deadlineNanos);
         com.huanghuang.rsintegration.command.PerformanceMonitor.recordPurePlanningSearch(
                 result, System.nanoTime() - searchStarted);
         return result;
+    }
+
+    static long deadlineAfterMillis(long startedNanos, int timeoutMs) {
+        long budgetNanos = Math.max(1L, timeoutMs) * 1_000_000L;
+        long deadline = startedNanos + budgetNanos;
+        return deadline < startedNanos ? Long.MAX_VALUE : deadline;
     }
 
     /** Keeps a background result inseparable from the immutable state that produced it. */

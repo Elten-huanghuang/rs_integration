@@ -20,9 +20,18 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ResolutionContextSupplyTest extends BootstrapTest {
+
+    @Test
+    void strictPreviewDeadlineAbortsInsteadOfReturningMissingMaterial() {
+        ResolutionContext context = new ResolutionContext(null, Map.of(), Map.of(), null,
+                false, null, System.nanoTime() - 1L, true);
+
+        assertThrows(CraftingPlanningTimeoutException.class, context::timedOut);
+    }
 
     @Test
     void detailedConsumptionPreservesInitialSourceAndQuantity() {

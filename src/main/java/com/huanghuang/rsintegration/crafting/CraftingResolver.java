@@ -307,7 +307,21 @@ public final class CraftingResolver {
             @Nullable Map<ResourceLocation, ResourceLocation> forcedOverrides,
             boolean bestEffort) {
         return resolveGraphForSpecsWithTypes(needed, availableKeyed, level, player, network,
-                missingOut, forcedOverrides, bestEffort, false);
+                missingOut, forcedOverrides, bestEffort, false, -1);
+    }
+
+    public static CraftPlanGraph resolveGraphForSpecsWithTypes(
+            List<IngredientSpec> needed,
+            Map<StackKey, Integer> availableKeyed,
+            Level level,
+            @Nullable ServerPlayer player,
+            @Nullable INetwork network,
+            @Nullable List<String> missingOut,
+            @Nullable Map<ResourceLocation, ResourceLocation> forcedOverrides,
+            boolean bestEffort,
+            int timeoutMs) {
+        return resolveGraphForSpecsWithTypes(needed, availableKeyed, level, player, network,
+                missingOut, forcedOverrides, bestEffort, false, timeoutMs);
     }
 
     /**
@@ -326,7 +340,21 @@ public final class CraftingResolver {
             @Nullable Map<ResourceLocation, ResourceLocation> forcedOverrides,
             boolean bestEffort) {
         return resolveGraphForSpecsWithTypes(needed, availableKeyed, level, player, network,
-                missingOut, forcedOverrides, bestEffort, true);
+                missingOut, forcedOverrides, bestEffort, true, -1);
+    }
+
+    public static CraftPlanGraph resolveMachineGraphForSpecsWithTypes(
+            List<IngredientSpec> needed,
+            Map<StackKey, Integer> availableKeyed,
+            Level level,
+            @Nullable ServerPlayer player,
+            @Nullable INetwork network,
+            @Nullable List<String> missingOut,
+            @Nullable Map<ResourceLocation, ResourceLocation> forcedOverrides,
+            boolean bestEffort,
+            int timeoutMs) {
+        return resolveGraphForSpecsWithTypes(needed, availableKeyed, level, player, network,
+                missingOut, forcedOverrides, bestEffort, true, timeoutMs);
     }
 
     private static CraftPlanGraph resolveGraphForSpecsWithTypes(
@@ -338,10 +366,15 @@ public final class CraftingResolver {
             @Nullable List<String> missingOut,
             @Nullable Map<ResourceLocation, ResourceLocation> forcedOverrides,
             boolean bestEffort,
-            boolean singleVariantRoots) {
+            boolean singleVariantRoots,
+            int timeoutMs) {
         Map<ResourceLocation, ResourceLocation> prefs = mergeForcedOverrides(level, forcedOverrides);
-        ResolutionContext ctx = new ResolutionContext(level, RecipeIndex.get(level), availableKeyed,
-                prefs, player, network, bestEffort, missingOut);
+        ResolutionContext ctx = timeoutMs > 0
+                ? new ResolutionContext(level, RecipeIndex.get(level), availableKeyed,
+                        prefs, player, network, bestEffort, missingOut,
+                        ResolutionContext.deadlineAfterMillis(timeoutMs), true)
+                : new ResolutionContext(level, RecipeIndex.get(level), availableKeyed,
+                        prefs, player, network, bestEffort, missingOut);
         EdgeTracker edges = new EdgeTracker();
         List<RootDemand> roots = new ArrayList<>();
 

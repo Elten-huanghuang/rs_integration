@@ -20,7 +20,9 @@ class CraftingPlanningConfigTest {
                 RSIntegrationConfig.CRAFTING_PLANNING_QUEUE_CAPACITY.getDefault(),
                 RSIntegrationConfig.CRAFTING_PURE_SEARCH_MAX_STATES.getDefault(),
                 RSIntegrationConfig.CRAFTING_PURE_SEARCH_MAX_MEMOIZED_FAILURES.getDefault(),
-                RSIntegrationConfig.CRAFTING_PURE_DEMAND_MAX_NODES.getDefault()));
+                RSIntegrationConfig.CRAFTING_PURE_DEMAND_MAX_NODES.getDefault(),
+                RSIntegrationConfig.CRAFTING_PURE_PLANNING_TIMEOUT_MS.getDefault(),
+                RSIntegrationConfig.CRAFTING_TYPED_PREVIEW_TIMEOUT_MS.getDefault()));
     }
 
     @Test
@@ -30,7 +32,9 @@ class CraftingPlanningConfigTest {
                 CraftingPlanningConfig.MIN_QUEUE_CAPACITY,
                 CraftingPlanningConfig.MIN_SEARCH_STATES,
                 CraftingPlanningConfig.MIN_MEMOIZED_FAILURES,
-                CraftingPlanningConfig.MIN_DEMAND_TREE_NODES);
+                CraftingPlanningConfig.MIN_DEMAND_TREE_NODES,
+                CraftingPlanningConfig.MIN_PURE_TIMEOUT_MS,
+                CraftingPlanningConfig.MIN_TYPED_PREVIEW_TIMEOUT_MS);
         load(config);
 
         assertEquals(new CraftingPlanningConfig(
@@ -38,7 +42,9 @@ class CraftingPlanningConfigTest {
                 CraftingPlanningConfig.MIN_QUEUE_CAPACITY,
                 CraftingPlanningConfig.MIN_SEARCH_STATES,
                 CraftingPlanningConfig.MIN_MEMOIZED_FAILURES,
-                CraftingPlanningConfig.MIN_DEMAND_TREE_NODES), CraftingPlanningConfig.load());
+                CraftingPlanningConfig.MIN_DEMAND_TREE_NODES,
+                CraftingPlanningConfig.MIN_PURE_TIMEOUT_MS,
+                CraftingPlanningConfig.MIN_TYPED_PREVIEW_TIMEOUT_MS), CraftingPlanningConfig.load());
     }
 
     @Test
@@ -48,7 +54,9 @@ class CraftingPlanningConfigTest {
                 CraftingPlanningConfig.MAX_QUEUE_CAPACITY,
                 CraftingPlanningConfig.MAX_SEARCH_STATES,
                 CraftingPlanningConfig.MAX_MEMOIZED_FAILURES,
-                CraftingPlanningConfig.MAX_DEMAND_TREE_NODES);
+                CraftingPlanningConfig.MAX_DEMAND_TREE_NODES,
+                CraftingPlanningConfig.MAX_PURE_TIMEOUT_MS,
+                CraftingPlanningConfig.MAX_TYPED_PREVIEW_TIMEOUT_MS);
         load(config);
 
         assertEquals(new CraftingPlanningConfig(
@@ -56,7 +64,9 @@ class CraftingPlanningConfigTest {
                 CraftingPlanningConfig.MAX_QUEUE_CAPACITY,
                 CraftingPlanningConfig.MAX_SEARCH_STATES,
                 CraftingPlanningConfig.MAX_MEMOIZED_FAILURES,
-                CraftingPlanningConfig.MAX_DEMAND_TREE_NODES), CraftingPlanningConfig.load());
+                CraftingPlanningConfig.MAX_DEMAND_TREE_NODES,
+                CraftingPlanningConfig.MAX_PURE_TIMEOUT_MS,
+                CraftingPlanningConfig.MAX_TYPED_PREVIEW_TIMEOUT_MS), CraftingPlanningConfig.load());
     }
 
     @Test
@@ -67,7 +77,9 @@ class CraftingPlanningConfigTest {
                 CraftingPlanningConfig.MAX_QUEUE_CAPACITY + 1,
                 CraftingPlanningConfig.MIN_SEARCH_STATES - 1,
                 CraftingPlanningConfig.MAX_MEMOIZED_FAILURES + 1,
-                CraftingPlanningConfig.MAX_DEMAND_TREE_NODES + 1);
+                CraftingPlanningConfig.MAX_DEMAND_TREE_NODES + 1,
+                CraftingPlanningConfig.MIN_PURE_TIMEOUT_MS - 1,
+                CraftingPlanningConfig.MAX_TYPED_PREVIEW_TIMEOUT_MS + 1);
 
         assertTrue(RSIntegrationConfig.SERVER_SPEC.correct(config) != 0);
         load(config);
@@ -76,7 +88,9 @@ class CraftingPlanningConfigTest {
                 CraftingPlanningConfig.MAX_QUEUE_CAPACITY,
                 CraftingPlanningConfig.MIN_SEARCH_STATES,
                 CraftingPlanningConfig.MAX_MEMOIZED_FAILURES,
-                CraftingPlanningConfig.MAX_DEMAND_TREE_NODES), CraftingPlanningConfig.load());
+                CraftingPlanningConfig.MAX_DEMAND_TREE_NODES,
+                CraftingPlanningConfig.MIN_PURE_TIMEOUT_MS,
+                CraftingPlanningConfig.MAX_TYPED_PREVIEW_TIMEOUT_MS), CraftingPlanningConfig.load());
     }
 
     @Test
@@ -85,11 +99,13 @@ class CraftingPlanningConfigTest {
         assertThrows(IllegalArgumentException.class, () -> new CraftingPlanningConfig(
                 CraftingPlanningConfig.MIN_WORKERS - 1, defaults.queueCapacity(),
                 defaults.maxSearchStates(), defaults.maxMemoizedFailures(),
-                defaults.maxDemandTreeNodes()));
+                defaults.maxDemandTreeNodes(), defaults.pureTimeoutMs(),
+                defaults.typedPreviewTimeoutMs()));
         assertThrows(IllegalArgumentException.class, () -> new CraftingPlanningConfig(
                 defaults.workers(), CraftingPlanningConfig.MAX_QUEUE_CAPACITY + 1,
                 defaults.maxSearchStates(), defaults.maxMemoizedFailures(),
-                defaults.maxDemandTreeNodes()));
+                defaults.maxDemandTreeNodes(), defaults.pureTimeoutMs(),
+                defaults.typedPreviewTimeoutMs()));
     }
 
     @Test
@@ -98,14 +114,17 @@ class CraftingPlanningConfigTest {
         assertThrows(IllegalArgumentException.class, () -> new CraftingPlanningConfig(
                 defaults.workers(), defaults.queueCapacity(),
                 CraftingPlanningConfig.MIN_SEARCH_STATES - 1, defaults.maxMemoizedFailures(),
-                defaults.maxDemandTreeNodes()));
+                defaults.maxDemandTreeNodes(), defaults.pureTimeoutMs(),
+                defaults.typedPreviewTimeoutMs()));
         assertThrows(IllegalArgumentException.class, () -> new CraftingPlanningConfig(
                 defaults.workers(), defaults.queueCapacity(), defaults.maxSearchStates(),
                 CraftingPlanningConfig.MAX_MEMOIZED_FAILURES + 1,
-                defaults.maxDemandTreeNodes()));
+                defaults.maxDemandTreeNodes(), defaults.pureTimeoutMs(),
+                defaults.typedPreviewTimeoutMs()));
         assertThrows(IllegalArgumentException.class, () -> new CraftingPlanningConfig(
                 defaults.workers(), defaults.queueCapacity(), defaults.maxSearchStates(),
-                defaults.maxMemoizedFailures(), CraftingPlanningConfig.MIN_DEMAND_TREE_NODES - 1));
+                defaults.maxMemoizedFailures(), CraftingPlanningConfig.MIN_DEMAND_TREE_NODES - 1,
+                defaults.pureTimeoutMs(), defaults.typedPreviewTimeoutMs()));
     }
 
     @AfterEach
@@ -125,7 +144,8 @@ class CraftingPlanningConfigTest {
 
     private static void setPlanningValues(CommentedConfig config, int workers, int queueCapacity,
                                           int maxSearchStates, int maxMemoizedFailures,
-                                          int maxDemandTreeNodes) {
+                                          int maxDemandTreeNodes, int pureTimeoutMs,
+                                          int typedPreviewTimeoutMs) {
         config.set(RSIntegrationConfig.CRAFTING_PLANNING_WORKERS.getPath(), workers);
         config.set(RSIntegrationConfig.CRAFTING_PLANNING_QUEUE_CAPACITY.getPath(), queueCapacity);
         config.set(RSIntegrationConfig.CRAFTING_PURE_SEARCH_MAX_STATES.getPath(), maxSearchStates);
@@ -133,5 +153,8 @@ class CraftingPlanningConfigTest {
                 maxMemoizedFailures);
         config.set(RSIntegrationConfig.CRAFTING_PURE_DEMAND_MAX_NODES.getPath(),
                 maxDemandTreeNodes);
+        config.set(RSIntegrationConfig.CRAFTING_PURE_PLANNING_TIMEOUT_MS.getPath(), pureTimeoutMs);
+        config.set(RSIntegrationConfig.CRAFTING_TYPED_PREVIEW_TIMEOUT_MS.getPath(),
+                typedPreviewTimeoutMs);
     }
 }

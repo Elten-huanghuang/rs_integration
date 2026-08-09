@@ -7,15 +7,19 @@
 
 ## 当前实现状态（2026-08-09）
 
-当前代码已经完成迁移阶段的第 0、1 步：
+当前代码已经完成迁移阶段的第 0--3 步，并增加了保守的通用标签转换 Guard：
 
 - 第 0 步只增加了快照、纯搜索和 typed resolver 的分段计时，没有改变规划语义。
 - 第 1 步在提交后台 pure planner 之前执行带库存的需求树走查。走查按物料扣减库存，标签候选使用“存在一个可满足候选”的语义；检测到缺失 producer、环或节点上限时，保守地选择 typed resolver。
 - 同一个预览请求只选择一个 planner。pure planner 返回失败结果时不再自动再次调用 typed resolver；异步基础设施异常仍保留原有恢复路径。
+- `PureRecipePlanner.Result` 使用 `FEASIBLE/INFEASIBLE/UNKNOWN` 三态；`STEP_LIMIT`、`SEARCH_LIMIT` 和 `TIME_LIMIT` 都属于 `UNKNOWN`。max-craftable 二分遇到未知立即终止，不会把未知当成不可行并静默压低数量。
+- 后台 pure planner 使用独立的 500 ms 默认预算，时钟从 worker 出队执行时开始；同一个 max-craftable 请求的所有探测共享这份预算。
+- typed 预览使用独立的 50 ms 默认主线程预算。超时通过专用异常穿过递归层，在包入口返回本地化 `TIME_LIMIT`，不会再显示成缺少材料。typed planner 不会迁移到后台继续执行。
+- 对多候选标签需求启用“无净增益转换”Guard：若一个 crafting 配方消耗的同标签材料不少于其产出，则该配方不能增加这个标签的可用数量，候选会被跳过。这覆盖羊毛、玻璃、陶瓦、混凝土粉末和木材变体等同类转换，同时保留精确目标染色、`线 -> 白羊毛`、`原木 -> 木板` 和 `混凝土粉末 -> 混凝土` 等有效路径。
 
 需求树走查上限是服务端配置 `autoCrafting.craftingPureDemandMaxNodes`，默认 `512`，范围 `64-4096`。它位于服务端配置的 `autoCrafting` 段，与客户端配方树渲染用的 `recipeTreeMaxNodes` 独立。达到上限只会让请求转到 typed resolver，不会把“不确定”误判成 pure 完整。
 
-当前提交还没有实现 max-craftable 的 `FEASIBLE/INFEASIBLE/UNKNOWN` 三态，也没有实现 pure 与 typed 分开的 deadline；这两项仍按迁移计划的第 2、3 步处理。
+相关服务端配置为 `autoCrafting.craftingPurePlanningTimeoutMs`（默认 `500`）、`autoCrafting.craftingTypedPreviewTimeoutMs`（默认 `50`）和 `autoCrafting.enableCraftingVariantConversionGuard`（默认开启）。超时和 Guard 结果不写入普通成功缓存。
 
 ## 1. 执行摘要
 
@@ -137,7 +141,7 @@
 - 注释明确纯图只包含普通 crafting 配方，失败后重跑 typed resolver：同文件约 `2008` 行。
 - `PureRecipePlanner` 当前最多展开 65,536 个状态：`src/main/java/com/huanghuang/rsintegration/crafting/planning/PureRecipePlanner.java:19`。
 
-当前搜索状态本身也偏重。每次展开都会为失败记忆构造 `FailureKey`，复制 pending task 列表、库存 `Map` 和 resolving 集合。高分支配方达到数万状态时，会产生大量哈希计算、短命对象和 GC 压力。当前限制主要是状态数、步骤数和递归深度，没有 BetterJEI FAST 模式那种约 500 ms 的墙钟预算，所以“有界”不等于“响应足够快”。
+当前搜索状态本身也偏重。每次展开都会为失败记忆构造 `FailureKey`，复制 pending task 列表、库存 `Map` 和 resolving 集合。高分支配方达到数万状态时，会产生大量哈希计算、短命对象和 GC 压力。当前已增加 500 ms pure 墙钟预算，但预算只能限制最坏等待，不能降低正常搜索的分配率和 CPU 成本。
 
 因此应区分两个指标：
 
@@ -161,7 +165,7 @@
 
 这样 `crafttweaker:summoningrituals.altar.1` 的 Malum 中间配方会在目录编译阶段被纳入同一张图，规划器只搜索一次；如果该特殊配方确实动态到无法编译，则请求在目录阶段就被明确分类，而不会先消耗十几秒做无效搜索。
 
-阶段 1--3 的过渡路由是对“目录完备性”不变量的受控例外：目录不完整时可以直接选择现有 typed resolver，以免立即砍掉当前可用功能；但一个请求仍只能选择一个 planner。该例外必须受 typed 前置条件和约 200 ms 主线程预算约束，并在统一目录覆盖相应配方族后删除。
+阶段 1--3 的过渡路由是对“目录完备性”不变量的受控例外：目录不完整时可以直接选择现有 typed resolver，以免立即砍掉当前可用功能；但一个请求仍只能选择一个 planner。该例外必须受 typed 前置条件和独立主线程预算约束，并在统一目录覆盖相应配方族后删除。当前默认预算是 50 ms，可通过服务端配置在 10--500 ms 范围内调整。
 
 ### 3.4 “2 秒以内且少改动”的现实边界
 
@@ -172,7 +176,7 @@
 1. **后台纯规划超时即明确失败**：给纯值 planner 设置约 200--500 ms 的墙钟预算，超时返回 `TIME_LIMIT`，不再同步完整回退。端到端延迟可以压住，但复杂特殊配方可能暂时无法预览。
 2. **将 typed resolver 改为可暂停 job**：把递归状态、候选游标、`ResolutionContext` 的 journal 和待处理需求显式保存，每 tick 只执行约 20--40 ms，跨 tick 续算。这样可以保留特殊配方成功率，但改动明显大于增加线程或加一个 deadline。
 
-如果业务要求“当前仪式必须成功”且“不能阻塞全服”，第二个选项或完整纯值投影是必要条件；不存在只改路由就同时满足两者的方案。第一轮不应提前实现状态机，除非第 0 步证明确有稳定、受支持的配方需要超过 200 ms。
+如果业务要求“当前仪式必须成功”且“不能阻塞全服”，第二个选项或完整纯值投影是必要条件；不存在只改路由就同时满足两者的方案。第一轮不应提前实现状态机，除非基准证明确有稳定、受支持的配方需要超过当前 typed 配置上限。
 
 这一节的 2 秒只是用户体验上限，不是 planner 正确性保证。所有超时都必须是三态结果中的 `UNKNOWN/TIME_LIMIT`，不能当作“不可合成”。
 
@@ -183,7 +187,7 @@
 1. **分段计时硬门禁**：在 `tryBuildPlan` 及后台回调中分别记录快照采集、纯搜索、typed resolver、DAG/响应组装和队列等待。已有 `recordPurePlanningSearch` 与同步回退计数不能替代阶段耗时。没有拆分数据，不改变路由。
 2. **快照感知的过渡路由**：投影时只收集“存在未投影 producer 且纯图没有任何 producer 可产出”的孤儿材料；请求时从目标输入做有界 DFS，库存足够的节点剪枝，标签使用存在量词。该路由是迁移脚手架，不是终局目录模型。
 3. **先修三态**：修改 max-craftable 探测，使 `UNKNOWN/TIME_LIMIT` 中止整个二分或显式返回未知，绝不当成 `false`。
-4. **拆分预算**：纯规划使用后台预算，建议先试 1,000 ms；typed 只允许约 200 ms 的主线程预算，超时返回 `TIME_LIMIT`，不做 1.5 秒同步等待。typed resolver 尚不做跨 tick 状态机，除非计时证明存在大量正当配方需要超过该预算。
+4. **拆分预算**：pure 使用后台 500 ms 默认预算；typed 使用主线程 50 ms 默认预算，超时返回 `TIME_LIMIT`，不做 1.5 秒同步等待。两者都可配置且互不共享时钟。typed resolver 尚不做跨 tick 状态机，除非计时证明存在大量正当配方需要超过可配置预算。
 5. **撤掉搜索失败回退**：只删除 `PURE_UNRESOLVABLE/STEP_LIMIT/SEARCH_LIMIT` 到完整 resolver 的自动回退；`fromAsyncFailure` 对线程异常、任务拒绝和基础设施故障的恢复逻辑保留。
 
 这套顺序的可交付承诺是“预算内成功或明确失败”，不是“目标仪式一定回到几百毫秒”。是否能达到后者必须由第 1 步的实测决定。
@@ -443,8 +447,8 @@ InventoryLedger {
 
 纯规划和 typed job 使用不同资源预算，不能合并成一个“全请求 1,500 ms”数字：
 
-- 纯规划初始试验值：后台 1,000 ms、750,000 次搜索操作、最多 512 步。
-- typed resolver 初始主线程预算：约 200 ms；它是保护网，不是允许主线程连续运行 1.5 秒的目标。
+- pure 当前默认预算：后台 500 ms，并继续受搜索状态数和步骤数上限约束。
+- typed resolver 当前默认主线程预算：50 ms；它是协作式保护网，不是允许主线程连续运行 1.5 秒的目标。
 - 服务端配置允许更低上限；任何一个上限先到即停止。
 - 若未来增加 THOROUGH 模式，只能扩大后台纯规划预算，不能扩大主线程 typed 预算。
 
@@ -610,7 +614,11 @@ planner.dynamicRecipePolicy = MAIN_THREAD_BOUNDED | LEGACY_REJECT
 
 ### 阶段 3：分资源 deadline
 
-从 worker 出队时启动纯规划 deadline，初始试验值约 1,000 ms；typed resolver 在进入主线程计算时启动独立 deadline，初始试验值约 200 ms。两者分别记录耗时和超时。`TIME_LIMIT` 不进入普通缓存，提示使用 `Component.translatable(...)`。这一阶段不提前实现跨 tick 状态机。
+从 worker 出队时启动 pure deadline，当前默认 500 ms；typed resolver 在进入主线程计算时启动独立 deadline，当前默认 50 ms。两者分别记录耗时和超时。`TIME_LIMIT` 不进入普通缓存，提示使用 `Component.translatable(...)`。这一阶段不实现跨 tick 状态机，也不把持有 `ServerLevel`、`ServerPlayer`、`INetwork` 和实时配方对象的递归调用栈迁移到后台。
+
+### 阶段 3A：通用标签转换 Guard
+
+在 typed 候选验证阶段，对多候选标签需求计算配方的标签内净增益。仅当配方消耗的同标签材料数量不少于其产出、且 NBT/返还物语义可明确判断时才剪枝；不依赖羊毛、颜色或木材名称白名单。精确物品需求不应用该剪枝，因此需要红色羊毛时仍允许直接染红；递归处理其 `#wool` 输入时，蓝色羊毛再染成其他颜色这类零净增益绕路会被排除。识别不确定、动态配方或 NBT 敏感输入保持原候选集合，由 deadline 兜底。
 
 ### 阶段 4：统一材料和配方领域模型
 
@@ -670,12 +678,13 @@ planner 输出动作序列；replay 使用同一目录和快照确定性生成 `
 - 已覆盖配方的 P95 由代表性整合包、目标硬件和冷/热缓存基准共同确定；500 ms 只能作为初始试验目标，不是全体配方的承诺。若预算耗尽，必须在预算内返回明确失败，不能继续卡住。
 - 客户端收到成功响应后打开配方树小于 50 ms。
 - 规划期间服务端 tick 无明显长尾阻塞。
-- 任何仍使用实时 `ServerLevel`/`ServerPlayer`/`INetwork` 的 typed resolver，第一轮只允许约 200 ms 的主线程硬上限，并记录每次超时；不能用 1.5 秒同步 deadline 作为替代。只有基准证明存在大量正当配方超过该上限时，才立项做 20--40 ms/tick 的可暂停状态机。
+- 任何仍使用实时 `ServerLevel`/`ServerPlayer`/`INetwork` 的 typed resolver，当前默认使用 50 ms 主线程预算并记录每次超时；不能用 1.5 秒同步 deadline 作为替代。只有基准证明存在大量正当配方超过可配置上限时，才立项做 20--40 ms/tick 的可暂停状态机。
 - 单个请求不得在纯规划失败或预算耗尽后再执行第二套完整 resolver。
 - 所有进入纯规划的目标及其当前快照选择的递归依赖都必须存在于同一份 `CompiledRecipeCatalog`；静态集合只能作为肯定判据，模糊标签必须经过快照走查。
 - 过渡路由允许目录不完整请求直接选择一次 typed resolver，以保留现有功能；它满足“单次语义规划”但不满足终局“目录完备性”，必须有命中率指标和删除阶段，不能演化成永久双系统。
 - `crafttweaker:summoningrituals.altar.1` 在其依赖 producer 完成语义覆盖后，不再出现约 16.8--17.6 秒的固定长尾；在覆盖完成前应明确标记为未支持，而不是用半完整图给出误导性结果。
 - `TIME_LIMIT/UNKNOWN` 不会被 max-craftable 二分当作 `false`，也不会进入普通成功缓存。
+- 多候选标签中的零净增益转换不会进入递归搜索；精确变体目标、真正增加标签数量的 producer 和跨材料族单向转换仍可用。
 - 在改变路由前，`PerformanceMonitor` 必须能分别给出纯搜索、typed resolver、快照、DAG 组装和队列等待耗时；没有拆分数据不得宣称已找到收益来源。
 - 支持范围内新旧计划语义一致，标签/NBT/催化剂/返还物测试全部通过。
 - 过期或取消结果不会写入缓存、发送给客户端或启动执行。

@@ -26,6 +26,10 @@ public final class RSIntegrationConfig {
             CraftingPlanningConfig.DEFAULT_MEMOIZED_FAILURES;
     public static final int DEFAULT_CRAFTING_PURE_DEMAND_MAX_NODES =
             CraftingPlanningConfig.DEFAULT_DEMAND_TREE_NODES;
+    public static final int DEFAULT_CRAFTING_PURE_PLANNING_TIMEOUT_MS =
+            CraftingPlanningConfig.DEFAULT_PURE_TIMEOUT_MS;
+    public static final int DEFAULT_CRAFTING_TYPED_PREVIEW_TIMEOUT_MS =
+            CraftingPlanningConfig.DEFAULT_TYPED_PREVIEW_TIMEOUT_MS;
     public static final int DEFAULT_CRAFTING_RESOLVE_TIMEOUT_MS = 2_000;
     public static final int DEFAULT_CRAFTING_MAX_ENSURE_CALLS = 10_000;
     public static final int DEFAULT_CRAFTING_PREVIEW_RATE_LIMIT_MS =
@@ -150,6 +154,9 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.IntValue CRAFTING_PURE_SEARCH_MAX_STATES;
     public static ForgeConfigSpec.IntValue CRAFTING_PURE_SEARCH_MAX_MEMOIZED_FAILURES;
     public static ForgeConfigSpec.IntValue CRAFTING_PURE_DEMAND_MAX_NODES;
+    public static ForgeConfigSpec.IntValue CRAFTING_PURE_PLANNING_TIMEOUT_MS;
+    public static ForgeConfigSpec.IntValue CRAFTING_TYPED_PREVIEW_TIMEOUT_MS;
+    public static ForgeConfigSpec.BooleanValue ENABLE_CRAFTING_VARIANT_CONVERSION_GUARD;
     public static ForgeConfigSpec.IntValue CRAFTING_PREVIEW_RATE_LIMIT_MS;
     public static ForgeConfigSpec.IntValue CRAFTING_PLAN_CACHE_TTL_MS;
     public static ForgeConfigSpec.IntValue CRAFTING_PLAN_CACHE_MAX_ENTRIES;
@@ -633,7 +640,7 @@ public final class RSIntegrationConfig {
                         CraftingPlanningConfig.MAX_QUEUE_CAPACITY);
         CRAFTING_PURE_SEARCH_MAX_STATES = s
                 .comment("Maximum backtracking states expanded by one immutable pure-plan search.",
-                        "When exhausted, the request safely falls back to the complete typed resolver.",
+                        "When exhausted, the result is unknown and does not fall back to another planner.",
                         "Range: 256-262144.")
                 .defineInRange("craftingPureSearchMaxStates",
                         DEFAULT_CRAFTING_PURE_SEARCH_MAX_STATES,
@@ -655,6 +662,27 @@ public final class RSIntegrationConfig {
                         DEFAULT_CRAFTING_PURE_DEMAND_MAX_NODES,
                         CraftingPlanningConfig.MIN_DEMAND_TREE_NODES,
                         CraftingPlanningConfig.MAX_DEMAND_TREE_NODES);
+        CRAFTING_PURE_PLANNING_TIMEOUT_MS = s
+                .comment("Wall-clock budget for one background pure-planning request.",
+                        "The clock starts when a worker dequeues the task. Max-craftable probes",
+                        "share one request budget and return unknown when it expires. Range: 50-5000.")
+                .defineInRange("craftingPurePlanningTimeoutMs",
+                        DEFAULT_CRAFTING_PURE_PLANNING_TIMEOUT_MS,
+                        CraftingPlanningConfig.MIN_PURE_TIMEOUT_MS,
+                        CraftingPlanningConfig.MAX_PURE_TIMEOUT_MS);
+        CRAFTING_TYPED_PREVIEW_TIMEOUT_MS = s
+                .comment("Hard server-thread budget for typed recipe preview resolution.",
+                        "Timeout aborts the preview instead of being reported as missing materials.",
+                        "Keep this near one server tick. Range: 10-500.")
+                .defineInRange("craftingTypedPreviewTimeoutMs",
+                        DEFAULT_CRAFTING_TYPED_PREVIEW_TIMEOUT_MS,
+                        CraftingPlanningConfig.MIN_TYPED_PREVIEW_TIMEOUT_MS,
+                        CraftingPlanningConfig.MAX_TYPED_PREVIEW_TIMEOUT_MS);
+        ENABLE_CRAFTING_VARIANT_CONVERSION_GUARD = s
+                .comment("Skip crafting conversions with no net gain for a broad tag demand.",
+                        "This prevents color and material variants from recursively converting",
+                        "through each other while preserving exact-output conversions.")
+                .define("enableCraftingVariantConversionGuard", true);
         CRAFTING_PREVIEW_RATE_LIMIT_MS = s
                 .comment("Minimum interval in milliseconds between craft preview requests.",
                         "Range: 10-2000.")

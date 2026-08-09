@@ -52,6 +52,7 @@ final class ResolutionContext {
     final Set<String> resolving;
     final Set<CraftingResolver.StackKey> resolvingOutputs;
     final long deadlineNanos;
+    final boolean abortOnTimeout;
     int ensureCalls;
     final Deque<UndoEntry> undoStack = new ArrayDeque<>();
     final Deque<Integer> undoCheckpoints = new ArrayDeque<>();
@@ -104,6 +105,7 @@ final class ResolutionContext {
         this.player = player;
         this.network = network;
         this.deadlineNanos = resolveDeadlineNanos();
+        this.abortOnTimeout = false;
         this.bestEffort = false;
         this.missingOut = null;
         this.diagLog = Diagnostics.isEnabled() ? new ArrayList<>() : null;
@@ -125,10 +127,36 @@ final class ResolutionContext {
                       Map<Item, List<RecipeIndex.Entry>> index,
                       Map<CraftingResolver.StackKey, Integer> keyedCounts,
                       @Nullable Map<ResourceLocation, ResourceLocation> preferredRecipes,
+                      boolean bestEffort,
+                      @Nullable List<String> missingOut,
+                      long deadlineNanos,
+                      boolean abortOnTimeout) {
+        this(level, index, keyedCounts, preferredRecipes, null, null, bestEffort,
+                missingOut, deadlineNanos, abortOnTimeout);
+    }
+
+    ResolutionContext(Level level,
+                      Map<Item, List<RecipeIndex.Entry>> index,
+                      Map<CraftingResolver.StackKey, Integer> keyedCounts,
+                      @Nullable Map<ResourceLocation, ResourceLocation> preferredRecipes,
                       @Nullable ServerPlayer player,
                       @Nullable INetwork network,
                       boolean bestEffort,
                       @Nullable List<String> missingOut) {
+        this(level, index, keyedCounts, preferredRecipes, player, network, bestEffort,
+                missingOut, resolveDeadlineNanos(), false);
+    }
+
+    ResolutionContext(Level level,
+                      Map<Item, List<RecipeIndex.Entry>> index,
+                      Map<CraftingResolver.StackKey, Integer> keyedCounts,
+                      @Nullable Map<ResourceLocation, ResourceLocation> preferredRecipes,
+                      @Nullable ServerPlayer player,
+                      @Nullable INetwork network,
+                      boolean bestEffort,
+                      @Nullable List<String> missingOut,
+                      long deadlineNanos,
+                      boolean abortOnTimeout) {
         this.level = level;
         this.index = index;
         this.counts = new LinkedHashMap<>(keyedCounts);
@@ -138,7 +166,8 @@ final class ResolutionContext {
         this.preferredRecipes = preferredRecipes;
         this.player = player;
         this.network = network;
-        this.deadlineNanos = resolveDeadlineNanos();
+        this.deadlineNanos = deadlineNanos;
+        this.abortOnTimeout = abortOnTimeout;
         this.bestEffort = bestEffort;
         this.missingOut = missingOut;
         this.diagLog = Diagnostics.isEnabled() ? new ArrayList<>() : null;
@@ -155,7 +184,18 @@ final class ResolutionContext {
         if (diagLog != null) diagLog.add(msg);
     }
 
-    boolean timedOut() { return System.nanoTime() > deadlineNanos; }
+    boolean timedOut() {
+        boolean expired = System.nanoTime() - deadlineNanos >= 0L;
+        if (expired && abortOnTimeout) throw new CraftingPlanningTimeoutException();
+        return expired;
+    }
+
+    static long deadlineAfterMillis(int timeoutMs) {
+        long started = System.nanoTime();
+        long budget = Math.max(1L, timeoutMs) * 1_000_000L;
+        long deadline = started + budget;
+        return deadline < started ? Long.MAX_VALUE : deadline;
+    }
 
     void beginUndo() {
         undoCheckpoints.push(undoStack.size());

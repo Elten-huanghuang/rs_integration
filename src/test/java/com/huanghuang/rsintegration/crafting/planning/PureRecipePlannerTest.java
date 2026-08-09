@@ -245,6 +245,17 @@ class PureRecipePlannerTest {
     }
 
     @Test
+    void expiredDeadlineProducesUnknownTimeLimit() {
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(
+                new ImmutableRecipeGraph(Map.of()), Map.of(), List.of(ingredient(LOG, 1)),
+                20, 100, 100, System.nanoTime() - 1L);
+
+        assertFalse(result.feasible());
+        assertEquals(PureRecipePlanner.Feasibility.UNKNOWN, result.feasibility());
+        assertEquals(PureRecipePlanner.Status.TIME_LIMIT, result.status());
+    }
+
+    @Test
     void interruptedPlanningStopsCooperatively() {
         Thread.currentThread().interrupt();
         try {
