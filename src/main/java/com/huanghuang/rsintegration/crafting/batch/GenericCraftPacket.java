@@ -1501,7 +1501,11 @@ public final class GenericCraftPacket {
                                 player.getServer()::execute,
                                 RSIntegrationConfig.CRAFTING_MAX_STEPS.get(),
                                 result -> {
-                                    if (result.maximum() <= 0) {
+                                    if (!result.determined()) {
+                                        networkSink(player, packet.requestId).error(
+                                                Component.translatable(
+                                                        "rsi.plan.failure.max_craftable_unknown"));
+                                    } else if (result.maximum() <= 0) {
                                         MaxCraftableSearch fallback = new MaxCraftableSearch(
                                                 RSIntegrationConfig.REPEAT_COUNT_MAX.get());
                                         continueMaxCraftableSearch(player, packet,

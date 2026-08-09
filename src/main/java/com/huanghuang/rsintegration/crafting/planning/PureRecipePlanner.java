@@ -52,28 +52,47 @@ public final class PureRecipePlanner {
                 ? List.of() : List.of(search.deepestFailure != null ? search.deepestFailure : roots.get(0));
         List<PlannedStep> resultSteps = status == Status.SUCCESS ? search.steps : List.of();
         Map<MaterialRef, Integer> resultStock = status == Status.SUCCESS ? search.stock : search.initialStock;
-        return new Result(status == Status.SUCCESS, resultSteps, missing, resultStock, status,
+        return new Result(Feasibility.from(status), resultSteps, missing, resultStock, status,
                 search.expandedStates, search.backtracks, search.memoHits);
     }
 
     public enum Status { SUCCESS, UNRESOLVABLE, STEP_LIMIT, SEARCH_LIMIT }
 
+    public enum Feasibility {
+        FEASIBLE,
+        INFEASIBLE,
+        UNKNOWN;
+
+        static Feasibility from(Status status) {
+            return switch (status) {
+                case SUCCESS -> FEASIBLE;
+                case UNRESOLVABLE -> INFEASIBLE;
+                case STEP_LIMIT, SEARCH_LIMIT -> UNKNOWN;
+            };
+        }
+    }
+
     public record PlannedStep(ResourceLocation recipeId, int batches) {}
 
-    public record Result(boolean feasible, List<PlannedStep> steps,
+    public record Result(Feasibility feasibility, List<PlannedStep> steps,
                          List<IngredientRef> missing, Map<MaterialRef, Integer> remaining,
                          Status status, int expandedStates, int backtracks, int memoHits) {
         public Result(boolean feasible, List<PlannedStep> steps,
                       List<IngredientRef> missing, Map<MaterialRef, Integer> remaining) {
-            this(feasible, steps, missing, remaining,
+            this(feasible ? Feasibility.FEASIBLE : Feasibility.INFEASIBLE,
+                    steps, missing, remaining,
                     feasible ? Status.SUCCESS : Status.UNRESOLVABLE, 0, 0, 0);
+        }
+
+        public boolean feasible() {
+            return feasibility == Feasibility.FEASIBLE;
         }
 
         public Result {
             steps = List.copyOf(steps);
             missing = List.copyOf(missing);
             remaining = Map.copyOf(remaining);
-            if (status == null || feasible != (status == Status.SUCCESS)) {
+            if (status == null || feasibility == null || feasibility != Feasibility.from(status)) {
                 throw new IllegalArgumentException("inconsistent pure-plan status");
             }
         }

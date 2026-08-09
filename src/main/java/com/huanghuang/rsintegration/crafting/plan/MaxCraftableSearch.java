@@ -4,10 +4,13 @@ import java.util.OptionalInt;
 
 /** Monotonic search for the greatest repeat count accepted by plan validation. */
 public final class MaxCraftableSearch {
+    public enum Verdict { FEASIBLE, INFEASIBLE, UNKNOWN }
+
     private final int limit;
     private int feasible;
     private int infeasible;
     private int pendingProbe = -1;
+    private boolean unknown;
 
     public MaxCraftableSearch(int limit) {
         this.limit = Math.max(1, limit);
@@ -23,6 +26,7 @@ public final class MaxCraftableSearch {
     }
 
     public OptionalInt nextProbe() {
+        if (unknown) return OptionalInt.empty();
         if (pendingProbe >= 0) return OptionalInt.of(pendingProbe);
         if (infeasible - feasible <= 1) return OptionalInt.empty();
         pendingProbe = feasible + (infeasible - feasible) / 2;
@@ -30,13 +34,23 @@ public final class MaxCraftableSearch {
     }
 
     public void accept(int repeatCount, boolean accepted) {
+        accept(repeatCount, accepted ? Verdict.FEASIBLE : Verdict.INFEASIBLE);
+    }
+
+    public void accept(int repeatCount, Verdict verdict) {
         if (repeatCount != pendingProbe) return;
-        if (accepted) feasible = repeatCount;
+        if (verdict == Verdict.UNKNOWN) unknown = true;
+        else if (verdict == Verdict.FEASIBLE) feasible = repeatCount;
         else infeasible = repeatCount;
         pendingProbe = -1;
     }
 
+    public boolean isUnknown() {
+        return unknown;
+    }
+
     public int result() {
+        if (unknown) throw new IllegalStateException("maximum search is unknown");
         if (infeasible - feasible > 1 || pendingProbe >= 0) {
             throw new IllegalStateException("maximum search is not complete");
         }

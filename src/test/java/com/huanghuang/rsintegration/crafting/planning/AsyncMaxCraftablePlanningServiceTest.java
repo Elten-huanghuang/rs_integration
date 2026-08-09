@@ -17,6 +17,8 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AsyncMaxCraftablePlanningServiceTest {
 
@@ -42,8 +44,28 @@ class AsyncMaxCraftablePlanningServiceTest {
         AsyncMaxCraftablePlanningService.CompletedSearch result =
                 AsyncMaxCraftablePlanningService.compute(snapshot, 1024, 100, 65_536, 8_192);
 
+        assertTrue(result.determined());
         assertEquals(20, result.maximum());
         assertNotNull(result.plan());
+    }
+
+    @Test
+    void reportsUnknownInsteadOfLoweringMaximumOnSearchLimit() {
+        MaterialRef base = material("base");
+        MaterialRef input = material("input");
+        MaterialRef output = material("output");
+        RecipeNode producer = recipe("producer", input, 1, ingredient(base, 1));
+        RecipeNode target = recipe("target", output, 1, ingredient(input, 1));
+        ImmutableRecipeGraph graph = new ImmutableRecipeGraph(Map.of(
+                input, List.of(producer), output, List.of(target)));
+        PlanningSnapshot snapshot = new PlanningSnapshot(UUID.randomUUID(), 1L, 1L,
+                target.recipeId(), Map.of(), Map.of(), graph, "network", "bindings", false);
+
+        AsyncMaxCraftablePlanningService.CompletedSearch result =
+                AsyncMaxCraftablePlanningService.compute(snapshot, 1024, 100, 1, 0);
+
+        assertFalse(result.determined());
+        assertEquals(0, result.maximum());
     }
 
     private static RecipeNode recipe(String id, MaterialRef output, int outputCount,
