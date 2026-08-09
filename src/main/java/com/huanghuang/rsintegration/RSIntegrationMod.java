@@ -258,6 +258,14 @@ public final class RSIntegrationMod {
             RSIntegrationConfig.ANVIL_MEMORY_ADAPTERS.set(migratedAdapters);
             LOGGER.info("[RSI-Config] Enabled new anvil memory adapters: {}", migratedAdapters);
         }
+        int currentTypedTimeout = RSIntegrationConfig.CRAFTING_TYPED_PREVIEW_TIMEOUT_MS.get();
+        int migratedTypedTimeout = RSIntegrationConfig.migrateTypedPreviewTimeoutMs(
+                schema, currentTypedTimeout);
+        if (migratedTypedTimeout != currentTypedTimeout) {
+            RSIntegrationConfig.CRAFTING_TYPED_PREVIEW_TIMEOUT_MS.set(migratedTypedTimeout);
+            LOGGER.info("[RSI-Config] Migrated craftingTypedPreviewTimeoutMs from 50 to {}",
+                    migratedTypedTimeout);
+        }
         RSIntegrationConfig.SERVER_CONFIG_SCHEMA_VERSION
                 .set(RSIntegrationConfig.SERVER_CONFIG_SCHEMA);
         config.save();

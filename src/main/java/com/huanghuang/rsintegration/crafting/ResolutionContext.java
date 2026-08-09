@@ -56,6 +56,8 @@ final class ResolutionContext {
     int ensureCalls;
     final Deque<UndoEntry> undoStack = new ArrayDeque<>();
     final Deque<Integer> undoCheckpoints = new ArrayDeque<>();
+    final Deque<SupplyUndoEntry> supplyUndoStack = new ArrayDeque<>();
+    final Deque<Integer> supplyUndoCheckpoints = new ArrayDeque<>();
     final Deque<Integer> stepCheckpoints = new ArrayDeque<>();
     final List<CraftNode> graphNodes = new ArrayList<>();
     final List<MaterialAllocation> graphAllocations = new ArrayList<>();
@@ -67,6 +69,7 @@ final class ResolutionContext {
     final Deque<Integer> nodeIdCheckpoints = new ArrayDeque<>();
     final Deque<Long> allocationIdCheckpoints = new ArrayDeque<>();
     final List<SupplyLot> supplies = new ArrayList<>();
+    final Map<MaterialKey, List<SupplyLot>> suppliesByMaterial = new HashMap<>();
     int nextNodeId;
     long nextAllocationId;
     @Nullable final Map<ResourceLocation, ResourceLocation> preferredRecipes;
@@ -81,6 +84,7 @@ final class ResolutionContext {
     // Inverted index: Item → pre-cached stacks, built once from initial inventory.
     // Eliminates the O(N) scan of all 546+ inventory types inside countMatching.
     private final Map<Item, List<CachedStack>> inventoryIndex = new HashMap<>();
+    private final Map<CraftingResolver.StackKey, CachedStack> stacksByKey = new HashMap<>();
 
     ResolutionContext(Level level,
                       Map<Item, List<RecipeIndex.Entry>> index,
@@ -174,7 +178,7 @@ final class ResolutionContext {
         for (Map.Entry<CraftingResolver.StackKey, Integer> entry : keyedCounts.entrySet()) {
             if (entry.getValue() > 0) {
                 MaterialKey material = MaterialKey.of(entry.getKey().toStack());
-                supplies.add(newSupply(material, new MaterialSource.InitialPool(material), entry.getValue()));
+                addSupply(newSupply(material, new MaterialSource.InitialPool(material), entry.getValue()));
             }
         }
         buildInventoryIndex();
@@ -199,6 +203,7 @@ final class ResolutionContext {
 
     void beginUndo() {
         undoCheckpoints.push(undoStack.size());
+        supplyUndoCheckpoints.push(supplyUndoStack.size());
         stepCheckpoints.push(steps.size());
         graphNodeCheckpoints.push(graphNodes.size());
         graphAllocationCheckpoints.push(graphAllocations.size());
@@ -206,11 +211,11 @@ final class ResolutionContext {
         supplyCheckpoints.push(supplies.size());
         nodeIdCheckpoints.push(nextNodeId);
         allocationIdCheckpoints.push(nextAllocationId);
-        for (SupplyLot supply : supplies) supply.beginUndo();
     }
 
     void commitUndo() {
         undoCheckpoints.pop();
+        supplyUndoCheckpoints.pop();
         stepCheckpoints.pop();
         graphNodeCheckpoints.pop();
         graphAllocationCheckpoints.pop();
@@ -218,12 +223,15 @@ final class ResolutionContext {
         supplyCheckpoints.pop();
         nodeIdCheckpoints.pop();
         allocationIdCheckpoints.pop();
-        for (SupplyLot supply : supplies) supply.commitUndo();
-        if (undoCheckpoints.isEmpty()) undoStack.clear();
+        if (undoCheckpoints.isEmpty()) {
+            undoStack.clear();
+            supplyUndoStack.clear();
+        }
     }
 
     void rollback() {
         int ucp = undoCheckpoints.pop();
+        int supplyUndoCp = supplyUndoCheckpoints.pop();
         int scp = stepCheckpoints.pop();
         int ncp = graphNodeCheckpoints.pop();
         int acp = graphAllocationCheckpoints.pop();
@@ -240,9 +248,15 @@ final class ResolutionContext {
         while (graphNodes.size() > ncp) graphNodes.remove(graphNodes.size() - 1);
         while (graphAllocations.size() > acp) graphAllocations.remove(graphAllocations.size() - 1);
         while (graphUnresolved.size() > unresolvedCp) graphUnresolved.remove(graphUnresolved.size() - 1);
-        while (supplies.size() > supplyCount) supplies.remove(supplies.size() - 1);
-        for (SupplyLot supply : supplies) supply.rollback();
-        if (undoCheckpoints.isEmpty()) undoStack.clear();
+        while (supplyUndoStack.size() > supplyUndoCp) {
+            SupplyUndoEntry entry = supplyUndoStack.pop();
+            entry.supply.remaining = entry.oldRemaining;
+        }
+        while (supplies.size() > supplyCount) removeLastSupply();
+        if (undoCheckpoints.isEmpty()) {
+            undoStack.clear();
+            supplyUndoStack.clear();
+        }
     }
 
     void add(ItemStack stack) {
@@ -254,19 +268,31 @@ final class ResolutionContext {
         if (stack.isEmpty() || stack.getCount() <= 0) return;
         addCount(stack);
         MaterialKey material = MaterialKey.of(stack);
-        supplies.add(newSupply(material, new MaterialSource.InitialPool(material), stack.getCount()));
+        addSupply(newSupply(material, new MaterialSource.InitialPool(material), stack.getCount()));
     }
 
     void addProduced(ItemStack stack, MaterialSource.ProducerOutput source) {
         if (stack.isEmpty() || stack.getCount() <= 0) return;
         addCount(stack);
-        supplies.add(newSupply(MaterialKey.of(stack), source, stack.getCount()));
+        addSupply(newSupply(MaterialKey.of(stack), source, stack.getCount()));
     }
 
     private SupplyLot newSupply(MaterialKey material, MaterialSource source, int count) {
-        SupplyLot supply = new SupplyLot(material, source, count);
-        for (int i = 0; i < undoCheckpoints.size(); i++) supply.beginUndo();
-        return supply;
+        return new SupplyLot(material, source, count);
+    }
+
+    private void addSupply(SupplyLot supply) {
+        supplies.add(supply);
+        suppliesByMaterial.computeIfAbsent(supply.material, ignored -> new ArrayList<>())
+                .add(supply);
+    }
+
+    private void removeLastSupply() {
+        SupplyLot supply = supplies.remove(supplies.size() - 1);
+        List<SupplyLot> materialSupplies = suppliesByMaterial.get(supply.material);
+        if (materialSupplies == null) return;
+        materialSupplies.remove(supply);
+        if (materialSupplies.isEmpty()) suppliesByMaterial.remove(supply.material);
     }
 
     private void addCount(ItemStack stack) {
@@ -303,14 +329,14 @@ final class ResolutionContext {
     }
 
     private void indexStack(CraftingResolver.StackKey key) {
+        if (stacksByKey.containsKey(key)) return;
+        CachedStack cachedStack = new CachedStack(key);
+        stacksByKey.put(key, cachedStack);
         List<CachedStack> stacks = inventoryIndex.computeIfAbsent(key.item(), k -> new ArrayList<>());
         // A key removed during a speculative branch remains cached in this index.
         // Re-adding it after rollback must not append a duplicate candidate, or
         // countMatching would count the same physical stack more than once.
-        for (CachedStack cached : stacks) {
-            if (cached.key.equals(key)) return;
-        }
-        stacks.add(new CachedStack(key));
+        stacks.add(cachedStack);
     }
 
     int countMatching(Ingredient ingredient) {
@@ -331,7 +357,7 @@ final class ResolutionContext {
 
             for (CachedStack candidate : candidates) {
                 // Use the pre-created ItemStack — zero allocation per call
-                if (IngredientMatcher.test(ingredient, candidate.key)) {
+                if (IngredientMatcher.test(ingredient, candidate.stack)) {
                     total += counts.getOrDefault(candidate.key, 0);
                 }
             }
@@ -353,7 +379,7 @@ final class ResolutionContext {
         if (constrained) {
             total = 0;
             for (Map.Entry<CraftingResolver.StackKey, Integer> entry : counts.entrySet()) {
-                if (entry.getValue() > 0 && IngredientMatcher.test(ingredient, entry.getKey())) {
+                if (entry.getValue() > 0 && matches(ingredient, entry.getKey())) {
                     total += entry.getValue();
                 }
             }
@@ -364,14 +390,17 @@ final class ResolutionContext {
     SupplyConsumption consumeMatchingDetailed(Ingredient ingredient, int needed) {
         int remaining = needed;
         List<SupplySlice> slices = new ArrayList<>();
-        List<CraftingResolver.StackKey> sortedKeys = sortedMatchingKeys();
+        List<CraftingResolver.StackKey> sortedKeys = sortedMatchingKeys(ingredient);
 
         for (CraftingResolver.StackKey key : sortedKeys) {
             if (remaining <= 0) break;
             int available = counts.getOrDefault(key, 0);
             if (available <= 0 || !matches(ingredient, key)) continue;
             int take = Math.min(available, remaining);
-            int supplied = consumeSupplyLots(MaterialKey.of(key.toStack()), take, slices);
+            CachedStack cached = stacksByKey.get(key);
+            MaterialKey material = cached != null
+                    ? cached.material : MaterialKey.of(key.toStack());
+            int supplied = consumeSupplyLots(material, take, slices);
             if (supplied != take) {
                 return new SupplyConsumption(List.copyOf(slices), needed, needed - remaining);
             }
@@ -384,7 +413,7 @@ final class ResolutionContext {
 
     boolean consumeMatching(Ingredient ingredient, int needed) {
         int remaining = needed;
-        for (CraftingResolver.StackKey key : sortedMatchingKeys()) {
+        for (CraftingResolver.StackKey key : sortedMatchingKeys(ingredient)) {
             if (remaining <= 0) return true;
             int available = counts.getOrDefault(key, 0);
             if (available <= 0 || !matches(ingredient, key)) continue;
@@ -396,8 +425,35 @@ final class ResolutionContext {
         return remaining <= 0;
     }
 
-    private List<CraftingResolver.StackKey> sortedMatchingKeys() {
-        List<CraftingResolver.StackKey> sortedKeys = new ArrayList<>(counts.keySet());
+    private List<CraftingResolver.StackKey> sortedMatchingKeys(Ingredient ingredient) {
+        ItemStack[] templates = ingredient.getItems();
+        Set<Item> ingredientItems = new LinkedHashSet<>();
+        // Custom Ingredient subclasses may accept stacks that are not exposed by
+        // getItems(). Only vanilla's concrete Ingredient has a complete candidate list.
+        boolean requiresAuthoritativeScan = ingredient.getClass() != Ingredient.class
+                || templates.length == 0;
+        if (!requiresAuthoritativeScan) {
+            requiresAuthoritativeScan = true;
+            for (ItemStack template : templates) {
+                if (template.isEmpty()) continue;
+                ingredientItems.add(template.getItem());
+                if (!template.hasTag()) requiresAuthoritativeScan = false;
+            }
+            if (ingredientItems.isEmpty()) requiresAuthoritativeScan = true;
+        }
+
+        List<CraftingResolver.StackKey> sortedKeys;
+        if (requiresAuthoritativeScan) {
+            sortedKeys = new ArrayList<>(counts.keySet());
+        } else {
+            Set<CraftingResolver.StackKey> matchingItems = new LinkedHashSet<>();
+            for (Item item : ingredientItems) {
+                List<CachedStack> cached = inventoryIndex.get(item);
+                if (cached == null) continue;
+                for (CachedStack stack : cached) matchingItems.add(stack.key);
+            }
+            sortedKeys = new ArrayList<>(matchingItems);
+        }
         sortedKeys.sort(Comparator.comparing((CraftingResolver.StackKey k) -> k.tag() != null)
                 .thenComparing(k -> {
                     var rl = ForgeRegistries.ITEMS.getKey(k.item());
@@ -406,16 +462,24 @@ final class ResolutionContext {
         return sortedKeys;
     }
 
-    private static boolean matches(Ingredient ingredient, CraftingResolver.StackKey key) {
-        return IngredientMatcher.test(ingredient, key);
+    private boolean matches(Ingredient ingredient, CraftingResolver.StackKey key) {
+        CachedStack cached = stacksByKey.get(key);
+        return cached != null
+                ? IngredientMatcher.test(ingredient, cached.stack)
+                : IngredientMatcher.test(ingredient, key);
     }
 
     private int consumeSupplyLots(MaterialKey material, int needed, List<SupplySlice> slices) {
         int remaining = needed;
-        for (SupplyLot supply : supplies) {
+        List<SupplyLot> matchingSupplies = suppliesByMaterial.get(material);
+        if (matchingSupplies == null) return 0;
+        for (SupplyLot supply : matchingSupplies) {
             if (remaining <= 0) break;
-            if (!supply.material.equals(material) || supply.remaining <= 0) continue;
+            if (supply.remaining <= 0) continue;
             int take = Math.min(supply.remaining, remaining);
+            if (!supplyUndoCheckpoints.isEmpty()) {
+                supplyUndoStack.push(new SupplyUndoEntry(supply, supply.remaining));
+            }
             supply.consume(take);
             slices.add(new SupplySlice(supply.source, supply.material, take));
             remaining -= take;
@@ -425,7 +489,9 @@ final class ResolutionContext {
 
     private void addRemainder(CraftingResolver.StackKey key, int count) {
         try {
-            ItemStack remainder = key.toStack().getCraftingRemainingItem();
+            CachedStack cached = stacksByKey.get(key);
+            ItemStack source = cached != null ? cached.stack : key.toStack();
+            ItemStack remainder = source.getCraftingRemainingItem();
             if (!remainder.isEmpty()) add(remainder.copyWithCount(count));
         } catch (Exception ignored) {
             // Defensive against broken remainder implementations.
@@ -445,9 +511,9 @@ final class ResolutionContext {
     /** Populate the Item→CachedStack index from {@link #counts}. Called once per context. */
     private void buildInventoryIndex() {
         inventoryIndex.clear();
+        stacksByKey.clear();
         for (var entry : counts.entrySet()) {
-            inventoryIndex.computeIfAbsent(entry.getKey().item(), k -> new ArrayList<>())
-                    .add(new CachedStack(entry.getKey()));
+            indexStack(entry.getKey());
         }
     }
 
@@ -477,7 +543,6 @@ final class ResolutionContext {
     private static final class SupplyLot {
         final MaterialKey material;
         final MaterialSource source;
-        final Deque<Integer> checkpoints = new ArrayDeque<>();
         int remaining;
 
         SupplyLot(MaterialKey material, MaterialSource source, int remaining) {
@@ -485,18 +550,6 @@ final class ResolutionContext {
             this.source = Objects.requireNonNull(source, "source");
             if (remaining <= 0) throw new IllegalArgumentException("supply amount must be positive");
             this.remaining = remaining;
-        }
-
-        void beginUndo() {
-            checkpoints.push(remaining);
-        }
-
-        void commitUndo() {
-            checkpoints.pop();
-        }
-
-        void rollback() {
-            remaining = checkpoints.pop();
         }
 
         void consume(int amount) {
@@ -507,12 +560,23 @@ final class ResolutionContext {
         }
     }
 
+    private static final class SupplyUndoEntry {
+        final SupplyLot supply;
+        final int oldRemaining;
+
+        SupplyUndoEntry(SupplyLot supply, int oldRemaining) {
+            this.supply = supply;
+            this.oldRemaining = oldRemaining;
+        }
+    }
+
     /** Pre-created ItemStack to avoid allocating 200K+ ItemStack instances
      *  during candidate scoring.  The ItemStack is created once at index
      *  build time and reused for every ingredient.test() call. */
     private static class CachedStack {
         final CraftingResolver.StackKey key;
         final ItemStack stack;
+        final MaterialKey material;
 
         CachedStack(CraftingResolver.StackKey key) {
             this.key = key;
@@ -522,6 +586,7 @@ final class ResolutionContext {
                     this.stack.setTag(net.minecraft.nbt.TagParser.parseTag(key.tag()));
                 } catch (Exception e) { /* defensive — invalid NBT falls back to tag-less stack */ }
             }
+            this.material = MaterialKey.of(this.stack);
         }
     }
 

@@ -14,7 +14,7 @@ import java.util.List;
 public final class RSIntegrationConfig {
     public static final int REPEAT_COUNT_DEFAULT = 1024;
     public static final int REPEAT_COUNT_ABSOLUTE_MAX = 1024;
-    public static final int SERVER_CONFIG_SCHEMA = 3;
+    public static final int SERVER_CONFIG_SCHEMA = 4;
     public static final List<String> DEFAULT_ANVIL_MEMORY_ADAPTERS = List.of(
             "minecraft_anvil", "goety_dark_anvil", "irons_spellbooks_arcane_anvil");
     public static final int DEFAULT_CRAFTING_PLANNING_WORKERS = CraftingPlanningConfig.DEFAULT_WORKERS;
@@ -673,7 +673,8 @@ public final class RSIntegrationConfig {
         CRAFTING_TYPED_PREVIEW_TIMEOUT_MS = s
                 .comment("Hard server-thread budget for typed recipe preview resolution.",
                         "Timeout aborts the preview instead of being reported as missing materials.",
-                        "Keep this near one server tick. Range: 10-500.")
+                        "The default allows supported complex recipes while bounding server stalls.",
+                        "Range: 10-500.")
                 .defineInRange("craftingTypedPreviewTimeoutMs",
                         DEFAULT_CRAFTING_TYPED_PREVIEW_TIMEOUT_MS,
                         CraftingPlanningConfig.MIN_TYPED_PREVIEW_TIMEOUT_MS,
@@ -911,6 +912,11 @@ public final class RSIntegrationConfig {
             int schema, List<? extends String> currentValue) {
         return schema < 3 && currentValue.equals(List.of("minecraft_anvil"))
                 ? DEFAULT_ANVIL_MEMORY_ADAPTERS : currentValue;
+    }
+
+    public static int migrateTypedPreviewTimeoutMs(int schema, int currentValue) {
+        return schema < 4 && currentValue == 50
+                ? DEFAULT_CRAFTING_TYPED_PREVIEW_TIMEOUT_MS : currentValue;
     }
 
     public static void saveClientConfig() {
