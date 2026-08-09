@@ -7,7 +7,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 class TypedPreviewTimeoutConfigTest {
     @Test
     void legacyDefaultMigratesWithoutOverwritingCustomBudgets() {
-        assertEquals(200, RSIntegrationConfig.migrateTypedPreviewTimeoutMs(3, 50));
+        assertEquals(CraftingPlanningConfig.DEFAULT_TYPED_PREVIEW_TIMEOUT_MS,
+                RSIntegrationConfig.migrateTypedPreviewTimeoutMs(3, 50));
         assertEquals(50, RSIntegrationConfig.migrateTypedPreviewTimeoutMs(4, 50));
         assertEquals(125, RSIntegrationConfig.migrateTypedPreviewTimeoutMs(3, 125));
     }

@@ -168,6 +168,98 @@ class PlanTreeModelGraphTest extends BootstrapTest {
     }
 
     @Test
+    void sharedProducerInputCostIsExpandedOnlyOnce() {
+        PlanGraphView.SourceView initial = new PlanGraphView.SourceView(true, -1, -1);
+        PlanGraphView.NodeView powder = new PlanGraphView.NodeView(40,
+                new ResourceLocation("test", "powder_from_block"), "generic", 1,
+                new ItemStack(Items.IRON_NUGGET, 9), List.of(), List.of(
+                new PlanGraphView.OutputView(0, new ItemStack(Items.IRON_NUGGET), 9, 0)));
+        PlanGraphView.NodeView left = new PlanGraphView.NodeView(41,
+                new ResourceLocation("test", "left"), "generic", 1,
+                new ItemStack(Items.DIAMOND), List.of(), List.of(
+                new PlanGraphView.OutputView(0, new ItemStack(Items.DIAMOND), 1, 0)));
+        PlanGraphView.NodeView right = new PlanGraphView.NodeView(42,
+                new ResourceLocation("test", "right"), "generic", 1,
+                new ItemStack(Items.EMERALD), List.of(), List.of(
+                new PlanGraphView.OutputView(0, new ItemStack(Items.EMERALD), 1, 0)));
+        PlanGraphView.SourceView powderSource = new PlanGraphView.SourceView(false, 40, 0);
+        PlanGraphView graph = new PlanGraphView(1, List.of(powder, left, right), List.of(
+                new PlanGraphView.EdgeView(40, 0, initial,
+                        new ItemStack(Items.IRON_BLOCK), 1),
+                new PlanGraphView.EdgeView(41, 0, powderSource,
+                        new ItemStack(Items.IRON_NUGGET), 4),
+                new PlanGraphView.EdgeView(42, 0, powderSource,
+                        new ItemStack(Items.IRON_NUGGET), 4)),
+                List.of(
+                        new PlanGraphView.RootView(new ItemStack(Items.DIAMOND), 1, 0, List.of(
+                                new PlanGraphView.RootEdgeView(
+                                        new PlanGraphView.SourceView(false, 41, 0),
+                                        new ItemStack(Items.DIAMOND), 1))),
+                        new PlanGraphView.RootView(new ItemStack(Items.EMERALD), 1, 0, List.of(
+                                new PlanGraphView.RootEdgeView(
+                                        new PlanGraphView.SourceView(false, 42, 0),
+                                        new ItemStack(Items.EMERALD), 1)))),
+                List.of(), List.of(40, 41, 42));
+        PlanResponse plan = new PlanResponse(true, "root", new ItemStack(Items.DIAMOND),
+                List.of(), Map.of(), List.of(), "test:root", null, null, 0, 0, 0,
+                List.of(), 1, null, null, null, 0, false, false, false, null,
+                Set.of(), Map.of(), null, graph);
+
+        PlanTreeModel tree = PlanTreeModel.from(plan);
+        Map<IngredientKey, Integer> gross = PlanTreeModel.grossDemandByKey(tree);
+
+        assertEquals(2, tree.graphReferenceCounts().get(40));
+        assertEquals(8, gross.get(IngredientKey.of(new ItemStack(Items.IRON_NUGGET))));
+        assertEquals(1, gross.get(IngredientKey.of(new ItemStack(Items.IRON_BLOCK))));
+    }
+
+    @Test
+    void unresolvedLeavesMergeWhenEquivalentRecipeBranchesFold() {
+        ResourceLocation market = new ResourceLocation("farmingforblockheads", "market/test");
+        PlanGraphView.NodeView first = new PlanGraphView.NodeView(50, market, "market", 1,
+                new ItemStack(Items.WHEAT_SEEDS), List.of(), List.of(
+                new PlanGraphView.OutputView(0, new ItemStack(Items.WHEAT_SEEDS), 1, 0)));
+        PlanGraphView.NodeView second = new PlanGraphView.NodeView(51, market, "market", 1,
+                new ItemStack(Items.WHEAT_SEEDS), List.of(), List.of(
+                new PlanGraphView.OutputView(0, new ItemStack(Items.WHEAT_SEEDS), 1, 0)));
+        PlanGraphView.NodeView consumer = new PlanGraphView.NodeView(52,
+                new ResourceLocation("test", "consumer"), "generic", 1,
+                new ItemStack(Items.DIAMOND), List.of(), List.of(
+                new PlanGraphView.OutputView(0, new ItemStack(Items.DIAMOND), 1, 0)));
+        PlanGraphView graph = new PlanGraphView(1, List.of(first, second, consumer), List.of(
+                new PlanGraphView.EdgeView(52, 0,
+                        new PlanGraphView.SourceView(false, 50, 0),
+                        new ItemStack(Items.WHEAT_SEEDS), 1),
+                new PlanGraphView.EdgeView(52, 1,
+                        new PlanGraphView.SourceView(false, 51, 0),
+                        new ItemStack(Items.WHEAT_SEEDS), 1)),
+                List.of(new PlanGraphView.RootView(new ItemStack(Items.DIAMOND), 1, 0, List.of(
+                        new PlanGraphView.RootEdgeView(
+                                new PlanGraphView.SourceView(false, 52, 0),
+                                new ItemStack(Items.DIAMOND), 1)))),
+                List.of(
+                        new PlanGraphView.UnresolvedView(50, 0,
+                                new ItemStack(Items.TORCHFLOWER_SEEDS), 1),
+                        new PlanGraphView.UnresolvedView(51, 0,
+                                new ItemStack(Items.TORCHFLOWER_SEEDS), 1)),
+                List.of(50, 51, 52));
+        IngredientKey missingKey = IngredientKey.of(new ItemStack(Items.TORCHFLOWER_SEEDS));
+        PlanResponse plan = new PlanResponse(false, "root", new ItemStack(Items.DIAMOND),
+                List.of(), Map.of(missingKey, new PlanResponse.Availability(2, 0)),
+                List.of(), "test:root", null, null, 0, 0, 0,
+                List.of(), 1, null, null, null, 0, false, false, false, null,
+                Set.of(), Map.of(), null, graph);
+
+        PlanTreeNode foldedMarket = PlanTreeModel.from(plan).root.children.get(0).children.get(0);
+
+        assertEquals(2, foldedMarket.amount);
+        assertEquals(1, foldedMarket.children.size());
+        assertEquals(2, foldedMarket.children.get(0).amount);
+        assertEquals(2, foldedMarket.children.get(0).unresolved);
+        assertEquals(2, foldedMarket.children.get(0).needed);
+    }
+
+    @Test
     void grossDemandUsesGraphQuantitiesWithoutRescalingReusableRoots() {
         PlanGraphView.SourceView initial = new PlanGraphView.SourceView(true, -1, -1);
         PlanGraphView graph = new PlanGraphView(1, List.of(), List.of(), List.of(
