@@ -535,6 +535,7 @@ public final class RSIntegrationMod {
         MinecraftForge.EVENT_BUS.addListener((net.minecraftforge.event.AddReloadListenerEvent e) -> {
             com.huanghuang.rsintegration.recipe.ModRecipeHandlers.clearResultCaches();
             com.huanghuang.rsintegration.crafting.CraftPlanningRevision.bump();
+            com.huanghuang.rsintegration.crafting.RecipeIndex.invalidate();
         });
 
         // Async craft chains
@@ -554,27 +555,24 @@ public final class RSIntegrationMod {
                         .onPlayerLogout(sp.getUUID());
             }
         });
+        // Compile and publish one complete recipe generation before normal server
+        // ticks begin. Preview clicks never advance this work or wait behind it.
         MinecraftForge.EVENT_BUS.addListener((ServerStartedEvent e) ->
                 com.huanghuang.rsintegration.crafting.RecipeIndex
-                        .scheduleWarmUp(e.getServer().overworld()));
-        MinecraftForge.EVENT_BUS.addListener((net.minecraftforge.event.TickEvent.ServerTickEvent e) -> {
-            if (e.phase == net.minecraftforge.event.TickEvent.Phase.START) {
-                com.huanghuang.rsintegration.crafting.planning.WarmUpBudgetPolicy.beginTick();
-                return;
-            }
-            var level = e.getServer().overworld();
-            var budgets = com.huanghuang.rsintegration.crafting.planning.WarmUpBudgetPolicy
-                    .selectForCurrentTick(com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket
-                            .hasDeferredWarmUpRequests());
-            if (com.huanghuang.rsintegration.crafting.RecipeIndex.isReady(level)) {
-                com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraphProjector
-                        .tickWarmUp(level, budgets.recipeGraphNanos());
-            } else {
+                        .warmUp(e.getServer().overworld()));
+        // /reload fires this event after the new recipes have been applied and
+        // before they are sent to clients. Rebuild against that completed revision.
+        MinecraftForge.EVENT_BUS.addListener((net.minecraftforge.event.OnDatapackSyncEvent e) -> {
+            if (e.getPlayer() == null) {
                 com.huanghuang.rsintegration.crafting.RecipeIndex
-                        .tickWarmUp(level, budgets.recipeIndexNanos());
+                        .warmUp(e.getPlayerList().getServer().overworld());
             }
-            com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket
-                    .tickWarmUpRequests(e.getServer());
+        });
+        MinecraftForge.EVENT_BUS.addListener((net.minecraftforge.event.TickEvent.ServerTickEvent e) -> {
+            if (e.phase == net.minecraftforge.event.TickEvent.Phase.END) {
+                com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket
+                        .tickWarmUpRequests(e.getServer());
+            }
         });
         // Cross-dimension: unpin the old dimension's IStorageCache listener
         // and re-register against the new dimension's network.

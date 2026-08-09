@@ -19,43 +19,39 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RecipeGraphWarmUpContractTest {
     @Test
-    void serverStartupSchedulesIncrementalWarmUp() throws IOException {
+    void serverStartupBuildsCompleteGenerationBeforeTicks() throws IOException {
         Set<String> calls = methodCalls(RSIntegrationMod.class, null);
 
-        assertFalse(calls.contains(owner(RecipeIndex.class) + ".warmUp"));
-        assertFalse(calls.contains(owner(ImmutableRecipeGraphProjector.class) + ".capture"));
-        assertTrue(calls.contains(owner(RecipeIndex.class) + ".scheduleWarmUp"));
-        assertTrue(calls.contains(owner(RecipeIndex.class) + ".tickWarmUp"));
-        assertTrue(calls.contains(owner(ImmutableRecipeGraphProjector.class) + ".tickWarmUp"));
+        assertTrue(calls.contains(owner(RecipeIndex.class) + ".warmUp"));
         assertTrue(calls.contains(owner(GenericCraftPacket.class) + ".tickWarmUpRequests"));
     }
 
     @Test
-    void playerCraftRequestsWaitForBothWarmUpStages() throws IOException {
+    void playerCraftRequestsWaitForOnePublishedGeneration() throws IOException {
         Set<String> calls = methodCalls(GenericCraftPacket.class, "warmUpReady");
 
         assertTrue(calls.contains(owner(RecipeIndex.class) + ".isReady"));
-        assertTrue(calls.contains(owner(ImmutableRecipeGraphProjector.class) + ".isReady"));
+        assertFalse(calls.contains(owner(ImmutableRecipeGraphProjector.class) + ".isReady"));
     }
 
     @Test
     void explicitWarmUpEntryPointRemainsBinaryCompatible() throws IOException {
         Set<String> calls = methodCalls(RecipeIndex.class, "warmUp");
 
-        assertTrue(calls.contains(owner(ImmutableRecipeGraphProjector.class) + ".capture"));
+        assertTrue(calls.contains(owner(RecipeIndex.class) + ".buildSynchronously"));
     }
 
     @Test
-    void ordinaryIndexAccessNeverFinishesWarmUpSynchronously() throws IOException {
+    void ordinaryIndexAccessNeverBuildsGenerationSynchronously() throws IOException {
         Set<String> calls = methodCalls(RecipeIndex.class, "get");
 
-        assertFalse(calls.contains(owner(RecipeIndex.class) + "$BuildState.advance"));
-        assertTrue(calls.contains(owner(RecipeIndex.class) + ".scheduleWarmUp"));
+        assertFalse(calls.contains(owner(RecipeIndex.class) + ".buildSynchronously"));
+        assertFalse(calls.contains(owner(RecipeIndex.class) + ".warmUp"));
     }
 
     @Test
     void craftingProjectionBypassesGenericReflectiveExtraction() throws IOException {
-        Set<String> calls = methodCalls(ImmutableRecipeGraphProjector.class, "projectEntry");
+        Set<String> calls = methodCalls(ImmutableRecipeGraphProjector.class, "projectCraftingRecipe");
         String utilityOwner = owner(CraftPacketUtils.class);
 
         assertTrue(calls.contains(utilityOwner + ".extractCraftingIngredientSpecs"));
