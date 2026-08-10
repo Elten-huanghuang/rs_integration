@@ -56,8 +56,10 @@ class CandidateEngineTest extends BootstrapTest {
                 new IngredientSpec(iron, 1, DemandRole.CONSUMED)));
 
         assertEquals(2, demands.size());
-        assertTrue(demands.values().stream().anyMatch(d -> d.required() == 2));
-        assertTrue(demands.values().stream().anyMatch(d -> d.required() == 1));
+        assertTrue(demands.values().stream().anyMatch(d -> d.required() == 2
+                && d.role() == DemandRole.CATALYST));
+        assertTrue(demands.values().stream().anyMatch(d -> d.required() == 1
+                && d.role() == DemandRole.CONSUMED));
     }
 
     @Test

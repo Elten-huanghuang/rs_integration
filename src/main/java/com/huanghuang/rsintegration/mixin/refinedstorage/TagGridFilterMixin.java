@@ -22,7 +22,6 @@ public class TagGridFilterMixin {
             at = @At("HEAD"), cancellable = true)
     private void rsi$cachedTagTest(IGridStack stack, CallbackInfoReturnable<Boolean> cir) {
         UUID id = stack.getId();
-        String cached = RSGridSearchCache.getTags(id, stack);
-        cir.setReturnValue(cached.contains(this.tagName));
+        cir.setReturnValue(RSGridSearchCache.matchesTags(id, this.tagName));
     }
 }

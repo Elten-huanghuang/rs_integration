@@ -73,6 +73,7 @@ import com.huanghuang.rsintegration.crafting.planning.PlanningStateValidator;
 import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
+import com.huanghuang.rsintegration.recipe.GoetyRecipeHandler;
 import com.huanghuang.rsintegration.recipe.CrockPotRecipeHandler;
 import com.huanghuang.rsintegration.recipe.WRRecipeHandler;
 import com.huanghuang.rsintegration.util.TextBuilder;
@@ -852,6 +853,13 @@ public final class GenericCraftPacket {
         }
 
         ModType modType = ModType.classifyRecipe(recipe);
+        if (repeatCount > 1
+                && com.huanghuang.rsintegration.recipe.GoetyRecipeHandler
+                .requiresManualConfirmation(recipe)) {
+            player.sendSystemMessage(Component.translatable(
+                    "rsi.goety.error.manual_single_only"));
+            return;
+        }
         if (requiresBoundMachine(recipe, modType)
                 && !AltarBindingRegistry.hasBindingForRecipe(player, recipe)) {
             player.sendSystemMessage(Component.translatable(
@@ -1798,6 +1806,7 @@ public final class GenericCraftPacket {
             recipeIngredients = expandIngredientSpecs(recipeSpecs);
             targetOutput = ModRecipeHandlers.tryGetResultItem(recipe, player.serverLevel().registryAccess());
             recipeModType = ModType.classifyRecipe(recipe);
+            boolean manualGoetyRitual = GoetyRecipeHandler.requiresManualConfirmation(recipe);
             RSIntegrationMod.debug("[RSI-tryBuildPlan] targetOutput: recipeId={} class={} result={}x{} isEmpty={} modType={}",
                     recipeId,
                     recipe.getClass().getSimpleName(),
@@ -1814,7 +1823,8 @@ public final class GenericCraftPacket {
                     && !recipeModType.id().startsWith(ModIds.AETHER + "_")
                     && !ModIds.ID_YHK_KETTLE.equals(recipeModType.id())
                     && !ModIds.ID_YHK_FERMENT.equals(recipeModType.id())
-                    && !ModIds.ID_FR_KETTLE.equals(recipeModType.id())) {
+                    && !ModIds.ID_FR_KETTLE.equals(recipeModType.id())
+                    && !manualGoetyRitual) {
                 sink.error(Component.translatable(
                         "rsi.generic.error.unsupported_machine", recipe.getClass().getSimpleName()));
                 return;
@@ -1958,22 +1968,30 @@ public final class GenericCraftPacket {
 
         long demandTreeStarted = System.nanoTime();
         PureDemandTreeInspector.Result demandTree;
+        Set<ResourceLocation> reusableCatalystOutputIds =
+                RSIntegrationConfig.ENABLE_CATALYST_RECIPE_PREFERENCE.get()
+                        ? RecipeIndex.reusableCatalystOutputIds(player.serverLevel()) : Set.of();
+        Set<ResourceLocation> reusableCatalystRecipeIds =
+                RecipeIndex.reusableCatalystRecipeIds(player.serverLevel());
         try {
             demandTree = PureDemandTreeInspector.inspect(
                     planningSnapshot.recipeGraph(), routingAvailability(planningSnapshot.availableItems()),
-                    recipeId, repeatCount, RSIntegrationConfig.CRAFTING_PURE_DEMAND_MAX_NODES.get());
+                    recipeId, repeatCount, RSIntegrationConfig.CRAFTING_PURE_DEMAND_MAX_NODES.get(),
+                    reusableCatalystOutputIds, reusableCatalystRecipeIds);
         } finally {
             PerformanceMonitor.recordDemandTreeInspection(System.nanoTime() - demandTreeStarted);
         }
         boolean pureRoute = demandTree.complete()
                 && effectiveOverrides.isEmpty()
-                && !planningSnapshot.mainThreadOnly();
+                && !planningSnapshot.mainThreadOnly()
+                && !demandTree.catalystRouteAvailable();
         boolean typedResolverAvailable = RSIntegrationConfig.ENABLE_MULTIBLOCK_AUTO_CRAFTING.get()
                 && network != null;
         RSIntegrationMod.debug(
-                "[RSI-plan] planner route recipe={} pure={} coverage={} nodes={} unresolved={} overrides={} mainThreadOnly={}",
+                "[RSI-plan] planner route recipe={} pure={} coverage={} nodes={} unresolved={} overrides={} mainThreadOnly={} catalystRoute={}",
                 recipeId, pureRoute, demandTree.status(), demandTree.visitedNodes(),
-                demandTree.unresolved(), !effectiveOverrides.isEmpty(), planningSnapshot.mainThreadOnly());
+                demandTree.unresolved(), !effectiveOverrides.isEmpty(), planningSnapshot.mainThreadOnly(),
+                demandTree.catalystRouteAvailable());
         if (!asyncAttempted && pureRoute) {
             PLAN_REQUESTS.submit(planningSnapshot, repeatCount, player.getServer()::execute,
                     RSIntegrationConfig.CRAFTING_MAX_STEPS.get(), completed ->
@@ -2007,7 +2025,7 @@ public final class GenericCraftPacket {
                         ? java.util.Optional.<SynchronousFallbackReason>empty()
                         : SynchronousFallbackReason.whenPureRouteUnavailable(
                                 planningSnapshot.mainThreadOnly(), !effectiveOverrides.isEmpty(),
-                                demandTree.complete());
+                                demandTree.complete(), demandTree.catalystRouteAvailable());
         synchronousFallbackReason.ifPresent(reason ->
                 PerformanceMonitor.recordSynchronousPlanningFallback(reason, recipeId));
 

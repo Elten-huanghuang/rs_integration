@@ -22,7 +22,6 @@ public class TooltipGridFilterMixin {
             at = @At("HEAD"), cancellable = true)
     private void rsi$cachedTooltipTest(IGridStack stack, CallbackInfoReturnable<Boolean> cir) {
         UUID id = stack.getId();
-        String cached = RSGridSearchCache.getTooltip(id, stack);
-        cir.setReturnValue(cached.contains(this.tooltip));
+        cir.setReturnValue(RSGridSearchCache.matchesTooltip(id, this.tooltip));
     }
 }

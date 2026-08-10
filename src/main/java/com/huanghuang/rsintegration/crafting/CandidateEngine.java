@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.crafting;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.recipe.SlashBladeRecipeHandler;
@@ -24,7 +25,6 @@ final class CandidateEngine {
     private CandidateEngine() {}
 
     private static final int PREFERRED_RECIPE_BONUS = 10000;
-
     public record CandidateDiagnostic(ResourceLocation recipeId, int score, ModType modType,
                                        boolean skipped, String skipReason) {}
 
@@ -275,6 +275,7 @@ final class CandidateEngine {
                 }
             }
             score -= demands.values().stream().mapToInt(IngredientDemand::required).sum();
+            score += reusableCatalystPreferenceScore(specs, demands.values(), ctx, matchCache);
         }
         ItemStack output = ModRecipeHandlers.tryGetResultItem(entry.recipe(), ctx.level.registryAccess());
         if (!output.isEmpty()) {
@@ -307,7 +308,8 @@ final class CandidateEngine {
             }
         }
 
-        Map<String, IngredientDemand> demands = craftingDemands(recipe);
+        List<IngredientSpec> specs = CraftPacketUtils.extractCraftingIngredientSpecs(recipe);
+        Map<String, IngredientDemand> demands = specDemands(specs);
         for (IngredientDemand demand : demands.values()) {
             int available = cachedCountMatching(ctx, demand.ingredient(), matchCache);
             if (available >= demand.required()) score += 10;
@@ -315,6 +317,7 @@ final class CandidateEngine {
         }
 
         score -= demands.values().stream().mapToInt(IngredientDemand::required).sum();
+        score += reusableCatalystPreferenceScore(specs, demands.values(), ctx, matchCache);
 
         if (output.getCount() > 1) {
             // Gate output bonus behind ingredient availability for the same
@@ -322,8 +325,9 @@ final class CandidateEngine {
             // recipes when their inputs are themselves craftable only via the
             // output they produce.
             boolean allAvail = true;
-            for (Ingredient ing : recipe.getIngredients()) {
-                if (!ing.isEmpty() && cachedCountMatching(ctx, ing, matchCache) <= 0) {
+            for (IngredientDemand demand : demands.values()) {
+                if (cachedCountMatching(ctx, demand.ingredient(), matchCache)
+                        < demand.required()) {
                     allAvail = false;
                     break;
                 }
@@ -340,6 +344,81 @@ final class CandidateEngine {
                                            @javax.annotation.Nullable Map<Ingredient, Integer> cache) {
         if (cache == null) return ctx.countMatching(ing);
         return cache.computeIfAbsent(ing, ctx::countMatching);
+    }
+
+    private static int reusableCatalystPreferenceScore(
+            List<IngredientSpec> recipeSpecs, Collection<IngredientDemand> demands,
+            ResolutionContext ctx, @javax.annotation.Nullable Map<Ingredient, Integer> matchCache) {
+        if (!catalystPreferenceEnabled()) return 0;
+
+        int score = 0;
+        int bonus = catalystPreferenceBonus();
+        if (hasReusableCatalyst(recipeSpecs)
+                && reusableCatalystsAvailable(recipeSpecs, ctx, matchCache)) {
+            score += bonus;
+        }
+        for (IngredientDemand demand : demands) {
+            if (demand.role() != DemandRole.CATALYST
+                    && hasAvailableReusableCatalystProducer(
+                    demand.ingredient(), ctx, matchCache)) {
+                score += bonus;
+                break;
+            }
+        }
+        return score;
+    }
+
+    private static boolean hasAvailableReusableCatalystProducer(
+            Ingredient demanded, ResolutionContext ctx,
+            @javax.annotation.Nullable Map<Ingredient, Integer> matchCache) {
+        Set<ResourceLocation> checked = new HashSet<>();
+        for (ItemStack option : demanded.getItems()) {
+            if (option.isEmpty()) continue;
+            List<RecipeIndex.ReusableCatalystRoute> routes =
+                    ctx.reusableCatalystRoutes.get(option.getItem());
+            if (routes == null) continue;
+            for (RecipeIndex.ReusableCatalystRoute route : routes) {
+                if (!checked.add(route.recipeId())) continue;
+                if (!IngredientMatcher.test(demanded, route.output())) continue;
+                if (reusableCatalystsAvailable(route.specs(), ctx, matchCache)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasReusableCatalyst(List<IngredientSpec> specs) {
+        return specs.stream().anyMatch(spec -> !spec.isEmpty()
+                && spec.role() == DemandRole.CATALYST);
+    }
+
+    private static boolean reusableCatalystsAvailable(
+            List<IngredientSpec> specs, ResolutionContext ctx,
+            @javax.annotation.Nullable Map<Ingredient, Integer> matchCache) {
+        boolean found = false;
+        for (IngredientSpec spec : specs) {
+            if (spec.isEmpty() || spec.role() != DemandRole.CATALYST) continue;
+            found = true;
+            if (cachedCountMatching(ctx, spec.ingredient(), matchCache) < spec.count()) return false;
+        }
+        return found;
+    }
+
+    private static boolean catalystPreferenceEnabled() {
+        try {
+            return RSIntegrationConfig.ENABLE_CATALYST_RECIPE_PREFERENCE.get();
+        } catch (Exception ignored) {
+            return true;
+        }
+    }
+
+    private static int catalystPreferenceBonus() {
+        try {
+            return RSIntegrationConfig.CATALYST_RECIPE_PREFERENCE_BONUS.get();
+        } catch (Exception ignored) {
+            return RSIntegrationConfig.DEFAULT_CATALYST_RECIPE_PREFERENCE_BONUS;
+        }
     }
 
     /** Cap the per-batch output bonus so decompression recipes
@@ -387,18 +466,10 @@ final class CandidateEngine {
                 .count();
     }
 
-    record IngredientDemand(Ingredient ingredient, int required) {}
+    record IngredientDemand(Ingredient ingredient, int required, DemandRole role) {}
 
     static Map<String, IngredientDemand> craftingDemands(CraftingRecipe recipe) {
-        Map<String, IngredientDemand> demands = new LinkedHashMap<>();
-        for (Ingredient ingredient : recipe.getIngredients()) {
-            if (ingredient.isEmpty()) continue;
-            String key = ingredientKey(ingredient);
-            IngredientDemand old = demands.get(key);
-            demands.put(key, new IngredientDemand(ingredient,
-                    (old == null ? 0 : old.required()) + 1));
-        }
-        return demands;
+        return specDemands(CraftPacketUtils.extractCraftingIngredientSpecs(recipe));
     }
 
     static Map<String, IngredientDemand> specDemands(List<IngredientSpec> specs) {
@@ -408,7 +479,7 @@ final class CandidateEngine {
             String key = spec.role() + ":" + ingredientKey(spec.ingredient());
             IngredientDemand old = demands.get(key);
             demands.put(key, new IngredientDemand(spec.ingredient(),
-                    (old == null ? 0 : old.required()) + spec.count()));
+                    (old == null ? 0 : old.required()) + spec.count(), spec.role()));
         }
         return demands;
     }

@@ -42,6 +42,16 @@ public final class RSIntegrationConfig {
             GuiTimingConfig.DEFAULT_OPEN_RATE_LIMIT_MS;
     public static final int DEFAULT_SIDE_PANEL_NAVIGATION_TIMEOUT_MS =
             GuiTimingConfig.DEFAULT_NAVIGATION_TIMEOUT_MS;
+    public static final int DEFAULT_CATALYST_RECIPE_PREFERENCE_BONUS = 1000;
+    public static final int DEFAULT_GRID_SEARCH_IDLE_BUDGET_MICROS = 1_000;
+    public static final int DEFAULT_GRID_SEARCH_ACTIVE_BUDGET_MICROS = 3_000;
+    public static final int DEFAULT_GRID_SEARCH_DEBOUNCE_MS = 80;
+    public static final int DEFAULT_GRID_SEARCH_PARTIAL_REFRESH_MS = 50;
+    public static final int DEFAULT_GRID_SEARCH_QUERY_CACHE_ENTRIES = 16;
+    public static final int DEFAULT_GRID_SEARCH_PINYIN_WORKERS = 2;
+    public static final int DEFAULT_GRID_SEARCH_DISK_CACHE_ENTRIES = 20_000;
+    public static final int DEFAULT_GRID_SEARCH_DISK_CACHE_MAX_MIB = 32;
+    public static final int DEFAULT_GRID_SEARCH_DISK_CACHE_SAVE_DELAY_MS = 2_000;
 
     public static final ForgeConfigSpec COMMON_SPEC;
     public static final ForgeConfigSpec SERVER_SPEC;
@@ -57,6 +67,8 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.IntValue NEARBY_BINDING_COOLDOWN_MS;
     public static ForgeConfigSpec.BooleanValue ENABLE_AUTO_CRAFTING;
     public static ForgeConfigSpec.BooleanValue ENABLE_MULTIBLOCK_AUTO_CRAFTING;
+    public static ForgeConfigSpec.BooleanValue ENABLE_CATALYST_RECIPE_PREFERENCE;
+    public static ForgeConfigSpec.IntValue CATALYST_RECIPE_PREFERENCE_BONUS;
     public static ForgeConfigSpec.ConfigValue<List<? extends String>> PREFERRED_RECIPES;
     public static ForgeConfigSpec.IntValue MULTIBLOCK_CRAFT_TIMEOUT_SECONDS;
     public static ForgeConfigSpec.IntValue CRAFTING_CHAIN_GLOBAL_TIMEOUT_SECONDS;
@@ -105,6 +117,16 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.BooleanValue ENABLE_JEI_MARQUEE_SELECTION;
     public static ForgeConfigSpec.BooleanValue ENABLE_JEI_BOOKMARK_MARQUEE_SELECTION;
     public static ForgeConfigSpec.BooleanValue ENABLE_RS_GRID_SWIPE_EXTRACT;
+    public static ForgeConfigSpec.IntValue GRID_SEARCH_IDLE_BUDGET_MICROS;
+    public static ForgeConfigSpec.IntValue GRID_SEARCH_ACTIVE_BUDGET_MICROS;
+    public static ForgeConfigSpec.IntValue GRID_SEARCH_DEBOUNCE_MS;
+    public static ForgeConfigSpec.IntValue GRID_SEARCH_PARTIAL_REFRESH_MS;
+    public static ForgeConfigSpec.IntValue GRID_SEARCH_QUERY_CACHE_ENTRIES;
+    public static ForgeConfigSpec.IntValue GRID_SEARCH_PINYIN_WORKERS;
+    public static ForgeConfigSpec.BooleanValue GRID_SEARCH_DISK_CACHE_ENABLED;
+    public static ForgeConfigSpec.IntValue GRID_SEARCH_DISK_CACHE_ENTRIES;
+    public static ForgeConfigSpec.IntValue GRID_SEARCH_DISK_CACHE_MAX_MIB;
+    public static ForgeConfigSpec.IntValue GRID_SEARCH_DISK_CACHE_SAVE_DELAY_MS;
     public static ForgeConfigSpec.BooleanValue DEPOSIT_UPGRADE_RS;
     public static ForgeConfigSpec.BooleanValue ENABLE_MAJ_ACCESSORY_COMPRESSION;
     public static ForgeConfigSpec.BooleanValue ENABLE_MACHINE_GUI_TABS;
@@ -601,6 +623,17 @@ public final class RSIntegrationConfig {
         s.pop();
 
         s.push("autoCrafting");
+        ENABLE_CATALYST_RECIPE_PREFERENCE = s
+                .comment("Automatically prefer crafting paths backed by reusable catalysts.",
+                        "CraftTweaker inputs using .reuse() are recognized without listing recipe IDs.",
+                        "The ordinary recipe path remains available when the catalyst path cannot be resolved.")
+                .define("enableCatalystRecipePreference", true);
+        CATALYST_RECIPE_PREFERENCE_BONUS = s
+                .comment("Candidate score bonus for reusable-catalyst recipes and their immediate consumers.",
+                        "Raise this only when another custom scoring rule still wins unexpectedly.",
+                        "Range: 0-100000.")
+                .defineInRange("catalystRecipePreferenceBonus",
+                        DEFAULT_CATALYST_RECIPE_PREFERENCE_BONUS, 0, 100000);
         PREFERRED_RECIPES = s
                 .comment("Preferred recipe IDs for auto-crafting resolution.",
                         "When multiple recipes produce the same item, the preferred recipe gets a +10000 scoring bonus.",
@@ -917,6 +950,55 @@ public final class RSIntegrationConfig {
                         DEFAULT_SIDE_PANEL_NAVIGATION_TIMEOUT_MS,
                         GuiTimingConfig.MIN_NAVIGATION_TIMEOUT_MS,
                         GuiTimingConfig.MAX_NAVIGATION_TIMEOUT_MS);
+        cl.pop();
+        cl.push("gridSearch");
+        GRID_SEARCH_IDLE_BUDGET_MICROS = cl
+                .comment("RS 网格未执行特殊搜索时，每个客户端 tick 用于后台预热搜索索引的时间预算。",
+                        "范围：100-10000 微秒。")
+                .defineInRange("idleBudgetMicros", DEFAULT_GRID_SEARCH_IDLE_BUDGET_MICROS,
+                        100, 10_000);
+        GRID_SEARCH_ACTIVE_BUDGET_MICROS = cl
+                .comment("正在等待 @、# 或 $ 搜索时，每个客户端 tick 用于索引和匹配的时间预算。",
+                        "范围：500-10000 微秒。")
+                .defineInRange("activeBudgetMicros", DEFAULT_GRID_SEARCH_ACTIVE_BUDGET_MICROS,
+                        500, 10_000);
+        GRID_SEARCH_DEBOUNCE_MS = cl
+                .comment("输入停止后开始执行特殊搜索的等待时间，避免每输入一个字符都重复扫描。",
+                        "范围：0-500 毫秒。")
+                .defineInRange("debounceMs", DEFAULT_GRID_SEARCH_DEBOUNCE_MS, 0, 500);
+        GRID_SEARCH_PARTIAL_REFRESH_MS = cl
+                .comment("# 搜索索引尚未完成时，部分结果刷新到网格的最小间隔。",
+                        "较小的值响应更快，较大的值可减少网格重排。范围：16-500 毫秒。")
+                .defineInRange("partialRefreshMs", DEFAULT_GRID_SEARCH_PARTIAL_REFRESH_MS,
+                        16, 500);
+        GRID_SEARCH_QUERY_CACHE_ENTRIES = cl
+                .comment("保留的 @、#、$ 单项搜索结果数量，用于重复搜索和继续输入时复用结果。",
+                        "范围：8-128。")
+                .defineInRange("queryCacheEntries", DEFAULT_GRID_SEARCH_QUERY_CACHE_ENTRIES,
+                        8, 128);
+        GRID_SEARCH_PINYIN_WORKERS = cl
+                .comment("用于生成 # 搜索拼音索引的后台线程数。",
+                        "Minecraft tooltip 本身仍在客户端线程采集；只有纯文本转拼音在后台运行。",
+                        "范围：1-4。")
+                .defineInRange("pinyinWorkers", DEFAULT_GRID_SEARCH_PINYIN_WORKERS, 1, 4);
+        GRID_SEARCH_DISK_CACHE_ENABLED = cl
+                .comment("将已经完成的 RS tooltip 与拼音搜索文本保存到本地磁盘。",
+                        "再次启动客户端时可直接复用，避免每次进入世界都重新冷预热。")
+                .define("diskCacheEnabled", true);
+        GRID_SEARCH_DISK_CACHE_ENTRIES = cl
+                .comment("磁盘搜索缓存最多保留的物品/流体变体数量。",
+                        "缓存键包含类型、注册名和 NBT，不包含数量。范围：1000-100000。")
+                .defineInRange("diskCacheEntries", DEFAULT_GRID_SEARCH_DISK_CACHE_ENTRIES,
+                        1_000, 100_000);
+        GRID_SEARCH_DISK_CACHE_MAX_MIB = cl
+                .comment("压缩搜索缓存允许使用的最大磁盘空间。范围：4-256 MiB。")
+                .defineInRange("diskCacheMaxMiB", DEFAULT_GRID_SEARCH_DISK_CACHE_MAX_MIB,
+                        4, 256);
+        GRID_SEARCH_DISK_CACHE_SAVE_DELAY_MS = cl
+                .comment("最后一次补全 tooltip 后延迟多久异步写回磁盘。",
+                        "较长的延迟可以合并连续写入。范围：500-30000 毫秒。")
+                .defineInRange("diskCacheSaveDelayMs",
+                        DEFAULT_GRID_SEARCH_DISK_CACHE_SAVE_DELAY_MS, 500, 30_000);
         cl.pop();
         cl.push("distantWorlds");
         ENABLE_DISTANT_WORLDS_HUD = cl
