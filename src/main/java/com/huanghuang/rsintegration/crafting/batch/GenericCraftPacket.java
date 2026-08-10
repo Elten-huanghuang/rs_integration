@@ -1956,9 +1956,15 @@ public final class GenericCraftPacket {
             return;
         }
 
-        PureDemandTreeInspector.Result demandTree = PureDemandTreeInspector.inspect(
-                planningSnapshot.recipeGraph(), routingAvailability(planningSnapshot.availableItems()),
-                recipeId, repeatCount, RSIntegrationConfig.CRAFTING_PURE_DEMAND_MAX_NODES.get());
+        long demandTreeStarted = System.nanoTime();
+        PureDemandTreeInspector.Result demandTree;
+        try {
+            demandTree = PureDemandTreeInspector.inspect(
+                    planningSnapshot.recipeGraph(), routingAvailability(planningSnapshot.availableItems()),
+                    recipeId, repeatCount, RSIntegrationConfig.CRAFTING_PURE_DEMAND_MAX_NODES.get());
+        } finally {
+            PerformanceMonitor.recordDemandTreeInspection(System.nanoTime() - demandTreeStarted);
+        }
         boolean pureRoute = demandTree.complete()
                 && effectiveOverrides.isEmpty()
                 && !planningSnapshot.mainThreadOnly();
