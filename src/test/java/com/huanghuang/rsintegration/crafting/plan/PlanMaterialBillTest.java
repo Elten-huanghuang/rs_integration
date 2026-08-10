@@ -99,6 +99,29 @@ class PlanMaterialBillTest extends BootstrapTest {
     }
 
     @Test
+    void grossTreeDemandDoesNotTurnTaggedDisplayStackIntoStrictMaterial() {
+        ItemStack displayTemplate = new ItemStack(Items.IRON_HELMET);
+        displayTemplate.setDamageValue(10);
+        ItemStack stored = new ItemStack(Items.IRON_HELMET);
+        stored.setDamageValue(80);
+        stored.getOrCreateTag().putString("modifier", "other");
+        PlanStep targetStep = new PlanStep(TARGET_RECIPE, new ItemStack(Items.EMERALD), 1,
+                List.of(displayTemplate));
+
+        PlanMaterialBill.Result result = PlanMaterialBill.summarize(
+                Map.of(Items.IRON_HELMET, 1),
+                Map.of(Items.IRON_HELMET, Ingredient.of(displayTemplate)),
+                Map.of(Items.IRON_HELMET, 1),
+                Map.of(new StackKey(Items.IRON_HELMET, stored.getTag().toString()), 1),
+                new ItemStack(Items.EMERALD), List.of(targetStep), 1, null, false);
+
+        IngredientKey plainKey = IngredientKey.of(new ItemStack(Items.IRON_HELMET));
+        assertTrue(result.feasible());
+        assertEquals(new PlanResponse.Availability(1, 1), result.materials().get(plainKey));
+        assertEquals(1, result.materials().size());
+    }
+
+    @Test
     void reportsNonTargetOverproductionAsLeftovers() {
         PlanMaterialBill.Result result = PlanMaterialBill.summarize(
                 mapOf(Items.DIAMOND, -1, Items.GOLD_INGOT, -3),

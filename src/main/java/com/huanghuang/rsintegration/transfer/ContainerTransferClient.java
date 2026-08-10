@@ -321,7 +321,11 @@ public final class ContainerTransferClient {
         var mc = Minecraft.getInstance();
         Screen screen = mc.screen;
         if (!(screen instanceof AbstractContainerScreen<?>)) return;
-        if (screen instanceof InventoryScreen || screen instanceof CreativeModeInventoryScreen) return;
+        // F is the vanilla swap-offhand key on the player inventory and on
+        // crafting-grid/accessor screens.  Never consume it there: these
+        // screens have no external storage container for this feature, and
+        // cancelling the event breaks the normal offhand action.
+        if (isPlayerInventoryOrCraftingScreen(screen)) return;
 
         // Exclude inventory-only screens (Curios, cosmetic armor, etc.)
         // where there is no "external container" to transfer from.
@@ -355,5 +359,21 @@ public final class ContainerTransferClient {
 
         ContainerTransferNetworkHandler.CHANNEL.sendToServer(new StoreAllPacket(currentMode));
         event.setCanceled(true);
+    }
+
+    private static boolean isPlayerInventoryOrCraftingScreen(Screen screen) {
+        if (screen instanceof InventoryScreen || screen instanceof CreativeModeInventoryScreen) {
+            return true;
+        }
+
+        String className = screen.getClass().getName().toLowerCase(java.util.Locale.ROOT);
+        int separator = Math.max(className.lastIndexOf('.'), className.lastIndexOf('$'));
+        String simpleName = separator >= 0 ? className.substring(separator + 1) : className;
+        return simpleName.equals("gridscreen")
+                || simpleName.equals("craftingscreen")
+                || simpleName.contains("craftingaccessor")
+                || simpleName.contains("crafting_accessor")
+                || simpleName.contains("craftinggrid")
+                || simpleName.contains("crafting_grid");
     }
 }

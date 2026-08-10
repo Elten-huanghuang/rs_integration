@@ -41,7 +41,8 @@ public final class PlanMaterialBill {
         }
 
         Map<IngredientKey, PlanResponse.Availability> displayMaterials = buildDisplayMaterials(
-                netMaterials, itemAvailable, stackAvailable, targetOutput, steps, repeatCount, graph);
+                netMaterials, itemSources, itemAvailable, stackAvailable, targetOutput,
+                steps, repeatCount, graph);
         return new Result(feasible, displayMaterials, leftovers);
     }
 
@@ -89,6 +90,7 @@ public final class PlanMaterialBill {
 
     private static Map<IngredientKey, PlanResponse.Availability> buildDisplayMaterials(
             Map<IngredientKey, PlanResponse.Availability> netMaterials,
+            Map<Item, Ingredient> itemSources,
             Map<Item, Integer> itemAvailable,
             Map<StackKey, Integer> stackAvailable,
             ItemStack targetOutput,
@@ -107,10 +109,28 @@ public final class PlanMaterialBill {
         for (Map.Entry<IngredientKey, Integer> entry : grossDemand.entrySet()) {
             IngredientKey key = entry.getKey();
             ItemStack display = key.stack(1);
-            int have = display.hasTag()
-                    ? countExactStack(display, stackAvailable)
-                    : itemAvailable.getOrDefault(key.item(), 0);
-            displayMaterials.put(key, new PlanResponse.Availability(entry.getValue(), have));
+            Ingredient source = itemSources.get(key.item());
+            boolean nbtStrict = source != null && IngredientMatcher.requiresNbt(source);
+            int have;
+            IngredientKey materialKey = key;
+            if (source != null && !nbtStrict) {
+                // A vanilla Ingredient may expose a tagged JEI display stack while
+                // matching by item only.  Count every stored variant and collapse
+                // the material card to the semantic item identity.
+                have = itemAvailable.getOrDefault(key.item(), 0);
+                materialKey = IngredientKey.of(new ItemStack(key.item()));
+            } else if (source != null) {
+                have = countNbtMatching(source, stackAvailable);
+            } else {
+                have = display.hasTag()
+                        ? countExactStack(display, stackAvailable)
+                        : itemAvailable.getOrDefault(key.item(), 0);
+            }
+            PlanResponse.Availability availability =
+                    new PlanResponse.Availability(entry.getValue(), have);
+            displayMaterials.merge(materialKey, availability, (left, right) ->
+                    new PlanResponse.Availability(left.needed() + right.needed(),
+                            Math.max(left.available(), right.available())));
         }
         for (Map.Entry<IngredientKey, PlanResponse.Availability> entry : netMaterials.entrySet()) {
             displayMaterials.putIfAbsent(entry.getKey(), entry.getValue());
