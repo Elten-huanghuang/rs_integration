@@ -509,6 +509,7 @@ public final class RSIntegrationMod {
         }
 
         // Binding tooltip handler
+        com.huanghuang.rsintegration.network.binding.NearbyBindingRequestPacket.register();
         DistExecutor.safeRunWhenOn(Dist.CLIENT,
                 () -> () -> MinecraftForge.EVENT_BUS.register(BindingTooltipHandler.class));
         DistExecutor.safeRunWhenOn(Dist.CLIENT,

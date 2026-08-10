@@ -35,6 +35,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 @Mod.EventBusSubscriber(modid = RSIntegrationMod.MOD_ID, bus = Mod.EventBusSubscriber.Bus.FORGE)
@@ -63,14 +64,7 @@ public final class BindingEventHandler {
         Block block = event.getLevel().getBlockState(event.getPos()).getBlock();
         String className = block.getClass().getName();
 
-        MachineBindingTarget matched = null;
-        for (MachineBindingTarget target : TARGETS) {
-            if (!target.configFlag.get()) continue;
-            if (!target.modId.equals("minecraft") && !ModList.get().isLoaded(target.modId)) continue;
-            if (!target.matches(block, className)) continue;
-            matched = target;
-            break;
-        }
+        MachineBindingTarget matched = findEnabledTarget(block);
 
         if (matched == null) {
             RSIntegrationMod.LOGGER.debug("[RSI-Bind] No match: class={} regName={}",
@@ -207,6 +201,133 @@ public final class BindingEventHandler {
         }
         event.setCanceled(true);
     }
+
+    static boolean isPotentialNearbyTarget(Block block) {
+        if (isEnabledRegisteredTarget(block)) return true;
+        ResourceLocation id = ForgeRegistries.BLOCKS.getKey(block);
+        return id != null && RSIntegrationConfig.CUSTOM_GUI_MACHINE_MODS.get().stream()
+                .anyMatch(id.getNamespace()::equals);
+    }
+
+    static boolean isEnabledRegisteredTarget(Block block) {
+        return findEnabledTarget(block) != null;
+    }
+
+    @Nullable
+    static NearbyTarget prepareNearbyTarget(net.minecraft.server.level.ServerLevel level,
+                                            BlockPos clickedPos) {
+        Block block = level.getBlockState(clickedPos).getBlock();
+        String className = block.getClass().getName();
+        MachineBindingTarget target = findEnabledTarget(block);
+        if (target == null) {
+            ResourceLocation id = ForgeRegistries.BLOCKS.getKey(block);
+            if (id == null || !RSIntegrationConfig.CUSTOM_GUI_MACHINE_MODS.get().stream()
+                    .anyMatch(id.getNamespace()::equals)) {
+                return null;
+            }
+            BlockEntity be = level.getBlockEntity(clickedPos);
+            if (!(be instanceof MenuProvider)) return null;
+            target = new MachineBindingTarget(id.getNamespace(), ModType.byId("custom_gui"),
+                    RSIntegrationConfig.ENABLE_MACHINE_GUI_TABS, List.of(), null,
+                    true);
+        }
+
+        BlockPos rootPos = resolveRootPos(level, clickedPos, block, className);
+        if ("goety_cursed_infuser".equals(target.modType.id())
+                && !level.getBlockState(rootPos.below())
+                .is(net.minecraft.world.level.block.Blocks.SPAWNER)) {
+            return null;
+        }
+        if ("forbidden_arcanus_clibano".equals(target.modType.id())
+                && rootPos.equals(clickedPos)
+                && !className.equals(
+                "com.stal111.forbidden_arcanus.common.block.ClibanoMainPartBlock")) {
+            return null;
+        }
+
+        if (!rootPos.equals(clickedPos)) {
+            MachineBindingTarget rootTarget = findEnabledTarget(
+                    level.getBlockState(rootPos).getBlock());
+            if (rootTarget != null) target = rootTarget;
+        }
+        return new NearbyTarget(rootPos.immutable(), target);
+    }
+
+    static NearbyBindResult bindNearbyTarget(ServerPlayer player,
+                                             net.minecraft.server.level.ServerLevel level,
+                                             ItemStack connector,
+                                             AltarBinding networkBinding,
+                                             NearbyTarget nearbyTarget,
+                                             Set<BlockPos> knownPlayerBindings) {
+        BlockPos pos = nearbyTarget.rootPos();
+        BlockState state = level.getBlockState(pos);
+        Block block = state.getBlock();
+        MachineBindingTarget target = nearbyTarget.target();
+        MachineBindingTarget currentTarget = findEnabledTarget(block);
+        if (currentTarget != null) target = currentTarget;
+
+        BlockEntity be = level.getBlockEntity(pos);
+        String blockKey = target.blockKey(block);
+        if ("ironfurnaces_furnace".equals(target.modType.id())
+                && be != null && isIronFurnace(be)) {
+            blockKey = ironFurnacePrefix(be) + "||" + block.getDescriptionId();
+        }
+        ResourceLocation blockId = ForgeRegistries.BLOCKS.getKey(block);
+        String blockRegKey = blockId != null ? blockId.toString() : null;
+        ItemStack displayStack = createDisplayStack(level, pos, state, be);
+        ResourceLocation dim = level.dimension().location();
+
+        synchronized (BINDING_LOCK) {
+            if (knownPlayerBindings.contains(pos)
+                    || BindingStorage.hasBinding(connector, dim, pos)
+                    || AltarBindingRegistry.isBound(level.dimension(), pos)) {
+                return NearbyBindResult.ALREADY_BOUND;
+            }
+            if (!BindingStorage.addBinding(
+                    connector, dim, pos, blockKey, blockRegKey, displayStack)) {
+                return NearbyBindResult.ALREADY_BOUND;
+            }
+            AltarBindingRegistry.bind(level.dimension(), pos,
+                    new AltarBinding(networkBinding.type(), networkBinding.displayName(),
+                            networkBinding.data().copy()));
+            knownPlayerBindings.add(pos);
+            return NearbyBindResult.BOUND;
+        }
+    }
+
+    private static MachineBindingTarget findEnabledTarget(Block block) {
+        String className = block.getClass().getName();
+        for (MachineBindingTarget target : TARGETS) {
+            if (!target.configFlag.get()) continue;
+            if (!target.modId.equals("minecraft") && !ModList.get().isLoaded(target.modId)) continue;
+            if (target.matches(block, className)) return target;
+        }
+        return null;
+    }
+
+    private static ItemStack createDisplayStack(Level level, BlockPos pos, BlockState state,
+                                                 @Nullable BlockEntity be) {
+        ItemStack displayStack = state.getBlock().getCloneItemStack(level, pos, state);
+        if (be == null || displayStack.isEmpty()
+                || !be.getClass().getName().contains("GunSmithTable")) {
+            return displayStack;
+        }
+        net.minecraft.nbt.CompoundTag beData = be.saveWithoutMetadata();
+        if (beData.isEmpty()) return displayStack;
+        beData.remove("Items");
+        beData.remove("Inventory");
+        beData.remove("inventory");
+        beData.remove("Energy");
+        displayStack.getOrCreateTag().put("BlockEntityTag", beData);
+        if (beData.contains("BlockId", net.minecraft.nbt.Tag.TAG_STRING)) {
+            displayStack.getOrCreateTag().putString("BlockId", beData.getString("BlockId"));
+        }
+        return displayStack;
+    }
+
+    record NearbyTarget(BlockPos rootPos, MachineBindingTarget target) {}
+
+    enum NearbyBindResult { BOUND, ALREADY_BOUND }
 
     private static boolean isIronFurnace(BlockEntity be) {
         Class<?> type = be.getClass();
@@ -645,7 +766,7 @@ public final class BindingEventHandler {
         return null;
     }
 
-    private static void sendBindingRefresh(ServerPlayer player) {
+    static void sendBindingRefresh(ServerPlayer player) {
         try {
             RSSidePanelNetworkHandler.sendBindingSync(player);
         } catch (Exception e) {

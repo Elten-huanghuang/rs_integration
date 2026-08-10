@@ -96,4 +96,7 @@ public final class NetworkPacketIds {
     public static final int REFORGING_RESTOCK_RESULT = 123;
     public static final int ANVIL_MEMORY_REQUEST = 124;
     public static final int ANVIL_MEMORY_SYNC = 125;
+
+    // Nearby machine binding (126-129)
+    public static final int NEARBY_BINDING_REQUEST = 126;
 }
