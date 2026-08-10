@@ -50,6 +50,11 @@ public final class RSIntegrationConfig {
 
     //  master switches
     public static ForgeConfigSpec.BooleanValue ENABLE_BINDING;
+    public static ForgeConfigSpec.IntValue NEARBY_BINDING_HORIZONTAL_RADIUS;
+    public static ForgeConfigSpec.IntValue NEARBY_BINDING_VERTICAL_RADIUS;
+    public static ForgeConfigSpec.IntValue NEARBY_BINDING_MAX_MACHINES;
+    public static ForgeConfigSpec.IntValue NEARBY_BINDING_TICK_BUDGET_MICROS;
+    public static ForgeConfigSpec.IntValue NEARBY_BINDING_COOLDOWN_MS;
     public static ForgeConfigSpec.BooleanValue ENABLE_AUTO_CRAFTING;
     public static ForgeConfigSpec.BooleanValue ENABLE_MULTIBLOCK_AUTO_CRAFTING;
     public static ForgeConfigSpec.ConfigValue<List<? extends String>> PREFERRED_RECIPES;
@@ -195,6 +200,26 @@ public final class RSIntegrationConfig {
                 .comment("Master switch for all block-binding features (Shift+Right-click to bind RS networks to machines).",
                         "Disabling this turns off all binding-related functionality regardless of per-mod settings.")
                 .define("enableBinding", true);
+        NEARBY_BINDING_HORIZONTAL_RADIUS = c
+                .comment("Horizontal radius for the one-shot nearby machine binding key.",
+                        "Only loaded chunks are scanned. Range: 1-64 blocks.")
+                .defineInRange("nearbyBindingHorizontalRadius", 24, 1, 64);
+        NEARBY_BINDING_VERTICAL_RADIUS = c
+                .comment("Vertical radius above and below the player for nearby machine binding.",
+                        "Keeping this lower than the horizontal radius avoids scanning unused height. Range: 1-24 blocks.")
+                .defineInRange("nearbyBindingVerticalRadius", 12, 1, 24);
+        NEARBY_BINDING_MAX_MACHINES = c
+                .comment("Maximum machines bound by one nearby binding operation.",
+                        "Prevents excessive connector NBT growth. Range: 1-128.")
+                .defineInRange("nearbyBindingMaxMachines", 128, 1, 128);
+        NEARBY_BINDING_TICK_BUDGET_MICROS = c
+                .comment("Maximum server-thread time used by nearby binding per tick.",
+                        "The scan continues on later ticks when this budget is reached. Range: 100-5000 microseconds.")
+                .defineInRange("nearbyBindingTickBudgetMicros", 1000, 100, 5000);
+        NEARBY_BINDING_COOLDOWN_MS = c
+                .comment("Cooldown between nearby binding requests from the same player.",
+                        "Range: 250-10000 milliseconds.")
+                .defineInRange("nearbyBindingCooldownMs", 2000, 250, 10000);
         ENABLE_AUTO_CRAFTING = c
                 .comment("Allow the mod to automatically craft intermediate items via the RS network when direct materials are missing.",
                         "Disabling this means recipes will simply fail if all items are not already present.")
