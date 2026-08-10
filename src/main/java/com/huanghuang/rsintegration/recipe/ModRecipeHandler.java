@@ -60,4 +60,14 @@ public interface ModRecipeHandler {
     default boolean hasDeterministicPrimaryOutput(@Nonnull Recipe<?> recipe) {
         return true;
     }
+
+    /**
+     * Whether the primary result should be exposed as a recursive item producer.
+     * Some recipes use a JEI-only placeholder for an entity/fluid/world action;
+     * those recipes may still be previewable, but the placeholder must not enter
+     * the item recipe index.
+     */
+    default boolean indexPrimaryOutput(@Nonnull Recipe<?> recipe) {
+        return true;
+    }
 }

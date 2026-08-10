@@ -336,14 +336,29 @@ public final class SteamerBatchDelegate extends AbstractBatchDelegate {
     private boolean hasLid(BlockEntity be) {
         List<?> racks = getRacks(be);
         if (racks == null) return false;
-        // Scan upward from the pot base to find the lid -- don't assume an exact
-        // offset because the number of racks may not match racks.size().
-        BlockPos checkPos = potBasePos.above();
-        for (int i = 0; i < 5; i++) {
+
+        // YHK stores a lid in CAPPED on compact stacks. Only a full-height
+        // stack places a separate steamer_lid block above the structure.
+        List<SteamerStructurePolicy.Layer> layers = new ArrayList<>();
+        BlockPos checkPos = potBasePos;
+        for (int i = 0; i < 6; i++) {
             BlockState state = myLevel.getBlockState(checkPos);
             ResourceLocation key = BuiltInRegistries.BLOCK.getKey(state.getBlock());
-            if (KEY_LID.equals(key)) return true;
+            boolean structural = KEY_POT.equals(key) || KEY_RACK.equals(key);
+            layers.add(new SteamerStructurePolicy.Layer(
+                    structural, KEY_LID.equals(key), structural && isCapped(state)));
+            if (!structural) break;
             checkPos = checkPos.above();
+        }
+        return SteamerStructurePolicy.hasLid(layers);
+    }
+
+    private static boolean isCapped(BlockState state) {
+        for (var property : state.getProperties()) {
+            if (property instanceof BooleanProperty booleanProperty
+                    && "capped".equalsIgnoreCase(property.getName())) {
+                return state.getValue(booleanProperty);
+            }
         }
         return false;
     }

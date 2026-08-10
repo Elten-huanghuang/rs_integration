@@ -14,6 +14,7 @@ import com.huanghuang.rsintegration.mods.pmmo.PmmoRSModule;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.command.PerformanceMonitor;
+import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraphProjector;
 import com.huanghuang.rsintegration.util.Diagnostics;
@@ -50,7 +51,18 @@ public final class RecipeIndex {
         }
     }
 
+    public record ReusableCatalystRoute(ResourceLocation recipeId, ItemStack output,
+                                        List<IngredientSpec> specs) {
+        public ReusableCatalystRoute {
+            output = output.copy();
+            specs = List.copyOf(specs);
+        }
+    }
+
     private static volatile Map<Item, List<Entry>> index;
+    private static volatile Map<Item, List<ReusableCatalystRoute>> reusableCatalystRoutes = Map.of();
+    private static volatile Set<ResourceLocation> reusableCatalystOutputIds = Set.of();
+    private static volatile Set<ResourceLocation> reusableCatalystRecipeIds = Set.of();
     private static volatile RecipeManager source;
     private static volatile long sourceRevision;
     private static volatile boolean generationBuildFailed;
@@ -116,6 +128,9 @@ public final class RecipeIndex {
             Set<ResourceLocation> seen = new HashSet<>();
             Map<ImmutableRecipeGraph.MaterialRef, List<ImmutableRecipeGraph.RecipeNode>> projected =
                     new HashMap<>();
+            Set<ResourceLocation> catalystOutputIds = new LinkedHashSet<>();
+            Set<ResourceLocation> catalystRecipeIds = new LinkedHashSet<>();
+            Map<Item, List<ReusableCatalystRoute>> catalystRoutes = new HashMap<>();
             BuildTiming timing = new BuildTiming();
             int skippedUnknown = 0, skippedEmptyResult = 0, skippedIdentity = 0;
 
@@ -123,7 +138,8 @@ public final class RecipeIndex {
             // ordinary crafting, but removing an alternative here makes it vanish from recursion.
             for (Recipe<?> recipe : rm.getRecipes()) {
                 long recipeStarted = System.nanoTime();
-                IndexOutcome outcome = indexRecipe(level, idx, seen, projected, timing, recipe);
+                IndexOutcome outcome = indexRecipe(level, idx, seen, projected,
+                        catalystOutputIds, catalystRecipeIds, catalystRoutes, timing, recipe);
                 timing.recordRecipe(recipe, System.nanoTime() - recipeStarted);
                 if (outcome == IndexOutcome.UNKNOWN) skippedUnknown++;
                 else if (outcome == IndexOutcome.EMPTY_RESULT) skippedEmptyResult++;
@@ -146,6 +162,9 @@ public final class RecipeIndex {
             Map<Item, List<Entry>> publishedIndex = freezeIndex(idx);
             ImmutableRecipeGraph graph = new ImmutableRecipeGraph(projected);
             ImmutableRecipeGraphProjector.publishCompiled(rm, revision, graph, timing.graphNanos);
+            reusableCatalystOutputIds = Set.copyOf(catalystOutputIds);
+            reusableCatalystRecipeIds = Set.copyOf(catalystRecipeIds);
+            reusableCatalystRoutes = freezeCatalystRoutes(catalystRoutes);
             index = publishedIndex;
             source = rm;
             sourceRevision = revision;
@@ -179,6 +198,9 @@ public final class RecipeIndex {
                                             Set<ResourceLocation> seen,
                                             Map<ImmutableRecipeGraph.MaterialRef,
                                                     List<ImmutableRecipeGraph.RecipeNode>> projected,
+                                            Set<ResourceLocation> catalystOutputIds,
+                                            Set<ResourceLocation> catalystRecipeIds,
+                                            Map<Item, List<ReusableCatalystRoute>> catalystRoutes,
                                             BuildTiming timing, Recipe<?> recipe) {
         if (!seen.add(recipe.getId())) return IndexOutcome.DUPLICATE;
 
@@ -188,6 +210,7 @@ public final class RecipeIndex {
         if (handler != null) {
             type = ModType.classifyRecipe(recipe);
             if (type == null) type = handler.modType();
+            if (!handler.indexPrimaryOutput(recipe)) return IndexOutcome.EMPTY_RESULT;
             result = ModRecipeHandlers.tryGetResultItem(recipe, level.registryAccess());
         } else if (recipe instanceof CraftingRecipe crafting
                 && ModType.classifyRecipe(recipe) == null) {
@@ -209,10 +232,22 @@ public final class RecipeIndex {
 
         Entry entry = new Entry(recipe, type, typeId);
         target.computeIfAbsent(result.getItem(), key -> new ArrayList<>()).add(entry);
+        List<IngredientSpec> craftingSpecs = null;
+        if (recipe instanceof CraftingRecipe crafting) {
+            craftingSpecs = CraftPacketUtils.extractCraftingIngredientSpecs(crafting);
+            if (craftingSpecs.stream().anyMatch(spec -> spec.role() == DemandRole.CATALYST)) {
+                ResourceLocation outputId = ForgeRegistries.ITEMS.getKey(result.getItem());
+                if (outputId != null) catalystOutputIds.add(outputId);
+                catalystRecipeIds.add(recipe.getId());
+                catalystRoutes.computeIfAbsent(result.getItem(), ignored -> new ArrayList<>())
+                        .add(new ReusableCatalystRoute(recipe.getId(), result, craftingSpecs));
+            }
+        }
         if (type == ModType.GENERIC && recipe instanceof CraftingRecipe crafting) {
             long graphStarted = System.nanoTime();
             ImmutableRecipeGraph.RecipeNode node =
-                    ImmutableRecipeGraphProjector.projectCraftingRecipe(crafting, result);
+                    ImmutableRecipeGraphProjector.projectCraftingRecipe(
+                            crafting, result, craftingSpecs);
             timing.graphNanos += System.nanoTime() - graphStarted;
             if (node != null) {
                 projected.computeIfAbsent(node.output(), ignored -> new ArrayList<>()).add(node);
@@ -232,6 +267,30 @@ public final class RecipeIndex {
         Map<Item, List<Entry>> frozen = new HashMap<>(mutable.size());
         mutable.forEach((item, entries) -> frozen.put(item, List.copyOf(entries)));
         return Map.copyOf(frozen);
+    }
+
+    private static Map<Item, List<ReusableCatalystRoute>> freezeCatalystRoutes(
+            Map<Item, List<ReusableCatalystRoute>> mutable) {
+        Map<Item, List<ReusableCatalystRoute>> frozen = new HashMap<>(mutable.size());
+        mutable.forEach((item, routes) -> frozen.put(item, List.copyOf(routes)));
+        return Map.copyOf(frozen);
+    }
+
+    /** Outputs with at least one indexed producer that uses a reusable catalyst. */
+    public static Set<ResourceLocation> reusableCatalystOutputIds(Level level) {
+        get(level);
+        return reusableCatalystOutputIds;
+    }
+
+    /** Indexed crafting recipes containing at least one reusable catalyst input. */
+    public static Set<ResourceLocation> reusableCatalystRecipeIds(Level level) {
+        get(level);
+        return reusableCatalystRecipeIds;
+    }
+
+    public static Map<Item, List<ReusableCatalystRoute>> reusableCatalystRoutes(Level level) {
+        get(level);
+        return reusableCatalystRoutes;
     }
 
     private static final class BuildTiming {
@@ -603,6 +662,9 @@ public final class RecipeIndex {
     public static void invalidate() {
         synchronized (RecipeIndex.class) {
             index = null;
+            reusableCatalystRoutes = Map.of();
+            reusableCatalystOutputIds = Set.of();
+            reusableCatalystRecipeIds = Set.of();
             source = null;
             sourceRevision = 0L;
             generationBuildFailed = false;

@@ -197,6 +197,18 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
         if (mixinClassName.contains("jei.RecipesGuiMixin")) {
             return hasMethod(targetClassName, "updateLayout");
         }
+        if (mixinClassName.contains("jei.IngredientFilterSolCarrotMixin")) {
+            return hasField(targetClassName, "ingredientListCached")
+                    && hasMethod(targetClassName, "notifyListenersOfChange");
+        }
+        if (mixinClassName.contains("jei.ElementSearchSolCarrotMixin")) {
+            return hasField(targetClassName, "allElements")
+                    && hasMethod(targetClassName, "getSearchResults");
+        }
+        if (mixinClassName.contains("jei.ElementSearchLowMemSolCarrotMixin")) {
+            return hasField(targetClassName, "elementInfoList")
+                    && hasMethod(targetClassName, "getSearchResults");
+        }
         if (mixinClassName.contains("refinedstorage.CraftingTaskAccessor")) {
             return hasField(targetClassName, "network");
         }

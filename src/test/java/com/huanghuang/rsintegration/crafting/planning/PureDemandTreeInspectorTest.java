@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -161,6 +162,54 @@ class PureDemandTreeInspectorTest {
 
         assertFalse(result.complete());
         assertEquals(PureDemandTreeInspector.Status.TARGET_NOT_PROJECTED, result.status());
+    }
+
+    @Test
+    void detectsCatalystBackedAlternativeEvenWhenDirectRecipeIsCompletable() {
+        MaterialRef block = material("iron_block");
+        MaterialRef nugget = material("iron_nugget");
+        MaterialRef ingot = material("iron_ingot");
+        RecipeNode direct = recipe("ingots_from_block", ingot, 9, ingredient(block, 1));
+        RecipeNode compress = recipe("ingot_from_nuggets", ingot, 1, ingredient(nugget, 9));
+        RecipeNode target = recipe("door", material("iron_door"), 1, ingredient(ingot, 6));
+
+        var result = PureDemandTreeInspector.inspect(graph(direct, compress, target),
+                Map.of(block, 1), target.recipeId(), 1, 64, Set.of(nugget.itemId()));
+
+        assertTrue(result.complete());
+        assertTrue(result.catalystRouteAvailable());
+    }
+
+    @Test
+    void stockedCatalystOutputKeepsPureRoute() {
+        MaterialRef block = material("iron_block");
+        MaterialRef nugget = material("iron_nugget");
+        MaterialRef ingot = material("iron_ingot");
+        RecipeNode direct = recipe("ingots_from_block", ingot, 9, ingredient(block, 1));
+        RecipeNode compress = recipe("ingot_from_nuggets", ingot, 1, ingredient(nugget, 9));
+        RecipeNode target = recipe("door", material("iron_door"), 1, ingredient(ingot, 6));
+
+        var result = PureDemandTreeInspector.inspect(graph(direct, compress, target),
+                Map.of(block, 1, nugget, 54), target.recipeId(), 1, 64,
+                Set.of(nugget.itemId()));
+
+        assertTrue(result.complete());
+        assertFalse(result.catalystRouteAvailable());
+    }
+
+    @Test
+    void targetRecipeWithReusableCatalystRoutesTypedEvenWhenInputsAreStocked() {
+        MaterialRef catalyst = material("catalyst");
+        MaterialRef cost = material("cost");
+        RecipeNode target = recipe("copy", material("result"), 3,
+                ingredient(catalyst, 1), ingredient(cost, 1));
+
+        var result = PureDemandTreeInspector.inspect(graph(target),
+                Map.of(catalyst, 1, cost, 1), target.recipeId(), 1, 64,
+                Set.of(), Set.of(target.recipeId()));
+
+        assertTrue(result.complete());
+        assertTrue(result.catalystRouteAvailable());
     }
 
     private static ImmutableRecipeGraph graph(RecipeNode... recipes) {

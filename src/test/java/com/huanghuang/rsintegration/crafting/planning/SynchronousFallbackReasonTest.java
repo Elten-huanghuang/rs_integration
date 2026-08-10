@@ -24,6 +24,9 @@ class SynchronousFallbackReasonTest {
         assertEquals(SynchronousFallbackReason.INCOMPLETE_DEMAND_TREE,
                 SynchronousFallbackReason.whenPureRouteUnavailable(false, false, false)
                         .orElseThrow());
+        assertEquals(SynchronousFallbackReason.CATALYST_ROUTE,
+                SynchronousFallbackReason.whenPureRouteUnavailable(
+                        false, false, true, true).orElseThrow());
         assertTrue(SynchronousFallbackReason.whenPureRouteUnavailable(false, false, true)
                 .isEmpty());
     }

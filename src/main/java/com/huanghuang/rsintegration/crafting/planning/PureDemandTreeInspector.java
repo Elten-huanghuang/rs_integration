@@ -31,22 +31,52 @@ public final class PureDemandTreeInspector {
                                  ResourceLocation targetRecipeId,
                                  int repeatCount,
                                  int maxNodes) {
-        RecipeNode target = graph.recipesById().get(targetRecipeId);
-        if (target == null) return new Result(Status.TARGET_NOT_PROJECTED, 0, null);
+        return inspect(graph, available, targetRecipeId, repeatCount, maxNodes, Set.of());
+    }
 
-        Walker walker = new Walker(graph, available, Math.max(1, maxNodes));
+    public static Result inspect(ImmutableRecipeGraph graph,
+                                 Map<MaterialRef, Integer> available,
+                                 ResourceLocation targetRecipeId,
+                                 int repeatCount,
+                                 int maxNodes,
+                                 Set<ResourceLocation> reusableCatalystOutputIds) {
+        return inspect(graph, available, targetRecipeId, repeatCount, maxNodes,
+                reusableCatalystOutputIds, Set.of());
+    }
+
+    public static Result inspect(ImmutableRecipeGraph graph,
+                                 Map<MaterialRef, Integer> available,
+                                 ResourceLocation targetRecipeId,
+                                 int repeatCount,
+                                 int maxNodes,
+                                 Set<ResourceLocation> reusableCatalystOutputIds,
+                                 Set<ResourceLocation> reusableCatalystRecipeIds) {
+        boolean targetUsesReusableCatalyst = reusableCatalystRecipeIds != null
+                && reusableCatalystRecipeIds.contains(targetRecipeId);
+        RecipeNode target = graph.recipesById().get(targetRecipeId);
+        if (target == null) {
+            return new Result(Status.TARGET_NOT_PROJECTED, 0, null,
+                    targetUsesReusableCatalyst);
+        }
+
+        Walker walker = new Walker(graph, available, Math.max(1, maxNodes),
+                reusableCatalystOutputIds);
+        walker.catalystRouteAvailable = targetUsesReusableCatalyst;
         int multiplier = Math.max(1, repeatCount);
         for (IngredientRef input : target.inputs()) {
             long scaled = (long) input.count() * multiplier;
             if (scaled > Integer.MAX_VALUE) {
-                return new Result(Status.INCOMPLETE, walker.visitedNodes, first(input));
+                return new Result(Status.INCOMPLETE, walker.visitedNodes, first(input),
+                        walker.catalystRouteAvailable);
             }
             if (!walker.coverIngredient(new IngredientRef(input.alternatives(), (int) scaled))) {
                 Status status = walker.nodeLimitReached ? Status.NODE_LIMIT : Status.INCOMPLETE;
-                return new Result(status, walker.visitedNodes, walker.firstUnresolved);
+                return new Result(status, walker.visitedNodes, walker.firstUnresolved,
+                        walker.catalystRouteAvailable);
             }
         }
-        return new Result(Status.COMPLETE, walker.visitedNodes, null);
+        return new Result(Status.COMPLETE, walker.visitedNodes, null,
+                walker.catalystRouteAvailable);
     }
 
     private static MaterialRef first(IngredientRef ingredient) {
@@ -60,7 +90,8 @@ public final class PureDemandTreeInspector {
         NODE_LIMIT
     }
 
-    public record Result(Status status, int visitedNodes, @Nullable MaterialRef unresolved) {
+    public record Result(Status status, int visitedNodes, @Nullable MaterialRef unresolved,
+                         boolean catalystRouteAvailable) {
         public boolean complete() {
             return status == Status.COMPLETE;
         }
@@ -70,19 +101,24 @@ public final class PureDemandTreeInspector {
         private final ImmutableRecipeGraph graph;
         private final Ledger ledger;
         private final Set<MaterialRef> visiting = new HashSet<>();
+        private final Set<ResourceLocation> reusableCatalystOutputIds;
         private final int maxNodes;
         private int visitedNodes;
         private boolean nodeLimitReached;
+        private boolean catalystRouteAvailable;
         private MaterialRef firstUnresolved;
 
         private Walker(ImmutableRecipeGraph graph, Map<MaterialRef, Integer> available,
-                       int maxNodes) {
+                       int maxNodes, Set<ResourceLocation> reusableCatalystOutputIds) {
             this.graph = graph;
             this.ledger = new Ledger(available);
             this.maxNodes = maxNodes;
+            this.reusableCatalystOutputIds = reusableCatalystOutputIds == null
+                    ? Set.of() : reusableCatalystOutputIds;
         }
 
         private boolean coverIngredient(IngredientRef ingredient) {
+            noteCatalystOpportunity(ingredient);
             int mark = ledger.mark();
             if (consumeAcrossAlternatives(ingredient) == 0) return true;
 
@@ -142,6 +178,7 @@ public final class PureDemandTreeInspector {
             int mark = ledger.mark();
             visiting.add(material);
             try {
+                noteCatalystAlternatives(candidates, count);
                 for (RecipeNode candidate : candidates) {
                     ledger.rollback(mark);
                     long batches = ((long) count + candidate.outputCount() - 1L)
@@ -166,6 +203,44 @@ public final class PureDemandTreeInspector {
             }
             ledger.rollback(mark);
             return false;
+        }
+
+        private void noteCatalystAlternatives(List<RecipeNode> candidates, int count) {
+            if (reusableCatalystOutputIds.isEmpty()) return;
+            for (RecipeNode candidate : candidates) {
+                long batches = ((long) count + candidate.outputCount() - 1L)
+                        / candidate.outputCount();
+                if (batches <= 0L || batches > Integer.MAX_VALUE) continue;
+
+                int mark = ledger.mark();
+                try {
+                    for (IngredientRef input : candidate.inputs()) {
+                        long scaled = (long) input.count() * batches;
+                        if (scaled > Integer.MAX_VALUE) break;
+                        IngredientRef demand = new IngredientRef(input.alternatives(), (int) scaled);
+                        int remaining = consumeAcrossAlternatives(demand);
+                        if (remaining > 0 && containsReusableCatalystOutput(demand)) {
+                            catalystRouteAvailable = true;
+                            return;
+                        }
+                    }
+                } finally {
+                    ledger.rollback(mark);
+                }
+            }
+        }
+
+        private void noteCatalystOpportunity(IngredientRef ingredient) {
+            if (catalystRouteAvailable || reusableCatalystOutputIds.isEmpty()) return;
+            if (ledger.countAcrossAlternatives(ingredient) < ingredient.count()
+                    && containsReusableCatalystOutput(ingredient)) {
+                catalystRouteAvailable = true;
+            }
+        }
+
+        private boolean containsReusableCatalystOutput(IngredientRef ingredient) {
+            return ingredient.alternatives().stream()
+                    .anyMatch(material -> reusableCatalystOutputIds.contains(material.itemId()));
         }
 
         private static boolean matchesAny(MaterialRef stocked, List<MaterialRef> alternatives) {
@@ -204,6 +279,17 @@ public final class PureDemandTreeInspector {
 
             private int count(MaterialRef material) {
                 return stock.getOrDefault(material, 0);
+            }
+
+            private int countAcrossAlternatives(IngredientRef ingredient) {
+                int remaining = ingredient.count();
+                for (MaterialRef stocked : order) {
+                    int available = count(stocked);
+                    if (available <= 0 || !matchesAny(stocked, ingredient.alternatives())) continue;
+                    remaining -= Math.min(available, remaining);
+                    if (remaining == 0) break;
+                }
+                return ingredient.count() - remaining;
             }
 
             private List<MaterialRef> byItem(ResourceLocation itemId) {

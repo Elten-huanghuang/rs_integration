@@ -22,7 +22,6 @@ public class ModGridFilterMixin {
             at = @At("HEAD"), cancellable = true)
     private void rsi$cachedModTest(IGridStack stack, CallbackInfoReturnable<Boolean> cir) {
         UUID id = stack.getId();
-        String cached = RSGridSearchCache.getMod(id, stack);
-        cir.setReturnValue(cached.contains(this.inputModName));
+        cir.setReturnValue(RSGridSearchCache.matchesMod(id, this.inputModName));
     }
 }

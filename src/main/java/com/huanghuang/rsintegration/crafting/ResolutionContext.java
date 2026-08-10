@@ -48,6 +48,7 @@ final class ResolutionContext {
 
     final Level level;
     final Map<Item, List<RecipeIndex.Entry>> index;
+    final Map<Item, List<RecipeIndex.ReusableCatalystRoute>> reusableCatalystRoutes;
     final Map<CraftingResolver.StackKey, Integer> counts;
     final List<CraftingResolver.ResolutionStep> steps;
     final Set<String> resolving;
@@ -109,6 +110,8 @@ final class ResolutionContext {
                       @Nullable INetwork network) {
         this.level = level;
         this.index = index;
+        this.reusableCatalystRoutes = level == null
+                ? Map.of() : RecipeIndex.reusableCatalystRoutes(level);
         this.counts = new LinkedHashMap<>();
         this.steps = new ArrayList<>();
         this.resolving = new HashSet<>();
@@ -171,6 +174,8 @@ final class ResolutionContext {
                       boolean abortOnTimeout) {
         this.level = level;
         this.index = index;
+        this.reusableCatalystRoutes = level == null
+                ? Map.of() : RecipeIndex.reusableCatalystRoutes(level);
         this.counts = new LinkedHashMap<>(keyedCounts);
         this.steps = new ArrayList<>();
         this.resolving = new HashSet<>();

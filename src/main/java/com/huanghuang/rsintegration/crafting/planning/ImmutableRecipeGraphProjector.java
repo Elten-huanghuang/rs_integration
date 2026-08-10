@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.crafting.CraftPlanningRevision;
 import com.huanghuang.rsintegration.crafting.IngredientMatcher;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.RecipeIndex;
+import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.command.PerformanceMonitor;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.IngredientRef;
@@ -69,8 +70,14 @@ public final class ImmutableRecipeGraphProjector {
     /** Captures one ordinary crafting recipe without invoking generic reflective extraction. */
     @Nullable
     public static RecipeNode projectCraftingRecipe(CraftingRecipe recipe, ItemStack output) {
+        return projectCraftingRecipe(recipe, output,
+                CraftPacketUtils.extractCraftingIngredientSpecs(recipe));
+    }
+
+    @Nullable
+    public static RecipeNode projectCraftingRecipe(CraftingRecipe recipe, ItemStack output,
+                                                    List<IngredientSpec> specs) {
         if (output.isEmpty()) return null;
-        List<IngredientSpec> specs = CraftPacketUtils.extractCraftingIngredientSpecs(recipe);
         List<IngredientRef> inputs = new ArrayList<>();
         for (IngredientSpec spec : specs) {
             if (spec.isEmpty()) continue;
@@ -104,6 +111,9 @@ public final class ImmutableRecipeGraphProjector {
     }
 
     public static IngredientRef projectIngredient(IngredientSpec spec) {
+        // The pure graph has no role field, so projecting reusable/transformed inputs
+        // would silently turn them into per-execution consumables.
+        if (spec.role() != DemandRole.CONSUMED) return null;
         Ingredient ingredient = spec.ingredient();
         boolean strictNbt = IngredientMatcher.requiresNbt(ingredient);
         Set<MaterialRef> alternatives = new LinkedHashSet<>();

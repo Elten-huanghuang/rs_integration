@@ -9,6 +9,7 @@ import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.network.binding.BindingStorage;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.ResolutionStep;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
+import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.util.CraftLogContext;
@@ -57,6 +58,7 @@ public final class CraftPacketUtils {
 
     private static final Map<ResourceLocation, List<Ingredient>> ingredientCache = new ConcurrentHashMap<>();
     private static final Set<ResourceLocation> emptyIngredientMarkers = ConcurrentHashMap.newKeySet();
+    private static final Map<Ingredient, DemandRole> craftingDemandRoleCache = new ConcurrentHashMap<>();
     /** Caches the ingredient-list Field per recipe class for scanAllFieldsForIngredients. */
     private static final Map<Class<?>, java.lang.reflect.Field> ingredientFieldCache = new ConcurrentHashMap<>();
     private static final java.lang.reflect.Field NO_INGREDIENT_FIELD;
@@ -82,6 +84,7 @@ public final class CraftPacketUtils {
     public static void clearIngredientCache() {
         ingredientCache.clear();
         emptyIngredientMarkers.clear();
+        craftingDemandRoleCache.clear();
         ingredientFieldCache.clear();
         methodAbsenceMarkers.clear();
     }
@@ -1019,19 +1022,75 @@ public final class CraftPacketUtils {
         if (craftTweakerSpecs != null) return craftTweakerSpecs;
         return recipe.getIngredients().stream()
                 .map(ingredient -> ingredient.isEmpty()
-                        ? IngredientSpec.EMPTY : new IngredientSpec(ingredient, 1))
+                        ? IngredientSpec.EMPTY
+                        : new IngredientSpec(ingredient, 1, craftingDemandRole(ingredient)))
                 .toList();
     }
 
+    /**
+     * Classify ordinary Forge crafting remainders without assuming that every
+     * item in a tag behaves like the first display candidate. Only an unchanged
+     * self-remainder is reusable across every execution; replacement containers
+     * and durability/NBT transformations still need per-execution accounting.
+     */
+    static DemandRole craftingDemandRole(Ingredient ingredient) {
+        return craftingDemandRoleCache.computeIfAbsent(ingredient,
+                key -> craftingDemandRole(key, ItemStack::getCraftingRemainingItem));
+    }
+
+    static DemandRole craftingDemandRole(
+            Ingredient ingredient,
+            java.util.function.Function<ItemStack, ItemStack> remainderLookup) {
+        ItemStack[] candidates;
+        try {
+            candidates = ingredient.getItems();
+        } catch (RuntimeException ignored) {
+            return DemandRole.CONSUMED;
+        }
+        if (candidates.length == 0) {
+            return DemandRole.CONSUMED;
+        }
+
+        boolean sawCandidate = false;
+        boolean sawRemainder = false;
+        boolean allReturnUnchangedSelf = true;
+        for (ItemStack candidate : candidates) {
+            if (candidate == null || candidate.isEmpty()) continue;
+            sawCandidate = true;
+            ItemStack input = candidate.copyWithCount(1);
+            ItemStack remainder;
+            try {
+                remainder = remainderLookup.apply(input);
+            } catch (RuntimeException ignored) {
+                return DemandRole.CONSUMED;
+            }
+            if (remainder.isEmpty()) {
+                allReturnUnchangedSelf = false;
+                continue;
+            }
+            sawRemainder = true;
+            if (remainder.getCount() != 1
+                    || !ItemStack.isSameItemSameTags(input, remainder)) {
+                allReturnUnchangedSelf = false;
+            }
+        }
+        if (sawCandidate && allReturnUnchangedSelf) {
+            return DemandRole.CATALYST;
+        }
+        return sawRemainder
+                ? DemandRole.CONTAINER_RETURNING
+                : DemandRole.CONSUMED;
+    }
+
     public static int requiredCount(IngredientSpec spec, int executions) {
-        return spec.role() == com.huanghuang.rsintegration.crafting.graph.DemandRole.CATALYST
+        return spec.role() == DemandRole.CATALYST
                 ? spec.count() : mulCount(spec.count(), Math.max(1, executions));
     }
 
     public static int remainderExecutions(ItemStack remainder, List<IngredientSpec> specs,
                                           int executions) {
         for (IngredientSpec spec : specs) {
-            if (spec.role() == com.huanghuang.rsintegration.crafting.graph.DemandRole.CATALYST
+            if (spec.role() == DemandRole.CATALYST
                     && IngredientMatcher.test(spec.ingredient(), remainder)) {
                 return 1;
             }

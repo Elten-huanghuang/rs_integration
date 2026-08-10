@@ -61,6 +61,9 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
     private long ritualIdleSinceGameTime = -1L;
     private static final int RITUAL_IDLE_STABILITY_TICKS = 20;
     private ItemStack activationExtractedFromPlayer;
+    /** Activation item held until the manual ritual handoff is observed. */
+    private ItemStack pendingManualActivation = ItemStack.EMPTY;
+    private boolean ritualPreparedForManualStart;
 
     // Brazier-mode state
     private boolean isBrazier;
@@ -182,11 +185,6 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             prerequisiteBlocked = true;
             return false;
         } else {
-            if (GoetyReflection.convertRitualClass != null && GoetyReflection.convertRitualClass.isInstance(ritualObj)) {
-                RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] validateAndInit [FAIL-7] convert ritual blocked: recipe={}", recipeId);
-                player.sendSystemMessage(Component.translatable("rsi.goety.error.unsupported_ritual_type", "convert"));
-                return false;
-            }
             if (GoetyReflection.teleportRitualClass != null && GoetyReflection.teleportRitualClass.isInstance(ritualObj)) {
                 RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] validateAndInit [FAIL-7] teleport ritual blocked: recipe={}", recipeId);
                 player.sendSystemMessage(Component.translatable("rsi.goety.error.unsupported_ritual_type", "teleport"));
@@ -322,6 +320,8 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         this.ledger = new ExtractionLedger();
         this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
         this.activationExtractedFromPlayer = null;
+        this.pendingManualActivation = ItemStack.EMPTY;
+        this.ritualPreparedForManualStart = false;
 
         ServerLevel machineLevel = resolveMachineLevel(player);
         if (myPos != null && machineLevel != null && machineLevel.isLoaded(myPos)) {
@@ -351,8 +351,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             return false;
         }
 
-        boolean isSummon = ritual.getClass().getName()
-                .endsWith(".SummonRitual");
+        boolean requiresManualStart = requiresManualStart(ritualRecipe, ritual);
 
         if (!checkRitualPrerequisites(ritualRecipe, ritual)) return false;
 
@@ -378,10 +377,8 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             }
         }
 
-        // Summon rituals: fill pedestals from RS, give activation item to player.
-        // The player must manually right-click the altar to start the ritual.
-        if (isSummon) {
-            return prepareSummonRitual(activationIng, specList);
+        if (requiresManualStart) {
+            return prepareManualRitual(activationIng, specList);
         }
 
         ItemStack activationItemStack = extractActivation(activationIng);
@@ -393,9 +390,8 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         return startRitualWithPedestals(ritual, activationItemStack, specList);
     }
 
-    /** Fill pedestals from RS and hand the activation item to the player.
-     *  Summon rituals produce entities, so we let the player trigger the ritual manually. */
-    private boolean prepareSummonRitual(Ingredient activationIng, List<IngredientSpec> specList) {
+    /** Fill pedestals and hand the activation item to the player without starting the ritual. */
+    private boolean prepareManualRitual(Ingredient activationIng, List<IngredientSpec> specList) {
         // 1. Reserve activation item in ledger (template — not yet extracted from RS)
         ItemStack activationItem = extractActivation(activationIng);
         if (activationItem == null) {
@@ -432,7 +428,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
 
         // 3. Commit all extractions together — items are now physically extracted
         if (!ledger.commit(network, player)) {
-            RSIntegrationMod.LOGGER.error("[RSI-Batch-Goety] Ledger commit failed for summon prep");
+            RSIntegrationMod.LOGGER.error("[RSI-Batch-Goety] Ledger commit failed for manual ritual prep");
             refundActivationToPlayer();
             return false;
         }
@@ -446,14 +442,11 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             }
         }
 
-        // 5. Give activation item to player
-        if (!activationItem.isEmpty()) {
-            ItemHandlerHelper.giveItemToPlayer(player, activationItem);
-        }
-
-        // 6. Notify
-        Component itemName = CraftPacketUtils.describeIngredient(activationIng);
-        player.sendSystemMessage(Component.translatable("rsi.goety.summon_prepared", itemName));
+        // 5. Defer the handoff until the delegate is observed by the chain.
+        // This keeps a committed ledger authoritative if the player disconnects
+        // between preparation and the next server tick.
+        this.pendingManualActivation = activationItem.copy();
+        this.ritualPreparedForManualStart = true;
         return true;
     }
 
@@ -702,6 +695,8 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         useSharedLedger(sharedLedger);
         this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
         this.activationExtractedFromPlayer = null;
+        this.pendingManualActivation = ItemStack.EMPTY;
+        this.ritualPreparedForManualStart = false;
 
         // Verify the cached BlockEntity is still valid
         ServerLevel machineLevel = resolveMachineLevel(player);
@@ -755,6 +750,11 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
 
         if (remainingMaterials.isEmpty()) {
             try {
+                if (requiresManualStart(ritualRecipe, ritual)) {
+                    this.pendingManualActivation = activationItem.copy();
+                    this.ritualPreparedForManualStart = true;
+                    return true;
+                }
                 if (!checkRitualIsValid(ritual, activationItem)) {
                     player.sendSystemMessage(Component.translatable("rsi.goety.error.ritual_invalid"));
                     refundActivationToPlayer();
@@ -792,6 +792,11 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
                 filledPedestals.add(ped);
             }
 
+            if (requiresManualStart(ritualRecipe, ritual)) {
+                this.pendingManualActivation = activationItem.copy();
+                this.ritualPreparedForManualStart = true;
+                return true;
+            }
             if (!checkRitualIsValid(ritual, activationItem)) {
                 player.sendSystemMessage(Component.translatable("rsi.goety.error.ritual_invalid"));
                 refundActivationToPlayer();
@@ -888,6 +893,8 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
     protected boolean isMachineCraftFinished(ServerLevel level, BlockEntity be) {
         if (isBrazier) return isBrazierCraftComplete(level);
 
+        if (ritualPreparedForManualStart && pendingManualActivation.isEmpty()) return true;
+
         // Use the public field directly — getCurrentRitualRecipe() has a side
         // effect: it re-populates currentRitualRecipe from currentRitualRecipeId
         // via recipe-manager lookup, which defeats null-after-completion detection.
@@ -909,6 +916,23 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             return false;
         }
         return now - ritualIdleSinceGameTime >= RITUAL_IDLE_STABILITY_TICKS;
+    }
+
+    @Override
+    protected CraftObservation observeMachineCraft(ServerLevel level, BlockEntity be) {
+        if (ritualPreparedForManualStart) {
+            if (!pendingManualActivation.isEmpty()) {
+                ItemStack activation = pendingManualActivation.copy();
+                pendingManualActivation = ItemStack.EMPTY;
+                ItemHandlerHelper.giveItemToPlayer(player, activation);
+                Ingredient activationIng = Reflect.<Ingredient>invoke(
+                        ritualRecipe, GoetyReflection.M_GET_ACTIVATION_ITEM).orElse(Ingredient.EMPTY);
+                Component itemName = CraftPacketUtils.describeIngredient(activationIng);
+                player.sendSystemMessage(Component.translatable("rsi.goety.manual_ritual_prepared", itemName));
+            }
+            return doneObservation();
+        }
+        return super.observeMachineCraft(level, be);
     }
 
     private boolean hasExpectedRitualOutput(ServerLevel level, BlockEntity be) {
@@ -958,6 +982,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
     @Override
     public ItemStack collectResult(ServerPlayer player) {
         if (isBrazier) return collectBrazierResult(player);
+        if (isCurrentManualRecipe()) return ItemStack.EMPTY;
 
         ItemStack expected = RecipeIndex.tryGetResultItem((Recipe<?>) ritualRecipe, player.serverLevel().registryAccess());
         if (expected.isEmpty()) return ItemStack.EMPTY;
@@ -1083,6 +1108,8 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             refundActivationToPlayer();
             recoverFromPedestals();
         }
+        pendingManualActivation = ItemStack.EMPTY;
+        ritualPreparedForManualStart = false;
         resetState();
         activationExtractedFromPlayer = null;
     }
@@ -1094,8 +1121,16 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         } else {
             ritualEverSeenActive = false;
             ritualIdleSinceGameTime = -1L;
-            clearFilledPedestals();
+            if (ritualPreparedForManualStart) {
+                // Ownership has deliberately been handed to the player/altar.
+                // Do not clear the pedestals that the player must activate.
+                filledPedestals = null;
+            } else {
+                clearFilledPedestals();
+            }
         }
+        pendingManualActivation = ItemStack.EMPTY;
+        ritualPreparedForManualStart = false;
         resetState();
         activationExtractedFromPlayer = null;
     }
@@ -1144,6 +1179,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public ItemStack getExpectedOutput() {
+        if (!isBrazier && isCurrentManualRecipe()) return null;
         Recipe<?> outputRecipe = isBrazier
                 ? (brazierRecipeObj instanceof Recipe<?> recipe ? recipe : null)
                 : (ritualRecipe instanceof Recipe<?> recipe ? recipe : null);
@@ -1152,6 +1188,17 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         if (level == null) return null;
         ItemStack expected = RecipeIndex.tryGetResultItem(outputRecipe, level.registryAccess());
         return expected.isEmpty() ? null : expected;
+    }
+
+    private static boolean requiresManualStart(Object recipe, Object ritual) {
+        return GoetyRitualPolicy.classify(recipe, ritual)
+                != GoetyRitualPolicy.Execution.AUTOMATIC;
+    }
+
+    private boolean isCurrentManualRecipe() {
+        if (ritualRecipe == null) return false;
+        Object ritual = Reflect.invoke(ritualRecipe, GoetyReflection.M_GET_RITUAL).orElse(null);
+        return requiresManualStart(ritualRecipe, ritual);
     }
 
     @Override
@@ -1506,10 +1553,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             return false;
         }
         if (!requires) return true;
-        Component name = displayComponent(
-                Reflect.invoke(recipe, "getEntityToSacrificeDisplayName").orElse(null));
-        player.sendSystemMessage(Component.translatable("rsi.goety.error.requires_sacrifice", name));
-        return false;
+        return true;
     }
 
     static Component displayComponent(Object value) {
@@ -1761,6 +1805,12 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             blocked = true;
         }
 
+        if (ritual != null && GoetyRitualPolicy.classify(recipe, ritual)
+                == GoetyRitualPolicy.Execution.MANUAL_CONFIRMATION) {
+            warnings.add(Component.translatable(
+                    "rsi.goety.warn.manual_confirmation"));
+        }
+
         try {
             boolean requiresSacrifice = Boolean.TRUE.equals(
                     recipe.getClass().getMethod("requiresSacrifice").invoke(recipe));
@@ -1768,8 +1818,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
                 Component name = displayComponent(
                         Reflect.invoke(recipe, "getEntityToSacrificeDisplayName").orElse(null));
                 warnings.add(Component.translatable(
-                        "rsi.goety.error.requires_sacrifice", name));
-                blocked = true;
+                        "rsi.goety.warn.manual_sacrifice", name));
             }
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn(

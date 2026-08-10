@@ -9,6 +9,7 @@ import java.util.concurrent.RejectedExecutionException;
 public enum SynchronousFallbackReason {
     MAIN_THREAD_ONLY,
     INCOMPLETE_DEMAND_TREE,
+    CATALYST_ROUTE,
     RECIPE_OVERRIDES,
     PURE_UNRESOLVABLE,
     STEP_LIMIT,
@@ -17,9 +18,16 @@ public enum SynchronousFallbackReason {
 
     public static Optional<SynchronousFallbackReason> whenPureRouteUnavailable(
             boolean mainThreadOnly, boolean hasOverrides, boolean demandTreeComplete) {
+        return whenPureRouteUnavailable(mainThreadOnly, hasOverrides, demandTreeComplete, false);
+    }
+
+    public static Optional<SynchronousFallbackReason> whenPureRouteUnavailable(
+            boolean mainThreadOnly, boolean hasOverrides, boolean demandTreeComplete,
+            boolean catalystRouteAvailable) {
         if (mainThreadOnly) return Optional.of(MAIN_THREAD_ONLY);
         if (hasOverrides) return Optional.of(RECIPE_OVERRIDES);
         if (!demandTreeComplete) return Optional.of(INCOMPLETE_DEMAND_TREE);
+        if (catalystRouteAvailable) return Optional.of(CATALYST_ROUTE);
         return Optional.empty();
     }
 

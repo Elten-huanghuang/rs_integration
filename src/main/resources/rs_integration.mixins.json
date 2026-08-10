@@ -79,6 +79,9 @@
     "jei.RecipesGuiMixin",
     "jei.RecipeBookmarkMixin",
     "jei.BookmarkOverlayAccessor",
+    "jei.IngredientFilterSolCarrotMixin",
+    "jei.ElementSearchSolCarrotMixin",
+    "jei.ElementSearchLowMemSolCarrotMixin",
     "minecraft.MerchantScreenAccessor",
     "minecraft.MerchantScreenSelectionMixin",
     "minecraft.MinecraftMixin",
@@ -87,6 +90,7 @@
     "refinedstorage.GridScreenMouseMixin",
     "refinedstorage.GridScreenKeyboardMixin",
     "refinedstorage.GridScreenTooltipMixin",
+    "refinedstorage.GridViewImplSearchMixin",
     "refinedstorage.TooltipGridFilterMixin",
     "refinedstorage.TagGridFilterMixin",
     "refinedstorage.ModGridFilterMixin"

@@ -19,6 +19,7 @@ import com.huanghuang.rsintegration.sidepanel.client.GuiNavStack;
 import com.huanghuang.rsintegration.sidepanel.network.OpenBoundMachineGuiPacket;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.mods.goety.GoetyRSNetworkHandler;
+import com.huanghuang.rsintegration.mods.goety.GoetyRitualPolicy;
 import com.huanghuang.rsintegration.mods.goety.RSClientAvailabilityCache;
 import com.huanghuang.rsintegration.reflection.probes.FAReflection;
 import com.huanghuang.rsintegration.reflection.probes.TLMReflection;
@@ -240,12 +241,14 @@ public class RecipeGuiLayoutsMixin {
             ModType recipeModType = computeModType(recipe);
             boolean isVirtual = recipeModType != null && recipeModType.isVirtual();
 
-            // Skip Goety rituals that don't produce items:
-            // - requiresSacrifice() (entity sacrifice rituals)
-            // - ConvertRitual / TeleportRitual (no item output)
-            // Note: SummonRitual is kept (returns false) to allow remote triggering
+            // Keep manual-confirmation rituals visible in JEI. Their handler
+            // prepares the altar and returns the activation item to the player.
+            // Only explicitly unsupported variants (currently teleport) are hidden.
             if (rsi$isGoetyRitual(recipe)
-                    && (rsi$isGoetySacrificial(recipe) || rsi$isGoetyNonItemRitual(recipe))) {
+                    && rsi$goetyExecution(recipe) == GoetyRitualPolicy.Execution.UNSUPPORTED) {
+                RSIntegrationMod.LOGGER.debug(
+                        "[RSI-JEI-Mixin] Goety ritual hidden by policy: id={} category={} class={}",
+                        recipeId, rsi$safeCategoryUid(recipeLayout), recipeClassName);
                 continue;
             }
 
@@ -1546,11 +1549,16 @@ public class RecipeGuiLayoutsMixin {
     }
 
     @Unique
-    private static boolean rsi$isGoetySacrificial(Object recipe) {
+    private static GoetyRitualPolicy.Execution rsi$goetyExecution(Object recipe) {
         try {
-            return (boolean) recipe.getClass().getMethod("requiresSacrifice").invoke(recipe);
-        } catch (Exception e) {
-            return false;
+            Object ritual = recipe.getClass().getMethod("getRitual").invoke(recipe);
+            return GoetyRitualPolicy.classify(recipe, ritual);
+        } catch (ReflectiveOperationException | RuntimeException exception) {
+            // A recipe whose ritual cannot be inspected is unsafe to expose.
+            RSIntegrationMod.LOGGER.warn(
+                    "[RSI-JEI-Mixin] Goety ritual policy lookup failed: id={} class={}",
+                    getRecipeIdSafe(recipe), recipe.getClass().getName());
+            return GoetyRitualPolicy.Execution.UNSUPPORTED;
         }
     }
 

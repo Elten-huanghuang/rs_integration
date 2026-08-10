@@ -48,7 +48,7 @@ class PerformanceMonitorPlanningFallbackTest extends BootstrapTest {
             assertEquals(1L, PerformanceMonitor.getSynchronousPlanningFallbackCount(reason));
         }
         assertTrue(PerformanceMonitor.snapshot().contains(
-                "syncFallback=[main_thread_only:1,incomplete_demand_tree:1,recipe_overrides:1,"
+                "syncFallback=[main_thread_only:1,incomplete_demand_tree:1,catalyst_route:1,recipe_overrides:1,"
                         + "pure_unresolvable:1,step_limit:1,search_limit:1,async_failure:1]"));
         assertEquals(SynchronousFallbackReason.values().length,
                 Diagnostics.recentEvents().size());
