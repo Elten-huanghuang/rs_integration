@@ -308,13 +308,14 @@ final class StepExecutor {
                                 (first, ignored) -> first,
                                 LinkedHashMap::new),
                         map -> new ArrayList<>(map.values())));
+        boolean strictNbt = IngredientMatcher.requiresNbt(ingredient);
 
         // Custom ingredients may not expose concrete item stacks. Preserve the
         // existing behavior because there is no safe variant to lock onto.
         if (variants.size() <= 1) {
             Ingredient selected = variants.isEmpty()
                     ? ingredient
-                    : CraftingResolver.ingredientOf(variants.get(0), variants.get(0).hasTag());
+                    : CraftingResolver.ingredientOf(variants.get(0), strictNbt);
             List<ResolutionContext.SupplySlice> consumed = new ArrayList<>();
             boolean resolved = CraftingResolver.ensureIngredient(
                     selected, quantity, ctx, depth, edges, port, consumed);
@@ -332,7 +333,9 @@ final class StepExecutor {
                 }));
 
         for (ItemStack variant : variants) {
-            Ingredient selected = CraftingResolver.ingredientOf(variant, variant.hasTag());
+            // A tagged display candidate does not make a vanilla Ingredient strict.
+            // Preserve the source predicate when locking one physical machine slot.
+            Ingredient selected = CraftingResolver.ingredientOf(variant, strictNbt);
             List<ResolutionContext.SupplySlice> consumed = new ArrayList<>();
             ctx.beginUndo();
             edges.beginUndo();

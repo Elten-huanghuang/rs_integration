@@ -18,6 +18,8 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
 class StepExecutorSpecTest extends BootstrapTest {
@@ -134,5 +136,23 @@ class StepExecutorSpecTest extends BootstrapTest {
         assertNull(selected);
         assertEquals(1, context.countMatching(Ingredient.of(Items.RED_WOOL)));
         assertEquals(1, context.countMatching(Ingredient.of(Items.BLUE_WOOL)));
+    }
+
+    @Test
+    void machineSlotPreservesNonStrictSemanticsOfTaggedDisplayCandidate() {
+        ItemStack recipeDisplay = new ItemStack(Items.IRON_HELMET);
+        recipeDisplay.setDamageValue(10);
+        ItemStack stored = new ItemStack(Items.IRON_HELMET);
+        stored.setDamageValue(80);
+        stored.getOrCreateTag().putString("modifier", "hasty");
+        ResolutionContext context = new ResolutionContext(null, Map.of(), List.of(stored), null);
+
+        Ingredient selected = StepExecutor.ensureSingleVariantMachineInput(
+                Ingredient.of(recipeDisplay), 1, context, 0,
+                new CraftingResolver.EdgeTracker(), null, new java.util.ArrayList<>());
+
+        assertNotNull(selected);
+        assertFalse(IngredientMatcher.requiresNbt(selected));
+        assertEquals(0, context.countMatching(Ingredient.of(Items.IRON_HELMET)));
     }
 }

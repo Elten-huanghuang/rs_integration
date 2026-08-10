@@ -48,11 +48,18 @@ public record PlanResponse(
         boolean executionBlocked               // hard prerequisite failure, independent of material availability
 ) {
     public Availability availability(ItemStack stack) {
-        return materials.get(IngredientKey.of(stack));
+        Availability exact = materials.get(IngredientKey.of(stack));
+        if (exact != null || !stack.hasTag()) return exact;
+        // Non-strict ingredients are represented by a tagless material card even
+        // when the tree keeps a real stored variant for display.  Preserve the
+        // lookup for that tree node without weakening strict-NBT cards.
+        return materials.get(IngredientKey.of(new ItemStack(stack.getItem())));
     }
 
     public Availability availability(IngredientKey key) {
-        return materials.get(key);
+        Availability exact = materials.get(key);
+        if (exact != null || !key.stack(1).hasTag()) return exact;
+        return materials.get(IngredientKey.of(new ItemStack(key.item())));
     }
 
     public record Availability(int needed, int available) {
