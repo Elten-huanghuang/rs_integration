@@ -7,6 +7,7 @@
 - `/reload` 会递增 `CraftPlanningRevision`，同时清理旧索引、纯图和计划缓存。新旧 revision 不能混用，修复了只按 `RecipeManager` 对象身份判断时可能继续读取旧索引的问题。
 - 普通 `CraftingRecipe` 的输出提取和纯图节点投影已合并到一个遍历中，避免重复调用 `getResultItem`。第三方 handler 仍在服务端加载线程读取，不能为了表面上的异步化把实时 Forge/模组对象送入后台线程。
 - `/rsi_debug perf` 新增 `recipeCatalog=次数/平均/最大`、其中的 `graph` CPU 和配方数量；完成日志同时记录最慢配方 ID 和耗时。原日志中的几十秒是 tick 节流后的墙钟等待，新指标记录实际构建 CPU。
+- 需求树路由走查改用可回滚库存账本和按物品 ID 的匹配索引，不再为每个候选分支复制完整库存快照；`/rsi_debug perf` 同时记录 `demandTree=次数/平均/最大`，用于区分路由前置成本与 typed resolver 成本。
 - 当前代价是世界加载或 `/reload` 会增加一次真实目录构建耗时。这是显式加载成本，不会延后到玩家第一次打开配方树；具体耗时必须在目标整合包中复测后再决定是否需要针对最慢 handler 做专项优化。
 
 已完成：

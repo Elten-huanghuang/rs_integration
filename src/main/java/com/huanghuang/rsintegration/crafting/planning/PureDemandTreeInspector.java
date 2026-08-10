@@ -7,6 +7,7 @@ import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.Recip
 import net.minecraft.resources.ResourceLocation;
 
 import javax.annotation.Nullable;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -65,15 +66,10 @@ public final class PureDemandTreeInspector {
         }
     }
 
-    private record FailureKey(MaterialRef material, int count,
-                              Map<MaterialRef, Integer> stock,
-                              Set<MaterialRef> visiting) {}
-
     private static final class Walker {
         private final ImmutableRecipeGraph graph;
-        private final Map<MaterialRef, Integer> stock = new HashMap<>();
+        private final Ledger ledger;
         private final Set<MaterialRef> visiting = new HashSet<>();
-        private final Set<FailureKey> failed = new HashSet<>();
         private final int maxNodes;
         private int visitedNodes;
         private boolean nodeLimitReached;
@@ -82,47 +78,47 @@ public final class PureDemandTreeInspector {
         private Walker(ImmutableRecipeGraph graph, Map<MaterialRef, Integer> available,
                        int maxNodes) {
             this.graph = graph;
-            available.forEach((material, count) -> {
-                if (material != null && count != null && count > 0) stock.put(material, count);
-            });
+            this.ledger = new Ledger(available);
             this.maxNodes = maxNodes;
         }
 
         private boolean coverIngredient(IngredientRef ingredient) {
-            Map<MaterialRef, Integer> before = new HashMap<>(stock);
+            int mark = ledger.mark();
             if (consumeAcrossAlternatives(ingredient) == 0) return true;
 
             for (MaterialRef alternative : ingredient.alternatives()) {
-                restore(before);
+                ledger.rollback(mark);
                 int remaining = consumeMatching(alternative, ingredient.count());
                 if (coverMaterial(alternative, remaining)) return true;
                 if (nodeLimitReached) break;
             }
-            restore(before);
+            ledger.rollback(mark);
             if (firstUnresolved == null) firstUnresolved = first(ingredient);
             return false;
         }
 
         private int consumeAcrossAlternatives(IngredientRef ingredient) {
-            Map<MaterialRef, Integer> before = new HashMap<>(stock);
+            int mark = ledger.mark();
             int remaining = ingredient.count();
-            for (Map.Entry<MaterialRef, Integer> entry : Map.copyOf(stock).entrySet()) {
-                if (!matchesAny(entry.getKey(), ingredient.alternatives())) continue;
-                int take = Math.min(entry.getValue(), remaining);
-                setStock(entry.getKey(), entry.getValue() - take);
+            for (MaterialRef stocked : ledger.order()) {
+                int available = ledger.count(stocked);
+                if (available <= 0 || !matchesAny(stocked, ingredient.alternatives())) continue;
+                int take = Math.min(available, remaining);
+                ledger.set(stocked, available - take);
                 remaining -= take;
                 if (remaining == 0) break;
             }
-            if (remaining > 0) restore(before);
+            if (remaining > 0) ledger.rollback(mark);
             return remaining;
         }
 
         private int consumeMatching(MaterialRef requested, int count) {
             int remaining = count;
-            for (Map.Entry<MaterialRef, Integer> entry : Map.copyOf(stock).entrySet()) {
-                if (!matches(entry.getKey(), requested)) continue;
-                int take = Math.min(entry.getValue(), remaining);
-                setStock(entry.getKey(), entry.getValue() - take);
+            for (MaterialRef stocked : ledger.byItem(requested.itemId())) {
+                int available = ledger.count(stocked);
+                if (available <= 0 || !matches(stocked, requested)) continue;
+                int take = Math.min(available, remaining);
+                ledger.set(stocked, available - take);
                 remaining -= take;
                 if (remaining == 0) break;
             }
@@ -137,21 +133,17 @@ public final class PureDemandTreeInspector {
                 return false;
             }
 
-            FailureKey key = new FailureKey(material, count, Map.copyOf(stock), Set.copyOf(visiting));
-            if (failed.contains(key)) return false;
-
             List<RecipeNode> candidates = graph.recipesByOutput().getOrDefault(material, List.of());
             if (candidates.isEmpty()) {
                 if (firstUnresolved == null) firstUnresolved = material;
-                failed.add(key);
                 return false;
             }
 
-            Map<MaterialRef, Integer> before = new HashMap<>(stock);
+            int mark = ledger.mark();
             visiting.add(material);
             try {
                 for (RecipeNode candidate : candidates) {
-                    restore(before);
+                    ledger.rollback(mark);
                     long batches = ((long) count + candidate.outputCount() - 1L)
                             / candidate.outputCount();
                     if (batches <= 0L || batches > Integer.MAX_VALUE) continue;
@@ -172,8 +164,7 @@ public final class PureDemandTreeInspector {
             } finally {
                 visiting.remove(material);
             }
-            restore(before);
-            failed.add(key);
+            ledger.rollback(mark);
             return false;
         }
 
@@ -189,14 +180,55 @@ public final class PureDemandTreeInspector {
                     && (requested.nbt().isEmpty() || stocked.nbt().equals(requested.nbt()));
         }
 
-        private void restore(Map<MaterialRef, Integer> state) {
-            stock.clear();
-            stock.putAll(state);
-        }
+        /** Mutable inventory with rollback checkpoints; keys and item buckets are immutable. */
+        private static final class Ledger {
+            private record Change(MaterialRef material, int previousCount) {}
 
-        private void setStock(MaterialRef material, int count) {
-            if (count <= 0) stock.remove(material);
-            else stock.put(material, count);
+            private final Map<MaterialRef, Integer> stock = new HashMap<>();
+            private final Map<ResourceLocation, List<MaterialRef>> byItem = new HashMap<>();
+            private final List<MaterialRef> order = new ArrayList<>();
+            private final List<Change> changes = new ArrayList<>();
+
+            private Ledger(Map<MaterialRef, Integer> available) {
+                available.forEach((material, count) -> {
+                    if (material == null || count == null || count <= 0) return;
+                    stock.put(material, count);
+                    order.add(material);
+                    byItem.computeIfAbsent(material.itemId(), ignored -> new ArrayList<>()).add(material);
+                });
+            }
+
+            private int mark() {
+                return changes.size();
+            }
+
+            private int count(MaterialRef material) {
+                return stock.getOrDefault(material, 0);
+            }
+
+            private List<MaterialRef> byItem(ResourceLocation itemId) {
+                return byItem.getOrDefault(itemId, List.of());
+            }
+
+            private List<MaterialRef> order() {
+                return order;
+            }
+
+            private void set(MaterialRef material, int count) {
+                int previous = stock.getOrDefault(material, 0);
+                if (previous == count) return;
+                changes.add(new Change(material, previous));
+                if (count <= 0) stock.remove(material);
+                else stock.put(material, count);
+            }
+
+            private void rollback(int mark) {
+                while (changes.size() > mark) {
+                    Change change = changes.remove(changes.size() - 1);
+                    if (change.previousCount() <= 0) stock.remove(change.material());
+                    else stock.put(change.material(), change.previousCount());
+                }
+            }
         }
     }
 }

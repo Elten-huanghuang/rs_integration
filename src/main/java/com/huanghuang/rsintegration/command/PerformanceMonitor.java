@@ -71,6 +71,9 @@ public final class PerformanceMonitor {
     private static final AtomicLong planningSnapshotCaptures = new AtomicLong();
     private static final AtomicLong planningSnapshotNanos = new AtomicLong();
     private static final AtomicLong planningSnapshotMaxNanos = new AtomicLong();
+    private static final AtomicLong demandTreeInspections = new AtomicLong();
+    private static final AtomicLong demandTreeNanos = new AtomicLong();
+    private static final AtomicLong demandTreeMaxNanos = new AtomicLong();
     private static final AtomicLong purePlanningNanos = new AtomicLong();
     private static final AtomicLong purePlanningMaxNanos = new AtomicLong();
     private static final AtomicLong typedResolverCalls = new AtomicLong();
@@ -183,6 +186,11 @@ public final class PerformanceMonitor {
         planningSnapshotNanos.addAndGet(Math.max(0L, nanosElapsed));
         planningSnapshotMaxNanos.updateAndGet(previous -> Math.max(previous, nanosElapsed));
     }
+    public static void recordDemandTreeInspection(long nanosElapsed) {
+        demandTreeInspections.incrementAndGet();
+        demandTreeNanos.addAndGet(Math.max(0L, nanosElapsed));
+        demandTreeMaxNanos.updateAndGet(previous -> Math.max(previous, nanosElapsed));
+    }
     public static void recordTypedResolver(long nanosElapsed) {
         typedResolverCalls.incrementAndGet();
         typedResolverNanos.addAndGet(Math.max(0L, nanosElapsed));
@@ -288,6 +296,10 @@ public final class PerformanceMonitor {
              + (planningSnapshotCaptures.get() == 0 ? 0
                      : planningSnapshotNanos.get() / planningSnapshotCaptures.get() / 1000) + "/"
              + planningSnapshotMaxNanos.get() / 1000 + "us"
+             + " demandTree=" + demandTreeInspections.get() + "/"
+             + (demandTreeInspections.get() == 0 ? 0
+                     : demandTreeNanos.get() / demandTreeInspections.get() / 1000) + "/"
+             + demandTreeMaxNanos.get() / 1000 + "us"
              + " phasePure=" + purePlanningSearches.get() + "/"
              + (purePlanningSearches.get() == 0 ? 0
                      : purePlanningNanos.get() / purePlanningSearches.get() / 1000) + "/"
