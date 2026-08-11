@@ -398,17 +398,20 @@ public final class PlanTreeModel {
         // Empty grid slots carry no ingredient and are skipped.
         LinkedHashMap<IngredientKey, ItemStack> reps = new LinkedHashMap<>();
         LinkedHashMap<IngredientKey, Integer> counts = new LinkedHashMap<>();
-        for (ItemStack input : parentStep.inputs()) {
+        for (int inputIndex = 0; inputIndex < parentStep.inputs().size(); inputIndex++) {
+            ItemStack input = parentStep.inputs().get(inputIndex);
             if (input.isEmpty()) continue;
             IngredientKey inputKey = IngredientKey.of(input);
             reps.putIfAbsent(inputKey, input);
-            counts.merge(inputKey, input.getCount(), Integer::sum);
+            counts.merge(inputKey,
+                    parentStep.totalInputCount(inputIndex, parentBatches),
+                    PlanTreeModel::saturatingAdd);
         }
 
         for (Map.Entry<IngredientKey, ItemStack> e : reps.entrySet()) {
             IngredientKey inputKey = e.getKey();
             ItemStack input = e.getValue();
-            int amount = counts.get(inputKey) * parentBatches;
+            int amount = counts.get(inputKey);
             PlanStep childStep = producers.get(inputKey);
 
             if (childStep != null) {
@@ -436,6 +439,11 @@ public final class PlanTreeModel {
                 parent.children.add(leaf);
             }
         }
+    }
+
+    private static int saturatingAdd(int left, int right) {
+        long total = (long) left + right;
+        return total >= Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) total;
     }
 
     private static void applyAvailability(PlanTreeNode node, PlanResponse plan, ItemStack input) {

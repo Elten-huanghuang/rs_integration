@@ -191,6 +191,7 @@ public final class AsyncCraftChain {
     private final OperationResourceCoordinator operationResources;
     private final OperationExecutionKernel operationKernel;
     private int progressTickCounter;
+    private boolean waitingForVanillaBudget;
     private final CraftProgressPublisher progressPublisher;
     private int progressSequence;
     @Nullable
@@ -295,11 +296,19 @@ public final class AsyncCraftChain {
             initialiseGraphMaterialFlow(graph);
             GraphExecutionPolicy.Decision executionDecision = GraphExecutionPolicy.decide(false,
                     steps.stream().map(CraftingResolver.ResolutionStep::modType).distinct().toList());
-            this.useGraphExecution = executionDecision.useGraphExecutor();
+            int atomicVanillaLimit = configuredAtomicVanillaGraphLimit();
+            boolean oversizedVanillaNode = steps.stream().anyMatch(step ->
+                    step.modType() == ModType.GENERIC
+                            && step.executions() > atomicVanillaLimit);
+            this.useGraphExecution = executionDecision.useGraphExecutor() && !oversizedVanillaNode;
             RSIntegrationMod.LOGGER.debug(ctx.format(
                     "Using {} execution for self-contained graph: reason={} detail={}"),
-                    executionDecision.useGraphExecutor() ? "graph" : "flat",
-                    executionDecision.reason(), executionDecision.detail());
+                    useGraphExecution ? "graph" : "flat",
+                    oversizedVanillaNode ? "VANILLA_NODE_REQUIRES_TICK_SLICING"
+                            : executionDecision.reason(),
+                    oversizedVanillaNode
+                            ? "vanilla node exceeds atomic per-tick limit " + atomicVanillaLimit
+                            : executionDecision.detail());
         } else {
             this.graph = null;
             this.graphScheduler = null;
@@ -416,6 +425,12 @@ public final class AsyncCraftChain {
      * (either finished successfully or aborted).
      */
     public boolean tick() {
+        VanillaCraftingTickBudget fallback = new VanillaCraftingTickBudget(Integer.MAX_VALUE);
+        return tick(fallback.allowance(Integer.MAX_VALUE));
+    }
+
+    boolean tick(VanillaCraftingTickBudget.ChainAllowance vanillaAllowance) {
+        waitingForVanillaBudget = false;
         if (state == State.ABORTED || state == State.COMPLETED) return true;
 
         if (state == State.WAITING_PLAYER_TRANSFORMATION) {
@@ -440,7 +455,7 @@ public final class AsyncCraftChain {
                 abortSilently("RS controller removed or network invalidated");
                 return true;
             }
-            return tickGraph(online);
+            return tickGraph(online, vanillaAllowance);
         }
 
         // First tick transition
@@ -660,8 +675,16 @@ public final class AsyncCraftChain {
             return false;
         }
         if (step.modType() == ModType.GENERIC) {
-            currentStepIdx = executeVanillaBatch(currentStepIdx, online);
+            int granted = vanillaAllowance.claimUpTo(vanillaAllowance.remaining());
+            if (granted <= 0) {
+                waitingForVanillaBudget = true;
+                maybeSendProgress(online, false);
+                return false;
+            }
+            currentStepIdx = executeVanillaBatch(currentStepIdx, online, granted);
             if (state == State.ABORTED) return true;
+            waitingForVanillaBudget = currentStepIdx < steps.size()
+                    && steps.get(currentStepIdx).modType() == ModType.GENERIC;
             if (!ledger.isCommitted() && !ledger.commit(network, online)) {
                 abort("Commit failed after vanilla batch",
                         Component.translatable("rsi.async.abort.vanilla_commit_failed"));
@@ -719,7 +742,8 @@ public final class AsyncCraftChain {
 
     //  graph-backed tick (multi-node parallel)
 
-    private boolean tickGraph(ServerPlayer online) {
+    private boolean tickGraph(ServerPlayer online,
+                              VanillaCraftingTickBudget.ChainAllowance vanillaAllowance) {
         if (graphScheduler == null) {
             abort("Graph scheduler is null",
                     Component.translatable("rsi.async.abort.scheduler_missing"));
@@ -767,7 +791,7 @@ public final class AsyncCraftChain {
 
         // Process synchronous GENERIC nodes outside the executor.
         // They complete immediately and don't wait for observation ticks.
-        settleReadyVanillaNodes(online);
+        settleReadyVanillaNodes(online, vanillaAllowance);
 
         // Drive the executor: observe all running, settle completed, dispatch new.
         try {
@@ -809,7 +833,8 @@ public final class AsyncCraftChain {
     }
 
     /** Execute ready GENERIC nodes synchronously, one graph node at a time. */
-    private void settleReadyVanillaNodes(ServerPlayer online) {
+    private void settleReadyVanillaNodes(
+            ServerPlayer online, VanillaCraftingTickBudget.ChainAllowance vanillaAllowance) {
         while (true) {
             NodeId vanillaNode = findReadyVanillaNode();
             if (vanillaNode == null) break;
@@ -826,6 +851,12 @@ public final class AsyncCraftChain {
             }
 
             int idx = stepIndex(vanillaNode);
+            int executions = Math.max(1, steps.get(idx).executions());
+            if (!vanillaAllowance.tryClaimExact(executions)) {
+                graphScheduler.releaseClaim(vanillaNode);
+                waitingForVanillaBudget = true;
+                break;
+            }
             currentStepIdx = idx;
             ExtractionLedger nodeLedger = new ExtractionLedger();
             nodeLedger.setLogContext(ctx);
@@ -1987,7 +2018,7 @@ public final class AsyncCraftChain {
                 nodeState = CraftProgressSnapshot.NodeState.BLOCKED;
             } else if (state == State.ABORTED) {
                 nodeState = CraftProgressSnapshot.NodeState.FAILED;
-            } else if (currentDelegate != null || state == State.WAITING_MOD
+            } else if (currentDelegate != null || stepRemaining > 0 || state == State.WAITING_MOD
                     || state == State.WAITING_PLAYER_TRANSFORMATION) {
                 nodeState = CraftProgressSnapshot.NodeState.RUNNING;
             } else {
@@ -2212,23 +2243,71 @@ public final class AsyncCraftChain {
 
     //  vanilla batch execution
 
-    /**
-     * Execute consecutive vanilla steps synchronously in one tick.
-     * Returns the index of the first non-vanilla step (or steps.size()).
-     */
-    private int executeVanillaBatch(int startIdx, ServerPlayer online) {
-        List<CraftingResolver.ResolutionStep> vanillaSteps = new ArrayList<>();
-        int i = startIdx;
-        while (i < steps.size() && steps.get(i).modType() == ModType.GENERIC
-                && !steps.get(i).recipeId().equals(CraftingResolver.TAINT_EARTH_HEART_STEP)) {
-            vanillaSteps.add(steps.get(i));
+    /** Execute one bounded slice of consecutive vanilla steps. */
+    private int executeVanillaBatch(int startIdx, ServerPlayer online, int operationBudget) {
+        VanillaBatchSlice slice = planVanillaBatchSlice(
+                steps, startIdx, stepRemaining, operationBudget);
+        stepRemaining = slice.remainingExecutions();
+        if (!slice.steps().isEmpty()) {
+            executeVanillaStepsInline(slice.steps(), online);
+        }
+        return slice.nextStepIndex();
+    }
+
+    static VanillaBatchSlice planVanillaBatchSlice(
+            List<CraftingResolver.ResolutionStep> sourceSteps,
+            int startIdx, int currentRemaining, int operationBudget) {
+        int budget = Math.max(1, operationBudget);
+        int i = Math.max(0, startIdx);
+        int remaining = Math.max(0, currentRemaining);
+        List<CraftingResolver.ResolutionStep> sliceSteps = new ArrayList<>();
+        while (i < sourceSteps.size() && budget > 0) {
+            CraftingResolver.ResolutionStep step = sourceSteps.get(i);
+            if (step.modType() != ModType.GENERIC
+                    || step.recipeId().equals(CraftingResolver.TAINT_EARTH_HEART_STEP)) {
+                break;
+            }
+            int stepExecutions = i == startIdx && remaining > 0
+                    ? remaining : step.executions();
+            int sliceExecutions = Math.min(stepExecutions, budget);
+            sliceSteps.add(copyWithExecutions(step, sliceExecutions));
+            budget -= sliceExecutions;
+            stepExecutions -= sliceExecutions;
+            if (stepExecutions > 0) {
+                return new VanillaBatchSlice(List.copyOf(sliceSteps), i, stepExecutions);
+            }
+            remaining = 0;
             i++;
         }
+        return new VanillaBatchSlice(List.copyOf(sliceSteps), i, 0);
+    }
 
-        if (!vanillaSteps.isEmpty()) {
-            executeVanillaStepsInline(vanillaSteps, online);
+    private static CraftingResolver.ResolutionStep copyWithExecutions(
+            CraftingResolver.ResolutionStep step, int executions) {
+        return new CraftingResolver.ResolutionStep(
+                step.recipeId(), step.modType(), step.recipeTypeId(),
+                step.alternativeIds(), step.alternativeModTypes(), step.inferMode(),
+                executions, step.syntheticInput(), step.syntheticOutput());
+    }
+
+    record VanillaBatchSlice(
+            List<CraftingResolver.ResolutionStep> steps,
+            int nextStepIndex,
+            int remainingExecutions) {}
+
+    boolean isWaitingForVanillaBudget() {
+        return waitingForVanillaBudget;
+    }
+
+    private static int configuredAtomicVanillaGraphLimit() {
+        try {
+            return Math.max(1, Math.min(
+                    RSIntegrationConfig.CRAFTING_VANILLA_OPERATIONS_PER_TICK.get(),
+                    RSIntegrationConfig.CRAFTING_GLOBAL_VANILLA_OPERATIONS_PER_TICK.get()));
+        } catch (Exception ignored) {
+            return Math.min(RSIntegrationConfig.DEFAULT_CRAFTING_VANILLA_OPERATIONS_PER_TICK,
+                    RSIntegrationConfig.DEFAULT_CRAFTING_GLOBAL_VANILLA_OPERATIONS_PER_TICK);
         }
-        return i;
     }
 
     /**
@@ -2270,89 +2349,13 @@ public final class AsyncCraftChain {
             RSIntegrationMod.LOGGER.debug(ctx.format("  processing step: {} x{}"), stepId, executions);
 
             if (recipe instanceof net.minecraft.world.item.crafting.CraftingRecipe cr) {
-                // Track only the slots actually modified so we can roll back
-                // just those slots on failure -avoids full-inventory snapshot copies.
-                Map<Integer, ItemStack> modifiedSlots = new HashMap<>();
-
-                // Capture the actual items consumed (with NBT) so assemble()
-                // can transfer input data to the output.  getResultItem()
-                // returns a bare template that discards backpack contents,
-                // blade stats, enchantments, etc.
                 List<IngredientSpec> specs = CraftPacketUtils.extractCraftingIngredientSpecs(cr);
-                ItemStack[] consumed = new ItemStack[Math.min(specs.size(), 9)];
-
-                for (int ingIdx = 0; ingIdx < specs.size(); ingIdx++) {
-                    IngredientSpec spec = specs.get(ingIdx);
-                    if (spec.isEmpty()) continue;
-                    Ingredient ing = spec.ingredient();
-                    int stillNeeded = CraftPacketUtils.requiredCount(spec, executions);
-                    boolean captured = false;
-                    for (int i = 0; i < workingInventory.size() && stillNeeded > 0; i++) {
-                        ItemStack vi = workingInventory.get(i);
-                        if (vi.isEmpty()) continue;
-                        if (ing.test(vi)) {
-                            modifiedSlots.putIfAbsent(i, vi.copy());
-                            if (!captured && ingIdx < 9) {
-                                consumed[ingIdx] = vi.copyWithCount(1);
-                                captured = true;
-                            }
-                            int take = Math.min(stillNeeded, vi.getCount());
-                            vi.shrink(take);
-                            stillNeeded -= take;
-                        }
+                for (int execution = 0; execution < executions; execution++) {
+                    if (!executeCraftingOnceInline(cr, specs, stepId, online,
+                            workingInventory, executionLedger, allowPhysicalFallback,
+                            overworld.registryAccess())) {
+                        return false;
                     }
-                    if (stillNeeded > 0) {
-                        ItemStack reserved = ItemStack.EMPTY;
-                        if (allowPhysicalFallback) {
-                            reserved = executionLedger.reserveFromNetwork(ing, stillNeeded, network);
-                            if (reserved.isEmpty()) {
-                                reserved = executionLedger.reserveFromInventory(ing, stillNeeded, online);
-                            }
-                        }
-                        if (reserved.isEmpty()) {
-                            modifiedSlots.forEach((idx, originalStack) -> {
-                                if (idx < workingInventory.size()) {
-                                    workingInventory.set(idx, originalStack);
-                                } else {
-                                    workingInventory.add(originalStack);
-                                }
-                            });
-                            logMissingIngredient(ing, stepId);
-                            logVirtualInventory("at failure for step " + stepId);
-                            logLedgerState(executionLedger);
-                            if (allowPhysicalFallback) {
-                                abort("Missing: " + describeIngredientSafe(ing),
-                                        Component.translatable("rsi.async.abort.missing_material",
-                                                nameIngredientSafe(ing)));
-                            }
-                            return false;
-                        }
-                        if (!captured && ingIdx < 9) {
-                            consumed[ingIdx] = reserved.copyWithCount(1);
-                        }
-                    }
-                }
-
-                ItemStack result = CraftPacketUtils.assembleCraftingOutput(cr, consumed, online);
-                if (result.isEmpty()) {
-                    result = ModRecipeHandlers.tryGetResultItem(cr, overworld.registryAccess());
-                }
-                if (!result.isEmpty()) {
-                    addToInventory(workingInventory,
-                            result.copyWithCount(StepExecutor.mulCount(result.getCount(), executions)));
-                }
-                // Compute remainders from the actual stacks placed in the recipe,
-                // not ingredient templates. CraftTweaker copy/container recipes
-                // may derive the returned stack from NBT or durability. Do not
-                // also run the generic secondary-output probe for CraftingRecipe:
-                // Forge's remainder API is authoritative here and probing both
-                // paths can count the same container item twice.
-                for (ItemStack remainder : CraftPacketUtils.getRecipeRemainders(cr, consumed)) {
-                    int remainderExecutions = CraftPacketUtils.remainderExecutions(
-                            remainder, specs, executions);
-                    addToInventory(workingInventory,
-                            remainder.copyWithCount(StepExecutor.mulCount(
-                                    remainder.getCount(), remainderExecutions)));
                 }
             } else {
                 // Non-crafting GENERIC recipe (e.g. sawmill, custom mod type)
@@ -2435,6 +2438,80 @@ public final class AsyncCraftChain {
                     }
                 }
             }
+        }
+        return true;
+    }
+
+    private boolean executeCraftingOnceInline(
+            net.minecraft.world.item.crafting.CraftingRecipe recipe,
+            List<IngredientSpec> specs, ResourceLocation stepId, ServerPlayer online,
+            List<ItemStack> workingInventory, ExtractionLedger executionLedger,
+            boolean allowPhysicalFallback,
+            net.minecraft.core.RegistryAccess registryAccess) {
+        Map<Integer, ItemStack> modifiedSlots = new HashMap<>();
+        ItemStack[] consumed = new ItemStack[Math.min(specs.size(), 9)];
+
+        for (int ingIdx = 0; ingIdx < specs.size(); ingIdx++) {
+            IngredientSpec spec = specs.get(ingIdx);
+            if (spec.isEmpty()) continue;
+            Ingredient ingredient = spec.ingredient();
+            int stillNeeded = CraftPacketUtils.requiredCount(spec, 1);
+            boolean captured = false;
+            for (int i = 0; i < workingInventory.size() && stillNeeded > 0; i++) {
+                ItemStack available = workingInventory.get(i);
+                if (available.isEmpty() || !ingredient.test(available)) continue;
+                modifiedSlots.putIfAbsent(i, available.copy());
+                if (!captured && ingIdx < consumed.length) {
+                    consumed[ingIdx] = available.copyWithCount(1);
+                    captured = true;
+                }
+                int take = Math.min(stillNeeded, available.getCount());
+                available.shrink(take);
+                stillNeeded -= take;
+            }
+            if (stillNeeded <= 0) continue;
+
+            ItemStack reserved = ItemStack.EMPTY;
+            if (allowPhysicalFallback) {
+                reserved = executionLedger.reserveFromNetwork(ingredient, stillNeeded, network);
+                if (reserved.isEmpty()) {
+                    reserved = executionLedger.reserveFromInventory(ingredient, stillNeeded, online);
+                }
+            }
+            if (reserved.isEmpty()) {
+                modifiedSlots.forEach((index, originalStack) -> {
+                    if (index < workingInventory.size()) {
+                        workingInventory.set(index, originalStack);
+                    } else {
+                        workingInventory.add(originalStack);
+                    }
+                });
+                logMissingIngredient(ingredient, stepId);
+                logVirtualInventory("at failure for step " + stepId);
+                logLedgerState(executionLedger);
+                if (allowPhysicalFallback) {
+                    abort("Missing: " + describeIngredientSafe(ingredient),
+                            Component.translatable("rsi.async.abort.missing_material",
+                                    nameIngredientSafe(ingredient)));
+                }
+                return false;
+            }
+            if (!captured && ingIdx < consumed.length) {
+                consumed[ingIdx] = reserved.copyWithCount(1);
+            }
+        }
+
+        ItemStack result = CraftPacketUtils.assembleCraftingOutput(recipe, consumed, online);
+        if (result.isEmpty()) {
+            result = ModRecipeHandlers.tryGetResultItem(recipe, registryAccess);
+        }
+        if (!result.isEmpty()) addToInventory(workingInventory, result);
+
+        for (ItemStack remainder : CraftPacketUtils.getRecipeRemainders(recipe, consumed)) {
+            int remainderExecutions = CraftPacketUtils.remainderExecutions(remainder, specs, 1);
+            addToInventory(workingInventory,
+                    remainder.copyWithCount(StepExecutor.mulCount(
+                            remainder.getCount(), remainderExecutions)));
         }
         return true;
     }

@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.crafting;
 
+import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.graph.ConcurrentNodeExecutor;
 import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
@@ -78,6 +79,41 @@ class CraftProgressRuntimeTest extends BootstrapTest {
         assertEquals(0, AsyncCraftChain.completedFlatOperations(11, 11));
         assertEquals(8, AsyncCraftChain.completedFlatOperations(11, 3));
         assertEquals(11, AsyncCraftChain.completedFlatOperations(11, 0));
+    }
+
+    @Test
+    void vanillaExecutionSliceContinuesLargeStepAcrossTicks() {
+        var step = genericStep("large", 65);
+
+        var first = AsyncCraftChain.planVanillaBatchSlice(List.of(step), 0, 0, 8);
+        var second = AsyncCraftChain.planVanillaBatchSlice(
+                List.of(step), first.nextStepIndex(), first.remainingExecutions(), 8);
+
+        assertEquals(8, first.steps().get(0).executions());
+        assertEquals(0, first.nextStepIndex());
+        assertEquals(57, first.remainingExecutions());
+        assertEquals(8, second.steps().get(0).executions());
+        assertEquals(49, second.remainingExecutions());
+    }
+
+    @Test
+    void vanillaExecutionSliceSharesBudgetAcrossSteps() {
+        List<CraftingResolver.ResolutionStep> steps = List.of(
+                genericStep("first", 3), genericStep("second", 10));
+
+        var slice = AsyncCraftChain.planVanillaBatchSlice(steps, 0, 0, 8);
+
+        assertEquals(List.of(3, 5), slice.steps().stream()
+                .map(CraftingResolver.ResolutionStep::executions).toList());
+        assertEquals(1, slice.nextStepIndex());
+        assertEquals(5, slice.remainingExecutions());
+    }
+
+    private static CraftingResolver.ResolutionStep genericStep(String path, int executions) {
+        return new CraftingResolver.ResolutionStep(
+                new ResourceLocation("test", path), ModType.GENERIC,
+                new ResourceLocation("minecraft", "crafting"),
+                List.of(), List.of(), false, executions);
     }
 
     private static final class StubDelegate implements IBatchDelegate {

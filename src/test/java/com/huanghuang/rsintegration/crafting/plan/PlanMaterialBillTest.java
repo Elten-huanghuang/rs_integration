@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting.plan;
 
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
+import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.crafting.tree.IngredientKey;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.resources.ResourceLocation;
@@ -38,6 +39,31 @@ class PlanMaterialBillTest extends BootstrapTest {
 
         assertTrue(result.feasible(), "one net ingot is available for execution");
         assertEquals(new PlanResponse.Availability(2, 1),
+                result.materials().get(IngredientKey.of(new ItemStack(Items.IRON_INGOT))));
+    }
+
+    @Test
+    void reusableCatalystIsNotMultipliedByBatchCount() {
+        ItemStack target = new ItemStack(Items.EMERALD);
+        PlanStep targetStep = new PlanStep(TARGET_RECIPE, target, 65,
+                List.of(new ItemStack(Items.DIAMOND), new ItemStack(Items.IRON_INGOT)),
+                List.of(), null, 0, false, 0, 0, List.of(),
+                List.of(DemandRole.CATALYST, DemandRole.CONSUMED));
+
+        PlanMaterialBill.Result result = PlanMaterialBill.summarize(
+                mapOf(Items.DIAMOND, 1, Items.IRON_INGOT, 65),
+                Map.of(Items.DIAMOND, Ingredient.of(Items.DIAMOND),
+                        Items.IRON_INGOT, Ingredient.of(Items.IRON_INGOT)),
+                Map.of(Items.DIAMOND, 1, Items.IRON_INGOT, 65),
+                Map.of(new StackKey(Items.DIAMOND, null), 1,
+                        new StackKey(Items.IRON_INGOT, null), 65),
+                target, List.of(targetStep), 65, null, false);
+
+        assertEquals(1, targetStep.totalInputCount(0, 65));
+        assertEquals(65, targetStep.totalInputCount(1, 65));
+        assertEquals(new PlanResponse.Availability(1, 1),
+                result.materials().get(IngredientKey.of(new ItemStack(Items.DIAMOND))));
+        assertEquals(new PlanResponse.Availability(65, 65),
                 result.materials().get(IngredientKey.of(new ItemStack(Items.IRON_INGOT))));
     }
 

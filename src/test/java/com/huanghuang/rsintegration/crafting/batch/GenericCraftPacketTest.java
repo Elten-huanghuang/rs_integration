@@ -143,6 +143,35 @@ class GenericCraftPacketTest extends BootstrapTest {
     }
 
     @Test
+    void pureCraftingChainUsesConfiguredOperationThreshold() {
+        List<CraftingResolver.ResolutionStep> steps = List.of(
+                new CraftingResolver.ResolutionStep(
+                        new ResourceLocation("test", "intermediate"), ModType.GENERIC,
+                        new ResourceLocation("minecraft", "crafting"),
+                        List.of(), List.of(), false, 3),
+                genericStep("terminal", 5));
+
+        assertEquals(8, GenericCraftPacket.totalExecutions(steps));
+        assertFalse(GenericCraftPacket.shouldExecuteGenericChainAsync(steps, 8));
+        assertTrue(GenericCraftPacket.shouldExecuteGenericChainAsync(steps, 7));
+    }
+
+    @Test
+    void pureCraftingOperationCountSaturates() {
+        List<CraftingResolver.ResolutionStep> steps = List.of(
+                genericStep("first", Integer.MAX_VALUE), genericStep("second", 1));
+
+        assertEquals(Integer.MAX_VALUE, GenericCraftPacket.totalExecutions(steps));
+    }
+
+    private static CraftingResolver.ResolutionStep genericStep(String path, int executions) {
+        return new CraftingResolver.ResolutionStep(
+                new ResourceLocation("test", path), ModType.GENERIC,
+                new ResourceLocation("minecraft", "crafting"),
+                List.of(), List.of(), false, executions);
+    }
+
+    @Test
     void smithingWaitsForAsynchronousIntermediateBeforeTerminalStep() {
         ResourceLocation intermediateId = new ResourceLocation("test", "dark_helmet");
         ResourceLocation smithingId = new ResourceLocation("test", "divine_gold_helmet");
@@ -229,6 +258,19 @@ class GenericCraftPacketTest extends BootstrapTest {
         assertEquals(DemandRole.CONSUMED, scaled.get(0).role());
         assertEquals(1, scaled.get(1).count());
         assertEquals(DemandRole.CATALYST, scaled.get(1).role());
+    }
+
+    @Test
+    void shapedDisplayKeepsCatalystRoleAlignedAcrossEmptySlots() {
+        List<Ingredient> displayed = List.of(
+                Ingredient.EMPTY, Ingredient.of(Items.DIAMOND), Ingredient.of(Items.IRON_INGOT));
+        List<IngredientSpec> specs = List.of(
+                IngredientSpec.EMPTY,
+                new IngredientSpec(Ingredient.of(Items.DIAMOND), 1, DemandRole.CATALYST),
+                new IngredientSpec(Ingredient.of(Items.IRON_INGOT), 1, DemandRole.CONSUMED));
+
+        assertEquals(List.of(DemandRole.CONSUMED, DemandRole.CATALYST, DemandRole.CONSUMED),
+                GenericCraftPacket.alignInputRoles(displayed, specs));
     }
 
     @Test

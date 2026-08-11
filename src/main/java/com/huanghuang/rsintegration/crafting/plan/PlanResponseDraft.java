@@ -150,7 +150,8 @@ public record PlanResponseDraft(
         return new PlanStep(step.recipeId(), step.output().copy(), step.batches(),
                 step.inputs().stream().map(ItemStack::copy).toList(),
                 step.alternatives(), step.modType(), step.depth(), step.hasOrSiblings(),
-                step.recipeWidth(), step.recipeHeight(), step.alternativeModTypes());
+                step.recipeWidth(), step.recipeHeight(), step.alternativeModTypes(),
+                step.inputRoles());
     }
 
     private static PlanGraphView copyGraph(PlanGraphView source) {

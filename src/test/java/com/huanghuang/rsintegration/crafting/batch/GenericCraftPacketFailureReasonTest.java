@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.crafting.plan.PlanResponse;
 import com.huanghuang.rsintegration.crafting.tree.IngredientKey;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
@@ -23,6 +24,7 @@ import java.util.Map;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class GenericCraftPacketFailureReasonTest extends BootstrapTest {
@@ -56,6 +58,11 @@ class GenericCraftPacketFailureReasonTest extends BootstrapTest {
 
         assertTrue(specs.stream().anyMatch(spec -> spec.ingredient().test(new ItemStack(Items.STICK))));
         assertTrue(specs.stream().anyMatch(spec -> spec.ingredient().test(new ItemStack(Items.DIAMOND))));
+        IngredientSpec catalyst = specs.stream()
+                .filter(spec -> spec.ingredient().test(new ItemStack(Items.DIAMOND)))
+                .findFirst().orElseThrow();
+        assertEquals(DemandRole.CATALYST, catalyst.role());
+        assertEquals(1, GenericCraftPacket.scaleIngredientSpecs(List.of(catalyst), 65).get(0).count());
     }
 
     private static final class SpecializedCraftingRecipe extends ShapelessRecipe {
@@ -74,7 +81,7 @@ class GenericCraftPacketFailureReasonTest extends BootstrapTest {
         }
         @Override public List<IngredientSpec> getIngredients(Recipe<?> recipe) {
             return List.of(new IngredientSpec(Ingredient.of(Items.STICK), 1),
-                    new IngredientSpec(Ingredient.of(Items.DIAMOND), 1));
+                    new IngredientSpec(Ingredient.of(Items.DIAMOND), 1, DemandRole.CATALYST));
         }
     }
 }

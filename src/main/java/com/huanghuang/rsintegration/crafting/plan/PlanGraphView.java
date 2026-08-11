@@ -128,9 +128,10 @@ public record PlanGraphView(
             List<ItemStack> displayInputs = inputs.stream()
                     .map(input -> input.display().copyWithCount(input.perExecutionQuantity(runCount)))
                     .toList();
+            List<DemandRole> inputRoles = inputs.stream().map(InputView::role).toList();
             return new PlanStep(recipeId, primaryOutput.copy(), runCount,
                     displayInputs, alternativeIds, ModType.byId(modTypeId), 0,
-                    !alternativeIds.isEmpty(), 0, 0, alternativeModTypeIds);
+                    !alternativeIds.isEmpty(), 0, 0, alternativeModTypeIds, inputRoles);
         }
     }
 
@@ -140,6 +141,12 @@ public record PlanGraphView(
         private int perExecutionQuantity(int executions) {
             if (roleOrdinal == DemandRole.CATALYST.ordinal()) return quantity;
             return Math.max(1, (quantity + executions - 1) / executions);
+        }
+
+        private DemandRole role() {
+            DemandRole[] roles = DemandRole.values();
+            return roleOrdinal >= 0 && roleOrdinal < roles.length
+                    ? roles[roleOrdinal] : DemandRole.CONSUMED;
         }
     }
 

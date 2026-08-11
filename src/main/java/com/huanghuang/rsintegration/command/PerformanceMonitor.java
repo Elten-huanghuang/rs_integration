@@ -79,6 +79,14 @@ public final class PerformanceMonitor {
     private static final AtomicLong typedResolverCalls = new AtomicLong();
     private static final AtomicLong typedResolverNanos = new AtomicLong();
     private static final AtomicLong typedResolverMaxNanos = new AtomicLong();
+    private static final AtomicLong typedPreviewQueued = new AtomicLong();
+    private static final AtomicLong typedPreviewReplaced = new AtomicLong();
+    private static final AtomicLong typedPreviewRejected = new AtomicLong();
+    private static final AtomicLong typedPreviewAdmitted = new AtomicLong();
+    private static final AtomicLong typedPreviewQueueDepth = new AtomicLong();
+    private static final AtomicLong vanillaTickOperations = new AtomicLong();
+    private static final AtomicLong vanillaTickBudget = new AtomicLong();
+    private static final AtomicLong vanillaDeferredChains = new AtomicLong();
     private static final AtomicLongArray synchronousPlanningFallbacks =
             new AtomicLongArray(SynchronousFallbackReason.values().length);
     private static final AtomicLong delegateObserveCalls = new AtomicLong();
@@ -196,6 +204,24 @@ public final class PerformanceMonitor {
         typedResolverNanos.addAndGet(Math.max(0L, nanosElapsed));
         typedResolverMaxNanos.updateAndGet(previous -> Math.max(previous, nanosElapsed));
     }
+    public static void recordVanillaTickBudget(int used, int budget, int deferredChains) {
+        vanillaTickOperations.addAndGet(Math.max(0, used));
+        vanillaTickBudget.addAndGet(Math.max(0, budget));
+        vanillaDeferredChains.addAndGet(Math.max(0, deferredChains));
+    }
+    public static void recordTypedPreviewQueued(boolean replaced, int queueDepth) {
+        typedPreviewQueued.incrementAndGet();
+        if (replaced) typedPreviewReplaced.incrementAndGet();
+        typedPreviewQueueDepth.set(Math.max(0, queueDepth));
+    }
+    public static void recordTypedPreviewRejected(int queueDepth) {
+        typedPreviewRejected.incrementAndGet();
+        typedPreviewQueueDepth.set(Math.max(0, queueDepth));
+    }
+    public static void recordTypedPreviewAdmitted(int admitted, int queueDepth) {
+        typedPreviewAdmitted.addAndGet(Math.max(0, admitted));
+        typedPreviewQueueDepth.set(Math.max(0, queueDepth));
+    }
     public static void recordSynchronousPlanningFallback(
             SynchronousFallbackReason reason, ResourceLocation recipeId) {
         synchronousPlanningFallbacks.incrementAndGet(reason.ordinal());
@@ -308,6 +334,11 @@ public final class PerformanceMonitor {
              + (typedResolverCalls.get() == 0 ? 0
                      : typedResolverNanos.get() / typedResolverCalls.get() / 1000) + "/"
              + typedResolverMaxNanos.get() / 1000 + "us"
+             + " typedQueue=" + typedPreviewQueued.get() + "/"
+             + typedPreviewReplaced.get() + "/" + typedPreviewRejected.get()
+             + "/" + typedPreviewAdmitted.get() + " depth=" + typedPreviewQueueDepth.get()
+             + " vanillaTick=" + vanillaTickOperations.get() + "/"
+             + vanillaTickBudget.get() + " deferred=" + vanillaDeferredChains.get()
              + " syncFallback=" + synchronousPlanningFallbackSummary()
              + " delegateObserve=" + delegateObserveCalls.get() + "/"
              + (delegateObserveCalls.get() == 0 ? 0 : delegateObserveNanos.get() / delegateObserveCalls.get() / 1000)

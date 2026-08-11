@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.crafting.plan;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.tree.IngredientKey;
+import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.command.PerformanceMonitor;
 import io.netty.handler.codec.DecoderException;
 import net.minecraft.network.FriendlyByteBuf;
@@ -90,6 +91,9 @@ public final class PlanResponsePacket {
             buf.writeVarInt(step.inputs().size());
             for (ItemStack in : step.inputs()) {
                 buf.writeItem(in);
+            }
+            for (DemandRole role : step.inputRoles()) {
+                buf.writeVarInt(role.ordinal());
             }
             buf.writeVarInt(step.alternatives().size());
             for (ResourceLocation alt : step.alternatives()) {
@@ -196,6 +200,15 @@ public final class PlanResponsePacket {
             for (int j = 0; j < inCount; j++) {
                 inputs.add(buf.readItem());
             }
+            List<DemandRole> inputRoles = new ArrayList<>(inCount);
+            DemandRole[] demandRoles = DemandRole.values();
+            for (int j = 0; j < inCount; j++) {
+                int ordinal = buf.readVarInt();
+                if (ordinal < 0 || ordinal >= demandRoles.length) {
+                    throw new DecoderException("Invalid input demand role: " + ordinal);
+                }
+                inputRoles.add(demandRoles[ordinal]);
+            }
             int altCount = readBoundedCount(buf);
             List<ResourceLocation> alternatives = new ArrayList<>(altCount);
             for (int j = 0; j < altCount; j++) {
@@ -215,7 +228,8 @@ public final class PlanResponsePacket {
                 alternativeModTypes.add(buf.readUtf(MAX_MOD_TYPE_LENGTH));
             }
             steps.add(new PlanStep(rid, output, batches, inputs, alternatives, modType,
-                    depth, hasOrSiblings, recipeWidth, recipeHeight, alternativeModTypes));
+                    depth, hasOrSiblings, recipeWidth, recipeHeight, alternativeModTypes,
+                    inputRoles));
         }
         // Materials
         int matCount = readBoundedCount(buf);

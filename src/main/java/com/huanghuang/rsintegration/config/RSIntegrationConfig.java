@@ -30,8 +30,13 @@ public final class RSIntegrationConfig {
             CraftingPlanningConfig.DEFAULT_PURE_TIMEOUT_MS;
     public static final int DEFAULT_CRAFTING_TYPED_PREVIEW_TIMEOUT_MS =
             CraftingPlanningConfig.DEFAULT_TYPED_PREVIEW_TIMEOUT_MS;
+    public static final int DEFAULT_CRAFTING_TYPED_PREVIEW_QUEUE_CAPACITY = 32;
+    public static final int DEFAULT_CRAFTING_TYPED_PREVIEW_ADMISSIONS_PER_TICK = 1;
+    public static final int DEFAULT_CRAFTING_TYPED_PREVIEW_QUEUE_TIMEOUT_MS = 1_000;
     public static final int DEFAULT_CRAFTING_RESOLVE_TIMEOUT_MS = 2_000;
     public static final int DEFAULT_CRAFTING_MAX_ENSURE_CALLS = 10_000;
+    public static final int DEFAULT_CRAFTING_VANILLA_OPERATIONS_PER_TICK = 8;
+    public static final int DEFAULT_CRAFTING_GLOBAL_VANILLA_OPERATIONS_PER_TICK = 24;
     public static final int DEFAULT_CRAFTING_PREVIEW_RATE_LIMIT_MS =
             CraftingPreviewPolicy.DEFAULT_RATE_LIMIT_MS;
     public static final int DEFAULT_CRAFTING_PLAN_CACHE_TTL_MS =
@@ -48,6 +53,9 @@ public final class RSIntegrationConfig {
     public static final int DEFAULT_GRID_SEARCH_DEBOUNCE_MS = 80;
     public static final int DEFAULT_GRID_SEARCH_PARTIAL_REFRESH_MS = 50;
     public static final int DEFAULT_GRID_SEARCH_QUERY_CACHE_ENTRIES = 16;
+    public static final int DEFAULT_GRID_SEARCH_EMPTY_SNAPSHOT_GRACE_MS = 250;
+    public static final int DEFAULT_GRID_SEARCH_CANDIDATE_INDEX_MAX_PERCENT = 60;
+    public static final int DEFAULT_GRID_SEARCH_CANDIDATE_REBUILD_DELAY_MS = 100;
     public static final int DEFAULT_GRID_SEARCH_PINYIN_WORKERS = 2;
     public static final int DEFAULT_GRID_SEARCH_DISK_CACHE_ENTRIES = 20_000;
     public static final int DEFAULT_GRID_SEARCH_DISK_CACHE_MAX_MIB = 32;
@@ -122,11 +130,15 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.IntValue GRID_SEARCH_DEBOUNCE_MS;
     public static ForgeConfigSpec.IntValue GRID_SEARCH_PARTIAL_REFRESH_MS;
     public static ForgeConfigSpec.IntValue GRID_SEARCH_QUERY_CACHE_ENTRIES;
+    public static ForgeConfigSpec.IntValue GRID_SEARCH_EMPTY_SNAPSHOT_GRACE_MS;
+    public static ForgeConfigSpec.IntValue GRID_SEARCH_CANDIDATE_INDEX_MAX_PERCENT;
+    public static ForgeConfigSpec.IntValue GRID_SEARCH_CANDIDATE_REBUILD_DELAY_MS;
     public static ForgeConfigSpec.IntValue GRID_SEARCH_PINYIN_WORKERS;
     public static ForgeConfigSpec.BooleanValue GRID_SEARCH_DISK_CACHE_ENABLED;
     public static ForgeConfigSpec.IntValue GRID_SEARCH_DISK_CACHE_ENTRIES;
     public static ForgeConfigSpec.IntValue GRID_SEARCH_DISK_CACHE_MAX_MIB;
     public static ForgeConfigSpec.IntValue GRID_SEARCH_DISK_CACHE_SAVE_DELAY_MS;
+    public static ForgeConfigSpec.BooleanValue LIGHTWEIGHT_SLASHBLADE_LIST_RENDERING;
     public static ForgeConfigSpec.BooleanValue DEPOSIT_UPGRADE_RS;
     public static ForgeConfigSpec.BooleanValue ENABLE_MAJ_ACCESSORY_COMPRESSION;
     public static ForgeConfigSpec.BooleanValue ENABLE_MACHINE_GUI_TABS;
@@ -183,12 +195,17 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.IntValue CRAFTING_PURE_DEMAND_MAX_NODES;
     public static ForgeConfigSpec.IntValue CRAFTING_PURE_PLANNING_TIMEOUT_MS;
     public static ForgeConfigSpec.IntValue CRAFTING_TYPED_PREVIEW_TIMEOUT_MS;
+    public static ForgeConfigSpec.IntValue CRAFTING_TYPED_PREVIEW_QUEUE_CAPACITY;
+    public static ForgeConfigSpec.IntValue CRAFTING_TYPED_PREVIEW_ADMISSIONS_PER_TICK;
+    public static ForgeConfigSpec.IntValue CRAFTING_TYPED_PREVIEW_QUEUE_TIMEOUT_MS;
     public static ForgeConfigSpec.BooleanValue ENABLE_CRAFTING_VARIANT_CONVERSION_GUARD;
     public static ForgeConfigSpec.IntValue CRAFTING_PREVIEW_RATE_LIMIT_MS;
     public static ForgeConfigSpec.IntValue CRAFTING_PLAN_CACHE_TTL_MS;
     public static ForgeConfigSpec.IntValue CRAFTING_PLAN_CACHE_MAX_ENTRIES;
     public static ForgeConfigSpec.IntValue CRAFTING_RESOLVE_TIMEOUT_MS;
     public static ForgeConfigSpec.IntValue CRAFTING_MAX_ENSURE_CALLS;
+    public static ForgeConfigSpec.IntValue CRAFTING_VANILLA_OPERATIONS_PER_TICK;
+    public static ForgeConfigSpec.IntValue CRAFTING_GLOBAL_VANILLA_OPERATIONS_PER_TICK;
     public static ForgeConfigSpec.IntValue CRAFTING_MAX_CONCURRENT_GRAPH_NODES;
     public static ForgeConfigSpec.IntValue CRAFTING_GRAPH_DISPATCH_PER_TICK;
     public static ForgeConfigSpec.IntValue CRAFTING_GRAPH_DISPATCH_PER_CRAFT;
@@ -737,6 +754,22 @@ public final class RSIntegrationConfig {
                         DEFAULT_CRAFTING_TYPED_PREVIEW_TIMEOUT_MS,
                         CraftingPlanningConfig.MIN_TYPED_PREVIEW_TIMEOUT_MS,
                         CraftingPlanningConfig.MAX_TYPED_PREVIEW_TIMEOUT_MS);
+        CRAFTING_TYPED_PREVIEW_QUEUE_CAPACITY = s
+                .comment("Maximum number of players waiting for typed preview admission.",
+                        "Only each player's latest request is retained. Range: 1-256.")
+                .defineInRange("craftingTypedPreviewQueueCapacity",
+                        DEFAULT_CRAFTING_TYPED_PREVIEW_QUEUE_CAPACITY, 1, 256);
+        CRAFTING_TYPED_PREVIEW_ADMISSIONS_PER_TICK = s
+                .comment("Maximum typed preview requests admitted to the server thread per tick.",
+                        "Keep this low because typed resolution reads live world and network state.",
+                        "Range: 1-8.")
+                .defineInRange("craftingTypedPreviewAdmissionsPerTick",
+                        DEFAULT_CRAFTING_TYPED_PREVIEW_ADMISSIONS_PER_TICK, 1, 8);
+        CRAFTING_TYPED_PREVIEW_QUEUE_TIMEOUT_MS = s
+                .comment("Maximum time a typed preview may wait in the admission queue.",
+                        "Expired requests return the localized planner-busy response. Range: 100-10000.")
+                .defineInRange("craftingTypedPreviewQueueTimeoutMs",
+                        DEFAULT_CRAFTING_TYPED_PREVIEW_QUEUE_TIMEOUT_MS, 100, 10_000);
         ENABLE_CRAFTING_VARIANT_CONVERSION_GUARD = s
                 .comment("Skip crafting conversions with no net gain for a broad tag demand.",
                         "This prevents color and material variants from recursively converting",
@@ -777,6 +810,17 @@ public final class RSIntegrationConfig {
                         "Increase alongside the timeout for deep recipe trees. Range: 1000-100000.")
                 .defineInRange("craftingMaxEnsureCalls",
                         DEFAULT_CRAFTING_MAX_ENSURE_CALLS, 1000, 100000);
+        CRAFTING_VANILLA_OPERATIONS_PER_TICK = s
+                .comment("Maximum vanilla crafting executions performed synchronously per server tick.",
+                        "This is a per-chain fairness cap. Larger chains continue across ticks.",
+                        "Range: 1-256.")
+                .defineInRange("craftingVanillaOperationsPerTick",
+                        DEFAULT_CRAFTING_VANILLA_OPERATIONS_PER_TICK, 1, 256);
+        CRAFTING_GLOBAL_VANILLA_OPERATIONS_PER_TICK = s
+                .comment("Maximum vanilla crafting executions shared by all active chains per server tick.",
+                        "The manager distributes this budget fairly between chains. Range: 1-1024.")
+                .defineInRange("craftingGlobalVanillaOperationsPerTick",
+                        DEFAULT_CRAFTING_GLOBAL_VANILLA_OPERATIONS_PER_TICK, 1, 1024);
         CRAFTING_MAX_CONCURRENT_GRAPH_NODES = s
                 .comment("Maximum number of independent DAG recipe nodes that may run in parallel.",
                         "Set to 1 for serial execution (safest); increase for multi-machine speedup.",
@@ -976,6 +1020,21 @@ public final class RSIntegrationConfig {
                         "范围：8-128。")
                 .defineInRange("queryCacheEntries", DEFAULT_GRID_SEARCH_QUERY_CACHE_ENTRIES,
                         8, 128);
+        GRID_SEARCH_EMPTY_SNAPSHOT_GRACE_MS = cl
+                .comment("RS 重建网格视图时，保留上一份非空搜索快照的等待时间。",
+                        "用于忽略短暂的空列表，避免清空并重建全部索引。范围：0-2000 毫秒。")
+                .defineInRange("emptySnapshotGraceMs",
+                        DEFAULT_GRID_SEARCH_EMPTY_SNAPSHOT_GRACE_MS, 0, 2_000);
+        GRID_SEARCH_CANDIDATE_INDEX_MAX_PERCENT = cl
+                .comment("倒排索引候选占当前可搜索条目的比例上限。",
+                        "超过该比例时直接分片扫描，避免为接近全集的候选额外复制和求交。范围：10-100。")
+                .defineInRange("candidateIndexMaxPercent",
+                        DEFAULT_GRID_SEARCH_CANDIDATE_INDEX_MAX_PERCENT, 10, 100);
+        GRID_SEARCH_CANDIDATE_REBUILD_DELAY_MS = cl
+                .comment("搜索文本开始成批就绪后，按多长间隔在后台重建倒排索引。",
+                        "连续预热期间会合并更新，同时保留动态结果，避免为每个物品重复发布。范围：0-2000 毫秒。")
+                .defineInRange("candidateRebuildDelayMs",
+                        DEFAULT_GRID_SEARCH_CANDIDATE_REBUILD_DELAY_MS, 0, 2_000);
         GRID_SEARCH_PINYIN_WORKERS = cl
                 .comment("用于生成 # 搜索拼音索引的后台线程数。",
                         "Minecraft tooltip 本身仍在客户端线程采集；只有纯文本转拼音在后台运行。",
@@ -999,6 +1058,10 @@ public final class RSIntegrationConfig {
                         "较长的延迟可以合并连续写入。范围：500-30000 毫秒。")
                 .defineInRange("diskCacheSaveDelayMs",
                         DEFAULT_GRID_SEARCH_DISK_CACHE_SAVE_DELAY_MS, 500, 30_000);
+        LIGHTWEIGHT_SLASHBLADE_LIST_RENDERING = cl
+                .comment("在 RS 网格和 JEI 物品列表中使用轻量的 SlashBlade 图标渲染。",
+                        "保留刀身与纹理，但省略发光、3D 耐久装饰和附魔的重复模型绘制。")
+                .define("lightweightSlashBladeRendering", false);
         cl.pop();
         cl.push("distantWorlds");
         ENABLE_DISTANT_WORLDS_HUD = cl

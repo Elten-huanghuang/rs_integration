@@ -149,6 +149,15 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
             return isClassPresent(
                     "mods.flammpfeil.slashblade.recipe.SlashBladeSmithingRecipe$Serializer");
         }
+        if (mixinClassName.contains("slashblade.SlashBladeTEISRGridMixin")) {
+            return isClassPresent("mods.flammpfeil.slashblade.client.renderer.SlashBladeTEISR")
+                    && hasMethod(targetClassName, "renderBlade")
+                    && hasMethod(targetClassName, "renderIcon");
+        }
+        if (mixinClassName.contains("slashblade.BladeRenderStateGridMixin")) {
+            return isClassPresent("mods.flammpfeil.slashblade.client.renderer.util.BladeRenderState")
+                    && hasMethod(targetClassName, "renderOverrided");
+        }
         if (mixinClassName.contains("AddonEventHandler")) {
             // Target is Enigmatic Addons; body calls Enigmatic Legacy's SuperpositionHandler.
             return isClassPresent("com.aizistral.enigmaticlegacy.handlers.SuperpositionHandler");
@@ -208,6 +217,14 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
         if (mixinClassName.contains("jei.ElementSearchLowMemSolCarrotMixin")) {
             return hasField(targetClassName, "elementInfoList")
                     && hasMethod(targetClassName, "getSearchResults");
+        }
+        if (mixinClassName.contains("jei.IngredientListRendererGridMixin")) {
+            return isClassPresent("mezz.jei.gui.overlay.IngredientListRenderer")
+                    && hasMethod(targetClassName, "renderBatch");
+        }
+        if (mixinClassName.contains("jei.ItemStackRendererGridMixin")) {
+            return isClassPresent("mezz.jei.library.render.ItemStackRenderer")
+                    && hasMethod(targetClassName, "render");
         }
         if (mixinClassName.contains("refinedstorage.CraftingTaskAccessor")) {
             return hasField(targetClassName, "network");
