@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting.plan;
 
 import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 
@@ -26,12 +27,27 @@ public record PlanStep(
         boolean hasOrSiblings,
         int recipeWidth,
         int recipeHeight,
-        List<String> alternativeModTypes
+        List<String> alternativeModTypes,
+        List<DemandRole> inputRoles
 ) {
     public PlanStep {
         inputs = List.copyOf(inputs);
         alternatives = List.copyOf(alternatives);
         alternativeModTypes = List.copyOf(alternativeModTypes);
+        inputRoles = inputRoles.isEmpty() && !inputs.isEmpty()
+                ? Collections.nCopies(inputs.size(), DemandRole.CONSUMED)
+                : List.copyOf(inputRoles);
+        if (inputRoles.size() != inputs.size()) {
+            throw new IllegalArgumentException("inputRoles must align with inputs");
+        }
+    }
+
+    public PlanStep(ResourceLocation recipeId, ItemStack output, int batches,
+                    List<ItemStack> inputs, List<ResourceLocation> alternatives,
+                    @Nullable ModType modType, int depth, boolean hasOrSiblings,
+                    int recipeWidth, int recipeHeight, List<String> alternativeModTypes) {
+        this(recipeId, output, batches, inputs, alternatives, modType, depth, hasOrSiblings,
+                recipeWidth, recipeHeight, alternativeModTypes, Collections.emptyList());
     }
 
     public PlanStep(ResourceLocation recipeId, ItemStack output, int batches,
@@ -39,39 +55,59 @@ public record PlanStep(
                     @Nullable ModType modType, int depth, boolean hasOrSiblings,
                     int recipeWidth, int recipeHeight) {
         this(recipeId, output, batches, inputs, alternatives, modType, depth, hasOrSiblings,
-                recipeWidth, recipeHeight, Collections.emptyList());
+                recipeWidth, recipeHeight, Collections.emptyList(), Collections.emptyList());
     }
 
     public PlanStep(ResourceLocation recipeId, ItemStack output, int batches,
                     List<ItemStack> inputs, List<ResourceLocation> alternatives,
                     @Nullable ModType modType, int depth, boolean hasOrSiblings) {
         this(recipeId, output, batches, inputs, alternatives, modType, depth, hasOrSiblings,
-                0, 0, Collections.emptyList());
+                0, 0, Collections.emptyList(), Collections.emptyList());
     }
 
     public PlanStep(ResourceLocation recipeId, ItemStack output, int batches,
                     List<ItemStack> inputs, List<ResourceLocation> alternatives,
                     @Nullable ModType modType) {
         this(recipeId, output, batches, inputs, alternatives, modType, 0, false,
-                0, 0, Collections.emptyList());
+                0, 0, Collections.emptyList(), Collections.emptyList());
     }
 
     public PlanStep(ResourceLocation recipeId, ItemStack output, int batches,
                     List<ItemStack> inputs, List<ResourceLocation> alternatives) {
         this(recipeId, output, batches, inputs, alternatives, null, 0, false,
-                0, 0, Collections.emptyList());
+                0, 0, Collections.emptyList(), Collections.emptyList());
     }
 
     public PlanStep(ResourceLocation recipeId, ItemStack output, int batches,
                     List<ItemStack> inputs) {
         this(recipeId, output, batches, inputs, Collections.emptyList(), null, 0, false,
-                0, 0, Collections.emptyList());
+                0, 0, Collections.emptyList(), Collections.emptyList());
     }
 
     public int totalInputCount() {
         int n = 0;
-        for (ItemStack s : inputs) n += s.getCount();
-        return n * batches;
+        for (int i = 0; i < inputs.size(); i++) {
+            n = saturatingAdd(n, totalInputCount(i, batches));
+        }
+        return n;
+    }
+
+    public DemandRole inputRole(int index) {
+        return index >= 0 && index < inputRoles.size()
+                ? inputRoles.get(index) : DemandRole.CONSUMED;
+    }
+
+    public int totalInputCount(int index, int executions) {
+        if (index < 0 || index >= inputs.size()) return 0;
+        int count = Math.max(0, inputs.get(index).getCount());
+        if (inputRole(index) == DemandRole.CATALYST) return count;
+        long total = (long) count * Math.max(1, executions);
+        return total >= Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) total;
+    }
+
+    private static int saturatingAdd(int left, int right) {
+        long total = (long) left + right;
+        return total >= Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) total;
     }
 
     public int totalOutputCount() {

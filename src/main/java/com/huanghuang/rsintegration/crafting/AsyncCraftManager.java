@@ -26,6 +26,7 @@ public final class AsyncCraftManager {
     private static final AsyncCraftManager INSTANCE = new AsyncCraftManager();
     private final ActiveCraftRegistry<UUID, AsyncCraftChain> activeChains = new ActiveCraftRegistry<>();
     private OperationServices operationServices = new OperationServices();
+    private int roundRobinCursor;
     private final java.util.concurrent.ConcurrentLinkedQueue<Runnable> completionQueue = new java.util.concurrent.ConcurrentLinkedQueue<>();
 
     void enqueueCompletion(Runnable callback) {
@@ -180,9 +181,17 @@ public final class AsyncCraftManager {
 
         long tickStart = System.nanoTime();
 
-        for (AsyncCraftChain chain : activeChains.snapshot()) {
+        List<AsyncCraftChain> snapshot = activeChains.snapshot();
+        int globalLimit = configuredGlobalVanillaLimit();
+        int perChainLimit = configuredPerChainVanillaLimit();
+        VanillaCraftingTickBudget vanillaBudget = new VanillaCraftingTickBudget(globalLimit);
+        int deferredChains = 0;
+        int start = snapshot.isEmpty() ? 0 : Math.floorMod(roundRobinCursor, snapshot.size());
+        for (AsyncCraftChain chain : roundRobinOrder(snapshot, start)) {
+            VanillaCraftingTickBudget.ChainAllowance allowance =
+                    vanillaBudget.allowance(perChainLimit);
             try {
-                chain.tick();
+                chain.tick(allowance);
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.error("[RSI-AsyncMgr] Chain tick error", e);
                 String msg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
@@ -198,12 +207,50 @@ public final class AsyncCraftManager {
             if (chain.isDone()) {
                 activeChains.remove(chain.getCraftId());
             }
+            if (!chain.isDone() && chain.isWaitingForVanillaBudget() && allowance.remaining() == 0) {
+                deferredChains++;
+            }
         }
+        if (!snapshot.isEmpty()) roundRobinCursor = (start + 1) % snapshot.size();
         for (Runnable callback; (callback = completionQueue.poll()) != null;) {
             try { callback.run(); }
             catch (RuntimeException | LinkageError e) { RSIntegrationMod.LOGGER.error("[RSI-AsyncMgr] Completion callback failed", e); }
         }
         PerformanceMonitor.recordTick(
                 System.nanoTime() - tickStart);
+        if (!snapshot.isEmpty()) {
+            PerformanceMonitor.recordVanillaTickBudget(
+                    vanillaBudget.used(), vanillaBudget.limit(), deferredChains);
+        }
+    }
+
+    private static int configuredPerChainVanillaLimit() {
+        try {
+            return Math.max(1, com.huanghuang.rsintegration.config.RSIntegrationConfig
+                    .CRAFTING_VANILLA_OPERATIONS_PER_TICK.get());
+        } catch (Exception ignored) {
+            return com.huanghuang.rsintegration.config.RSIntegrationConfig
+                    .DEFAULT_CRAFTING_VANILLA_OPERATIONS_PER_TICK;
+        }
+    }
+
+    private static int configuredGlobalVanillaLimit() {
+        try {
+            return Math.max(1, com.huanghuang.rsintegration.config.RSIntegrationConfig
+                    .CRAFTING_GLOBAL_VANILLA_OPERATIONS_PER_TICK.get());
+        } catch (Exception ignored) {
+            return com.huanghuang.rsintegration.config.RSIntegrationConfig
+                    .DEFAULT_CRAFTING_GLOBAL_VANILLA_OPERATIONS_PER_TICK;
+        }
+    }
+
+    static <T> List<T> roundRobinOrder(List<T> source, int start) {
+        if (source.isEmpty()) return List.of();
+        int normalized = Math.floorMod(start, source.size());
+        List<T> ordered = new ArrayList<>(source.size());
+        for (int offset = 0; offset < source.size(); offset++) {
+            ordered.add(source.get((normalized + offset) % source.size()));
+        }
+        return List.copyOf(ordered);
     }
 }

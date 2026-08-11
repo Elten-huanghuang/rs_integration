@@ -421,8 +421,8 @@ public final class CraftingPlanScreen extends Screen {
             int maxLineW = contentW - 24;
             if (missingCount > 0) {
                 lines++; // header
-                String joined = String.join(", ", plan.missing());
-                lines += UIRenderer.wrapLines(font, "  " + joined, maxLineW).size();
+                lines += missingTextLineCount(font,
+                        MissingMaterialBookmarkList.textEntries(plan), maxLineW);
             }
             if (modWarnCount > 0) {
                 lines += modWarnCount;
@@ -1231,7 +1231,7 @@ public final class CraftingPlanScreen extends Screen {
                     int sx = gridLeft + col * (GRID_SLOT + GRID_GAP);
                     int sy = gridTop + row * (GRID_SLOT + GRID_GAP);
                     ItemStack gs = step.inputs().get(i);
-                    int gTotal = gs.getCount() * Math.max(1, step.batches());
+                    int gTotal = step.totalInputCount(i, step.batches());
                     int gDisp = batches > 1 ? gs.getCount() : gTotal;
                     drawGridSlot(gfx, font, sx, sy, gs, gTotal, gDisp);
                 }
@@ -1251,7 +1251,7 @@ public final class CraftingPlanScreen extends Screen {
                     ItemStack in = step.inputs().get(i);
                     int sx = cx + (i % cols) * (SLOT_SIZE + 3);
                     int sy = cy + (i / cols) * (SLOT_SIZE + 3);
-                    int totalNeed = in.getCount() * Math.max(1, step.batches());
+                    int totalNeed = step.totalInputCount(i, step.batches());
                     int disp = batches > 1 ? in.getCount() : totalNeed;
                     drawSlot(gfx, font, sx, sy, in, totalNeed, disp, true);
                 }
@@ -1676,11 +1676,8 @@ public final class CraftingPlanScreen extends Screen {
             gfx.drawString(font, hdr, left + 10, my, 0xFFFF6666);
 
             my += font.lineHeight + 4;
-            String joined = String.join(", ", plan.missing());
-            for (String line : UIRenderer.wrapLines(font, "  " + joined, maxLineW)) {
-                gfx.drawString(font, line, left + 10, my, 0xFFCC8888);
-                my += font.lineHeight + 4;
-            }
+            my = renderMissingTextEntries(gfx, font,
+                    MissingMaterialBookmarkList.textEntries(plan), left + 10, my, maxLineW);
         }
         // Render mod warnings (one per line — they're longer sentences)
         if (hasModWarnings) {
@@ -1692,6 +1689,68 @@ public final class CraftingPlanScreen extends Screen {
                 my += font.lineHeight + 4;
             }
         }
+    }
+
+    private int renderMissingTextEntries(
+            GuiGraphics gfx, Font font,
+            List<MissingMaterialBookmarkList.TextEntry> entries,
+            int left, int y, int maxLineWidth) {
+        int cursorX = left;
+        boolean firstOnLine = true;
+        for (MissingMaterialBookmarkList.TextEntry entry : entries) {
+            String prefix = firstOnLine ? "  " : ", ";
+            int prefixWidth = font.width(prefix);
+            int labelWidth = font.width(entry.label());
+            if (!firstOnLine && cursorX + prefixWidth + labelWidth > left + maxLineWidth) {
+                y += font.lineHeight + 4;
+                cursorX = left;
+                firstOnLine = true;
+                prefix = "  ";
+                prefixWidth = font.width(prefix);
+            }
+
+            gfx.drawString(font, prefix, cursorX, y, 0xFFCC8888, false);
+            cursorX += prefixWidth;
+            int availableWidth = Math.max(1, left + maxLineWidth - cursorX);
+            String visibleLabel = font.plainSubstrByWidth(entry.label(), availableWidth);
+            int visibleWidth = font.width(visibleLabel);
+            boolean hovered = entry.bookmarkable()
+                    && mouseX >= cursorX && mouseX < cursorX + visibleWidth
+                    && mouseY >= y && mouseY < y + font.lineHeight;
+            gfx.drawString(font, visibleLabel, cursorX, y,
+                    hovered ? 0xFFFFBBBB : 0xFFCC8888, false);
+            if (hovered) {
+                gfx.fill(cursorX, y + font.lineHeight,
+                        cursorX + visibleWidth, y + font.lineHeight + 1, 0xFFFF9999);
+            }
+            if (entry.bookmarkable() && visibleWidth > 0) {
+                registerBookmarkHit(entry.bookmark(), cursorX, y,
+                        visibleWidth, font.lineHeight, entry.missingCount());
+            }
+            cursorX += visibleWidth;
+            firstOnLine = false;
+        }
+        return entries.isEmpty() ? y : y + font.lineHeight + 4;
+    }
+
+    private static int missingTextLineCount(
+            Font font, List<MissingMaterialBookmarkList.TextEntry> entries, int maxLineWidth) {
+        if (entries.isEmpty()) return 0;
+        int lines = 1;
+        int used = 0;
+        boolean firstOnLine = true;
+        for (MissingMaterialBookmarkList.TextEntry entry : entries) {
+            int width = font.width(firstOnLine ? "  " : ", ") + font.width(entry.label());
+            if (!firstOnLine && used + width > maxLineWidth) {
+                lines++;
+                used = font.width("  ") + Math.min(font.width(entry.label()), maxLineWidth);
+                firstOnLine = false;
+            } else {
+                used += width;
+                firstOnLine = false;
+            }
+        }
+        return lines;
     }
 
     private void renderBookmarkAllAction(GuiGraphics gfx, Font font, int x, int y) {
@@ -2633,11 +2692,12 @@ public final class CraftingPlanScreen extends Screen {
 
     private int stepAccent(PlanStep step, int batches) {
         if (step == null || step.inputs().isEmpty()) return C_ACCENT_NEUTRAL;
-        for (ItemStack in : step.inputs()) {
+        for (int inputIndex = 0; inputIndex < step.inputs().size(); inputIndex++) {
+            ItemStack in = step.inputs().get(inputIndex);
             if (in.isEmpty()) continue;
             PlanResponse.Availability a = plan.availability(in);
             int avail = a != null ? a.available() : 0;
-            int need = in.getCount() * Math.max(1, batches);
+            int need = step.totalInputCount(inputIndex, batches);
             if (avail < need) return C_ACCENT_MISSING;
         }
         return C_ACCENT_READY;

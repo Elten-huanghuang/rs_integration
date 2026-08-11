@@ -90,8 +90,12 @@ class PlanGraphViewTest extends BootstrapTest {
         CompoundTag tag = new CompoundTag();
         tag.putString("variant", "round-trip");
         graph.nodes().get(0).primaryOutput().setTag(tag);
+        PlanStep catalystStep = new PlanStep(new ResourceLocation("test", "reuse"),
+                new ItemStack(Items.EMERALD), 12,
+                List.of(new ItemStack(Items.DIAMOND)), List.of(), null,
+                0, false, 0, 0, List.of(), List.of(DemandRole.CATALYST));
         PlanResponse plan = new PlanResponse(true, "Diamond", new ItemStack(Items.DIAMOND),
-                List.of(), java.util.Map.of(), List.of(), "test:root",
+                List.of(catalystStep), java.util.Map.of(), List.of(), "test:root",
                 null, null, 0, 0, 0, List.of(), 1,
                 null, null, null, 0, false, false, false, null,
                 java.util.Set.of(), java.util.Map.of(), null, graph, true);
@@ -113,6 +117,8 @@ class PlanGraphViewTest extends BootstrapTest {
                 decoded.graph().nodes().get(0).alternativeModTypeIds());
         assertEquals(graph.nodes().get(0).primaryOutput().getCount(),
                 decoded.graph().nodes().get(0).primaryOutput().getCount());
+        assertEquals(List.of(DemandRole.CATALYST), decoded.steps().get(0).inputRoles());
+        assertEquals(1, decoded.steps().get(0).totalInputCount());
         assertEquals(1, decoded.graph().nodes().get(0).outputs().get(0).display().getCount());
         assertEquals(3, decoded.graph().nodes().get(0).outputs().get(0).quantity());
         assertEquals(1, decoded.graph().edges().get(1).material().getCount());

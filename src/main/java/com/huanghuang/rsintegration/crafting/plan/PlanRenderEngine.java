@@ -46,6 +46,7 @@ public final class PlanRenderEngine {
 
     private static final int CARD_HEIGHT = 28;
     private static final int SLOT_SIZE   = 18;
+    private static final int BOOKMARK_BUTTON_Z = 200;
 
     // Material pill colors
     private static final int C_PILL_GREEN_BG  = 0xCC1B5E20;
@@ -327,12 +328,15 @@ public final class PlanRenderEngine {
     /** Compact overlay control that keeps the existing material-cell geometry unchanged. */
     public static void drawBookmarkAddButton(GuiGraphics gfx, int x, int y, int size,
                                              boolean hovered) {
+        gfx.pose().pushPose();
+        gfx.pose().translate(0, 0, BOOKMARK_BUTTON_Z);
         UIRenderer.rounded(gfx, x, y, size, size, 2f,
                 hovered ? 0xEE338855 : 0xDD182A20);
         int color = hovered ? 0xFFFFFFFF : 0xFF9BE7B5;
         int center = size / 2;
         gfx.fill(x + 2, y + center, x + size - 2, y + center + 1, color);
         gfx.fill(x + center, y + 2, x + center + 1, y + size - 2, color);
+        gfx.pose().popPose();
     }
 
     // ── Formatting helpers ────────────────────────────────────────────

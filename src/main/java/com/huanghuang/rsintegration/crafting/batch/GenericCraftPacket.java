@@ -70,6 +70,7 @@ import com.huanghuang.rsintegration.crafting.planning.SynchronousFallbackReason;
 import com.huanghuang.rsintegration.crafting.planning.PlanCache;
 import com.huanghuang.rsintegration.crafting.planning.PlanRequestService;
 import com.huanghuang.rsintegration.crafting.planning.PlanningStateValidator;
+import com.huanghuang.rsintegration.crafting.planning.TypedPreviewAdmissionQueue;
 import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
@@ -119,6 +120,9 @@ public final class GenericCraftPacket {
     private static final int MAX_DEFERRED_WARM_UP_REQUESTS = 128;
     private static final LogSampler FAILURE_LOG_SAMPLER = new LogSampler(2_000);
     private static volatile PlanRequestService PLAN_REQUESTS = newDefaultPlanRequestService();
+    private static volatile TypedPreviewAdmissionQueue TYPED_PREVIEW_REQUESTS =
+            new TypedPreviewAdmissionQueue(
+                    RSIntegrationConfig.DEFAULT_CRAFTING_TYPED_PREVIEW_QUEUE_CAPACITY);
     private static final DeferredCraftRequestQueue<Consumer<ServerPlayer>> WARM_UP_REQUESTS =
             new DeferredCraftRequestQueue<>(MAX_DEFERRED_WARM_UP_REQUESTS);
 
@@ -497,6 +501,7 @@ public final class GenericCraftPacket {
 
     /** Runs at most one valid deferred request after a complete generation is ready. */
     public static void tickWarmUpRequests(MinecraftServer server) {
+        tickTypedPreviewRequests(server);
         if (RecipeIndex.generationBuildFailed()) {
             DeferredCraftRequestQueue.Entry<Consumer<ServerPlayer>> request;
             while ((request = WARM_UP_REQUESTS.poll()) != null) {
@@ -521,6 +526,26 @@ public final class GenericCraftPacket {
             request.payload().accept(player);
             return;
         }
+    }
+
+    private static void tickTypedPreviewRequests(MinecraftServer server) {
+        int admissions;
+        int timeoutMs;
+        try {
+            admissions = RSIntegrationConfig.CRAFTING_TYPED_PREVIEW_ADMISSIONS_PER_TICK.get();
+            timeoutMs = RSIntegrationConfig.CRAFTING_TYPED_PREVIEW_QUEUE_TIMEOUT_MS.get();
+        } catch (Exception ignored) {
+            admissions = RSIntegrationConfig.DEFAULT_CRAFTING_TYPED_PREVIEW_ADMISSIONS_PER_TICK;
+            timeoutMs = RSIntegrationConfig.DEFAULT_CRAFTING_TYPED_PREVIEW_QUEUE_TIMEOUT_MS;
+        }
+        TypedPreviewAdmissionQueue queue = TYPED_PREVIEW_REQUESTS;
+        int admitted = queue.run(Math.max(1, admissions), System.nanoTime(),
+                Math.max(1, timeoutMs) * 1_000_000L, request -> {
+                    ServerPlayer player = server.getPlayerList().getPlayer(request.playerId());
+                    return player != null && !player.hasDisconnected()
+                            && PLAN_REQUESTS.isCurrent(request.playerId(), request.generation());
+                });
+        PerformanceMonitor.recordTypedPreviewAdmitted(admitted, queue.size());
     }
 
     /**
@@ -731,7 +756,28 @@ public final class GenericCraftPacket {
             player.sendSystemMessage(Component.translatable("rsi.generic.error.craft_failed", failMsg));
             return false;
         }
+        player.sendSystemMessage(Component.translatable(
+                "rsi.generic.craft_completed", recipeId.toString(), totalExecutions(steps)));
         return true;
+    }
+
+    static int totalExecutions(List<ResolutionStep> steps) {
+        long total = 0L;
+        for (ResolutionStep step : steps) {
+            total += Math.max(1, step.executions());
+            if (total >= Integer.MAX_VALUE) return Integer.MAX_VALUE;
+        }
+        return (int) total;
+    }
+
+    static boolean shouldExecuteGenericChainAsync(List<ResolutionStep> steps) {
+        return shouldExecuteGenericChainAsync(
+                steps, RSIntegrationConfig.CRAFTING_VANILLA_OPERATIONS_PER_TICK.get());
+    }
+
+    static boolean shouldExecuteGenericChainAsync(
+            List<ResolutionStep> steps, int syncOperationThreshold) {
+        return totalExecutions(steps) > Math.max(0, syncOperationThreshold);
     }
 
     static ResolutionStep genericTerminalStep(ResourceLocation recipeId, int repeatCount) {
@@ -1048,9 +1094,12 @@ public final class GenericCraftPacket {
                 // All GENERIC steps → execute sync chain
                 List<ResolutionStep> execSteps = new ArrayList<>(allSteps);
                 execSteps.add(genericTerminalStep(recipeId, repeatCount));
-                if (outputDestination == OutputDestination.PLAYER_INVENTORY) {
+                if (outputDestination == OutputDestination.PLAYER_INVENTORY
+                        || shouldExecuteGenericChainAsync(execSteps)) {
                     launchAsyncChain(player, execSteps,
-                            LegacyExecutionMetrics.Reason.GRAPH_COMPOSITION_REJECTED,
+                            outputDestination == OutputDestination.PLAYER_INVENTORY
+                                    ? LegacyExecutionMetrics.Reason.GRAPH_COMPOSITION_REJECTED
+                                    : LegacyExecutionMetrics.Reason.PURE_CHAIN_OPERATION_THRESHOLD,
                             network, repeatCount, recipeId, forcedRecipes,
                             dim, pos, inferMode, baseItem, targetOutput, outputDestination);
                     return;
@@ -1084,8 +1133,15 @@ public final class GenericCraftPacket {
                 cachedSteps.add(genericTerminalStep(recipeId, repeatCount));
                 RSIntegrationMod.debug("[RSI-Generic] Executing revalidated pure preview plan for {}",
                         recipeId);
-                executeSyncLoop(player, cachedSteps, network, recipeId, repeatCount,
-                        "Intermediate crafting failed");
+                if (shouldExecuteGenericChainAsync(cachedSteps)) {
+                    launchAsyncChain(player, cachedSteps,
+                            LegacyExecutionMetrics.Reason.PURE_CHAIN_OPERATION_THRESHOLD,
+                            network, repeatCount, recipeId, forcedRecipes, dim, pos,
+                            inferMode, baseItem, targetOutput, outputDestination);
+                } else {
+                    executeSyncLoop(player, cachedSteps, network, recipeId, repeatCount,
+                            "Intermediate crafting failed");
+                }
                 return;
             }
             Map<StackKey, Integer> avail = MaterialSources.listAllAvailable(player, network);
@@ -1128,9 +1184,11 @@ public final class GenericCraftPacket {
                                 recipeId, exception.getMessage());
                     }
                 }
-                if (needsAsync) {
+                if (needsAsync || shouldExecuteGenericChainAsync(execSteps2)) {
                     launchAsyncChain(player, execSteps2,
-                            LegacyExecutionMetrics.rejectedGraphReason(execSteps2),
+                            needsAsync
+                                    ? LegacyExecutionMetrics.rejectedGraphReason(execSteps2)
+                                    : LegacyExecutionMetrics.Reason.PURE_CHAIN_OPERATION_THRESHOLD,
                             network, repeatCount, recipeId, forcedRecipes,
                             dim, pos, inferMode, baseItem, targetOutput, outputDestination);
                     return;
@@ -1228,6 +1286,17 @@ public final class GenericCraftPacket {
                     }
                 }
             }
+        }
+
+        if (recipe instanceof CraftingRecipe
+                && shouldExecuteGenericChainAsync(
+                List.of(genericTerminalStep(recipeId, repeatCount)))) {
+            launchAsyncChain(player,
+                    List.of(genericTerminalStep(recipeId, repeatCount)),
+                    LegacyExecutionMetrics.Reason.PURE_CHAIN_OPERATION_THRESHOLD,
+                    network, repeatCount, recipeId, forcedRecipes, dim, pos,
+                    inferMode, baseItem, targetOutput, outputDestination);
+            return;
         }
 
         for (int r = 0; r < repeatCount; r++) {
@@ -1464,6 +1533,34 @@ public final class GenericCraftPacket {
         return expanded;
     }
 
+    static List<DemandRole> nonEmptyInputRoles(List<IngredientSpec> specs) {
+        return specs.stream()
+                .filter(spec -> !spec.isEmpty())
+                .map(IngredientSpec::role)
+                .toList();
+    }
+
+    static List<DemandRole> alignInputRoles(
+            List<Ingredient> displayed, List<IngredientSpec> specs) {
+        if (displayed.size() == specs.size()) {
+            return specs.stream().map(spec -> spec.isEmpty()
+                    ? DemandRole.CONSUMED : spec.role()).toList();
+        }
+
+        List<DemandRole> nonEmpty = nonEmptyInputRoles(specs);
+        List<DemandRole> aligned = new ArrayList<>(displayed.size());
+        int roleIndex = 0;
+        for (Ingredient ingredient : displayed) {
+            if (ingredient.isEmpty()) {
+                aligned.add(DemandRole.CONSUMED);
+            } else {
+                aligned.add(roleIndex < nonEmpty.size()
+                        ? nonEmpty.get(roleIndex++) : DemandRole.CONSUMED);
+            }
+        }
+        return List.copyOf(aligned);
+    }
+
     private interface PlanResultSink {
         void success(PlanResponse plan, PlanningSnapshot snapshot);
         void error(Component message);
@@ -1683,6 +1780,7 @@ public final class GenericCraftPacket {
 
         // Un-expanded ingredients for PlanStep display (avoids 64× icon spam).
         List<Ingredient> displayIngredients;
+        List<DemandRole> displayInputRoles;
 
         if (faRecipe) {
             // Build ingredient specs from FA recipe: template + baseItem + addition
@@ -1704,6 +1802,7 @@ public final class GenericCraftPacket {
                     perRecipe.add(spec.ingredient());
                 }
                 displayIngredients = perRecipe;
+                displayInputRoles = nonEmptyInputRoles(specs);
                 recipeSpecs = scaleIngredientSpecs(specs, repeatCount);
                 recipeIngredients = expandIngredientSpecs(recipeSpecs);
                 // Apply modifier to the JEI-provided base item so the plan
@@ -1750,6 +1849,7 @@ public final class GenericCraftPacket {
                     .filter(spec -> !spec.isEmpty())
                     .map(IngredientSpec::ingredient)
                     .toList();
+            displayInputRoles = nonEmptyInputRoles(specs);
             recipeSpecs = scaleIngredientSpecs(specs, repeatCount);
             recipeIngredients = expandIngredientSpecs(recipeSpecs);
             targetOutput = validated;
@@ -1760,6 +1860,7 @@ public final class GenericCraftPacket {
             if (cr instanceof net.minecraft.world.item.crafting.ShapedRecipe) {
                 // Preserve empty slots for the shaped-grid renderer.
                 displayIngredients = raw;
+                displayInputRoles = alignInputRoles(raw, extractedSpecs);
             } else {
                 // Some mod recipes implement CraftingRecipe for JEI integration but
                 // their handler supplies semantic inputs absent from getIngredients(),
@@ -1768,6 +1869,7 @@ public final class GenericCraftPacket {
                         .filter(spec -> !spec.isEmpty())
                         .map(IngredientSpec::ingredient)
                         .toList();
+                displayInputRoles = nonEmptyInputRoles(extractedSpecs);
             }
             recipeSpecs = scaleIngredientSpecs(extractedSpecs, repeatCount);
             recipeIngredients = expandIngredientSpecs(recipeSpecs);
@@ -1802,6 +1904,7 @@ public final class GenericCraftPacket {
                 perRecipe.add(spec.ingredient());
             }
             displayIngredients = perRecipe;
+            displayInputRoles = nonEmptyInputRoles(specs);
             recipeSpecs = scaleIngredientSpecs(specs, repeatCount);
             recipeIngredients = expandIngredientSpecs(recipeSpecs);
             targetOutput = ModRecipeHandlers.tryGetResultItem(recipe, player.serverLevel().registryAccess());
@@ -1936,6 +2039,7 @@ public final class GenericCraftPacket {
                         .filter(spec -> !spec.isEmpty())
                         .map(IngredientSpec::ingredient)
                         .toList();
+                displayInputRoles = nonEmptyInputRoles(recipeSpecs);
                 ItemStack assembled = SmithingRecipeHandler.assembleWithBase(
                         smithingRecipe, selectedSmithingBase,
                         player.serverLevel().registryAccess());
@@ -2041,6 +2145,31 @@ public final class GenericCraftPacket {
             sink.error(Component.translatable(network == null
                     ? "rsi.generic.error.network_unavailable"
                     : "rsi.generic.error.multiblock_auto_craft_disabled"));
+            return;
+        }
+        if (needsTypedResolver
+                && !TYPED_PREVIEW_REQUESTS.isAdmitted(player.getUUID(), previewGeneration)) {
+            PlanningSnapshot queuedSnapshot = planningSnapshot;
+            TypedPreviewAdmissionQueue queue = TYPED_PREVIEW_REQUESTS;
+            TypedPreviewAdmissionQueue.OfferResult queued = queue.offer(
+                    new TypedPreviewAdmissionQueue.Request(
+                            player.getUUID(), previewGeneration, System.nanoTime(),
+                            () -> tryBuildPlan(player, recipeId, forcedRecipes, dim, pos,
+                                    repeatCount, baseItem, clickedOutput, requestId,
+                                    previewGeneration, precomputedPlan, queuedSnapshot, true,
+                                    pendingFallbackReason, true, sink),
+                            () -> {
+                                PerformanceMonitor.recordTypedPreviewRejected(queue.size());
+                                sink.error(Component.translatable(
+                                        "rsi.plan.failure.planner_busy"));
+                            }));
+            if (queued == TypedPreviewAdmissionQueue.OfferResult.FULL) {
+                PerformanceMonitor.recordTypedPreviewRejected(queue.size());
+                sink.error(Component.translatable("rsi.plan.failure.planner_busy"));
+                return;
+            }
+            PerformanceMonitor.recordTypedPreviewQueued(
+                    queued == TypedPreviewAdmissionQueue.OfferResult.REPLACED, queue.size());
             return;
         }
 
@@ -2262,33 +2391,41 @@ public final class GenericCraftPacket {
             int recipeW = 0, recipeH = 0;
 
             List<ItemStack> inputs = new ArrayList<>();
+            List<DemandRole> inputRoles = new ArrayList<>();
             if (stepRecipe instanceof CraftingRecipe scr) {
+                List<Ingredient> craftingIngredients = scr.getIngredients();
+                List<DemandRole> craftingRoles = alignInputRoles(
+                        craftingIngredients, extractPlanIngredientSpecs(scr));
                 if (scr instanceof net.minecraft.world.item.crafting.ShapedRecipe shaped) {
                     recipeW = shaped.getWidth();
                     recipeH = shaped.getHeight();
                     // Preserve grid positions — include empty slots as ItemStack.EMPTY
-                    for (Ingredient ing : scr.getIngredients()) {
+                    for (int inputIndex = 0; inputIndex < craftingIngredients.size(); inputIndex++) {
+                        Ingredient ing = craftingIngredients.get(inputIndex);
                         if (ing.isEmpty()) {
                             inputs.add(ItemStack.EMPTY);
                         } else {
                             ItemStack matched = matchAndConsume(ing, displayAvailable);
                             inputs.add(matched != null ? matched : firstValidDisplayItem(ing));
                         }
+                        inputRoles.add(craftingRoles.get(inputIndex));
                     }
                 } else {
-                    if (!scr.getIngredients().isEmpty()) {
+                    if (!craftingIngredients.isEmpty()) {
                         int n = 0;
-                        for (Ingredient ing : scr.getIngredients()) {
+                        for (Ingredient ing : craftingIngredients) {
                             if (!ing.isEmpty()) n++;
                         }
                         if (n <= 3) { recipeW = n; recipeH = 1; }
                         else if (n <= 4) { recipeW = 2; recipeH = 2; }
                         else { recipeW = 3; recipeH = 3; }
                     }
-                    for (Ingredient ing : scr.getIngredients()) {
+                    for (int inputIndex = 0; inputIndex < craftingIngredients.size(); inputIndex++) {
+                        Ingredient ing = craftingIngredients.get(inputIndex);
                         if (ing.isEmpty()) continue;
                         ItemStack matched = matchAndConsume(ing, displayAvailable);
                         inputs.add(matched != null ? matched : firstValidDisplayItem(ing));
+                        inputRoles.add(craftingRoles.get(inputIndex));
                     }
                 }
             } else {
@@ -2305,6 +2442,7 @@ public final class GenericCraftPacket {
                         display.setCount(cnt);
                         for (int c = 1; c < cnt; c++) matchAndConsume(spec.ingredient(), displayAvailable);
                         inputs.add(display);
+                        inputRoles.add(spec.role());
                     }
                 }
             }
@@ -2371,7 +2509,8 @@ public final class GenericCraftPacket {
             recipeWidths.put(stepId, recipeW);
             recipeHeights.put(stepId, recipeH);
             steps.add(new PlanStep(stepId, output, batches, inputs, alternatives, mt,
-                    0, !alternatives.isEmpty(), recipeW, recipeH, alternativeModTypes));
+                    0, !alternatives.isEmpty(), recipeW, recipeH, alternativeModTypes,
+                    inputRoles));
         }
 
         if (RSIntegrationMod.LOGGER.isDebugEnabled()) {
@@ -2428,7 +2567,7 @@ public final class GenericCraftPacket {
                             step.inputs(), step.alternatives(), step.modType(),
                             newDepth, step.hasOrSiblings(),
                             step.recipeWidth(), step.recipeHeight(),
-                            step.alternativeModTypes()));
+                            step.alternativeModTypes(), step.inputRoles()));
                     depthByItem.put(step.output().getItem(), newDepth);
                     changed = true;
                 }
@@ -2450,21 +2589,25 @@ public final class GenericCraftPacket {
         }
         {
             List<ItemStack> targetInputs = new ArrayList<>();
+            List<DemandRole> targetInputRoles = new ArrayList<>();
             int targetW = 0, targetH = 0;
             if (faRecipe || arsDynamic) {
                 // Contextual recipes use the already validated concrete input
                 // list so the target card shows the same NBT-bearing item that
                 // execution will extract.
-                for (Ingredient ing : displayIngredients) {
+                for (int inputIndex = 0; inputIndex < displayIngredients.size(); inputIndex++) {
+                    Ingredient ing = displayIngredients.get(inputIndex);
                     if (ing.isEmpty()) continue;
                     ItemStack matched = matchAndConsume(ing, displayAvailable, plannedOutputs);
                     ItemStack display = matched != null ? matched.copy() : firstValidDisplayItem(ing);
                     targetInputs.add(display);
+                    targetInputRoles.add(displayInputRoles.get(inputIndex));
                 }
             } else if (recipe instanceof net.minecraft.world.item.crafting.ShapedRecipe shaped) {
                 targetW = shaped.getWidth();
                 targetH = shaped.getHeight();
-                for (Ingredient ing : displayIngredients) {
+                for (int inputIndex = 0; inputIndex < displayIngredients.size(); inputIndex++) {
+                    Ingredient ing = displayIngredients.get(inputIndex);
                     if (ing.isEmpty()) {
                         targetInputs.add(ItemStack.EMPTY);
                     } else {
@@ -2472,6 +2615,7 @@ public final class GenericCraftPacket {
                         targetInputs.add(matched != null ? matched
                                 : firstValidDisplayItem(ing));
                     }
+                    targetInputRoles.add(displayInputRoles.get(inputIndex));
                 }
             } else if (recipe instanceof CraftingRecipe) {
                 int n = 0;
@@ -2479,11 +2623,13 @@ public final class GenericCraftPacket {
                 if (n <= 3) { targetW = n; targetH = 1; }
                 else if (n <= 4) { targetW = 2; targetH = 2; }
                 else { targetW = 3; targetH = 3; }
-                for (Ingredient ing : displayIngredients) {
+                for (int inputIndex = 0; inputIndex < displayIngredients.size(); inputIndex++) {
+                    Ingredient ing = displayIngredients.get(inputIndex);
                     if (ing.isEmpty()) continue;
                     ItemStack matched = matchAndConsume(ing, displayAvailable, plannedOutputs);
                     targetInputs.add(matched != null ? matched
                             : firstValidDisplayItem(ing));
+                    targetInputRoles.add(displayInputRoles.get(inputIndex));
                 }
             } else {
                 // Mod recipe: linear layout — re-read specs for per-ingredient counts
@@ -2506,6 +2652,7 @@ public final class GenericCraftPacket {
                             matchAndConsume(spec.ingredient(), displayAvailable, plannedOutputs);
                         }
                         targetInputs.add(display);
+                        targetInputRoles.add(spec.role());
                     }
                 }
             }
@@ -2569,17 +2716,20 @@ public final class GenericCraftPacket {
             // level-(N-1) book, and snapshot the side materials so the synthesized
             // lower-level steps below reuse the identical side set.
             List<ItemStack> iteratorSideDisplays = null;
+            List<DemandRole> iteratorSideRoles = null;
             if (levelBooks != null && !targetInputs.isEmpty()) {
                 iteratorSideDisplays = new ArrayList<>();
+                iteratorSideRoles = new ArrayList<>();
                 for (int i = 1; i < targetInputs.size(); i++) {
                     iteratorSideDisplays.add(targetInputs.get(i).copy());
+                    iteratorSideRoles.add(targetInputRoles.get(i));
                 }
                 targetInputs.set(0, levelBooks[levelBooks.length - 2].copy());
             }
 
             steps.add(new PlanStep(recipeId, planTargetOutput, repeatCount, targetInputs,
                     targetAlts, recipeModType, targetDepth, !targetAlts.isEmpty(),
-                    targetW, targetH, targetAltModTypes));
+                    targetW, targetH, targetAltModTypes, targetInputRoles));
 
             // Emit only the still-required levels. If a matching level-S book is
             // already available, it is a leaf input and the chain begins at S+1;
@@ -2587,12 +2737,15 @@ public final class GenericCraftPacket {
             if (levelBooks != null && iteratorSideDisplays != null) {
                 for (int k = levelBooks.length - 1; k > iteratorStartLevel; k--) {
                     List<ItemStack> lvlInputs = new ArrayList<>();
+                    List<DemandRole> lvlInputRoles = new ArrayList<>();
                     lvlInputs.add(k >= 2 ? levelBooks[k - 2].copy() : new ItemStack(Items.BOOK));
+                    lvlInputRoles.add(DemandRole.CONSUMED);
                     for (ItemStack side : iteratorSideDisplays) lvlInputs.add(side.copy());
+                    lvlInputRoles.addAll(iteratorSideRoles);
                     steps.add(new PlanStep(recipeId, levelBooks[k - 1].copy(), repeatCount,
                             lvlInputs, Collections.emptyList(), recipeModType,
                             targetDepth + (levelBooks.length - k), false,
-                            0, 0, Collections.emptyList()));
+                            0, 0, Collections.emptyList(), lvlInputRoles));
                 }
             }
 
@@ -3249,6 +3402,7 @@ public final class GenericCraftPacket {
 
     public static void onPlayerLogout(UUID playerId) {
         WARM_UP_REQUESTS.removePlayer(playerId);
+        TYPED_PREVIEW_REQUESTS.remove(playerId);
         PLAN_REQUESTS.forget(playerId);
         PLAN_CACHE.removePlayer(playerId);
     }
@@ -3259,6 +3413,7 @@ public final class GenericCraftPacket {
         PLAN_REQUESTS = newDefaultPlanRequestService();
         stopped.close();
         WARM_UP_REQUESTS.clear();
+        TYPED_PREVIEW_REQUESTS.clear();
         ImmutableRecipeGraphProjector.clearCache();
     }
 
@@ -3267,6 +3422,10 @@ public final class GenericCraftPacket {
         PlanRequestService previous = PLAN_REQUESTS;
         PLAN_REQUESTS = newPlanRequestService();
         previous.close();
+        TypedPreviewAdmissionQueue previousTyped = TYPED_PREVIEW_REQUESTS;
+        TYPED_PREVIEW_REQUESTS = new TypedPreviewAdmissionQueue(
+                RSIntegrationConfig.CRAFTING_TYPED_PREVIEW_QUEUE_CAPACITY.get());
+        previousTyped.clear();
     }
 
 }

@@ -1,15 +1,14 @@
 package com.huanghuang.rsintegration.recipe;
 
 import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.CraftingRecipe;
-import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
 
 import javax.annotation.Nullable;
-import java.util.ArrayList;
 import java.util.List;
 
 final class GenericRecipeHandler extends AbstractRecipeHandler {
@@ -34,12 +33,7 @@ final class GenericRecipeHandler extends AbstractRecipeHandler {
     @Override
     public List<IngredientSpec> getIngredients(Recipe<?> recipe) {
         if (!(recipe instanceof CraftingRecipe cr)) return null;
-        List<Ingredient> ingredients = cr.getIngredients();
-        if (ingredients.isEmpty()) return null;
-        List<IngredientSpec> specs = new ArrayList<>();
-        for (Ingredient ing : ingredients) {
-            if (!ing.isEmpty()) specs.add(new IngredientSpec(ing, 1));
-        }
-        return specs.isEmpty() ? null : specs;
+        List<IngredientSpec> specs = CraftPacketUtils.extractCraftingIngredientSpecs(cr);
+        return specs.stream().anyMatch(spec -> !spec.isEmpty()) ? specs : null;
     }
 }

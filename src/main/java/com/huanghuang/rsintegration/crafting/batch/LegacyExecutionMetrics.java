@@ -22,6 +22,7 @@ public final class LegacyExecutionMetrics {
         UNKNOWN_OUTPUT,
         NONDETERMINISTIC_OUTPUT,
         TAINT_SYNTHETIC_STEP,
+        PURE_CHAIN_OPERATION_THRESHOLD,
         GRAPH_COMPOSITION_REJECTED
     }
 
