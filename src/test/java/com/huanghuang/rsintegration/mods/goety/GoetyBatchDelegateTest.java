@@ -9,6 +9,7 @@ import net.minecraft.network.chat.Component;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Method;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -63,5 +64,36 @@ class GoetyBatchDelegateTest extends BootstrapTest {
         assertEquals("Skeleton", GoetyBatchDelegate
                 .displayComponent(Component.literal("Skeleton")).getString());
         assertEquals("?", GoetyBatchDelegate.displayComponent(null).getString());
+    }
+
+    @Test
+    void verifiedAltarWinsOverOtherCandidates() {
+        assertEquals(GoetyBatchDelegate.PlanStructureOutcome.VERIFIED,
+                GoetyBatchDelegate.summarizePlanStructureProbes(List.of(
+                        GoetyBatchDelegate.PlanStructureProbe.STRUCTURE_MISMATCH,
+                        GoetyBatchDelegate.PlanStructureProbe.VERIFIED,
+                        GoetyBatchDelegate.PlanStructureProbe.UNLOADED)));
+    }
+
+    @Test
+    void unloadedAltarDefersPreviewInsteadOfBlocking() {
+        assertEquals(GoetyBatchDelegate.PlanStructureOutcome.DEFERRED_UNLOADED,
+                GoetyBatchDelegate.summarizePlanStructureProbes(List.of(
+                        GoetyBatchDelegate.PlanStructureProbe.STRUCTURE_MISMATCH,
+                        GoetyBatchDelegate.PlanStructureProbe.UNLOADED)));
+    }
+
+    @Test
+    void explicitStructureMismatchStillBlocks() {
+        assertEquals(GoetyBatchDelegate.PlanStructureOutcome.STRUCTURE_MISMATCH,
+                GoetyBatchDelegate.summarizePlanStructureProbes(List.of(
+                        GoetyBatchDelegate.PlanStructureProbe.INVALID_BINDING,
+                        GoetyBatchDelegate.PlanStructureProbe.STRUCTURE_MISMATCH)));
+    }
+
+    @Test
+    void emptyCandidateListReportsNoBinding() {
+        assertEquals(GoetyBatchDelegate.PlanStructureOutcome.NO_BINDING,
+                GoetyBatchDelegate.summarizePlanStructureProbes(List.of()));
     }
 }

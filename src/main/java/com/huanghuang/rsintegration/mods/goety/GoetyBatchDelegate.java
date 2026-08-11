@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.mods.goety;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 
@@ -9,6 +10,7 @@ import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.RecipeIndex;
 import com.huanghuang.rsintegration.reflection.probes.GoetyReflection;
+import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.util.ModIds;
 import com.huanghuang.rsintegration.util.Reflect;
 import com.refinedmods.refinedstorage.api.network.INetwork;
@@ -42,6 +44,7 @@ import javax.annotation.Nullable;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 
@@ -1728,6 +1731,40 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         }
     }
 
+    enum PlanStructureProbe {
+        VERIFIED,
+        UNLOADED,
+        STRUCTURE_MISMATCH,
+        INVALID_BINDING,
+        CHECK_UNAVAILABLE
+    }
+
+    enum PlanStructureOutcome {
+        VERIFIED,
+        DEFERRED_UNLOADED,
+        STRUCTURE_MISMATCH,
+        INVALID_BINDING,
+        CHECK_UNAVAILABLE,
+        NO_BINDING
+    }
+
+    static PlanStructureOutcome summarizePlanStructureProbes(List<PlanStructureProbe> probes) {
+        if (probes == null || probes.isEmpty()) return PlanStructureOutcome.NO_BINDING;
+        if (probes.contains(PlanStructureProbe.VERIFIED)) return PlanStructureOutcome.VERIFIED;
+        // An unloaded bound altar may be perfectly valid. Execution performs the
+        // authoritative preflight again before reserving any material.
+        if (probes.contains(PlanStructureProbe.UNLOADED)) {
+            return PlanStructureOutcome.DEFERRED_UNLOADED;
+        }
+        if (probes.contains(PlanStructureProbe.CHECK_UNAVAILABLE)) {
+            return PlanStructureOutcome.CHECK_UNAVAILABLE;
+        }
+        if (probes.contains(PlanStructureProbe.STRUCTURE_MISMATCH)) {
+            return PlanStructureOutcome.STRUCTURE_MISMATCH;
+        }
+        return PlanStructureOutcome.INVALID_BINDING;
+    }
+
     public static List<Component> getPlanWarnings(ServerPlayer player, Recipe<?> recipe,
                                                   @Nullable ResourceLocation dim,
                                                   @Nullable net.minecraft.core.BlockPos pos) {
@@ -1828,37 +1865,42 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             blocked = true;
         }
 
-        // Structure/craftType check
+        // Structure/craftType check. Do not treat an unloaded remote altar as
+        // structurally invalid: preview is advisory, while execution repeats the
+        // full check before its material ledger reserves or commits anything.
         try {
             Object craftTypeValue = recipe.getClass().getMethod("getCraftType").invoke(recipe);
             String craftType = craftTypeValue instanceof String string ? string : null;
             if (craftType != null && !craftType.isEmpty()) {
-                if (pos != null && dim != null) {
-                    ServerLevel level = CraftPacketUtils.resolveLevel(player.server, dim, player);
-                    BlockEntity be = level != null && level.isLoaded(pos)
-                            ? level.getBlockEntity(pos) : null;
-                    Method structureCheck = findCompatibleStaticMethod(
-                            GoetyReflection.ritualRequirementsClass,
-                            "getProperStructure", craftType, be, pos, level);
-                    if (level == null || be == null
-                            || GoetyReflection.darkAltarBEClass == null
-                            || !GoetyReflection.darkAltarBEClass.isInstance(be)
-                            || structureCheck == null) {
-                        warnings.add(Component.translatable(
-                                "rsi.goety.warn.prerequisite_check_failed"));
-                        blocked = true;
-                    } else if (!Boolean.TRUE.equals(
-                            structureCheck.invoke(null, craftType, be, pos, level))) {
+                PlanStructureOutcome outcome = assessBoundAltarStructures(
+                        player, recipe, craftType, dim, pos);
+                switch (outcome) {
+                    case VERIFIED -> { }
+                    case DEFERRED_UNLOADED -> warnings.add(Component.translatable(
+                            "rsi.goety.warn.altar_unloaded",
+                            resolveCraftTypeName(craftType)));
+                    case STRUCTURE_MISMATCH -> {
                         warnings.add(Component.translatable(
                                 "rsi.goety.warn.structure_mismatch",
                                 resolveCraftTypeName(craftType)));
                         blocked = true;
                     }
-                } else {
-                    warnings.add(Component.translatable(
-                            "rsi.goety.warn.no_bound_altar",
-                            resolveCraftTypeName(craftType)));
-                    blocked = true;
+                    case INVALID_BINDING -> {
+                        warnings.add(Component.translatable(
+                                "rsi.goety.warn.bound_altar_invalid"));
+                        blocked = true;
+                    }
+                    case CHECK_UNAVAILABLE -> {
+                        warnings.add(Component.translatable(
+                                "rsi.goety.warn.prerequisite_check_failed"));
+                        blocked = true;
+                    }
+                    case NO_BINDING -> {
+                        warnings.add(Component.translatable(
+                                "rsi.goety.warn.no_bound_altar",
+                                resolveCraftTypeName(craftType)));
+                        blocked = true;
+                    }
                 }
             }
         } catch (Exception e) {
@@ -1897,6 +1939,82 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         }
 
         return new PlanPrerequisiteCheck(warnings, blocked);
+    }
+
+    private static PlanStructureOutcome assessBoundAltarStructures(
+            ServerPlayer player, Recipe<?> recipe, String craftType,
+            @Nullable ResourceLocation preferredDim, @Nullable BlockPos preferredPos) {
+        ModType recipeType = ModType.classifyRecipe(recipe);
+        if (recipeType == null) return PlanStructureOutcome.NO_BINDING;
+
+        List<AltarBindingRegistry.BoundMachine> candidates = new ArrayList<>();
+        for (AltarBindingRegistry.BoundMachine machine :
+                AltarBindingRegistry.getBoundMachinesForRecipe(
+                        player, recipeType, recipe.getId())) {
+            if (!GoetyBindingRules.matches(
+                    machine.blockKey(), null, GoetyBindingRules.ALTAR_FILTER)) {
+                continue;
+            }
+            boolean duplicate = candidates.stream().anyMatch(existing ->
+                    existing.dim().equals(machine.dim())
+                            && existing.pos().equals(machine.pos()));
+            if (!duplicate) candidates.add(machine);
+        }
+        if (preferredDim != null && preferredPos != null) {
+            candidates.sort(Comparator.comparingInt(machine ->
+                    machine.dim().equals(preferredDim)
+                            && machine.pos().equals(preferredPos) ? 0 : 1));
+        }
+
+        List<PlanStructureProbe> probes = new ArrayList<>(candidates.size());
+        for (AltarBindingRegistry.BoundMachine candidate : candidates) {
+            PlanStructureProbe probe = probeBoundAltarStructure(
+                    player, recipe.getId(), craftType, candidate);
+            probes.add(probe);
+            RSIntegrationMod.LOGGER.debug(
+                    "[RSI-Batch-Goety] Plan structure candidate: recipe={} craftType={} dim={} pos={} result={}",
+                    recipe.getId(), craftType, candidate.dim(), candidate.pos(), probe);
+        }
+        PlanStructureOutcome outcome = summarizePlanStructureProbes(probes);
+        RSIntegrationMod.LOGGER.debug(
+                "[RSI-Batch-Goety] Plan structure summary: recipe={} candidates={} outcome={}",
+                recipe.getId(), candidates.size(), outcome);
+        return outcome;
+    }
+
+    private static PlanStructureProbe probeBoundAltarStructure(
+            ServerPlayer player, ResourceLocation recipeId, String craftType,
+            AltarBindingRegistry.BoundMachine candidate) {
+        if (GoetyReflection.ritualRequirementsClass == null
+                || GoetyReflection.darkAltarBEClass == null) {
+            return PlanStructureProbe.CHECK_UNAVAILABLE;
+        }
+
+        ServerLevel level = CraftPacketUtils.resolveLevel(
+                player.server, candidate.dim(), player);
+        if (level == null) return PlanStructureProbe.INVALID_BINDING;
+        if (!level.isLoaded(candidate.pos())) return PlanStructureProbe.UNLOADED;
+
+        BlockEntity be = level.getBlockEntity(candidate.pos());
+        if (be == null || !GoetyReflection.darkAltarBEClass.isInstance(be)) {
+            return PlanStructureProbe.INVALID_BINDING;
+        }
+
+        Method structureCheck = findCompatibleStaticMethod(
+                GoetyReflection.ritualRequirementsClass,
+                "getProperStructure", craftType, be, candidate.pos(), level);
+        if (structureCheck == null) return PlanStructureProbe.CHECK_UNAVAILABLE;
+        try {
+            return Boolean.TRUE.equals(structureCheck.invoke(
+                    null, craftType, be, candidate.pos(), level))
+                    ? PlanStructureProbe.VERIFIED
+                    : PlanStructureProbe.STRUCTURE_MISMATCH;
+        } catch (ReflectiveOperationException | RuntimeException exception) {
+            RSIntegrationMod.LOGGER.warn(
+                    "[RSI-Batch-Goety] Plan structure probe failed: recipe={} dim={} pos={}",
+                    recipeId, candidate.dim(), candidate.pos(), exception);
+            return PlanStructureProbe.CHECK_UNAVAILABLE;
+        }
     }
 
     /**
