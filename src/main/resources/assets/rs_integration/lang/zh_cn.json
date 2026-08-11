@@ -558,6 +558,8 @@
   "rsi.goety.warn.prerequisite_check_failed": "§c无法验证仪式前置条件，已禁止执行合成",
   "rsi.goety.warn.structure_mismatch": "§6⚠ 绑定祭坛不满足仪式结构 (%s)",
   "rsi.goety.warn.no_bound_altar": "§6⚠ 未绑定祭坛，无法验证结构 (%s)",
+  "rsi.goety.warn.altar_unloaded": "§6⚠ 绑定祭坛所在区块尚未加载，暂缓结构预检 (%s)；执行前请先加载祭坛区块",
+  "rsi.goety.warn.bound_altar_invalid": "§c绑定记录已失效：目标位置不是黑暗祭坛，已禁止执行合成",
   "rsi.goety.error.brazier_wrong_biome": "§c亡灵火炉必须放置在深暗群系才能工作",
   "rsi.goety.error.brazier_no_candlesticks": "§c附近没有灵魂烛台 — 亡灵火炉需要烛台提供灵魂能量",
   "rsi.goety.summon_prepared": "§a基座材料已从RS网络填充完毕，§e%s§a 已放入背包。为防止误召唤，RSI不会自动启动仪式；请确认环境安全后，手持激活物品右键黑暗祭坛。",

@@ -12,6 +12,8 @@ RS Integration lets Refined Storage operate machines from other mods. Choose an 
 
 **Current version: 1.3.2 | Minecraft 1.20.1**
 
+[1.3.2 release notes](docs/RELEASE_NOTES_1.3.2.md) | [MC Encyclopedia guide (Chinese)](https://www.mcmod.cn/class/29199.html)
+
 ## Requirements
 
 | Dependency | Requirement |
@@ -22,6 +24,15 @@ RS Integration lets Refined Storage operate machines from other mods. Choose an 
 | JEI | Required on the client for recipe actions and plan previews |
 | Other integrations | Optional; modules load only when their target mod is present |
 
+## Version 1.3.2 Highlights
+
+- **Responsive RS search**: `#` tooltip, `$` tag, and `@` mod searches publish progressive results while immutable indexes and pinyin text warm in the background. Completed search text is cached on disk for later sessions.
+- **Bounded recipe previews**: an inventory-aware demand inspection chooses one planner before searching, preventing the old pure-planner-to-typed-planner double pass. Pure and typed planning use separate budgets, and multiplayer typed previews enter a fair admission queue.
+- **Safer recursive planning**: no-gain wool, concrete, wood, and other material-family conversions are pruned before they can form large loops. Reusable-catalyst recipes receive an automatic preference without requiring a list of recipe IDs.
+- **Correct batch accounting**: the plan distinguishes consumed inputs, returned containers, and reusable catalysts. Shared intermediates are counted once, while large vanilla batches are split across ticks under per-chain and global server budgets.
+- **Nearby machine binding**: press `;` to scan loaded chunks around the player. A Network Linker may remain equipped in a Curios slot; existing bindings, invalid structures, and machines protected by FTB Chunks are skipped safely.
+- **Expanded compatibility**: safer manual confirmation for Goety summoning/sacrifice/conversion rituals, single-layer Youkai steamers, Farmer's Respite kettle fluids, potion charms, Wizards Reborn crown inputs, and dynamic SlashBlade smithing outputs.
+
 ## Main Features
 
 ### Recursive remote crafting
@@ -31,7 +42,11 @@ RS Integration lets Refined Storage operate machines from other mods. Choose an 
 - Click the RSI action in JEI to preview and start crafting.
 - Resolves crafting-table, modded-machine, virtual-exchange, and multiblock prerequisites.
 - Shows the full step list, missing materials, alternative recipes, and a zoomable dependency graph before execution.
+- Uses the current inventory and RS snapshot to select one planner up front, avoiding duplicate planning work for recipes whose dependencies require special handlers.
+- Distinguishes consumed materials, returned containers, and reusable catalysts in cards, the tree, and total requirements. Missing material names can be bookmarked individually in JEI.
+- Prunes recursive no-gain conversions between equivalent colors or material variants while preserving exact-output and quantity-increasing recipes.
 - Runs independent graph nodes concurrently and load-balances repeated work across compatible machines.
+- Splits large vanilla crafting batches across ticks and shares a global operation budget fairly between active players and chains.
 - Tracks material provenance and performs transactional reservation, rollback, refund, and output delivery.
 - Keeps one physical machine input slot on one concrete item variant, while separate crafting-grid slots may mix tag-compatible materials such as different planks.
 - Press `P` to inspect progress; cancel from the progress screen, chat action, or `/rsi cancel`.
@@ -39,6 +54,7 @@ RS Integration lets Refined Storage operate machines from other mods. Choose an 
 ### Machine binding and remote access
 
 - Shift-right-click a supported block with the Network Linker to bind or unbind it.
+- Press `;` to bind nearby supported machines in loaded chunks. The scan is time-sliced, skips duplicate bindings, accepts a linker equipped in Curios, and reports protected or invalid targets separately.
 - Bindings retain dimension and position information and remove stale entries when blocks are broken.
 - Open compatible machine GUIs remotely from RS screens and return to the terminal after closing them.
 - Use the searchable Machine Management Center for status, output collection, GUI access, and number-key selection.
@@ -53,6 +69,9 @@ RS Integration lets Refined Storage operate machines from other mods. Choose an 
 - `Ctrl+T` transfers the visible JEI recipe to an RS crafting grid.
 - `Ctrl` + left-drag across RS slots extracts one item from each visited slot.
 - A draggable side panel exposes RS contents and machine tabs from other screens, with pinyin-aware search.
+- RS grids support progressive `#` tooltip, `$` tag, and `@` mod searches. Search data begins warming when JEI becomes ready, is refreshed without blocking rendering, and is reused from an on-disk cache when possible.
+- Sol Carrot's player-specific Eaten/Not Eaten tooltip state stays dynamic in both RS and JEI instead of leaking into shared search text.
+- Missing materials in recipe cards, tree totals, and text lists can be added to JEI bookmarks one at a time or as a group.
 
 ### JEI registration and recipe entry points
 
@@ -74,6 +93,7 @@ Open an RS crafting grid to consume food directly from the network:
 
 - **Dietary Diversity** works with SolCarrot and chooses foods not yet recorded.
 - **Stack Feast** consumes one selected food until full or the per-use limit is reached.
+- Stack Feast recognizes effects such as Gnaw's Gift that legitimately allow eating at full hunger.
 - **Balanced Diet** works with Diet and chooses food for lower nutrition groups.
 - Food and status-effect blacklists prevent unwanted consumption.
 - Bowls, bottles, and other remainders return to the RS network when possible.
@@ -106,6 +126,8 @@ Open an RS crafting grid to consume food directly from the network:
 - **Automatic Embers alchemy inference**: after an Embers Rekindled Alchemy Tablet is bound, RSI can place materials, spark the tablet, evaluate black/white pin feedback, and eliminate candidate alchemy codes through repeated trials. Successful codes are saved and reused; Calculate mode can use a deterministic layout without trial and error.
 - **Automatic Aetherium Anvil hammering**: while holding a Tinker Hammer, enabling Auto Hammer in the anvil settings makes RSI strike whenever the anvil's hit cooldown permits. The same screen configures temperature bounds, forge-lever temperature control, and automatic material refilling.
 - **Dimensional Magnet collection for mutant remains**: Distant Worlds Wither Totems and Charged Wither Totems (`wither_totem` / `charged_wither_totem`) are converted from direct inventory rewards into magnet-compatible drops. A bound Dimensional Magnet can send them straight to RS instead of placing them in the player's inventory.
+- **Safe Goety manual rituals**: summoning, sacrifice, and conversion requests prepare pedestal materials and return the activation item to the player, but do not start the ritual automatically. This leaves target and environment confirmation to the player and prevents accidental material loss.
+- **Kettle and steamer structures**: Farmer's Respite kettle automation preserves native container/fluid behavior, while Youkai's Homecoming accepts both full-height steamers and a valid single-layer rack with a lid.
 
 ### Apotheosis Spawner Upgrades
 
@@ -121,6 +143,7 @@ Open an RS crafting grid to consume food directly from the network:
 - Press `G` to switch the target between a bound RS network and a Sophisticated Backpack.
 - Transfers respect filters, item blacklists, and destination capacity; rejected items remain in the source container.
 - Transfer keys are suppressed while typing in chat, search boxes, and other text fields.
+- `F` transfer is also disabled in player-inventory and crafting-accessor contexts where Minecraft needs the key for normal offhand swapping.
 
 ### RS side panel and Machine Management Center
 
@@ -180,7 +203,7 @@ The Resonance Disk is an RS storage disk whose contents can act as if carried by
 
 1. Build and power a Refined Storage network.
 2. Obtain an RSI Network Linker.
-3. Shift-right-click a supported machine to bind it.
+3. Shift-right-click one supported machine, or press `;` to scan and bind nearby machines.
 4. Open a recipe in JEI and use the RSI craft action.
 5. Review the generated plan, choose alternatives or a repeat count, then start the chain.
 6. Watch progress with `P`; completed outputs return to RS, or to the player when no network exists.
@@ -196,6 +219,7 @@ All key mappings can be changed in Minecraft Controls. Configurable numeric key 
 | `Y` | Any screen | Toggle the RS side panel |
 | `H` | Any screen | Toggle the Machine Management Center |
 | `P` | Any screen | Open/close active crafting progress |
+| `;` | In world | Bind nearby supported machines with the held or equipped Network Linker |
 | `Alt` + left-click | JEI ingredient | Filter by mod |
 | `Alt` + middle-click | JEI ingredient list | Clear search |
 | `Ctrl+T` | JEI recipe | Transfer to RS crafting grid |
@@ -212,8 +236,8 @@ The table lists dedicated recipe integrations registered by the current code. Re
 | Vanilla / Brick Furnace | Furnace, blast furnace, smoker, campfire, brewing stand, stonecutter, smithing, anvil, enchanting |
 | Iron Furnaces | Furnace tiers in furnace, blasting, and smoking modes |
 | Botania | Mana Pool/catalysts, Petal Apothecary, Runic Altar, Botanical Brewery, Alfheim trade, Terra Plate, Pure Daisy |
-| Ars Nouveau | Imbuement Chamber and Enchanting Apparatus |
-| Goety | Necro Brazier, Dark Altar, Cursed Cage, Soul Candlestick and supported ritual recipes |
+| Ars Nouveau | Imbuement Chamber and Enchanting Apparatus, including add-on recipes that reuse supported Ars recipe types |
+| Goety | Necro Brazier, Dark Altar, Cursed Cage, Soul Candlestick and supported ritual recipes; summoning, sacrifice, and conversion rituals use manual final confirmation |
 | Malum | Spirit Altar, Spirit Crucible, Runic Workbench, Spirit Infusion and related recipes; adjacent altars collect outputs independently |
 | Eidolon | Worktable, Crucible, and Brazier |
 | Forbidden & Arcanus | Hephaestus Forge, Clibano, smithing/apply-modifier flow |
@@ -224,8 +248,8 @@ The table lists dedicated recipe integrations registered by the current code. Re
 | The Aether | Freezer, Incubator, and Altar |
 | Crock Pot | Crock Pot and Portable Crock Pot |
 | Farmer's Delight | Cooking Pot and Skillet |
-| Farmer's Respite | Kettle |
-| Youkai's Homecoming | Moka Pot, Fermentation Tank, Steamer, Kettle, cooking pots, Cuisine Board |
+| Farmer's Respite | Kettle, including native container input, non-water fluids, and safe fluid mismatch handling |
+| Youkai's Homecoming | Moka Pot, Fermentation Tank, single- or multi-layer Steamer, Kettle, cooking pots, Cuisine Board |
 | Immortaler's Delight | Enchantal Cooler |
 | Apotheosis | Fletching, Gem Cutting, Enchantment Library scanning/import, reforging GUI access, and server-authoritative spawner upgrades with recursive material crafting |
 | TACZ and compatible gun packs | Gun Smith Table recipes, including NBT-bearing guns/ammo |
@@ -244,9 +268,9 @@ Custom GUI defaults include Crabber's Delight, Metal Barrels, PGP, EMX Arms, Apo
 
 Configuration files are documented in-place with comments and validation ranges:
 
-- `config/rs_integration/common.toml`: feature switches, optional integrations, passive effects, auto-eat, side panel, GUI-machine allowlist.
-- `saves/<world>/serverconfig/rs_integration/server.toml`: recipe selection, timeouts, recursive depth/step limits, DAG concurrency, protected reserves, machine-specific policies.
-- `config/rs_integration/client.toml`: side-panel position, size, visibility, and HUD preferences.
+- `config/rs_integration/common.toml`: feature switches, optional integrations, passive effects, auto-eat, nearby-binding range/budget, side panel, GUI-machine allowlist.
+- `saves/<world>/serverconfig/rs_integration/server.toml`: recipe selection, pure/typed planning budgets, preview admission, recursive limits, catalyst preference, variant-conversion guard, vanilla per-tick budgets, DAG concurrency, protected reserves, machine-specific policies.
+- `config/rs_integration/client.toml`: side-panel layout, HUD preferences, and RS special-search warm-up, progressive refresh, index, pinyin-worker, and disk-cache settings.
 
 Important server controls include recipe preference/blacklists, repeat limits, resolution budgets, concurrent graph nodes/operations, per-mod parallel policy, and global chain timeout. Existing config files are not overwritten when new defaults are added; merge new list entries manually or regenerate the file.
 
