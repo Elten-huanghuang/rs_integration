@@ -858,10 +858,7 @@ public final class RecipeIndex {
                 // separately (tryGetResultItem), drop the first stack equal to the
                 // primary so it isn't duplicated into the RS network.
                 ItemStack primary = tryGetResultItem(recipe, access);
-                if (!primary.isEmpty() && !primary.hasTag()) {
-                    ItemStack hiddenPrimary = CraftingResolver.extractHiddenOutput(recipe);
-                    if (!hiddenPrimary.isEmpty()) primary = hiddenPrimary;
-                }
+                primary = CraftingResolver.resolveDeclaredOutput(recipe, primary);
                 boolean primaryDropped = false;
                 List<ItemStack> fromGetOutputs = new ArrayList<>();
                 if (seenOutputContainers.add(obj) && obj instanceof List<?> list) {
@@ -874,7 +871,11 @@ public final class RecipeIndex {
                     }
                 }
                 for (ItemStack s : fromGetOutputs) {
-                    if (!primaryDropped && !primary.isEmpty() && ItemStack.isSameItemSameTags(s, primary)) {
+                    boolean matchesPrimary = !primary.isEmpty()
+                            && (primary.hasTag()
+                            ? ItemStack.isSameItemSameTags(s, primary)
+                            : ItemStack.isSameItem(s, primary));
+                    if (!primaryDropped && matchesPrimary) {
                         primaryDropped = true; // skip exactly one copy of the primary
                         continue;
                     }

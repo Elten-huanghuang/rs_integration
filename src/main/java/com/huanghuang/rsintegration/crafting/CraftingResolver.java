@@ -592,12 +592,7 @@ public final class CraftingResolver {
                     candidate.recipe(), ctx.level.registryAccess());
             // If the result is bare (no NBT), scan fields for the real
             // NBT-carrying output — TACZ/Applied Armorer hide it there.
-            if (!out.isEmpty() && !out.hasTag()) {
-                ItemStack hidden = extractHiddenOutput(candidate.recipe());
-                if (!hidden.isEmpty()) {
-                    out = hidden;
-                }
-            }
+            out = resolveDeclaredOutput(candidate.recipe(), out);
             if (out.isEmpty() || out.getCount() <= 0) {
                 continue;
             }
@@ -1165,6 +1160,27 @@ public final class CraftingResolver {
         return ItemStack.EMPTY;
     }
 
+    /** Output identity used by planning; runtime-derived NBT remains unspecified. */
+    public static ItemStack resolveDeclaredOutput(Recipe<?> recipe, ItemStack staticResult) {
+        return resolveDeclaredOutput(recipe, staticResult, ModRecipeHandlers.handlerFor(recipe));
+    }
+
+    static ItemStack resolveDeclaredOutput(
+            Recipe<?> recipe, ItemStack staticResult,
+            @Nullable com.huanghuang.rsintegration.recipe.ModRecipeHandler handler) {
+        if (staticResult.isEmpty()) return ItemStack.EMPTY;
+        if (handler != null && handler.hasRuntimeDependentPrimaryNbt(recipe)) {
+            ItemStack dynamic = staticResult.copy();
+            dynamic.setTag(null);
+            return dynamic;
+        }
+        if (!staticResult.hasTag()) {
+            ItemStack hidden = extractHiddenOutput(recipe);
+            if (!hidden.isEmpty()) return hidden;
+        }
+        return staticResult.copy();
+    }
+
     // ── Broken ingredient repair ───────────────────────────────────
     //
     // Some mods (TACZ, Applied Armorer) implement getIngredients() by
@@ -1199,9 +1215,7 @@ public final class CraftingResolver {
      */
     public static List<ItemStack> getRepairedInputStacks(Recipe<?> recipe, net.minecraft.core.RegistryAccess access) {
         ItemStack output = ModRecipeHandlers.tryGetResultItem(recipe, access);
-        if (output.isEmpty() || !output.hasTag()) {
-            output = extractHiddenOutput(recipe);
-        }
+        output = resolveDeclaredOutput(recipe, output);
 
         List<ItemStack> repaired = new ArrayList<>();
         Class<?> clazz = recipe.getClass();

@@ -1787,26 +1787,28 @@ public final class AsyncCraftChain {
                 materials.add(ItemStack.EMPTY);
                 continue;
             }
-            boolean exactReservation = requiresExactGraphReservation(spec.ingredient());
             int remaining = spec.count();
             ItemStack combined = ItemStack.EMPTY;
             for (ItemStack produced : producerPool) {
                 if (remaining <= 0) break;
                 if (produced.isEmpty() || !IngredientMatcher.test(spec.ingredient(), produced)) continue;
+                if (!combined.isEmpty() && !ItemStack.isSameItemSameTags(combined, produced)) continue;
                 int take = Math.min(remaining, produced.getCount());
                 if (combined.isEmpty()) {
                     combined = produced.copyWithCount(take);
-                } else if (!exactReservation || ItemStack.isSameItemSameTags(combined, produced)) {
-                    combined.grow(take);
                 } else {
-                    return null;
+                    combined.grow(take);
                 }
                 produced.shrink(take);
                 remaining -= take;
             }
             if (remaining > 0) {
-                ItemStack planned = takeMatching(
-                        initialPool, spec.ingredient(), remaining, exactReservation);
+                // MaterialBroker checkout already selected the concrete runtime
+                // fragment. Preserve that exact identity all the way through the
+                // ledger; selecting again through a broad Ingredient can choose a
+                // different damaged/tagged tool and make the node retry forever.
+                ItemStack planned = findMatching(
+                        initialPool, spec.ingredient(), remaining, true);
                 if (planned.isEmpty() || planned.getCount() != remaining) return null;
                 int reservationMark = ledger.reservationMark();
                 // A tagless graph allocation represents an NBT-insensitive demand, not a
@@ -1814,22 +1816,20 @@ public final class AsyncCraftChain {
                 // ingredient so stateful variants (damage, affixes, item modifiers, etc.)
                 // remain eligible and the ledger captures the exact stack it selected.
                 ItemStack initial;
-                if (exactReservation) {
-                    initial = ledger.reserveExactAcrossNetworkAndInventory(
-                            planned, remaining, network, online);
-                    if (initial.isEmpty()) return null;
-                } else {
-                    int reserved = ledger.reserveUpToFromMainInventoryThenNetwork(
-                            spec.ingredient(), remaining, online, network);
-                    if (reserved != remaining) {
-                        ledger.cancelReservationsSince(reservationMark);
-                        return null;
-                    }
-                    initial = planned.copyWithCount(remaining);
+                ItemStack exactTemplate = combined.isEmpty() ? planned : combined;
+                initial = ledger.reserveExactAcrossNetworkAndInventory(
+                        exactTemplate, remaining, network, online);
+                if (initial.isEmpty()) {
+                    ledger.cancelReservationsSince(reservationMark);
+                    return null;
+                }
+                if (!takeExactMatching(initialPool, initial, remaining)) {
+                    ledger.cancelReservationsSince(reservationMark);
+                    return null;
                 }
                 if (combined.isEmpty()) {
                     combined = initial.copyWithCount(remaining);
-                } else if (!exactReservation || ItemStack.isSameItemSameTags(combined, initial)) {
+                } else if (ItemStack.isSameItemSameTags(combined, initial)) {
                     combined.grow(remaining);
                 } else {
                     ledger.cancelReservationsSince(reservationMark);
@@ -1848,6 +1848,23 @@ public final class AsyncCraftChain {
 
     static ItemStack takeMatching(
             List<ItemStack> pool, Ingredient ingredient, int count, boolean exactNbt) {
+        ItemStack selected = findMatching(pool, ingredient, count, exactNbt);
+        if (selected.isEmpty()) return ItemStack.EMPTY;
+
+        int remaining = count;
+        for (ItemStack stack : pool) {
+            if (remaining <= 0) break;
+            if (stack.isEmpty() || !IngredientMatcher.test(ingredient, stack)) continue;
+            if (exactNbt && !ItemStack.isSameItemSameTags(selected, stack)) continue;
+            int take = Math.min(remaining, stack.getCount());
+            stack.shrink(take);
+            remaining -= take;
+        }
+        return selected.copyWithCount(count);
+    }
+
+    static ItemStack findMatching(
+            List<ItemStack> pool, Ingredient ingredient, int count, boolean exactNbt) {
         ItemStack selected = ItemStack.EMPTY;
         int available = 0;
         for (ItemStack stack : pool) {
@@ -1861,17 +1878,24 @@ public final class AsyncCraftChain {
             if (available >= count) break;
         }
         if (selected.isEmpty() || available < count) return ItemStack.EMPTY;
+        return selected.copyWithCount(count);
+    }
 
+    static boolean takeExactMatching(List<ItemStack> pool, ItemStack template, int count) {
+        int available = 0;
+        for (ItemStack stack : pool) {
+            if (ItemStack.isSameItemSameTags(stack, template)) available += stack.getCount();
+        }
+        if (available < count) return false;
         int remaining = count;
         for (ItemStack stack : pool) {
             if (remaining <= 0) break;
-            if (stack.isEmpty() || !IngredientMatcher.test(ingredient, stack)) continue;
-            if (exactNbt && !ItemStack.isSameItemSameTags(selected, stack)) continue;
+            if (!ItemStack.isSameItemSameTags(stack, template)) continue;
             int take = Math.min(remaining, stack.getCount());
             stack.shrink(take);
             remaining -= take;
         }
-        return selected.copyWithCount(count);
+        return true;
     }
 
     private boolean isGraphTerminalNode(NodeId nodeId) {

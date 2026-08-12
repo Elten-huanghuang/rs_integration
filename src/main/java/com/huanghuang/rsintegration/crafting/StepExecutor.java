@@ -201,14 +201,8 @@ final class StepExecutor {
             RSIntegrationMod.LOGGER.warn("[RSI] craftBatched: empty result for recipe {} (handler={})",
                     entry.recipe().getId(), handler != null ? handler.getClass().getSimpleName() : "null");
         }
-        // If the result is bare (no NBT), scan fields for the real
-        // NBT-carrying output hidden by the mod author.
-        if (!result.isEmpty() && !result.hasTag()) {
-            ItemStack hidden = CraftingResolver.extractHiddenOutput(entry.recipe());
-            if (!hidden.isEmpty()) {
-                result = hidden;
-            }
-        }
+        // Preserve exact hidden outputs, but leave runtime-derived NBT open.
+        result = CraftingResolver.resolveDeclaredOutput(entry.recipe(), result);
         registerGraphOutput(result, batches, OutputKind.PRIMARY, graphNodeId, graphOutputs, ctx);
 
         if (handler != null) {

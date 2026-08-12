@@ -29,6 +29,23 @@ public final class MalumRecipeHandler extends AbstractRecipeHandler {
     public ModType modType() { return ModType.byId("malum"); }
 
     @Override
+    public boolean hasRuntimeDependentPrimaryNbt(Recipe<?> recipe) {
+        Class<?> scan = recipe.getClass();
+        while (scan != null && scan != Object.class) {
+            try {
+                Field field = scan.getDeclaredField("useNbtFromInput");
+                field.setAccessible(true);
+                return field.getBoolean(recipe);
+            } catch (NoSuchFieldException e) {
+                scan = scan.getSuperclass();
+            } catch (ReflectiveOperationException e) {
+                return false;
+            }
+        }
+        return false;
+    }
+
+    @Override
     public ItemStack getResultItem(Recipe<?> recipe, RegistryAccess access) {
         // NOTE: must NOT call RecipeIndex.tryGetResultItem here — for Malum recipes
         // that method dispatches straight back to this handler, causing infinite

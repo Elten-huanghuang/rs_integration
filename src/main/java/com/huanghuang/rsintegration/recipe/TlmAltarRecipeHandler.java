@@ -23,6 +23,24 @@ public final class TlmAltarRecipeHandler extends AbstractRecipeHandler {
     public ModType modType() { return ModType.byId("touhou_little_maid"); }
 
     @Override
+    public boolean hasRuntimeDependentPrimaryNbt(Recipe<?> recipe) {
+        Class<?> scan = recipe.getClass();
+        while (scan != null && scan != Object.class) {
+            try {
+                java.lang.reflect.Field field = scan.getDeclaredField("copyInput");
+                field.setAccessible(true);
+                Object value = field.get(recipe);
+                return value instanceof Ingredient ingredient && !ingredient.isEmpty();
+            } catch (NoSuchFieldException e) {
+                scan = scan.getSuperclass();
+            } catch (ReflectiveOperationException e) {
+                return false;
+            }
+        }
+        return false;
+    }
+
+    @Override
     public ItemStack getResultItem(Recipe<?> recipe, RegistryAccess access) {
         // Probe getResult/getOutput/getOutputCopy/getAssembledItem first,
         // fall back to getResultItem last — some recipes only expose
