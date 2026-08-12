@@ -59,6 +59,7 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
         }
         this.recipe = found;
         this.pendingResult = ItemStack.EMPTY;
+        this.pendingSecondary.clear();
         this.craftDone = false;
 
         if (!validateExecutionContext(player)) {
@@ -312,8 +313,25 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
         return r;
     }
 
-    /** Secondary outputs (remainders, extra products) that the chain should
-     *  add to virtual inventory.  Call after {@link #collectResult}. */
+    @Override
+    public List<ItemStack> collectAllResults(ServerPlayer player) {
+        List<ItemStack> results = new ArrayList<>(pendingSecondary.size() + 1);
+        if (!pendingResult.isEmpty()) results.add(pendingResult.copy());
+        for (ItemStack secondary : pendingSecondary) {
+            if (secondary != null && !secondary.isEmpty()) results.add(secondary.copy());
+        }
+        pendingResult = ItemStack.EMPTY;
+        pendingSecondary.clear();
+        craftDone = false;
+        return List.copyOf(results);
+    }
+
+    @Override
+    public boolean collectsPhysicalSecondaryOutputs() {
+        return true;
+    }
+
+    /** Legacy compatibility for callers that collect only the primary result. */
     public List<ItemStack> getPendingSecondary() {
         List<ItemStack> copy = new ArrayList<>(pendingSecondary);
         pendingSecondary.clear();
@@ -324,12 +342,14 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
     protected void clearMachineState(BlockEntity be, ServerPlayer player) {
         refundAll();
         pendingResult = ItemStack.EMPTY;
+        pendingSecondary.clear();
         craftDone = false;
     }
 
     @Override
     public void onBatchFinished(@NotNull ServerPlayer player) {
         pendingResult = ItemStack.EMPTY;
+        pendingSecondary.clear();
         craftDone = false;
         ledger = null;
         network = null;
