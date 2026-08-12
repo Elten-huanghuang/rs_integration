@@ -256,10 +256,17 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
             List<ItemStack> capturedSnapshot = new java.util.ArrayList<>();
             if (operationSession != null) capturedSnapshot.addAll(operationSession.capturedSnapshot());
             if (capture != null) capturedSnapshot.addAll(capture.snapshot());
-            boolean capturedWorldOutput = !capturedSnapshot.isEmpty()
-                    && delegate.getExpectedOutput() != null && !delegate.getExpectedOutput().isEmpty()
+            boolean captureHasOutput = (operationSession != null && operationSession.hasCaptured())
+                    || (capture != null && capture.hasCaptured());
+            ItemStack expectedOutput = delegate.getExpectedOutput();
+            boolean capturedExpectedOutput = containsExpectedOutput(
+                    capturedSnapshot, expectedOutput);
+            boolean capturedWorldOutput = capturedExpectedOutput
                     && (outputs == null || outputs.canCompleteWith(capturedSnapshot));
-            if (observation.phase() == IBatchDelegate.CraftPhase.DONE || capturedWorldOutput) {
+            boolean requiresWorldCapture = capture != null
+                    || (operationSession != null && operationSession.hasCaptureScope());
+            if (shouldSucceed(observation.phase(), requiresWorldCapture,
+                    captureHasOutput, capturedWorldOutput)) {
                 if (!delegate.validateExecutionContext(player)) {
                     failureReason = "execution context changed before output publication";
                     return ConcurrentNodeExecutor.Observation.FAILED;
@@ -292,6 +299,24 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
         }
 
         return ConcurrentNodeExecutor.Observation.WORKING;
+    }
+
+    static boolean containsExpectedOutput(List<ItemStack> captured, @Nullable ItemStack expected) {
+        if (expected == null || expected.isEmpty()) return false;
+        int count = 0;
+        for (ItemStack stack : captured) {
+            if (stack != null && !stack.isEmpty() && ItemStack.isSameItem(stack, expected)) {
+                count += stack.getCount();
+                if (count >= expected.getCount()) return true;
+            }
+        }
+        return false;
+    }
+
+    static boolean shouldSucceed(IBatchDelegate.CraftPhase phase, boolean requiresWorldCapture,
+                                 boolean captureHasOutput, boolean capturedWorldOutput) {
+        return (!requiresWorldCapture && phase == IBatchDelegate.CraftPhase.DONE)
+                || capturedWorldOutput || (requiresWorldCapture && captureHasOutput);
     }
 
     @Override

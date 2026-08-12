@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.crafting;
 
+import com.electronwill.nightconfig.core.CommentedConfig;
+import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.graph.ConcurrentNodeExecutor;
@@ -9,20 +11,34 @@ import com.huanghuang.rsintegration.crafting.graph.OutputDeclaration;
 import com.huanghuang.rsintegration.crafting.graph.OutputKind;
 import com.huanghuang.rsintegration.crafting.graph.OutputPortId;
 import com.huanghuang.rsintegration.crafting.graph.NodeId;
+import com.huanghuang.rsintegration.crafting.graph.CaptureLeaseRegistry;
+import com.huanghuang.rsintegration.crafting.graph.MachineLeaseRegistry;
+import com.huanghuang.rsintegration.crafting.graph.OperationBudget;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.phys.AABB;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeAll;
 
 import java.util.List;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class CraftProgressRuntimeTest extends BootstrapTest {
+
+    @BeforeAll
+    static void loadDefaultServerConfig() {
+        CommentedConfig config = CommentedConfig.inMemory();
+        RSIntegrationConfig.SERVER_SPEC.correct(config);
+        RSIntegrationConfig.SERVER_SPEC.setConfig(config);
+    }
 
     @Test
     void ordinaryRuntimeReportsOneRunningOperationThenCompletion() {
@@ -72,6 +88,37 @@ class CraftProgressRuntimeTest extends BootstrapTest {
         assertTrue(detail.contains("minecraft:diamond"));
         assertTrue(detail.contains("missing=1"));
         assertEquals(detail, runtime.failureReason());
+    }
+
+    @Test
+    void worldCaptureRuntimeDoesNotTrustDoneBeforePhysicalOutputArrives() {
+        NodeId node = new NodeId(7);
+        StubDelegate delegate = new StubDelegate(IBatchDelegate.CraftPhase.DONE, "");
+        OperationExecutionKernel kernel = new OperationExecutionKernel(
+                new OperationResourceCoordinator(new MachineLeaseRegistry(),
+                        new CaptureLeaseRegistry(), new OperationBudget(1, 2)));
+        OperationExecutionKernel.Session session = kernel.tryPrepare(
+                UUID.randomUUID(), node, 0, new OperationBudget(1, 2),
+                new MachineLeaseRegistry.MachineKey(new ResourceLocation("minecraft", "overworld"),
+                        BlockPos.ZERO, "test"),
+                new OperationResourceCoordinator.CaptureRequest(
+                        new ResourceLocation("minecraft", "overworld"),
+                        new AABB(0, 0, 0, 1, 1, 1), new ItemStack(Items.DIAMOND)));
+        assertTrue(session.commit(() -> true));
+        assertTrue(session.tryStart(() -> true));
+        CraftNodeRuntime runtime = new CraftNodeRuntime(node, "test:capture", delegate,
+                null, null, session);
+
+        assertEquals(ConcurrentNodeExecutor.Observation.WORKING, runtime.observe());
+        session.close();
+    }
+
+    @Test
+    void ownedCapturedOutputEndsWorldCaptureWaitEvenBeforeDeclarationProbeMatches() {
+        assertEquals(true, CraftNodeRuntime.shouldSucceed(
+                IBatchDelegate.CraftPhase.WORKING, true, true, false));
+        assertEquals(false, CraftNodeRuntime.shouldSucceed(
+                IBatchDelegate.CraftPhase.DONE, true, false, false));
     }
 
     @Test
@@ -150,6 +197,11 @@ class CraftProgressRuntimeTest extends BootstrapTest {
         @Override
         public ItemStack collectResult(ServerPlayer player) {
             return ItemStack.EMPTY;
+        }
+
+        @Override
+        public ItemStack getExpectedOutput() {
+            return new ItemStack(Items.DIAMOND);
         }
 
         @Override

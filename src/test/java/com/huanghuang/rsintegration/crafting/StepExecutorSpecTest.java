@@ -3,6 +3,8 @@ package com.huanghuang.rsintegration.crafting;
 import com.electronwill.nightconfig.core.CommentedConfig;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
+import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.ItemStack;
@@ -11,6 +13,8 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.crafting.CraftingBookCategory;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.ShapedRecipe;
+import net.minecraft.world.item.crafting.Recipe;
+import net.minecraft.core.RegistryAccess;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
@@ -154,5 +158,33 @@ class StepExecutorSpecTest extends BootstrapTest {
         assertNotNull(selected);
         assertFalse(IngredientMatcher.requiresNbt(selected));
         assertEquals(0, context.countMatching(Ingredient.of(Items.IRON_HELMET)));
+    }
+
+    @Test
+    void runtimeDependentOutputDropsOnlyThePlanningNbtConstraint() {
+        ShapedRecipe recipe = new ShapedRecipe(
+                new ResourceLocation("test", "dynamic_output"), "", CraftingBookCategory.MISC,
+                1, 1, NonNullList.of(Ingredient.EMPTY, Ingredient.of(Items.IRON_INGOT)),
+                new ItemStack(Items.DIAMOND));
+        ItemStack staticResult = new ItemStack(Items.DIAMOND, 2);
+        staticResult.getOrCreateTag().putString("owner", "template");
+
+        ItemStack declared = CraftingResolver.resolveDeclaredOutput(
+                recipe, staticResult, new RuntimeNbtHandler());
+
+        assertEquals(Items.DIAMOND, declared.getItem());
+        assertEquals(2, declared.getCount());
+        assertFalse(declared.hasTag());
+        assertEquals("template", staticResult.getTag().getString("owner"));
+    }
+
+    private static final class RuntimeNbtHandler implements ModRecipeHandler {
+        @Override public ModType modType() { return ModType.GENERIC; }
+        @Override public boolean canHandle(Recipe<?> recipe) { return true; }
+        @Override public ItemStack getResultItem(Recipe<?> recipe, RegistryAccess access) {
+            return ItemStack.EMPTY;
+        }
+        @Override public List<IngredientSpec> getIngredients(Recipe<?> recipe) { return List.of(); }
+        @Override public boolean hasRuntimeDependentPrimaryNbt(Recipe<?> recipe) { return true; }
     }
 }

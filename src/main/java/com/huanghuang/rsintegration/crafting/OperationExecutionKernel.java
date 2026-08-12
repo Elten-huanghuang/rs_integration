@@ -146,6 +146,10 @@ public final class OperationExecutionKernel {
             return scope != null && scope.hasCaptured();
         }
 
+        public boolean hasCaptureScope() {
+            return scope != null && scope.hasCaptureScope();
+        }
+
         public List<ItemStack> capturedSnapshot() {
             return scope == null ? List.of() : scope.capturedSnapshot();
         }

@@ -61,6 +61,11 @@ public interface ModRecipeHandler {
         return true;
     }
 
+    /** Whether the primary output copies or otherwise derives NBT from runtime inputs. */
+    default boolean hasRuntimeDependentPrimaryNbt(@Nonnull Recipe<?> recipe) {
+        return false;
+    }
+
     /**
      * Whether the primary result should be exposed as a recursive item producer.
      * Some recipes use a JEI-only placeholder for an entity/fluid/world action;

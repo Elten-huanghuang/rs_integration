@@ -18,6 +18,8 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class OperationResourceCoordinatorTest extends BootstrapTest {
 
@@ -77,6 +79,8 @@ class OperationResourceCoordinatorTest extends BootstrapTest {
                 UUID.randomUUID(), new NodeId(0), 0, craft, machine, capture);
 
         assertNotNull(scope);
+        assertTrue(scope.hasCaptureScope());
+        assertFalse(scope.hasCaptured());
         assertEquals(1, machines.size());
         assertEquals(1, captures.size());
         assertEquals(1, craft.active());
