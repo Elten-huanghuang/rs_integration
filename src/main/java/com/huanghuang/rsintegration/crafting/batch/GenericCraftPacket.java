@@ -786,6 +786,13 @@ public final class GenericCraftPacket {
                 Math.max(1, repeatCount));
     }
 
+    static List<ResolutionStep> genericExecutionSteps(
+            List<ResolutionStep> intermediateSteps, ResourceLocation recipeId, int repeatCount) {
+        List<ResolutionStep> executionSteps = new ArrayList<>(intermediateSteps);
+        executionSteps.add(genericTerminalStep(recipeId, repeatCount));
+        return List.copyOf(executionSteps);
+    }
+
     static ResolutionStep smithingTerminalStep(ResourceLocation recipeId, int repeatCount) {
         // The request is binding-gated before the chain starts. Keeping this
         // terminal generic lets it assemble from freshly produced inputs.
@@ -1082,18 +1089,17 @@ public final class GenericCraftPacket {
                 if (allSteps.stream().anyMatch(s -> s.modType() != ModType.GENERIC
                         || s.recipeId().equals(CraftingResolver.TAINT_EARTH_HEART_STEP))) {
                     // Multi-block intermediates → async chain
-                    allSteps.add(new ResolutionStep(recipeId, ModType.GENERIC,
-                            new ResourceLocation("minecraft:crafting"),
-                            List.of(), List.of(), false, Math.max(1, repeatCount)));
-                    launchAsyncChain(player, allSteps,
-                            LegacyExecutionMetrics.rejectedGraphReason(allSteps),
+                    List<ResolutionStep> execSteps = genericExecutionSteps(
+                            allSteps, recipeId, repeatCount);
+                    launchAsyncChain(player, execSteps,
+                            LegacyExecutionMetrics.rejectedGraphReason(execSteps),
                             network, repeatCount, recipeId, forcedRecipes,
                             dim, pos, inferMode, baseItem, targetOutput, outputDestination);
                     return;
                 }
                 // All GENERIC steps → execute sync chain
-                List<ResolutionStep> execSteps = new ArrayList<>(allSteps);
-                execSteps.add(genericTerminalStep(recipeId, repeatCount));
+                List<ResolutionStep> execSteps = genericExecutionSteps(
+                        allSteps, recipeId, repeatCount);
                 if (outputDestination == OutputDestination.PLAYER_INVENTORY
                         || shouldExecuteGenericChainAsync(execSteps)) {
                     launchAsyncChain(player, execSteps,

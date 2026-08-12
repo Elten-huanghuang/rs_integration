@@ -143,6 +143,21 @@ class GenericCraftPacketTest extends BootstrapTest {
     }
 
     @Test
+    void genericExecutionStepsAcceptImmutableProjectedSteps() {
+        var intermediate = genericStep("taint_earth_heart", 1);
+        List<CraftingResolver.ResolutionStep> projectedSteps = List.of(intermediate);
+        ResourceLocation target = new ResourceLocation("crafttweaker", "avarice_scroll");
+
+        List<CraftingResolver.ResolutionStep> executionSteps =
+                GenericCraftPacket.genericExecutionSteps(projectedSteps, target, 4);
+
+        assertEquals(List.of(intermediate), projectedSteps);
+        assertEquals(2, executionSteps.size());
+        assertEquals(target, executionSteps.get(1).recipeId());
+        assertEquals(4, executionSteps.get(1).executions());
+    }
+
+    @Test
     void pureCraftingChainUsesConfiguredOperationThreshold() {
         List<CraftingResolver.ResolutionStep> steps = List.of(
                 new CraftingResolver.ResolutionStep(
