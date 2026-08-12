@@ -646,9 +646,49 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
     @Override
     public ItemStack getExpectedOutput() {
         if (recipe == null || myLevel == null) return null;
-        ItemStack expected = RecipeIndex
-                .tryGetResultItem(recipe, myLevel.registryAccess());
+        // SpiritInfusionRecipe's authoritative output is its public `output`
+        // field. Avoid the generic result cache here: a stale empty probe would
+        // leave the world capture unarmed, allowing another mod to collect the
+        // spawned result before the graph publishes it.
+        ItemStack expected = findRecipeOutput(recipe);
+        if (expected.isEmpty()) {
+            expected = RecipeIndex.tryGetResultItem(recipe, myLevel.registryAccess());
+        }
+        if (isRuntimeNbtOutput(recipe)) expected.setTag(null);
         return expected.isEmpty() ? null : expected;
+    }
+
+    private static ItemStack findRecipeOutput(Recipe<?> recipe) {
+        Class<?> scan = recipe.getClass();
+        while (scan != null && scan != Object.class) {
+            try {
+                java.lang.reflect.Field field = scan.getDeclaredField("output");
+                field.setAccessible(true);
+                Object value = field.get(recipe);
+                return value instanceof ItemStack stack ? stack.copy() : ItemStack.EMPTY;
+            } catch (NoSuchFieldException ignored) {
+                scan = scan.getSuperclass();
+            } catch (ReflectiveOperationException ignored) {
+                return ItemStack.EMPTY;
+            }
+        }
+        return ItemStack.EMPTY;
+    }
+
+    private static boolean isRuntimeNbtOutput(Recipe<?> recipe) {
+        Class<?> scan = recipe.getClass();
+        while (scan != null && scan != Object.class) {
+            try {
+                java.lang.reflect.Field field = scan.getDeclaredField("useNbtFromInput");
+                field.setAccessible(true);
+                return field.getBoolean(recipe);
+            } catch (NoSuchFieldException ignored) {
+                scan = scan.getSuperclass();
+            } catch (ReflectiveOperationException ignored) {
+                return false;
+            }
+        }
+        return false;
     }
 
     @Override
