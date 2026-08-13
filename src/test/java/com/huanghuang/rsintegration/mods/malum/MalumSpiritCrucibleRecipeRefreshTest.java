@@ -34,6 +34,21 @@ class MalumSpiritCrucibleRecipeRefreshTest extends BootstrapTest {
                 new FakeCrucible(recipe("different")), expected));
     }
 
+    @Test
+    void refreshesNearbyAcceleratorsAfterProgrammaticPlacement() {
+        FakeCrucible crucible = new FakeCrucible(recipe("neutron_nugget"));
+
+        assertTrue(MalumSpiritCrucibleBatchDelegate.refreshAccelerators(
+                crucible, new Object(), new Object()));
+        assertTrue(crucible.acceleratorsRefreshed);
+    }
+
+    @Test
+    void missingAcceleratorApiRemainsCompatible() {
+        assertFalse(MalumSpiritCrucibleBatchDelegate.refreshAccelerators(
+                new Object(), new Object(), new Object()));
+    }
+
     private static ShapedRecipe recipe(String path) {
         return new ShapedRecipe(new ResourceLocation("test", path), "",
                 CraftingBookCategory.MISC, 1, 1,
@@ -45,6 +60,7 @@ class MalumSpiritCrucibleRecipeRefreshTest extends BootstrapTest {
         public Recipe<?> recipe;
         private final Recipe<?> selected;
         private boolean initialized;
+        private boolean acceleratorsRefreshed;
 
         private FakeCrucible(Recipe<?> selected) {
             this.selected = selected;
@@ -53,6 +69,10 @@ class MalumSpiritCrucibleRecipeRefreshTest extends BootstrapTest {
         public void init() {
             initialized = true;
             recipe = selected;
+        }
+
+        public void recalibrateAccelerators(Object level, Object pos) {
+            acceleratorsRefreshed = level != null && pos != null;
         }
     }
 }
