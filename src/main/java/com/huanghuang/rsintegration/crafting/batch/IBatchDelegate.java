@@ -208,6 +208,16 @@ public interface IBatchDelegate {
     }
 
     /**
+     * Whether graph dispatch must call {@link #tryStartSingleCraft(ServerPlayer)}
+     * with the delegate's private extraction ledger. This is required by
+     * machines that consume inputs across multiple internal runs and cannot
+     * safely accept one shared graph checkout.
+     */
+    default boolean requiresPrivateLedgerGraphDispatch() {
+        return false;
+    }
+
+    /**
      * Merge graph-allocated and directly reserved supplemental materials into
      * the order expected by {@link #tryStartWithMaterials}. Delegates exposing
      * supplemental specs must override this method when concatenation is not

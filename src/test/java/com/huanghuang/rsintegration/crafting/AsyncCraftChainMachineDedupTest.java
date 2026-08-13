@@ -15,6 +15,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraftforge.common.crafting.StrictNBTIngredient;
 import org.junit.jupiter.api.Test;
 
+import java.lang.reflect.Proxy;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -74,6 +75,19 @@ class AsyncCraftChainMachineDedupTest extends BootstrapTest {
         assertFalse(AsyncCraftChain.requiresExactGraphReservation(Ingredient.of(modified)),
                 "vanilla Ingredient ignores NBT even when its display stack has a tag");
         assertTrue(AsyncCraftChain.requiresExactGraphReservation(StrictNBTIngredient.of(modified)));
+    }
+
+    @Test
+    void privateLedgerGraphDispatchUsesDelegateCapabilityInsteadOfRecipePath() {
+        IBatchDelegate delegate = (IBatchDelegate) Proxy.newProxyInstance(
+                IBatchDelegate.class.getClassLoader(),
+                new Class<?>[]{IBatchDelegate.class},
+                (proxy, method, args) -> method.getName()
+                        .equals("requiresPrivateLedgerGraphDispatch"));
+
+        assertTrue(AsyncCraftChain.shouldUsePrivateLedgerGraphDispatch(delegate, List.of()));
+        assertFalse(AsyncCraftChain.shouldUsePrivateLedgerGraphDispatch(
+                delegate, List.of(new IngredientSpec(Ingredient.of(Items.IRON_INGOT), 1))));
     }
 
     @Test

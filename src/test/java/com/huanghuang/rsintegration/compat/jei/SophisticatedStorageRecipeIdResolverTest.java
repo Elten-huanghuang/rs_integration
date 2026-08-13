@@ -8,6 +8,7 @@ import net.minecraft.world.item.crafting.RecipeSerializer;
 import net.minecraft.world.item.crafting.RecipeType;
 import net.minecraft.world.level.Level;
 import net.p3pp3rf1y.sophisticatedstorage.compat.recipeviewers.common.TierUpgradeDisplayRecipe;
+import net.p3pp3rf1y.sophisticatedcore.compat.recipeviewers.common.CraftingDisplaySpec$SpecShapedRecipeFixture;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -28,6 +29,13 @@ class SophisticatedStorageRecipeIdResolverTest {
 
         assertNull(SophisticatedStorageRecipeIdResolver.resolve(recipe));
         assertNull(SophisticatedStorageRecipeIdResolver.resolve(new TierUpgradeDisplayRecipe("not a recipe")));
+    }
+
+    @Test
+    void resolvesCoreCraftingDisplayToReplacedServerRecipeId() {
+        ResourceLocation realId = new ResourceLocation("sophisticatedstorage", "diamond_chest");
+        assertEquals(realId, SophisticatedStorageRecipeIdResolver.resolve(
+                new CraftingDisplaySpec$SpecShapedRecipeFixture(realId)));
     }
 
     private record StubRecipe(ResourceLocation id) implements Recipe<Container> {

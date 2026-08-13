@@ -1144,6 +1144,11 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
+    public boolean requiresPrivateLedgerGraphDispatch() {
+        return machineType == MachineType.ARCANE_ITERATOR;
+    }
+
+    @Override
     public boolean tryStartWithMaterials(ServerPlayer player, List<ItemStack> materials,
                                          ExtractionLedger sharedLedger) {
         this.player = player;
