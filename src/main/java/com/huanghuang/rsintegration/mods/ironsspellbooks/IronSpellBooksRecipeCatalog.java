@@ -4,7 +4,6 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import io.redspace.ironsspellbooks.api.registry.SpellRegistry;
 import io.redspace.ironsspellbooks.api.spells.AbstractSpell;
 import io.redspace.ironsspellbooks.api.spells.ISpellContainer;
-import io.redspace.ironsspellbooks.api.spells.SpellData;
 import io.redspace.ironsspellbooks.item.InkItem;
 import io.redspace.ironsspellbooks.registries.ItemRegistry;
 import net.minecraft.resources.ResourceLocation;
@@ -24,12 +23,16 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /** Runtime recipes for the JEI-only Scroll Forge and Arcane Anvil categories. */
 public final class IronSpellBooksRecipeCatalog {
     public static final RecipeType<IronSpellBooksRecipe> TYPE =
             RecipeType.simple(new ResourceLocation("rs_integration", "irons_spellbooks"));
     private static volatile Catalog catalog;
+    private static final Map<Class<?>, SpellEntryAccess> SPELL_ENTRY_ACCESS =
+            new ConcurrentHashMap<>();
+    private static final Map<Class<?>, Method> SPELL_ID_ACCESS = new ConcurrentHashMap<>();
 
     private IronSpellBooksRecipeCatalog() {}
 
@@ -76,14 +79,54 @@ public final class IronSpellBooksRecipeCatalog {
             return null;
         }
         try {
-            List<SpellData> spells = ISpellContainer.get(stack).getActiveSpells();
+            // Iron's 3.15 changed this list from SpellData to SpellSlot while
+            // retaining the same erased getActiveSpells() descriptor. Avoid a
+            // compile-time element cast so one build supports both layouts.
+            List<?> spells = ISpellContainer.get(stack).getActiveSpells();
             if (spells.size() != 1) return null;
-            SpellData spell = spells.get(0);
-            ResourceLocation id = ResourceLocation.tryParse(spell.getSpell().getSpellId());
-            return id == null || spell.getLevel() <= 0
-                    ? null : new SpellScrollKey(id, spell.getLevel());
-        } catch (RuntimeException ignored) {
+            return spellEntryKey(spells.get(0));
+        } catch (RuntimeException | LinkageError ignored) {
             return null;
+        }
+    }
+
+    @Nullable
+    static SpellScrollKey spellEntryKey(@Nullable Object entry) {
+        if (entry == null) return null;
+        try {
+            SpellEntryAccess access = SPELL_ENTRY_ACCESS.computeIfAbsent(
+                    entry.getClass(), IronSpellBooksRecipeCatalog::resolveSpellEntryAccess);
+            Object spell = access.getSpell().invoke(entry);
+            if (spell == null) return null;
+            Method spellId = SPELL_ID_ACCESS.computeIfAbsent(
+                    spell.getClass(), IronSpellBooksRecipeCatalog::resolveSpellIdAccess);
+            Object rawId = spellId.invoke(spell);
+            Object rawLevel = access.getLevel().invoke(entry);
+            if (!(rawId instanceof String idText) || !(rawLevel instanceof Number number)) {
+                return null;
+            }
+            ResourceLocation id = ResourceLocation.tryParse(idText);
+            int level = number.intValue();
+            return id == null || level <= 0 ? null : new SpellScrollKey(id, level);
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError ignored) {
+            return null;
+        }
+    }
+
+    private static SpellEntryAccess resolveSpellEntryAccess(Class<?> type) {
+        try {
+            return new SpellEntryAccess(type.getMethod("getSpell"), type.getMethod("getLevel"));
+        } catch (ReflectiveOperationException exception) {
+            throw new IllegalArgumentException("unsupported Iron spell entry " + type.getName(),
+                    exception);
+        }
+    }
+
+    private static Method resolveSpellIdAccess(Class<?> type) {
+        try {
+            return type.getMethod("getSpellId");
+        } catch (ReflectiveOperationException exception) {
+            throw new IllegalArgumentException("unsupported Iron spell " + type.getName(), exception);
         }
     }
 
@@ -309,6 +352,8 @@ public final class IronSpellBooksRecipeCatalog {
     private record Catalog(Map<ResourceLocation, IronSpellBooksRecipe> byId,
                            Map<OutputKey, IronSpellBooksRecipe> byOutput,
                            long runtimeFingerprint) {}
+
+    private record SpellEntryAccess(Method getSpell, Method getLevel) {}
 
     private record OutputKey(IronSpellBooksRecipe.Machine machine, ResourceLocation itemId,
                              @Nullable net.minecraft.nbt.CompoundTag tag) {
