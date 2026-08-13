@@ -610,8 +610,14 @@ public final class GenericCraftPacket {
             if (recipe != null) return recipe;
         }
 
-        recipe = resolveFARitual(level, recipeId);
-        if (recipe != null) return recipe;
+        // FA rituals live in a separate registry. Avoid probing that optional
+        // registry for every ordinary recipe; besides being wasted work, a
+        // missing FA installation would otherwise emit a reflection failure
+        // on every planning branch.
+        if (ModIds.FORBIDDEN_ARCANUS.equals(recipeId.getNamespace())) {
+            recipe = resolveFARitual(level, recipeId);
+            if (recipe != null) return recipe;
+        }
         recipe = MarketBatchDelegate.resolveMarketEntry(recipeId);
         if (recipe != null) return recipe;
         recipe = ApotheosisGemCuttingCatalog.byId(recipeId);
@@ -631,17 +637,19 @@ public final class GenericCraftPacket {
             return new LithumAltarRecipeWrapper(recipeId, firon);
         }
 
-        // Scan FA rituals directly (bypasses cache in case of
-        // registry-key vs lookup-key mismatch).  FA's ritual registry
-        // is small (typically < 100 entries), so this is safe.
-        recipe = FaRitualHelper.resolveFARitualScan(level, recipeId);
-        if (recipe != null) return recipe;
+        // Scan FA rituals directly only for FA IDs (bypasses cache in case of
+        // registry-key vs lookup-key mismatch).
+        if (ModIds.FORBIDDEN_ARCANUS.equals(recipeId.getNamespace())) {
+            recipe = FaRitualHelper.resolveFARitualScan(level, recipeId);
+            if (recipe != null) return recipe;
+        }
 
         RSIntegrationMod.LOGGER.warn("[RSI-resolveRecipe] All lookups failed for {}", recipeId);
         return null;
     }
 
     private static Recipe<?> resolveFARitual(ServerLevel level, ResourceLocation recipeId) {
+        if (!ModIds.FORBIDDEN_ARCANUS.equals(recipeId.getNamespace())) return null;
         Object ritual = FaRitualHelper.getRitualById(recipeId, level);
         if (ritual == null) {
             RSIntegrationMod.debug("[RSI-Generic] FA ritual not found in registry: {}", recipeId);

@@ -38,6 +38,7 @@ public final class FaRitualHelper {
     private FaRitualHelper() {}
 
     private static volatile ResourceKey<?> cachedFaRitualKey;
+    private static volatile boolean faRegistryUnavailable;
     /** Built once from the FA ritual registry — O(1) lookups thereafter. */
     private static volatile Map<ResourceLocation, Object> cachedRitualMap;
 
@@ -46,15 +47,22 @@ public final class FaRitualHelper {
 
     @Nullable
     static ResourceKey<?> getFARegistryKey() {
-        if (cachedFaRitualKey != null) return cachedFaRitualKey;
+        if (cachedFaRitualKey != null || faRegistryUnavailable) return cachedFaRitualKey;
         try {
             Class<?> faRegistries = Class.forName(
                     "com.stal111.forbidden_arcanus.core.registry.FARegistries");
             java.lang.reflect.Field field = faRegistries.getField("RITUAL");
             field.setAccessible(true);
             cachedFaRitualKey = (ResourceKey<?>) field.get(null);
-        } catch (Exception ex) {
-            RSIntegrationMod.LOGGER.error("[RSI-FA] Failed to get FA ritual registry key", ex);
+        } catch (ClassNotFoundException ex) {
+            // FA is optional. Cache its absence so ordinary recipe planning
+            // never repeats a failing class-loader lookup.
+            faRegistryUnavailable = true;
+            RSIntegrationMod.LOGGER.debug(
+                    "[RSI-FA] Forbidden Arcanus is not present; ritual integration disabled");
+        } catch (ReflectiveOperationException | LinkageError ex) {
+            faRegistryUnavailable = true;
+            RSIntegrationMod.LOGGER.warn("[RSI-FA] Failed to initialize ritual registry integration", ex);
         }
         return cachedFaRitualKey;
     }

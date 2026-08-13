@@ -61,6 +61,7 @@ public final class RecipeIndex {
     }
 
     private static volatile Map<Item, List<Entry>> index;
+    private static volatile Map<IronSpellBooksRecipeCatalog.SpellScrollKey, List<Entry>> spellScrollIndex = Map.of();
     private static volatile Map<Item, List<ReusableCatalystRoute>> reusableCatalystRoutes = Map.of();
     private static volatile Set<ResourceLocation> reusableCatalystOutputIds = Set.of();
     private static volatile Set<ResourceLocation> reusableCatalystRecipeIds = Set.of();
@@ -181,12 +182,15 @@ public final class RecipeIndex {
                     .VanillaBrewingCatalog.index(level, idx, seen);
 
             Map<Item, List<Entry>> publishedIndex = freezeIndex(idx);
+            Map<IronSpellBooksRecipeCatalog.SpellScrollKey, List<Entry>> publishedSpellScrollIndex =
+                    buildSpellScrollIndex(level, publishedIndex);
             ImmutableRecipeGraph graph = new ImmutableRecipeGraph(projected);
             ImmutableRecipeGraphProjector.publishCompiled(rm, revision, graph, timing.graphNanos);
             reusableCatalystOutputIds = Set.copyOf(catalystOutputIds);
             reusableCatalystRecipeIds = Set.copyOf(catalystRecipeIds);
             reusableCatalystRoutes = freezeCatalystRoutes(catalystRoutes);
             index = publishedIndex;
+            spellScrollIndex = publishedSpellScrollIndex;
             source = rm;
             sourceRevision = revision;
 
@@ -288,6 +292,33 @@ public final class RecipeIndex {
         Map<Item, List<Entry>> frozen = new HashMap<>(mutable.size());
         mutable.forEach((item, entries) -> frozen.put(item, List.copyOf(entries)));
         return Map.copyOf(frozen);
+    }
+
+    private static Map<IronSpellBooksRecipeCatalog.SpellScrollKey, List<Entry>> buildSpellScrollIndex(
+            Level level, Map<Item, List<Entry>> publishedIndex) {
+        if (!net.minecraftforge.fml.ModList.get().isLoaded(ModIds.IRONS_SPELLBOOKS)) return Map.of();
+        Item scroll = ForgeRegistries.ITEMS.getValue(
+                new ResourceLocation(ModIds.IRONS_SPELLBOOKS, "scroll"));
+        List<Entry> entries = scroll == null ? null : publishedIndex.get(scroll);
+        if (entries == null || entries.isEmpty()) return Map.of();
+        Map<IronSpellBooksRecipeCatalog.SpellScrollKey, List<Entry>> mutable = new HashMap<>();
+        for (Entry entry : entries) {
+            ItemStack output = ModRecipeHandlers.tryGetResultItem(
+                    entry.recipe(), level.registryAccess());
+            var key = IronSpellBooksRecipeCatalog.spellScrollKey(output);
+            if (key != null) mutable.computeIfAbsent(key, ignored -> new ArrayList<>()).add(entry);
+        }
+        Map<IronSpellBooksRecipeCatalog.SpellScrollKey, List<Entry>> frozen =
+                new HashMap<>(mutable.size());
+        mutable.forEach((key, recipes) -> frozen.put(key, List.copyOf(recipes)));
+        return Map.copyOf(frozen);
+    }
+
+    /** Exact spell-level producers, avoiding a scan of every scroll recipe. */
+    public static List<Entry> spellScrollCandidates(Level level, ItemStack requested) {
+        get(level);
+        var key = IronSpellBooksRecipeCatalog.spellScrollKey(requested);
+        return key == null ? List.of() : spellScrollIndex.getOrDefault(key, List.of());
     }
 
     private static Map<Item, List<ReusableCatalystRoute>> freezeCatalystRoutes(
@@ -704,6 +735,7 @@ public final class RecipeIndex {
     public static void invalidate() {
         synchronized (RecipeIndex.class) {
             index = null;
+            spellScrollIndex = Map.of();
             reusableCatalystRoutes = Map.of();
             reusableCatalystOutputIds = Set.of();
             reusableCatalystRecipeIds = Set.of();
