@@ -263,8 +263,10 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
                     capturedSnapshot, expectedOutput);
             boolean capturedWorldOutput = capturedExpectedOutput
                     && (outputs == null || outputs.canCompleteWith(capturedSnapshot));
-            boolean requiresWorldCapture = capture != null
+            boolean hasWorldCapture = capture != null
                     || (operationSession != null && operationSession.hasCaptureScope());
+            boolean requiresWorldCapture = hasWorldCapture
+                    && !delegate.canCollectResultWithoutWorldCapture();
             if (shouldSucceed(observation.phase(), requiresWorldCapture,
                     captureHasOutput, capturedWorldOutput)) {
                 if (!delegate.validateExecutionContext(player)) {

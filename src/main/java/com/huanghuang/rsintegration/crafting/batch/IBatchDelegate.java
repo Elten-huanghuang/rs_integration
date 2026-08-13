@@ -370,4 +370,14 @@ public interface IBatchDelegate {
     default net.minecraft.world.phys.AABB getOutputCaptureRegion() {
         return null;
     }
+
+    /**
+     * True when {@link #collectAllResults(ServerPlayer)} can authoritatively
+     * remove the completed product from a machine slot even though a defensive
+     * world-output capture is also armed. World-spawning delegates remain false
+     * so a premature DONE observation cannot lose their output.
+     */
+    default boolean canCollectResultWithoutWorldCapture() {
+        return false;
+    }
 }
