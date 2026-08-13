@@ -112,11 +112,12 @@ public final class IronSpellBooksRecipeCatalog {
     }
 
     private static void addScrollForgeRecipes(Map<ResourceLocation, IronSpellBooksRecipe> result,
-                                               Map<Object, List<ItemStack>> focuses) {
+                                               Map<ResourceLocation, List<ItemStack>> focuses) {
         List<InkItem> inks = findInks();
         for (AbstractSpell spell : SpellRegistry.getEnabledSpells()) {
             if (spell == SpellRegistry.none() || !spell.allowCrafting()) continue;
-            List<ItemStack> focusOptions = focuses.getOrDefault(spell.getSchoolType(), List.of());
+            List<ItemStack> focusOptions = focuses.getOrDefault(
+                    spell.getSchoolType().getId(), List.of());
             if (focusOptions.isEmpty()) continue;
             Map<Integer, List<ItemStack>> inksByLevel = new LinkedHashMap<>();
             for (InkItem ink : inks) {
@@ -199,11 +200,11 @@ public final class IronSpellBooksRecipeCatalog {
         return stack;
     }
 
-    private static Map<Object, List<ItemStack>> findFocuses() {
-        Map<Object, List<ItemStack>> focuses = new java.util.IdentityHashMap<>();
+    private static Map<ResourceLocation, List<ItemStack>> findFocuses() {
+        Map<ResourceLocation, List<ItemStack>> focuses = new LinkedHashMap<>();
         for (AbstractSpell spell : SpellRegistry.getEnabledSpells()) {
-            Object school = spell.getSchoolType();
-            if (focuses.containsKey(school)) continue;
+            ResourceLocation schoolId = spell.getSchoolType().getId();
+            if (focuses.containsKey(schoolId)) continue;
             List<ItemStack> matches = new ArrayList<>();
             for (var item : ForgeRegistries.ITEMS.getValues()) {
                 ItemStack stack = new ItemStack(item);
@@ -211,7 +212,7 @@ public final class IronSpellBooksRecipeCatalog {
                     matches.add(stack);
                 }
             }
-            if (!matches.isEmpty()) focuses.put(school, List.copyOf(matches));
+            if (!matches.isEmpty()) focuses.put(schoolId, List.copyOf(matches));
         }
         return focuses;
     }
