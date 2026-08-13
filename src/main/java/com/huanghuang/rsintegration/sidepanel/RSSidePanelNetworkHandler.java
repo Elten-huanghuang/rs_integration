@@ -736,7 +736,11 @@ public final class RSSidePanelNetworkHandler {
             dirtyMachinePlayers.remove(pid);
             syncGenerations.remove(pid);
             RemoteGuiAuth.onPlayerLogout(pid);
-            GuiOpenRateLimiter.onPlayerLogout(pid);
+            try {
+                GuiOpenRateLimiter.onPlayerLogout(pid);
+            } catch (LinkageError ignored) {
+                // Rate limiting is optional and must not break player logout.
+            }
             com.huanghuang.rsintegration.crafting.PreviewRateLimiter.onPlayerLogout(pid);
             SidePanelRequestRateLimiter.onPlayerLogout(pid);
             com.huanghuang.rsintegration.crafting.batch.CraftCancelPacket.onPlayerLogout(pid);

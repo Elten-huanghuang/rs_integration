@@ -136,7 +136,11 @@ public final class ExternalItemProgressBridge {
     @SubscribeEvent
     public static void onServerStopping(ServerStoppingEvent event) {
         clearPending();
-        RsAutocraftProgressTracker.clear();
+        try {
+            RsAutocraftProgressTracker.clear();
+        } catch (LinkageError ignored) {
+            // Progress tracking is optional and must not break server shutdown.
+        }
     }
 
     private static void clearPending() {

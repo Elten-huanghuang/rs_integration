@@ -24,10 +24,15 @@ public abstract class ElementSearchSolCarrotMixin {
     private void rsi$searchCurrentSolCarrotStatus(
             ElementPrefixParser.TokenInfo tokenInfo,
             CallbackInfoReturnable<Set<IListElement<?>>> cir) {
-        var query = SolCarrotJeiSearchResults.query(tokenInfo);
-        if (query != null) {
-            cir.setReturnValue(SolCarrotJeiSearchResults.filter(
-                    this, allElements.values(), query));
+        try {
+            var query = SolCarrotJeiSearchResults.query(tokenInfo);
+            if (query != null) {
+                cir.setReturnValue(SolCarrotJeiSearchResults.filter(
+                        this, allElements.values(), query));
+            }
+        } catch (LinkageError ignored) {
+            // SolCarrot search is optional; leave JEI's normal search active
+            // when an old/incomplete runtime cannot resolve the helper.
         }
     }
 }
