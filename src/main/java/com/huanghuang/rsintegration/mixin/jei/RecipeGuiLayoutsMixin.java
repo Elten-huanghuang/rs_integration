@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.compat.ftbquests.QuestSubmissionRequestPacke
 import com.huanghuang.rsintegration.compat.ftbquests.QuestSubmissionSnapshot;
 import com.huanghuang.rsintegration.compat.ftbquests.QuestSubmissionTargetIds;
 import com.huanghuang.rsintegration.compat.jei.StandardRecipeIdResolver;
+import com.huanghuang.rsintegration.compat.jei.SophisticatedStorageRecipeIdResolver;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.util.Reflect;
@@ -863,6 +864,13 @@ public class RecipeGuiLayoutsMixin {
     @Unique
     private static ResourceLocation getRecipeId(Object recipe) {
         String className = recipe.getClass().getName();
+
+        // Sophisticated Storage's grouped JEI records use a synthetic ID, but
+        // retain the real server-side crafting recipe in recipe(). Resolve that
+        // nested recipe so StorageTierUpgradeRecipe can assemble and preserve
+        // the source chest's NBT on the server.
+        ResourceLocation groupedStorageId = SophisticatedStorageRecipeIdResolver.resolve(recipe);
+        if (groupedStorageId != null) return groupedStorageId;
 
         // Iron's Spell Books exposes these as JEI-only records with no recipe ID.
         // Resolve the concrete NBT output shown by JEI to the matching runtime
