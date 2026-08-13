@@ -88,6 +88,31 @@ class GraphAssetConservationTest extends BootstrapTest {
         assertTrue(broker.drainAvailableProducerAssets().isEmpty());
     }
 
+    @Test
+    void producedCatalystRecoveredFromRunningMachineIsNotDeliveredTwice() {
+        MaterialBroker broker = new MaterialBroker();
+        NodeId producerNode = new NodeId(4);
+        NodeId consumerNode = new NodeId(5);
+        MaterialSource catalystSource = new MaterialSource.ProducerOutput(
+                new OutputPortId(producerNode, 0));
+        MaterialKey catalyst = MaterialKey.of(new ItemStack(Items.SHEARS));
+        broker.publishActual(catalystSource, catalyst, new ItemStack(Items.SHEARS));
+
+        MaterialBroker.ReservationToken token = broker.reserve(consumerNode,
+                List.of(new MaterialBroker.Request(catalystSource, catalyst, 1)));
+        assertNotNull(token);
+        ItemStack installedCatalyst = broker.checkout(token).producerStacks().get(0);
+        broker.commit(token);
+
+        // Once dispatch begins the machine owns this exact stack. Failure
+        // recovery returns the installed stack; the broker claim is settled so
+        // graph-surplus recovery cannot mint a second copy.
+        broker.settle(token);
+        assertEquals(1, installedCatalyst.getCount());
+        assertTrue(installedCatalyst.is(Items.SHEARS));
+        assertTrue(broker.drainAvailableProducerAssets().isEmpty());
+    }
+
     private static Accounting runScenario(int cap) {
         MaterialBroker broker = new MaterialBroker();
         MaterialKey iron = MaterialKey.of(new ItemStack(Items.IRON_INGOT));
