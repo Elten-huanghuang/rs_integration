@@ -2458,8 +2458,8 @@ public final class GenericCraftPacket {
             }
 
             // Extract alternatives from the resolver's own candidate analysis.
-            // Filter by material availability so the OR badge is only shown for
-            // recipes the player can actually use.
+            // Missing materials do not hide a route: choosing it triggers a new
+            // recursive plan that may craft those inputs.
             List<ResourceLocation> alternatives = new ArrayList<>();
             List<String> alternativeModTypes = new ArrayList<>();
             ResolutionStep rs = stepByRecipe.get(stepId);
@@ -2477,24 +2477,6 @@ public final class GenericCraftPacket {
                         RSIntegrationMod.debug("[RSI-OR]   alt {} NOT FOUND in recipe manager", altId);
                         continue;
                     }
-                    List<Ingredient> altIngs;
-                    if (altRecipe instanceof CraftingRecipe cr) {
-                        altIngs = cr.getIngredients();
-                    } else {
-                        altIngs = CraftPacketUtils.extractIngredients(altRecipe);
-                        // Fallback: some recipes (e.g. BlastingRecipe) may have
-                        // their ingredients cached as null; retry via specs path.
-                        if (altIngs == null) {
-                            List<IngredientSpec> fallback = CraftPacketUtils.extractIngredientSpecs(altRecipe);
-                            if (fallback != null) {
-                                altIngs = new ArrayList<>();
-                                for (IngredientSpec spec : fallback) {
-                                    if (!spec.isEmpty()) altIngs.add(spec.ingredient());
-                                }
-                            }
-                        }
-                    }
-                    boolean hasMats = altIngs != null && recipeHasSomeMaterials(altIngs, itemAvailable, recipeIndex);
                     // Machine gating must match the resolver's own candidate check
                     // (CandidateEngine.isMachineAvailable → hasBindingForRecipe).
                     // hasBindingForRecipe re-classifies the recipe, so vanilla
@@ -2504,10 +2486,9 @@ public final class GenericCraftPacket {
                     // wrongly hid those alternatives (e.g. the blast-furnace path for
                     // refined_beeswax_bar), leaving only the stonecutter step with no
                     // switch button even though the resolver could use either.
-                    boolean hasMachine = hasMats && AltarBindingRegistry.hasBindingForRecipe(player, altRecipe);
-                    RSIntegrationMod.debug("[RSI-OR]   alt {}: ingCount={} hasMaterials={} hasMachine={}",
-                            altId, altIngs != null ? altIngs.size() : -1, hasMats, hasMachine);
-                    if (hasMats && hasMachine) {
+                    boolean hasMachine = AltarBindingRegistry.hasBindingForRecipe(player, altRecipe);
+                    RSIntegrationMod.debug("[RSI-OR]   alt {}: hasMachine={}", altId, hasMachine);
+                    if (hasMachine) {
                         alternatives.add(altId);
                         alternativeModTypes.add(altMod);
                     }
@@ -2690,19 +2671,14 @@ public final class GenericCraftPacket {
                         }
                         if (!ItemStack.isSameItemSameTags(altOut, planTargetOutput)) continue;
                     }
-                    List<Ingredient> altIngs;
-                    if (e.recipe() instanceof CraftingRecipe cr) {
-                        altIngs = cr.getIngredients();
-                    } else {
-                        altIngs = CraftPacketUtils.extractIngredients(e.recipe());
-                    }
                     // Gate by machine binding too — same rule the resolver and the
                     // intermediate-step alternatives use (hasBindingForRecipe: vanilla
                     // machines are always available, mod machines need a binding). Without
                     // this the target offered recipes for unbound machines (cooking pot,
                     // forge ritual, spirit crucible…) that the player can't actually run.
-                    if (altIngs != null && recipeHasSomeMaterials(altIngs, itemAvailable, recipeIndex)
-                            && AltarBindingRegistry.hasBindingForRecipe(player, e.recipe())) {
+                    // Selecting this branch performs a fresh recursive plan, so
+                    // current inventory must not decide whether the button exists.
+                    if (AltarBindingRegistry.hasBindingForRecipe(player, e.recipe())) {
                         targetAlts.add(e.recipe().getId());
                         targetAltModTypes.add(e.modType().id());
                     }
@@ -3251,30 +3227,6 @@ public final class GenericCraftPacket {
             available.merge(matched.getItem(), -1, Integer::sum);
         }
         return matched;
-    }
-
-    /**
-     * Returns true if at least one matching item is available (directly or craftable)
-     * for every non-empty ingredient. Uses RecipeIndex to check if an item can be
-     * produced even when not directly in inventory — this prevents filtering out
-     * alternatives that require one extra crafting hop (e.g. "其他原木 → 橡木原木 → 木板").
-     */
-    private static boolean recipeHasSomeMaterials(List<Ingredient> ingredients,
-                                                   Map<Item, Integer> itemAvailable,
-                                                   Map<Item, List<RecipeIndex.Entry>> recipeIndex) {
-        for (Ingredient ing : ingredients) {
-            if (ing.isEmpty()) continue;
-            boolean any = false;
-            for (ItemStack opt : ing.getItems()) {
-                if (opt.isEmpty()) continue;
-                // Direct availability
-                if (itemAvailable.getOrDefault(opt.getItem(), 0) > 0) { any = true; break; }
-                // Craftable — player can make this item from raw materials
-                if (recipeIndex.containsKey(opt.getItem())) { any = true; break; }
-            }
-            if (!any) return false;
-        }
-        return true;
     }
 
     /** Give item to player only if still connected. Prevents ghost items
