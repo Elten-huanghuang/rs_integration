@@ -27,6 +27,8 @@ import com.huanghuang.rsintegration.mods.goety.GoetyRSModule;
 import com.huanghuang.rsintegration.mods.immortalersdelight.ImmortalersDelightRSModule;
 import com.huanghuang.rsintegration.mods.ironfurnaces.IronFurnacesRSModule;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRSModule;
+import com.huanghuang.rsintegration.mods.apprenticecodex.ApprenticeCodexRSModule;
+import com.huanghuang.rsintegration.mods.isscsw.IssCswRSModule;
 import com.huanghuang.rsintegration.mods.malum.MalumRSModule;
 import com.huanghuang.rsintegration.mods.lychee.LycheeRSModule;
 import com.huanghuang.rsintegration.mods.pmmo.PmmoRSModule;
@@ -108,6 +110,8 @@ public final class RSIntegrationMod {
             "vanilla_brewing_stand", "vanilla_campfire", "vanilla_furnace",
             "vanilla_smoker", "vanilla_stonecutter", "wizards_reborn",
             "irons_spellbooks_scroll_forge", "irons_spellbooks_arcane_anvil",
+            "apprenticecodex_essence_smoker", "apprenticecodex_spellcaster_workbench",
+            "iss_csw_spell_forge",
             "youkaishomecoming", "youkaishomecoming_cooking_large",
             "youkaishomecoming_cooking_short", "youkaishomecoming_cooking_small",
             "youkaishomecoming_cuisine", "youkaishomecoming_ferment",
@@ -174,6 +178,10 @@ public final class RSIntegrationMod {
                     () -> ApotheosisRSModule.INSTANCE),
             new ModuleEntry(ModIds.IRONS_SPELLBOOKS, RSIntegrationConfig.ENABLE_IRONS_SPELLBOOKS,
                     () -> IronSpellBooksRSModule.INSTANCE),
+            new ModuleEntry(ModIds.APPRENTICE_CODEX, RSIntegrationConfig.ENABLE_APPRENTICE_CODEX,
+                    () -> ApprenticeCodexRSModule.INSTANCE),
+            new ModuleEntry(ModIds.ISS_CSW, RSIntegrationConfig.ENABLE_ISS_CSW,
+                    () -> IssCswRSModule.INSTANCE),
             new ModuleEntry(ModIds.CROCKPOT, RSIntegrationConfig.ENABLE_CROCKPOT,
                     () -> CrockPotRSModule.INSTANCE),
             new ModuleEntry(ModIds.TACZ, RSIntegrationConfig.ENABLE_TACZ,
