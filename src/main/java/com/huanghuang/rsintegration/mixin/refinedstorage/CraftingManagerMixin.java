@@ -16,6 +16,12 @@ public abstract class CraftingManagerMixin {
     private void rsi$rememberItemRequester(Object requester, ItemStack requested, int quantity,
                                              CallbackInfoReturnable<ICraftingTask> cir) {
         ICraftingTask task = cir.getReturnValue();
-        if (task != null) RsAutocraftProgressTracker.remember(task.getId(), requester);
+        if (task != null) {
+            try {
+                RsAutocraftProgressTracker.remember(task.getId(), requester);
+            } catch (LinkageError ignored) {
+                // Optional FTB progress tracking must not block RS crafting.
+            }
+        }
     }
 }

@@ -26,13 +26,17 @@ public abstract class ElementSearchLowMemSolCarrotMixin {
     private void rsi$searchCurrentSolCarrotStatus(
             ElementPrefixParser.TokenInfo tokenInfo,
             CallbackInfoReturnable<Set<IListElement<?>>> cir) {
-        var query = SolCarrotJeiSearchResults.query(tokenInfo);
-        if (query != null) {
-            List<IListElement<?>> elements = new ArrayList<>(elementInfoList.size());
-            for (IListElementInfo<?> info : elementInfoList) {
-                elements.add(info.getElement());
+        try {
+            var query = SolCarrotJeiSearchResults.query(tokenInfo);
+            if (query != null) {
+                List<IListElement<?>> elements = new ArrayList<>(elementInfoList.size());
+                for (IListElementInfo<?> info : elementInfoList) {
+                    elements.add(info.getElement());
+                }
+                cir.setReturnValue(SolCarrotJeiSearchResults.filter(this, elements, query));
             }
-            cir.setReturnValue(SolCarrotJeiSearchResults.filter(this, elements, query));
+        } catch (LinkageError ignored) {
+            // SolCarrot search is optional; leave JEI's normal search active.
         }
     }
 }

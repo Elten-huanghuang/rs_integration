@@ -22,19 +22,24 @@ public abstract class CraftingTaskMixin {
     private void rsi$reportCompletedOutput(CallbackInfoReturnable<Boolean> cir) {
         if (!cir.getReturnValueZ()) return;
         CraftingTask task = (CraftingTask) (Object) this;
-        UUID ownerId = RsAutocraftProgressTracker.owner(task.getId());
+        UUID ownerId;
+        try {
+            ownerId = RsAutocraftProgressTracker.owner(task.getId());
+        } catch (LinkageError ignored) {
+            return;
+        }
         if (ownerId == null) {
-            RsAutocraftProgressTracker.forget(task.getId());
+            forgetSafely(task.getId());
             return;
         }
         ICraftingRequestInfo requested = task.getRequested();
         if (requested == null || requested.getItem() == null || requested.getItem().isEmpty()) {
-            RsAutocraftProgressTracker.forget(task.getId());
+            forgetSafely(task.getId());
             return;
         }
         INetwork network = ((CraftingTaskAccessor) task).rsi$getNetwork();
         if (network == null) {
-            RsAutocraftProgressTracker.forget(task.getId());
+            forgetSafely(task.getId());
             return;
         }
         // The task has already inserted into RS. Report the requested final
@@ -45,6 +50,14 @@ public abstract class CraftingTaskMixin {
             ExternalItemProgressBridge.enqueueCrafted(player,
                     requested.getItem().copyWithCount(task.getQuantity()));
         }
-        RsAutocraftProgressTracker.forget(task.getId());
+        forgetSafely(task.getId());
+    }
+
+    private static void forgetSafely(UUID taskId) {
+        try {
+            RsAutocraftProgressTracker.forget(taskId);
+        } catch (LinkageError ignored) {
+            // Optional FTB progress tracking must not affect RS task cleanup.
+        }
     }
 }

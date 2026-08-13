@@ -19,7 +19,11 @@ public abstract class ItemGridHandlerMixin {
             remap = false)
     private void rsi$rememberGridRequester(ICraftingManager manager, ICraftingTask task,
                                            ServerPlayer player, UUID stackId, int quantity) {
-        RsAutocraftProgressTracker.remember(task.getId(), player);
+        try {
+            RsAutocraftProgressTracker.remember(task.getId(), player);
+        } catch (LinkageError ignored) {
+            // Optional FTB progress tracking must not block RS crafting.
+        }
         manager.start(task);
     }
 }
