@@ -852,8 +852,8 @@ public final class AsyncCraftChain {
 
             int idx = stepIndex(vanillaNode);
             int executions = Math.max(1, steps.get(idx).executions());
-            if (!vanillaAllowance.tryClaimExact(executions)) {
-                graphScheduler.releaseClaim(vanillaNode);
+            if (!claimVanillaBudgetOrReleaseAdmission(
+                    vanillaAllowance, graphAdmissions, admission, executions)) {
                 waitingForVanillaBudget = true;
                 break;
             }
@@ -923,6 +923,16 @@ public final class AsyncCraftChain {
             graphScheduler.succeed(vanillaNode);
             currentStepIdx = idx + 1;
         }
+    }
+
+    static boolean claimVanillaBudgetOrReleaseAdmission(
+            VanillaCraftingTickBudget.ChainAllowance allowance,
+            NodeAdmissionCoordinator admissions,
+            NodeAdmissionCoordinator.Admission admission,
+            int executions) {
+        if (allowance.tryClaimExact(executions)) return true;
+        admissions.releaseBeforeDispatch(admission);
+        return false;
     }
 
     @Nullable
@@ -1238,6 +1248,11 @@ public final class AsyncCraftChain {
                 IBatchDelegate.MaterialReservationScope.PER_WORKER_REUSABLE);
         int operationCost = graphOperationWorkerCount(desiredOperations, availableOperations,
                 eligible.size(), concurrencySafe, workerReusable);
+        if (operationGroup && workerReusable) {
+            operationCost = Math.min(operationCost, Math.max(1,
+                    reusableWorkerCapacity(delegate.getGraphSpecs(),
+                            delegate.getMaterialReservationScopes(), online, network)));
+        }
         return PreparationResult.ready(
                 new PreparedGraphNode(step, delegate, eligible, operationCost, operationGroup));
     }
@@ -1250,8 +1265,45 @@ public final class AsyncCraftChain {
                                          int eligibleMachines, boolean concurrencySafe,
                                          boolean workerReusable) {
         if (!shouldUseGraphOperationGroup(executions, availableOperations)
-                || !concurrencySafe || workerReusable) return 1;
+                || !concurrencySafe) return 1;
         return Math.max(1, Math.min(Math.min(executions, availableOperations), eligibleMachines));
+    }
+
+    /**
+     * Reusable materials are required once per physical worker.  The graph
+     * planner intentionally records only one catalyst demand, so use the live
+     * RS/player snapshot to avoid selecting more workers than can be equipped.
+     * A missing snapshot is treated conservatively as one worker; the broker
+     * admission still remains authoritative for planned producer outputs.
+     */
+    static int reusableWorkerCapacity(List<IngredientSpec> specs,
+                                      List<IBatchDelegate.MaterialReservationScope> scopes,
+                                      ServerPlayer online, @Nullable INetwork network) {
+        if (specs == null || specs.isEmpty() || online == null) return 1;
+        return reusableWorkerCapacity(specs, scopes,
+                MaterialSources.listAllAvailable(online, network));
+    }
+
+    static int reusableWorkerCapacity(List<IngredientSpec> specs,
+                                      List<IBatchDelegate.MaterialReservationScope> scopes,
+                                      Map<CraftingResolver.StackKey, Integer> available) {
+        if (specs == null || specs.isEmpty()) return 1;
+        int capacity = Integer.MAX_VALUE;
+        boolean found = false;
+        for (int i = 0; i < specs.size() && i < scopes.size(); i++) {
+            if (scopes.get(i) != IBatchDelegate.MaterialReservationScope.PER_WORKER_REUSABLE) continue;
+            IngredientSpec spec = specs.get(i);
+            if (spec.isEmpty()) continue;
+            found = true;
+            int matching = 0;
+            for (Map.Entry<CraftingResolver.StackKey, Integer> entry : available.entrySet()) {
+                if (IngredientMatcher.test(spec.ingredient(), entry.getKey())) {
+                    matching += entry.getValue();
+                }
+            }
+            capacity = Math.min(capacity, matching / Math.max(1, spec.count()));
+        }
+        return found ? Math.max(1, capacity) : 1;
     }
 
     private GraphDispatchResult dispatchPreparedGraphNode(
@@ -1637,9 +1689,13 @@ public final class AsyncCraftChain {
             IBatchDelegate delegate, List<IngredientSpec> specs, int executions,
             ServerPlayer online, ExtractionLedger ledger,
             MaterialBroker.ReservationToken materialToken) {
+        int reservationMark = ledger.reservationMark();
         if (delegate instanceof ParallelCraftGroup group) {
             List<IngredientSpec> operationSpecs = group.getOperationMaterials();
-            if (operationSpecs == null || operationSpecs.isEmpty()) return null;
+            if (operationSpecs == null || operationSpecs.isEmpty()) {
+                ledger.cancelReservationsSince(reservationMark);
+                return null;
+            }
             MaterialBroker.Checkout checkout = graphMaterials != null
                     ? graphMaterials.checkout(materialToken) : new MaterialBroker.Checkout(List.of());
             List<ItemStack> initialPool = new ArrayList<>(checkout.initialStacks());
@@ -1650,28 +1706,42 @@ public final class AsyncCraftChain {
             List<List<ItemStack>> producerDebits = new ArrayList<>();
             List<ItemStack> reusable = new ArrayList<>();
             List<IngredientSpec> perOperationSpecs = new ArrayList<>();
-            List<IngredientSpec> reusableSpecs = new ArrayList<>();
             List<IBatchDelegate.MaterialReservationScope> scopes = group.getMaterialReservationScopes();
             List<Integer> reusableIndices = reusableMaterialIndices(scopes, operationSpecs.size());
             for (int i = 0; i < operationSpecs.size(); i++) {
-                if (reusableIndices.contains(i)) {
-                    reusableSpecs.add(operationSpecs.get(i));
-                } else {
+                if (!reusableIndices.contains(i)) {
                     perOperationSpecs.add(operationSpecs.get(i));
                 }
             }
             int workers = Math.min(group.getChildCount(), group.getTotalOperations());
-            for (int worker = 0; worker < workers; worker++) {
-                List<ItemStack> lane = reserveGraphMaterials(reusableSpecs, online, ledger, initialPool, producerPool);
-                if (lane == null) return null;
-                reusable.addAll(lane);
+            for (int reusableIndex : reusableIndices) {
+                IngredientSpec spec = operationSpecs.get(reusableIndex);
+                List<ItemStack> planned = reserveGraphMaterials(
+                        List.of(spec), online, ledger, initialPool, producerPool);
+                if (planned == null) {
+                    ledger.cancelReservationsSince(reservationMark);
+                    return null;
+                }
+                reusable.addAll(planned);
+                for (int worker = 1; worker < workers; worker++) {
+                    ItemStack additional = ledger.reserve(
+                            spec.ingredient(), spec.count(), network, online, null, null);
+                    if (additional.isEmpty() || additional.getCount() != spec.count()) {
+                        ledger.cancelReservationsSince(reservationMark);
+                        return null;
+                    }
+                    reusable.add(additional);
+                }
             }
             for (int operation = 0; operation < group.getTotalOperations(); operation++) {
                 int mark = ledger.reservationMark();
                 List<ItemStack> producerBefore = copyStacks(producerPool);
                 List<ItemStack> slice = reserveGraphMaterials(
                         perOperationSpecs, online, ledger, initialPool, producerPool);
-                if (slice == null) return null;
+                if (slice == null) {
+                    ledger.cancelReservationsSince(reservationMark);
+                    return null;
+                }
                 List<ItemStack> full = new ArrayList<>();
                 int consumedIndex = 0;
                 int reusableIndex = operation % Math.max(1, workers);
@@ -1699,7 +1769,10 @@ public final class AsyncCraftChain {
                 delegate.getMaterialReservationScopes(), executions);
         List<ItemStack> materials = reserveGraphMaterials(
                 scaledSpecs, online, ledger, initialPool, producerPool);
-        if (materials == null) return null;
+        if (materials == null) {
+            ledger.cancelReservationsSince(reservationMark);
+            return null;
+        }
         requireGraphMaterialPoolsDrained(initialPool, producerPool);
         return new GraphNodeMaterials(materials, List.of(), List.of(), List.of());
     }
