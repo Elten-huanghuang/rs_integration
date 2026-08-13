@@ -512,6 +512,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
 
     private boolean activateExpectedRecipe(BlockEntity be, ServerPlayer player) {
         if (refreshRecipeSelection(be, recipe)) {
+            refreshAccelerators(be, myLevel, myPos);
             craftWasSeenActive = true;
             return true;
         }
@@ -548,6 +549,32 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
             if (!(active instanceof Recipe<?> activeRecipe)) return false;
             return activeRecipe == expected || activeRecipe.getId().equals(expected.getId());
         } catch (ReflectiveOperationException | RuntimeException e) {
+            return false;
+        }
+    }
+
+    /** Mirror Malum's manual crucible interaction after programmatic material placement. */
+    static boolean refreshAccelerators(Object crucible, Object level, Object pos) {
+        if (crucible == null || level == null || pos == null) return false;
+        try {
+            java.lang.reflect.Method recalibrate = null;
+            for (java.lang.reflect.Method method : crucible.getClass().getMethods()) {
+                Class<?>[] parameters = method.getParameterTypes();
+                if (method.getName().equals("recalibrateAccelerators")
+                        && parameters.length == 2
+                        && parameters[0].isInstance(level)
+                        && parameters[1].isInstance(pos)) {
+                    recalibrate = method;
+                    break;
+                }
+            }
+            if (recalibrate == null) return false;
+            recalibrate.setAccessible(true);
+            recalibrate.invoke(crucible, level, pos);
+            return true;
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            RSIntegrationMod.LOGGER.debug(
+                    "[RSI-Crucible] Accelerator recalibration failed at {}", pos, e);
             return false;
         }
     }
