@@ -274,6 +274,11 @@ public final class SteamerBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
+    public boolean canCollectResultWithoutWorldCapture() {
+        return true;
+    }
+
+    @Override
     protected void clearMachineState(BlockEntity be, ServerPlayer player) {
         clearAndRefund();
         forceChunkLoad(false);

@@ -1209,6 +1209,13 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         return myPos == null ? null : new net.minecraft.world.phys.AABB(myPos).inflate(3);
     }
 
+    @Override
+    public boolean canCollectResultWithoutWorldCapture() {
+        // Dark Altar craft results are normally written to its item handler and
+        // collectResult() extracts that slot. The brazier only ejects an entity.
+        return !isBrazier;
+    }
+
     // ── Brazier helpers ─────────────────────────────────────────
 
     private static final int CANDLESTICK_SEARCH_RANGE = 8;

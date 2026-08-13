@@ -351,6 +351,11 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
         return out.isEmpty() ? null : out;
     }
 
+    @Override
+    public boolean canCollectResultWithoutWorldCapture() {
+        return true;
+    }
+
     /**
      * Serve a PotFoodBlock and atomically restore the matching empty pot.
      * Returns null only when the block is definitely not a PotFoodBlock. EMPTY

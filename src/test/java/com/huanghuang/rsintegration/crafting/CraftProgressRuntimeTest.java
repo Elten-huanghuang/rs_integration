@@ -114,6 +114,34 @@ class CraftProgressRuntimeTest extends BootstrapTest {
     }
 
     @Test
+    void slotCollectingRuntimeCanFinishWhileDefensiveWorldCaptureIsEmpty() {
+        NodeId node = new NodeId(8);
+        StubDelegate delegate = new StubDelegate(IBatchDelegate.CraftPhase.DONE, "") {
+            @Override
+            public boolean canCollectResultWithoutWorldCapture() {
+                return true;
+            }
+        };
+        OperationExecutionKernel kernel = new OperationExecutionKernel(
+                new OperationResourceCoordinator(new MachineLeaseRegistry(),
+                        new CaptureLeaseRegistry(), new OperationBudget(1, 2)));
+        OperationExecutionKernel.Session session = kernel.tryPrepare(
+                UUID.randomUUID(), node, 0, new OperationBudget(1, 2),
+                new MachineLeaseRegistry.MachineKey(new ResourceLocation("minecraft", "overworld"),
+                        BlockPos.ZERO, "test"),
+                new OperationResourceCoordinator.CaptureRequest(
+                        new ResourceLocation("minecraft", "overworld"),
+                        new AABB(0, 0, 0, 1, 1, 1), new ItemStack(Items.DIAMOND)));
+        assertTrue(session.commit(() -> true));
+        assertTrue(session.tryStart(() -> true));
+        CraftNodeRuntime runtime = new CraftNodeRuntime(node, "test:slot-output", delegate,
+                null, null, session);
+
+        assertEquals(ConcurrentNodeExecutor.Observation.SUCCEEDED, runtime.observe());
+        session.close();
+    }
+
+    @Test
     void ownedCapturedOutputEndsWorldCaptureWaitEvenBeforeDeclarationProbeMatches() {
         assertEquals(true, CraftNodeRuntime.shouldSucceed(
                 IBatchDelegate.CraftPhase.WORKING, true, true, false));
@@ -163,7 +191,7 @@ class CraftProgressRuntimeTest extends BootstrapTest {
                 List.of(), List.of(), false, executions);
     }
 
-    private static final class StubDelegate implements IBatchDelegate {
+    private static class StubDelegate implements IBatchDelegate {
         private final CraftPhase phase;
         private final String detail;
         private int failureCleanups;

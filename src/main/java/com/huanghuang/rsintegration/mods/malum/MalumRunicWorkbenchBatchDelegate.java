@@ -311,6 +311,11 @@ public final class MalumRunicWorkbenchBatchDelegate extends AbstractBatchDelegat
 
     // ── helpers ─────────────────────────────────────────────────────
 
+    @Override
+    public boolean canCollectResultWithoutWorldCapture() {
+        return true;
+    }
+
     private static IItemHandler resolveHandler(BlockEntity be) {
         LazyOptional<IItemHandler> cap = be.getCapability(
                 net.minecraftforge.common.capabilities.ForgeCapabilities.ITEM_HANDLER, null);

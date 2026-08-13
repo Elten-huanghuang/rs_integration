@@ -1881,6 +1881,11 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
                 myPos.offset(-2, -1, -2), myPos.offset(2, 3, 2));
     }
 
+    @Override
+    public boolean canCollectResultWithoutWorldCapture() {
+        return machineType == MachineType.CRYSTAL_RITUAL;
+    }
+
     //
     // WR commits the ledger BEFORE placing items (unlike Goety). Whether a
     // clear must physically RETURN the machine contents to RS, or merely VOID

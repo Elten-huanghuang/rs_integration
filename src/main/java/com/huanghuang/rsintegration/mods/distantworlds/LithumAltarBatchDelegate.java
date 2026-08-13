@@ -397,6 +397,11 @@ public final class LithumAltarBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
+    public boolean canCollectResultWithoutWorldCapture() {
+        return true;
+    }
+
+    @Override
     protected boolean isMachineCraftFinished(ServerLevel level, BlockEntity be) {
         if (!started) return false;
         if (IBatchDelegate.matchesProducedItem(pendingResult, definition.output())) return true;
