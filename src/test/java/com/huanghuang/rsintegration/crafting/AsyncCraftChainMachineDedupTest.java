@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.crafting;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.graph.MachineLeaseRegistry;
 import com.huanghuang.rsintegration.crafting.graph.NodeId;
+import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry.BoundMachine;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.core.BlockPos;
@@ -82,13 +83,34 @@ class AsyncCraftChainMachineDedupTest extends BootstrapTest {
     }
 
     @Test
+    void intrinsicMachineBatchBypassesSerialOperationGroup() {
+        assertFalse(AsyncCraftChain.shouldUseGraphOperationGroup(5, 4, 5));
+        assertTrue(AsyncCraftChain.shouldUseGraphOperationGroup(7, 4, 6));
+    }
+
+    @Test
     void concurrentMultiExecutionNodeMayUseSeveralWorkers() {
         assertEquals(2, AsyncCraftChain.graphOperationWorkerCount(2, 4, 3, true, false));
     }
 
     @Test
-    void reusableGraphMaterialForcesOneSequentialWorker() {
-        assertEquals(1, AsyncCraftChain.graphOperationWorkerCount(8, 8, 4, true, true));
+    void reusableGraphMaterialCanUseSeveralWorkers() {
+        assertEquals(4, AsyncCraftChain.graphOperationWorkerCount(8, 8, 4, true, true));
+    }
+
+    @Test
+    void reusableWorkerCapacityIsLimitedByAvailableCatalysts() {
+        IngredientSpec catalyst = new IngredientSpec(Ingredient.of(Items.BUCKET), 1);
+        var scopes = List.of(IBatchDelegate.MaterialReservationScope.PER_WORKER_REUSABLE);
+        var twoBuckets = java.util.Map.of(
+                CraftingResolver.StackKey.of(new ItemStack(Items.BUCKET, 2), true), 2);
+        var oneBucket = java.util.Map.of(
+                CraftingResolver.StackKey.of(new ItemStack(Items.BUCKET), true), 1);
+
+        assertEquals(2, AsyncCraftChain.reusableWorkerCapacity(
+                List.of(catalyst), scopes, twoBuckets));
+        assertEquals(1, AsyncCraftChain.reusableWorkerCapacity(
+                List.of(catalyst), scopes, oneBucket));
     }
 
     @Test
