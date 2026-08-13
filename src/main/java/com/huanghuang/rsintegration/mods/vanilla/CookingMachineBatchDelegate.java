@@ -86,6 +86,17 @@ public final class CookingMachineBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
+    public int prepareFlatBatch(int remainingOperations) {
+        return active().prepareFlatBatch(remainingOperations);
+    }
+
+    @Override
+    public boolean validateExecutionContext(@Nullable ServerPlayer player) {
+        configureChild();
+        return active().validateExecutionContext(player);
+    }
+
+    @Override
     public void setMachineDim(@Nonnull ResourceLocation dim) {
         super.setMachineDim(dim);
         configureChild();
@@ -125,6 +136,12 @@ public final class CookingMachineBatchDelegate extends AbstractBatchDelegate {
     @Override
     public List<IngredientSpec> getRequiredMaterials() {
         return active().getRequiredMaterials();
+    }
+
+    @Nonnull
+    @Override
+    public List<MaterialReservationScope> getMaterialReservationScopes() {
+        return active().getMaterialReservationScopes();
     }
 
     @Nonnull
@@ -205,6 +222,11 @@ public final class CookingMachineBatchDelegate extends AbstractBatchDelegate {
     @Override
     public void releasePreparationResources() {
         if (delegate != null) delegate.releasePreparationResources();
+    }
+
+    @Override
+    public void releaseReusableMaterials(@Nonnull ServerPlayer player) {
+        if (delegate != null) delegate.releaseReusableMaterials(player);
     }
 
     @Override

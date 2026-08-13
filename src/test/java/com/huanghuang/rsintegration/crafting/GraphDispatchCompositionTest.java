@@ -26,6 +26,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -110,6 +111,26 @@ class GraphDispatchCompositionTest extends BootstrapTest {
         assertEquals(0, harness.globalBudget.active());
         assertEquals(0, harness.machines.size());
         assertEquals(0, harness.broker.heldBy(harness.node));
+    }
+
+    @Test
+    void exhaustedVanillaBudgetReleasesAdmissionBeforeRetry() {
+        Harness harness = new Harness();
+        NodeAdmissionCoordinator.Admission first = harness.admit();
+        VanillaCraftingTickBudget budget = new VanillaCraftingTickBudget(1);
+        VanillaCraftingTickBudget.ChainAllowance allowance = budget.allowance(1);
+        assertNotNull(first);
+        assertTrue(allowance.tryClaimExact(1));
+
+        assertFalse(AsyncCraftChain.claimVanillaBudgetOrReleaseAdmission(
+                allowance, harness.admissions, first, 1));
+        assertEquals(DagScheduler.NodeState.READY, harness.scheduler.state(harness.node));
+        assertEquals(1, harness.broker.available(harness.source, harness.material));
+        assertEquals(0, harness.broker.heldBy(harness.node));
+
+        NodeAdmissionCoordinator.Admission retry = harness.admit();
+        assertNotNull(retry);
+        harness.admissions.releaseBeforeDispatch(retry);
     }
 
     private static final class Harness {

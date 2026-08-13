@@ -2669,7 +2669,7 @@ public final class GenericCraftPacket {
                         } else {
                             altOut = ModRecipeHandlers.tryGetResultItem(e.recipe(), player.serverLevel().registryAccess());
                         }
-                        if (!ItemStack.isSameItemSameTags(altOut, planTargetOutput)) continue;
+                        if (!sameRecipeOutput(altOut, planTargetOutput)) continue;
                     }
                     // Gate by machine binding too — same rule the resolver and the
                     // intermediate-step alternatives use (hasBindingForRecipe: vanilla
@@ -3304,7 +3304,7 @@ public final class GenericCraftPacket {
                 ResourceLocation candidateId = candidate.recipe().getId();
                 if (candidateId.equals(step.recipeId())) continue;
                 ItemStack candidateOutput = ModRecipeHandlers.tryGetResultItem(candidate.recipe(), access);
-                if (!ItemStack.isSameItemSameTags(output, candidateOutput)) continue;
+                if (!sameRecipeOutput(output, candidateOutput)) continue;
                 alternatives.putIfAbsent(candidateId, candidate.modType().id());
             }
             if (alternatives.isEmpty()) {
@@ -3316,6 +3316,13 @@ public final class GenericCraftPacket {
                     step.inferMode(), step.executions(), step.syntheticInput(), step.syntheticOutput()));
         }
         return List.copyOf(enriched);
+    }
+
+    private static boolean sameRecipeOutput(ItemStack left, ItemStack right) {
+        return ItemStack.isSameItemSameTags(left, right)
+                || (net.minecraftforge.fml.ModList.get().isLoaded(ModIds.IRONS_SPELLBOOKS)
+                && com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRecipeCatalog
+                .sameSpellScroll(left, right));
     }
 
     static boolean usesPhysicalMachineInputSlots(Recipe<?> recipe) {
