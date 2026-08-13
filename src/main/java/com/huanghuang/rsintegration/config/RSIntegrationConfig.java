@@ -119,6 +119,8 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.ConfigValue<List<? extends String>> DISTANT_WORLDS_FUEL_PRIORITY;
     public static ForgeConfigSpec.BooleanValue ENABLE_APOTHEOSIS;
     public static ForgeConfigSpec.BooleanValue ENABLE_IRONS_SPELLBOOKS;
+    public static ForgeConfigSpec.BooleanValue ENABLE_APPRENTICE_CODEX;
+    public static ForgeConfigSpec.BooleanValue ENABLE_ISS_CSW;
     public static ForgeConfigSpec.BooleanValue ENABLE_VANILLA_MACHINES;
     public static ForgeConfigSpec.BooleanValue ENABLE_SOPHISTICATED_BACKPACKS;
     public static ForgeConfigSpec.BooleanValue ENABLE_FTB_QUEST_EXTERNAL_ITEM_PROGRESS;
@@ -404,6 +406,12 @@ public final class RSIntegrationConfig {
         ENABLE_IRONS_SPELLBOOKS = c
                 .comment("Enable RS integration with Iron's Spell Books (Scroll Forge and Arcane Anvil).")
                 .define("enableIronsSpellbooks", true);
+        ENABLE_APPRENTICE_CODEX = c
+                .comment("Enable recursive RS crafting for Apprentice Codex (Essence Smoker and Spellcaster Workbench).")
+                .define("enableApprenticeCodex", true);
+        ENABLE_ISS_CSW = c
+                .comment("Enable recursive RS crafting for Interlace Spellweaves (Spell Forge).")
+                .define("enableIssCsw", true);
         ENABLE_AETHERWORKS = c
                 .comment("Enable RS integration with Embers Aetherworks Addon",
                         "(Aetherium Anvil remote crafting with auto-hammer support).")
