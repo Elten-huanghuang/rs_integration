@@ -140,7 +140,7 @@ public abstract class ReflectiveMenuBatchDelegate extends AbstractBatchDelegate 
             ItemStack material = materials.get(i);
             if (material == null || material.isEmpty() || material.getCount() < spec.count()
                     || !spec.ingredient().test(material)) { clearMenu(); return false; }
-            menu.getSlot(i).set(material.copyWithCount(spec.count()));
+            menu.getSlot(menuInputSlotIndex(i)).set(material.copyWithCount(spec.count()));
         }
         menu.slotsChanged(menu.getSlot(0).container);
         Slot resultSlot = menu.getSlot(resultSlotIndex);
@@ -170,22 +170,29 @@ public abstract class ReflectiveMenuBatchDelegate extends AbstractBatchDelegate 
     }
 
     private boolean machineSlotsEmpty() {
-        for (int i = 0; i < inputCount; i++) if (menu.getSlot(i).hasItem()) return false;
+        for (int i = 0; i < inputCount; i++) {
+            if (menu.getSlot(menuInputSlotIndex(i)).hasItem()) return false;
+        }
         return !menu.getSlot(resultSlotIndex).hasItem();
     }
 
     private void collectRemainingInputs() {
         for (int i = 0; i < inputCount; i++) {
-            Slot slot = menu.getSlot(i);
+            Slot slot = menu.getSlot(menuInputSlotIndex(i));
             if (slot.hasItem()) results.add(slot.remove(slot.getItem().getCount()).copy());
         }
     }
 
     protected void clearMenu() {
         if (menu == null) return;
-        for (int i = 0; i < inputCount; i++) clearSlot(menu.getSlot(i));
+        for (int i = 0; i < inputCount; i++) clearSlot(menu.getSlot(menuInputSlotIndex(i)));
         clearSlot(menu.getSlot(resultSlotIndex));
         menu = null;
+    }
+
+    /** Maps recipe input order to the physical menu slot order. */
+    protected int menuInputSlotIndex(int recipeInputIndex) {
+        return recipeInputIndex;
     }
 
     private static void clearSlot(Slot slot) {

@@ -119,22 +119,22 @@ public final class IronSpellBooksRecipeCatalog {
             List<ItemStack> focusOptions = focuses.getOrDefault(
                     spell.getSchoolType().getId(), List.of());
             if (focusOptions.isEmpty()) continue;
-            Map<Integer, List<ItemStack>> inksByLevel = new LinkedHashMap<>();
+            Map<Integer, InkItem> inksByLevel = new LinkedHashMap<>();
             for (InkItem ink : inks) {
                 int level = spell.getMinLevelForRarity(ink.getRarity());
                 if (level <= 0 || level > spell.getMaxLevel()) continue;
-                inksByLevel.computeIfAbsent(level, ignored -> new ArrayList<>())
-                        .add(new ItemStack(ink));
+                InkItem canonical = InkItem.getInkForRarity(spell.getRarity(level));
+                if (canonical != null) inksByLevel.putIfAbsent(level, canonical);
             }
-            for (Map.Entry<Integer, List<ItemStack>> entry : inksByLevel.entrySet()) {
+            for (Map.Entry<Integer, InkItem> entry : inksByLevel.entrySet()) {
                 int level = entry.getKey();
-                List<ItemStack> inkOptions = entry.getValue();
+                ItemStack ink = new ItemStack(entry.getValue());
                 ItemStack output = scroll(spell, level);
                 ResourceLocation id = id("scroll_forge", spell.getSpellResource(), level, null);
                 result.put(id, new IronSpellBooksRecipe(id,
                         IronSpellBooksRecipe.Machine.SCROLL_FORGE,
-                        List.of(inkOptions.get(0), new ItemStack(Items.PAPER), focusOptions.get(0)),
-                        List.of(ingredientOf(inkOptions), Ingredient.of(Items.PAPER),
+                        List.of(ink, new ItemStack(Items.PAPER), focusOptions.get(0)),
+                        List.of(Ingredient.of(ink), Ingredient.of(Items.PAPER),
                                 ingredientOf(focusOptions)), output,
                         spell.getSpellId()));
             }
@@ -198,6 +198,10 @@ public final class IronSpellBooksRecipeCatalog {
         ItemStack stack = new ItemStack(ItemRegistry.SCROLL.get());
         ISpellContainer.createScrollContainer(spell, level, stack);
         return stack;
+    }
+
+    static ItemStack scrollFor(AbstractSpell spell, int level) {
+        return level <= 0 ? ItemStack.EMPTY : scroll(spell, level);
     }
 
     private static Map<ResourceLocation, List<ItemStack>> findFocuses() {

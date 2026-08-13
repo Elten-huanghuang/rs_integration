@@ -1,10 +1,8 @@
 package com.huanghuang.rsintegration.sidepanel.network;
 
-import com.huanghuang.rsintegration.RSIntegrationMod;
-import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.network.gui.RemoteGuiAuth;
 import com.huanghuang.rsintegration.network.ProtectionChecker;
-import com.huanghuang.rsintegration.util.ChunkUtils;
+import com.refinedmods.refinedstorage.blockentity.grid.GridBlockEntity;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.network.FriendlyByteBuf;
@@ -62,14 +60,6 @@ public final class ReturnToRSPacket {
             var level = server.getLevel(dimKey);
             if (level == null) return;
 
-            // Validate the player is bound to this machine (same gate as all
-            // sibling packets to prevent remote container opening from a modified client).
-            if (!AltarBindingRegistry.isBound(dimKey, packet.pos, player)) {
-                player.sendSystemMessage(
-                    Component.translatable("rsi.error.not_bound"));
-                return;
-            }
-
             PlayerInteractEvent.RightClickBlock event = new PlayerInteractEvent.RightClickBlock(
                     player, InteractionHand.MAIN_HAND, packet.pos,
                     new BlockHitResult(new Vec3(packet.pos.getX() + 0.5,
@@ -92,6 +82,12 @@ public final class ReturnToRSPacket {
             }
 
             BlockEntity be = level.getBlockEntity(packet.pos);
+            // This packet is only for returning to the RS Grid that was cached
+            // before opening a machine. A machine binding is deliberately not
+            // required for the grid itself; otherwise every return emits the
+            // misleading "machine not bound" message.
+            if (!(be instanceof GridBlockEntity grid)
+                    || grid.getNode() == null || grid.getNode().getNetwork() == null) return;
             if (!(be instanceof MenuProvider provider)) return;
 
             String blockId = net.minecraftforge.registries.ForgeRegistries.BLOCKS
