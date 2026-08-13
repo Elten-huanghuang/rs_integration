@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.mods.isscsw;
 
+import com.huanghuang.rsintegration.crafting.IngredientMatcher;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -25,6 +26,17 @@ class IssCswRecipeHandlerTest extends BootstrapTest {
         assertFalse(normalized.test(new ItemStack(Items.DIAMOND)));
     }
 
+    @Test
+    void invalidTaglessProbeCannotEscapeThirdPartyMatcher() {
+        ItemStack display = new ItemStack(Items.PAPER);
+        display.getOrCreateTag().putString("spell", "test:spell");
+        Ingredient normalized = IssCswRecipeHandler.normalizeIngredient(
+                new ThrowingDisplayIngredient(display));
+
+        assertFalse(normalized.test(new ItemStack(Items.PAPER)));
+        assertTrue(IngredientMatcher.requiresNbt(normalized));
+    }
+
     private static final class DisplayOnlyIngredient extends Ingredient {
         private final ItemStack display;
 
@@ -37,6 +49,21 @@ class IssCswRecipeHandlerTest extends BootstrapTest {
 
         @Override public boolean test(@Nullable ItemStack stack) {
             return stack != null && stack.is(display.getItem());
+        }
+    }
+
+    private static final class ThrowingDisplayIngredient extends Ingredient {
+        private final ItemStack display;
+
+        private ThrowingDisplayIngredient(ItemStack display) {
+            super(Stream.empty());
+            this.display = display;
+        }
+
+        @Override public ItemStack[] getItems() { return new ItemStack[]{display.copy()}; }
+
+        @Override public boolean test(@Nullable ItemStack stack) {
+            throw new NullPointerException("missing spell container");
         }
     }
 }

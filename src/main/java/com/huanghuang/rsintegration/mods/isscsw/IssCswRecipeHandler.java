@@ -93,7 +93,15 @@ final class IssCswRecipeHandler implements ModRecipeHandler {
 
         @Override
         public boolean test(@Nullable ItemStack stack) {
-            return stack != null && delegate.test(stack);
+            if (stack == null) return false;
+            try {
+                return delegate.test(stack);
+            } catch (RuntimeException ignored) {
+                // ISS CSW dereferences a missing spell container when generic
+                // planning probes a tagless scroll. That candidate is invalid,
+                // but a third-party matcher must not crash the server thread.
+                return false;
+            }
         }
     }
 }
