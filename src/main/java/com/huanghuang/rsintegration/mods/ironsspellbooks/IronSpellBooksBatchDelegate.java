@@ -62,9 +62,12 @@ public final class IronSpellBooksBatchDelegate extends AbstractBatchDelegate {
 
     @Override public List<IngredientSpec> getRequiredMaterials() {
         if (recipe == null) return null;
+        List<net.minecraft.world.item.crafting.Ingredient> ingredients = recipe.inputIngredients();
+        List<ItemStack> displays = recipe.inputs();
         List<IngredientSpec> result = new ArrayList<>();
-        for (ItemStack input : recipe.inputs()) result.add(new IngredientSpec(
-                net.minecraftforge.common.crafting.StrictNBTIngredient.of(input), input.getCount()));
+        for (int i = 0; i < ingredients.size(); i++) {
+            result.add(new IngredientSpec(ingredients.get(i), displays.get(i).getCount()));
+        }
         return result;
     }
 
@@ -125,7 +128,7 @@ public final class IronSpellBooksBatchDelegate extends AbstractBatchDelegate {
             if (spell == null) { clearMenu(); return false; }
             forge.setRecipeSpell(spell);
             ItemStack displayed = forge.getResultSlot().getItem().copy();
-            if (!ItemStack.isSameItemSameTags(displayed, expected)) { clearMenu(); return false; }
+            if (!sameExpectedOutput(displayed)) { clearMenu(); return false; }
             Slot resultSlot = forge.getResultSlot();
             result = resultSlot.remove(displayed.getCount());
             resultSlot.onTake(player, result);
@@ -135,7 +138,7 @@ public final class IronSpellBooksBatchDelegate extends AbstractBatchDelegate {
             anvil.getSlot(1).set(materials.get(1).copyWithCount(1));
             anvil.slotsChanged(anvil.getSlot(0).container);
             ItemStack displayed = anvil.getSlot(2).getItem().copy();
-            if (!ItemStack.isSameItemSameTags(displayed, expected)) { clearMenu(); return false; }
+            if (!sameExpectedOutput(displayed)) { clearMenu(); return false; }
             Slot resultSlot = anvil.getSlot(2);
             result = resultSlot.remove(displayed.getCount());
             resultSlot.onTake(player, result);
@@ -143,6 +146,11 @@ public final class IronSpellBooksBatchDelegate extends AbstractBatchDelegate {
         clearMenu();
         done = !result.isEmpty();
         return done;
+    }
+
+    private boolean sameExpectedOutput(ItemStack displayed) {
+        return ItemStack.isSameItemSameTags(displayed, expected)
+                || IronSpellBooksRecipeCatalog.sameSpellScroll(displayed, expected);
     }
 
     @Override protected boolean isMachineCraftFinished(@Nonnull ServerLevel level, @Nonnull BlockEntity be) { return done; }

@@ -21,20 +21,33 @@ public final class IronSpellBooksRecipe implements Recipe<Container> {
     private final ResourceLocation id;
     private final Machine machine;
     private final List<ItemStack> inputs;
+    private final List<Ingredient> inputIngredients;
     private final ItemStack output;
     private final String spellId;
 
     IronSpellBooksRecipe(ResourceLocation id, Machine machine, List<ItemStack> inputs,
                          ItemStack output, String spellId) {
+        this(id, machine, inputs,
+                inputs.stream().map(stack -> (Ingredient) StrictNBTIngredient.of(stack.copy())).toList(),
+                output, spellId);
+    }
+
+    IronSpellBooksRecipe(ResourceLocation id, Machine machine, List<ItemStack> inputs,
+                         List<Ingredient> inputIngredients, ItemStack output, String spellId) {
+        if (inputs.size() != inputIngredients.size()) {
+            throw new IllegalArgumentException("Display inputs and ingredients must have equal sizes");
+        }
         this.id = id;
         this.machine = machine;
         this.inputs = inputs.stream().map(ItemStack::copy).toList();
+        this.inputIngredients = List.copyOf(inputIngredients);
         this.output = output.copy();
         this.spellId = spellId;
     }
 
     public Machine machine() { return machine; }
     public List<ItemStack> inputs() { return inputs.stream().map(ItemStack::copy).toList(); }
+    public List<Ingredient> inputIngredients() { return inputIngredients; }
     public String spellId() { return spellId; }
 
     @Override public boolean matches(Container container, Level level) { return false; }
@@ -48,7 +61,7 @@ public final class IronSpellBooksRecipe implements Recipe<Container> {
     @Override
     public NonNullList<Ingredient> getIngredients() {
         NonNullList<Ingredient> result = NonNullList.create();
-        for (ItemStack input : inputs) result.add(StrictNBTIngredient.of(input.copy()));
+        result.addAll(inputIngredients);
         return result;
     }
 }

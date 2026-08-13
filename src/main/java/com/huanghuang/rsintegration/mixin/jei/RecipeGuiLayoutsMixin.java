@@ -887,7 +887,7 @@ public class RecipeGuiLayoutsMixin {
             }
             return null;
         }
-        if (className.equals("io.redspace.ironsspellbooks.jei.ArcaneAnvilRecipe")) {
+        if (rsi$isIronSpellBooksArcaneAnvilRecipe(className)) {
             try {
                 Object tuple = recipe.getClass().getMethod("getRecipeItems").invoke(recipe);
                 Object outputs = tuple.getClass().getMethod("c").invoke(tuple);
@@ -989,7 +989,13 @@ public class RecipeGuiLayoutsMixin {
     @Unique
     private static boolean rsi$isIronSpellBooksJeiRecipe(String className) {
         return className.equals("io.redspace.ironsspellbooks.jei.ScrollForgeRecipe")
-                || className.equals("io.redspace.ironsspellbooks.jei.ArcaneAnvilRecipe");
+                || rsi$isIronSpellBooksArcaneAnvilRecipe(className);
+    }
+
+    @Unique
+    private static boolean rsi$isIronSpellBooksArcaneAnvilRecipe(String className) {
+        return className.equals("io.redspace.ironsspellbooks.jei.ArcaneAnvilRecipe")
+                || className.equals("io.redspace.ironsspellbooks.jei.ArcaneAnvilJeiRecipe");
     }
 
     @Unique
