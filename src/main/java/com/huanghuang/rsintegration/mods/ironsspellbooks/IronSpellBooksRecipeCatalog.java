@@ -14,6 +14,9 @@ import net.minecraftforge.registries.ForgeRegistries;
 
 import javax.annotation.Nullable;
 import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -22,44 +25,61 @@ import java.util.Map;
 public final class IronSpellBooksRecipeCatalog {
     public static final RecipeType<IronSpellBooksRecipe> TYPE =
             RecipeType.simple(new ResourceLocation("rs_integration", "irons_spellbooks"));
+    private static volatile Catalog catalog;
 
     private IronSpellBooksRecipeCatalog() {}
 
-    public static Collection<IronSpellBooksRecipe> allRecipes() { return build().values(); }
+    public static Collection<IronSpellBooksRecipe> allRecipes() { return catalog().byId().values(); }
 
     @Nullable
     public static IronSpellBooksRecipe byId(ResourceLocation id) {
         if (!"rs_integration".equals(id.getNamespace())
                 || !id.getPath().startsWith("irons_spellbooks/")) return null;
-        return build().get(id);
+        return catalog().byId().get(id);
     }
 
     @Nullable
     public static IronSpellBooksRecipe recipeForTarget(IronSpellBooksRecipe.Machine machine,
                                                         ItemStack target) {
         if (target == null || target.isEmpty()) return null;
-        for (IronSpellBooksRecipe recipe : allRecipes()) {
-            if (recipe.machine() == machine
-                    && ItemStack.isSameItemSameTags(recipe.getResultItem(net.minecraft.core.RegistryAccess.EMPTY), target)) {
-                return recipe;
-            }
+        return catalog().byOutput().get(OutputKey.of(machine, target));
+    }
+
+    public static void invalidate() {
+        synchronized (IronSpellBooksRecipeCatalog.class) {
+            catalog = null;
         }
-        return null;
     }
 
-    private static Map<ResourceLocation, IronSpellBooksRecipe> build() {
+    private static Catalog catalog() {
+        Catalog cached = catalog;
+        if (cached != null) return cached;
+        synchronized (IronSpellBooksRecipeCatalog.class) {
+            cached = catalog;
+            if (cached == null) catalog = cached = build();
+        }
+        return cached;
+    }
+
+    private static Catalog build() {
         Map<ResourceLocation, IronSpellBooksRecipe> result = new LinkedHashMap<>();
-        addScrollForgeRecipes(result);
+        addScrollForgeRecipes(result, findFocuses());
         addArcaneAnvilRecipes(result);
-        return result;
+        Map<OutputKey, IronSpellBooksRecipe> byOutput = new HashMap<>();
+        for (IronSpellBooksRecipe recipe : result.values()) {
+            ItemStack output = recipe.getResultItem(net.minecraft.core.RegistryAccess.EMPTY);
+            if (!output.isEmpty()) byOutput.putIfAbsent(OutputKey.of(recipe.machine(), output), recipe);
+        }
+        return new Catalog(Collections.unmodifiableMap(result), Map.copyOf(byOutput));
     }
 
-    private static void addScrollForgeRecipes(Map<ResourceLocation, IronSpellBooksRecipe> result) {
+    private static void addScrollForgeRecipes(Map<ResourceLocation, IronSpellBooksRecipe> result,
+                                               Map<Object, ItemStack> focuses) {
         for (AbstractSpell spell : SpellRegistry.getEnabledSpells()) {
             if (spell == SpellRegistry.none() || !spell.allowCrafting()) continue;
             int level = spell.getMinLevel();
             InkItem ink = InkItem.getInkForRarity(spell.getRarity(level));
-            ItemStack focus = findFocus(spell);
+            ItemStack focus = focuses.getOrDefault(spell.getSchoolType(), ItemStack.EMPTY);
             if (ink == null || focus.isEmpty()) continue;
             ItemStack output = scroll(spell, level);
             ResourceLocation id = id("scroll_forge", spell.getSpellResource(), level, null);
@@ -91,13 +111,14 @@ public final class IronSpellBooksRecipeCatalog {
         return stack;
     }
 
-    private static ItemStack findFocus(AbstractSpell spell) {
+    private static Map<Object, ItemStack> findFocuses() {
+        Map<Object, ItemStack> focuses = new IdentityHashMap<>();
         for (var item : ForgeRegistries.ITEMS.getValues()) {
             ItemStack stack = new ItemStack(item);
-            if (io.redspace.ironsspellbooks.api.registry.SchoolRegistry.getSchoolFromFocus(stack)
-                    == spell.getSchoolType()) return stack;
+            Object school = io.redspace.ironsspellbooks.api.registry.SchoolRegistry.getSchoolFromFocus(stack);
+            if (school != null) focuses.putIfAbsent(school, stack);
         }
-        return ItemStack.EMPTY;
+        return focuses;
     }
 
     private static ResourceLocation id(String kind, ResourceLocation spell, int level,
@@ -106,5 +127,16 @@ public final class IronSpellBooksRecipeCatalog {
                 + spell.getPath() + "/" + level;
         if (material != null) path += "/" + material.getNamespace() + "/" + material.getPath();
         return new ResourceLocation("rs_integration", path);
+    }
+
+    private record Catalog(Map<ResourceLocation, IronSpellBooksRecipe> byId,
+                           Map<OutputKey, IronSpellBooksRecipe> byOutput) {}
+
+    private record OutputKey(IronSpellBooksRecipe.Machine machine, ResourceLocation itemId,
+                             @Nullable net.minecraft.nbt.CompoundTag tag) {
+        private static OutputKey of(IronSpellBooksRecipe.Machine machine, ItemStack stack) {
+            ResourceLocation itemId = ForgeRegistries.ITEMS.getKey(stack.getItem());
+            return new OutputKey(machine, itemId, stack.hasTag() ? stack.getTag().copy() : null);
+        }
     }
 }

@@ -37,6 +37,8 @@ public final class RecipePreviewRenderer {
     // Cached items for synthetic recipe icons
     private net.minecraft.world.item.Item gemCuttingTableItem;
     private net.minecraft.world.item.Item marketItem;
+    private net.minecraft.world.item.Item scrollForgeItem;
+    private net.minecraft.world.item.Item arcaneAnvilItem;
 
     public RecipePreviewRenderer() {
         this.mc = Minecraft.getInstance();
@@ -48,6 +50,8 @@ public final class RecipePreviewRenderer {
         titleCache.clear();
         gemCuttingTableItem = null;  // Clear cached item on reset
         marketItem = null;
+        scrollForgeItem = null;
+        arcaneAnvilItem = null;
     }
 
     /**
@@ -285,6 +289,17 @@ public final class RecipePreviewRenderer {
      */
     public boolean drawCategoryIcon(GuiGraphics gfx, ResourceLocation recipeId,
                                     int x, int y, int size) {
+        if (isIronSpellBooksRecipe(recipeId)) {
+            boolean scrollForge = recipeId.getPath().startsWith("irons_spellbooks/scroll_forge/");
+            net.minecraft.world.item.Item item = scrollForge ? scrollForgeItem : arcaneAnvilItem;
+            if (item == null) {
+                item = net.minecraftforge.registries.ForgeRegistries.ITEMS.getValue(new ResourceLocation(
+                        "irons_spellbooks", scrollForge ? "scroll_forge" : "arcane_anvil"));
+                if (scrollForge) scrollForgeItem = item;
+                else arcaneAnvilItem = item;
+            }
+            if (renderItemIcon(gfx, item, x, y, size)) return true;
+        }
         if (isPmmoSalvageRecipe(recipeId)) {
             ItemStack salvageBlock = com.huanghuang.rsintegration.mods.pmmo.client
                     .PmmoSalvageAccess.salvageBlock();
@@ -366,6 +381,30 @@ public final class RecipePreviewRenderer {
                 && recipeId.getPath().startsWith("vanilla_brewing/");
     }
 
+    private static boolean isIronSpellBooksRecipe(ResourceLocation recipeId) {
+        if (recipeId == null || !"rs_integration".equals(recipeId.getNamespace())) return false;
+        String path = recipeId.getPath();
+        return path.startsWith("irons_spellbooks/scroll_forge/")
+                || path.startsWith("irons_spellbooks/arcane_anvil/");
+    }
+
+    private static boolean renderItemIcon(GuiGraphics gfx, @Nullable net.minecraft.world.item.Item item,
+                                          int x, int y, int size) {
+        if (item == null || item == net.minecraft.world.item.Items.AIR) return false;
+        gfx.pose().pushPose();
+        try {
+            gfx.pose().translate(x, y, 0);
+            float scale = size / 16.0f;
+            gfx.pose().scale(scale, scale, 1.0f);
+            gfx.renderItem(new ItemStack(item), 0, 0);
+            return true;
+        } catch (RuntimeException ignored) {
+            return false;
+        } finally {
+            gfx.pose().popPose();
+        }
+    }
+
     private static boolean isSyntheticGemCuttingRecipe(ResourceLocation recipeId) {
         return "rs_integration".equals(recipeId.getNamespace())
                 && recipeId.getPath().startsWith("gem_cutting/");
@@ -387,6 +426,12 @@ public final class RecipePreviewRenderer {
      * resolved from the category that actually handles the recipe. Cached; empty when JEI is off.
      */
     public Optional<Component> categoryTitle(ResourceLocation recipeId) {
+        if (isIronSpellBooksRecipe(recipeId)) {
+            String key = recipeId.getPath().startsWith("irons_spellbooks/scroll_forge/")
+                    ? "rsi.batch.mod.irons_spellbooks_scroll_forge"
+                    : "rsi.batch.mod.irons_spellbooks_arcane_anvil";
+            return Optional.of(Component.translatable(key));
+        }
         if (isPmmoSalvageRecipe(recipeId)) {
             return Optional.of(Component.translatable("rsi.jei.pmmo_salvage"));
         }

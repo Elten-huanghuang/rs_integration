@@ -692,6 +692,9 @@ public final class RecipeIndex {
             sourceRevision = 0L;
             generationBuildFailed = false;
         }
+        if (net.minecraftforge.fml.ModList.get().isLoaded(ModIds.IRONS_SPELLBOOKS)) {
+            IronSpellBooksRecipeCatalog.invalidate();
+        }
         com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraphProjector.clearCache();
         com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket.clearPlanCache();
     }
