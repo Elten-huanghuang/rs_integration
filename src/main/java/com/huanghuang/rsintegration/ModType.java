@@ -287,13 +287,25 @@ public final class ModType {
      */
     @Nullable
     public static ModType classifyRecipe(Recipe<?> recipe) {
+        String cn = recipe.getClass().getName();
+        if (cn.equals("com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRecipe")) {
+            try {
+                Object machine = recipe.getClass().getMethod("machine").invoke(recipe);
+                return byId("SCROLL_FORGE".equals(String.valueOf(machine))
+                        ? "irons_spellbooks_scroll_forge"
+                        : "irons_spellbooks_arcane_anvil");
+            } catch (ReflectiveOperationException e) {
+                RSIntegrationMod.LOGGER.warn("Unable to classify Iron's Spell Books recipe {}",
+                        recipe.getId(), e);
+                return null;
+            }
+        }
         if (recipe instanceof FaRitualWrapper) {
             return byId(ModIds.FORBIDDEN_ARCANUS);
         }
         if (recipe instanceof LithumAltarRecipeWrapper) {
             return byId("distant_worlds_lithum_altar");
         }
-        String cn = recipe.getClass().getName();
         // ApplyModifierRecipe is a smithing-table recipe, not a Hephaestus Forge ritual
         if (cn.endsWith("ApplyModifierRecipe")) return null;
 

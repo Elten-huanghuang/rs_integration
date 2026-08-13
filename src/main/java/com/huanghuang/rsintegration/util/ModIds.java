@@ -42,6 +42,7 @@ public final class ModIds {
     public static final String BETTER_COMBAT = "bettercombat";
     public static final String CRABBERS_DELIGHT = "crabbersdelight";
     public static final String APOTHEOSIS = "apotheosis";
+    public static final String IRONS_SPELLBOOKS = "irons_spellbooks";
     public static final String PMMO = "pmmo";
 
     // Composite ModType IDs (one mod ->multiple machine types)
