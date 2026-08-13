@@ -24,16 +24,18 @@ public final class IronSpellBooksRecipe implements Recipe<Container> {
     private final List<Ingredient> inputIngredients;
     private final ItemStack output;
     private final String spellId;
+    private final int spellLevel;
 
     IronSpellBooksRecipe(ResourceLocation id, Machine machine, List<ItemStack> inputs,
                          ItemStack output, String spellId) {
         this(id, machine, inputs,
                 inputs.stream().map(stack -> (Ingredient) StrictNBTIngredient.of(stack.copy())).toList(),
-                output, spellId);
+                output, spellId, 0);
     }
 
     IronSpellBooksRecipe(ResourceLocation id, Machine machine, List<ItemStack> inputs,
-                         List<Ingredient> inputIngredients, ItemStack output, String spellId) {
+                         List<Ingredient> inputIngredients, ItemStack output, String spellId,
+                         int spellLevel) {
         if (inputs.size() != inputIngredients.size()) {
             throw new IllegalArgumentException("Display inputs and ingredients must have equal sizes");
         }
@@ -43,12 +45,14 @@ public final class IronSpellBooksRecipe implements Recipe<Container> {
         this.inputIngredients = List.copyOf(inputIngredients);
         this.output = output.copy();
         this.spellId = spellId;
+        this.spellLevel = spellLevel;
     }
 
     public Machine machine() { return machine; }
     public List<ItemStack> inputs() { return inputs.stream().map(ItemStack::copy).toList(); }
     public List<Ingredient> inputIngredients() { return inputIngredients; }
     public String spellId() { return spellId; }
+    public int spellLevel() { return spellLevel; }
 
     @Override public boolean matches(Container container, Level level) { return false; }
     @Override public ItemStack assemble(Container container, RegistryAccess access) { return output.copy(); }

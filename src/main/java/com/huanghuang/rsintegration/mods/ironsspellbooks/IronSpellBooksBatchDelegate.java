@@ -7,6 +7,7 @@ import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import io.redspace.ironsspellbooks.api.registry.SpellRegistry;
+import io.redspace.ironsspellbooks.api.registry.SchoolRegistry;
 import io.redspace.ironsspellbooks.api.spells.AbstractSpell;
 import io.redspace.ironsspellbooks.item.InkItem;
 import io.redspace.ironsspellbooks.gui.arcane_anvil.ArcaneAnvilMenu;
@@ -136,14 +137,17 @@ public final class IronSpellBooksBatchDelegate extends AbstractBatchDelegate {
                 Slot resultSlot = forge.getResultSlot();
                 result = resultSlot.remove(displayed.getCount());
                 resultSlot.onTake(player, result);
-            } else if (validDeterministicScrollForgeInputs(spell, materials)) {
+            } else {
+                String fallbackRejection = deterministicScrollForgeRejection(spell, materials);
+                if (fallbackRejection != null) {
+                    return fail("native Scroll Forge output mismatch; " + fallbackRejection,
+                            displayed, materials);
+                }
                 RSIntegrationMod.LOGGER.info(
                         "[RSI-IronSpells] Native Scroll Forge menu returned {} for {}; "
                                 + "using validated deterministic output {}",
                         displayed, recipe.getId(), expected);
                 result = expected.copy();
-            } else {
-                return fail("native Scroll Forge output mismatch", displayed, materials);
             }
         } else {
             ArcaneAnvilMenu anvil = (ArcaneAnvilMenu) created;
@@ -168,17 +172,41 @@ public final class IronSpellBooksBatchDelegate extends AbstractBatchDelegate {
                 || IronSpellBooksRecipeCatalog.sameSpellScroll(displayed, expected);
     }
 
-    private boolean validDeterministicScrollForgeInputs(AbstractSpell spell,
-                                                         List<ItemStack> materials) {
+    @Nullable
+    private String deterministicScrollForgeRejection(AbstractSpell spell,
+                                                      List<ItemStack> materials) {
         if (materials.size() != 3 || !(materials.get(0).getItem() instanceof InkItem ink)) {
-            return false;
+            return "expected ink, paper, and focus";
         }
-        int producedLevel = spell.getMinLevelForRarity(ink.getRarity());
-        ItemStack deterministic = IronSpellBooksRecipeCatalog.scrollFor(spell, producedLevel);
-        return producedLevel > 0
-                && spell.allowCrafting()
-                && spell.getSchoolType().isFocus(materials.get(2))
-                && sameExpectedOutput(deterministic);
+        int targetLevel = recipe.spellLevel();
+        ItemStack deterministic = IronSpellBooksRecipeCatalog.scrollFor(spell, targetLevel);
+        int inkLevel = spell.getMinLevelForRarity(ink.getRarity());
+        if (targetLevel <= 0) return "recipe has no target spell level";
+        if (!recipe.inputIngredients().get(0).test(materials.get(0))) {
+            return "ink is not one of the runtime recipe's accepted inks";
+        }
+        if (inkLevel != targetLevel) {
+            return "ink maps to level " + inkLevel + " but target level is " + targetLevel;
+        }
+        if (!spell.allowCrafting()) return "spell disallows crafting";
+        if (!isRuntimeFocus(spell, materials.get(2))) {
+            return "focus is not registered for school " + spell.getSchoolType().getId();
+        }
+        if (!sameExpectedOutput(deterministic)) {
+            return "deterministic scroll does not match the selected target";
+        }
+        return null;
+    }
+
+    private static boolean isRuntimeFocus(AbstractSpell spell, ItemStack focus) {
+        try {
+            Object schools = SchoolRegistry.class.getMethod(
+                    "getSchoolsFromFocus", ItemStack.class).invoke(null, focus);
+            if (schools instanceof List<?> list) return list.contains(spell.getSchoolType());
+        } catch (ReflectiveOperationException | LinkageError ignored) {
+            // Older Iron's Spell Books versions expose only SchoolType.isFocus.
+        }
+        return spell.getSchoolType().isFocus(focus);
     }
 
     private boolean fail(String reason, ItemStack displayed, List<ItemStack> materials) {

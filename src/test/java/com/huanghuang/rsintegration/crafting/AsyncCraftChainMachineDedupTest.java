@@ -83,9 +83,10 @@ class AsyncCraftChainMachineDedupTest extends BootstrapTest {
     }
 
     @Test
-    void intrinsicMachineBatchBypassesSerialOperationGroup() {
-        assertFalse(AsyncCraftChain.shouldUseGraphOperationGroup(5, 4, 5));
-        assertTrue(AsyncCraftChain.shouldUseGraphOperationGroup(7, 4, 6));
+    void operationGroupRequiresMultipleExecutionsAndAvailableCapacity() {
+        assertFalse(AsyncCraftChain.shouldUseGraphOperationGroup(1, 4));
+        assertFalse(AsyncCraftChain.shouldUseGraphOperationGroup(5, 0));
+        assertTrue(AsyncCraftChain.shouldUseGraphOperationGroup(7, 4));
     }
 
     @Test

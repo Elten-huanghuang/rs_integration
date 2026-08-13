@@ -10,9 +10,12 @@ import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraftforge.common.crafting.CompoundIngredient;
 
+import javax.annotation.Nullable;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.util.Arrays;
 import java.util.List;
+import java.util.stream.Stream;
 
 final class IssCswRecipeHandler implements ModRecipeHandler {
     @Override public ModType modType() { return ModType.byId(IssCswRSModule.SPELL_FORGE_TYPE); }
@@ -43,9 +46,9 @@ final class IssCswRecipeHandler implements ModRecipeHandler {
             if (main == null || first == null || first.length == 0 || second == null || second.length == 0) {
                 return null;
             }
-            return List.of(new IngredientSpec(main, 1),
-                    new IngredientSpec(CompoundIngredient.of(first), 1),
-                    new IngredientSpec(CompoundIngredient.of(second), 1));
+            return List.of(new IngredientSpec(normalizeIngredient(main), 1),
+                    new IngredientSpec(compound(first), 1),
+                    new IngredientSpec(compound(second), 1));
         } catch (ReflectiveOperationException | ClassCastException | LinkageError e) {
             RSIntegrationMod.LOGGER.warn("[RSI-ISS-CSW] Cannot read spell forge ingredients from {}",
                     recipe.getClass().getName(), e);
@@ -56,5 +59,41 @@ final class IssCswRecipeHandler implements ModRecipeHandler {
     private static Object field(Object target, String name) throws ReflectiveOperationException {
         Field field = target.getClass().getField(name);
         return field.get(target);
+    }
+
+    private static Ingredient compound(Ingredient[] alternatives) {
+        return CompoundIngredient.of(Arrays.stream(alternatives)
+                .map(IssCswRecipeHandler::normalizeIngredient)
+                .toArray(Ingredient[]::new));
+    }
+
+    /**
+     * ISS CSW's SpellScrollIngredient extends AbstractIngredient with no base
+     * values. Ingredient.isEmpty() therefore reports true even though its
+     * getItems() and test() implementations are valid. Give the planning code
+     * real display values while retaining the mod's spell-aware matcher.
+     */
+    static Ingredient normalizeIngredient(Ingredient original) {
+        if (!original.isEmpty() || original.getItems().length == 0) return original;
+        ItemStack[] displays = Arrays.stream(original.getItems())
+                .filter(stack -> stack != null && !stack.isEmpty())
+                .map(ItemStack::copy)
+                .toArray(ItemStack[]::new);
+        if (displays.length == 0) return original;
+        return new DelegatingDisplayIngredient(original, displays);
+    }
+
+    private static final class DelegatingDisplayIngredient extends Ingredient {
+        private final Ingredient delegate;
+
+        private DelegatingDisplayIngredient(Ingredient delegate, ItemStack[] displays) {
+            super(Stream.of(displays).map(ItemValue::new));
+            this.delegate = delegate;
+        }
+
+        @Override
+        public boolean test(@Nullable ItemStack stack) {
+            return stack != null && delegate.test(stack);
+        }
     }
 }
