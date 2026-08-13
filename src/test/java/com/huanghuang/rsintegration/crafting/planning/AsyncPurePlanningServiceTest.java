@@ -14,6 +14,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 class AsyncPurePlanningServiceTest {
     @Test
@@ -34,6 +35,29 @@ class AsyncPurePlanningServiceTest {
             assertTrue(result.get() != null && result.get().snapshot() == snapshot);
             assertTrue(result.get() != null && result.get().result().feasible() == false);
         }
+    }
+
+    @Test
+    void terminalAmplificationUsesOneSeedAcrossRepeatedExecutions() throws Exception {
+        MaterialRef template = new MaterialRef(id("template"), "");
+        MaterialRef diamond = new MaterialRef(id("diamond"), "");
+        MaterialRef stone = new MaterialRef(id("stone"), "");
+        RecipeNode duplicate = new RecipeNode(id("duplicate"), template, 2, List.of(
+                new IngredientRef(List.of(template), 1),
+                new IngredientRef(List.of(diamond), 7),
+                new IngredientRef(List.of(stone), 1)));
+        ImmutableRecipeGraph graph = new ImmutableRecipeGraph(
+                Map.of(template, List.of(duplicate)));
+        Map<MaterialRef, Integer> projectedStock = Map.of(template, 1, diamond, 42, stone, 6);
+
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(graph,
+                projectedStock,
+                com.huanghuang.rsintegration.crafting.SelfAmplifyingRecipePolicy
+                        .scaleTargetInputs(duplicate, 6), 20);
+
+        assertTrue(result.feasible());
+        assertEquals(List.of(), result.steps());
+        assertTrue(result.remaining().isEmpty());
     }
 
     private static ResourceLocation id(String path) { return new ResourceLocation("test", path); }

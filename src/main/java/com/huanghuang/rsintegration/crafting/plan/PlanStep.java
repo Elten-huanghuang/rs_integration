@@ -101,8 +101,21 @@ public record PlanStep(
         if (index < 0 || index >= inputs.size()) return 0;
         int count = Math.max(0, inputs.get(index).getCount());
         if (inputRole(index) == DemandRole.CATALYST) return count;
+        if (isSelfAmplifying() && ItemStack.isSameItemSameTags(inputs.get(index), output)) {
+            return count;
+        }
         long total = (long) count * Math.max(1, executions);
         return total >= Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) total;
+    }
+
+    private boolean isSelfAmplifying() {
+        long selfConsumed = 0L;
+        for (int i = 0; i < inputs.size(); i++) {
+            if (inputRole(i) == DemandRole.CATALYST) continue;
+            ItemStack input = inputs.get(i);
+            if (ItemStack.isSameItemSameTags(input, output)) selfConsumed += input.getCount();
+        }
+        return selfConsumed > 0L && output.getCount() > selfConsumed;
     }
 
     private static int saturatingAdd(int left, int right) {

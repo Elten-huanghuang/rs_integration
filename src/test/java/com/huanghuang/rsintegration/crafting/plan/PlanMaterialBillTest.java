@@ -68,6 +68,18 @@ class PlanMaterialBillTest extends BootstrapTest {
     }
 
     @Test
+    void selfAmplifyingTargetDisplaysOneSeedForRepeatedExecutions() {
+        ItemStack templateOutput = new ItemStack(Items.NETHERITE_UPGRADE_SMITHING_TEMPLATE, 2);
+        PlanStep targetStep = new PlanStep(TARGET_RECIPE, templateOutput, 6,
+                List.of(new ItemStack(Items.NETHERITE_UPGRADE_SMITHING_TEMPLATE),
+                        new ItemStack(Items.DIAMOND, 7), new ItemStack(Items.NETHERRACK)));
+
+        assertEquals(1, targetStep.totalInputCount(0, 6));
+        assertEquals(42, targetStep.totalInputCount(1, 6));
+        assertEquals(6, targetStep.totalInputCount(2, 6));
+    }
+
+    @Test
     void mergesMultiOptionDemandAndOffsetsProducedTagMembers() {
         Ingredient logs = Ingredient.of(Items.OAK_LOG, Items.BIRCH_LOG);
         PlanMaterialBill.Result result = PlanMaterialBill.summarize(
