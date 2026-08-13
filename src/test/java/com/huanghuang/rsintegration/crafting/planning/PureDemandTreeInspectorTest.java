@@ -123,6 +123,22 @@ class PureDemandTreeInspectorTest {
     }
 
     @Test
+    void repeatedAmplificationTargetRequiresOneSeedAndScaledCosts() {
+        MaterialRef template = material("template");
+        MaterialRef diamond = material("diamond");
+        MaterialRef stone = material("stone");
+        RecipeNode duplicate = recipe("duplicate", template, 2,
+                ingredient(template, 1), ingredient(diamond, 7), ingredient(stone, 1));
+
+        assertTrue(PureDemandTreeInspector.inspect(graph(duplicate),
+                Map.of(template, 1, diamond, 42, stone, 6), duplicate.recipeId(), 6).complete());
+        assertFalse(PureDemandTreeInspector.inspect(graph(duplicate),
+                Map.of(diamond, 42, stone, 6), duplicate.recipeId(), 6).complete());
+        assertFalse(PureDemandTreeInspector.inspect(graph(duplicate),
+                Map.of(template, 1, diamond, 41, stone, 6), duplicate.recipeId(), 6).complete());
+    }
+
+    @Test
     void cycleTerminatesConservatively() {
         MaterialRef left = material("left");
         MaterialRef right = material("right");

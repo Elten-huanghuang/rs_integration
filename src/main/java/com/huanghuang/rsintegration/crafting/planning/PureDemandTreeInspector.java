@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.crafting.planning;
 
+import com.huanghuang.rsintegration.crafting.SelfAmplifyingRecipePolicy;
 import com.huanghuang.rsintegration.config.CraftingPlanningConfig;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.IngredientRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.MaterialRef;
@@ -62,14 +63,9 @@ public final class PureDemandTreeInspector {
         Walker walker = new Walker(graph, available, Math.max(1, maxNodes),
                 reusableCatalystOutputIds);
         walker.catalystRouteAvailable = targetUsesReusableCatalyst;
-        int multiplier = Math.max(1, repeatCount);
-        for (IngredientRef input : target.inputs()) {
-            long scaled = (long) input.count() * multiplier;
-            if (scaled > Integer.MAX_VALUE) {
-                return new Result(Status.INCOMPLETE, walker.visitedNodes, first(input),
-                        walker.catalystRouteAvailable);
-            }
-            if (!walker.coverIngredient(new IngredientRef(input.alternatives(), (int) scaled))) {
+        for (IngredientRef input : SelfAmplifyingRecipePolicy.scaleTargetInputs(
+                target, repeatCount)) {
+            if (!walker.coverIngredient(input)) {
                 Status status = walker.nodeLimitReached ? Status.NODE_LIMIT : Status.INCOMPLETE;
                 return new Result(status, walker.visitedNodes, walker.firstUnresolved,
                         walker.catalystRouteAvailable);

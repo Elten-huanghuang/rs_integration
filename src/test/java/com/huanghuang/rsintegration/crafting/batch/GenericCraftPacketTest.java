@@ -276,6 +276,19 @@ class GenericCraftPacketTest extends BootstrapTest {
     }
 
     @Test
+    void selfAmplifyingTerminalScalesCostsButKeepsOneSeed() {
+        ItemStack output = new ItemStack(Items.NETHERITE_UPGRADE_SMITHING_TEMPLATE, 2);
+        List<IngredientSpec> scaled = GenericCraftPacket.scaleTerminalIngredientSpecs(List.of(
+                new IngredientSpec(Ingredient.of(Items.NETHERITE_UPGRADE_SMITHING_TEMPLATE), 1),
+                new IngredientSpec(Ingredient.of(Items.DIAMOND), 7),
+                new IngredientSpec(Ingredient.of(Items.NETHERRACK), 1)), output, 6);
+
+        assertEquals(1, scaled.get(0).count());
+        assertEquals(42, scaled.get(1).count());
+        assertEquals(6, scaled.get(2).count());
+    }
+
+    @Test
     void shapedDisplayKeepsCatalystRoleAlignedAcrossEmptySlots() {
         List<Ingredient> displayed = List.of(
                 Ingredient.EMPTY, Ingredient.of(Items.DIAMOND), Ingredient.of(Items.IRON_INGOT));

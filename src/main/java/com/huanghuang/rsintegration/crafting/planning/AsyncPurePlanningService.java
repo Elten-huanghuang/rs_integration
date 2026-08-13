@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting.planning;
 
 import com.huanghuang.rsintegration.config.CraftingPlanningConfig;
+import com.huanghuang.rsintegration.crafting.SelfAmplifyingRecipePolicy;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.IngredientRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.RecipeNode;
 import net.minecraft.resources.ResourceLocation;
@@ -61,11 +62,8 @@ public final class AsyncPurePlanningService {
         }
         Map<ImmutableRecipeGraph.MaterialRef, Integer> stock =
                 ImmutableRecipeGraphProjector.projectAvailability(snapshot.availableItems());
-        List<IngredientRef> roots = target.inputs().stream()
-                .map(root -> new IngredientRef(root.alternatives(),
-                        Math.toIntExact(Math.min(Integer.MAX_VALUE,
-                                (long) root.count() * Math.max(1, repeatCount)))))
-                .toList();
+        List<IngredientRef> roots = SelfAmplifyingRecipePolicy.scaleTargetInputs(
+                target, repeatCount);
         long searchStarted = System.nanoTime();
         long deadlineNanos = deadlineAfterMillis(searchStarted, timeoutMs);
         PureRecipePlanner.Result result = PureRecipePlanner.resolve(
