@@ -61,7 +61,8 @@ final class CandidateEngine {
             if (stack.isEmpty()) continue;
             Item item = stack.getItem();
 
-            List<RecipeIndex.Entry> recipes = ctx.index.get(item);
+            List<RecipeIndex.Entry> recipes = semanticSpellRecipes(stack, ctx);
+            if (recipes == null) recipes = ctx.index.get(item);
             if (recipes == null) {
                 if (diag != null) logDiag(diag, item, null, 0, null, true, "No recipes indexed for this item");
                 continue;
@@ -195,6 +196,25 @@ final class CandidateEngine {
         }
 
         return result;
+    }
+
+    @javax.annotation.Nullable
+    private static List<RecipeIndex.Entry> semanticSpellRecipes(
+            ItemStack requested, ResolutionContext ctx) {
+        ResourceLocation id = ForgeRegistries.ITEMS.getKey(requested.getItem());
+        if (id == null || !id.equals(new ResourceLocation("irons_spellbooks", "scroll"))) {
+            return null;
+        }
+        try {
+            // A compound ingredient may intentionally accept several distinct
+            // spell scrolls; keep the normal candidate union for that case.
+            if (requested == null || requested.isEmpty()) return null;
+            var key = com.huanghuang.rsintegration.mods.ironsspellbooks
+                    .IronSpellBooksRecipeCatalog.spellScrollKey(requested);
+            return key == null ? null : RecipeIndex.spellScrollCandidates(ctx.level, requested);
+        } catch (LinkageError ignored) {
+            return null;
+        }
     }
 
     private static boolean variantGuardEnabled() {
@@ -498,7 +518,8 @@ final class CandidateEngine {
                                               Ingredient ingredient, boolean ingredientAllNbt,
                                               boolean nbtStrict,
                                               @javax.annotation.Nullable List<CandidateDiagnostic> diag) {
-        if (output.isEmpty() || !ingredient.test(output)) {
+        if (output.isEmpty() || (!ingredient.test(output)
+                && !matchesSemanticSpellScroll(ingredient, output))) {
             boolean slashBladeChain = false;
             if (SlashBladeRecipeHandler.isSlashBladeIngredient(ingredient) && !output.isEmpty()) {
                 for (ItemStack ingItem : ingredient.getItems()) {
@@ -517,6 +538,32 @@ final class CandidateEngine {
         // ingredients intentionally accept extra runtime state; TACZ guns
         // carry more NBT than the GunId required by soul-stone recipes.
         return true;
+    }
+
+    /**
+     * Iron spell scrolls from datapacks and addons may serialize the same
+     * level with different numeric NBT tag types. Their gameplay identity is
+     * the spell id plus level, so candidate discovery must use the same
+     * semantic comparison as runtime output settlement.
+     */
+    static boolean matchesSemanticSpellScroll(Ingredient ingredient, ItemStack output) {
+        ResourceLocation outputId = ForgeRegistries.ITEMS.getKey(output.getItem());
+        if (outputId == null
+                || !outputId.equals(new ResourceLocation("irons_spellbooks", "scroll"))) {
+            return false;
+        }
+        try {
+            for (ItemStack declared : ingredient.getItems()) {
+                if (!declared.isEmpty()
+                        && com.huanghuang.rsintegration.mods.ironsspellbooks
+                                .IronSpellBooksRecipeCatalog.sameSpellScroll(declared, output)) {
+                    return true;
+                }
+            }
+        } catch (LinkageError ignored) {
+            // Iron's Spell Books is optional; retain normal Ingredient semantics.
+        }
+        return false;
     }
 
     private static boolean allItemsHaveNbt(Ingredient ingredient) {

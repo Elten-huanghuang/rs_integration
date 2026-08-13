@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import io.redspace.ironsspellbooks.api.registry.SpellRegistry;
 import io.redspace.ironsspellbooks.api.spells.AbstractSpell;
 import io.redspace.ironsspellbooks.api.spells.ISpellContainer;
+import io.redspace.ironsspellbooks.api.spells.SpellData;
 import io.redspace.ironsspellbooks.item.InkItem;
 import io.redspace.ironsspellbooks.registries.ItemRegistry;
 import net.minecraft.resources.ResourceLocation;
@@ -31,6 +32,8 @@ public final class IronSpellBooksRecipeCatalog {
     private static volatile Catalog catalog;
 
     private IronSpellBooksRecipeCatalog() {}
+
+    public record SpellScrollKey(ResourceLocation spellId, int level) {}
 
     public static Collection<IronSpellBooksRecipe> allRecipes() { return catalog().byId().values(); }
 
@@ -62,24 +65,25 @@ public final class IronSpellBooksRecipeCatalog {
         if (left == null || right == null || left.isEmpty() || right.isEmpty()
                 || left.getItem() != ItemRegistry.SCROLL.get()
                 || right.getItem() != ItemRegistry.SCROLL.get()) return false;
+        SpellScrollKey leftKey = spellScrollKey(left);
+        return leftKey != null && leftKey.equals(spellScrollKey(right));
+    }
+
+    /** Stable identity shared by native, addon and datapack spell scroll NBT. */
+    @Nullable
+    public static SpellScrollKey spellScrollKey(ItemStack stack) {
+        if (stack == null || stack.isEmpty() || stack.getItem() != ItemRegistry.SCROLL.get()) {
+            return null;
+        }
         try {
-            List<?> leftSpells = ISpellContainer.get(left).getActiveSpells();
-            List<?> rightSpells = ISpellContainer.get(right).getActiveSpells();
-            if (leftSpells.size() != 1 || rightSpells.size() != 1) return false;
-            Object leftSpell = leftSpells.get(0);
-            Object rightSpell = rightSpells.get(0);
-            AbstractSpell leftDefinition = (AbstractSpell) leftSpell.getClass()
-                    .getMethod("getSpell").invoke(leftSpell);
-            AbstractSpell rightDefinition = (AbstractSpell) rightSpell.getClass()
-                    .getMethod("getSpell").invoke(rightSpell);
-            int leftLevel = ((Number) leftSpell.getClass().getMethod("getLevel")
-                    .invoke(leftSpell)).intValue();
-            int rightLevel = ((Number) rightSpell.getClass().getMethod("getLevel")
-                    .invoke(rightSpell)).intValue();
-            return leftDefinition.getSpellId().equals(rightDefinition.getSpellId())
-                    && leftLevel == rightLevel;
-        } catch (ReflectiveOperationException | RuntimeException ignored) {
-            return false;
+            List<SpellData> spells = ISpellContainer.get(stack).getActiveSpells();
+            if (spells.size() != 1) return null;
+            SpellData spell = spells.get(0);
+            ResourceLocation id = ResourceLocation.tryParse(spell.getSpell().getSpellId());
+            return id == null || spell.getLevel() <= 0
+                    ? null : new SpellScrollKey(id, spell.getLevel());
+        } catch (RuntimeException ignored) {
+            return null;
         }
     }
 
