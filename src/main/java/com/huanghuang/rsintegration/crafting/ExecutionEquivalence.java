@@ -21,15 +21,20 @@ public final class ExecutionEquivalence {
         for (NodeId nodeId : graph.topologicalOrder()) {
             CraftNode node = nodes.get(nodeId);
             if (node == null) throw new IllegalArgumentException("missing graph node " + nodeId);
-            ModType modType = ModType.findById(node.modTypeId());
-            if (modType == null) {
-                throw new IllegalArgumentException("unknown graph mod type " + node.modTypeId());
-            }
-            projected.add(new CraftingResolver.ResolutionStep(node.recipeId(), modType,
-                    node.recipeTypeId(), node.alternativeIds(), node.alternativeModTypeIds(),
-                    node.inferMode(), node.executions(), node.syntheticInput(), node.syntheticOutput()));
+            projected.add(projectStep(node));
         }
         return List.copyOf(projected);
+    }
+
+    /** Projects one authoritative graph node without relying on list position or node id. */
+    static CraftingResolver.ResolutionStep projectStep(CraftNode node) {
+        ModType modType = ModType.findById(node.modTypeId());
+        if (modType == null) {
+            throw new IllegalArgumentException("unknown graph mod type " + node.modTypeId());
+        }
+        return new CraftingResolver.ResolutionStep(node.recipeId(), modType,
+                node.recipeTypeId(), node.alternativeIds(), node.alternativeModTypeIds(),
+                node.inferMode(), node.executions(), node.syntheticInput(), node.syntheticOutput());
     }
 
     public static Report compare(CraftPlanGraph graph,
