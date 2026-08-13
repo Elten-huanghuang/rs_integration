@@ -71,7 +71,14 @@ public final class IngredientMatcher {
         for (ItemStack candidate : ingredient.getItems()) {
             if (candidate.isEmpty()) continue;
             hasTaggedCandidate |= candidate.hasTag();
-            if (ingredient.test(new ItemStack(candidate.getItem()))) return false;
+            try {
+                if (ingredient.test(new ItemStack(candidate.getItem()))) return false;
+            } catch (RuntimeException ignored) {
+                // Some modded ingredients assume their probe already contains
+                // capability/NBT state. Treat an invalid tagless probe as a
+                // rejection instead of allowing third-party code to crash the
+                // planning tick.
+            }
         }
         return hasTaggedCandidate;
     }
