@@ -615,6 +615,10 @@ public final class GenericCraftPacket {
         if (recipe != null) return recipe;
         recipe = ApotheosisGemCuttingCatalog.byId(recipeId);
         if (recipe != null) return recipe;
+        if (net.minecraftforge.fml.ModList.get().isLoaded(ModIds.IRONS_SPELLBOOKS)) {
+            recipe = com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRecipeCatalog.byId(recipeId);
+            if (recipe != null) return recipe;
+        }
         if (net.minecraftforge.fml.ModList.get().isLoaded(ModIds.PMMO)) {
             recipe = com.huanghuang.rsintegration.mods.pmmo.PmmoSalvageCatalog.byId(recipeId);
             if (recipe != null) return recipe;

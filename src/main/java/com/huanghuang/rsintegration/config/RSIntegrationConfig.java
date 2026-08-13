@@ -118,6 +118,7 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.IntValue DISTANT_WORLDS_FUEL_BATCH_SIZE;
     public static ForgeConfigSpec.ConfigValue<List<? extends String>> DISTANT_WORLDS_FUEL_PRIORITY;
     public static ForgeConfigSpec.BooleanValue ENABLE_APOTHEOSIS;
+    public static ForgeConfigSpec.BooleanValue ENABLE_IRONS_SPELLBOOKS;
     public static ForgeConfigSpec.BooleanValue ENABLE_VANILLA_MACHINES;
     public static ForgeConfigSpec.BooleanValue ENABLE_SOPHISTICATED_BACKPACKS;
     public static ForgeConfigSpec.BooleanValue ENABLE_FTB_QUEST_EXTERNAL_ITEM_PROGRESS;
@@ -400,6 +401,9 @@ public final class RSIntegrationConfig {
                 .comment("Enable RS integration with Apotheosis, including Fletching Table recipes and remote GUI access.",
                         "Only applies when Apotheosis is installed.")
                 .define("enableApotheosis", true);
+        ENABLE_IRONS_SPELLBOOKS = c
+                .comment("Enable RS integration with Iron's Spell Books (Scroll Forge and Arcane Anvil).")
+                .define("enableIronsSpellbooks", true);
         ENABLE_AETHERWORKS = c
                 .comment("Enable RS integration with Embers Aetherworks Addon",
                         "(Aetherium Anvil remote crafting with auto-hammer support).")

@@ -228,7 +228,14 @@ public class RecipeGuiLayoutsMixin {
 
             totalRecipes++;
 
-            ResourceLocation recipeId = getRecipeId(recipe);
+            ItemStack ironSpellBooksTarget = null;
+            ResourceLocation recipeId;
+            if (rsi$isIronSpellBooksJeiRecipe(recipeClassName)) {
+                ironSpellBooksTarget = extractOutputStack(recipeLayout);
+                recipeId = rsi$ironSpellBooksRecipeId(recipeClassName, ironSpellBooksTarget);
+            } else {
+                recipeId = getRecipeId(recipe);
+            }
             if (recipeId == null) {
                 if (isFa) faNoRecipeId++;
                 if (isFaOrTlm) {
@@ -306,8 +313,12 @@ public class RecipeGuiLayoutsMixin {
             // the player clicked from the id alone. Capture the OUTPUT ghost slot
             // (the leveled enchanted book JEI renders) so the server can require the
             // matching (N-1)-level center book and produce level N.
-            ItemStack concreteTargetOutput = null;
-            if (ModIds.WIZARDS_REBORN.equals(recipeId.getNamespace())
+            ItemStack concreteTargetOutput = ironSpellBooksTarget;
+            if (ironSpellBooksTarget != null && !ironSpellBooksTarget.isEmpty()) {
+                RSIntegrationMod.LOGGER.debug(
+                        "[RSI-JEI-Mixin] Iron's Spell Books output capture: recipeId={} output={}",
+                        recipeId, ironSpellBooksTarget.getHoverName().getString());
+            } else if (ModIds.WIZARDS_REBORN.equals(recipeId.getNamespace())
                     && recipeId.getPath().startsWith("arcane_iterator/")) {
                 concreteTargetOutput = extractOutputStack(recipeLayout);
                 RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] WR arcane iterator output capture: recipeId={} output={}",
@@ -853,6 +864,51 @@ public class RecipeGuiLayoutsMixin {
     private static ResourceLocation getRecipeId(Object recipe) {
         String className = recipe.getClass().getName();
 
+        // Iron's Spell Books exposes these as JEI-only records with no recipe ID.
+        // Resolve the concrete NBT output shown by JEI to the matching runtime
+        // catalog entry, so recursive planning gets a stable server-side ID.
+        if (className.equals("io.redspace.ironsspellbooks.jei.ScrollForgeRecipe")) {
+            try {
+                Object outputs = recipe.getClass().getMethod("scrollOutputs").invoke(recipe);
+                ItemStack output = rsi$firstStack(outputs);
+                if (!output.isEmpty()) {
+                    Object machine = Enum.valueOf(
+                            (Class<Enum>) Class.forName(
+                                    "com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRecipe$Machine"),
+                            "SCROLL_FORGE");
+                    Object found = Class.forName(
+                            "com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRecipeCatalog")
+                            .getMethod("recipeForTarget", machine.getClass(), ItemStack.class)
+                            .invoke(null, machine, output);
+                    if (found instanceof Recipe<?> r) return r.getId();
+                }
+            } catch (Throwable e) {
+                RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] Scroll Forge ID recovery failed", e);
+            }
+            return null;
+        }
+        if (className.equals("io.redspace.ironsspellbooks.jei.ArcaneAnvilRecipe")) {
+            try {
+                Object tuple = recipe.getClass().getMethod("getRecipeItems").invoke(recipe);
+                Object outputs = tuple.getClass().getMethod("c").invoke(tuple);
+                ItemStack output = rsi$firstStack(outputs);
+                if (!output.isEmpty()) {
+                    Object machine = Enum.valueOf(
+                            (Class<Enum>) Class.forName(
+                                    "com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRecipe$Machine"),
+                            "ARCANE_ANVIL");
+                    Object found = Class.forName(
+                            "com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRecipeCatalog")
+                            .getMethod("recipeForTarget", machine.getClass(), ItemStack.class)
+                            .invoke(null, machine, output);
+                    if (found instanceof Recipe<?> r) return r.getId();
+                }
+            } catch (Throwable e) {
+                RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] Arcane Anvil ID recovery failed", e);
+            }
+            return null;
+        }
+
         if (recipe instanceof com.huanghuang.rsintegration.mods.pmmo.client.PmmoSalvageRecipe salvage) {
             return salvage.recipeId();
         }
@@ -928,6 +984,34 @@ public class RecipeGuiLayoutsMixin {
 
         RSIntegrationMod.LOGGER.warn("[RSI-JEI-Mixin] getRecipeId failed for {} — no strategy succeeded", className);
         return null;
+    }
+
+    @Unique
+    private static boolean rsi$isIronSpellBooksJeiRecipe(String className) {
+        return className.equals("io.redspace.ironsspellbooks.jei.ScrollForgeRecipe")
+                || className.equals("io.redspace.ironsspellbooks.jei.ArcaneAnvilRecipe");
+    }
+
+    @Unique
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private static ResourceLocation rsi$ironSpellBooksRecipeId(String className, ItemStack output) {
+        if (output == null || output.isEmpty()) return null;
+        try {
+            String machineName = className.endsWith("ScrollForgeRecipe")
+                    ? "SCROLL_FORGE" : "ARCANE_ANVIL";
+            Class<?> machineClass = Class.forName(
+                    "com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRecipe$Machine");
+            Object machine = Enum.valueOf((Class<Enum>) machineClass, machineName);
+            Object found = Class.forName(
+                    "com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRecipeCatalog")
+                    .getMethod("recipeForTarget", machineClass, ItemStack.class)
+                    .invoke(null, machine, output);
+            return found instanceof Recipe<?> recipe ? recipe.getId() : null;
+        } catch (Throwable e) {
+            RSIntegrationMod.LOGGER.debug(
+                    "[RSI-JEI-Mixin] Iron's Spell Books displayed-output ID recovery failed", e);
+            return null;
+        }
     }
 
     @Unique

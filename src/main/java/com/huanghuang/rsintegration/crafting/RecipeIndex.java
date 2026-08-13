@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.mods.farmingforblockheads.MarketRecipeWrapper;
 import com.huanghuang.rsintegration.mods.apotheosis.ApotheosisGemCuttingCatalog;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRecipeCatalog;
 import com.huanghuang.rsintegration.mods.forbidden.FaRitualWrapper;
 import com.huanghuang.rsintegration.mods.distantworlds.LithumAltarRecipeResolver;
 import com.huanghuang.rsintegration.mods.distantworlds.LithumAltarRecipeDefinition;
@@ -152,6 +153,7 @@ public final class RecipeIndex {
             // ── Market entries (MarketRegistry, not RecipeManager) ────
             int marketIndexed = indexMarketEntries(idx, seen);
             int gemCuttingIndexed = indexGemCutting(level, idx, seen);
+            int ironSpellBooksIndexed = indexIronSpellBooks(level, idx, seen);
 
             // ── Distant Worlds Firon Lithum Altar definitions ─────────
             int distantWorldsIndexed = indexDistantWorldsFiron(idx, seen);
@@ -336,6 +338,27 @@ public final class RecipeIndex {
             idx.computeIfAbsent(output.getItem(), key -> new ArrayList<>()).add(new Entry(
                     recipe, ModType.byId("apotheosis_gem_cutting"),
                     new ResourceLocation("apotheosis", "gem_cutting"), true));
+            count++;
+        }
+        return count;
+    }
+
+    private static int indexIronSpellBooks(Level level, Map<Item, List<Entry>> idx,
+                                           Set<ResourceLocation> seen) {
+        if (!net.minecraftforge.fml.ModList.get().isLoaded(ModIds.IRONS_SPELLBOOKS)
+                || !RSIntegrationConfig.ENABLE_IRONS_SPELLBOOKS.get()) return 0;
+        int count = 0;
+        for (var recipe : IronSpellBooksRecipeCatalog.allRecipes()) {
+            if (!seen.add(recipe.getId())) continue;
+            ItemStack output = recipe.getResultItem(level.registryAccess());
+            if (output.isEmpty()) continue;
+            String typeId = recipe.machine()
+                    == com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRecipe.Machine.SCROLL_FORGE
+                    ? "irons_spellbooks_scroll_forge" : "irons_spellbooks_arcane_anvil";
+            idx.computeIfAbsent(output.getItem(), key -> new ArrayList<>()).add(new Entry(
+                    recipe, ModType.byId(typeId), new ResourceLocation("irons_spellbooks",
+                    recipe.machine() == com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRecipe.Machine.SCROLL_FORGE
+                            ? "scroll_forge" : "arcane_anvil"), true));
             count++;
         }
         return count;
