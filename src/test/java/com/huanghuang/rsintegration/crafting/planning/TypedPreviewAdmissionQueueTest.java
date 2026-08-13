@@ -48,7 +48,8 @@ class TypedPreviewAdmissionQueueTest {
         UUID second = UUID.randomUUID();
         List<String> events = new ArrayList<>();
         queue.offer(new TypedPreviewAdmissionQueue.Request(first, 1, 0,
-                () -> events.add("stale-run"), () -> events.add("expired")));
+                () -> events.add("stale-run"), () -> events.add("expired"),
+                ignored -> events.add("failed")));
         queue.offer(request(second, 1, 9, () -> events.add("fresh")));
 
         assertEquals(1, queue.run(1, 10, 5, ignored -> true));
@@ -70,9 +71,24 @@ class TypedPreviewAdmissionQueueTest {
         assertEquals(1, queue.size());
     }
 
+    @Test
+    void taskFailureIsReportedWithoutEscapingTheTick() {
+        TypedPreviewAdmissionQueue queue = new TypedPreviewAdmissionQueue(1);
+        UUID player = UUID.randomUUID();
+        List<String> events = new ArrayList<>();
+        queue.offer(new TypedPreviewAdmissionQueue.Request(player, 1, 0,
+                () -> { throw new IllegalArgumentException("invalid graph"); },
+                () -> events.add("expired"),
+                failure -> events.add(failure.getMessage())));
+
+        assertEquals(1, queue.run(1, 1, 10, ignored -> true));
+        assertEquals(List.of("invalid graph"), events);
+        assertFalse(queue.isAdmitted(player, 1));
+    }
+
     private static TypedPreviewAdmissionQueue.Request request(
             UUID player, long generation, long queuedNanos, Runnable task) {
         return new TypedPreviewAdmissionQueue.Request(
-                player, generation, queuedNanos, task, () -> {});
+                player, generation, queuedNanos, task, () -> {}, ignored -> {});
     }
 }
