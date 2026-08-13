@@ -1340,8 +1340,7 @@ public final class AsyncCraftChain {
             } else {
                 List<IngredientSpec> graphSpecs = delegate.getGraphSpecs();
                 if (graphSpecs == null || graphSpecs.isEmpty()) {
-                    if (delegate.getClass().getName().endsWith(".WRBatchDelegate")
-                            && prepared.step().recipeId().getPath().startsWith("arcane_iterator/")) {
+                    if (shouldUsePrivateLedgerGraphDispatch(delegate, graphSpecs)) {
                         return dispatchPrivateLedgerGraphNode(nodeId, prepared, delegate, online,
                                 admission, nodeLedger);
                     }
@@ -1455,6 +1454,13 @@ public final class AsyncCraftChain {
             catch (RuntimeException ignored) { }
             return GraphDispatchResult.fatal(message);
         }
+    }
+
+    static boolean shouldUsePrivateLedgerGraphDispatch(
+            IBatchDelegate delegate, List<IngredientSpec> graphSpecs) {
+        return delegate != null
+                && (graphSpecs == null || graphSpecs.isEmpty())
+                && delegate.requiresPrivateLedgerGraphDispatch();
     }
 
     private GraphDispatchResult dispatchPrivateLedgerGraphNode(
