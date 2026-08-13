@@ -10,6 +10,7 @@ import com.huanghuang.rsintegration.sidepanel.data.BindingInfo;
 import com.huanghuang.rsintegration.sidepanel.network.MachineCollectPacket;
 import com.huanghuang.rsintegration.sidepanel.network.MachineInsertPacket;
 import com.huanghuang.rsintegration.sidepanel.network.OpenBoundMachineGuiPacket;
+import com.huanghuang.rsintegration.sidepanel.network.UnbindMachinePacket;
 import com.huanghuang.rsintegration.resonance.backpack.OpenResonanceBackpackPacket;
 import com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler;
 
@@ -102,6 +103,16 @@ public final class MachineTabHandler {
         RSIntegrationMod.LOGGER.debug("[RSI-MachineTab] Insert: {} slot={}", info.displayName(), slot);
         RSSidePanelNetworkHandler.CHANNEL.sendToServer(
             new MachineInsertPacket(info.dim(), info.pos(), slot));
+    }
+
+    /** Remove a machine from the connector that supplied this Hub entry. */
+    public static boolean onUnbind(BindingInfo info) {
+        if (info == null) return false;
+        if (!checkCooldown()) return false;
+        RSIntegrationMod.LOGGER.debug("[RSI-MachineTab] Unbind: {}", info.displayName());
+        RSSidePanelNetworkHandler.CHANNEL.sendToServer(
+                new UnbindMachinePacket(info.dim(), info.pos()));
+        return true;
     }
 
     private static boolean checkCooldown() {

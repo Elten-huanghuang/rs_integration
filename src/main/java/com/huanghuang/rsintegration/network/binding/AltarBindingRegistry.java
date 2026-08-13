@@ -138,6 +138,33 @@ public final class AltarBindingRegistry {
         BINDINGS.remove(GlobalPos.of(dim, altarPos));
     }
 
+    /**
+     * Remove one machine binding from every connector carried by this player.
+     * This updates the item NBT, which is the authoritative persistent store.
+     *
+     * @return number of connector stacks that contained the binding
+     */
+    public static int removePlayerBinding(ServerPlayer player, ResourceLocation dim, BlockPos pos) {
+        if (player == null || dim == null || pos == null) return 0;
+
+        int[] removed = {0};
+        forEachInventoryGroup(player, stacks -> {
+            for (ItemStack stack : stacks) {
+                if (!stack.isEmpty() && BindingStorage.removeBinding(stack, dim, pos)) {
+                    removed[0]++;
+                }
+            }
+        });
+        if (removed[0] == 0) return 0;
+
+        ResourceKey<Level> dimKey = ResourceKey.create(
+                net.minecraft.core.registries.Registries.DIMENSION, dim);
+        unbindAll(dimKey, pos);
+        invalidateScanCache();
+        RSIntegrationNetwork.invalidateNetworkResolution(player.getUUID());
+        return removed[0];
+    }
+
     public static Optional<AltarBinding> getBinding(ResourceKey<Level> dim, BlockPos altarPos, ResourceLocation type) {
         List<AltarBinding> list = BINDINGS.get(GlobalPos.of(dim, altarPos));
         if (list == null) return Optional.empty();

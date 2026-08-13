@@ -18,6 +18,7 @@ import com.huanghuang.rsintegration.sidepanel.network.MachineStatusDeltaPacket;
 import com.huanghuang.rsintegration.sidepanel.network.OpenBoundMachineGuiPacket;
 import com.huanghuang.rsintegration.sidepanel.network.ReturnToRSPacket;
 import com.huanghuang.rsintegration.sidepanel.network.RSBindingSyncPacket;
+import com.huanghuang.rsintegration.sidepanel.network.UnbindMachinePacket;
 import com.refinedmods.refinedstorage.api.storage.cache.IStorageCache;
 import com.refinedmods.refinedstorage.api.storage.cache.IStorageCacheListener;
 import com.refinedmods.refinedstorage.api.util.StackListResult;
@@ -100,6 +101,9 @@ public final class RSSidePanelNetworkHandler {
         ch.registerMessage(NetworkPacketIds.SIDE_PANEL_OPERATION_RESULT, RSSidePanelOperationResultPacket.class,
                 RSSidePanelOperationResultPacket::encode, RSSidePanelOperationResultPacket::decode, RSSidePanelOperationResultPacket::handle,
                 java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_CLIENT));
+        ch.registerMessage(NetworkPacketIds.UNBIND_MACHINE, UnbindMachinePacket.class,
+                UnbindMachinePacket::encode, UnbindMachinePacket::decode, UnbindMachinePacket::handle,
+                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_SERVER));
         ch.registerMessage(NetworkPacketIds.OPEN_RESONANCE_BACKPACK, OpenResonanceBackpackPacket.class,
                 OpenResonanceBackpackPacket::encode, OpenResonanceBackpackPacket::decode, OpenResonanceBackpackPacket::handle,
                 java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_SERVER));
