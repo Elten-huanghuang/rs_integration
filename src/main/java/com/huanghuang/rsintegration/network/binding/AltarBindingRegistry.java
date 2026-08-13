@@ -906,6 +906,15 @@ public final class AltarBindingRegistry {
         if (ModIds.ID_FR_KETTLE.equals(type.id())) {
             return null;
         }
+        // These integrations each expose one concrete workstation. Recipe paths
+        // are content grouping only (for example iss_csw:amalgamator/fire_pearl
+        // and rs_integration:irons_spellbooks/scroll_forge/...), so treating the
+        // first path segment as a machine subtype rejects the valid binding.
+        if ("iss_csw_spell_forge".equals(type.id())
+                || "irons_spellbooks_scroll_forge".equals(type.id())
+                || "irons_spellbooks_arcane_anvil".equals(type.id())) {
+            return null;
+        }
         // Botania recipe paths are data-pack folders, not machine sub-types.
         if (type.id().startsWith("botania_")) {
             return null;

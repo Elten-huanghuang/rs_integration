@@ -108,4 +108,24 @@ class AltarBindingRegistryTest {
                 AltarBindingRegistry.recipeSubTypeHint(new ResourceLocation(
                         "wizards_reborn", "wissen_crystallizer/earth_crystal_seed")));
     }
+
+    @Test
+    void leafSpellWorkstationsIgnoreRecipeGroupingPaths() {
+        registerLeafType("iss_csw_spell_forge");
+        registerLeafType("irons_spellbooks_scroll_forge");
+        registerLeafType("irons_spellbooks_arcane_anvil");
+
+        assertNull(AltarBindingRegistry.normalizeSubType("amalgamator",
+                ModType.byId("iss_csw_spell_forge")));
+        assertNull(AltarBindingRegistry.normalizeSubType("irons_spellbooks",
+                ModType.byId("irons_spellbooks_scroll_forge")));
+        assertNull(AltarBindingRegistry.normalizeSubType("irons_spellbooks",
+                ModType.byId("irons_spellbooks_arcane_anvil")));
+    }
+
+    private static void registerLeafType(String id) {
+        if (ModType.byId(id) == ModType.GENERIC) {
+            ModType.register(id, new String[0], new String[]{id}, new String[]{id}, () -> null);
+        }
+    }
 }
