@@ -8,6 +8,8 @@ import com.refinedmods.refinedstorage.apiimpl.API;
 import com.refinedmods.refinedstorage.apiimpl.storage.ItemStorageType;
 import com.refinedmods.refinedstorage.item.StorageDiskItem;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.InteractionResultHolder;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
@@ -28,6 +30,15 @@ public final class ResonanceDiskItem extends StorageDiskItem {
     @Override
     public int getCapacity(ItemStack stack) {
         return RESONANCE_CAPACITY;
+    }
+
+    @Override
+    public InteractionResultHolder<ItemStack> use(Level level, Player player, InteractionHand hand) {
+        // StorageDiskItem treats an empty sneaking disk as dismantleable and
+        // returns the storage part matching its constructor type. This custom
+        // disk uses FOUR_K only as an RS compatibility token, so inheriting
+        // that behavior incorrectly turns it into a 4K part and disk housing.
+        return InteractionResultHolder.pass(player.getItemInHand(hand));
     }
 
     @Override
