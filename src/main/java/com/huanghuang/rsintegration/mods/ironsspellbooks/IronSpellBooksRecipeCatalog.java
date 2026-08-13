@@ -113,30 +113,36 @@ public final class IronSpellBooksRecipeCatalog {
 
     private static void addScrollForgeRecipes(Map<ResourceLocation, IronSpellBooksRecipe> result,
                                                Map<ResourceLocation, List<ItemStack>> focuses) {
+        // Mirror Iron's own JEI maker: every registered InkItem is a valid
+        // input, and its rarity determines the first scroll level. Do not
+        // reverse-map a level through spell.getRarity(level); custom spells
+        // and older ISB versions can have non-identical rarity curves.
         List<InkItem> inks = findInks();
         for (AbstractSpell spell : SpellRegistry.getEnabledSpells()) {
             if (spell == SpellRegistry.none() || !spell.allowCrafting()) continue;
             List<ItemStack> focusOptions = focuses.getOrDefault(
                     spell.getSchoolType().getId(), List.of());
             if (focusOptions.isEmpty()) continue;
-            Map<Integer, InkItem> inksByLevel = new LinkedHashMap<>();
+            Map<Integer, List<InkItem>> inksByLevel = new LinkedHashMap<>();
             for (InkItem ink : inks) {
                 int level = spell.getMinLevelForRarity(ink.getRarity());
                 if (level <= 0 || level > spell.getMaxLevel()) continue;
-                InkItem canonical = InkItem.getInkForRarity(spell.getRarity(level));
-                if (canonical != null) inksByLevel.putIfAbsent(level, canonical);
+                inksByLevel.computeIfAbsent(level, ignored -> new ArrayList<>()).add(ink);
             }
-            for (Map.Entry<Integer, InkItem> entry : inksByLevel.entrySet()) {
+            for (Map.Entry<Integer, List<InkItem>> entry : inksByLevel.entrySet()) {
                 int level = entry.getKey();
-                ItemStack ink = new ItemStack(entry.getValue());
+                List<InkItem> levelInks = entry.getValue();
+                ItemStack displayInk = new ItemStack(levelInks.get(0));
+                Ingredient inkIngredient = Ingredient.of(levelInks.stream()
+                        .map(ItemStack::new));
                 ItemStack output = scroll(spell, level);
                 ResourceLocation id = id("scroll_forge", spell.getSpellResource(), level, null);
                 result.put(id, new IronSpellBooksRecipe(id,
                         IronSpellBooksRecipe.Machine.SCROLL_FORGE,
-                        List.of(ink, new ItemStack(Items.PAPER), focusOptions.get(0)),
-                        List.of(Ingredient.of(ink), Ingredient.of(Items.PAPER),
+                        List.of(displayInk, new ItemStack(Items.PAPER), focusOptions.get(0)),
+                        List.of(inkIngredient, Ingredient.of(Items.PAPER),
                                 ingredientOf(focusOptions)), output,
-                        spell.getSpellId()));
+                        spell.getSpellId(), level));
             }
         }
     }
@@ -160,8 +166,10 @@ public final class IronSpellBooksRecipeCatalog {
                             spell.getSpellResource(), level + 1, null);
                     result.put(id, new IronSpellBooksRecipe(id,
                             IronSpellBooksRecipe.Machine.ARCANE_ANVIL,
-                            List.of(leftItems.get(0), rightItems.get(0)), outputs.get(0),
-                            spell.getSpellId()));
+                            List.of(leftItems.get(0), rightItems.get(0)),
+                            List.of(exactIngredientOf(leftItems), exactIngredientOf(rightItems)),
+                            outputs.get(0),
+                            spell.getSpellId(), level + 1));
                 }
             }
         } catch (ReflectiveOperationException | LinkageError e) {
@@ -223,6 +231,16 @@ public final class IronSpellBooksRecipeCatalog {
 
     private static Ingredient ingredientOf(List<ItemStack> options) {
         return Ingredient.of(options.stream().map(ItemStack::copy));
+    }
+
+    private static Ingredient exactIngredientOf(List<ItemStack> options) {
+        Ingredient[] alternatives = options.stream()
+                .map(stack -> stack.hasTag()
+                        ? (Ingredient) net.minecraftforge.common.crafting.StrictNBTIngredient.of(stack.copy())
+                        : Ingredient.of(stack.copy()))
+                .toArray(Ingredient[]::new);
+        return alternatives.length == 1 ? alternatives[0]
+                : net.minecraftforge.common.crafting.CompoundIngredient.of(alternatives);
     }
 
     private static List<InkItem> findInks() {
