@@ -26,6 +26,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeAll;
 
 import java.util.List;
+import java.util.ArrayList;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -70,6 +71,25 @@ class CraftProgressRuntimeTest extends BootstrapTest {
         assertEquals(0, runtime.completedOperations());
         assertEquals(0, runtime.runningOperations());
         assertEquals(1, delegate.failureCleanups);
+    }
+
+    @Test
+    void cancellationRecoversReusableMaterialsBeforeMachineCleanup() {
+        List<String> calls = new ArrayList<>();
+        CraftNodeRuntime.runFailureCleanup(true,
+                () -> calls.add("reusable"), () -> calls.add("cleanup"));
+
+        assertEquals(List.of("reusable", "cleanup"), calls);
+    }
+
+    @Test
+    void catalystRecoveryFailureDoesNotSkipMachineCleanup() {
+        List<String> calls = new ArrayList<>();
+        CraftNodeRuntime.runFailureCleanup(true,
+                () -> { throw new IllegalStateException("recovery failed"); },
+                () -> calls.add("cleanup"));
+
+        assertEquals(List.of("cleanup"), calls);
     }
 
     @Test

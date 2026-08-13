@@ -46,6 +46,7 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
     private boolean stopRequested;
     private String failureReason;
     private boolean terminal;
+    private boolean reusableMaterialsRecovered;
     private List<ItemStack> virtualInventory;
     @Nullable
     private ServerPlayer player;
@@ -334,13 +335,30 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
         if (terminal) return;
         terminal = true;
         if (delegate != null) {
-            try {
-                delegate.onBatchFailed(null, failureReason != null ? failureReason : "node failure");
-            } catch (Exception ignored) {
-                // Best-effort cleanup
-            }
+            boolean recoverReusable = !reusableMaterialsRecovered && player != null;
+            if (recoverReusable) reusableMaterialsRecovered = true;
+            runFailureCleanup(recoverReusable,
+                    () -> delegate.releaseReusableMaterials(player),
+                    () -> delegate.onBatchFailed(null,
+                            failureReason != null ? failureReason : "node failure"));
         }
         disarmCapture();
+    }
+
+    static void runFailureCleanup(boolean recoverReusable, Runnable reusableRecovery,
+                                  Runnable machineCleanup) {
+        if (recoverReusable) {
+            try {
+                reusableRecovery.run();
+            } catch (RuntimeException ignored) {
+                // Machine cleanup must still run even if catalyst recovery fails.
+            }
+        }
+        try {
+            machineCleanup.run();
+        } catch (RuntimeException ignored) {
+            // Best-effort cleanup.
+        }
     }
 
     List<ItemStack> drainSettledResults() {
