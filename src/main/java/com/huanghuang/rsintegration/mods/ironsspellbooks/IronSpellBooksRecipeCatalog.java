@@ -89,6 +89,12 @@ public final class IronSpellBooksRecipeCatalog {
         }
     }
 
+    /** Detects spell-config changes applied after the dynamic catalog was built. */
+    public static boolean hasRuntimeDrift() {
+        Catalog cached = catalog;
+        return cached != null && cached.runtimeFingerprint() != runtimeFingerprint();
+    }
+
     private static Catalog catalog() {
         Catalog cached = catalog;
         if (cached != null) return cached;
@@ -108,7 +114,8 @@ public final class IronSpellBooksRecipeCatalog {
             ItemStack output = recipe.getResultItem(net.minecraft.core.RegistryAccess.EMPTY);
             if (!output.isEmpty()) byOutput.putIfAbsent(OutputKey.of(recipe.machine(), output), recipe);
         }
-        return new Catalog(Collections.unmodifiableMap(result), Map.copyOf(byOutput));
+        return new Catalog(Collections.unmodifiableMap(result), Map.copyOf(byOutput),
+                runtimeFingerprint());
     }
 
     private static void addScrollForgeRecipes(Map<ResourceLocation, IronSpellBooksRecipe> result,
@@ -251,6 +258,42 @@ public final class IronSpellBooksRecipeCatalog {
         return result;
     }
 
+    private static long runtimeFingerprint() {
+        List<AbstractSpell> spells = new ArrayList<>(SpellRegistry.getEnabledSpells());
+        spells.sort(java.util.Comparator.comparing(spell -> spell.getSpellResource().toString()));
+        List<InkItem> inks = findInks();
+        inks.sort(java.util.Comparator.comparing(ink -> {
+            ResourceLocation id = ForgeRegistries.ITEMS.getKey(ink);
+            return id == null ? "" : id.toString();
+        }));
+        long hash = 0xcbf29ce484222325L;
+        for (AbstractSpell spell : spells) {
+            hash = fingerprint(hash, spell.getSpellId());
+            hash = fingerprint(hash, spell.allowCrafting() ? 1 : 0);
+            hash = fingerprint(hash, spell.getMinLevel());
+            hash = fingerprint(hash, spell.getMaxLevel());
+            for (InkItem ink : inks) {
+                ResourceLocation inkId = ForgeRegistries.ITEMS.getKey(ink);
+                hash = fingerprint(hash, inkId == null ? "" : inkId.toString());
+                hash = fingerprint(hash, spell.getMinLevelForRarity(ink.getRarity()));
+            }
+        }
+        return hash;
+    }
+
+    private static long fingerprint(long hash, String value) {
+        for (int i = 0; i < value.length(); i++) {
+            hash ^= value.charAt(i);
+            hash *= 0x100000001b3L;
+        }
+        return hash;
+    }
+
+    private static long fingerprint(long hash, int value) {
+        hash ^= value;
+        return hash * 0x100000001b3L;
+    }
+
     private static ResourceLocation id(String kind, ResourceLocation spell, int level,
                                        @Nullable ResourceLocation material) {
         String path = "irons_spellbooks/" + kind + "/" + spell.getNamespace() + "/"
@@ -260,7 +303,8 @@ public final class IronSpellBooksRecipeCatalog {
     }
 
     private record Catalog(Map<ResourceLocation, IronSpellBooksRecipe> byId,
-                           Map<OutputKey, IronSpellBooksRecipe> byOutput) {}
+                           Map<OutputKey, IronSpellBooksRecipe> byOutput,
+                           long runtimeFingerprint) {}
 
     private record OutputKey(IronSpellBooksRecipe.Machine machine, ResourceLocation itemId,
                              @Nullable net.minecraft.nbt.CompoundTag tag) {

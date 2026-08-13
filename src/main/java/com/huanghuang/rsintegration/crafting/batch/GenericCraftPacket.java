@@ -440,6 +440,7 @@ public final class GenericCraftPacket {
         context.enqueueWork(() -> {
             Consumer<ServerPlayer> action = readyPlayer ->
                     executeRequest(readyPlayer, packet, previewGeneration);
+            RecipeIndex.refreshDynamicRuntimeIfNeeded(player.serverLevel());
             if (warmUpReady(player.serverLevel())) {
                 action.accept(player);
                 return;

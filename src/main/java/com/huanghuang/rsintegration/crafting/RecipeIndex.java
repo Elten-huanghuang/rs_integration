@@ -82,11 +82,30 @@ public final class RecipeIndex {
         return generationBuildFailed;
     }
 
+    /** Rebuilds once when late spell-config synchronization changes ink mappings. */
+    public static void refreshDynamicRuntimeIfNeeded(Level level) {
+        if (!net.minecraftforge.fml.ModList.get().isLoaded(ModIds.IRONS_SPELLBOOKS)
+                || !IronSpellBooksRecipeCatalog.hasRuntimeDrift()) return;
+        RSIntegrationMod.LOGGER.info(
+                "[RecipeCatalog] Iron spell configuration changed; rebuilding dynamic recipes");
+        CraftPlanningRevision.bump();
+        invalidate();
+        warmUp(level);
+    }
+
     /** Retained for integrations compiled against the original eager entry point. */
     public static void warmUp(Level level) {
         long start = System.currentTimeMillis();
         generationBuildFailed = false;
         try {
+            // In an integrated client the render thread may build this dynamic
+            // catalog for JEI before the server has applied its spell configs.
+            // A complete server generation must always start from the server's
+            // final rarity/level mappings instead of reusing that client cache.
+            if (!isReady(level)
+                    && net.minecraftforge.fml.ModList.get().isLoaded(ModIds.IRONS_SPELLBOOKS)) {
+                IronSpellBooksRecipeCatalog.invalidate();
+            }
             buildSynchronously(level);
             RSIntegrationMod.LOGGER.info("[RecipeCatalog] generation ready in {}ms",
                     System.currentTimeMillis() - start);

@@ -110,6 +110,7 @@ public final class RSSidePanelClient {
         networkAvailable = false;
         networkName = "";
         SyncHandler.clearOnLogout();
+        com.huanghuang.rsintegration.sidepanel.data.BindingCache.getInstance().clear();
         com.huanghuang.rsintegration.sidepanel.data.MachineStatusCache.getInstance().clear();
         com.huanghuang.rsintegration.config.ClientSyncedConfig.reset();
     }

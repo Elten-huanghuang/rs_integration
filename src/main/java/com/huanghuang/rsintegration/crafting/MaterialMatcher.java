@@ -47,7 +47,15 @@ public final class MaterialMatcher {
     public static boolean matchesOutputDeclaration(MaterialKey declared, ItemStack stack) {
         Objects.requireNonNull(declared, "declared");
         if (stack == null || stack.isEmpty() || stack.getItem() != declared.item()) return false;
-        return declared.tag() == null || matchesExact(declared, stack);
+        if (declared.tag() == null || matchesExact(declared, stack)) return true;
+        ResourceLocation itemId = BuiltInRegistries.ITEM.getKey(stack.getItem());
+        if (!new ResourceLocation("irons_spellbooks", "scroll").equals(itemId)) return false;
+        try {
+            return com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRecipeCatalog
+                    .sameSpellScroll(declared.toStack(1), stack);
+        } catch (LinkageError ignored) {
+            return false;
+        }
     }
 
     /**
