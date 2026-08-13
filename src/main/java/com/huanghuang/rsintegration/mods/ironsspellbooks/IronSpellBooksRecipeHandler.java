@@ -6,7 +6,6 @@ import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Recipe;
-import net.minecraftforge.common.crafting.StrictNBTIngredient;
 
 import java.util.List;
 
@@ -18,8 +17,14 @@ public final class IronSpellBooksRecipeHandler implements ModRecipeHandler {
         return recipe.getResultItem(access).copy();
     }
     @Override public List<IngredientSpec> getIngredients(Recipe<?> recipe) {
-        return ((IronSpellBooksRecipe) recipe).inputs().stream()
-                .map(stack -> new IngredientSpec(StrictNBTIngredient.of(stack), stack.getCount()))
-                .toList();
+        IronSpellBooksRecipe ironRecipe = (IronSpellBooksRecipe) recipe;
+        List<ItemStack> displays = ironRecipe.inputs();
+        List<net.minecraft.world.item.crafting.Ingredient> ingredients =
+                ironRecipe.inputIngredients();
+        java.util.ArrayList<IngredientSpec> result = new java.util.ArrayList<>(ingredients.size());
+        for (int i = 0; i < ingredients.size(); i++) {
+            result.add(new IngredientSpec(ingredients.get(i), displays.get(i).getCount()));
+        }
+        return List.copyOf(result);
     }
 }

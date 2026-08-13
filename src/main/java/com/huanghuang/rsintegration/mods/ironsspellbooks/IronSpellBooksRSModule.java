@@ -38,7 +38,9 @@ public final class IronSpellBooksRSModule implements IModIntegration {
                 "gui.rs_integration.jei.irons_spellbooks_scroll_forge");
         ModType.configureJei(ARCANE_ANVIL_TYPE,
                 new String[][]{{"irons_spellbooks:arcane_anvil", ARCANE_ANVIL_TYPE}},
-                new String[][]{{"io.redspace.ironsspellbooks.jei.ArcaneAnvilRecipe", ARCANE_ANVIL_TYPE}},
+                new String[][]{
+                        {"io.redspace.ironsspellbooks.jei.ArcaneAnvilRecipe", ARCANE_ANVIL_TYPE},
+                        {"io.redspace.ironsspellbooks.jei.ArcaneAnvilJeiRecipe", ARCANE_ANVIL_TYPE}},
                 "gui.rs_integration.jei.irons_spellbooks_arcane_anvil");
     }
 
