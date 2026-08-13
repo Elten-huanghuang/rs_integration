@@ -558,6 +558,10 @@ public final class RSIntegrationMod {
             if (e.getEntity() instanceof ServerPlayer sp) {
                 NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> sp),
                         ConfigSyncPacket.fromServerConfig());
+                com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler
+                        .sendBindingSync(sp);
+                sp.server.execute(() -> com.huanghuang.rsintegration.crafting.RecipeIndex
+                        .refreshDynamicRuntimeIfNeeded(sp.server.overworld()));
             }
         });
         MinecraftForge.EVENT_BUS.addListener((PlayerEvent.PlayerLoggedOutEvent e) -> {

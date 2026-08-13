@@ -35,6 +35,15 @@ class MaterialMatcherTest extends BootstrapTest {
                 new MaterialKey(Items.DIAMOND, null), second));
     }
 
+    @Test
+    void nonSpellOutputsRemainStrictWhenTheirDeclaredNbtDiffers() {
+        ItemStack declared = tagged("declared");
+        ItemStack actual = tagged("actual");
+
+        assertFalse(MaterialMatcher.matchesOutputDeclaration(
+                MaterialKey.of(declared), actual));
+    }
+
     private static ItemStack tagged(String value) {
         ItemStack stack = new ItemStack(Items.DIAMOND);
         CompoundTag tag = new CompoundTag();
