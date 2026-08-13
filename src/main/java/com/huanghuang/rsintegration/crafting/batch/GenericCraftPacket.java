@@ -2181,6 +2181,11 @@ public final class GenericCraftPacket {
                                 PerformanceMonitor.recordTypedPreviewRejected(queue.size());
                                 sink.error(Component.translatable(
                                         "rsi.plan.failure.planner_busy"));
+                            }, failure -> {
+                                RSIntegrationMod.LOGGER.error(
+                                        "[RSI-plan] Deferred typed preview failed for {}",
+                                        recipeId, failure);
+                                sink.error(buildFailureMessage(failure, recipeId));
                             }));
             if (queued == TypedPreviewAdmissionQueue.OfferResult.FULL) {
                 PerformanceMonitor.recordTypedPreviewRejected(queue.size());
@@ -2246,6 +2251,11 @@ public final class GenericCraftPacket {
             } catch (CraftingPlanningTimeoutException timeout) {
                 PerformanceMonitor.recordResolveTimeout();
                 sink.error(Component.translatable("rsi.plan.failure.time_limit"));
+                return;
+            } catch (RuntimeException | LinkageError failure) {
+                RSIntegrationMod.LOGGER.error(
+                        "[RSI-plan] Typed resolver failed for {}", recipeId, failure);
+                sink.error(buildFailureMessage(failure, recipeId));
                 return;
             } finally {
                 PerformanceMonitor.recordTypedResolver(System.nanoTime() - typedResolverStarted);

@@ -18,6 +18,8 @@ import java.util.Objects;
 public final class IngredientMatcher {
     private static final ResourceLocation EARTH_HEART =
             new ResourceLocation("enigmaticlegacy", "earth_heart");
+    private static final ResourceLocation IRON_SPELL_SCROLL =
+            new ResourceLocation("irons_spellbooks", "scroll");
 
     private IngredientMatcher() {}
 
@@ -39,6 +41,7 @@ public final class IngredientMatcher {
     public static boolean test(Ingredient ingredient, ItemStack actual) {
         for (ItemStack template : ingredient.getItems()) {
             if (matchesWaterBottleIgnoringPurity(template, actual)) return true;
+            if (matchesSpellScrollSemantics(template, actual)) return true;
         }
         if (ingredient.test(actual)) return true;
         if (actual.isEmpty() || !EARTH_HEART.equals(ForgeRegistries.ITEMS.getKey(actual.getItem()))) {
@@ -57,6 +60,20 @@ public final class IngredientMatcher {
             }
         }
         return false;
+    }
+
+    /** Iron 3.15 rewrote scroll-container NBT while retaining spell identity. */
+    private static boolean matchesSpellScrollSemantics(ItemStack expected, ItemStack actual) {
+        if (expected == null || actual == null || expected.isEmpty() || actual.isEmpty()
+                || expected.getItem() != actual.getItem()) return false;
+        ResourceLocation itemId = ForgeRegistries.ITEMS.getKey(expected.getItem());
+        if (!IRON_SPELL_SCROLL.equals(itemId)) return false;
+        try {
+            return com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRecipeCatalog
+                    .sameSpellScroll(expected, actual);
+        } catch (RuntimeException | LinkageError ignored) {
+            return false;
+        }
     }
 
     /**

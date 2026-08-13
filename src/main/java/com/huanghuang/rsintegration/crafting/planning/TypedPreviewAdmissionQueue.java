@@ -5,16 +5,18 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.function.Consumer;
 import java.util.function.Predicate;
 
 /** Fair server-thread admission queue that retains only the latest typed preview per player. */
 public final class TypedPreviewAdmissionQueue {
     public record Request(UUID playerId, long generation, long queuedNanos,
-                          Runnable task, Runnable expired) {
+                          Runnable task, Runnable expired, Consumer<Throwable> failed) {
         public Request {
             Objects.requireNonNull(playerId, "playerId");
             Objects.requireNonNull(task, "task");
             Objects.requireNonNull(expired, "expired");
+            Objects.requireNonNull(failed, "failed");
         }
     }
 
@@ -61,6 +63,12 @@ public final class TypedPreviewAdmissionQueue {
             }
             try {
                 request.task().run();
+            } catch (RuntimeException | LinkageError failure) {
+                try {
+                    request.failed().accept(failure);
+                } catch (RuntimeException | LinkageError ignored) {
+                    // A reporting failure must not escape into the server tick.
+                }
             } finally {
                 synchronized (this) {
                     admitted = null;
