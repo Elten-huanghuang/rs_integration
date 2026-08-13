@@ -55,7 +55,9 @@ public final class IronSpellBooksBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override public boolean acceptsMachineWithoutBlockEntity(@Nonnull ServerLevel level, @Nonnull BlockPos pos) {
-        return recipe != null && isMachine(level, pos, recipe.machine());
+        if (recipe != null) return isMachine(level, pos, recipe.machine());
+        return isMachine(level, pos, IronSpellBooksRecipe.Machine.SCROLL_FORGE)
+                || isMachine(level, pos, IronSpellBooksRecipe.Machine.ARCANE_ANVIL);
     }
 
     @Override public List<IngredientSpec> getRequiredMaterials() {

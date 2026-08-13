@@ -64,9 +64,21 @@ public final class PlanTreeModel {
         }
 
         ItemStack target = plan.targetResult();
+        PlanStep targetStep = null;
+        if (plan.recipeId() != null) {
+            for (PlanStep step : plan.steps()) {
+                if (plan.recipeId().equals(step.recipeId().toString())) {
+                    targetStep = step;
+                    break;
+                }
+            }
+        }
         PlanTreeNode root = new PlanTreeNode(
                 IngredientKey.of(target), target,
-                target.getCount() * Math.max(1, plan.repeatCount()), 0, null);
+                target.getCount() * Math.max(1, plan.repeatCount()), 0, targetStep);
+        if (targetStep != null) {
+            root.limited = targetStep.alternatives().size() > maxTreeCandidates();
+        }
         PlanResponse.Availability rootAvail = plan.availability(target);
         if (rootAvail != null) {
             root.available = rootAvail.available();
