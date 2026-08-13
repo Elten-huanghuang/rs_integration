@@ -60,7 +60,7 @@ public final class MachineHubInputHandler {
                 && screen != null
                 && screen.hasControlDown()) {
             if (MachineTabHandler.onUnbind(info)) {
-                MachineHub.hide();
+                MachineHub.removeMachine(info);
             }
             return true;
         }

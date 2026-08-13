@@ -223,14 +223,41 @@ public final class MachineHub {
         INSTANCE.animProgress = 0.001f;
     }
 
-    /** Refresh machine list from BindingCache without animation. */
+    /**
+     * Refresh machine list from BindingCache without animation.
+     *
+     * <p>The server sends a full binding sync immediately after bind/unbind.
+     * That packet can arrive while the hub is animating closed (the unbind
+     * action starts that animation before the packet round-trip completes), so
+     * this method must not discard refreshes based on the current animation
+     * state. Otherwise the overlay renders stale entries until it is opened
+     * again.</p>
+     */
     public static void refreshMachines() {
-        if (INSTANCE.state != State.VISIBLE && INSTANCE.state != State.HIDDEN) return;
         INSTANCE.machines.clear();
         INSTANCE.machines.addAll(MachineTabHandler.getAllMachines());
         INSTANCE.refilter();
-        if (INSTANCE.machines.isEmpty() && INSTANCE.state == State.VISIBLE) {
-            hide();
+        if (INSTANCE.machines.isEmpty() && INSTANCE.state != State.HIDDEN) {
+            // There is no valid hub content left. Clear it now so the side
+            // button and overlay stop rendering the removed machine during a
+            // close animation.
+            hideImmediate();
+        }
+    }
+
+    /**
+     * Optimistically remove an entry after the client sends an unbind request.
+     * The authoritative full sync sent by the server will either confirm this
+     * state or restore the entry when the request is rejected.
+     */
+    public static void removeMachine(BindingInfo removed) {
+        if (removed == null) return;
+        INSTANCE.machines.removeIf(info -> info != null
+                && info.dim().equals(removed.dim())
+                && info.pos().equals(removed.pos()));
+        INSTANCE.refilter();
+        if (INSTANCE.machines.isEmpty()) {
+            hideImmediate();
         }
     }
 
