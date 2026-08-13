@@ -80,12 +80,18 @@ public final class NearbyBindingService {
         ItemStack offhand = player.getOffhandItem();
         if (NetworkItem.isValid(offhand)) return offhand;
 
-        List<ItemStack> curios = new ArrayList<>();
-        for (ItemStack stack : CuriosAccess.stacks(player)) {
-            if (NetworkItem.isValid(stack)) curios.add(stack);
+        List<ItemStack> candidates = new ArrayList<>();
+        for (ItemStack stack : player.getInventory().items) {
+            if (NetworkItem.isValid(stack)) candidates.add(stack);
         }
-        if (curios.size() == 1) return curios.get(0);
-        player.displayClientMessage(Component.translatable(curios.isEmpty()
+        for (ItemStack stack : player.getInventory().armor) {
+            if (NetworkItem.isValid(stack)) candidates.add(stack);
+        }
+        for (ItemStack stack : CuriosAccess.stacks(player)) {
+            if (NetworkItem.isValid(stack)) candidates.add(stack);
+        }
+        if (candidates.size() == 1) return candidates.get(0);
+        player.displayClientMessage(Component.translatable(candidates.isEmpty()
                 ? "rsi.binding.nearby.no_connector"
                 : "rsi.binding.nearby.multiple_connectors"), true);
         return null;
@@ -205,6 +211,12 @@ public final class NearbyBindingService {
         private boolean connectorStillCarried() {
             if (player.serverLevel() != level) return false;
             if (player.getMainHandItem() == connector || player.getOffhandItem() == connector) return true;
+            for (ItemStack stack : player.getInventory().items) {
+                if (stack == connector) return true;
+            }
+            for (ItemStack stack : player.getInventory().armor) {
+                if (stack == connector) return true;
+            }
             for (ItemStack curio : CuriosAccess.stacks(player)) {
                 if (curio == connector) return true;
             }
