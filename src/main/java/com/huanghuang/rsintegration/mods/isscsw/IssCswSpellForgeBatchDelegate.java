@@ -8,4 +8,10 @@ public final class IssCswSpellForgeBatchDelegate extends ReflectiveMenuBatchDele
                 "org.xszb.interlace_spellweaves.gui.spell_forge.SpellForgeMenu",
                 "iss_csw:spell_forge", 3, 3, true);
     }
+
+    /** SpellForgeMenu builds its recipe container as slot1, slot0, slot2. */
+    @Override
+    protected int menuInputSlotIndex(int recipeInputIndex) {
+        return recipeInputIndex == 0 ? 1 : recipeInputIndex == 1 ? 0 : recipeInputIndex;
+    }
 }

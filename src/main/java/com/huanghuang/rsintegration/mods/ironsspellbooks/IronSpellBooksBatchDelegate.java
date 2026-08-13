@@ -5,11 +5,13 @@ import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
+import com.huanghuang.rsintegration.RSIntegrationMod;
 import io.redspace.ironsspellbooks.api.registry.SpellRegistry;
+import io.redspace.ironsspellbooks.api.spells.AbstractSpell;
+import io.redspace.ironsspellbooks.item.InkItem;
 import io.redspace.ironsspellbooks.gui.arcane_anvil.ArcaneAnvilMenu;
 import io.redspace.ironsspellbooks.gui.scroll_forge.ScrollForgeMenu;
 import net.minecraft.core.BlockPos;
-import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -125,20 +127,33 @@ public final class IronSpellBooksBatchDelegate extends AbstractBatchDelegate {
             forge.getBlankScrollSlot().set(materials.get(1).copyWithCount(1));
             forge.getFocusSlot().set(materials.get(2).copyWithCount(1));
             var spell = SpellRegistry.getSpell(new ResourceLocation(recipe.spellId()));
-            if (spell == null) { clearMenu(); return false; }
+            if (spell == null || spell == SpellRegistry.none()) {
+                return fail("spell is not registered", ItemStack.EMPTY, materials);
+            }
             forge.setRecipeSpell(spell);
             ItemStack displayed = forge.getResultSlot().getItem().copy();
-            if (!sameExpectedOutput(displayed)) { clearMenu(); return false; }
-            Slot resultSlot = forge.getResultSlot();
-            result = resultSlot.remove(displayed.getCount());
-            resultSlot.onTake(player, result);
+            if (sameExpectedOutput(displayed)) {
+                Slot resultSlot = forge.getResultSlot();
+                result = resultSlot.remove(displayed.getCount());
+                resultSlot.onTake(player, result);
+            } else if (validDeterministicScrollForgeInputs(spell, materials)) {
+                RSIntegrationMod.LOGGER.info(
+                        "[RSI-IronSpells] Native Scroll Forge menu returned {} for {}; "
+                                + "using validated deterministic output {}",
+                        displayed, recipe.getId(), expected);
+                result = expected.copy();
+            } else {
+                return fail("native Scroll Forge output mismatch", displayed, materials);
+            }
         } else {
             ArcaneAnvilMenu anvil = (ArcaneAnvilMenu) created;
             anvil.getSlot(0).set(materials.get(0).copyWithCount(1));
             anvil.getSlot(1).set(materials.get(1).copyWithCount(1));
             anvil.slotsChanged(anvil.getSlot(0).container);
             ItemStack displayed = anvil.getSlot(2).getItem().copy();
-            if (!sameExpectedOutput(displayed)) { clearMenu(); return false; }
+            if (!sameExpectedOutput(displayed)) {
+                return fail("Arcane Anvil output mismatch", displayed, materials);
+            }
             Slot resultSlot = anvil.getSlot(2);
             result = resultSlot.remove(displayed.getCount());
             resultSlot.onTake(player, result);
@@ -151,6 +166,28 @@ public final class IronSpellBooksBatchDelegate extends AbstractBatchDelegate {
     private boolean sameExpectedOutput(ItemStack displayed) {
         return ItemStack.isSameItemSameTags(displayed, expected)
                 || IronSpellBooksRecipeCatalog.sameSpellScroll(displayed, expected);
+    }
+
+    private boolean validDeterministicScrollForgeInputs(AbstractSpell spell,
+                                                         List<ItemStack> materials) {
+        if (materials.size() != 3 || !(materials.get(0).getItem() instanceof InkItem ink)) {
+            return false;
+        }
+        int producedLevel = spell.getMinLevelForRarity(ink.getRarity());
+        ItemStack deterministic = IronSpellBooksRecipeCatalog.scrollFor(spell, producedLevel);
+        return producedLevel > 0
+                && spell.allowCrafting()
+                && spell.getSchoolType().isFocus(materials.get(2))
+                && sameExpectedOutput(deterministic);
+    }
+
+    private boolean fail(String reason, ItemStack displayed, List<ItemStack> materials) {
+        RSIntegrationMod.LOGGER.warn(
+                "[RSI-IronSpells] {} for {} at {}: expected={}, displayed={}, materials={}",
+                reason, recipe == null ? "unknown" : recipe.getId(), pos, expected, displayed,
+                materials);
+        clearMenu();
+        return false;
     }
 
     @Override protected boolean isMachineCraftFinished(@Nonnull ServerLevel level, @Nonnull BlockEntity be) { return done; }
