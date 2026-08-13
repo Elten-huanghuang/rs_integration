@@ -53,6 +53,18 @@ public final class MachineHubInputHandler {
 
         BindingInfo info = MachineHub.getMachines().get(idx);
 
+        // Shift already means collect-to-RS / fuel insertion in this UI.
+        // Control-click is therefore reserved for the destructive unbind action.
+        var screen = Minecraft.getInstance().screen;
+        if (button == GLFW.GLFW_MOUSE_BUTTON_LEFT
+                && screen != null
+                && screen.hasControlDown()) {
+            if (MachineTabHandler.onUnbind(info)) {
+                MachineHub.hide();
+            }
+            return true;
+        }
+
         // Right-click always opens GUI
         if (button == GLFW.GLFW_MOUSE_BUTTON_RIGHT) {
             MachineTabHandler.onClick(info);
@@ -71,7 +83,6 @@ public final class MachineHubInputHandler {
             }
 
             // Quick type: differentiate by cursor + state
-            var screen = Minecraft.getInstance().screen;
             boolean shift = screen != null && screen.hasShiftDown();
             Minecraft mc = Minecraft.getInstance();
             ItemStack carried = mc.player != null
