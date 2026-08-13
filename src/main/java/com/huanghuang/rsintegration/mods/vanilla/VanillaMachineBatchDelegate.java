@@ -495,7 +495,8 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
                 candidates, RSIntegrationConfig.VANILLA_FURNACE_FUEL_PRIORITY.get(),
                 remainingCook,
                 stack -> BrickFurnaceCompat.effectiveBurnTicks(furnaceBE, stack, fuelRecipeType()));
-        return selection != null && supplyFuel(player, selection.fuel(), selection.amount());
+        return selection != null && !selection.partial()
+                && supplyFuel(player, selection.fuel(), selection.amount());
     }
 
     private RecipeType<?> fuelRecipeType() {

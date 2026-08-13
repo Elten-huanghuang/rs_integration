@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.mods.ironsspellbooks;
 import io.redspace.ironsspellbooks.api.registry.SpellRegistry;
 import io.redspace.ironsspellbooks.api.spells.AbstractSpell;
 import io.redspace.ironsspellbooks.api.spells.ISpellContainer;
+import io.redspace.ironsspellbooks.api.spells.SpellData;
 import io.redspace.ironsspellbooks.item.InkItem;
 import io.redspace.ironsspellbooks.jei.ArcaneAnvilRecipe;
 import io.redspace.ironsspellbooks.registries.ItemRegistry;
@@ -43,6 +44,24 @@ public final class IronSpellBooksRecipeCatalog {
                                                         ItemStack target) {
         if (target == null || target.isEmpty()) return null;
         return catalog().byOutput().get(OutputKey.of(machine, target));
+    }
+
+    /** Compares single-spell scrolls by their game semantics, not NBT numeric tag types. */
+    public static boolean sameSpellScroll(ItemStack left, ItemStack right) {
+        if (left == null || right == null || left.isEmpty() || right.isEmpty()
+                || left.getItem() != ItemRegistry.SCROLL.get()
+                || right.getItem() != ItemRegistry.SCROLL.get()) return false;
+        try {
+            List<SpellData> leftSpells = ISpellContainer.get(left).getActiveSpells();
+            List<SpellData> rightSpells = ISpellContainer.get(right).getActiveSpells();
+            if (leftSpells.size() != 1 || rightSpells.size() != 1) return false;
+            SpellData leftSpell = leftSpells.get(0);
+            SpellData rightSpell = rightSpells.get(0);
+            return leftSpell.getSpell().getSpellId().equals(rightSpell.getSpell().getSpellId())
+                    && leftSpell.getLevel() == rightSpell.getLevel();
+        } catch (RuntimeException ignored) {
+            return false;
+        }
     }
 
     public static void invalidate() {

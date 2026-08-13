@@ -27,11 +27,93 @@ class IronFurnacesCompatibilityTest extends BootstrapTest {
     }
 
     @Test
+    void factoryBatchUsesFiveLanesForFiveOperations() {
+        var lanes = IronFurnacesBatchDelegate.splitFactoryMaterials(
+                java.util.List.of(new ItemStack(Items.CLAY_BALL, 5)));
+
+        assertEquals(5, lanes.size());
+        assertTrue(lanes.stream().allMatch(stack -> stack.is(Items.CLAY_BALL)
+                && stack.getCount() == 1));
+    }
+
+    @Test
+    void rainbowFactoryBatchFillsSixFullLanes() {
+        var lanes = IronFurnacesBatchDelegate.splitFactoryMaterials(
+                java.util.List.of(
+                        new ItemStack(Items.CLAY_BALL, 64),
+                        new ItemStack(Items.CLAY_BALL, 64),
+                        new ItemStack(Items.CLAY_BALL, 64),
+                        new ItemStack(Items.CLAY_BALL, 64),
+                        new ItemStack(Items.CLAY_BALL, 64),
+                        new ItemStack(Items.CLAY_BALL, 64)), 64);
+
+        assertEquals(6, lanes.size());
+        assertTrue(lanes.stream().allMatch(stack -> stack.is(Items.CLAY_BALL)
+                && stack.getCount() == 64));
+        assertEquals(6, IronFurnacesBatchDelegate.requiredFactoryLanes(384, 64));
+        assertEquals(2, IronFurnacesBatchDelegate.requiredFactoryLanes(65, 64));
+        assertEquals(384, IronFurnacesBatchDelegate.plannedBatchSize(true, true, 400, 64));
+        assertEquals(6, IronFurnacesBatchDelegate.plannedBatchSize(true, false, 400, 64));
+        assertEquals(64, IronFurnacesBatchDelegate.plannedBatchSize(false, true, 400, 64));
+    }
+
+    @Test
+    void rainbowFactoryBatchUsesFullLaneBeforeRemainderLane() {
+        var lanes = IronFurnacesBatchDelegate.splitFactoryMaterials(
+                java.util.List.of(new ItemStack(Items.CLAY_BALL, 65)), 64);
+
+        assertEquals(2, lanes.size());
+        assertEquals(64, lanes.get(0).getCount());
+        assertEquals(1, lanes.get(1).getCount());
+    }
+
+    @Test
+    void oversizedRainbowBatchesSplitByPhysicalMachineCapacity() {
+        assertEquals(java.util.List.of(64, 1),
+                IronFurnacesBatchDelegate.physicalBatchSizes(65, 64));
+        assertEquals(java.util.List.of(384, 1),
+                IronFurnacesBatchDelegate.physicalBatchSizes(385, 384));
+        assertEquals(2, IronFurnacesBatchDelegate.physicalCycleCount(65, 64));
+        assertEquals(2, IronFurnacesBatchDelegate.physicalCycleCount(385, 384));
+    }
+
+    @Test
+    void rainbowBatchMergesAFullStackForOneSmeltCycle() {
+        ItemStack merged = IronFurnacesBatchDelegate.mergeBatchMaterials(
+                java.util.List.of(new ItemStack(Items.CLAY_BALL, 32),
+                        new ItemStack(Items.CLAY_BALL, 32)), 64);
+
+        assertTrue(merged.is(Items.CLAY_BALL));
+        assertEquals(64, merged.getCount());
+        assertTrue(IronFurnacesBatchDelegate.mergeBatchMaterials(
+                java.util.List.of(new ItemStack(Items.CLAY_BALL, 64),
+                        new ItemStack(Items.CLAY_BALL, 1)), 64).isEmpty());
+    }
+
+    @Test
     void factoryBatchRejectsInvalidLaneCounts() {
         assertTrue(IronFurnacesBatchDelegate.splitFactoryMaterials(
                 java.util.List.of(ItemStack.EMPTY)).isEmpty());
         assertTrue(IronFurnacesBatchDelegate.splitFactoryMaterials(
                 java.util.List.of(new ItemStack(Items.IRON_ORE, 7))).isEmpty());
+        assertTrue(IronFurnacesBatchDelegate.splitFactoryMaterials(
+                java.util.List.of(new ItemStack(Items.IRON_ORE, 64),
+                        new ItemStack(Items.IRON_ORE, 64),
+                        new ItemStack(Items.IRON_ORE, 64),
+                        new ItemStack(Items.IRON_ORE, 64),
+                        new ItemStack(Items.IRON_ORE, 64),
+                        new ItemStack(Items.IRON_ORE, 64),
+                        new ItemStack(Items.IRON_ORE, 1)), 64).isEmpty());
+    }
+
+    @Test
+    void rainbowFuelUsesIronFurnacesScaledBurnTicks() {
+        assertEquals(320, IronFurnacesBatchDelegate.effectiveFuelTicks(1600, 40, 1, 1));
+        assertEquals(640, IronFurnacesBatchDelegate.effectiveFuelTicks(1600, 40, 2, 1));
+        assertEquals(160, IronFurnacesBatchDelegate.effectiveFuelTicks(1600, 40, 1, 2));
+        assertEquals(0, IronFurnacesBatchDelegate.effectiveFuelTicks(100, 1, 1, 1));
+        assertEquals(80, IronFurnacesBatchDelegate.requiredFuelTicks(40, 2, 0));
+        assertEquals(30, IronFurnacesBatchDelegate.requiredFuelTicks(40, 2, 50));
     }
 
     @Test
