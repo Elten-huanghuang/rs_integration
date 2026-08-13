@@ -851,7 +851,8 @@ public final class AsyncCraftChain {
             }
 
             int idx = stepIndex(vanillaNode);
-            int executions = Math.max(1, steps.get(idx).executions());
+            CraftingResolver.ResolutionStep step = graphStep(vanillaNode);
+            int executions = Math.max(1, step.executions());
             if (!claimVanillaBudgetOrReleaseAdmission(
                     vanillaAllowance, graphAdmissions, admission, executions)) {
                 waitingForVanillaBudget = true;
@@ -885,7 +886,7 @@ public final class AsyncCraftChain {
             boolean executed;
             try {
                 executed = operation.tryStart(() -> executeVanillaStepsInline(
-                        List.of(steps.get(idx)), online, operationInventory, nodeLedger, false));
+                        List.of(step), online, operationInventory, nodeLedger, false));
             } catch (RuntimeException exception) {
                 RSIntegrationMod.LOGGER.error(ctx.format("Graph vanilla operation threw for {}"),
                         vanillaNode, exception);
@@ -940,7 +941,7 @@ public final class AsyncCraftChain {
         List<NodeId> ready = graphScheduler.claimReady(1);
         if (ready.isEmpty()) return null;
         NodeId candidate = ready.get(0);
-        CraftingResolver.ResolutionStep step = steps.get(stepIndex(candidate));
+        CraftingResolver.ResolutionStep step = graphStep(candidate);
         if (step.modType() == ModType.GENERIC
                 && !step.recipeId().equals(CraftingResolver.TAINT_EARTH_HEART_STEP)) {
             return candidate;
@@ -959,8 +960,7 @@ public final class AsyncCraftChain {
      * reach this oracle.
      */
     private boolean isNodeExclusive(NodeId nodeId) {
-        int idx = stepIndex(nodeId);
-        CraftingResolver.ResolutionStep step = steps.get(idx);
+        CraftingResolver.ResolutionStep step = graphStep(nodeId);
         if (step.recipeId().equals(CraftingResolver.TAINT_EARTH_HEART_STEP)) return true;
         IBatchDelegate probe = createStepDelegate(step);
         GraphConcurrencyPolicy.Decision decision = concurrencyDecision(step, probe);
@@ -1059,8 +1059,7 @@ public final class AsyncCraftChain {
             graphFailureDetails.put(nodeId, "Crafting plan is stale after recipe or matcher reload");
             return ConcurrentNodeExecutor.StartResult.failed();
         }
-        int idx = stepIndex(nodeId);
-        CraftingResolver.ResolutionStep step = steps.get(idx);
+        CraftingResolver.ResolutionStep step = graphStep(nodeId);
 
         // Earth Heart is synchronous and owns no machine/capture resources.
         if (step.recipeId().equals(CraftingResolver.TAINT_EARTH_HEART_STEP)) {
@@ -1981,6 +1980,12 @@ public final class AsyncCraftChain {
             if (graph.topologicalOrder().get(i).equals(nodeId)) return i;
         }
         throw new IllegalArgumentException("Unknown graph node " + nodeId);
+    }
+
+    private CraftingResolver.ResolutionStep graphStep(NodeId nodeId) {
+        CraftNode node = graphNodes.get(nodeId);
+        if (node == null) throw new IllegalArgumentException("Unknown graph node " + nodeId);
+        return ExecutionEquivalence.projectStep(node);
     }
 
     public boolean isDone() { return state == State.COMPLETED || state == State.ABORTED; }

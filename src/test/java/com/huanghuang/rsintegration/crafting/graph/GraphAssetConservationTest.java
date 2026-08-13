@@ -51,6 +51,43 @@ class GraphAssetConservationTest extends BootstrapTest {
         assertEquals(runScenario(1), runScenario(2));
     }
 
+    @Test
+    void branchedProducerAssetsRemainReservableAndRecoverable() {
+        MaterialBroker broker = new MaterialBroker();
+        NodeId boardsNode = new NodeId(1);
+        NodeId slabNode = new NodeId(0);
+        NodeId terminalNode = new NodeId(2);
+        MaterialSource boardsSource = new MaterialSource.ProducerOutput(
+                new OutputPortId(boardsNode, 0));
+        MaterialSource slabSource = new MaterialSource.ProducerOutput(
+                new OutputPortId(slabNode, 0));
+        MaterialKey boards = MaterialKey.of(new ItemStack(Items.OAK_PLANKS));
+        MaterialKey slabs = MaterialKey.of(new ItemStack(Items.OAK_SLAB));
+
+        broker.publishActual(boardsSource, boards, new ItemStack(Items.OAK_PLANKS, 20));
+        MaterialBroker.ReservationToken slabInputs = broker.reserve(slabNode,
+                List.of(new MaterialBroker.Request(boardsSource, boards, 12)));
+        assertNotNull(slabInputs);
+        broker.commit(slabInputs);
+        broker.settle(slabInputs);
+        broker.publishActual(slabSource, slabs, new ItemStack(Items.OAK_SLAB, 24));
+
+        MaterialBroker.ReservationToken terminalInputs = broker.reserve(terminalNode, List.of(
+                new MaterialBroker.Request(slabSource, slabs, 24),
+                new MaterialBroker.Request(boardsSource, boards, 4)));
+        assertNotNull(terminalInputs);
+        broker.release(terminalInputs);
+
+        // Cancelling before the terminal craft returns every unconsumed
+        // intermediate exactly once: 24 slabs and 8 remaining boards.
+        List<ItemStack> recovered = broker.drainAvailableProducerAssets();
+        assertEquals(24, recovered.stream().filter(stack -> stack.is(Items.OAK_SLAB))
+                .mapToInt(ItemStack::getCount).sum());
+        assertEquals(8, recovered.stream().filter(stack -> stack.is(Items.OAK_PLANKS))
+                .mapToInt(ItemStack::getCount).sum());
+        assertTrue(broker.drainAvailableProducerAssets().isEmpty());
+    }
+
     private static Accounting runScenario(int cap) {
         MaterialBroker broker = new MaterialBroker();
         MaterialKey iron = MaterialKey.of(new ItemStack(Items.IRON_INGOT));

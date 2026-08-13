@@ -18,6 +18,7 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -48,6 +49,34 @@ class ExecutionEquivalenceTest extends BootstrapTest {
         CraftingResolver.ResolutionStep flat = new CraftingResolver.ResolutionStep(node.recipeId(),
                 ModType.GENERIC, node.recipeTypeId(), List.of(), List.of(), false, 3);
         assertTrue(ExecutionEquivalence.compare(graph, List.of(flat)).equivalent());
+    }
+
+    @Test
+    void projectsExecutionMetadataFromTheSelectedNodeRatherThanItsListPosition() {
+        CraftNode twoExecutions = new CraftNode(new NodeId(7),
+                new net.minecraft.resources.ResourceLocation("test", "two"),
+                ModType.GENERIC.id(), new net.minecraft.resources.ResourceLocation("minecraft", "crafting"),
+                2, List.of(), List.of(), false, null, null, List.of(), List.of());
+        CraftNode fourExecutions = new CraftNode(new NodeId(2),
+                new net.minecraft.resources.ResourceLocation("test", "four"),
+                ModType.GENERIC.id(), new net.minecraft.resources.ResourceLocation("minecraft", "crafting"),
+                4, List.of(new net.minecraft.resources.ResourceLocation("test", "alternative")),
+                List.of(ModType.GENERIC.id()), true,
+                new ItemStack(Items.IRON_INGOT), new ItemStack(Items.GOLD_INGOT),
+                List.of(), List.of());
+
+        // Mirrors a graph whose node ids and execution counts do not match a
+        // compatibility step list's positions.
+        List<CraftNode> compatibilityOrder = List.of(twoExecutions, fourExecutions);
+        CraftingResolver.ResolutionStep selected = ExecutionEquivalence.projectStep(
+                compatibilityOrder.get(1));
+
+        assertEquals(fourExecutions.recipeId(), selected.recipeId());
+        assertEquals(4, selected.executions());
+        assertEquals(fourExecutions.alternativeIds(), selected.alternativeIds());
+        assertTrue(selected.inferMode());
+        assertTrue(ItemStack.isSameItemSameTags(fourExecutions.syntheticInput(), selected.syntheticInput()));
+        assertTrue(ItemStack.isSameItemSameTags(fourExecutions.syntheticOutput(), selected.syntheticOutput()));
     }
 
     @Test
