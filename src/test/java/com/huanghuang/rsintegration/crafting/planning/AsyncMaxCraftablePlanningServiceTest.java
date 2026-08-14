@@ -51,7 +51,7 @@ class AsyncMaxCraftablePlanningServiceTest {
 
     @Test
     void reportsUnknownInsteadOfLoweringMaximumOnSearchLimit() {
-        MaterialRef base = material("base");
+        MaterialRef base = material("cobblestone");
         MaterialRef input = material("input");
         MaterialRef output = material("output");
         RecipeNode producer = recipe("producer", input, 1, ingredient(base, 1));
@@ -59,7 +59,8 @@ class AsyncMaxCraftablePlanningServiceTest {
         ImmutableRecipeGraph graph = new ImmutableRecipeGraph(Map.of(
                 input, List.of(producer), output, List.of(target)));
         PlanningSnapshot snapshot = new PlanningSnapshot(UUID.randomUUID(), 1L, 1L,
-                target.recipeId(), Map.of(), Map.of(), graph, "network", "bindings", false);
+                target.recipeId(), Map.of(new StackKey(Items.COBBLESTONE, null), 1), Map.of(),
+                graph, "network", "bindings", false);
 
         AsyncMaxCraftablePlanningService.CompletedSearch result =
                 AsyncMaxCraftablePlanningService.compute(snapshot, 1024, 100, 1, 0);

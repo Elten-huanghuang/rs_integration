@@ -11,7 +11,8 @@ final class TerminalGraphExecutionPolicy {
         INFER_MODE,
         DYNAMIC_INPUTS,
         UNKNOWN_OUTPUT,
-        NONDETERMINISTIC_OUTPUT
+        NONDETERMINISTIC_OUTPUT,
+        SELF_AMPLIFYING_INPUT
     }
 
     record Decision(boolean composable, Reason reason) {}
@@ -19,13 +20,16 @@ final class TerminalGraphExecutionPolicy {
     private TerminalGraphExecutionPolicy() {}
 
     static Decision decide(boolean inferMode, boolean hasStaticInputs, ItemStack output,
-                           boolean deterministicOutput) {
+                           boolean deterministicOutput, boolean selfAmplifying) {
         Objects.requireNonNull(output, "output");
         if (inferMode) return new Decision(false, Reason.INFER_MODE);
         if (!hasStaticInputs) return new Decision(false, Reason.DYNAMIC_INPUTS);
         if (output.isEmpty()) return new Decision(false, Reason.UNKNOWN_OUTPUT);
         if (!deterministicOutput) {
             return new Decision(false, Reason.NONDETERMINISTIC_OUTPUT);
+        }
+        if (selfAmplifying) {
+            return new Decision(false, Reason.SELF_AMPLIFYING_INPUT);
         }
         return new Decision(true, Reason.COMPOSABLE);
     }

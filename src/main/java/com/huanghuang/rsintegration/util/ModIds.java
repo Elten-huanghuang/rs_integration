@@ -66,6 +66,7 @@ public final class ModIds {
 
     // Youkai's Homecoming
     public static final String YOUKAISHOMECOMING = "youkaishomecoming";
+    public static final String YOUKAISFEASTS = "youkaisfeasts";
     public static final String ID_YHK_MOKA = "youkaishomecoming_moka";
     public static final String ID_YHK_STEAMER = "youkaishomecoming_steamer";
     public static final String ID_YHK_FERMENT = "youkaishomecoming_ferment";

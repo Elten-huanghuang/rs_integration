@@ -29,6 +29,11 @@ public final class YoukaisHomecomingRSModule implements IModIntegration {
     }
 
     @Override
+    public List<String> modIds() {
+        return YoukaiRegistryIds.MOD_IDS;
+    }
+
+    @Override
     public void registerModType() {
         // ── Moka Pot ──
         ModType.register("youkaishomecoming_moka",
@@ -48,7 +53,10 @@ public final class YoukaisHomecomingRSModule implements IModIntegration {
                 new String[]{"youkaishomecoming_ferment"},
                 ModType.delegateSupplier("com.huanghuang.rsintegration.mods.youkaishomecoming.ferment.FermentationTankBatchDelegate"));
         ModType.configureJei("youkaishomecoming_ferment",
-                new String[][]{{"youkaishomecoming:ferment", "youkaishomecoming_ferment"}},
+                new String[][]{
+                        {"youkaishomecoming:ferment", "youkaishomecoming_ferment"},
+                        {"youkaisfeasts:ferment", "youkaishomecoming_ferment"}
+                },
                 new String[][]{{"dev.xkmc.youkaishomecoming.content.pot.ferment.SimpleFermentationRecipe", "youkaishomecoming_ferment"}},
                 "gui.rs_integration.jei.yhk_ferment_craft");
 
@@ -59,7 +67,10 @@ public final class YoukaisHomecomingRSModule implements IModIntegration {
                 new String[]{"youkaishomecoming_steamer"},
                 ModType.delegateSupplier("com.huanghuang.rsintegration.mods.youkaishomecoming.steamer.SteamerBatchDelegate"));
         ModType.configureJei("youkaishomecoming_steamer",
-                new String[][]{{"youkaishomecoming:steaming"}},
+                new String[][]{
+                        {"youkaishomecoming:steaming", "youkaishomecoming_steamer"},
+                        {"youkaisfeasts:steaming", "youkaishomecoming_steamer"}
+                },
                 new String[][]{{"dev.xkmc.youkaishomecoming.content.pot.steamer.SteamingRecipe", "youkaishomecoming_steamer"}},
                 "gui.rs_integration.jei.yhk_steamer_craft");
 
@@ -70,7 +81,10 @@ public final class YoukaisHomecomingRSModule implements IModIntegration {
                 new String[]{"youkaishomecoming_kettle"},
                 ModType.delegateSupplier("com.huanghuang.rsintegration.mods.youkaishomecoming.kettle.KettleBatchDelegate"));
         ModType.configureJei("youkaishomecoming_kettle",
-                new String[][]{{"youkaishomecoming:kettle", "youkaishomecoming_kettle"}},
+                new String[][]{
+                        {"youkaishomecoming:kettle", "youkaishomecoming_kettle"},
+                        {"youkaisfeasts:kettle", "youkaishomecoming_kettle"}
+                },
                 new String[][]{{"dev.xkmc.youkaishomecoming.content.pot.kettle.KettleRecipe", "youkaishomecoming_kettle"}},
                 "gui.rs_integration.jei.yhk_kettle_craft");
 
@@ -85,7 +99,10 @@ public final class YoukaisHomecomingRSModule implements IModIntegration {
                 new String[]{"youkaishomecoming_cooking_small"},
                 ModType.delegateSupplier("com.huanghuang.rsintegration.mods.youkaishomecoming.cooking.SmallPotBatchDelegate"));
         ModType.configureJei("youkaishomecoming_cooking_small",
-                new String[][]{{"youkaishomecoming:pot_cooking", "youkaishomecoming_cooking_small"}},
+                new String[][]{
+                        {"youkaishomecoming:pot_cooking", "youkaishomecoming_cooking_small"},
+                        {"youkaisfeasts:bowl_cooking", "youkaishomecoming_cooking_small"}
+                },
                 new String[][]{{"dev.xkmc.youkaishomecoming.content.pot.cooking.", "youkaishomecoming_cooking_small"}},
                 "gui.rs_integration.jei.yhk_cooking_pot_craft");
 
@@ -95,7 +112,10 @@ public final class YoukaisHomecomingRSModule implements IModIntegration {
                 new String[]{"youkaishomecoming_cooking_short"},
                 ModType.delegateSupplier("com.huanghuang.rsintegration.mods.youkaishomecoming.cooking.ShortPotBatchDelegate"));
         ModType.configureJei("youkaishomecoming_cooking_short",
-                new String[][]{{"youkaishomecoming:pot_cooking", "youkaishomecoming_cooking_short"}},
+                new String[][]{
+                        {"youkaishomecoming:pot_cooking", "youkaishomecoming_cooking_short"},
+                        {"youkaisfeasts:pot_cooking", "youkaishomecoming_cooking_short"}
+                },
                 new String[][]{{"dev.xkmc.youkaishomecoming.content.pot.cooking.", "youkaishomecoming_cooking_short"}},
                 "gui.rs_integration.jei.yhk_cooking_pot_craft");
 
@@ -105,7 +125,10 @@ public final class YoukaisHomecomingRSModule implements IModIntegration {
                 new String[]{"youkaishomecoming_cooking_large"},
                 ModType.delegateSupplier("com.huanghuang.rsintegration.mods.youkaishomecoming.cooking.LargePotBatchDelegate"));
         ModType.configureJei("youkaishomecoming_cooking_large",
-                new String[][]{{"youkaishomecoming:pot_cooking", "youkaishomecoming_cooking_large"}},
+                new String[][]{
+                        {"youkaishomecoming:pot_cooking", "youkaishomecoming_cooking_large"},
+                        {"youkaisfeasts:stock_cooking", "youkaishomecoming_cooking_large"}
+                },
                 new String[][]{{"dev.xkmc.youkaishomecoming.content.pot.cooking.", "youkaishomecoming_cooking_large"}},
                 "gui.rs_integration.jei.yhk_cooking_pot_craft");
 
@@ -116,7 +139,10 @@ public final class YoukaisHomecomingRSModule implements IModIntegration {
                 new String[]{"youkaishomecoming_cuisine"},
                 ModType.delegateSupplier("com.huanghuang.rsintegration.mods.youkaishomecoming.cuisine.CuisineBoardBatchDelegate"));
         ModType.configureJei("youkaishomecoming_cuisine",
-                new String[][]{{"youkaishomecoming:cuisine", "youkaishomecoming_cuisine"}},
+                new String[][]{
+                        {"youkaishomecoming:cuisine", "youkaishomecoming_cuisine"},
+                        {"youkaisfeasts:cuisine", "youkaishomecoming_cuisine"}
+                },
                 new String[][]{{"dev.xkmc.youkaishomecoming.content.pot.table.recipe.CuisineRecipe", "youkaishomecoming_cuisine"}},
                 null);
 
@@ -132,13 +158,27 @@ public final class YoukaisHomecomingRSModule implements IModIntegration {
                         {"youkaishomecoming:ferment", "youkaishomecoming_ferment"},
                         {"youkaishomecoming:pot_cooking", "youkaishomecoming_cooking_small"},
                         {"youkaishomecoming:kettle", "youkaishomecoming_kettle"},
-                        {"youkaishomecoming:cuisine", "youkaishomecoming_cuisine"}},
+                        {"youkaishomecoming:cuisine", "youkaishomecoming_cuisine"},
+                        {"youkaisfeasts:steaming", "youkaishomecoming_steamer"},
+                        {"youkaisfeasts:ferment", "youkaishomecoming_ferment"},
+                        {"youkaisfeasts:bowl_cooking", "youkaishomecoming_cooking_small"},
+                        {"youkaisfeasts:pot_cooking", "youkaishomecoming_cooking_short"},
+                        {"youkaisfeasts:stock_cooking", "youkaishomecoming_cooking_large"},
+                        {"youkaisfeasts:kettle", "youkaishomecoming_kettle"},
+                        {"youkaisfeasts:cuisine", "youkaishomecoming_cuisine"}},
                 new String[][]{{"dev.xkmc.youkaishomecoming.content.", "youkaishomecoming"}},
                 null);
     }
 
     @Override
     public void registerBindingTargets() {
+        registerMokaBindingTarget();
+        for (String namespace : YoukaiRegistryIds.MOD_IDS) {
+            registerSharedBindingTargets(namespace);
+        }
+    }
+
+    private static void registerMokaBindingTarget() {
         // Moka Pot — has GUI (MokaMenu)
         BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
                 "youkaishomecoming", ModType.byId("youkaishomecoming_moka"),
@@ -146,73 +186,76 @@ public final class YoukaisHomecomingRSModule implements IModIntegration {
                 List.of("dev.xkmc.youkaishomecoming.content.pot.moka.MokaMakerBlock"),
                 "youkaishomecoming_moka", true
         ));
+    }
+
+    private static void registerSharedBindingTargets(String namespace) {
 
         // Steamer Pot — no GUI, world-interaction
         // Bind ONLY the pot; the delegate auto-detects racks and lid above.
         BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
-                "youkaishomecoming", ModType.byId("youkaishomecoming_steamer"),
+                namespace, ModType.byId("youkaishomecoming_steamer"),
                 RSIntegrationConfig.ENABLE_YOUKAISHOMECOMING,
                 List.of(),
-                List.of("youkaishomecoming:steamer_pot"),
+                List.of(YoukaiRegistryIds.stringId(namespace, "steamer_pot")),
                 "youkaishomecoming_steamer", false
         ));
 
         // Fermentation Tank — no GUI, world-interaction
         // Uses L2ModularBlock DelegateBlock, so match by registry key only.
         BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
-                "youkaishomecoming", ModType.byId("youkaishomecoming_ferment"),
+                namespace, ModType.byId("youkaishomecoming_ferment"),
                 RSIntegrationConfig.ENABLE_YOUKAISHOMECOMING,
                 List.of(),
-                List.of("youkaishomecoming:fermentation_tank"),
+                List.of(YoukaiRegistryIds.stringId(namespace, "fermentation_tank")),
                 "youkaishomecoming_ferment", false
         ));
 
         // ── Small Iron Pot (小铁锅) ──
         BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
-                "youkaishomecoming", ModType.byId("youkaishomecoming_cooking_small"),
+                namespace, ModType.byId("youkaishomecoming_cooking_small"),
                 RSIntegrationConfig.ENABLE_YOUKAISHOMECOMING,
                 List.of(),
-                List.of("youkaishomecoming:cooking_small_iron_pot",
-                        "youkaishomecoming:small_iron_pot"),
+                List.of(YoukaiRegistryIds.stringId(namespace, "cooking_small_iron_pot"),
+                        YoukaiRegistryIds.stringId(namespace, "small_iron_pot")),
                 "youkaishomecoming_cooking_small", false
         ));
 
         // ── Short Iron Pot (矮锅) ──
         BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
-                "youkaishomecoming", ModType.byId("youkaishomecoming_cooking_short"),
+                namespace, ModType.byId("youkaishomecoming_cooking_short"),
                 RSIntegrationConfig.ENABLE_YOUKAISHOMECOMING,
                 List.of(),
-                List.of("youkaishomecoming:cooking_short_iron_pot",
-                        "youkaishomecoming:short_iron_pot"),
+                List.of(YoukaiRegistryIds.stringId(namespace, "cooking_short_iron_pot"),
+                        YoukaiRegistryIds.stringId(namespace, "short_iron_pot")),
                 "youkaishomecoming_cooking_short", false
         ));
 
         // ── Stockpot / Large Pot (汤锅) ──
         BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
-                "youkaishomecoming", ModType.byId("youkaishomecoming_cooking_large"),
+                namespace, ModType.byId("youkaishomecoming_cooking_large"),
                 RSIntegrationConfig.ENABLE_YOUKAISHOMECOMING,
                 List.of(),
-                List.of("youkaishomecoming:cooking_stockpot",
-                        "youkaishomecoming:stockpot"),
+                List.of(YoukaiRegistryIds.stringId(namespace, "cooking_stockpot"),
+                        YoukaiRegistryIds.stringId(namespace, "stockpot")),
                 "youkaishomecoming_cooking_large", false
         ));
 
         // Kettle — has GUI (KettleContainer)
         // Uses L2ModularBlock DelegateEntityBlockImpl, so match by registry key only.
         BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
-                "youkaishomecoming", ModType.byId("youkaishomecoming_kettle"),
+                namespace, ModType.byId("youkaishomecoming_kettle"),
                 RSIntegrationConfig.ENABLE_YOUKAISHOMECOMING,
                 List.of(),
-                List.of("youkaishomecoming:kettle"),
+                List.of(YoukaiRegistryIds.stringId(namespace, "kettle")),
                 "youkaishomecoming_kettle", true
         ));
 
         // Cuisine Board — no GUI, world-interaction
         BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
-                "youkaishomecoming", ModType.byId("youkaishomecoming_cuisine"),
+                namespace, ModType.byId("youkaishomecoming_cuisine"),
                 RSIntegrationConfig.ENABLE_YOUKAISHOMECOMING,
                 List.of(),
-                List.of("youkaishomecoming:cuisine_board"),
+                List.of(YoukaiRegistryIds.stringId(namespace, "cuisine_board")),
                 "youkaishomecoming_cuisine", false
         ));
     }

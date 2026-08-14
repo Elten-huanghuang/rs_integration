@@ -3,11 +3,13 @@ package com.huanghuang.rsintegration.reflection.probes;
 import com.huanghuang.rsintegration.reflection.contract.ContractValidation;
 import com.huanghuang.rsintegration.reflection.contract.ReflectionContract;
 import com.huanghuang.rsintegration.util.ModIds;
+import net.minecraftforge.fml.ModList;
 
 @ModReflection(modId = ModIds.YOUKAISHOMECOMING, description = "Youkais Homecoming cooking system")
 public final class YHKReflection {
 
-    private static final String MOD = ModIds.YOUKAISHOMECOMING;
+    private static final String MOD = ModList.get().isLoaded(ModIds.YOUKAISHOMECOMING)
+            ? ModIds.YOUKAISHOMECOMING : ModIds.YOUKAISFEASTS;
 
     // -- Cooking Pot --
     public static volatile Class<?> cookingBEClass;
@@ -69,9 +71,10 @@ public final class YHKReflection {
         registerOptional("dev.xkmc.youkaishomecoming.content.pot.steamer.SteamerPotBlock", "steamerPotBlockClass");
         registerOptional("dev.xkmc.youkaishomecoming.content.pot.base.BasePotBlock", "steamerPotBlockClass");
         // Moka Pot
-        register("dev.xkmc.youkaishomecoming.content.pot.moka.MokaMakerBlockEntity", "mokaMakerBEClass");
-        register("dev.xkmc.youkaishomecoming.content.pot.moka.MokaRecipe", "mokaRecipeClass");
-        register("dev.xkmc.youkaishomecoming.content.pot.moka.MokaMakerBlock", "mokaMakerBlockClass");
+        // Gensokyo Delight removed the moka machine while retaining the rest of the YHK API.
+        registerOptional("dev.xkmc.youkaishomecoming.content.pot.moka.MokaMakerBlockEntity", "mokaMakerBEClass");
+        registerOptional("dev.xkmc.youkaishomecoming.content.pot.moka.MokaRecipe", "mokaRecipeClass");
+        registerOptional("dev.xkmc.youkaishomecoming.content.pot.moka.MokaMakerBlock", "mokaMakerBlockClass");
         // Base
         register("dev.xkmc.youkaishomecoming.content.pot.base.TimedRecipeBlockEntity", "timedRecipeBEClass");
     }

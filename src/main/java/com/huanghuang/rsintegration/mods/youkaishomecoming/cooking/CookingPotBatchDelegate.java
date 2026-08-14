@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
+import com.huanghuang.rsintegration.mods.youkaishomecoming.YoukaiRegistryIds;
 import com.huanghuang.rsintegration.reflection.probes.YHKReflection;
 import com.huanghuang.rsintegration.util.Reflect;
 import com.refinedmods.refinedstorage.api.network.INetwork;
@@ -38,7 +39,7 @@ import java.util.Map;
 /** Base batch delegate for Youkais Homecoming cooking pots. Subclasses: SmallPot, ShortPot, LargePot. */
 public class CookingPotBatchDelegate extends AbstractBatchDelegate {
 
-    // indices into BOWL_KEYS / POT_KEYS / BE_CLASS_NAMES
+    // Indices into BOWL_PATHS / POT_PATHS / BE_CLASS_NAMES.
     protected static final int SMALL = 0;
     protected static final int SHORT = 1;
     protected static final int LARGE = 2;
@@ -52,6 +53,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
     private ServerLevel myLevel;
     private ResourceKey<Level> myDim;
     private BlockPos myPos;
+    private String machineNamespace;
     private Recipe<?> recipe;
     private boolean craftDone;
 
@@ -77,6 +79,11 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
         this.myDim = level.dimension();
         this.myPos = pos;
         this.player = player;
+        ResourceLocation machineId = net.minecraft.core.registries.BuiltInRegistries.BLOCK
+                .getKey(level.getBlockState(pos).getBlock());
+        this.machineNamespace = YoukaiRegistryIds.isSupportedNamespace(machineId.getNamespace())
+                ? machineId.getNamespace()
+                : recipeId.getNamespace();
 
         Recipe<?> found = level.getRecipeManager().byKey(recipeId).orElse(null);
         if (found == null || !isPotCookingRecipe(found)) {
@@ -90,7 +97,11 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public boolean acceptsMachineWithoutBlockEntity(@Nonnull ServerLevel level, @Nonnull BlockPos pos) {
-        return CookingPotCompletionPolicy.isIdleBowl(level.getBlockState(pos), BOWL_KEYS[potIndex]);
+        ResourceLocation blockId = net.minecraft.core.registries.BuiltInRegistries.BLOCK
+                .getKey(level.getBlockState(pos).getBlock());
+        if (!YoukaiRegistryIds.isSupportedNamespace(blockId.getNamespace())) return false;
+        return CookingPotCompletionPolicy.isIdleBowl(
+                level.getBlockState(pos), bowlKey(blockId.getNamespace(), potIndex));
     }
 
     @Nullable
@@ -380,7 +391,8 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
             return ItemStack.EMPTY;
         }
         RSIntegrationMod.LOGGER.debug("[RSI-CookPot] Served pot at {}: {} x{}; restored {}",
-                myPos, servings.getHoverName().getString(), servings.getCount(), BOWL_KEYS[potIndex]);
+                myPos, servings.getHoverName().getString(), servings.getCount(),
+                bowlKey(machineNamespace, potIndex));
         return servings.copy();
     }
 
@@ -391,9 +403,10 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
         if (!potItem.hasCraftingRemainingItem()) return null;
         ItemStack remainder = potItem.getCraftingRemainingItem();
         if (!(remainder.getItem() instanceof net.minecraft.world.item.BlockItem blockItem)) return null;
-        String key = net.minecraft.core.registries.BuiltInRegistries.BLOCK
-                .getKey(blockItem.getBlock()).toString();
-        if (!BOWL_KEYS[potIndex].equals(key)) return null;
+        ResourceLocation key = net.minecraft.core.registries.BuiltInRegistries.BLOCK
+                .getKey(blockItem.getBlock());
+        if (!machineNamespace.equals(key.getNamespace())
+                || !BOWL_PATHS[potIndex].equals(key.getPath())) return null;
 
         var emptyState = blockItem.getBlock().defaultBlockState();
         var facing = net.minecraft.world.level.block.state.properties.BlockStateProperties.FACING;
@@ -478,14 +491,18 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
     //   small_iron_pot     -> cooking_small_iron_pot  (SmallCookingPotBlockEntity)
     //   short_iron_pot     -> cooking_short_iron_pot  (MidCookingPotBlockEntity)
     //   stockpot           -> cooking_stockpot        (LargeCookingPotBlockEntity)
-    private static final String[] BOWL_KEYS = {
-        "youkaishomecoming:small_iron_pot",
-        "youkaishomecoming:short_iron_pot",
-        "youkaishomecoming:stockpot" };
-    private static final String[] POT_KEYS = {
-        "youkaishomecoming:cooking_small_iron_pot",
-        "youkaishomecoming:cooking_short_iron_pot",
-        "youkaishomecoming:cooking_stockpot" };
+    private static final String[] BOWL_PATHS = {
+        "small_iron_pot", "short_iron_pot", "stockpot" };
+    private static final String[] POT_PATHS = {
+        "cooking_small_iron_pot", "cooking_short_iron_pot", "cooking_stockpot" };
+
+    static String bowlKey(String namespace, int potIndex) {
+        return YoukaiRegistryIds.stringId(namespace, BOWL_PATHS[potIndex]);
+    }
+
+    static ResourceLocation cookingKey(String namespace, int potIndex) {
+        return YoukaiRegistryIds.id(namespace, POT_PATHS[potIndex]);
+    }
 
     private BlockEntity findCookingBE() {
         if (!myLevel.hasChunkAt(myPos)) return null;
@@ -502,11 +519,12 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
         var state = myLevel.getBlockState(myPos);
         var block = state.getBlock();
         if (!(block instanceof net.minecraft.world.level.block.EntityBlock)) {
-            String blockKey = net.minecraft.core.registries.BuiltInRegistries.BLOCK
-                    .getKey(block).toString();
-            if (BOWL_KEYS[potIndex].equals(blockKey)) {
+            ResourceLocation blockId = net.minecraft.core.registries.BuiltInRegistries.BLOCK
+                    .getKey(block);
+            if (machineNamespace.equals(blockId.getNamespace())
+                    && BOWL_PATHS[potIndex].equals(blockId.getPath())) {
                 var potBlock = net.minecraft.core.registries.BuiltInRegistries.BLOCK
-                        .get(new ResourceLocation(POT_KEYS[potIndex]));
+                        .get(cookingKey(machineNamespace, potIndex));
                 if (potBlock != null) {
                     var cookingState = potBlock.defaultBlockState();
                     if (state.hasProperty(net.minecraft.world.level.block.state.properties.BlockStateProperties.FACING)) {
@@ -516,7 +534,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
                     }
                     myLevel.setBlock(myPos, cookingState, 3);
                     RSIntegrationMod.LOGGER.info("[RSI-CookPot] Activated bowl -> {} at {}",
-                            POT_KEYS[potIndex], myPos);
+                            cookingKey(machineNamespace, potIndex), myPos);
                     be = myLevel.getBlockEntity(myPos);
                     if (be != null && isCookingBE(be)) return be;
                 }

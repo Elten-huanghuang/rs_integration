@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.mods.vanilla.brewing;
 
+import com.mojang.logging.LogUtils;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.RecipeIndex;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -14,9 +15,12 @@ import net.minecraft.world.item.alchemy.PotionUtils;
 import net.minecraft.world.level.Level;
 import net.minecraftforge.common.brewing.BrewingRecipeRegistry;
 import net.minecraftforge.common.brewing.IBrewingRecipe;
+import org.slf4j.Logger;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -26,6 +30,7 @@ import net.minecraft.world.item.crafting.Ingredient;
 
 /** Builds deterministic synthetic recipes from the live Forge brewing registry. */
 public final class VanillaBrewingCatalog {
+    private static final Logger LOGGER = LogUtils.getLogger();
     private static final Map<ResourceLocation, VanillaBrewingRecipeDefinition> BY_ID = new LinkedHashMap<>();
 
     private VanillaBrewingCatalog() {}
@@ -51,6 +56,8 @@ public final class VanillaBrewingCatalog {
         private final List<ItemStack> reagents;
         private final List<ItemStack> potionReagents;
         private final List<IBrewingRecipe> forgeRecipes;
+        private final Set<IBrewingRecipe> rejectedForgeRecipes =
+                Collections.newSetFromMap(new IdentityHashMap<>());
         private int phase;
         private int inputIndex;
         private int reagentIndex;
@@ -66,12 +73,19 @@ public final class VanillaBrewingCatalog {
         private IncrementalIndex(Map<Item, List<RecipeIndex.Entry>> index,
                                  Set<ResourceLocation> seen,
                                  List<ItemStack> inputs, List<ItemStack> reagents) {
+            this(index, seen, inputs, reagents, BrewingRecipeRegistry.getRecipes());
+        }
+
+        IncrementalIndex(Map<Item, List<RecipeIndex.Entry>> index,
+                         Set<ResourceLocation> seen,
+                         List<ItemStack> inputs, List<ItemStack> reagents,
+                         List<IBrewingRecipe> forgeRecipes) {
             this.index = index;
             this.seen = seen;
             this.inputs = inputs;
             this.reagents = reagents;
             this.potionReagents = reagents.stream().filter(PotionBrewing::isIngredient).toList();
-            this.forgeRecipes = List.copyOf(BrewingRecipeRegistry.getRecipes());
+            this.forgeRecipes = List.copyOf(forgeRecipes);
         }
 
         public boolean advance(BooleanSupplier budgetExpired) {
@@ -124,22 +138,37 @@ public final class VanillaBrewingCatalog {
 
         private boolean advanceForgeRecipe() {
             if (currentForgeRecipe == null) {
-                if (forgeIndex >= forgeRecipes.size()) return false;
-                currentForgeRecipe = forgeRecipes.get(forgeIndex++);
-                indexDeclaredMappings(currentForgeRecipe, index, seen);
-                acceptedInputs.clear();
-                acceptedReagents.clear();
-                filterIndex = -inputs.size();
-                inputIndex = reagentIndex = 0;
+                while (forgeIndex < forgeRecipes.size()) {
+                    IBrewingRecipe next = forgeRecipes.get(forgeIndex++);
+                    if (rejectedForgeRecipes.contains(next)) continue;
+                    currentForgeRecipe = next;
+                    indexDeclaredMappings(currentForgeRecipe, index, seen);
+                    acceptedInputs.clear();
+                    acceptedReagents.clear();
+                    filterIndex = -inputs.size();
+                    inputIndex = reagentIndex = 0;
+                    break;
+                }
+                if (currentForgeRecipe == null) return false;
             }
             if (filterIndex < 0) {
                 ItemStack candidate = inputs.get(inputs.size() + filterIndex++);
-                if (currentForgeRecipe.isInput(candidate)) acceptedInputs.add(candidate);
+                try {
+                    if (currentForgeRecipe.isInput(candidate)) acceptedInputs.add(candidate);
+                } catch (RuntimeException | LinkageError error) {
+                    rejectForgeRecipe(error, "isInput");
+                    return forgeIndex < forgeRecipes.size();
+                }
                 return true;
             }
             if (filterIndex < reagents.size()) {
                 ItemStack candidate = reagents.get(filterIndex++);
-                if (currentForgeRecipe.isIngredient(candidate)) acceptedReagents.add(candidate);
+                try {
+                    if (currentForgeRecipe.isIngredient(candidate)) acceptedReagents.add(candidate);
+                } catch (RuntimeException | LinkageError error) {
+                    rejectForgeRecipe(error, "isIngredient");
+                    return forgeIndex < forgeRecipes.size();
+                }
                 return true;
             }
             if (acceptedInputs.isEmpty() || acceptedReagents.isEmpty()) {
@@ -148,9 +177,16 @@ public final class VanillaBrewingCatalog {
             }
             ItemStack input = acceptedInputs.get(inputIndex);
             ItemStack reagent = acceptedReagents.get(reagentIndex++);
+            ItemStack output;
+            try {
+                output = currentForgeRecipe.getOutput(input.copy(), reagent.copy());
+            } catch (RuntimeException | LinkageError error) {
+                rejectForgeRecipe(error, "getOutput");
+                return forgeIndex < forgeRecipes.size();
+            }
+            if (output == null) output = ItemStack.EMPTY;
             int before = seen.size();
-            addDefinition(input, reagent,
-                    currentForgeRecipe.getOutput(input.copy(), reagent.copy()), index, seen);
+            addDefinition(input, reagent, output, index, seen);
             if (seen.size() > before) indexedCount++;
             if (reagentIndex >= acceptedReagents.size()) {
                 reagentIndex = 0;
@@ -158,6 +194,18 @@ public final class VanillaBrewingCatalog {
             }
             if (inputIndex >= acceptedInputs.size()) currentForgeRecipe = null;
             return currentForgeRecipe != null || forgeIndex < forgeRecipes.size();
+        }
+
+        private void rejectForgeRecipe(Throwable error, String operation) {
+            IBrewingRecipe rejected = currentForgeRecipe;
+            if (rejected != null && rejectedForgeRecipes.add(rejected)) {
+                LOGGER.warn(
+                        "[RecipeIndex] skipping broken Forge brewing recipe {} during {}",
+                        rejected.getClass().getName(), operation, error);
+            }
+            currentForgeRecipe = null;
+            acceptedInputs.clear();
+            acceptedReagents.clear();
         }
 
         private boolean advanceExistingDefinition() {
@@ -201,8 +249,8 @@ public final class VanillaBrewingCatalog {
         } catch (NoSuchMethodException ignored) {
             // Most brewing recipes do not expose a mapping; the ordinary
             // candidate scan below remains the generic fallback.
-        } catch (ReflectiveOperationException | RuntimeException e) {
-            com.huanghuang.rsintegration.RSIntegrationMod.LOGGER.debug(
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError e) {
+            LOGGER.debug(
                     "[RecipeIndex] unable to inspect brewing mappings for {}",
                     brewing.getClass().getName(), e);
         }

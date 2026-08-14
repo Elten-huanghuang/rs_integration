@@ -286,8 +286,9 @@ public final class RSIntegrationMod {
     private void onCommonSetup(final FMLCommonSetupEvent event) {
         com.huanghuang.rsintegration.compat.ftbquests.ExternalItemProgressBridge.initialize();
         for (ModuleEntry entry : MODULES) {
-            if (!entry.configFlag().get() || !ModList.get().isLoaded(entry.modId())) continue;
+            if (!entry.configFlag().get()) continue;
             IModIntegration module = entry.supplier().get();
+            if (module.modIds().stream().noneMatch(id -> ModList.get().isLoaded(id))) continue;
             module.registerModType();
             module.registerBindingTargets();
             module.registerRecipeHandler();

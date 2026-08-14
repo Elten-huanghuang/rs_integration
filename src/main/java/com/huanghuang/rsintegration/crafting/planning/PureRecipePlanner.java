@@ -6,9 +6,12 @@ import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.Recip
 import net.minecraft.resources.ResourceLocation;
 
 import java.util.ArrayList;
+import java.util.ArrayDeque;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.IdentityHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -46,9 +49,10 @@ public final class PureRecipePlanner {
     static Result resolve(ImmutableRecipeGraph graph, Map<MaterialRef, Integer> available,
                           List<IngredientRef> roots, int maxSteps, int maxSearchStates,
                           int maxMemoizedFailures, long deadlineNanos) {
+        List<IngredientRef> normalizedRoots = PureDemandNormalizer.mergeEquivalent(roots);
         Search search = new Search(graph, available, maxSteps, maxSearchStates,
-                maxMemoizedFailures, deadlineNanos);
-        List<Task> pending = PureDemandNormalizer.mergeEquivalent(roots).stream()
+                maxMemoizedFailures, deadlineNanos, normalizedRoots);
+        List<Task> pending = normalizedRoots.stream()
                 .map(DemandTask::new).map(Task.class::cast).toList();
         Status status;
         try {
@@ -127,6 +131,7 @@ public final class PureRecipePlanner {
         private final List<PlannedStep> steps = new ArrayList<>();
         private final Set<MaterialRef> resolving = new HashSet<>();
         private final Set<FailureKey> failedStates = new HashSet<>();
+        private final SeededReachability reachability;
         private int expandedStates;
         private int backtracks;
         private int memoHits;
@@ -137,7 +142,7 @@ public final class PureRecipePlanner {
 
         private Search(ImmutableRecipeGraph graph, Map<MaterialRef, Integer> available,
                        int maxSteps, int maxSearchStates, int maxMemoizedFailures,
-                       long deadlineNanos) {
+                       long deadlineNanos, List<IngredientRef> roots) {
             this.graph = graph;
             available.forEach((material, count) -> {
                 if (count != null && count > 0) stock.put(material, count);
@@ -147,6 +152,7 @@ public final class PureRecipePlanner {
             this.maxSearchStates = Math.max(1, maxSearchStates);
             this.maxMemoizedFailures = Math.max(0, maxMemoizedFailures);
             this.deadlineNanos = deadlineNanos;
+            this.reachability = new SeededReachability(graph, available, roots);
         }
 
         private boolean solve(List<Task> pending) {
@@ -211,7 +217,8 @@ public final class PureRecipePlanner {
                 int have = stock.getOrDefault(wanted, 0);
                 int needed = ingredient.count() - have;
                 if (needed <= 0) continue;
-                for (RecipeNode candidate : inventoryFirstCandidates(wanted)) {
+                if (!reachability.canReach(wanted)) continue;
+                for (RecipeNode candidate : inventoryFirstCandidates(wanted, true)) {
                     if (steps.size() + scheduledRecipes(rest) >= maxSteps) {
                         stepLimitReached = true;
                         continue;
@@ -347,23 +354,27 @@ public final class PureRecipePlanner {
          */
         private List<MaterialRef> inventoryFirst(List<MaterialRef> alternatives) {
             if (alternatives.size() < 2) return alternatives;
-            List<MaterialRef> ordered = new ArrayList<>(alternatives.size());
-            for (MaterialRef material : alternatives) {
-                if (stock.getOrDefault(material, 0) > 0) ordered.add(material);
-            }
-            if (ordered.isEmpty() || ordered.size() == alternatives.size()) return alternatives;
-            for (MaterialRef material : alternatives) {
-                if (stock.getOrDefault(material, 0) <= 0) ordered.add(material);
-            }
+            List<MaterialRef> ordered = new ArrayList<>(alternatives);
+            ordered.sort(Comparator
+                    .comparingInt((MaterialRef material) -> alternativeRank(material))
+                    .thenComparingInt(material -> reachability.depth(material)));
             return ordered;
         }
 
-        private List<RecipeNode> inventoryFirstCandidates(MaterialRef wanted) {
+        private int alternativeRank(MaterialRef material) {
+            if (stock.getOrDefault(material, 0) > 0) return 0;
+            return reachability.canReach(material) ? 1 : 2;
+        }
+
+        private List<RecipeNode> inventoryFirstCandidates(MaterialRef wanted, boolean pruneUnseeded) {
             List<RecipeNode> candidates = graph.recipesByOutput()
                     .getOrDefault(wanted, List.of());
-            if (candidates.size() < 2) return candidates;
-            List<RecipeNode> ordered = new ArrayList<>(candidates);
-            ordered.sort(Comparator.comparingDouble(this::inputStockCoverage).reversed());
+            List<RecipeNode> ordered = candidates.stream()
+                    .filter(candidate -> !pruneUnseeded || reachability.canReach(candidate))
+                    .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
+            if (ordered.size() < 2) return ordered;
+            ordered.sort(Comparator.comparingDouble(this::inputStockCoverage).reversed()
+                    .thenComparingInt(reachability::depth));
             return ordered;
         }
 
@@ -449,6 +460,136 @@ public final class PureRecipePlanner {
             else stock.put(material, count);
         }
     }
+
+    /**
+     * Marks the part of a demand graph that can be bootstrapped from the planning snapshot.
+     * Large tags often contain dozens of compressed-block or chest variants whose recipes lead
+     * only to missing leaves. Proving those branches unreachable once avoids exponential search.
+     */
+    private static final class SeededReachability {
+        private static final int UNREACHABLE_DEPTH = Integer.MAX_VALUE;
+
+        private final Set<MaterialRef> reachable = new HashSet<>();
+        private final Map<MaterialRef, Integer> materialDepth = new HashMap<>();
+        private final Map<RecipeNode, Integer> recipeDepth = new IdentityHashMap<>();
+
+        private SeededReachability(ImmutableRecipeGraph graph,
+                                   Map<MaterialRef, Integer> available,
+                                   List<IngredientRef> roots) {
+            Set<MaterialRef> relevantMaterials = new LinkedHashSet<>();
+            Set<RecipeNode> relevantRecipes = java.util.Collections.newSetFromMap(
+                    new IdentityHashMap<>());
+            ArrayDeque<MaterialRef> discover = new ArrayDeque<>();
+            for (IngredientRef root : roots) discover.addAll(root.alternatives());
+
+            while (!discover.isEmpty()) {
+                PlanningThreadContext.throwIfCancelled();
+                MaterialRef material = discover.removeFirst();
+                if (!relevantMaterials.add(material)) continue;
+                for (RecipeNode recipe : graph.recipesByOutput()
+                        .getOrDefault(material, List.of())) {
+                    if (!relevantRecipes.add(recipe)) continue;
+                    for (IngredientRef input : recipe.inputs()) {
+                        discover.addAll(input.alternatives());
+                    }
+                }
+            }
+
+            Map<MaterialRef, List<ReachableInput>> waiting = new HashMap<>();
+            ArrayDeque<MaterialRef> ready = new ArrayDeque<>();
+
+            for (RecipeNode recipe : relevantRecipes) {
+                List<IngredientRef> inputs = recipe.inputs();
+                ReachableRecipeState state = new ReachableRecipeState(recipe, inputs.size());
+                for (int inputIndex = 0; inputIndex < inputs.size(); inputIndex++) {
+                    for (MaterialRef alternative : inputs.get(inputIndex).alternatives()) {
+                        waiting.computeIfAbsent(alternative, ignored -> new ArrayList<>())
+                                .add(new ReachableInput(state, inputIndex));
+                    }
+                }
+                if (inputs.isEmpty()) markRecipeReady(state, ready);
+            }
+
+            for (Map.Entry<MaterialRef, Integer> entry : available.entrySet()) {
+                if (entry.getValue() != null && entry.getValue() > 0
+                        && relevantMaterials.contains(entry.getKey())) {
+                    markMaterialReady(entry.getKey(), 0, ready);
+                }
+            }
+
+            while (!ready.isEmpty()) {
+                PlanningThreadContext.throwIfCancelled();
+                MaterialRef material = ready.removeFirst();
+                int depth = materialDepth.getOrDefault(material, 0);
+                for (ReachableInput input : waiting.getOrDefault(material, List.of())) {
+                    if (input.state().satisfy(input.index(), depth)) {
+                        markRecipeReady(input.state(), ready);
+                    }
+                }
+            }
+        }
+
+        private void markRecipeReady(ReachableRecipeState state,
+                                     ArrayDeque<MaterialRef> ready) {
+            int depth = state.depth();
+            recipeDepth.put(state.recipe(), depth);
+            markMaterialReady(state.recipe().output(), depth, ready);
+        }
+
+        private void markMaterialReady(MaterialRef material, int depth,
+                                       ArrayDeque<MaterialRef> ready) {
+            if (!reachable.add(material)) return;
+            materialDepth.put(material, depth);
+            ready.addLast(material);
+        }
+
+        private boolean canReach(MaterialRef material) {
+            return reachable.contains(material);
+        }
+
+        private boolean canReach(RecipeNode recipe) {
+            return recipeDepth.containsKey(recipe);
+        }
+
+        private int depth(MaterialRef material) {
+            return materialDepth.getOrDefault(material, UNREACHABLE_DEPTH);
+        }
+
+        private int depth(RecipeNode recipe) {
+            return recipeDepth.getOrDefault(recipe, UNREACHABLE_DEPTH);
+        }
+    }
+
+    private static final class ReachableRecipeState {
+        private final RecipeNode recipe;
+        private final boolean[] satisfied;
+        private int remaining;
+        private int deepestInput;
+
+        private ReachableRecipeState(RecipeNode recipe, int inputCount) {
+            this.recipe = recipe;
+            this.satisfied = new boolean[inputCount];
+            this.remaining = inputCount;
+        }
+
+        private boolean satisfy(int inputIndex, int depth) {
+            if (satisfied[inputIndex]) return false;
+            satisfied[inputIndex] = true;
+            remaining--;
+            deepestInput = Math.max(deepestInput, depth);
+            return remaining == 0;
+        }
+
+        private RecipeNode recipe() {
+            return recipe;
+        }
+
+        private int depth() {
+            return deepestInput == Integer.MAX_VALUE ? Integer.MAX_VALUE : deepestInput + 1;
+        }
+    }
+
+    private record ReachableInput(ReachableRecipeState state, int index) {}
 
     private static final class SearchLimitException extends RuntimeException {
         private SearchLimitException() {

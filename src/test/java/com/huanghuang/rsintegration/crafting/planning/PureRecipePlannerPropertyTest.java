@@ -55,7 +55,7 @@ class PureRecipePlannerPropertyTest {
         }
 
         PureRecipePlanner.Result result = PureRecipePlanner.resolve(
-                new ImmutableRecipeGraph(recipes), Map.of(),
+                new ImmutableRecipeGraph(recipes), Map.of(materials.get(0), 1),
                 List.of(new IngredientRef(List.of(materials.get(length - 1)), 1)),
                 4_096, 100_000, 8_192);
 

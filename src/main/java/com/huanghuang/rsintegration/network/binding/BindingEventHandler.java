@@ -10,6 +10,7 @@ import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.mods.touhoulittlemaid.TlmAltarStructure;
 import com.huanghuang.rsintegration.util.ModIds;
+import com.huanghuang.rsintegration.mods.youkaishomecoming.YoukaiRegistryIds;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
@@ -849,9 +850,10 @@ public final class BindingEventHandler {
         if (isL2ModularBlock(block)) {
             ResourceLocation regKey = ForgeRegistries.BLOCKS.getKey(block);
             if (regKey != null) {
-                String rk = regKey.toString();
-                if (rk.equals("youkaishomecoming:steamer_rack")
-                        || rk.equals("youkaishomecoming:steamer_lid")) {
+                String namespace = regKey.getNamespace();
+                if (YoukaiRegistryIds.isSupportedNamespace(namespace)
+                        && ("steamer_rack".equals(regKey.getPath())
+                        || "steamer_lid".equals(regKey.getPath()))) {
                     // Walk downward to find the steamer pot
                     BlockPos.MutableBlockPos cursor = pos.mutable();
                     for (int i = 0; i < 16; i++) {
@@ -859,7 +861,8 @@ public final class BindingEventHandler {
                         BlockState below = level.getBlockState(cursor);
                         ResourceLocation belowKey = ForgeRegistries.BLOCKS.getKey(below.getBlock());
                         if (belowKey != null
-                                && belowKey.toString().equals("youkaishomecoming:steamer_pot")) {
+                                && namespace.equals(belowKey.getNamespace())
+                                && "steamer_pot".equals(belowKey.getPath())) {
                             return cursor.immutable();
                         }
                     }

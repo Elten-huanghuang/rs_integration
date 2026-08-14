@@ -5,5 +5,5 @@ final class BotaniaDelegateSupport {private BotaniaDelegateSupport(){}
  static void refund(INetwork n,List<ItemStack> stacks){for(ItemStack s:stacks)if(!s.isEmpty())n.insertItem(s,s.getCount(),Action.PERFORM);}
  static Set<UUID> snapshot(ServerLevel l,AABB b){Set<UUID>s=new HashSet<>();for(ItemEntity e:l.getEntitiesOfClass(ItemEntity.class,b))s.add(e.getUUID());return s;}
  static boolean isNew(ItemEntity e,Set<UUID> before){return e.isAlive()&&!before.contains(e.getUUID());}
- static void protectOperationInput(ItemEntity entity){entity.setPickUpDelay(Integer.MAX_VALUE);}
+ static void protectOperationInput(ItemEntity entity){entity.setPickUpDelay(Integer.MAX_VALUE);entity.setThrower(entity.getUUID());}
 }

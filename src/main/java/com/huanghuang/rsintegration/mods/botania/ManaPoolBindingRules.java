@@ -22,7 +22,8 @@ final class ManaPoolBindingRules {
     private ManaPoolBindingRules() {}
 
     static Assessment assess(BlockPos bindingPos, boolean bindingIsPool, boolean poolAboveBinding,
-                             boolean recipeHasCatalyst, boolean catalystMatchesBinding) {
+                             boolean recipeHasCatalyst, boolean catalystMatchesBinding,
+                             boolean catalystMatchesBelowPool) {
         if (bindingPos == null) {
             return new Assessment(State.FATAL, null, "Mana Pool binding position is missing");
         }
@@ -39,8 +40,10 @@ final class ManaPoolBindingRules {
                     "Plain Mana Pool recipes require a direct Mana Pool binding");
         }
         if (bindingIsPool) {
-            return new Assessment(State.FATAL, null,
-                    "Catalyst Mana Pool recipes require a binding on the catalyst below the pool");
+            return catalystMatchesBelowPool
+                    ? new Assessment(State.READY, poolPos, "")
+                    : new Assessment(State.FATAL, null,
+                    "The block below the bound Mana Pool does not match this recipe's catalyst");
         }
         if (!catalystMatchesBinding) {
             return new Assessment(State.FATAL, null,
