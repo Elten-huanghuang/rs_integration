@@ -931,5 +931,15 @@
   "rsi.anvil_memory.occupied": "材料槽中已有其他物品",
   "rsi.anvil_memory.rejected": "该材料不能放入当前铁砧的材料槽",
   "rsi.anvil_memory.swapped": "已交换铁砧输入槽",
-  "rsi.anvil_memory.invalid": "铁砧记忆当前不可用"
+  "rsi.anvil_memory.invalid": "铁砧记忆当前不可用",
+  "rsi.machine_candidate.label": "祭坛",
+  "rsi.machine_candidate.auto": "自动",
+  "rsi.machine_candidate.preferred": "优先",
+  "rsi.machine_candidate.exclusive": "仅使用",
+  "rsi.machine_candidate.auto_value": "自动（%s/%s 可用）",
+  "rsi.machine_candidate.none": "未选择祭坛",
+  "rsi.machine_candidate.ready": "可用",
+  "rsi.machine_candidate.temporary": "暂不可用",
+  "rsi.machine_candidate.incompatible": "条件不满足",
+  "rsi.machine_candidate.check_failed": "检查失败"
 }

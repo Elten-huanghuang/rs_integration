@@ -175,6 +175,16 @@ public final class PlanResponsePacket {
         if (plan.graph() != null) writeGraph(buf, plan.graph());
         // Keep hard prerequisite gating independent from material feasibility.
         buf.writeBoolean(plan.executionBlocked());
+        buf.writeVarInt(plan.machineCandidates().size());
+        for (MachineCandidateView candidate : plan.machineCandidates()) {
+            buf.writeUtf(candidate.dimension(), MAX_DIMENSION_LENGTH);
+            buf.writeVarInt(candidate.x());
+            buf.writeVarInt(candidate.y());
+            buf.writeVarInt(candidate.z());
+            buf.writeItem(candidate.icon());
+            buf.writeVarInt(candidate.state().ordinal());
+            buf.writeComponent(candidate.status());
+        }
         buf.writeBoolean(requestId != 0L);
         if (requestId != 0L) buf.writeVarLong(requestId);
         PerformanceMonitor.recordPlanPacketBytes(buf.writerIndex() - startIndex);
@@ -296,6 +306,23 @@ public final class PlanResponsePacket {
         boolean hasGraph = buf.readBoolean();
         PlanGraphView graph = hasGraph ? readGraph(buf) : null;
         boolean executionBlocked = buf.readBoolean();
+        int candidateCount = readBoundedCount(buf);
+        List<MachineCandidateView> machineCandidates = new ArrayList<>(candidateCount);
+        MachineCandidateView.State[] machineStates = MachineCandidateView.State.values();
+        for (int i = 0; i < candidateCount; i++) {
+            String dimension = buf.readUtf(MAX_DIMENSION_LENGTH);
+            int x = buf.readVarInt();
+            int y = buf.readVarInt();
+            int z = buf.readVarInt();
+            ItemStack icon = buf.readItem();
+            int stateOrdinal = buf.readVarInt();
+            if (stateOrdinal < 0 || stateOrdinal >= machineStates.length) {
+                throw new DecoderException("Invalid machine candidate state: " + stateOrdinal);
+            }
+            Component status = readComponentOrEmpty(buf);
+            machineCandidates.add(new MachineCandidateView(
+                    dimension, x, y, z, icon, machineStates[stateOrdinal], status));
+        }
         // requestId follows graph and is a required protocol field.
         long requestId = 0L;
         if (buf.readBoolean()) {
@@ -313,7 +340,7 @@ public final class PlanResponsePacket {
                 execModType, execDim, execX, execY, execZ, modWarnings, repeatCount,
                 embersCode, embersAspectNames, embersInputNames, embersSeed, embersCanInfer,
                 embersCodeFromCache, executionMachineSupportsGui, baseItem, boundMachineTypes,
-                leftovers, clickedOutput, graph, executionBlocked), requestId);
+                leftovers, clickedOutput, graph, executionBlocked, machineCandidates), requestId);
     }
 
     private static void writeGraph(FriendlyByteBuf buf, PlanGraphView graph) {

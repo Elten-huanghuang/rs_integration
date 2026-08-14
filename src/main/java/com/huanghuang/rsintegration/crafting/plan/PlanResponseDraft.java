@@ -44,7 +44,8 @@ public record PlanResponseDraft(
         Map<IngredientKey, Integer> leftovers,
         @Nullable ItemStack clickedOutput,
         @Nullable PlanGraphView graph,
-        boolean executionBlocked
+        boolean executionBlocked,
+        List<MachineCandidateView> machineCandidates
 ) {
     /** Backward-compat: drafts without an explicit hard prerequisite gate. */
     public PlanResponseDraft(boolean success, String targetName, ItemStack targetResult,
@@ -64,7 +65,30 @@ public record PlanResponseDraft(
                 executionModTypeId, executionDim, executionPosX, executionPosY, executionPosZ,
                 modWarnings, repeatCount, embersCode, embersAspectNames, embersInputNames,
                 embersSeed, embersCanInfer, embersCodeFromCache, executionMachineSupportsGui,
-                baseItem, boundMachineTypes, leftovers, clickedOutput, graph, false);
+                baseItem, boundMachineTypes, leftovers, clickedOutput, graph, false, List.of());
+    }
+
+    /** Backward-compat: drafts without target-machine candidate snapshots. */
+    public PlanResponseDraft(boolean success, String targetName, ItemStack targetResult,
+                             List<PlanStep> steps,
+                             Map<IngredientKey, PlanResponse.Availability> materials,
+                             List<String> missing, String recipeId,
+                             @Nullable String executionModTypeId, @Nullable String executionDim,
+                             int executionPosX, int executionPosY, int executionPosZ,
+                             List<Component> modWarnings, int repeatCount,
+                             @Nullable int[] embersCode, @Nullable Component[] embersAspectNames,
+                             @Nullable Component[] embersInputNames, long embersSeed,
+                             boolean embersCanInfer, boolean embersCodeFromCache,
+                             boolean executionMachineSupportsGui, @Nullable ItemStack baseItem,
+                             Set<String> boundMachineTypes, Map<IngredientKey, Integer> leftovers,
+                             @Nullable ItemStack clickedOutput, @Nullable PlanGraphView graph,
+                             boolean executionBlocked) {
+        this(success, targetName, targetResult, steps, materials, missing, recipeId,
+                executionModTypeId, executionDim, executionPosX, executionPosY, executionPosZ,
+                modWarnings, repeatCount, embersCode, embersAspectNames, embersInputNames,
+                embersSeed, embersCanInfer, embersCodeFromCache, executionMachineSupportsGui,
+                baseItem, boundMachineTypes, leftovers, clickedOutput, graph, executionBlocked,
+                List.of());
     }
 
     public PlanResponseDraft {
@@ -84,6 +108,7 @@ public record PlanResponseDraft(
         leftovers = Collections.unmodifiableMap(new LinkedHashMap<>(leftovers));
         clickedOutput = copyNullable(clickedOutput);
         graph = graph == null ? null : copyGraph(graph);
+        machineCandidates = machineCandidates == null ? List.of() : List.copyOf(machineCandidates);
     }
 
     @Override
@@ -143,7 +168,7 @@ public record PlanResponseDraft(
                 embersSeed, embersCanInfer, embersCodeFromCache,
                 executionMachineSupportsGui, copyNullable(baseItem), boundMachineTypes,
                 leftovers, copyNullable(clickedOutput), graph == null ? null : copyGraph(graph),
-                executionBlocked);
+                executionBlocked, machineCandidates);
     }
 
     private static PlanStep copyStep(PlanStep step) {

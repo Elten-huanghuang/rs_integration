@@ -28,6 +28,7 @@ import com.huanghuang.rsintegration.crafting.plan.PlanResponse;
 import com.huanghuang.rsintegration.crafting.plan.PlanResponseDraft;
 import com.huanghuang.rsintegration.crafting.plan.PlanResponsePublisher;
 import com.huanghuang.rsintegration.crafting.plan.PlanStep;
+import com.huanghuang.rsintegration.crafting.plan.MachineCandidateView;
 import com.huanghuang.rsintegration.crafting.tree.IngredientKey;
 import com.huanghuang.rsintegration.crafting.plan.PlanWarnings;
 import com.huanghuang.rsintegration.crafting.plan.MaxCraftableSearch;
@@ -49,6 +50,7 @@ import com.huanghuang.rsintegration.mods.vanilla.SmithingRecipeHandler;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.crafting.AsyncCraftChain;
+import com.huanghuang.rsintegration.crafting.MachineSelectionMode;
 import com.huanghuang.rsintegration.crafting.OutputDestination;
 import com.huanghuang.rsintegration.crafting.AsyncCraftManager;
 import com.huanghuang.rsintegration.crafting.ChainRepeatController;
@@ -167,6 +169,7 @@ public final class GenericCraftPacket {
     private long requestId;
     private OutputDestination outputDestination = OutputDestination.RS_NETWORK;
     private boolean maximize;
+    private MachineSelectionMode machineSelectionMode = MachineSelectionMode.AUTO;
 
     /** Preview mode: compute plan and send GUI to client. */
     public GenericCraftPacket(ResourceLocation recipeId, boolean preview) {
@@ -334,6 +337,7 @@ public final class GenericCraftPacket {
         if (requestId != 0L) buf.writeVarLong(requestId);
         outputDestination.write(buf);
         buf.writeBoolean(maximize);
+        machineSelectionMode.write(buf);
     }
 
     public static GenericCraftPacket decode(FriendlyByteBuf buf) {
@@ -392,17 +396,29 @@ public final class GenericCraftPacket {
         if (maximize && !preview) {
             throw new io.netty.handler.codec.DecoderException("maximize requires preview mode");
         }
+        MachineSelectionMode machineSelectionMode = buf.isReadable()
+                ? MachineSelectionMode.read(buf) : MachineSelectionMode.AUTO;
         if (buf.isReadable()) {
             throw new io.netty.handler.codec.DecoderException("trailing GenericCraftPacket data");
         }
         GenericCraftPacket packet = new GenericCraftPacket(recipeId, preview, forced, dim, pos,
                 repeatCount, inferMode, baseItem, targetOutput, requestId, outputDestination);
         packet.maximize = maximize;
+        packet.machineSelectionMode = machineSelectionMode;
         return packet;
+    }
+
+    public GenericCraftPacket withMachineSelectionMode(MachineSelectionMode mode) {
+        machineSelectionMode = mode == null ? MachineSelectionMode.AUTO : mode;
+        return this;
     }
 
     boolean isMaximizeRequest() {
         return maximize;
+    }
+
+    MachineSelectionMode machineSelectionMode() {
+        return machineSelectionMode;
     }
 
     public static void handle(GenericCraftPacket packet, Supplier<NetworkEvent.Context> contextSupplier) {
@@ -488,7 +504,7 @@ public final class GenericCraftPacket {
                         packet.recipeId, packet.forcedRecipes.size(), packet.outputDestination);
                 tryResolve(player, packet.recipeId, packet.forcedRecipes, packet.dim, packet.pos,
                         packet.repeatCount, packet.inferMode, packet.baseItem, packet.targetOutput,
-                        packet.outputDestination);
+                        packet.outputDestination, packet.machineSelectionMode);
             }
         } catch (Throwable e) {
             RSIntegrationMod.LOGGER.error("[RSI-Generic] Failed for {}:", packet.recipeId, e);
@@ -705,7 +721,8 @@ public final class GenericCraftPacket {
                                           @Nullable net.minecraft.core.BlockPos pos,
                                           boolean inferMode, @Nullable ItemStack baseItem,
                                           @Nullable ItemStack targetOutput,
-                                          OutputDestination outputDestination) {
+                                          OutputDestination outputDestination,
+                                          MachineSelectionMode machineSelectionMode) {
         // Resolver steps already contain the total physical execution count for
         // the requested repeats; do not multiply intermediate mod steps here.
         final UUID capturedUuid = player.getUUID();
@@ -713,12 +730,16 @@ public final class GenericCraftPacket {
         // The resolver already expanded all intermediate executions.
         final int effectiveRepeat = 1;
         LegacyFlatExecutionService.launch(player, network, steps, legacyReason, recipeId,
-                targetOutput, outputDestination, chain -> chain.onDone(() ->
+                targetOutput, outputDestination, runningChain -> {
+                    runningChain.setMachineSelection(recipeId, machineSelectionMode, dim, pos);
+                    runningChain.onDone(() ->
                         ChainRepeatController.scheduleNext(
-                                chain, capturedServer, capturedUuid, effectiveRepeat,
-                                chain.getMachineCount(),
+                                runningChain, capturedServer, capturedUuid, effectiveRepeat,
+                                runningChain.getMachineCount(),
                                 (p, rem) -> tryResolve(p, recipeId, forcedRecipes, dim, pos, rem,
-                                        inferMode, baseItem, targetOutput, outputDestination))));
+                                        inferMode, baseItem, targetOutput, outputDestination,
+                                        machineSelectionMode)));
+                });
     }
 
     private static void launchGraphAsyncChain(ServerPlayer player, CraftPlanGraph graph,
@@ -729,7 +750,8 @@ public final class GenericCraftPacket {
                                                @Nullable net.minecraft.core.BlockPos pos,
                                                boolean inferMode, @Nullable ItemStack baseItem,
                                                @Nullable ItemStack targetOutput,
-                                               OutputDestination outputDestination) {
+                                               OutputDestination outputDestination,
+                                               MachineSelectionMode machineSelectionMode) {
         AsyncCraftChain chain = new AsyncCraftChain(player.getUUID(), player.getServer(), network, graph);
         if (!chain.isGraphExecution()) {
             ModType legacyType = graph.nodes().stream()
@@ -746,13 +768,14 @@ public final class GenericCraftPacket {
                 chain.isGraphExecution() ? "graph" : "flat");
         chain.setTargetOutput(targetOutput);
         chain.setOutputDestination(outputDestination);
+        chain.setMachineSelection(recipeId, machineSelectionMode, dim, pos);
         UUID playerId = player.getUUID();
         var server = player.getServer();
         AsyncCraftManager.getInstance().submit(chain);
         chain.onDone(() -> ChainRepeatController.scheduleNext(
                 chain, server, playerId, 1, chain.getMachineCount(),
                 (p, rem) -> tryResolve(p, recipeId, forcedRecipes, dim, pos, rem,
-                        inferMode, baseItem, targetOutput, outputDestination)));
+                        inferMode, baseItem, targetOutput, outputDestination, machineSelectionMode)));
         player.sendSystemMessage(TextBuilder.translate(
                 outputDestination == OutputDestination.PLAYER_INVENTORY
                         ? "rsi.async.chain_started_player"
@@ -848,7 +871,8 @@ public final class GenericCraftPacket {
                                    int repeatCount, boolean inferMode,
                                    @Nullable ItemStack baseItem,
                                    @Nullable ItemStack targetOutput,
-                                   OutputDestination outputDestination) {
+                                   OutputDestination outputDestination,
+                                   MachineSelectionMode machineSelectionMode) {
         // v3.4: convert forced recipe overrides for the resolver (same format as tryBuildPlan).
         Map<ResourceLocation, ResourceLocation> forcedOverrides = null;
         if (!forcedRecipes.isEmpty()) {
@@ -1033,7 +1057,7 @@ public final class GenericCraftPacket {
                                 inputGraph, terminalStep, recipeOutput);
                         launchGraphAsyncChain(player, completeGraph, terminalStep,
                                 network, repeatCount, recipeId, forcedRecipes, dim, pos,
-                                inferMode, baseItem, targetOutput, outputDestination);
+                                inferMode, baseItem, targetOutput, outputDestination, machineSelectionMode);
                         return;
                     } catch (IllegalArgumentException | ArithmeticException exception) {
                         RSIntegrationMod.LOGGER.warn(
@@ -1051,10 +1075,14 @@ public final class GenericCraftPacket {
                         player, network, inputGraph, terminalStep, repeatCount,
                         LegacyExecutionMetrics.fromTerminalDecision(graphDecision.reason()),
                         recipeId, targetOutput, outputDestination,
-                        fallback -> fallback.onDone(() -> ChainRepeatController.scheduleNext(
-                                fallback, server, playerId, 1, fallback.getMachineCount(),
-                                (p, rem) -> tryResolve(p, recipeId, forcedRecipes, dim, pos, rem,
-                                        inferMode, baseItem, targetOutput, outputDestination))));
+                        fallback -> {
+                            fallback.setMachineSelection(recipeId, machineSelectionMode, dim, pos);
+                            fallback.onDone(() -> ChainRepeatController.scheduleNext(
+                                    fallback, server, playerId, 1, fallback.getMachineCount(),
+                                    (p, rem) -> tryResolve(p, recipeId, forcedRecipes, dim, pos, rem,
+                                            inferMode, baseItem, targetOutput, outputDestination,
+                                            machineSelectionMode)));
+                        });
                 return;
             }
         }
@@ -1092,7 +1120,7 @@ public final class GenericCraftPacket {
                                 inputGraph, terminalStep, recipeOutput);
                         launchGraphAsyncChain(player, completeGraph, terminalStep,
                                 network, repeatCount, recipeId, forcedRecipes, dim, pos,
-                                inferMode, baseItem, targetOutput, outputDestination);
+                                inferMode, baseItem, targetOutput, outputDestination, machineSelectionMode);
                         return;
                     } catch (IllegalArgumentException | ArithmeticException exception) {
                         RSIntegrationMod.LOGGER.warn(
@@ -1108,7 +1136,7 @@ public final class GenericCraftPacket {
                     launchAsyncChain(player, execSteps,
                             LegacyExecutionMetrics.rejectedGraphReason(execSteps),
                             network, repeatCount, recipeId, forcedRecipes,
-                            dim, pos, inferMode, baseItem, targetOutput, outputDestination);
+                            dim, pos, inferMode, baseItem, targetOutput, outputDestination, machineSelectionMode);
                     return;
                 }
                 // All GENERIC steps → execute sync chain
@@ -1121,7 +1149,7 @@ public final class GenericCraftPacket {
                                     ? LegacyExecutionMetrics.Reason.GRAPH_COMPOSITION_REJECTED
                                     : LegacyExecutionMetrics.Reason.PURE_CHAIN_OPERATION_THRESHOLD,
                             network, repeatCount, recipeId, forcedRecipes,
-                            dim, pos, inferMode, baseItem, targetOutput, outputDestination);
+                            dim, pos, inferMode, baseItem, targetOutput, outputDestination, machineSelectionMode);
                     return;
                 }
                 executeSyncLoop(player, execSteps, network, recipeId, repeatCount, "Intermediate crafting failed");
@@ -1157,7 +1185,7 @@ public final class GenericCraftPacket {
                     launchAsyncChain(player, cachedSteps,
                             LegacyExecutionMetrics.Reason.PURE_CHAIN_OPERATION_THRESHOLD,
                             network, repeatCount, recipeId, forcedRecipes, dim, pos,
-                            inferMode, baseItem, targetOutput, outputDestination);
+                            inferMode, baseItem, targetOutput, outputDestination, machineSelectionMode);
                 } else {
                     executeSyncLoop(player, cachedSteps, network, recipeId, repeatCount,
                             "Intermediate crafting failed");
@@ -1193,7 +1221,7 @@ public final class GenericCraftPacket {
                                 inputGraph, terminalStep, recipeOutput);
                         launchGraphAsyncChain(player, completeGraph, terminalStep,
                                 network, repeatCount, recipeId, forcedRecipes, dim, pos,
-                                inferMode, baseItem, targetOutput, outputDestination);
+                                inferMode, baseItem, targetOutput, outputDestination, machineSelectionMode);
                         return;
                     } catch (IllegalArgumentException | ArithmeticException exception) {
                         RSIntegrationMod.LOGGER.warn(
@@ -1207,7 +1235,7 @@ public final class GenericCraftPacket {
                                     ? LegacyExecutionMetrics.rejectedGraphReason(execSteps2)
                                     : LegacyExecutionMetrics.Reason.PURE_CHAIN_OPERATION_THRESHOLD,
                             network, repeatCount, recipeId, forcedRecipes,
-                            dim, pos, inferMode, baseItem, targetOutput, outputDestination);
+                            dim, pos, inferMode, baseItem, targetOutput, outputDestination, machineSelectionMode);
                     return;
                 }
                 executeSyncLoop(player, execSteps2, network, recipeId, repeatCount, "Intermediate crafting failed");
@@ -1286,7 +1314,7 @@ public final class GenericCraftPacket {
                                         smithingInputGraph, terminalStep, recipeOutput);
                                 launchGraphAsyncChain(player, completeGraph, terminalStep,
                                         network, repeatCount, recipeId, forcedRecipes, dim, pos,
-                                        inferMode, baseItem, targetOutput, outputDestination);
+                                        inferMode, baseItem, targetOutput, outputDestination, machineSelectionMode);
                                 return;
                             } catch (IllegalArgumentException | ArithmeticException exception) {
                                 RSIntegrationMod.LOGGER.warn(
@@ -1298,7 +1326,7 @@ public final class GenericCraftPacket {
                                 LegacyExecutionMetrics.rejectedGraphReason(asyncSteps),
                                 network, repeatCount, recipeId,
                                 forcedRecipes, dim, pos, inferMode, baseItem, targetOutput,
-                                outputDestination);
+                                outputDestination, machineSelectionMode);
                         return;
                     }
                 }
@@ -1312,7 +1340,7 @@ public final class GenericCraftPacket {
                     List.of(genericTerminalStep(recipeId, repeatCount)),
                     LegacyExecutionMetrics.Reason.PURE_CHAIN_OPERATION_THRESHOLD,
                     network, repeatCount, recipeId, forcedRecipes, dim, pos,
-                    inferMode, baseItem, targetOutput, outputDestination);
+                    inferMode, baseItem, targetOutput, outputDestination, machineSelectionMode);
             return;
         }
 
@@ -2999,6 +3027,12 @@ public final class GenericCraftPacket {
                     String.format("%,d", totalArsSource)));
         }
 
+        List<MachineCandidateView> machineCandidates = recipeModType != null
+                && ModIds.GOETY.equals(recipeModType.id())
+                ? com.huanghuang.rsintegration.mods.goety.GoetyBatchDelegate
+                .getPlanMachineCandidates(player, recipe)
+                : List.of();
+
         PlanResponseDraft responseDraft = new PlanResponseDraft(
                 feasible,
                 targetName,
@@ -3026,7 +3060,8 @@ public final class GenericCraftPacket {
                 leftovers,
                 clickedOutput,
                 planGraphView,
-                blockingPrerequisiteFailure
+                blockingPrerequisiteFailure,
+                machineCandidates
         );
 
         int responseStepCount = steps.size();

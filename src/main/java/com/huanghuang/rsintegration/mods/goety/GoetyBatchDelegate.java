@@ -4,6 +4,8 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.PreparationMessageScope;
+import com.huanghuang.rsintegration.crafting.plan.MachineCandidateView;
 
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
@@ -45,8 +47,10 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 /** Batch delegate for Goety Dark Altar and Necro Brazier rituals. */
 public final class GoetyBatchDelegate extends AbstractBatchDelegate {
@@ -1770,6 +1774,75 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             return PlanStructureOutcome.STRUCTURE_MISMATCH;
         }
         return PlanStructureOutcome.INVALID_BINDING;
+    }
+
+    /** Builds the target-recipe machine list shown in the crafting plan. */
+    public static List<MachineCandidateView> getPlanMachineCandidates(
+            ServerPlayer player, Recipe<?> recipe) {
+        if (player == null || recipe == null || GoetyReflection.ritualRecipeClass == null
+                || !GoetyReflection.ritualRecipeClass.isInstance(recipe)) {
+            return List.of();
+        }
+        ModType recipeType = ModType.classifyRecipe(recipe);
+        if (recipeType == null) return List.of();
+
+        List<MachineCandidateView> result = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
+        for (AltarBindingRegistry.BoundMachine machine :
+                AltarBindingRegistry.getBoundMachinesForRecipe(
+                        player, recipeType, recipe.getId())) {
+            if (!GoetyBindingRules.matches(
+                    machine.blockKey(), null, GoetyBindingRules.ALTAR_FILTER)) continue;
+            String key = machine.dim() + "@" + machine.pos().asLong();
+            if (!seen.add(key)) continue;
+
+            ServerLevel level = CraftPacketUtils.resolveLevel(player.server, machine.dim(), player);
+            ItemStack icon = ItemStack.EMPTY;
+            if (level != null && level.isLoaded(machine.pos())) {
+                icon = new ItemStack(level.getBlockState(machine.pos()).getBlock());
+            }
+
+            MachineCandidateView.State state;
+            Component status;
+            GoetyBatchDelegate delegate = null;
+            try {
+                if (level == null || !level.isLoaded(machine.pos())) {
+                    state = MachineCandidateView.State.TEMPORARY;
+                    status = Component.translatable("rsi.machine_candidate.temporary");
+                } else {
+                    delegate = new GoetyBatchDelegate();
+                    IBatchDelegate.PreparationResult preparation = PreparationMessageScope.prepare(
+                            delegate, player, recipe.getId(), machine.dim(), machine.pos());
+                    if (preparation.state() == IBatchDelegate.PreparationState.READY) {
+                        state = MachineCandidateView.State.READY;
+                        status = Component.translatable("rsi.machine_candidate.ready");
+                    } else if (preparation.state() == IBatchDelegate.PreparationState.RETRY) {
+                        state = MachineCandidateView.State.TEMPORARY;
+                        status = Component.translatable("rsi.machine_candidate.temporary");
+                    } else {
+                        state = MachineCandidateView.State.INCOMPATIBLE;
+                        status = Component.translatable("rsi.machine_candidate.incompatible");
+                    }
+                }
+            } catch (RuntimeException exception) {
+                state = MachineCandidateView.State.TEMPORARY;
+                status = Component.translatable("rsi.machine_candidate.check_failed");
+                RSIntegrationMod.LOGGER.debug(
+                        "[RSI-Batch-Goety] Plan machine candidate probe failed at {}",
+                        machine.pos(), exception);
+            } finally {
+                if (delegate != null) delegate.releasePreparationResources();
+            }
+            result.add(new MachineCandidateView(machine.dim().toString(),
+                    machine.pos().getX(), machine.pos().getY(), machine.pos().getZ(),
+                    icon, state, status));
+        }
+        ResourceLocation playerDim = player.level().dimension().location();
+        result.sort(Comparator
+                .comparingInt((MachineCandidateView candidate) ->
+                        candidate.state() == MachineCandidateView.State.READY ? 0 : 1)
+                .thenComparingInt(candidate -> candidate.dimension().equals(playerDim.toString()) ? 0 : 1));
+        return List.copyOf(result);
     }
 
     public static List<Component> getPlanWarnings(ServerPlayer player, Recipe<?> recipe,

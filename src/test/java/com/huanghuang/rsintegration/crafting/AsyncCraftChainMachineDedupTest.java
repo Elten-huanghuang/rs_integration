@@ -210,4 +210,44 @@ class AsyncCraftChainMachineDedupTest extends BootstrapTest {
         assertTrue(selection.unloadedRejected());
         assertEquals(false, selection.protectionRejected());
     }
+
+    @Test
+    void preferredMachineMovesFirstButKeepsAutomaticFallbacks() {
+        ResourceLocation overworld = new ResourceLocation("minecraft", "overworld");
+        BoundMachine first = new BoundMachine(overworld, new BlockPos(1, 64, 2),
+                ModType.GENERIC, "first");
+        BoundMachine preferred = new BoundMachine(overworld, new BlockPos(3, 64, 4),
+                ModType.GENERIC, "preferred");
+
+        List<BoundMachine> routed = AsyncCraftChain.routeMachineCandidates(
+                List.of(first, preferred), MachineSelectionMode.PREFERRED,
+                preferred.dim(), preferred.pos());
+
+        assertEquals(List.of(preferred, first), routed);
+    }
+
+    @Test
+    void exclusiveMachineCannotSelectAnUnboundCoordinate() {
+        ResourceLocation overworld = new ResourceLocation("minecraft", "overworld");
+        BoundMachine bound = new BoundMachine(overworld, new BlockPos(1, 64, 2),
+                ModType.GENERIC, "bound");
+
+        List<BoundMachine> routed = AsyncCraftChain.routeMachineCandidates(
+                List.of(bound), MachineSelectionMode.EXCLUSIVE,
+                overworld, new BlockPos(99, 64, 99));
+
+        assertTrue(routed.isEmpty());
+    }
+
+    @Test
+    void exclusiveMachineWithoutSelectionFailsClosed() {
+        ResourceLocation overworld = new ResourceLocation("minecraft", "overworld");
+        BoundMachine bound = new BoundMachine(overworld, new BlockPos(1, 64, 2),
+                ModType.GENERIC, "bound");
+
+        List<BoundMachine> routed = AsyncCraftChain.routeMachineCandidates(
+                List.of(bound), MachineSelectionMode.EXCLUSIVE, null, null);
+
+        assertTrue(routed.isEmpty());
+    }
 }

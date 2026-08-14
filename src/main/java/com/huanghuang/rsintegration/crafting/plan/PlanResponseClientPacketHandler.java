@@ -32,7 +32,7 @@ final class PlanResponseClientPacketHandler {
                 plan.embersCode(), plan.embersAspectNames(), plan.embersInputNames(), plan.embersSeed(),
                 plan.embersCanInfer(), plan.embersCodeFromCache(), plan.executionMachineSupportsGui(),
                 plan.baseItem(), plan.boundMachineTypes(), plan.leftovers(), plan.clickedOutput(), plan.graph(),
-                plan.executionBlocked());
+                plan.executionBlocked(), plan.machineCandidates());
         openScreen(localized, requestId);
     }
 

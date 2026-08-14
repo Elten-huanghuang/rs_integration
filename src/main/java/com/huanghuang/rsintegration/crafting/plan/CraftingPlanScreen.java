@@ -13,6 +13,7 @@ import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
 import com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket;
 import com.huanghuang.rsintegration.crafting.OutputDestination;
+import com.huanghuang.rsintegration.crafting.MachineSelectionMode;
 import com.huanghuang.rsintegration.crafting.tree.IngredientKey;
 import com.huanghuang.rsintegration.crafting.tree.JeiSubtreeBuilder;
 import com.huanghuang.rsintegration.crafting.tree.PlanTreeLayout;
@@ -97,6 +98,14 @@ public final class CraftingPlanScreen extends Screen {
     private boolean dragging;
     private int missingAreaTop;
     private int missingAreaHeight;
+    private int machineSelectorY;
+    private int machineModeX, machineModeY, machineModeW, machineModeH;
+    private int machineCandidateX, machineCandidateY, machineCandidateW, machineCandidateH;
+    private boolean machineDropdownOpen;
+    private int selectedMachineIndex = -1;
+    private MachineSelectionMode machineSelectionMode = MachineSelectionMode.AUTO;
+    private final List<MachineCandidateHit> machineCandidateHits = new ArrayList<>();
+    private record MachineCandidateHit(int x, int y, int w, int h, int index) {}
     private int materialAreaTop;
     private int materialAreaHeight;
     // Material grid vertical scroll (pixels); max set by the render engine each frame.
@@ -327,7 +336,16 @@ public final class CraftingPlanScreen extends Screen {
     /** Update plan data in-place (OR-path switch, repeat-count change, etc.).
      *  Avoids creating a new screen which would lose UI state. */
     public void updatePlan(PlanResponse newPlan) {
+        MachineCandidateView previous = selectedMachineCandidate();
         this.plan = newPlan;
+        if (previous != null) {
+            selectedMachineIndex = findMachineCandidate(previous.dimension(), previous.x(), previous.y(), previous.z());
+            if (selectedMachineIndex < 0) {
+                selectedMachineIndex = -1;
+                machineSelectionMode = MachineSelectionMode.AUTO;
+            }
+        }
+        machineDropdownOpen = false;
         this.renderEngine = new PlanRenderEngine(Minecraft.getInstance().font);
         this.dropdownNode = null;
         this.materialScroll = 0;
@@ -337,6 +355,23 @@ public final class CraftingPlanScreen extends Screen {
         this.altSelection.clear();
         this.clearWidgets();
         this.init();
+    }
+
+    private int findMachineCandidate(String dimension, int x, int y, int z) {
+        List<MachineCandidateView> candidates = plan.machineCandidates();
+        for (int i = 0; i < candidates.size(); i++) {
+            MachineCandidateView candidate = candidates.get(i);
+            if (candidate.dimension().equals(dimension) && candidate.x() == x
+                    && candidate.y() == y && candidate.z() == z) return i;
+        }
+        return -1;
+    }
+
+    @Nullable
+    private MachineCandidateView selectedMachineCandidate() {
+        List<MachineCandidateView> candidates = plan == null ? List.of() : plan.machineCandidates();
+        return selectedMachineIndex >= 0 && selectedMachineIndex < candidates.size()
+                ? candidates.get(selectedMachineIndex) : null;
     }
 
     /**
@@ -416,7 +451,9 @@ public final class CraftingPlanScreen extends Screen {
         // Compute missing items area — items flow inline with wrapping
         int missingCount = plan.missing() != null ? plan.missing().size() : 0;
         int modWarnCount = plan.modWarnings() != null ? plan.modWarnings().size() : 0;
-        if (missingCount + modWarnCount > 0) {
+        boolean hasMachineCandidates = plan.machineCandidates() != null
+                && !plan.machineCandidates().isEmpty();
+        if (missingCount + modWarnCount > 0 || hasMachineCandidates) {
             int lines = 0;
             int maxLineW = contentW - 24;
             if (missingCount > 0) {
@@ -427,7 +464,8 @@ public final class CraftingPlanScreen extends Screen {
             if (modWarnCount > 0) {
                 lines += modWarnCount;
             }
-            missingAreaHeight = font.lineHeight + 6 + lines * (font.lineHeight + 4) + 4;
+            int warningHeight = lines > 0 ? font.lineHeight + 6 + lines * (font.lineHeight + 4) + 4 : 0;
+            missingAreaHeight = warningHeight + (hasMachineCandidates ? 34 : 0);
         } else {
             missingAreaHeight = 0;
         }
@@ -671,14 +709,20 @@ public final class CraftingPlanScreen extends Screen {
             execPos = new net.minecraft.core.BlockPos(
                     plan.executionPosX(), plan.executionPosY(), plan.executionPosZ());
         }
+        MachineCandidateView selected = selectedMachineCandidate();
+        if (machineSelectionMode != MachineSelectionMode.AUTO) {
+            execDim = selected == null ? null : ResourceLocation.tryParse(selected.dimension());
+            execPos = selected == null ? null
+                    : new net.minecraft.core.BlockPos(selected.x(), selected.y(), selected.z());
+        }
         long requestId = nextRequestId++;
         if (nextRequestId <= 0 || nextRequestId > 0x7FFF_FFFF_FFFF_FFFFL) nextRequestId = 1L;
         if (preview) activeRequestId = requestId;
-        BatchCraftNetworkHandler.CHANNEL.sendToServer(
-                new GenericCraftPacket(rid, preview, forced, execDim, execPos,
+        GenericCraftPacket packet = new GenericCraftPacket(rid, preview, forced, execDim, execPos,
                         repeatCount, inferMode, plan.baseItem(),
                         executionTarget(plan.clickedOutput(), plan.targetResult()), requestId,
-                        outputDestination));
+                        outputDestination).withMachineSelectionMode(machineSelectionMode);
+        BatchCraftNetworkHandler.CHANNEL.sendToServer(packet);
     }
 
     /** Open JEI for a specific recipe id. No-op when JEI is unavailable. */
@@ -966,7 +1010,8 @@ public final class CraftingPlanScreen extends Screen {
         // Missing items + mod warnings
         if (missingAreaHeight > 0 && (
                 (plan.missing() != null && !plan.missing().isEmpty()) ||
-                (plan.modWarnings() != null && !plan.modWarnings().isEmpty()))) {
+                (plan.modWarnings() != null && !plan.modWarnings().isEmpty()) ||
+                (plan.machineCandidates() != null && !plan.machineCandidates().isEmpty()))) {
             renderMissingArea(gfx, font, left, missingAreaTop, contentW);
         }
 
@@ -999,6 +1044,7 @@ public final class CraftingPlanScreen extends Screen {
         renderCardPreview(gfx, font);
 
         renderOutputDestinationSelector(gfx, font, mouseX, mouseY);
+        renderMachineCandidateDropdown(gfx, font);
 
         // Deferred tooltip — rendered AFTER all scissors, so Legendary
         // Tooltips' boundary avoidance works without scissor clipping.
@@ -1664,7 +1710,9 @@ public final class CraftingPlanScreen extends Screen {
         UIRenderer.roundedGradient(gfx, left, top, contentW, missingAreaHeight, 6f,
                 0xE61E1814, 0xE6181410);
         // Left accent — red when materials are missing, orange when only mod warnings
-        int accentColor = hasMissing ? C_ACCENT_MISSING : C_ORANGE;
+        int accentColor = hasMissing ? C_ACCENT_MISSING
+                : (plan.machineCandidates() != null && !plan.machineCandidates().isEmpty()
+                ? C_ACCENT_READY : C_ORANGE);
         gfx.fill(left + 1, top + 2, left + 4, top + missingAreaHeight - 2, accentColor);
 
         int my = top + 4;
@@ -1688,6 +1736,105 @@ public final class CraftingPlanScreen extends Screen {
                 gfx.drawString(font, display, left + 10, my, 0xFFDDAA00);
                 my += font.lineHeight + 4;
             }
+        }
+        if (plan.machineCandidates() != null && !plan.machineCandidates().isEmpty()) {
+            if (my > top + 4) my += 2;
+            renderMachineSelector(gfx, font, left + 10, my, contentW - 20);
+        }
+    }
+
+    private void renderMachineSelector(GuiGraphics gfx, Font font, int left, int y, int width) {
+        machineSelectorY = y;
+        machineModeY = y;
+        machineModeH = 20;
+        machineModeW = 44;
+        String label = Component.translatable("rsi.machine_candidate.label").getString();
+        gfx.drawString(font, label, left, y + 3, 0xFFBBD8C2, false);
+
+        int modeX = left + font.width(label) + 8;
+        machineModeX = modeX;
+        String[] modeKeys = {"rsi.machine_candidate.auto", "rsi.machine_candidate.preferred",
+                "rsi.machine_candidate.exclusive"};
+        MachineSelectionMode[] modes = {MachineSelectionMode.AUTO, MachineSelectionMode.PREFERRED,
+                MachineSelectionMode.EXCLUSIVE};
+        for (int i = 0; i < modes.length; i++) {
+            int x = modeX + i * (machineModeW + 3);
+            boolean selected = machineSelectionMode == modes[i];
+            boolean hovered = mouseX >= x && mouseX < x + machineModeW
+                    && mouseY >= y && mouseY < y + machineModeH;
+            UIRenderer.rounded(gfx, x, y, machineModeW, machineModeH, 3f,
+                    selected ? 0xCC338855 : hovered ? 0x88385546 : 0x661A221E);
+            String text = Component.translatable(modeKeys[i]).getString();
+            String clipped = font.plainSubstrByWidth(text, machineModeW - 6);
+            gfx.drawString(font, clipped, x + (machineModeW - font.width(clipped)) / 2,
+                    y + (machineModeH - font.lineHeight) / 2,
+                    selected ? 0xFFFFFFFF : 0xFF9DB9A4, false);
+        }
+
+        int candidateX = modeX + 3 * (machineModeW + 3) + 8;
+        machineCandidateX = candidateX;
+        machineCandidateY = y;
+        machineCandidateH = machineModeH;
+        machineCandidateW = Math.max(60, left + width - candidateX);
+        MachineCandidateView selected = selectedMachineCandidate();
+        List<MachineCandidateView> candidates = plan.machineCandidates();
+        long ready = candidates.stream().filter(c -> c.state() == MachineCandidateView.State.READY).count();
+        String value;
+        if (machineSelectionMode == MachineSelectionMode.AUTO) {
+            value = Component.translatable("rsi.machine_candidate.auto_value", ready, candidates.size()).getString();
+        } else if (selected == null) {
+            value = Component.translatable("rsi.machine_candidate.none").getString();
+        } else {
+            value = selected.dimension() + " " + selected.x() + "," + selected.y() + "," + selected.z();
+        }
+        boolean hovered = mouseX >= candidateX && mouseX < candidateX + machineCandidateW
+                && mouseY >= y && mouseY < y + machineCandidateH;
+        UIRenderer.rounded(gfx, candidateX, y, machineCandidateW, machineCandidateH, 3f,
+                hovered ? 0x88385546 : 0x661A221E);
+        MachineCandidateView iconCandidate = selected != null ? selected
+                : candidates.stream().filter(c -> !c.icon().isEmpty()).findFirst().orElse(null);
+        int textX = candidateX + 6;
+        if (iconCandidate != null && !iconCandidate.icon().isEmpty()) {
+            gfx.renderItem(iconCandidate.icon(), candidateX + 3, y + 2);
+            textX = candidateX + 23;
+        }
+        String clipped = font.plainSubstrByWidth(value,
+                Math.max(1, candidateX + machineCandidateW - 12 - textX));
+        gfx.drawString(font, clipped, textX, y + (machineCandidateH - font.lineHeight) / 2,
+                hovered ? 0xFFFFFFFF : 0xFFBBD8C2, false);
+        gfx.drawString(font, machineDropdownOpen ? "^" : "v",
+                candidateX + machineCandidateW - 10,
+                y + (machineCandidateH - font.lineHeight) / 2, 0xFF79C995, false);
+    }
+
+    private void renderMachineCandidateDropdown(GuiGraphics gfx, Font font) {
+        machineCandidateHits.clear();
+        if (!machineDropdownOpen || plan.machineCandidates().isEmpty()) return;
+        int rowH = 22;
+        int width = Math.min(260, Math.max(170, machineCandidateW));
+        int left = Math.max(8, machineCandidateX);
+        int top = Math.max(8, machineCandidateY - rowH * plan.machineCandidates().size() - 4);
+        for (int i = 0; i < plan.machineCandidates().size(); i++) {
+            MachineCandidateView candidate = plan.machineCandidates().get(i);
+            int y = top + i * rowH;
+            boolean hovered = mouseX >= left && mouseX < left + width
+                    && mouseY >= y && mouseY < y + rowH;
+            int bg = hovered ? 0xDD31523E : 0xEE111A15;
+            UIRenderer.rounded(gfx, left, y, width, rowH, 3f, bg);
+            int color = candidate.state() == MachineCandidateView.State.READY ? C_GREEN
+                    : candidate.state() == MachineCandidateView.State.TEMPORARY ? C_ORANGE : C_RED;
+            gfx.fill(left + 3, y + 3, left + 5, y + rowH - 3, color);
+            int textX = left + 10;
+            if (!candidate.icon().isEmpty()) {
+                gfx.renderItem(candidate.icon(), left + 7, y + 3);
+                textX = left + 28;
+            }
+            String text = candidate.dimension() + " " + candidate.x() + "," + candidate.y()
+                    + "," + candidate.z() + " · " + candidate.status().getString();
+            text = font.plainSubstrByWidth(text, Math.max(1, left + width - 8 - textX));
+            gfx.drawString(font, text, textX, y + (rowH - font.lineHeight) / 2,
+                    0xFFE2F2E5, false);
+            machineCandidateHits.add(new MachineCandidateHit(left, y, width, rowH, i));
         }
     }
 
@@ -2362,6 +2509,40 @@ public final class CraftingPlanScreen extends Screen {
     @Override
     public boolean mouseClicked(double mx, double my, int button) {
         if (button == 0) {
+            if (machineDropdownOpen) {
+                for (MachineCandidateHit hit : machineCandidateHits) {
+                    if (mx >= hit.x() && mx < hit.x() + hit.w()
+                            && my >= hit.y() && my < hit.y() + hit.h()) {
+                        selectedMachineIndex = hit.index();
+                        if (machineSelectionMode == MachineSelectionMode.AUTO) {
+                            machineSelectionMode = MachineSelectionMode.PREFERRED;
+                        }
+                        machineDropdownOpen = false;
+                        return true;
+                    }
+                }
+            }
+            if (!plan.machineCandidates().isEmpty()
+                    && mx >= machineModeX && mx < machineModeX + 3 * (machineModeW + 3)
+                    && my >= machineModeY && my < machineModeY + machineModeH) {
+                int index = (int) ((mx - machineModeX) / (machineModeW + 3));
+                if (index >= 0 && index < 3) {
+                    machineSelectionMode = MachineSelectionMode.values()[index];
+                    if (machineSelectionMode != MachineSelectionMode.AUTO
+                            && selectedMachineIndex < 0) {
+                        selectedMachineIndex = plan.machineCandidates().stream()
+                                .filter(c -> c.state() == MachineCandidateView.State.READY)
+                                .findFirst().map(c -> plan.machineCandidates().indexOf(c)).orElse(-1);
+                    }
+                    return true;
+                }
+            }
+            if (!plan.machineCandidates().isEmpty()
+                    && mx >= machineCandidateX && mx < machineCandidateX + machineCandidateW
+                    && my >= machineCandidateY && my < machineCandidateY + machineCandidateH) {
+                machineDropdownOpen = !machineDropdownOpen;
+                return true;
+            }
             boolean overRepeatInput = mx >= countPillX && mx < countPillX + countPillW
                     && my >= countPillY && my < countPillY + countPillH;
             if (!overRepeatInput) unfocusRepeatCountInput();
