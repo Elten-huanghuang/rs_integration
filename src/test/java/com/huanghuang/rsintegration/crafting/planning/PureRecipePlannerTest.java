@@ -224,6 +224,81 @@ class PureRecipePlannerTest {
     }
 
     @Test
+    void prefabStyleCompressedTagSkipsUnseededVariants() {
+        MaterialRef dirt = material("dirt");
+        MaterialRef compressedDirt = material("compressed_dirt");
+        MaterialRef prefabDoubleDirt = material("prefab_double_compressed_dirt");
+        List<MaterialRef> doubleDirtVariants = new ArrayList<>();
+        Map<MaterialRef, List<RecipeNode>> recipes = new LinkedHashMap<>();
+
+        for (int i = 0; i < 96; i++) {
+            MaterialRef deadVariant = material("dead_double_dirt_" + i);
+            MaterialRef missingCompressedVariant = material("missing_compressed_dirt_" + i);
+            doubleDirtVariants.add(deadVariant);
+            recipes.put(deadVariant, List.of(recipe("dead_double_dirt_" + i,
+                    deadVariant, 1, ingredient(missingCompressedVariant, 9))));
+        }
+        doubleDirtVariants.add(prefabDoubleDirt);
+        recipes.put(compressedDirt, List.of(recipe("compress_dirt", compressedDirt, 1,
+                ingredient(dirt, 9))));
+        recipes.put(prefabDoubleDirt, List.of(recipe("double_compress_dirt",
+                prefabDoubleDirt, 1, ingredient(compressedDirt, 9))));
+
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(
+                new ImmutableRecipeGraph(recipes), Map.of(dirt, 243),
+                List.of(new IngredientRef(doubleDirtVariants, 3)),
+                20, 20);
+
+        assertTrue(result.feasible());
+        assertEquals(PureRecipePlanner.Status.SUCCESS, result.status());
+        assertEquals(List.of(
+                new PureRecipePlanner.PlannedStep(id("compress_dirt"), 27),
+                new PureRecipePlanner.PlannedStep(id("double_compress_dirt"), 3)),
+                result.steps());
+        assertTrue(result.expandedStates() < 20);
+    }
+
+    @Test
+    void entirelyUnseededLargeTagFailsWithoutSearchingEveryVariant() {
+        List<MaterialRef> variants = new ArrayList<>();
+        Map<MaterialRef, List<RecipeNode>> recipes = new LinkedHashMap<>();
+        for (int i = 0; i < 96; i++) {
+            MaterialRef variant = material("dead_variant_" + i);
+            MaterialRef missing = material("missing_" + i);
+            variants.add(variant);
+            recipes.put(variant, List.of(recipe("dead_variant_" + i, variant, 1,
+                    ingredient(missing, 1))));
+        }
+
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(
+                new ImmutableRecipeGraph(recipes), Map.of(),
+                List.of(new IngredientRef(variants, 1)), 20, 4);
+
+        assertFalse(result.feasible());
+        assertEquals(PureRecipePlanner.Status.UNRESOLVABLE, result.status());
+        assertEquals(1, result.expandedStates());
+    }
+
+    @Test
+    void exactCompressedDemandSkipsUnseededProducerChain() {
+        MaterialRef timber = material("timber");
+        MaterialRef compressedTimber = material("compressed_timber");
+        MaterialRef tonOfTimber = material("ton_of_timber");
+        ImmutableRecipeGraph graph = new ImmutableRecipeGraph(Map.of(
+                compressedTimber, List.of(recipe("compress_timber", compressedTimber, 1,
+                        ingredient(timber, 9))),
+                tonOfTimber, List.of(recipe("compress_ton_of_timber", tonOfTimber, 1,
+                        ingredient(compressedTimber, 9)))));
+
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(
+                graph, Map.of(), List.of(ingredient(tonOfTimber, 1)), 20, 2);
+
+        assertFalse(result.feasible());
+        assertEquals(PureRecipePlanner.Status.UNRESOLVABLE, result.status());
+        assertEquals(1, result.expandedStates());
+    }
+
+    @Test
     void unseededReverseConversionIsPrunedWithoutExhaustingSearch() {
         MaterialRef compressed = material("compressed_stone");
         MaterialRef doubleCompressed = material("double_compressed_stone");
@@ -315,13 +390,14 @@ class PureRecipePlannerTest {
                 target, List.of(impossibleA, impossibleB)));
 
         PureRecipePlanner.Result result = PureRecipePlanner.resolve(
-                graph, Map.of(), List.of(ingredient(target, 1)), 20, 1);
+                graph, Map.of(LOG, 1, PLANK, 1),
+                List.of(ingredient(target, 2)), 20, 1);
 
         assertFalse(result.feasible());
         assertEquals(PureRecipePlanner.Status.SEARCH_LIMIT, result.status());
         assertTrue(result.expandedStates() > 1);
         assertTrue(result.steps().isEmpty());
-        assertTrue(result.remaining().isEmpty());
+        assertEquals(Map.of(LOG, 1, PLANK, 1), result.remaining());
     }
 
     @Test

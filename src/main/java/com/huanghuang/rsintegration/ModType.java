@@ -343,15 +343,14 @@ public final class ModType {
                 net.minecraft.resources.ResourceLocation key =
                         net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(
                                 container.getItem());
-                String k = key.toString();
                 // IRON_BOWL  → small_iron_pot   (SmallCookingPotBlockEntity)
                 // IRON_POT   → short_iron_pot   (MidCookingPotBlockEntity)
                 // STOCKPOT   → stockpot         (LargeCookingPotBlockEntity)
-                if ("youkaishomecoming:short_iron_pot".equals(k))
+                if ("short_iron_pot".equals(key.getPath()))
                     return byId("youkaishomecoming_cooking_short");
-                if ("youkaishomecoming:stockpot".equals(k))
+                if ("stockpot".equals(key.getPath()))
                     return byId("youkaishomecoming_cooking_large");
-                if ("youkaishomecoming:small_iron_pot".equals(k))
+                if ("small_iron_pot".equals(key.getPath()))
                     return byId("youkaishomecoming_cooking_small");
             }
         } catch (Exception e) {

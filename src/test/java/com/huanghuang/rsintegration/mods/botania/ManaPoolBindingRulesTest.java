@@ -31,7 +31,8 @@ class ManaPoolBindingRulesTest {
 
     @Test
     void plainRecipeUsesDirectlyBoundPool() {
-        var result = ManaPoolBindingRules.assess(BINDING, true, false, false, false);
+        var result = ManaPoolBindingRules.assess(
+                BINDING, true, false, false, false, false);
 
         assertEquals(ManaPoolBindingRules.State.READY, result.state());
         assertEquals(BINDING, result.poolPos());
@@ -39,15 +40,26 @@ class ManaPoolBindingRulesTest {
 
     @Test
     void catalystRecipeUsesPoolAboveMatchingCatalyst() {
-        var result = ManaPoolBindingRules.assess(BINDING, false, true, true, true);
+        var result = ManaPoolBindingRules.assess(
+                BINDING, false, true, true, true, false);
 
         assertEquals(ManaPoolBindingRules.State.READY, result.state());
         assertEquals(BINDING.above(), result.poolPos());
     }
 
     @Test
-    void catalystRecipeRejectsDirectPoolBindingPermanently() {
-        var result = ManaPoolBindingRules.assess(BINDING, true, false, true, false);
+    void customCatalystRecipeUsesPoolBindingWhenBlockBelowMatches() {
+        var result = ManaPoolBindingRules.assess(
+                BINDING, true, false, true, false, true);
+
+        assertEquals(ManaPoolBindingRules.State.READY, result.state());
+        assertEquals(BINDING, result.poolPos());
+    }
+
+    @Test
+    void catalystRecipeRejectsPoolBindingWhenBlockBelowDoesNotMatch() {
+        var result = ManaPoolBindingRules.assess(
+                BINDING, true, false, true, false, false);
 
         assertEquals(ManaPoolBindingRules.State.FATAL, result.state());
         assertNull(result.poolPos());
@@ -55,7 +67,8 @@ class ManaPoolBindingRulesTest {
 
     @Test
     void plainRecipeRejectsCatalystBindingPermanently() {
-        var result = ManaPoolBindingRules.assess(BINDING, false, true, false, false);
+        var result = ManaPoolBindingRules.assess(
+                BINDING, false, true, false, false, false);
 
         assertEquals(ManaPoolBindingRules.State.FATAL, result.state());
         assertNull(result.poolPos());
@@ -63,7 +76,8 @@ class ManaPoolBindingRulesTest {
 
     @Test
     void catalystRecipeRejectsWrongCatalystPermanently() {
-        var result = ManaPoolBindingRules.assess(BINDING, false, true, true, false);
+        var result = ManaPoolBindingRules.assess(
+                BINDING, false, true, true, false, false);
 
         assertEquals(ManaPoolBindingRules.State.FATAL, result.state());
         assertNull(result.poolPos());
@@ -71,7 +85,8 @@ class ManaPoolBindingRulesTest {
 
     @Test
     void missingPoolAboveCatalystRemainsRetryable() {
-        var result = ManaPoolBindingRules.assess(BINDING, false, false, true, true);
+        var result = ManaPoolBindingRules.assess(
+                BINDING, false, false, true, true, false);
 
         assertEquals(ManaPoolBindingRules.State.RETRY, result.state());
         assertNull(result.poolPos());

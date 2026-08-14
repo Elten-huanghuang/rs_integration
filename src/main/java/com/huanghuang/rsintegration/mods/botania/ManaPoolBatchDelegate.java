@@ -79,8 +79,11 @@ public final class ManaPoolBatchDelegate extends AbstractBatchDelegate {
         boolean poolAboveBinding = resolved.getBlockEntity(bindingPos.above()) instanceof ManaPoolBlockEntity;
         var catalyst = r.getRecipeCatalyst();
         boolean catalystMatches = catalyst != null && catalyst.test(resolved.getBlockState(bindingPos));
+        boolean catalystMatchesBelowPool = catalyst != null && directlyBoundPool
+                && catalyst.test(resolved.getBlockState(bindingPos.below()));
         ManaPoolBindingRules.Assessment assessment = ManaPoolBindingRules.assess(
-                bindingPos, directlyBoundPool, poolAboveBinding, catalyst != null, catalystMatches);
+                bindingPos, directlyBoundPool, poolAboveBinding, catalyst != null,
+                catalystMatches, catalystMatchesBelowPool);
         if (assessment.state() == ManaPoolBindingRules.State.RETRY) {
             return PreparationResult.retry(assessment.detail());
         }

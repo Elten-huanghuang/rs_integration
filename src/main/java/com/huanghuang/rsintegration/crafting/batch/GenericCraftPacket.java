@@ -1050,7 +1050,9 @@ public final class GenericCraftPacket {
                 TerminalGraphExecutionPolicy.Decision graphDecision =
                         TerminalGraphExecutionPolicy.decide(
                                 inferMode, !graphSpecs.isEmpty(), recipeOutput,
-                                deterministicPrimary);
+                                deterministicPrimary,
+                                isSelfAmplifyingRecipe(
+                                        recipe, player.serverLevel().registryAccess()));
                 if (graphDecision.composable()) {
                     try {
                         CraftPlanGraph completeGraph = composeEquivalentTerminalGraph(
@@ -1108,6 +1110,8 @@ public final class GenericCraftPacket {
                         step -> step.recipeId().equals(CraftingResolver.TAINT_EARTH_HEART_STEP));
                 boolean needsAsync = outputDestination == OutputDestination.PLAYER_INVENTORY
                         || allSteps.stream().anyMatch(step -> step.modType() != ModType.GENERIC);
+                boolean selfAmplifying = isSelfAmplifyingRecipe(
+                        recipe, player.serverLevel().registryAccess());
                 if (needsAsync && !legacySyntheticStep) {
                     ResolutionStep terminalStep = genericTerminalStep(recipeId, repeatCount);
                     if (targetOutput != null && !targetOutput.isEmpty()
@@ -1115,17 +1119,19 @@ public final class GenericCraftPacket {
                             && targetOutput.getItem() == recipeOutput.getItem()) {
                         recipeOutput = targetOutput.copyWithCount(recipeOutput.getCount());
                     }
-                    try {
-                        CraftPlanGraph completeGraph = composeEquivalentTerminalGraph(
-                                inputGraph, terminalStep, recipeOutput);
-                        launchGraphAsyncChain(player, completeGraph, terminalStep,
-                                network, repeatCount, recipeId, forcedRecipes, dim, pos,
-                                inferMode, baseItem, targetOutput, outputDestination, machineSelectionMode);
-                        return;
-                    } catch (IllegalArgumentException | ArithmeticException exception) {
-                        RSIntegrationMod.LOGGER.warn(
-                                "[RSI-Craft] pre-resolved terminal graph composition rejected recipe={} reason={}",
-                                recipeId, exception.getMessage());
+                    if (!selfAmplifying) {
+                        try {
+                            CraftPlanGraph completeGraph = composeEquivalentTerminalGraph(
+                                    inputGraph, terminalStep, recipeOutput);
+                            launchGraphAsyncChain(player, completeGraph, terminalStep,
+                                    network, repeatCount, recipeId, forcedRecipes, dim, pos,
+                                    inferMode, baseItem, targetOutput, outputDestination, machineSelectionMode);
+                            return;
+                        } catch (IllegalArgumentException | ArithmeticException exception) {
+                            RSIntegrationMod.LOGGER.warn(
+                                    "[RSI-Craft] pre-resolved terminal graph composition rejected recipe={} reason={}",
+                                    recipeId, exception.getMessage());
+                        }
                     }
                 }
                 if (allSteps.stream().anyMatch(s -> s.modType() != ModType.GENERIC
@@ -1134,7 +1140,9 @@ public final class GenericCraftPacket {
                     List<ResolutionStep> execSteps = genericExecutionSteps(
                             allSteps, recipeId, repeatCount);
                     launchAsyncChain(player, execSteps,
-                            LegacyExecutionMetrics.rejectedGraphReason(execSteps),
+                            selfAmplifying
+                                    ? LegacyExecutionMetrics.Reason.SELF_AMPLIFYING_TERMINAL
+                                    : LegacyExecutionMetrics.rejectedGraphReason(execSteps),
                             network, repeatCount, recipeId, forcedRecipes,
                             dim, pos, inferMode, baseItem, targetOutput, outputDestination, machineSelectionMode);
                     return;
@@ -1207,6 +1215,8 @@ public final class GenericCraftPacket {
                         step -> step.recipeId().equals(CraftingResolver.TAINT_EARTH_HEART_STEP));
                 boolean needsAsync = outputDestination == OutputDestination.PLAYER_INVENTORY
                         || planSteps.stream().anyMatch(step -> step.modType() != ModType.GENERIC);
+                boolean selfAmplifying = isSelfAmplifyingRecipe(
+                        recipe, player.serverLevel().registryAccess());
                 List<ResolutionStep> execSteps2 = new ArrayList<>(planSteps);
                 ResolutionStep terminalStep = genericTerminalStep(recipeId, repeatCount);
                 execSteps2.add(terminalStep);
@@ -1216,23 +1226,27 @@ public final class GenericCraftPacket {
                             && targetOutput.getItem() == recipeOutput.getItem()) {
                         recipeOutput = targetOutput.copyWithCount(recipeOutput.getCount());
                     }
-                    try {
-                        CraftPlanGraph completeGraph = composeEquivalentTerminalGraph(
-                                inputGraph, terminalStep, recipeOutput);
-                        launchGraphAsyncChain(player, completeGraph, terminalStep,
-                                network, repeatCount, recipeId, forcedRecipes, dim, pos,
-                                inferMode, baseItem, targetOutput, outputDestination, machineSelectionMode);
-                        return;
-                    } catch (IllegalArgumentException | ArithmeticException exception) {
-                        RSIntegrationMod.LOGGER.warn(
-                                "[RSI-Craft] crafting terminal graph composition rejected recipe={} reason={}",
-                                recipeId, exception.getMessage());
+                    if (!selfAmplifying) {
+                        try {
+                            CraftPlanGraph completeGraph = composeEquivalentTerminalGraph(
+                                    inputGraph, terminalStep, recipeOutput);
+                            launchGraphAsyncChain(player, completeGraph, terminalStep,
+                                    network, repeatCount, recipeId, forcedRecipes, dim, pos,
+                                    inferMode, baseItem, targetOutput, outputDestination, machineSelectionMode);
+                            return;
+                        } catch (IllegalArgumentException | ArithmeticException exception) {
+                            RSIntegrationMod.LOGGER.warn(
+                                    "[RSI-Craft] crafting terminal graph composition rejected recipe={} reason={}",
+                                    recipeId, exception.getMessage());
+                        }
                     }
                 }
                 if (needsAsync || shouldExecuteGenericChainAsync(execSteps2)) {
                     launchAsyncChain(player, execSteps2,
                             needsAsync
-                                    ? LegacyExecutionMetrics.rejectedGraphReason(execSteps2)
+                                    ? selfAmplifying
+                                    ? LegacyExecutionMetrics.Reason.SELF_AMPLIFYING_TERMINAL
+                                    : LegacyExecutionMetrics.rejectedGraphReason(execSteps2)
                                     : LegacyExecutionMetrics.Reason.PURE_CHAIN_OPERATION_THRESHOLD,
                             network, repeatCount, recipeId, forcedRecipes,
                             dim, pos, inferMode, baseItem, targetOutput, outputDestination, machineSelectionMode);
@@ -1309,21 +1323,28 @@ public final class GenericCraftPacket {
                                     && targetOutput.getItem() == recipeOutput.getItem()) {
                                 recipeOutput = targetOutput.copyWithCount(recipeOutput.getCount());
                             }
-                            try {
-                                CraftPlanGraph completeGraph = composeEquivalentTerminalGraph(
-                                        smithingInputGraph, terminalStep, recipeOutput);
-                                launchGraphAsyncChain(player, completeGraph, terminalStep,
-                                        network, repeatCount, recipeId, forcedRecipes, dim, pos,
-                                        inferMode, baseItem, targetOutput, outputDestination, machineSelectionMode);
-                                return;
-                            } catch (IllegalArgumentException | ArithmeticException exception) {
-                                RSIntegrationMod.LOGGER.warn(
-                                        "[RSI-Craft] smithing terminal graph composition rejected recipe={} reason={}",
-                                        recipeId, exception.getMessage());
+                            boolean selfAmplifying = isSelfAmplifyingRecipe(
+                                    recipe, player.serverLevel().registryAccess());
+                            if (!selfAmplifying) {
+                                try {
+                                    CraftPlanGraph completeGraph = composeEquivalentTerminalGraph(
+                                            smithingInputGraph, terminalStep, recipeOutput);
+                                    launchGraphAsyncChain(player, completeGraph, terminalStep,
+                                            network, repeatCount, recipeId, forcedRecipes, dim, pos,
+                                            inferMode, baseItem, targetOutput, outputDestination, machineSelectionMode);
+                                    return;
+                                } catch (IllegalArgumentException | ArithmeticException exception) {
+                                    RSIntegrationMod.LOGGER.warn(
+                                            "[RSI-Craft] smithing terminal graph composition rejected recipe={} reason={}",
+                                            recipeId, exception.getMessage());
+                                }
                             }
                         }
                         launchAsyncChain(player, asyncSteps,
-                                LegacyExecutionMetrics.rejectedGraphReason(asyncSteps),
+                                isSelfAmplifyingRecipe(
+                                        recipe, player.serverLevel().registryAccess())
+                                        ? LegacyExecutionMetrics.Reason.SELF_AMPLIFYING_TERMINAL
+                                        : LegacyExecutionMetrics.rejectedGraphReason(asyncSteps),
                                 network, repeatCount, recipeId,
                                 forcedRecipes, dim, pos, inferMode, baseItem, targetOutput,
                                 outputDestination, machineSelectionMode);

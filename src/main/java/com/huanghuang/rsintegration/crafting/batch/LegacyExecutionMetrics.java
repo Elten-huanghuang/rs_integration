@@ -21,6 +21,7 @@ public final class LegacyExecutionMetrics {
         RUNTIME_SELECTED_INPUTS,
         UNKNOWN_OUTPUT,
         NONDETERMINISTIC_OUTPUT,
+        SELF_AMPLIFYING_TERMINAL,
         TAINT_SYNTHETIC_STEP,
         PURE_CHAIN_OPERATION_THRESHOLD,
         GRAPH_COMPOSITION_REJECTED
@@ -37,6 +38,7 @@ public final class LegacyExecutionMetrics {
             case DYNAMIC_INPUTS -> Reason.RUNTIME_SELECTED_INPUTS;
             case UNKNOWN_OUTPUT -> Reason.UNKNOWN_OUTPUT;
             case NONDETERMINISTIC_OUTPUT -> Reason.NONDETERMINISTIC_OUTPUT;
+            case SELF_AMPLIFYING_INPUT -> Reason.SELF_AMPLIFYING_TERMINAL;
             case COMPOSABLE -> Reason.GRAPH_COMPOSITION_REJECTED;
         };
     }

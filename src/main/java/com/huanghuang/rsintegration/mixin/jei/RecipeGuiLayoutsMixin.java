@@ -1775,9 +1775,10 @@ public class RecipeGuiLayoutsMixin {
         } catch (ReflectiveOperationException exception) {
             RSIntegrationMod.LOGGER.warn("[RSI-JEI-Mixin] Failed to inspect Botania mana catalyst", exception);
         }
-        RSIntegrationMod.LOGGER.warn("[RSI-JEI-Mixin] Unsupported Botania mana catalyst for recipe {}; hiding RSI button",
+        RSIntegrationMod.debug(
+                "[RSI-JEI-Mixin] Botania recipe {} uses a custom mana catalyst; routing through a bound Mana Pool",
                 getRecipeIdSafe(recipe));
-        return null;
+        return "mana_pool";
     }
 
     @Unique

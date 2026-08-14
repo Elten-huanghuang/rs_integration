@@ -6,6 +6,7 @@ import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.RecipeIndex;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
+import com.huanghuang.rsintegration.mods.youkaishomecoming.YoukaiRegistryIds;
 import com.huanghuang.rsintegration.reflection.probes.YHKReflection;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;
@@ -46,15 +47,9 @@ public final class SteamerBatchDelegate extends AbstractBatchDelegate {
     private ResourceKey<Level> myDim;
     private BlockPos myPos;
     private BlockPos potBasePos;
+    private String machineNamespace;
     private AbstractCookingRecipe recipe;
     private boolean craftDone;
-
-    private static final ResourceLocation KEY_POT =
-            new ResourceLocation("youkaishomecoming", "steamer_pot");
-    private static final ResourceLocation KEY_RACK =
-            new ResourceLocation("youkaishomecoming", "steamer_rack");
-    private static final ResourceLocation KEY_LID =
-            new ResourceLocation("youkaishomecoming", "steamer_lid");
 
     // Reflection cache
     private static volatile Field racksField;
@@ -80,6 +75,11 @@ public final class SteamerBatchDelegate extends AbstractBatchDelegate {
         this.myDim = level.dimension();
         this.myPos = pos;
         this.player = player;
+        ResourceLocation machineId = BuiltInRegistries.BLOCK.getKey(
+                level.getBlockState(pos).getBlock());
+        this.machineNamespace = YoukaiRegistryIds.isSupportedNamespace(machineId.getNamespace())
+                ? machineId.getNamespace()
+                : recipeId.getNamespace();
 
         Recipe<?> found = level.getRecipeManager().byKey(recipeId).orElse(null);
         if (!(found instanceof AbstractCookingRecipe)) {
@@ -326,7 +326,7 @@ public final class SteamerBatchDelegate extends AbstractBatchDelegate {
         for (int i = 0; i < 5; i++) {
             BlockState state = myLevel.getBlockState(pos);
             ResourceLocation key = BuiltInRegistries.BLOCK.getKey(state.getBlock());
-            if (KEY_POT.equals(key)) {
+            if (matchesMachineBlock(key, "steamer_pot")) {
                 BlockEntity be = myLevel.getBlockEntity(pos);
                 if (be != null && isSteamerBE(be)) {
                     this.potBasePos = pos.immutable();
@@ -349,13 +349,19 @@ public final class SteamerBatchDelegate extends AbstractBatchDelegate {
         for (int i = 0; i < 6; i++) {
             BlockState state = myLevel.getBlockState(checkPos);
             ResourceLocation key = BuiltInRegistries.BLOCK.getKey(state.getBlock());
-            boolean structural = KEY_POT.equals(key) || KEY_RACK.equals(key);
+            boolean structural = matchesMachineBlock(key, "steamer_pot")
+                    || matchesMachineBlock(key, "steamer_rack");
             layers.add(new SteamerStructurePolicy.Layer(
-                    structural, KEY_LID.equals(key), structural && isCapped(state)));
+                    structural, matchesMachineBlock(key, "steamer_lid"),
+                    structural && isCapped(state)));
             if (!structural) break;
             checkPos = checkPos.above();
         }
         return SteamerStructurePolicy.hasLid(layers);
+    }
+
+    private boolean matchesMachineBlock(ResourceLocation id, String path) {
+        return id != null && machineNamespace.equals(id.getNamespace()) && path.equals(id.getPath());
     }
 
     private static boolean isCapped(BlockState state) {
