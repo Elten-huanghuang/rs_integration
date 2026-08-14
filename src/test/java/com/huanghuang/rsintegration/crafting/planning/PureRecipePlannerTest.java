@@ -184,7 +184,104 @@ class PureRecipePlannerTest {
     }
 
     @Test
-    void quartzConversionsBacktrackInsteadOfReportingChiseledQuartzMissing() {
+    void mergesRepeatedEquivalentDemandsBeforeSearching() {
+        MaterialRef token = material("token");
+
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(
+                new ImmutableRecipeGraph(Map.of()), Map.of(token, 9),
+                List.of(ingredient(token, 1), ingredient(token, 3), ingredient(token, 5)), 20);
+
+        assertTrue(result.feasible());
+        assertEquals(2, result.expandedStates());
+        assertTrue(result.remaining().isEmpty());
+    }
+
+    @Test
+    void stockedTagVariantIsExpandedBeforeAbsentVariants() {
+        MaterialRef plank = material("oak_plank");
+        MaterialRef oakChest = material("oak_chest");
+        List<MaterialRef> chestVariants = new ArrayList<>();
+        Map<MaterialRef, List<RecipeNode>> recipes = new LinkedHashMap<>();
+        for (int i = 0; i < 32; i++) {
+            MaterialRef variant = material("absent_chest_" + i);
+            MaterialRef missing = material("missing_input_" + i);
+            chestVariants.add(variant);
+            recipes.put(variant, List.of(recipe("absent_chest_" + i, variant, 1,
+                    ingredient(missing, 1))));
+        }
+        chestVariants.add(oakChest);
+        recipes.put(oakChest, List.of(recipe("oak_chest", oakChest, 1,
+                ingredient(plank, 1))));
+
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(
+                new ImmutableRecipeGraph(recipes), Map.of(oakChest, 1, plank, 7),
+                List.of(new IngredientRef(chestVariants, 8)), 20, 6);
+
+        assertTrue(result.feasible());
+        assertEquals(PureRecipePlanner.Status.SUCCESS, result.status());
+        assertEquals(List.of(new PureRecipePlanner.PlannedStep(id("oak_chest"), 7)),
+                result.steps());
+    }
+
+    @Test
+    void unseededReverseConversionIsPrunedWithoutExhaustingSearch() {
+        MaterialRef compressed = material("compressed_stone");
+        MaterialRef doubleCompressed = material("double_compressed_stone");
+        RecipeNode decompress = recipe("decompress_double", compressed, 9,
+                ingredient(doubleCompressed, 1));
+        RecipeNode compress = recipe("compress_double", doubleCompressed, 1,
+                ingredient(compressed, 9));
+        ImmutableRecipeGraph graph = new ImmutableRecipeGraph(Map.of(
+                compressed, List.of(decompress), doubleCompressed, List.of(compress)));
+
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(
+                graph, Map.of(), List.of(ingredient(compressed, 9)), 20, 2);
+
+        assertFalse(result.feasible());
+        assertEquals(PureRecipePlanner.Status.UNRESOLVABLE, result.status());
+        assertEquals(1, result.expandedStates());
+    }
+
+    @Test
+    void stockedCompressedInputStillAllowsDecompression() {
+        MaterialRef compressed = material("compressed_stone");
+        MaterialRef doubleCompressed = material("double_compressed_stone");
+        RecipeNode decompress = recipe("decompress_double", compressed, 9,
+                ingredient(doubleCompressed, 1));
+        RecipeNode compress = recipe("compress_double", doubleCompressed, 1,
+                ingredient(compressed, 9));
+        ImmutableRecipeGraph graph = new ImmutableRecipeGraph(Map.of(
+                compressed, List.of(decompress), doubleCompressed, List.of(compress)));
+
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(
+                graph, Map.of(doubleCompressed, 1),
+                List.of(ingredient(compressed, 9)), 20, 6);
+
+        assertTrue(result.feasible());
+        assertEquals(List.of(new PureRecipePlanner.PlannedStep(id("decompress_double"), 1)),
+                result.steps());
+    }
+
+    @Test
+    void existingTargetSeedAllowsCrossMaterialAmplification() {
+        MaterialRef shard = material("shard");
+        MaterialRef cluster = material("cluster");
+        RecipeNode unpack = recipe("unpack_cluster", shard, 2, ingredient(cluster, 1));
+        RecipeNode pack = recipe("pack_cluster", cluster, 1, ingredient(shard, 1));
+        ImmutableRecipeGraph graph = new ImmutableRecipeGraph(Map.of(
+                shard, List.of(unpack), cluster, List.of(pack)));
+
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(
+                graph, Map.of(shard, 1), List.of(ingredient(shard, 2)), 20, 8);
+
+        assertTrue(result.feasible());
+        assertEquals(List.of(
+                new PureRecipePlanner.PlannedStep(id("pack_cluster"), 1),
+                new PureRecipePlanner.PlannedStep(id("unpack_cluster"), 1)), result.steps());
+    }
+
+    @Test
+    void quartzConversionsPruneReverseLoopInsteadOfReportingChiseledQuartzMissing() {
         MaterialRef quartz = material("quartz_block");
         MaterialRef slab = material("quartz_slab");
         MaterialRef chiseled = material("chiseled_quartz_block");
@@ -204,7 +301,7 @@ class PureRecipePlannerTest {
 
         assertTrue(result.feasible());
         assertEquals(PureRecipePlanner.Status.SUCCESS, result.status());
-        assertTrue(result.backtracks() > 0);
+        assertEquals(0, result.backtracks());
         assertTrue(result.steps().stream().anyMatch(step ->
                 step.recipeId().equals(id("slabs_from_quartz"))));
     }

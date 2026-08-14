@@ -87,6 +87,33 @@ class PureDemandTreeInspectorTest {
     }
 
     @Test
+    void stockedTagVariantAvoidsAbsentVariantExpansion() {
+        MaterialRef plank = material("oak_plank");
+        MaterialRef oakChest = material("oak_chest");
+        List<MaterialRef> variants = new java.util.ArrayList<>();
+        List<RecipeNode> allRecipes = new java.util.ArrayList<>();
+        for (int i = 0; i < 16; i++) {
+            MaterialRef variant = material("absent_chest_" + i);
+            variants.add(variant);
+            allRecipes.add(recipe("absent_chest_" + i, variant, 1,
+                    ingredient(material("missing_" + i), 1)));
+        }
+        variants.add(oakChest);
+        allRecipes.add(recipe("oak_chest", oakChest, 1, ingredient(plank, 1)));
+        RecipeNode target = new RecipeNode(id("compressed_chest"), material("compressed_chest"),
+                1, java.util.stream.IntStream.range(0, 8)
+                .mapToObj(ignored -> new IngredientRef(variants, 1)).toList());
+        allRecipes.add(target);
+
+        var result = PureDemandTreeInspector.inspect(
+                graph(allRecipes.toArray(RecipeNode[]::new)),
+                Map.of(oakChest, 1, plank, 7), target.recipeId(), 1, 2);
+
+        assertTrue(result.complete());
+        assertEquals(1, result.visitedNodes());
+    }
+
+    @Test
     void doesNotReuseOneStackAcrossTwoInputs() {
         MaterialRef token = material("token");
         RecipeNode target = recipe("target", material("result"), 1,
