@@ -47,7 +47,7 @@ import java.util.List;
 /** Batch delegate for Wizard's Reborn machines (Crystallizer, Workbench, Iterator, Crystal Ritual). */
 public final class WRBatchDelegate extends AbstractBatchDelegate {
 
-    private enum MachineType {
+    enum MachineType {
         WISSEN_CRYSTALLIZER,
         ARCANE_ITERATOR,
         ARCANE_WORKBENCH,
@@ -196,22 +196,24 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
             return false;
         }
 
-        // Verify the recipe's machine sub-type matches the actual machine.
-        // e.g. recipe "wizards_reborn:wissen_crystallizer/earth_crystal_seed"
-        // must go to a WISSEN_CRYSTALLIZER, not an ARCANE_WORKBENCH.
-        MachineType expected = expectedMachineType(recipeId);
-        if (expected != MachineType.UNKNOWN && expected != machineType) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Batch-WR] Type mismatch: recipe expects {}, machine is {}",
-                    expected, machineType);
-            return false;
-        }
-
         Recipe<?> foundRecipe = level.getRecipeManager().byKey(recipeId).orElse(null);
         if (foundRecipe == null) {
             player.sendSystemMessage(Component.translatable("rsi.generic.error.recipe_not_found", recipeId.toString()));
             return false;
         }
         this.recipe = foundRecipe;
+
+        // The recipe class is authoritative. Script-generated IDs such as
+        // wizards_reborn:kjs/<hash> carry no machine subtype, while arbitrary
+        // datapack folders can be misleading. Keep the ID as a compatibility
+        // fallback for older/addon recipe implementations we do not recognize.
+        MachineType expected = expectedMachineType(recipeId, foundRecipe.getClass());
+        if (expected != MachineType.UNKNOWN && expected != machineType) {
+            RSIntegrationMod.LOGGER.debug(
+                    "[RSI-Batch-WR] Type mismatch: recipe={} class={} expects {}, machine is {}",
+                    recipeId, foundRecipe.getClass().getName(), expected, machineType);
+            return false;
+        }
 
         // Resolve network early so validateIdle can access it for crystal rituals
         this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
@@ -252,7 +254,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
      * Extract the expected MachineType from a recipe ID.
      * Recipe IDs use the format "namespace:machine_sub_type/recipe_name".
      */
-    private static MachineType expectedMachineType(ResourceLocation recipeId) {
+    static MachineType expectedMachineType(ResourceLocation recipeId) {
         String path = recipeId.getPath();
         int slash = path.indexOf('/');
         if (slash <= 0) return MachineType.UNKNOWN;
@@ -262,6 +264,30 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         if (subType.contains("iterator")) return MachineType.ARCANE_ITERATOR;
         if (subType.contains("focus")) return MachineType.WISSEN_CRYSTALLIZER;
         if (subType.contains("crystal")) return MachineType.CRYSTAL_RITUAL;
+        return MachineType.UNKNOWN;
+    }
+
+    static MachineType expectedMachineType(ResourceLocation recipeId,
+                                           @Nullable Class<?> recipeClass) {
+        for (Class<?> current = recipeClass;
+             current != null && current != Object.class;
+             current = current.getSuperclass()) {
+            MachineType fromClass = expectedMachineTypeFromClassName(current.getSimpleName());
+            if (fromClass != MachineType.UNKNOWN) return fromClass;
+        }
+        return expectedMachineType(recipeId);
+    }
+
+    static MachineType expectedMachineTypeFromClassName(@Nullable String className) {
+        if (className == null) return MachineType.UNKNOWN;
+        String name = className.toLowerCase(java.util.Locale.ROOT);
+        if (name.endsWith("wissencrystallizerrecipe")) return MachineType.WISSEN_CRYSTALLIZER;
+        if (name.endsWith("arcaneworkbenchrecipe")) return MachineType.ARCANE_WORKBENCH;
+        if (name.endsWith("arcaneiteratorrecipe")) return MachineType.ARCANE_ITERATOR;
+        if (name.endsWith("crystalinfusionrecipe")) return MachineType.CRYSTAL_RITUAL;
+        // CrystalRitualRecipe describes the ritual installed by the Arcane
+        // Iterator; CrystalInfusionRecipe is the recipe run by the crystal block.
+        if (name.endsWith("crystalritualrecipe")) return MachineType.ARCANE_ITERATOR;
         return MachineType.UNKNOWN;
     }
 
@@ -2208,8 +2234,8 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         List<Component> warnings = new ArrayList<>();
         if (recipe == null) return warnings;
 
-        // Determine machine type from recipe ID path
-        MachineType mt = expectedMachineType(recipe.getId());
+        // Prefer the real recipe implementation; script IDs may be kjs/<hash>.
+        MachineType mt = expectedMachineType(recipe.getId(), recipe.getClass());
         if (mt == MachineType.CRYSTAL_RITUAL) return warnings; // no wissen for crystal rituals
 
         // Read wissen cost from recipe

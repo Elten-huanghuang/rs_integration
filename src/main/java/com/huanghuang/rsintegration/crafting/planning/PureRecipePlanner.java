@@ -48,7 +48,8 @@ public final class PureRecipePlanner {
                           int maxMemoizedFailures, long deadlineNanos) {
         Search search = new Search(graph, available, maxSteps, maxSearchStates,
                 maxMemoizedFailures, deadlineNanos);
-        List<Task> pending = roots.stream().map(DemandTask::new).map(Task.class::cast).toList();
+        List<Task> pending = PureDemandNormalizer.mergeEquivalent(roots).stream()
+                .map(DemandTask::new).map(Task.class::cast).toList();
         Status status;
         try {
             status = search.solve(pending) ? Status.SUCCESS
@@ -186,7 +187,8 @@ public final class PureRecipePlanner {
         }
 
         private boolean solveDemand(IngredientRef ingredient, List<Task> rest, int pendingCount) {
-            for (MaterialRef alternative : ingredient.alternatives()) {
+            List<MaterialRef> orderedAlternatives = inventoryFirst(ingredient.alternatives());
+            for (MaterialRef alternative : orderedAlternatives) {
                 int have = stock.getOrDefault(alternative, 0);
                 if (have < ingredient.count()) continue;
                 setStock(alternative, have - ingredient.count());
@@ -203,13 +205,13 @@ public final class PureRecipePlanner {
                 backtracks++;
             }
 
-            for (MaterialRef wanted : ingredient.alternatives()) {
+            for (MaterialRef wanted : orderedAlternatives) {
                 PlanningThreadContext.throwIfCancelled();
                 if (resolving.contains(wanted)) continue;
                 int have = stock.getOrDefault(wanted, 0);
                 int needed = ingredient.count() - have;
                 if (needed <= 0) continue;
-                for (RecipeNode candidate : graph.recipesByOutput().getOrDefault(wanted, List.of())) {
+                for (RecipeNode candidate : inventoryFirstCandidates(wanted)) {
                     if (steps.size() + scheduledRecipes(rest) >= maxSteps) {
                         stepLimitReached = true;
                         continue;
@@ -219,6 +221,10 @@ public final class PureRecipePlanner {
                     int batches = batchesFor(needed,
                             selfConsumed > 0 ? netGain : candidate.outputCount());
                     if (batches <= 0) continue;
+                    if (selfConsumed == 0
+                            && isUnseededReverseConversion(candidate, wanted, batches)) {
+                        continue;
+                    }
                     int scheduledBatches = batches;
                     int consumeCount = ingredient.count();
                     List<Task> continuation = rest;
@@ -322,8 +328,9 @@ public final class PureRecipePlanner {
 
         private List<Task> recipeBranch(RecipeNode candidate, int batches, int consumeCount,
                                         List<Task> rest) {
-            List<Task> branch = new ArrayList<>(candidate.inputs().size() + 1 + rest.size());
-            for (IngredientRef input : candidate.inputs()) {
+            List<IngredientRef> inputs = PureDemandNormalizer.mergeEquivalent(candidate.inputs());
+            List<Task> branch = new ArrayList<>(inputs.size() + 1 + rest.size());
+            for (IngredientRef input : inputs) {
                 long scaled = (long) input.count() * batches;
                 if (scaled > Integer.MAX_VALUE) return null;
                 branch.add(new DemandTask(new IngredientRef(input.alternatives(), (int) scaled)));
@@ -332,6 +339,84 @@ public final class PureRecipePlanner {
                     consumeCount, candidate.recipeId(), batches));
             branch.addAll(rest);
             return List.copyOf(branch);
+        }
+
+        /**
+         * Broad tag ingredients can expose hundreds of variants. Variants already present in
+         * inventory are the best recursive production seed and are attempted before absent ones.
+         */
+        private List<MaterialRef> inventoryFirst(List<MaterialRef> alternatives) {
+            if (alternatives.size() < 2) return alternatives;
+            List<MaterialRef> ordered = new ArrayList<>(alternatives.size());
+            for (MaterialRef material : alternatives) {
+                if (stock.getOrDefault(material, 0) > 0) ordered.add(material);
+            }
+            if (ordered.isEmpty() || ordered.size() == alternatives.size()) return alternatives;
+            for (MaterialRef material : alternatives) {
+                if (stock.getOrDefault(material, 0) <= 0) ordered.add(material);
+            }
+            return ordered;
+        }
+
+        private List<RecipeNode> inventoryFirstCandidates(MaterialRef wanted) {
+            List<RecipeNode> candidates = graph.recipesByOutput()
+                    .getOrDefault(wanted, List.of());
+            if (candidates.size() < 2) return candidates;
+            List<RecipeNode> ordered = new ArrayList<>(candidates);
+            ordered.sort(Comparator.comparingDouble(this::inputStockCoverage).reversed());
+            return ordered;
+        }
+
+        private double inputStockCoverage(RecipeNode candidate) {
+            long required = 0L;
+            long covered = 0L;
+            for (IngredientRef input : PureDemandNormalizer.mergeEquivalent(candidate.inputs())) {
+                required += input.count();
+                covered += Math.min(input.count(), stockAcross(input));
+            }
+            return required <= 0L ? 1.0D : (double) covered / (double) required;
+        }
+
+        /**
+         * Reject an unseeded decompression branch when every producer of one of its inputs
+         * directly consumes the material currently being resolved. This removes A -> B -> A
+         * compression loops while preserving conversions backed by inventory.
+         */
+        private boolean isUnseededReverseConversion(RecipeNode candidate, MaterialRef wanted,
+                                                    int batches) {
+            if (stock.getOrDefault(wanted, 0) > 0) return false;
+            for (IngredientRef input : PureDemandNormalizer.mergeEquivalent(candidate.inputs())) {
+                long required = (long) input.count() * batches;
+                if (required <= stockAcross(input)) continue;
+                boolean sawProducer = false;
+                boolean reverseOnly = true;
+                for (MaterialRef alternative : input.alternatives()) {
+                    List<RecipeNode> producers = graph.recipesByOutput()
+                            .getOrDefault(alternative, List.of());
+                    if (producers.isEmpty()) {
+                        reverseOnly = false;
+                        break;
+                    }
+                    sawProducer = true;
+                    if (producers.stream().anyMatch(producer ->
+                            producer.inputs().stream().noneMatch(ingredient ->
+                                    ingredient.alternatives().contains(wanted)))) {
+                        reverseOnly = false;
+                        break;
+                    }
+                }
+                if (sawProducer && reverseOnly) return true;
+            }
+            return false;
+        }
+
+        private long stockAcross(IngredientRef ingredient) {
+            long total = 0L;
+            for (MaterialRef alternative : ingredient.alternatives()) {
+                total += stock.getOrDefault(alternative, 0);
+                if (total >= Integer.MAX_VALUE) return Integer.MAX_VALUE;
+            }
+            return total;
         }
 
         private static int batchesFor(int needed, int outputCount) {

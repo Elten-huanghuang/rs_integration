@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.crafting.plan.PlanWarnings;
 import com.huanghuang.rsintegration.mixin.enigmaticaddons.ArtificialFlowerMixin;
 import com.huanghuang.rsintegration.mixin.jei.RecipeGuiLayoutsMixin;
 import com.huanghuang.rsintegration.mixin.wizardterracurios.BuffItemMixin;
+import com.huanghuang.rsintegration.mods.jei.JeiMarqueeSelector;
 import com.huanghuang.rsintegration.mods.pmmo.client.PmmoSalvageAccess;
 import com.huanghuang.rsintegration.mods.pmmo.client.PmmoSalvageJeiBridge;
 import com.huanghuang.rsintegration.mods.pmmo.PmmoSalvageCatalog;
@@ -70,6 +71,12 @@ class OptionalDependencyBytecodeTest {
         for (String[] dependency : dependencies) {
             assertNoTypeReference(RecipeGuiLayoutsMixin.class, dependency[0], dependency[1]);
         }
+    }
+
+    @Test
+    void jeiMarqueeDoesNotLinkVersionSpecificJeiImplementations() throws IOException {
+        assertNoTypeReference(JeiMarqueeSelector.class, "mezz/jei/gui", "JEI GUI internals");
+        assertNoTypeReference(JeiMarqueeSelector.class, "mezz/jei/common", "JEI common internals");
     }
 
     @Test

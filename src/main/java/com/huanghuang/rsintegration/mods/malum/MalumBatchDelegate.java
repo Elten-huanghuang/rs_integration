@@ -306,6 +306,8 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
             return false;
         }
 
+        refreshAccelerators(altar);
+
         craftStarted = true;
         craftWasSeenActive = false;
         RSIntegrationMod.LOGGER.debug("[RSI-Batch-Malum] Craft started via native tick: recipe={}", recipe.getId());
@@ -443,10 +445,27 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
             return false;
         }
 
+        refreshAccelerators(altar);
+
         craftStarted = true;
         craftWasSeenActive = false;
         RSIntegrationMod.LOGGER.debug("[RSI-Batch-Malum] Craft (with materials) started via native tick: recipe={}", recipe.getId());
         return true;
+    }
+
+    /** Refresh Malum's cached altar accelerators after RSI places inputs directly. */
+    static boolean refreshAccelerators(Object altar) {
+        if (altar == null) return false;
+        try {
+            altar.getClass().getMethod("recalibrateAccelerators").invoke(altar);
+            return true;
+        } catch (NoSuchMethodException e) {
+            return false;
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            RSIntegrationMod.LOGGER.debug(
+                    "[RSI-Batch-Malum] Altar accelerator recalibration unavailable", e);
+            return false;
+        }
     }
 
     @Override

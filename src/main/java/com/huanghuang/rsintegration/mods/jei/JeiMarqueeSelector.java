@@ -15,14 +15,6 @@ import mezz.jei.api.runtime.IJeiRuntime;
 import mezz.jei.api.runtime.IIngredientListOverlay;
 import mezz.jei.api.runtime.IIngredientManager;
 import mezz.jei.api.runtime.IScreenHelper;
-import mezz.jei.common.util.ImmutableRect2i;
-import mezz.jei.gui.bookmarks.BookmarkList;
-import mezz.jei.gui.bookmarks.IBookmark;
-import mezz.jei.gui.bookmarks.IngredientBookmark;
-import mezz.jei.gui.overlay.IngredientGridWithNavigation;
-import mezz.jei.gui.overlay.IngredientListOverlay;
-import mezz.jei.gui.recipes.RecipeTransferButton;
-import mezz.jei.gui.recipes.RecipesGui;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -43,8 +35,11 @@ import net.minecraftforge.registries.ForgeRegistries;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
+import java.util.stream.Stream;
 import javax.annotation.Nullable;
 
 public final class JeiMarqueeSelector {
@@ -59,7 +54,7 @@ public final class JeiMarqueeSelector {
     private static int dragOriginX, dragOriginY;
     private static int startX, startY, endX, endY;
 
-    private static List<ImmutableRect2i> selectedSlotAreas = Collections.emptyList();
+    private static List<SlotArea> selectedSlotAreas = Collections.emptyList();
     private static List<ITypedIngredient<?>> cachedIngredients = Collections.emptyList();
 
     private static final int FILL_COLOR      = 0x33999999;
@@ -120,12 +115,11 @@ public final class JeiMarqueeSelector {
 
         km = RSIKeyBindings.KEY_TRANSFER_RECIPE;
         if (km != null && km.isActiveAndMatches(input)) {
-            if (typingSafe && screen instanceof RecipesGui) {
+            if (typingSafe && hasClassName(screen, "RecipesGui")) {
                 Button target = null;
                 double best = Double.MAX_VALUE;
                 for (var child : screen.children()) {
-                    if (child instanceof Button btn
-                            && child instanceof RecipeTransferButton) {
+                    if (child instanceof Button btn && hasClassName(child, "RecipeTransferButton")) {
                         if (btn.active && btn.visible) {
                             double dist = (btn.getX() - mx) * (btn.getX() - mx)
                                         + (btn.getY() - my) * (btn.getY() - my);
@@ -175,7 +169,7 @@ public final class JeiMarqueeSelector {
                 if (bmOverlay != null && bmOverlay.getIngredientUnderMouse().isPresent()) {
                     return false;
                 }
-                IngredientGridWithNavigation bmGrid = getJeiGrid(bookmarkContentsField, bmOverlay);
+                Object bmGrid = getJeiGrid(bookmarkContentsField, bmOverlay);
                 if (bmGrid != null && !isNearAnySlot(bmGrid, mx, my)) return false;
                 dragOnBookmarks = true;
                 return true;
@@ -192,7 +186,7 @@ public final class JeiMarqueeSelector {
         // Mouse is on a specific ingredient → this is an item-drag, not marquee
         if (overlay.getIngredientUnderMouse().isPresent()) return false;
         // Mouse is far from all slots → likely over a pagination/config button
-        IngredientGridWithNavigation grid = getJeiGrid(overlayContentsField, overlay);
+        Object grid = getJeiGrid(overlayContentsField, overlay);
         if (grid != null && !isNearAnySlot(grid, mx, my)) return false;
 
         dragOnBookmarks = false;
@@ -200,10 +194,9 @@ public final class JeiMarqueeSelector {
     }
 
     /** Only allow drag start near a known slot, keeping page/config buttons safe. */
-    private static boolean isNearAnySlot(IngredientGridWithNavigation grid, int mx, int my) {
-        for (var slot : grid.getSlots().toList()) {
-            ImmutableRect2i area = slot.getArea();
-            if (area == null) continue;
+    private static boolean isNearAnySlot(Object grid, int mx, int my) {
+        for (JeiSlotView slot : getGridSlots(grid)) {
+            SlotArea area = slot.area();
             if (mx >= area.x() - 5 && mx <= area.x() + area.width() + 5
                     && my >= area.y() - 5 && my <= area.y() + area.height() + 5) {
                 return true;
@@ -212,12 +205,13 @@ public final class JeiMarqueeSelector {
         return false;
     }
 
-    /** Extract the IngredientGridWithNavigation from an overlay via reflection. */
+    /** Extracts the current JEI grid without linking its version-specific implementation type. */
     @Nullable
-    private static IngredientGridWithNavigation getJeiGrid(Field field, Object overlay) {
+    private static Object getJeiGrid(Field field, Object overlay) {
+        if (field == null || overlay == null) return null;
         try {
-            return (IngredientGridWithNavigation) field.get(overlay);
-        } catch (Exception e) {
+            return field.get(overlay);
+        } catch (ReflectiveOperationException | LinkageError | RuntimeException e) {
             return null;
         }
     }
@@ -240,15 +234,14 @@ public final class JeiMarqueeSelector {
         if (overlay == null) return false;
 
         try {
-            IngredientGridWithNavigation grid = (IngredientGridWithNavigation) overlayContentsField.get(overlay);
+            Object grid = getJeiGrid(overlayContentsField, overlay);
             if (grid == null) return false;
 
             int minX = Integer.MAX_VALUE, minY = Integer.MAX_VALUE;
             int maxX = Integer.MIN_VALUE, maxY = Integer.MIN_VALUE;
 
-            for (var slot : grid.getSlots().toList()) {
-                ImmutableRect2i area = slot.getArea();
-                if (area == null) continue;
+            for (JeiSlotView slot : getGridSlots(grid)) {
+                SlotArea area = slot.area();
                 if (area.x() < minX) minX = area.x();
                 if (area.y() < minY) minY = area.y();
                 int rx = area.x() + area.width();
@@ -261,7 +254,7 @@ public final class JeiMarqueeSelector {
             int padding = 5;
             return mx >= minX - padding && mx <= maxX + padding
                 && my >= minY - padding && my <= maxY + padding;
-        } catch (Exception e) {
+        } catch (RuntimeException | LinkageError e) {
             return false;
         }
     }
@@ -276,15 +269,14 @@ public final class JeiMarqueeSelector {
         if (bmOverlay == null) return false;
 
         try {
-            IngredientGridWithNavigation grid = (IngredientGridWithNavigation) bookmarkContentsField.get(bmOverlay);
+            Object grid = getJeiGrid(bookmarkContentsField, bmOverlay);
             if (grid == null) return false;
 
             int minX = Integer.MAX_VALUE, minY = Integer.MAX_VALUE;
             int maxX = Integer.MIN_VALUE, maxY = Integer.MIN_VALUE;
 
-            for (var slot : grid.getSlots().toList()) {
-                ImmutableRect2i area = slot.getArea();
-                if (area == null) continue;
+            for (JeiSlotView slot : getGridSlots(grid)) {
+                SlotArea area = slot.area();
                 if (area.x() < minX) minX = area.x();
                 if (area.y() < minY) minY = area.y();
                 int rx = area.x() + area.width();
@@ -297,7 +289,7 @@ public final class JeiMarqueeSelector {
             int padding = 5;
             return mx >= minX - padding && mx <= maxX + padding
                 && my >= minY - padding && my <= maxY + padding;
-        } catch (Exception e) {
+        } catch (RuntimeException | LinkageError e) {
             return false;
         }
     }
@@ -508,7 +500,7 @@ public final class JeiMarqueeSelector {
 
         // Draw per-slot highlights first (visible both during and after drag)
         if (!selectedSlotAreas.isEmpty()) {
-            for (ImmutableRect2i area : selectedSlotAreas) {
+            for (SlotArea area : selectedSlotAreas) {
                 int ax = area.x();
                 int ay = area.y();
                 int aw = area.width();
@@ -549,21 +541,21 @@ public final class JeiMarqueeSelector {
 
         probeReflection();
 
-        IngredientGridWithNavigation grid;
+        Object grid;
         if (dragOnBookmarks) {
             if (bookmarkContentsField == null) return;
             IBookmarkOverlay bmOverlay = runtime.getBookmarkOverlay();
             if (bmOverlay == null) return;
             try {
-                grid = (IngredientGridWithNavigation) bookmarkContentsField.get(bmOverlay);
-            } catch (Exception e) { return; }
+                grid = getJeiGrid(bookmarkContentsField, bmOverlay);
+            } catch (RuntimeException | LinkageError e) { return; }
         } else {
             if (overlayContentsField == null) return;
             IIngredientListOverlay overlay = runtime.getIngredientListOverlay();
             if (overlay == null) return;
             try {
-                grid = (IngredientGridWithNavigation) overlayContentsField.get(overlay);
-            } catch (Exception e) { return; }
+                grid = getJeiGrid(overlayContentsField, overlay);
+            } catch (RuntimeException | LinkageError e) { return; }
         }
         if (grid == null) return;
 
@@ -572,22 +564,21 @@ public final class JeiMarqueeSelector {
         int x2 = Math.max(startX, endX);
         int y2 = Math.max(startY, endY);
 
-        List<ImmutableRect2i> areas = new ArrayList<>();
+        List<SlotArea> areas = new ArrayList<>();
         List<ITypedIngredient<?>> ingredients = new ArrayList<>();
 
-        grid.getSlots().forEach(slot -> {
-            ImmutableRect2i area = slot.getArea();
-            if (area == null) return;
-            if (slot.getOptionalElement().isEmpty()) return;
+        for (JeiSlotView slot : getGridSlots(grid)) {
+            SlotArea area = slot.area();
+            if (slot.ingredient() == null) continue;
 
             int centerX = area.x() + area.width() / 2;
             int centerY = area.y() + area.height() / 2;
 
             if (centerX >= x1 && centerX <= x2 && centerY >= y1 && centerY <= y2) {
                 areas.add(area);
-                ingredients.add(slot.getOptionalElement().get().getTypedIngredient());
+                ingredients.add(slot.ingredient());
             }
-        });
+        }
 
         selectedSlotAreas = areas;
         cachedIngredients = ingredients;
@@ -609,19 +600,21 @@ public final class JeiMarqueeSelector {
         IBookmarkOverlay bmOverlay = runtime.getBookmarkOverlay();
         if (bmOverlay == null) return;
 
-        BookmarkList list;
+        Object list;
         try {
-            list = (BookmarkList) bookmarkListField.get(bmOverlay);
-        } catch (Exception e) { return; }
+            list = bookmarkListField.get(bmOverlay);
+        } catch (ReflectiveOperationException | LinkageError | RuntimeException e) { return; }
         if (list == null) return;
 
         int added = 0;
         for (ITypedIngredient<?> ing : ingredients) {
             if (ing == null) continue;
             try {
-                IBookmark bookmark = (IBookmark) bookmarkCreateMethod.invoke(null, ing, im);
-                if (bookmark != null && list.add(bookmark)) added++;
-            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-JEI-Marquee] bookmark create failed", e); }
+                Object bookmark = bookmarkCreateMethod.invoke(null, ing, im);
+                if (bookmark != null && invokeBooleanMutation(list, "add", bookmark)) added++;
+            } catch (ReflectiveOperationException | LinkageError | RuntimeException e) {
+                RSIntegrationMod.LOGGER.debug("[RSI-JEI-Marquee] bookmark create failed", e);
+            }
         }
         RSIntegrationMod.LOGGER.debug("[RSI-JEI-Marquee] Bookmarked {} items", added);
     }
@@ -650,19 +643,21 @@ public final class JeiMarqueeSelector {
         IBookmarkOverlay bmOverlay = runtime.getBookmarkOverlay();
         if (bmOverlay == null) return;
 
-        BookmarkList list;
+        Object list;
         try {
-            list = (BookmarkList) bookmarkListField.get(bmOverlay);
-        } catch (Exception e) { return; }
+            list = bookmarkListField.get(bmOverlay);
+        } catch (ReflectiveOperationException | LinkageError | RuntimeException e) { return; }
         if (list == null) return;
 
         int removed = 0;
         for (ITypedIngredient<?> ing : ingredients) {
             if (ing == null) continue;
             try {
-                IBookmark bookmark = (IBookmark) bookmarkCreateMethod.invoke(null, ing, im);
-                if (bookmark != null && list.remove(bookmark)) removed++;
-            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-JEI-Marquee] bookmark remove failed", e); }
+                Object bookmark = bookmarkCreateMethod.invoke(null, ing, im);
+                if (bookmark != null && invokeBooleanMutation(list, "remove", bookmark)) removed++;
+            } catch (ReflectiveOperationException | LinkageError | RuntimeException e) {
+                RSIntegrationMod.LOGGER.debug("[RSI-JEI-Marquee] bookmark remove failed", e);
+            }
         }
         RSIntegrationMod.LOGGER.debug("[RSI-JEI-Marquee] Unbookmarked {} items", removed);
     }
@@ -698,6 +693,131 @@ public final class JeiMarqueeSelector {
         return false;
     }
 
+    private static boolean hasClassName(Object value, String simpleName) {
+        if (value == null) return false;
+        for (Class<?> type = value.getClass(); type != null; type = type.getSuperclass()) {
+            if (simpleName.equals(type.getSimpleName())) return true;
+        }
+        return false;
+    }
+
+    private static List<JeiSlotView> getGridSlots(Object grid) {
+        if (grid == null) return List.of();
+        Object slots;
+        try {
+            Method method = findNoArgMethod(grid.getClass(), "getSlots");
+            if (method == null) return List.of();
+            slots = method.invoke(grid);
+        } catch (ReflectiveOperationException | LinkageError | RuntimeException e) {
+            return List.of();
+        }
+
+        List<?> values;
+        if (slots instanceof Stream<?> stream) {
+            try (stream) {
+                values = stream.toList();
+            }
+        } else if (slots instanceof Collection<?> collection) {
+            values = List.copyOf(collection);
+        } else if (slots instanceof Iterable<?> iterable) {
+            List<Object> copy = new ArrayList<>();
+            iterable.forEach(copy::add);
+            values = copy;
+        } else {
+            return List.of();
+        }
+
+        List<JeiSlotView> result = new ArrayList<>(values.size());
+        for (Object slot : values) {
+            JeiSlotView view = readSlot(slot);
+            if (view != null) result.add(view);
+        }
+        return result;
+    }
+
+    @Nullable
+    private static JeiSlotView readSlot(Object slot) {
+        if (slot == null) return null;
+        try {
+            Method areaMethod = findNoArgMethod(slot.getClass(), "getArea");
+            if (areaMethod == null) return null;
+            Object areaValue = areaMethod.invoke(slot);
+            SlotArea area = readArea(areaValue);
+            if (area == null) return null;
+
+            ITypedIngredient<?> ingredient = null;
+            Method elementMethod = findNoArgMethod(slot.getClass(), "getOptionalElement");
+            if (elementMethod != null) {
+                Object optionalValue = elementMethod.invoke(slot);
+                Object element = optionalValue instanceof Optional<?> optional
+                        ? optional.orElse(null) : optionalValue;
+                ingredient = readTypedIngredient(element);
+            }
+            if (ingredient == null) ingredient = readTypedIngredient(slot);
+            return new JeiSlotView(area, ingredient);
+        } catch (ReflectiveOperationException | LinkageError | RuntimeException e) {
+            return null;
+        }
+    }
+
+    @Nullable
+    private static SlotArea readArea(Object area) throws ReflectiveOperationException {
+        if (area == null) return null;
+        Integer x = invokeInt(area, "x", "getX");
+        Integer y = invokeInt(area, "y", "getY");
+        Integer width = invokeInt(area, "width", "getWidth");
+        Integer height = invokeInt(area, "height", "getHeight");
+        if (x == null || y == null || width == null || height == null) return null;
+        return new SlotArea(x, y, width, height);
+    }
+
+    @Nullable
+    private static Integer invokeInt(Object target, String... names)
+            throws ReflectiveOperationException {
+        for (String name : names) {
+            Method method = findNoArgMethod(target.getClass(), name);
+            if (method == null) continue;
+            Object value = method.invoke(target);
+            if (value instanceof Number number) return number.intValue();
+        }
+        return null;
+    }
+
+    @Nullable
+    private static ITypedIngredient<?> readTypedIngredient(Object element)
+            throws ReflectiveOperationException {
+        if (element == null) return null;
+        if (element instanceof ITypedIngredient<?> typed) return typed;
+        Method method = findNoArgMethod(element.getClass(), "getTypedIngredient");
+        if (method == null) return null;
+        Object value = method.invoke(element);
+        return value instanceof ITypedIngredient<?> typed ? typed : null;
+    }
+
+    @Nullable
+    private static Method findNoArgMethod(Class<?> type, String name) {
+        for (Class<?> scan = type; scan != null; scan = scan.getSuperclass()) {
+            try {
+                Method method = scan.getDeclaredMethod(name);
+                method.setAccessible(true);
+                return method;
+            } catch (NoSuchMethodException | RuntimeException ignored) {
+            }
+        }
+        return null;
+    }
+
+    private static boolean invokeBooleanMutation(Object target, String name, Object argument)
+            throws ReflectiveOperationException {
+        for (Method method : target.getClass().getMethods()) {
+            if (!name.equals(method.getName()) || method.getParameterCount() != 1
+                    || !method.getParameterTypes()[0].isInstance(argument)) continue;
+            Object result = method.invoke(target, argument);
+            return result instanceof Boolean changed && changed;
+        }
+        return false;
+    }
+
     private static String getModId(ITypedIngredient<?> ingredient) {
         Object ing = ingredient.getIngredient();
         if (ing instanceof ItemStack stack && !stack.isEmpty()) {
@@ -729,21 +849,81 @@ public final class JeiMarqueeSelector {
         if (reflectionProbed) return;
         reflectionProbed = true;
         try {
-            Class<?> overlayClass = IngredientListOverlay.class;
-            overlayContentsField = overlayClass.getDeclaredField("contents");
-            overlayContentsField.setAccessible(true);
-
-            Class<?> bmOverlayClass = mezz.jei.gui.overlay.bookmarks.BookmarkOverlay.class;
-            bookmarkContentsField = bmOverlayClass.getDeclaredField("contents");
-            bookmarkContentsField.setAccessible(true);
-            bookmarkListField = bmOverlayClass.getDeclaredField("bookmarkList");
-            bookmarkListField.setAccessible(true);
-
-            bookmarkCreateMethod = IngredientBookmark.class.getMethod("create",
-                    ITypedIngredient.class, IIngredientManager.class);
-            bookmarkCreateMethod.setAccessible(true);
-        } catch (Exception e) {
+            IJeiRuntime runtime = RSJeiPlugin.getRuntime();
+            if (runtime == null) return;
+            Object overlay = runtime.getIngredientListOverlay();
+            Object bookmarkOverlay = runtime.getBookmarkOverlay();
+            overlayContentsField = findGridField(overlay);
+            bookmarkContentsField = findGridField(bookmarkOverlay);
+            bookmarkListField = findField(bookmarkOverlay, "bookmarkList");
+            bookmarkCreateMethod = findBookmarkCreateMethod();
+        } catch (ReflectiveOperationException | LinkageError | RuntimeException e) {
             RSIntegrationMod.LOGGER.warn("[RSI-JEI-Marquee] Reflection probe failed", e);
         }
     }
+
+    @Nullable
+    private static Field findGridField(Object overlay) throws IllegalAccessException {
+        if (overlay == null) return null;
+        Field named = findField(overlay, "contents");
+        if (named != null) return named;
+        for (Class<?> scan = overlay.getClass(); scan != null; scan = scan.getSuperclass()) {
+            for (Field field : scan.getDeclaredFields()) {
+                if (java.lang.reflect.Modifier.isStatic(field.getModifiers())) continue;
+                try {
+                    field.setAccessible(true);
+                } catch (RuntimeException ignored) {
+                    continue;
+                }
+                Object value = field.get(overlay);
+                if (value != null && findNoArgMethod(value.getClass(), "getSlots") != null) {
+                    return field;
+                }
+            }
+        }
+        return null;
+    }
+
+    @Nullable
+    private static Field findField(Object owner, String name) {
+        if (owner == null) return null;
+        for (Class<?> scan = owner.getClass(); scan != null; scan = scan.getSuperclass()) {
+            try {
+                Field field = scan.getDeclaredField(name);
+                field.setAccessible(true);
+                return field;
+            } catch (NoSuchFieldException | RuntimeException ignored) {
+            }
+        }
+        return null;
+    }
+
+    @Nullable
+    private static Method findBookmarkCreateMethod() {
+        String[] classNames = {
+                "mezz.jei.gui.bookmarks.IngredientBookmark",
+                "mezz.jei.gui.overlay.elements.IngredientBookmarkElement"
+        };
+        for (String className : classNames) {
+            try {
+                Class<?> type = Class.forName(className, false,
+                        JeiMarqueeSelector.class.getClassLoader());
+                for (Method method : type.getMethods()) {
+                    if (!"create".equals(method.getName()) || method.getParameterCount() != 2
+                            || !java.lang.reflect.Modifier.isStatic(method.getModifiers())) continue;
+                    Class<?>[] parameters = method.getParameterTypes();
+                    if (!parameters[0].isAssignableFrom(ITypedIngredient.class)
+                            || !parameters[1].isAssignableFrom(IIngredientManager.class)) continue;
+                    method.setAccessible(true);
+                    return method;
+                }
+            } catch (ClassNotFoundException | LinkageError | RuntimeException ignored) {
+            }
+        }
+        return null;
+    }
+
+    private record SlotArea(int x, int y, int width, int height) {}
+
+    private record JeiSlotView(SlotArea area, @Nullable ITypedIngredient<?> ingredient) {}
 }
