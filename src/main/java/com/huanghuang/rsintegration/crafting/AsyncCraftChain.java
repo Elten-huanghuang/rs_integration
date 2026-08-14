@@ -154,6 +154,13 @@ public final class AsyncCraftChain {
     @Nullable
     private ItemStack targetOutput;
     private OutputDestination outputDestination = OutputDestination.RS_NETWORK;
+    @Nullable
+    private MachinePreference machinePreference;
+
+    private record MachinePreference(ResourceLocation recipeId,
+                                     MachineSelectionMode mode,
+                                     @Nullable ResourceLocation dimension,
+                                     @Nullable BlockPos position) {}
 
     /** Active execution session for the current flat physical-machine step. */
     @Nullable
@@ -380,6 +387,50 @@ public final class AsyncCraftChain {
 
     public void setOutputDestination(@Nullable OutputDestination destination) {
         this.outputDestination = destination == null ? OutputDestination.RS_NETWORK : destination;
+    }
+
+    /** Applies only to the target recipe and is matched against server-owned bindings. */
+    public void setMachineSelection(ResourceLocation recipeId, MachineSelectionMode mode,
+                                    @Nullable ResourceLocation dimension,
+                                    @Nullable BlockPos position) {
+        if (recipeId == null || mode == null || mode == MachineSelectionMode.AUTO) {
+            machinePreference = null;
+            return;
+        }
+        machinePreference = new MachinePreference(recipeId, mode, dimension,
+                position == null ? null : position.immutable());
+    }
+
+    private List<BoundMachine> applyMachineSelection(
+            List<BoundMachine> machines, ResourceLocation recipeId) {
+        MachinePreference preference = machinePreference;
+        if (preference == null || !preference.recipeId().equals(recipeId)) return machines;
+        return routeMachineCandidates(machines, preference.mode(),
+                preference.dimension(), preference.position());
+    }
+
+    static List<BoundMachine> routeMachineCandidates(
+            List<BoundMachine> machines, MachineSelectionMode mode,
+            @Nullable ResourceLocation dimension, @Nullable BlockPos position) {
+        if (machines == null || machines.isEmpty() || mode == null
+                || mode == MachineSelectionMode.AUTO) {
+            return machines == null ? List.of() : machines;
+        }
+        if (dimension == null || position == null) {
+            return mode == MachineSelectionMode.EXCLUSIVE ? List.of() : machines;
+        }
+        BoundMachine selected = machines.stream()
+                .filter(machine -> machine.dim().equals(dimension)
+                        && machine.pos().equals(position))
+                .findFirst().orElse(null);
+        if (mode == MachineSelectionMode.EXCLUSIVE) {
+            return selected == null ? List.of() : List.of(selected);
+        }
+        if (selected == null || machines.size() < 2 || machines.get(0) == selected) return machines;
+        List<BoundMachine> ordered = new ArrayList<>(machines.size());
+        ordered.add(selected);
+        for (BoundMachine machine : machines) if (machine != selected) ordered.add(machine);
+        return ordered;
     }
 
     @Nullable
@@ -1148,6 +1199,7 @@ public final class AsyncCraftChain {
             boolean bSame = b.dim().equals(playerDim);
             return aSame == bSame ? 0 : aSame ? -1 : 1;
         });
+        machines = applyMachineSelection(machines, step.recipeId());
         IBatchDelegate delegate = createStepDelegate(step);
         if (delegate == null) {
             return PreparationResult.fatal("No delegate for mod type " + step.modType().id());
@@ -1177,6 +1229,8 @@ public final class AsyncCraftChain {
             return PreparationResult.retry("all bound machines are busy, unloaded, or unavailable");
         }
         List<BoundMachine> eligible = new ArrayList<>();
+        delegate.releasePreparationResources();
+        delegate = null;
         boolean validationThrew = false;
         boolean retryableRejection = false;
         boolean protectionRejection = false;
@@ -1192,7 +1246,7 @@ public final class AsyncCraftChain {
                     protectionRejection = true;
                     continue;
                 }
-                IBatchDelegate candidate = eligible.isEmpty() ? delegate : createStepDelegate(step);
+                IBatchDelegate candidate = createStepDelegate(step);
                 if (candidate == null) {
                     fatalDetail = "delegate factory returned null for " + step.modType().id();
                     continue;
@@ -2726,6 +2780,7 @@ public final class AsyncCraftChain {
             if (aSame == bSame) return 0;
             return aSame ? -1 : 1;
         });
+        machines = applyMachineSelection(machines, step.recipeId());
 
         //  Load-balanced multi-machine dispatch
         // When multiple machines are bound for this mod type, try to distribute
@@ -2801,6 +2856,7 @@ public final class AsyncCraftChain {
                             && ProtectionChecker.canInteract(online, machineLevel, machine.pos());
                 });
 
+        initialDelegate.releasePreparationResources();
         IBatchDelegate delegate = null;
         // Try each bound machine until one is ready. Retryable preparation never
         // reaches material reservation or ledger commit.
@@ -2812,7 +2868,7 @@ public final class AsyncCraftChain {
         Component fatalUserMessage = null;
         for (BoundMachine m : candidateSelection.usable()) {
             try {
-                IBatchDelegate candidate = delegate == null ? initialDelegate : createStepDelegate(step);
+                IBatchDelegate candidate = createStepDelegate(step);
                 if (candidate == null) continue;
                 IBatchDelegate.PreparationResult preparation = PreparationMessageScope.prepare(
                         candidate, online, step.recipeId(), m.dim(), m.pos());

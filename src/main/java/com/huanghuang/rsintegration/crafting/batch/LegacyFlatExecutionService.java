@@ -75,8 +75,8 @@ public final class LegacyFlatExecutionService {
             Consumer<AsyncCraftChain> completionWiring) {
         chain.setTargetOutput(targetOutput);
         chain.setOutputDestination(outputDestination);
-        AsyncCraftManager.getInstance().submit(chain);
         completionWiring.accept(chain);
+        AsyncCraftManager.getInstance().submit(chain);
         player.sendSystemMessage(TextBuilder.translate(
                 outputDestination == OutputDestination.PLAYER_INVENTORY
                         ? "rsi.async.chain_started_player"

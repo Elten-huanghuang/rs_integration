@@ -929,5 +929,15 @@
   "rsi.anvil_memory.occupied": "Material slot contains another item",
   "rsi.anvil_memory.rejected": "This material cannot be placed in the material slot",
   "rsi.anvil_memory.swapped": "Anvil inputs swapped",
-  "rsi.anvil_memory.invalid": "Anvil memory is unavailable"
+  "rsi.anvil_memory.invalid": "Anvil memory is unavailable",
+  "rsi.machine_candidate.label": "Altar",
+  "rsi.machine_candidate.auto": "Auto",
+  "rsi.machine_candidate.preferred": "Prefer",
+  "rsi.machine_candidate.exclusive": "Only",
+  "rsi.machine_candidate.auto_value": "Auto (%s/%s ready)",
+  "rsi.machine_candidate.none": "No altar selected",
+  "rsi.machine_candidate.ready": "Ready",
+  "rsi.machine_candidate.temporary": "Temporarily unavailable",
+  "rsi.machine_candidate.incompatible": "Conditions not met",
+  "rsi.machine_candidate.check_failed": "Check failed"
 }

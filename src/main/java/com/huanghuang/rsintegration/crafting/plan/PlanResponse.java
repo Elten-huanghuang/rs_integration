@@ -45,8 +45,13 @@ public record PlanResponse(
         Map<IngredientKey, Integer> leftovers, // overproduction keyed by exact item+NBT
         @Nullable ItemStack clickedOutput,    // JEI ghost-output the player clicked (NBT-variant target, e.g. WR leveled book)
         @Nullable PlanGraphView graph,         // server-authored DAG view; null on legacy/fallback plans
-        boolean executionBlocked               // hard prerequisite failure, independent of material availability
+        boolean executionBlocked,              // hard prerequisite failure, independent of material availability
+        List<MachineCandidateView> machineCandidates
 ) {
+    public PlanResponse {
+        machineCandidates = machineCandidates == null ? List.of() : List.copyOf(machineCandidates);
+    }
+
     public Availability availability(ItemStack stack) {
         Availability exact = materials.get(IngredientKey.of(stack));
         if (exact != null || !stack.hasTag()) return exact;
@@ -84,7 +89,29 @@ public record PlanResponse(
                 executionModTypeId, executionDim, executionPosX, executionPosY, executionPosZ,
                 modWarnings, repeatCount, embersCode, embersAspectNames, embersInputNames,
                 embersSeed, embersCanInfer, embersCodeFromCache, executionMachineSupportsGui,
-                baseItem, boundMachineTypes, leftovers, clickedOutput, graph, false);
+                baseItem, boundMachineTypes, leftovers, clickedOutput, graph, false, List.of());
+    }
+
+    /** Backward-compat: plans without target-machine candidate snapshots. */
+    public PlanResponse(boolean success, String targetName, ItemStack targetResult,
+                        List<PlanStep> steps, Map<IngredientKey, Availability> materials,
+                        List<String> missing, String recipeId,
+                        @Nullable String executionModTypeId, @Nullable String executionDim,
+                        int executionPosX, int executionPosY, int executionPosZ,
+                        List<Component> modWarnings, int repeatCount,
+                        @Nullable int[] embersCode, @Nullable Component[] embersAspectNames,
+                        @Nullable Component[] embersInputNames, long embersSeed,
+                        boolean embersCanInfer, boolean embersCodeFromCache,
+                        boolean executionMachineSupportsGui, @Nullable ItemStack baseItem,
+                        Set<String> boundMachineTypes, Map<IngredientKey, Integer> leftovers,
+                        @Nullable ItemStack clickedOutput, @Nullable PlanGraphView graph,
+                        boolean executionBlocked) {
+        this(success, targetName, targetResult, steps, materials, missing, recipeId,
+                executionModTypeId, executionDim, executionPosX, executionPosY, executionPosZ,
+                modWarnings, repeatCount, embersCode, embersAspectNames, embersInputNames,
+                embersSeed, embersCanInfer, embersCodeFromCache, executionMachineSupportsGui,
+                baseItem, boundMachineTypes, leftovers, clickedOutput, graph, executionBlocked,
+                List.of());
     }
 
     /** Backward-compat: no execution routing info (vanilla/generic path). */
@@ -94,7 +121,7 @@ public record PlanResponse(
         this(success, targetName, targetResult, steps, materials, missing, recipeId,
                 null, null, 0, 0, 0, Collections.emptyList(), 1,
                 null, null, null, 0, false, false, false, null, Collections.emptySet(),
-                Collections.emptyMap(), null, null, false);
+                Collections.emptyMap(), null, null, false, List.of());
     }
 
     /** Backward-compat: no mod warnings. */

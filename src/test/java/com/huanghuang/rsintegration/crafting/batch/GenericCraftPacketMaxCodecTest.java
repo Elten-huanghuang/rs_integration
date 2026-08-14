@@ -4,6 +4,7 @@ import io.netty.buffer.Unpooled;
 import io.netty.handler.codec.DecoderException;
 import com.electronwill.nightconfig.core.CommentedConfig;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.crafting.MachineSelectionMode;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
 import org.junit.jupiter.api.Test;
@@ -12,6 +13,7 @@ import org.junit.jupiter.api.BeforeAll;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -42,9 +44,20 @@ class GenericCraftPacketMaxCodecTest {
     void executePacketCannotClaimMaximumMode() {
         FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.buffer());
         new GenericCraftPacket(id()).encode(buffer);
-        buffer.setBoolean(buffer.writerIndex() - 1, true);
+        buffer.setBoolean(buffer.writerIndex() - 2, true);
 
         assertThrows(DecoderException.class, () -> GenericCraftPacket.decode(buffer));
+    }
+
+    @Test
+    void machineSelectionModeRoundTrips() {
+        GenericCraftPacket packet = new GenericCraftPacket(id())
+                .withMachineSelectionMode(MachineSelectionMode.EXCLUSIVE);
+        FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.buffer());
+        packet.encode(buffer);
+
+        assertEquals(MachineSelectionMode.EXCLUSIVE,
+                GenericCraftPacket.decode(buffer).machineSelectionMode());
     }
 
     private static ResourceLocation id() {

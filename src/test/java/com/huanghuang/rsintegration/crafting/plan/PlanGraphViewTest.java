@@ -20,6 +20,7 @@ import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import io.netty.buffer.Unpooled;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -98,7 +99,10 @@ class PlanGraphViewTest extends BootstrapTest {
                 List.of(catalystStep), java.util.Map.of(), List.of(), "test:root",
                 null, null, 0, 0, 0, List.of(), 1,
                 null, null, null, 0, false, false, false, null,
-                java.util.Set.of(), java.util.Map.of(), null, graph, true);
+                java.util.Set.of(), java.util.Map.of(), null, graph, true,
+                List.of(new MachineCandidateView("minecraft:overworld", 12, 64, -8,
+                        new ItemStack(Items.ENCHANTING_TABLE),
+                        MachineCandidateView.State.READY, Component.literal("Ready"))));
         FriendlyByteBuf buf = new FriendlyByteBuf(Unpooled.buffer());
         new PlanResponsePacket(plan).encode(buf);
         int encodedSize = buf.readableBytes();
@@ -106,6 +110,11 @@ class PlanGraphViewTest extends BootstrapTest {
         // Decode and check graph decoded correctly
         PlanResponse decoded = PlanResponsePacket.decode(buf).plan();
         assertTrue(decoded.executionBlocked());
+        assertEquals(1, decoded.machineCandidates().size());
+        assertEquals(new ResourceLocation("minecraft", "overworld").toString(),
+                decoded.machineCandidates().get(0).dimension());
+        assertEquals(MachineCandidateView.State.READY,
+                decoded.machineCandidates().get(0).state());
         assertNotNull(decoded.graph());
         assertEquals(graph.topologicalOrder(), decoded.graph().topologicalOrder());
         assertEquals(graph.edges().size(), decoded.graph().edges().size());
