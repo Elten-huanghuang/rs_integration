@@ -160,7 +160,10 @@ public final class CraftingResolver {
         ResolutionContext ctx = new ResolutionContext(level,
                 RecipeIndex.get(level),
                 available,
-                prefs);
+                prefs,
+                forcedOverrides,
+                null,
+                null);
 
         EdgeTracker edges = new EdgeTracker();
         for (Ingredient ing : needed) {
@@ -237,6 +240,7 @@ public final class CraftingResolver {
                 RecipeIndex.get(level),
                 availableKeyed,
                 prefs,
+                forcedOverrides,
                 player,
                 network,
                 bestEffort,
@@ -277,6 +281,7 @@ public final class CraftingResolver {
                 RecipeIndex.get(level),
                 availableKeyed,
                 prefs,
+                forcedOverrides,
                 player,
                 network,
                 bestEffort,
@@ -371,10 +376,10 @@ public final class CraftingResolver {
         Map<ResourceLocation, ResourceLocation> prefs = mergeForcedOverrides(level, forcedOverrides);
         ResolutionContext ctx = timeoutMs > 0
                 ? new ResolutionContext(level, RecipeIndex.get(level), availableKeyed,
-                        prefs, player, network, bestEffort, missingOut,
+                        prefs, forcedOverrides, player, network, bestEffort, missingOut,
                         ResolutionContext.deadlineAfterMillis(timeoutMs), true)
                 : new ResolutionContext(level, RecipeIndex.get(level), availableKeyed,
-                        prefs, player, network, bestEffort, missingOut);
+                        prefs, forcedOverrides, player, network, bestEffort, missingOut);
         EdgeTracker edges = new EdgeTracker();
         List<RootDemand> roots = new ArrayList<>();
 
@@ -485,6 +490,9 @@ public final class CraftingResolver {
         if (count <= 0) return true;
 
         int minReserve = RSIntegrationConfig.getProtectedReserve(ingredient);
+        ResourceLocation forcedRecipeId = ctx.forcedRecipeFor(ingredient);
+        boolean forceProduction = forcedRecipeId != null
+                && !ctx.isForcedRecipeActive(forcedRecipeId);
 
         ctx.beginUndo();
         edges.beginUndo();
@@ -492,7 +500,7 @@ public final class CraftingResolver {
         long consumeStart = System.nanoTime();
         boolean mayConsumeDirect = minReserve <= 0
                 || ctx.countMatching(ingredient) >= count + minReserve;
-        if (mayConsumeDirect) {
+        if (!forceProduction && mayConsumeDirect) {
             ResolutionContext.SupplyConsumption direct = ctx.consumeMatchingDetailed(ingredient, count);
             if (direct.complete()) {
                 recordSupplyConsumption(ctx, consumer, consumedOut, direct);
@@ -521,10 +529,10 @@ public final class CraftingResolver {
             return false;
         }
 
-        int alreadyHave = ctx.countMatching(ingredient);
+        int alreadyHave = forceProduction ? 0 : ctx.countMatching(ingredient);
         long consumeMs = (System.nanoTime() - consumeStart) / 1_000_000;
         int remaining = count - alreadyHave;
-        if (remaining > 0 && isTaintedEarthHeartRequirement(ingredient)) {
+        if (!forceProduction && remaining > 0 && isTaintedEarthHeartRequirement(ingredient)) {
             Ingredient plainHeart = Ingredient.of(ForgeRegistries.ITEMS.getValue(EARTH_HEART_ID));
             NodeId nodeId = ctx.allocateNodeId();
             InputPortId inputPort = new InputPortId(nodeId, 0);
@@ -553,7 +561,7 @@ public final class CraftingResolver {
                 remaining = count - alreadyHave;
             }
         }
-        if (minReserve > 0) {
+        if (!forceProduction && minReserve > 0) {
             remaining += minReserve;
         }
 
@@ -565,6 +573,14 @@ public final class CraftingResolver {
 
         long candStart = System.nanoTime();
         List<RecipeIndex.Entry> candidates = CandidateEngine.findCandidates(ingredient, ctx);
+        if (forceProduction) {
+            ResourceLocation selected = forcedRecipeId;
+            candidates = candidates.stream()
+                    .filter(candidate -> candidate.recipe().getId().equals(selected))
+                    .toList();
+            ctx.diag("ensureIngredient forced recipe=" + selected
+                    + " candidates=" + candidates.size());
+        }
         long candMs = (System.nanoTime() - candStart) / 1_000_000;
         ctx.diag("ensureIngredient candidates=" + candidates.size() + " remaining=" + remaining + " depth=" + depth);
         RSIntegrationMod.debug("[RSI-ensure] countMatch/consume={}ms, findCandidates={}ms, {} candidates for {}",
@@ -699,6 +715,8 @@ public final class CraftingResolver {
             for (Set<Item> family : conversionFamilies) ctx.pushConversionFamily(family);
 
             boolean allOk;
+            boolean activatedForcedRecipe = forceProduction
+                    && ctx.activateForcedRecipe(a.entry.recipe().getId());
             try {
                 for (StackKey inKey : inKeys) {
                     edges.addEdge(inKey, outKey);
@@ -720,6 +738,9 @@ public final class CraftingResolver {
                     batchesLeft -= stageBatches;
                 } while (allOk && batchesLeft > 0);
             } finally {
+                if (activatedForcedRecipe) {
+                    ctx.deactivateForcedRecipe(a.entry.recipe().getId());
+                }
                 ctx.resolving.remove(bk);
                 ctx.resolvingOutputs.remove(outKey);
                 for (Set<Item> family : conversionFamilies) ctx.popConversionFamily(family);
@@ -740,7 +761,9 @@ public final class CraftingResolver {
                 continue;
             }
 
-            ResolutionContext.SupplyConsumption crafted = ctx.consumeMatchingDetailed(ingredient, count);
+            ResolutionContext.SupplyConsumption crafted = forceProduction
+                    ? ctx.consumeProducedMatchingDetailed(ingredient, count)
+                    : ctx.consumeMatchingDetailed(ingredient, count);
             if (crafted.complete()) {
                 recordSupplyConsumption(ctx, consumer, consumedOut, crafted);
                 ctx.diag("ensureIngredient OK " + a.entry.recipe().getId());

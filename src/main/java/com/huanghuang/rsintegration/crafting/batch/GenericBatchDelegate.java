@@ -11,6 +11,7 @@ import com.huanghuang.rsintegration.crafting.RecipeIndex;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.RegistryAccess;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.resources.ResourceKey;
@@ -38,6 +39,7 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
     private ItemStack pendingResult;
     private final List<ItemStack> pendingSecondary = new ArrayList<>();
     private boolean craftDone;
+    private int preparedGraphExecutions = 1;
 
     @Override
     public boolean validateAndInit(ServerPlayer player, ResourceLocation recipeId,
@@ -61,6 +63,7 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
         this.pendingResult = ItemStack.EMPTY;
         this.pendingSecondary.clear();
         this.craftDone = false;
+        this.preparedGraphExecutions = 1;
 
         if (!validateExecutionContext(player)) {
             player.sendSystemMessage(Component.translatable(
@@ -166,6 +169,11 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
+    public void prepareGraphBatch(int executions) {
+        this.preparedGraphExecutions = Math.max(1, executions);
+    }
+
+    @Override
     public boolean tryStartWithMaterials(ServerPlayer player,
                                          List<ItemStack> materials,
                                          ExtractionLedger sharedLedger) {
@@ -189,7 +197,9 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
             if (recipe instanceof net.minecraft.world.item.crafting.CraftingRecipe cr) {
                 if (!captureRepeatedCraftingOutputs(cr, materials, player)) return false;
             } else {
-                int executions = materialExecutions(materials);
+                int executions = materialExecutions(
+                        getRequiredMaterials(), getMaterialReservationScopes(), materials,
+                        preparedGraphExecutions);
                 if (executions <= 0) return false;
                 pendingResult.setCount(Math.multiplyExact(pendingResult.getCount(), executions));
                 this.pendingSecondary.addAll(
@@ -220,19 +230,20 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
             net.minecraft.world.item.crafting.CraftingRecipe craftingRecipe,
             List<ItemStack> materials, ServerPlayer player) {
         List<IngredientSpec> specs = getRequiredMaterials();
-        if (specs == null || specs.size() != materials.size()) return false;
+        return captureRepeatedCraftingOutputs(
+                craftingRecipe, specs, getMaterialReservationScopes(), materials,
+                preparedGraphExecutions, player.serverLevel().registryAccess());
+    }
 
-        int executions = -1;
-        for (int i = 0; i < specs.size(); i++) {
-            IngredientSpec spec = specs.get(i);
-            if (spec.isEmpty()) continue;
-            ItemStack material = materials.get(i);
-            if (material == null || material.isEmpty() || spec.count() <= 0
-                    || material.getCount() % spec.count() != 0) return false;
-            int slotExecutions = material.getCount() / spec.count();
-            if (executions < 0) executions = slotExecutions;
-            else if (executions != slotExecutions) return false;
-        }
+    boolean captureRepeatedCraftingOutputs(
+            net.minecraft.world.item.crafting.CraftingRecipe craftingRecipe,
+            List<IngredientSpec> specs,
+            List<MaterialReservationScope> scopes,
+            List<ItemStack> materials,
+            int expectedExecutions,
+            RegistryAccess registryAccess) {
+        int executions = materialExecutions(
+                specs, scopes, materials, expectedExecutions);
         if (executions <= 0) return false;
 
         RepeatedCraftingOutputAccumulator outputs = new RepeatedCraftingOutputAccumulator();
@@ -248,7 +259,9 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
             // returns empty, pendingResult would still hold the computeResult
             // template (or the previous iteration's output) — accumulating that
             // ×N would fabricate items the recipe never produced.
-            if (!captureActualCraftingOutputs(craftingRecipe, operationMaterials, player)) {
+            if (!captureActualCraftingOutputs(
+                    craftingRecipe, operationMaterials, specs, operation == 0,
+                    registryAccess)) {
                 return false;
             }
             if (!outputs.add(pendingResult)) return false;
@@ -257,19 +270,24 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
         return true;
     }
 
-    private int materialExecutions(List<ItemStack> materials) {
-        List<IngredientSpec> specs = getRequiredMaterials();
+    static int materialExecutions(
+            List<IngredientSpec> specs,
+            List<MaterialReservationScope> scopes,
+            List<ItemStack> materials,
+            int expectedExecutions) {
         if (specs == null || specs.size() != materials.size()) return -1;
-        int executions = -1;
+        int executions = Math.max(1, expectedExecutions);
         for (int i = 0; i < specs.size(); i++) {
             IngredientSpec spec = specs.get(i);
             if (spec.isEmpty()) continue;
             ItemStack material = materials.get(i);
-            if (material == null || material.isEmpty() || spec.count() <= 0
-                    || material.getCount() % spec.count() != 0) return -1;
-            int slotExecutions = material.getCount() / spec.count();
-            if (executions < 0) executions = slotExecutions;
-            else if (executions != slotExecutions) return -1;
+            if (material == null || material.isEmpty() || spec.count() <= 0) return -1;
+            boolean reusable = i < scopes.size()
+                    && scopes.get(i) == MaterialReservationScope.PER_WORKER_REUSABLE;
+            int required = reusable
+                    ? spec.count()
+                    : Math.multiplyExact(spec.count(), executions);
+            if (material.getCount() != required) return -1;
         }
         return executions;
     }
@@ -285,16 +303,31 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
     private boolean captureActualCraftingOutputs(
             net.minecraft.world.item.crafting.CraftingRecipe craftingRecipe,
             List<ItemStack> materials, ServerPlayer player) {
+        return captureActualCraftingOutputs(
+                craftingRecipe, materials, getRequiredMaterials(), true,
+                player.serverLevel().registryAccess());
+    }
+
+    private boolean captureActualCraftingOutputs(
+            net.minecraft.world.item.crafting.CraftingRecipe craftingRecipe,
+            List<ItemStack> materials,
+            List<IngredientSpec> specs,
+            boolean captureReusableRemainders,
+            RegistryAccess registryAccess) {
         ItemStack[] consumed = materials.stream()
                 .map(stack -> stack == null ? ItemStack.EMPTY : stack.copy())
                 .toArray(ItemStack[]::new);
         ItemStack assembled = CraftPacketUtils.assembleCraftingOutput(
-                craftingRecipe, consumed, player);
+                craftingRecipe, consumed, registryAccess);
         if (!assembled.isEmpty()) pendingResult = assembled;
         for (ItemStack remainder : CraftPacketUtils.getRecipeRemainders(
                 craftingRecipe, consumed)) {
             if (remainder != null && !remainder.isEmpty()) {
-                pendingSecondary.add(remainder.copy());
+                boolean reusable = specs != null
+                        && CraftPacketUtils.remainderExecutions(remainder, specs, 2) == 1;
+                if (captureReusableRemainders || !reusable) {
+                    pendingSecondary.add(remainder.copy());
+                }
             }
         }
         return !assembled.isEmpty();

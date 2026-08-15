@@ -46,6 +46,8 @@ class NativeSubmissionHookTest {
                 "ItemTask.submitTask is also called by automatic inventory detection");
         assertTrue(service.contains("reserveUpToFromMainInventoryThenNetwork"),
                 "one transaction must own inventory-first and RS-fallback consumption");
+        assertTrue(service.contains("if (display.isEmpty()) return false;"),
+                "an unavailable filter preview must fall back to FTB's native submit path");
         assertFalse(service.contains("afterNativeSubmission"),
                 "post-native settlement can reuse inventory-counted progress");
     }

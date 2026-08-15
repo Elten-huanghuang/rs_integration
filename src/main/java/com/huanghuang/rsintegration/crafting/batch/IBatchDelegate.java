@@ -92,6 +92,20 @@ public interface IBatchDelegate {
     default int prepareFlatBatch(int remainingOperations) {
         return remainingOperations > 0 ? 1 : 0;
     }
+
+    /** Announces the aggregate execution count before graph output capture is armed. */
+    default void prepareGraphBatch(int executions) {
+    }
+
+    /**
+     * Preferred number of recipe executions assigned to one physical worker start.
+     * The default preserves the one-operation transaction used by ordinary machines.
+     * Delegates opting in must accept aggregated material counts and report the
+     * matching aggregate expected output after {@link #prepareGraphBatch(int)}.
+     */
+    default int preferredParallelBatchSize(int totalOperations, int workerCount) {
+        return 1;
+    }
     boolean validateAndInit(@Nonnull ServerPlayer player, @Nonnull ResourceLocation recipeId,
                             @Nullable ResourceLocation dim, @Nonnull BlockPos pos);
 

@@ -20,6 +20,7 @@ public class ResonanceDiskInventory implements Container {
     private final int[] backingSlots = new int[SLOTS];
     private boolean reconciling;
     private boolean reloadedAfterRecoveryFailure;
+    private long lastSeenRevision;
 
     public ResonanceDiskInventory(ResonanceDiskWrapper disk) {
         this(disk, null);
@@ -34,6 +35,7 @@ public class ResonanceDiskInventory implements Container {
             backingSlots[i] = i;
         }
         loadFromDisk();
+        lastSeenRevision = disk.contentRevision();
     }
 
     private void loadFromDisk() {
@@ -227,6 +229,18 @@ public class ResonanceDiskInventory implements Container {
             backingSlots[i] = i;
         }
         loadFromDisk();
+        lastSeenRevision = disk.contentRevision();
+    }
+
+    /**
+     * Refresh the open backpack view after another integration path mutates the
+     * same disk. The disk revision is monotonic and changes only after a real
+     * mutation, so this check is cheap enough to run for every menu broadcast.
+     */
+    boolean reloadIfRevisionChanged() {
+        if (disk.contentRevision() == lastSeenRevision) return false;
+        reloadFromDisk();
+        return true;
     }
 
     private static ItemStack sanitize(ItemStack stack) {

@@ -1365,6 +1365,7 @@ public final class AsyncCraftChain {
         ExtractionLedger nodeLedger = new ExtractionLedger();
         nodeLedger.setLogContext(ctx);
         IBatchDelegate delegate = prepared.delegate();
+        delegate.prepareGraphBatch(Math.max(1, prepared.step().executions()));
         if (prepared.parallelGroup()) {
             List<BoundMachine> workers = new ArrayList<>(
                     prepared.machines().subList(0, prepared.operationCost()));
@@ -4110,6 +4111,26 @@ public final class AsyncCraftChain {
                 RSIntegrationMod.LOGGER.error(ctx.format("Error in graph node delegate cleanup {}"),
                         runtime.describe(), e);
             } finally {
+                // Generic recipes have no physical machine that could have
+                // accepted the inputs. If their start callback rejects after
+                // the node ledger was committed, return those exact stacks;
+                // machine-backed delegates are intentionally left to their
+                // operation terminal state and cleanup hooks.
+                if (runtime.delegate() instanceof GenericBatchDelegate
+                        && runtime.failureReason() != null
+                        && runtime.nodeLedger() != null
+                        && runtime.nodeLedger().isCommitted()) {
+                    try {
+                        runtime.nodeLedger().refundCommitted(network, player);
+                        RSIntegrationMod.LOGGER.debug(ctx.format(
+                                "Refunded committed materials for failed virtual recipe node {}"),
+                                runtime.describe());
+                    } catch (Exception e) {
+                        RSIntegrationMod.LOGGER.error(ctx.format(
+                                "Error refunding failed virtual recipe node {}"),
+                                runtime.describe(), e);
+                    }
+                }
                 try {
                     ExtractionLedger cleanupLedger = runtime.nodeLedger();
                     if (cleanupLedger != null) cleanupLedger.close();

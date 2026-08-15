@@ -133,6 +133,14 @@ public class ResonanceBackpackContainer extends AbstractContainerMenu {
         return player.isAlive();
     }
 
+    @Override
+    public void broadcastChanges() {
+        if (diskInventory instanceof ResonanceDiskInventory resonanceInventory) {
+            resonanceInventory.reloadIfRevisionChanged();
+        }
+        super.broadcastChanges();
+    }
+
     public int getStoredCount() {
         if (disk != null) return disk.getStored();
         // Client side: vanilla menu-sync fills the display container with real

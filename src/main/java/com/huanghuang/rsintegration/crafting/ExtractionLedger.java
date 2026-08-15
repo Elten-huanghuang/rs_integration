@@ -941,6 +941,7 @@ public final class ExtractionLedger implements AutoCloseable {
             for (int s = 0; s < bp.getSlots(); s++) {
                 ItemStack stack = bp.getStackInSlot(s);
                 if (stack.isEmpty() || !IngredientMatcher.test(ingredient, stack)) continue;
+                if (!InventoryProtectionPolicy.mayUseFromBackpack(stack, ingredient)) continue;
                 int available = stack.getCount()
                         - pendingInv.getOrDefault(CraftingResolver.StackKey.of(stack, true), 0);
                 if (available <= 0) continue;
@@ -984,6 +985,7 @@ public final class ExtractionLedger implements AutoCloseable {
             for (int s = 0; s < bp.getSlots(); s++) {
                 ItemStack stack = bp.getStackInSlot(s);
                 if (stack.isEmpty() || !IngredientMatcher.test(ingredient, stack)) continue;
+                if (!InventoryProtectionPolicy.mayUseFromBackpack(stack, ingredient)) continue;
                 int available = stack.getCount()
                         - pendingInv.getOrDefault(CraftingResolver.StackKey.of(stack, true), 0);
                 if (available <= 0) continue;
@@ -1033,6 +1035,7 @@ public final class ExtractionLedger implements AutoCloseable {
                 if (remaining <= 0) break;
                 ItemStack stack = bp.getStackInSlot(s);
                 if (stack.isEmpty() || !IngredientMatcher.test(ingredient, stack)) continue;
+                if (!InventoryProtectionPolicy.mayUseFromBackpack(stack, ingredient)) continue;
                 int available = stack.getCount()
                         - pendingInv.getOrDefault(CraftingResolver.StackKey.of(stack, true), 0);
                 if (available <= 0) continue;
@@ -1123,6 +1126,7 @@ public final class ExtractionLedger implements AutoCloseable {
             for (int s = 0; s < bp.getSlots() && remaining > 0; s++) {
                 ItemStack inSlot = bp.getStackInSlot(s);
                 if (inSlot.isEmpty() || !IngredientMatcher.test(entry.originalIngredient, inSlot)
+                        || !InventoryProtectionPolicy.mayUseFromBackpack(inSlot, entry.originalIngredient)
                         || !ItemStack.isSameItemSameTags(inSlot, entry.template)) continue;
                 int take = Math.min(remaining, inSlot.getCount());
                 ItemStack taken = bp.extractItem(s, take, false);

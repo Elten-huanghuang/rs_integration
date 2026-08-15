@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.mixin.sophisticatedbackpacks;
 
 import com.huanghuang.rsintegration.util.BackpackRSUtils;
+import com.huanghuang.rsintegration.crafting.CraftOutputInterceptor;
 import com.huanghuang.rsintegration.util.ExternalItemProgressSuppression;
 import com.huanghuang.rsintegration.util.InsertedStackDelta;
 import com.huanghuang.rsintegration.util.RsOperationPlayerContext;
@@ -107,6 +108,11 @@ public abstract class MagnetUpgradeWrapperMixin
 
     @Inject(method = "tryToInsertItem", at = @At(value = "HEAD"), remap = false, cancellable = true)
     private void tryToInsertItem(ItemEntity itemEntity, CallbackInfoReturnable<Boolean> cir) {
+        if (CraftOutputInterceptor.isInActiveZone(itemEntity.level(), itemEntity.position())) {
+            cir.setReturnValue(false);
+            cir.cancel();
+            return;
+        }
         rsi$magnetInput = itemEntity.getItem().copy();
         ExternalItemProgressSuppression.beginOperation();
         if (!this.rsi$isRs) return;
@@ -146,6 +152,8 @@ public abstract class MagnetUpgradeWrapperMixin
             remap = false)
     private int rsi$withPlayerContext(MagnetUpgradeWrapper instance, Entity entity,
                                       Level level, BlockPos pos, Operation<Integer> original) {
+        AABB scanArea = new AABB(pos).inflate(this.upgradeItem.getRadius());
+        if (CraftOutputInterceptor.intersectsActiveZone(level, scanArea)) return 0;
         if (!(entity instanceof ServerPlayer player)) return original.call(instance, entity, level, pos);
         try (RsOperationPlayerContext.Scope ignored = RsOperationPlayerContext.push(player)) {
             return original.call(instance, entity, level, pos);

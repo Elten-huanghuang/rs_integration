@@ -180,6 +180,24 @@ final class CandidateEngine {
             return compareCandidateIds(idA, idB, scoreCache, availCache);
         });
 
+        if (SpellScrollSelection.acceptsAnyScroll(ingredient)) {
+            Map<ResourceLocation, Integer> scrollLevels = new HashMap<>();
+            Map<ResourceLocation, Integer> scrollRarities = new HashMap<>();
+            for (RecipeIndex.Entry entry : result) {
+                ItemStack output = ModRecipeHandlers.tryGetResultItem(
+                        entry.recipe(), ctx.level.registryAccess());
+                scrollLevels.put(entry.recipe().getId(), SpellScrollSelection.level(output));
+                scrollRarities.put(entry.recipe().getId(), SpellScrollSelection.rarity(output));
+            }
+            // List.sort is stable: recipes at the same rarity and level retain
+            // the normal availability/material-cost score calculated above.
+            result.sort(Comparator
+                    .comparingInt((RecipeIndex.Entry entry) -> scrollRarities.getOrDefault(
+                            entry.recipe().getId(), Integer.MAX_VALUE))
+                    .thenComparingInt(entry -> scrollLevels.getOrDefault(
+                            entry.recipe().getId(), Integer.MAX_VALUE)));
+        }
+
         if (isTag) {
             long sortElapsed = System.nanoTime() - sortStart;
             RSIntegrationMod.LOGGER.debug(

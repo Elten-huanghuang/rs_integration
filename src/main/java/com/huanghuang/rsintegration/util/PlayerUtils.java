@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.util;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.crafting.MaterialSources;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
@@ -35,6 +36,7 @@ public final class PlayerUtils {
     public static ItemStack insertIntoPlayerInventory(ServerPlayer player, ItemStack stack) {
         ItemStack remainder = insertMaxSizedChunks(stack, player.getInventory()::add);
         player.getInventory().setChanged();
+        MaterialSources.invalidateFor(player);
         player.inventoryMenu.broadcastChanges();
         return remainder;
     }
@@ -84,6 +86,13 @@ public final class PlayerUtils {
                 ItemStack chunk = stack.split(split);
                 ItemHandlerHelper.giveItemToPlayer(player, chunk);
             }
+            player.getInventory().setChanged();
+            MaterialSources.invalidateFor(player);
+            // ItemHandlerHelper updates the inventory, but an already-open custom
+            // container is not guaranteed to observe that mutation until its next
+            // scheduled sync. Broadcast now so chained crafts can use the result
+            // immediately and the client does not render a stale stack.
+            player.containerMenu.broadcastChanges();
             return;
         }
         if (network != null) {

@@ -19,6 +19,7 @@ import com.huanghuang.rsintegration.util.TrackedNetworkInsertion;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.NonNullList;
+import net.minecraft.core.RegistryAccess;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.resources.ResourceKey;
@@ -470,6 +471,12 @@ public final class CraftPacketUtils {
      */
     public static ItemStack assembleCraftingOutput(CraftingRecipe recipe, ItemStack[] consumed,
                                                     ServerPlayer player) {
+        return assembleCraftingOutput(
+                recipe, consumed, player.serverLevel().registryAccess());
+    }
+
+    public static ItemStack assembleCraftingOutput(CraftingRecipe recipe, ItemStack[] consumed,
+                                                    RegistryAccess registryAccess) {
         AbstractContainerMenu dummyMenu = new AbstractContainerMenu(null, -1) {
             @Override public ItemStack quickMoveStack(net.minecraft.world.entity.player.Player p, int i) { return ItemStack.EMPTY; }
             @Override public boolean stillValid(net.minecraft.world.entity.player.Player p) { return false; }
@@ -480,7 +487,7 @@ public final class CraftPacketUtils {
                 container.setItem(craftingGridSlot(recipe, i), consumed[i].copy());
             }
         }
-        return recipe.assemble(container, player.serverLevel().registryAccess());
+        return recipe.assemble(container, registryAccess);
     }
 
     static int craftingGridSlot(CraftingRecipe recipe, int ingredientIndex) {
