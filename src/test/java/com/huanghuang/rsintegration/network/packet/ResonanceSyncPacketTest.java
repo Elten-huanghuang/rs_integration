@@ -50,4 +50,12 @@ class ResonanceSyncPacketTest {
         assertTrue(ClientDiskData.hasAbility(ResonanceDiskAbilities.MALUM_VOID_FAVOR));
         assertEquals(8L, ClientDiskData.revision());
     }
+
+    @Test
+    void clientReceivesHotSpringCatalystPresence() {
+        ClientDiskData.apply(0, LycheeVirtualCatalysts.HOT_SPRING_BUCKET, 0, 1L);
+
+        assertTrue(ClientDiskData.hasCatalyst(LycheeVirtualCatalysts.HOT_SPRING_BUCKET));
+        assertFalse(ClientDiskData.hasCatalyst(LycheeVirtualCatalysts.POWDER_SNOW_BUCKET));
+    }
 }

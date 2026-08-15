@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.mods.immortalersdelight;
 
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.crafting.batch.GenericBatchDelegate;
 import com.huanghuang.rsintegration.mods.IModIntegration;
 import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
 import com.huanghuang.rsintegration.recipe.EnchantalCoolerRecipeHandler;
@@ -15,6 +16,7 @@ import java.util.function.Supplier;
 public final class ImmortalersDelightRSModule implements IModIntegration {
 
     public static final ImmortalersDelightRSModule INSTANCE = new ImmortalersDelightRSModule();
+    public static final String HOT_SPRING_TYPE_ID = "immortalers_delight_hot_spring";
 
     private ImmortalersDelightRSModule() {}
 
@@ -31,14 +33,28 @@ public final class ImmortalersDelightRSModule implements IModIntegration {
     @Override
     public void registerModType() {
         ModType.register("immortalers_delight",
-                new String[]{"com.renyigesai.immortalers_delight.recipe.EnchantalCoolerRecipe"},
+                new String[]{
+                        "com.renyigesai.immortalers_delight.recipe.EnchantalCoolerRecipe",
+                        "com.renyigesai.immortalers_delight.recipe.PillagerKnifeAddPotionRecipe"
+                },
                 new String[]{"enchantal_cooler"},
                 new String[0],
                 EnchantalCoolerBatchDelegate::new);
         ModType.configureJei("immortalers_delight",
                 new String[][]{{"immortalers_delight:enchantal_cooler"}},
-                new String[][]{{"com.renyigesai.immortalers_delight.recipe.EnchantalCoolerRecipe", "immortalers_delight"}},
+                new String[][]{
+                        {"com.renyigesai.immortalers_delight.recipe.EnchantalCoolerRecipe", "immortalers_delight"},
+                        {"com.renyigesai.immortalers_delight.recipe.PillagerKnifeAddPotionRecipe", "immortalers_delight"}
+                },
                 "gui.rs_integration.jei.immortalers_cooler_craft");
+        ModType.registerVirtual(HOT_SPRING_TYPE_ID,
+                new String[]{ImmortalersDelightHotSpringRecipeHandler.RECIPE_CLASS},
+                GenericBatchDelegate::new);
+        ModType.configureJei(HOT_SPRING_TYPE_ID,
+                new String[][]{{"immortalers_delight:hot_spring", HOT_SPRING_TYPE_ID}},
+                new String[][]{{ImmortalersDelightHotSpringRecipeHandler.RECIPE_CLASS,
+                        HOT_SPRING_TYPE_ID}},
+                "gui.rs_integration.jei.immortalers_hot_spring_craft");
     }
 
     @Override
@@ -54,6 +70,7 @@ public final class ImmortalersDelightRSModule implements IModIntegration {
     @Override
     public void registerRecipeHandler() {
         ModRecipeHandlers.register(new EnchantalCoolerRecipeHandler());
+        ModRecipeHandlers.register(new ImmortalersDelightHotSpringRecipeHandler());
     }
 
     @Override

@@ -18,9 +18,12 @@ public final class EnchantalCoolerRecipeHandler extends AbstractRecipeHandler {
 
     private static final String RECIPE_CLASS =
             "com.renyigesai.immortalers_delight.recipe.EnchantalCoolerRecipe";
+    private static final String SPECIAL_RECIPE_CLASS =
+            "com.renyigesai.immortalers_delight.recipe.PillagerKnifeAddPotionRecipe";
 
     static {
-        registerRecipePrefixes(EnchantalCoolerRecipeHandler.class, RECIPE_CLASS);
+        registerRecipePrefixes(EnchantalCoolerRecipeHandler.class,
+                RECIPE_CLASS, SPECIAL_RECIPE_CLASS);
     }
 
     private static volatile Field inputItemsField;
@@ -37,6 +40,13 @@ public final class EnchantalCoolerRecipeHandler extends AbstractRecipeHandler {
     @Nullable
     @Override
     public List<IngredientSpec> getIngredients(Recipe<?> recipe) {
+        List<IngredientSpec> specs = getInputSpecs(recipe);
+        if (specs == null) return null;
+        return appendContainerSpec(specs, getContainerItem(recipe));
+    }
+
+    @Nullable
+    public static List<IngredientSpec> getInputSpecs(Recipe<?> recipe) {
         NonNullList<Ingredient> items = getInputItems(recipe);
         if (items == null || items.isEmpty()) return null;
         List<IngredientSpec> specs = new ArrayList<>(items.size());
@@ -44,6 +54,52 @@ public final class EnchantalCoolerRecipeHandler extends AbstractRecipeHandler {
             if (!ing.isEmpty()) specs.add(new IngredientSpec(ing, 1));
         }
         return specs.isEmpty() ? null : specs;
+    }
+
+    static List<IngredientSpec> appendContainerSpec(List<IngredientSpec> inputSpecs,
+                                                     ItemStack container) {
+        List<IngredientSpec> specs = new ArrayList<>(inputSpecs.size() + 1);
+        specs.addAll(inputSpecs);
+        if (container != null && !container.isEmpty()) {
+            specs.add(new IngredientSpec(Ingredient.of(container.copyWithCount(1)), 1));
+        }
+        return List.copyOf(specs);
+    }
+
+    public static ItemStack getContainerItem(Recipe<?> recipe) {
+        if (recipe == null) return ItemStack.EMPTY;
+        try {
+            java.lang.reflect.Method method = recipe.getClass().getMethod("getContainer");
+            Object value = method.invoke(recipe);
+            if (value instanceof ItemStack stack && !stack.isEmpty()) return stack.copy();
+        } catch (ReflectiveOperationException e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-Recipe] Enchantal Cooler getContainer failed", e);
+        }
+        for (Class<?> type = recipe.getClass(); type != null; type = type.getSuperclass()) {
+            try {
+                Field field = type.getDeclaredField("container");
+                field.setAccessible(true);
+                Object value = field.get(recipe);
+                if (value instanceof ItemStack stack && !stack.isEmpty()) return stack.copy();
+                return ItemStack.EMPTY;
+            } catch (NoSuchFieldException ignored) {
+                // Continue through compatibility subclasses.
+            } catch (ReflectiveOperationException e) {
+                RSIntegrationMod.LOGGER.debug(
+                        "[RSI-Recipe] Enchantal Cooler container field failed", e);
+                return ItemStack.EMPTY;
+            }
+        }
+        return ItemStack.EMPTY;
+    }
+
+    @Override
+    public boolean hasRuntimeDependentPrimaryNbt(Recipe<?> recipe) {
+        return SPECIAL_RECIPE_CLASS.equals(recipe.getClass().getName());
+    }
+
+    public static boolean isSupportedRecipeClassName(String className) {
+        return RECIPE_CLASS.equals(className) || SPECIAL_RECIPE_CLASS.equals(className);
     }
 
     @Nullable
