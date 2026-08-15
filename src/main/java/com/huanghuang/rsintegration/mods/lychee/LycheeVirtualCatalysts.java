@@ -11,16 +11,17 @@ import net.minecraft.world.item.ItemStack;
 
 import javax.annotation.Nullable;
 
-/** Presence-only catalysts stored in ordinary Resonance Disk slots. */
+/** Presence-only substrate catalysts stored in ordinary Resonance Disk slots. */
 public final class LycheeVirtualCatalysts {
 
     public static final int POWDER_SNOW_BUCKET = 1;
     public static final int GREEK_FIRE_BUCKET = 1 << 1;
     public static final int DWARVEN_OIL_BUCKET = 1 << 2;
     public static final int DEEP_AETHER_POISON_BUCKET = 1 << 3;
+    public static final int HOT_SPRING_BUCKET = 1 << 4;
 
     private static final int ALL_CATALYSTS = POWDER_SNOW_BUCKET | GREEK_FIRE_BUCKET
-            | DWARVEN_OIL_BUCKET | DEEP_AETHER_POISON_BUCKET;
+            | DWARVEN_OIL_BUCKET | DEEP_AETHER_POISON_BUCKET | HOT_SPRING_BUCKET;
 
     private static final ResourceLocation POWDER_SNOW_BUCKET_ID =
             new ResourceLocation("minecraft", "powder_snow_bucket");
@@ -30,6 +31,8 @@ public final class LycheeVirtualCatalysts {
             new ResourceLocation("embers", "dwarven_oil_bucket");
     private static final ResourceLocation DEEP_AETHER_POISON_BUCKET_ID =
             new ResourceLocation("deep_aether", "poison_bucket");
+    private static final ResourceLocation HOT_SPRING_BUCKET_ID =
+            new ResourceLocation("immortalers_delight", "hot_spring_bucket");
 
     private LycheeVirtualCatalysts() {}
 
@@ -57,13 +60,18 @@ public final class LycheeVirtualCatalysts {
         int mask = 0;
         for (ItemStack stack : disk.getInternalStacks()) {
             if (stack.isEmpty()) continue;
-            ResourceLocation id = BuiltInRegistries.ITEM.getKey(stack.getItem());
-            if (POWDER_SNOW_BUCKET_ID.equals(id)) mask |= POWDER_SNOW_BUCKET;
-            else if (GREEK_FIRE_BUCKET_ID.equals(id)) mask |= GREEK_FIRE_BUCKET;
-            else if (DWARVEN_OIL_BUCKET_ID.equals(id)) mask |= DWARVEN_OIL_BUCKET;
-            else if (DEEP_AETHER_POISON_BUCKET_ID.equals(id)) mask |= DEEP_AETHER_POISON_BUCKET;
+            mask |= catalystForItemId(BuiltInRegistries.ITEM.getKey(stack.getItem()));
             if (mask == ALL_CATALYSTS) break;
         }
         return mask;
+    }
+
+    static int catalystForItemId(@Nullable ResourceLocation id) {
+        if (POWDER_SNOW_BUCKET_ID.equals(id)) return POWDER_SNOW_BUCKET;
+        if (GREEK_FIRE_BUCKET_ID.equals(id)) return GREEK_FIRE_BUCKET;
+        if (DWARVEN_OIL_BUCKET_ID.equals(id)) return DWARVEN_OIL_BUCKET;
+        if (DEEP_AETHER_POISON_BUCKET_ID.equals(id)) return DEEP_AETHER_POISON_BUCKET;
+        if (HOT_SPRING_BUCKET_ID.equals(id)) return HOT_SPRING_BUCKET;
+        return 0;
     }
 }

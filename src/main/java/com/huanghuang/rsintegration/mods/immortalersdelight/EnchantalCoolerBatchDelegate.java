@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.mods.immortalersdelight;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
@@ -91,7 +92,8 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
         }
         IItemHandler handler = getInventory(be);
         if (handler == null || handler.getSlots() < baselineSlots.length) return false;
-        if (getCookingProgress(be) > 0 || !areInputsEmpty(handler)) {
+        if (getCookingProgress(be) > 0 || !areInputsEmpty(handler)
+                || !handler.getStackInSlot(CONTAINER_SLOT).isEmpty()) {
             return false;
         }
         return true;
@@ -172,7 +174,19 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-Cooler] Cannot access item handler");
             return false;
         }
-        long materialCount = materials.stream().filter(s -> !s.isEmpty()).count();
+        List<IngredientSpec> inputSpecs = EnchantalCoolerRecipeHandler.getInputSpecs(recipe);
+        ItemStack requiredContainer = EnchantalCoolerRecipeHandler.getContainerItem(recipe);
+        PreparedMaterials prepared = splitPreparedMaterials(
+                materials, inputSpecs != null ? inputSpecs.size() : 0, requiredContainer);
+        if (prepared == null) {
+            RSIntegrationMod.LOGGER.warn(
+                    "[RSI-Batch-Cooler] Planned materials do not match recipe {} inputs/container",
+                    recipe.getId());
+            return false;
+        }
+        List<ItemStack> inputMaterials = prepared.inputs();
+        ItemStack containerMaterial = prepared.container();
+        long materialCount = inputMaterials.stream().filter(s -> !s.isEmpty()).count();
         if (materialCount > INPUT_SLOTS) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-Cooler] Recipe {} has {} ingredients but only {} input slots",
                     recipe.getId(), materialCount, INPUT_SLOTS);
@@ -195,7 +209,7 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
 
         // Validate every input insertion before mutating fuel, containers, or recipe slots.
         int simulatedSlot = 0;
-        for (ItemStack mat : materials) {
+        for (ItemStack mat : inputMaterials) {
             if (mat.isEmpty()) continue;
             ItemStack single = mat.copyWithCount(1);
             if (!itemHandler.insertItem(simulatedSlot, single, true).isEmpty()) {
@@ -207,12 +221,21 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
             }
             simulatedSlot++;
         }
+        if (!requiredContainer.isEmpty()
+                && (!itemHandler.getStackInSlot(CONTAINER_SLOT).isEmpty()
+                || !itemHandler.insertItem(CONTAINER_SLOT, containerMaterial, true).isEmpty())) {
+            resetInventoryLease();
+            RSIntegrationMod.LOGGER.warn(
+                    "[RSI-Batch-Cooler] Container slot rejected planned {} during preflight",
+                    containerMaterial);
+            return false;
+        }
 
         forceChunkLoad(true);
 
         // Phase 1: Insert ingredients into input slots 0..3
         int slot = 0;
-        for (ItemStack mat : materials) {
+        for (ItemStack mat : inputMaterials) {
             if (mat.isEmpty()) continue;
             ItemStack single = mat.copyWithCount(1);
             ItemStack remainder = itemHandler.insertItem(slot, single, false);
@@ -248,35 +271,21 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
         // declare no explicit recipe container, so derive it from the result
         // item's crafting remainder — without it the meal stays stuck internally
         // and is never recovered into RS.
-        ItemStack container = getContainerItem(recipe);
-        if (!container.isEmpty()) {
+        if (!requiredContainer.isEmpty()) {
             ItemStack existing = itemHandler.getStackInSlot(CONTAINER_SLOT);
-            if (!existing.isEmpty() && !ItemStack.isSameItemSameTags(existing, container)) {
-                RSIntegrationMod.LOGGER.warn("[RSI-Batch-Cooler] Recipe {} needs container {}, but slot contains {}",
-                        recipe.getId(), container, existing);
+            if (!existing.isEmpty()) {
+                RSIntegrationMod.LOGGER.warn(
+                        "[RSI-Batch-Cooler] Recipe {} container slot became occupied by {}",
+                        recipe.getId(), existing);
                 return rollbackRejectedStart(itemHandler, be);
             }
-            if (existing.isEmpty()) {
-                ItemStack extracted = network.extractItem(container.copyWithCount(1), 1,
-                        com.refinedmods.refinedstorage.api.util.Action.PERFORM);
-                if (extracted.isEmpty()) {
-                    RSIntegrationMod.LOGGER.warn("[RSI-Batch-Cooler] Required container unavailable for recipe {}: {}",
-                            recipe.getId(), container);
-                    return rollbackRejectedStart(itemHandler, be);
-                }
-                ItemStack simulated = itemHandler.insertItem(CONTAINER_SLOT, extracted, true);
-                if (!simulated.isEmpty()) {
-                    refundToRSNetwork(extracted);
-                    return rollbackRejectedStart(itemHandler, be);
-                }
-                ItemStack remainder = itemHandler.insertItem(CONTAINER_SLOT, extracted, false);
-                if (!remainder.isEmpty()) {
-                    refundToRSNetwork(remainder);
-                    return rollbackRejectedStart(itemHandler, be);
-                }
-                recordSlotSupply(CONTAINER_SLOT, extracted, extracted.getCount());
-                be.setChanged();
+            ItemStack remainder = itemHandler.insertItem(
+                    CONTAINER_SLOT, containerMaterial.copyWithCount(1), false);
+            if (!remainder.isEmpty()) {
+                return rollbackRejectedStart(itemHandler, be);
             }
+            recordSlotSupply(CONTAINER_SLOT, containerMaterial, 1);
+            be.setChanged();
         }
 
         if (!matchesExpectedRecipe(itemHandler)) {
@@ -289,24 +298,6 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
         markCraftStarted();
         RSIntegrationMod.LOGGER.debug("[RSI-Batch-Cooler] Materials inserted, cooling should start next tick");
         return true;
-    }
-
-    /** The container explicitly declared by this recipe. EMPTY means the
-     *  cooler does not consume a container for the craft. */
-    private static ItemStack getContainerItem(Recipe<?> recipe) {
-        if (recipe == null) return ItemStack.EMPTY;
-        try {
-            java.lang.reflect.Method m = recipe.getClass().getMethod("getContainer");
-            Object r = m.invoke(recipe);
-            if (r instanceof ItemStack s && !s.isEmpty()) return s;
-        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-Cooler] getContainer failed", e); }
-        try {
-            java.lang.reflect.Field f = recipe.getClass().getDeclaredField("container");
-            f.setAccessible(true);
-            Object v = f.get(recipe);
-            if (v instanceof ItemStack s && !s.isEmpty()) return s;
-        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-Cooler] container field failed", e); }
-        return ItemStack.EMPTY;
     }
 
     @Override
@@ -409,9 +400,10 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
             ItemStack removed = extractOwnedSlotDelta(handler, slot);
             if (!removed.isEmpty() && refundInputs) refundToRSNetwork(removed);
         }
-        // Container is out-of-band (not in shared ledger) — refund unconditionally
+        // Inputs and container share the same ledger. During shared-graph cleanup,
+        // remove physical leftovers and let the ledger perform the only refund.
         ItemStack container = extractOwnedSlotDelta(handler, CONTAINER_SLOT);
-        if (!container.isEmpty()) refundToRSNetwork(container);
+        if (!container.isEmpty() && refundInputs) refundToRSNetwork(container);
         // Fuel is out-of-band (not in shared ledger) — refund unconditionally
         ItemStack fuel = extractOwnedSlotDelta(handler, FUEL_SLOT);
         if (!fuel.isEmpty()) refundToRSNetwork(fuel);
@@ -427,6 +419,7 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
 
     private boolean acquireIdleInventory(IItemHandler handler, BlockEntity be) {
         if (inventoryLease) return false;
+        if (!handler.getStackInSlot(CONTAINER_SLOT).isEmpty()) return false;
         List<ItemStack> inputs = new ArrayList<>(INPUT_SLOTS);
         for (int slot = 0; slot < INPUT_SLOTS; slot++) {
             inputs.add(handler.getStackInSlot(slot).copy());
@@ -489,10 +482,7 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
 
     private boolean matchesExpectedRecipe(IItemHandler handler) {
         if (recipe == null || myLevel == null) return false;
-        SimpleContainer inputs = new SimpleContainer(INPUT_SLOTS);
-        for (int slot = 0; slot < INPUT_SLOTS; slot++) {
-            inputs.setItem(slot, handler.getStackInSlot(slot).copy());
-        }
+        SimpleContainer inputs = createRecipeInput(handler);
         try {
             @SuppressWarnings("rawtypes")
             Recipe rawRecipe = recipe;
@@ -507,11 +497,23 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
         }
     }
 
+    static SimpleContainer createRecipeInput(IItemHandler handler) {
+        SimpleContainer inputs = new SimpleContainer(CONTAINER_SLOT + 1);
+        for (int slot = 0; slot < INPUT_SLOTS; slot++) {
+            inputs.setItem(slot, handler.getStackInSlot(slot).copy());
+        }
+        inputs.setItem(CONTAINER_SLOT, handler.getStackInSlot(CONTAINER_SLOT).copy());
+        return inputs;
+    }
+
     private boolean isExpectedOutput(ItemStack stack) {
         if (stack == null || stack.isEmpty()) return false;
         ExpectedProduction expected = getExpectedProduction();
-        return expected != null && !expected.item().isEmpty()
-                && ItemStack.isSameItemSameTags(expected.item(), stack);
+        return expected != null && matchesExpectedOutput(stack, expected.item());
+    }
+
+    static boolean matchesExpectedOutput(ItemStack actual, ItemStack declared) {
+        return IBatchDelegate.matchesProducedItem(actual, declared);
     }
 
     private static boolean areInputsEmpty(IItemHandler handler) {
@@ -537,8 +539,8 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
     }
 
     private boolean rollbackRejectedStart(IItemHandler handler, BlockEntity be) {
-        // The committed local/shared ledger refunds inputs. Fuel and containers are
-        // out-of-band and are returned by ownership-aware cleanup.
+        // The committed local/shared ledger refunds inputs and the container.
+        // Fuel remains out-of-band and is returned by ownership-aware cleanup.
         cleanupOwnedSlots(handler, false);
         be.setChanged();
         forceChunkLoad(false);
@@ -744,5 +746,37 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
 
     private void forceChunkLoad(boolean load) {
         forceMachineChunk(myLevel, myPos, load);
+    }
+
+    record PreparedMaterials(List<ItemStack> inputs, ItemStack container) {
+        PreparedMaterials {
+            inputs = List.copyOf(inputs);
+            container = container == null ? ItemStack.EMPTY : container.copy();
+        }
+    }
+
+    @Nullable
+    static PreparedMaterials splitPreparedMaterials(List<ItemStack> materials,
+                                                     int inputCount,
+                                                     ItemStack requiredContainer) {
+        if (materials == null || inputCount < 0) return null;
+        boolean hasContainer = requiredContainer != null && !requiredContainer.isEmpty();
+        int expectedSize = inputCount + (hasContainer ? 1 : 0);
+        if (materials.size() != expectedSize) return null;
+
+        List<ItemStack> inputs = new ArrayList<>(inputCount);
+        for (int i = 0; i < inputCount; i++) {
+            ItemStack material = materials.get(i);
+            if (material == null || material.isEmpty()) return null;
+            inputs.add(material);
+        }
+        if (!hasContainer) return new PreparedMaterials(inputs, ItemStack.EMPTY);
+
+        ItemStack container = materials.get(inputCount);
+        if (container == null || container.isEmpty()
+                || !ItemStack.isSameItem(container, requiredContainer)) {
+            return null;
+        }
+        return new PreparedMaterials(inputs, container.copyWithCount(1));
     }
 }

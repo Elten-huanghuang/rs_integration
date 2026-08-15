@@ -121,6 +121,17 @@ class LycheeVirtualRecipeIdTest extends BootstrapTest {
                         new ResourceLocation("crafttweaker", "deep_aether.sterling_aercloud")));
     }
 
+    @Test
+    void recognizesImmortalersDelightHotSpringBucketWithoutChangingExistingBits() {
+        assertEquals(1, LycheeVirtualCatalysts.POWDER_SNOW_BUCKET);
+        assertEquals(1 << 3, LycheeVirtualCatalysts.DEEP_AETHER_POISON_BUCKET);
+        assertEquals(LycheeVirtualCatalysts.HOT_SPRING_BUCKET,
+                LycheeVirtualCatalysts.catalystForItemId(
+                        new ResourceLocation("immortalers_delight", "hot_spring_bucket")));
+        assertEquals(0, LycheeVirtualCatalysts.catalystForItemId(
+                new ResourceLocation("immortalers_delight", "evolutcorn_paste_bucket")));
+    }
+
     private static ItemStack taggedDiamond(int value) {
         ItemStack stack = new ItemStack(Items.DIAMOND);
         CompoundTag tag = new CompoundTag();

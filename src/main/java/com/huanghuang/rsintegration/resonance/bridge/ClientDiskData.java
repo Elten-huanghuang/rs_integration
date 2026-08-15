@@ -27,6 +27,10 @@ public final class ClientDiskData {
     }
 
     public static boolean hasLycheeCatalyst(int requiredMask) {
+        return hasCatalyst(requiredMask);
+    }
+
+    public static boolean hasCatalyst(int requiredMask) {
         return com.huanghuang.rsintegration.mods.lychee.LycheeVirtualCatalysts
                 .hasCatalyst(lycheeCatalystMask, requiredMask);
     }

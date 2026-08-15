@@ -167,6 +167,12 @@ public final class AltarCraftButtons {
             return required != 0 && com.huanghuang.rsintegration.resonance.bridge.ClientDiskData
                     .hasLycheeCatalyst(required);
         }
+        if (com.huanghuang.rsintegration.mods.immortalersdelight
+                .ImmortalersDelightRSModule.HOT_SPRING_TYPE_ID.equals(type.id())) {
+            return com.huanghuang.rsintegration.resonance.bridge.ClientDiskData.hasCatalyst(
+                    com.huanghuang.rsintegration.mods.lychee.LycheeVirtualCatalysts
+                            .HOT_SPRING_BUCKET);
+        }
         if (com.huanghuang.rsintegration.mods.malum.MalumRSModule.VOID_FAVOR_TYPE_ID
                 .equals(type.id())) {
             return com.huanghuang.rsintegration.resonance.bridge.ClientDiskData.hasAbility(
