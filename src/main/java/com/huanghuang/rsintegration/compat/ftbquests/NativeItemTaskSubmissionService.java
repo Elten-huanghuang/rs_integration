@@ -36,7 +36,12 @@ public final class NativeItemTaskSubmissionService {
                 task.getId(), data.getProgress(task), remaining);
 
         ItemStack display = displayStack(task);
-        if (display.isEmpty() || remaining > Integer.MAX_VALUE) {
+        // A dedicated server may not have the item-filter display cache
+        // populated yet. In that case the native FTB callback is still
+        // able to scan the player's inventory with ItemTask#test; do not
+        // cancel it just because RSI cannot produce a missing-item preview.
+        if (display.isEmpty()) return false;
+        if (remaining > Integer.MAX_VALUE) {
             sendMissing(player, display, remaining);
             return true;
         }
@@ -94,8 +99,14 @@ public final class NativeItemTaskSubmissionService {
     }
 
     private static ItemStack displayStack(ItemTask task) {
-        List<ItemStack> valid = task.getValidDisplayItems();
-        for (ItemStack stack : valid) if (!stack.isEmpty()) return stack.copyWithCount(1);
+        try {
+            List<ItemStack> valid = task.getValidDisplayItems();
+            for (ItemStack stack : valid) if (!stack.isEmpty()) return stack.copyWithCount(1);
+        } catch (RuntimeException exception) {
+            RSIntegrationMod.LOGGER.debug(
+                    "[RSI-FTBQuests] Failed to resolve display items for task {}; using native submit",
+                    task.getId(), exception);
+        }
         ItemStack configured = task.getItemStack();
         return configured.isEmpty() ? ItemStack.EMPTY : configured.copyWithCount(1);
     }

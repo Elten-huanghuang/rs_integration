@@ -43,7 +43,8 @@ public final class MaterialSources {
                         .findAllBackpackInventories(sp)) {
                     for (int i = 0; i < bp.getSlots(); i++) {
                         ItemStack stack = bp.getStackInSlot(i);
-                        if (!stack.isEmpty()) {
+                        if (!stack.isEmpty()
+                                && !InventoryProtectionPolicy.isProtectedBackpackItem(stack)) {
                             map.merge(StackKey.of(stack, true), stack.getCount(), Integer::sum);
                         }
                     }

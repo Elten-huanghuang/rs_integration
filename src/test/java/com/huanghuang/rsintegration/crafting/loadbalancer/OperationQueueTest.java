@@ -2,6 +2,8 @@ package com.huanghuang.rsintegration.crafting.loadbalancer;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -61,5 +63,20 @@ class OperationQueueTest {
     void rejectsCompletingIdleWorker() {
         OperationQueue queue = new OperationQueue(1);
         assertThrows(IllegalStateException.class, () -> queue.complete(5));
+    }
+
+    @Test
+    void batchClaimsPreserveOriginalOperationAccounting() {
+        OperationQueue queue = new OperationQueue(10);
+
+        assertEquals(List.of(0, 1, 2, 3), queue.claimBatch(1, 4));
+        assertEquals(List.of(4, 5, 6, 7), queue.claimBatch(2, 4));
+        assertEquals(8, queue.runningOperations());
+        assertEquals(2, queue.queuedOperations());
+
+        assertEquals(List.of(0, 1, 2, 3), queue.completeBatch(1));
+        assertEquals(4, queue.completedOperations());
+        assertEquals(List.of(8, 9), queue.claimBatch(1, 4));
+        assertEquals(6, queue.runningOperations());
     }
 }

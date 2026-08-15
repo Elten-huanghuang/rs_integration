@@ -74,9 +74,15 @@ public final class ArsNouveauRecipeHandler extends AbstractRecipeHandler {
             return getImbuementResult(recipe);
         } else if (ArsRecipeClassifier.TYPE_APPARATUS.equals(typeId)) {
             return getApparatusResult(recipe);
+        } else if (ArsRecipeClassifier.isDynamicApparatus(typeId)) {
+            // Enchantment and armor-upgrade outputs depend on the concrete
+            // NBT-bearing centre item selected in JEI. Their context-free
+            // result is intentionally empty and is resolved later.
+            return ItemStack.EMPTY;
         }
 
-        RSIntegrationMod.LOGGER.warn("ArsNouveauRecipeHandler: unknown automatable recipe type {}", typeId);
+        RSIntegrationMod.LOGGER.warn(
+                "ArsNouveauRecipeHandler: unexpected recipe type requested for result {}", typeId);
         return ItemStack.EMPTY;
     }
 

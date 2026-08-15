@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.crafting.loadbalancer;
 
+import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -8,9 +9,10 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-class ParallelCraftGroupCaptureTest {
+class ParallelCraftGroupCaptureTest extends BootstrapTest {
     @Test
     void waitsForTheEntireExpectedWorldOutput() {
         ItemStack expected = new ItemStack(Items.DIAMOND, 2);
@@ -34,5 +36,14 @@ class ParallelCraftGroupCaptureTest {
 
         assertFalse(ParallelCraftGroup.containsExpectedWorldOutput(List.of(other), expected));
         assertTrue(ParallelCraftGroup.containsExpectedWorldOutput(List.of(expected.copy()), expected));
+    }
+
+    @Test
+    void cancellationSettlesOnlyOutputsAlreadyProducedByABatch() {
+        ItemStack expectedBatch = new ItemStack(Items.DIAMOND, 128);
+        assertEquals(6, ParallelCraftGroup.completedExecutionsFromCapture(
+                expectedBatch, 128, List.of(new ItemStack(Items.DIAMOND, 6))));
+        assertEquals(0, ParallelCraftGroup.completedExecutionsFromCapture(
+                expectedBatch, 128, List.of(new ItemStack(Items.EMERALD, 6))));
     }
 }

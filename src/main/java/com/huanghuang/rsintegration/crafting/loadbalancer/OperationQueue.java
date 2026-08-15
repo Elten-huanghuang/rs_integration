@@ -1,13 +1,14 @@
 package com.huanghuang.rsintegration.crafting.loadbalancer;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /** Tracks single-operation leases for a dynamic machine worker pool. */
 public final class OperationQueue {
 
     private final int totalOperations;
-    private final Map<Integer, Integer> inFlight = new HashMap<>();
+    private final Map<Integer, List<Integer>> inFlight = new HashMap<>();
     private int nextOperation;
     private int completedOperations;
     private boolean dispatchStopped;
@@ -26,22 +27,32 @@ public final class OperationQueue {
 
     /** Claim the next operation for a currently idle worker. */
     public int claim(int workerId) {
-        if (dispatchStopped || inFlight.containsKey(workerId) || nextOperation >= totalOperations) {
-            return -1;
-        }
-        int operation = nextOperation++;
-        inFlight.put(workerId, operation);
-        return operation;
+        List<Integer> claimed = claimBatch(workerId, 1);
+        return claimed.isEmpty() ? -1 : claimed.get(0);
+    }
+
+    /** Claim up to {@code maxOperations} consecutive operations for one worker start. */
+    public List<Integer> claimBatch(int workerId, int maxOperations) {
+        if (dispatchStopped || inFlight.containsKey(workerId) || nextOperation >= totalOperations
+                || maxOperations <= 0) return List.of();
+        int count = Math.min(maxOperations, totalOperations - nextOperation);
+        List<Integer> claimed = java.util.stream.IntStream
+                .range(nextOperation, nextOperation + count).boxed().toList();
+        nextOperation += count;
+        inFlight.put(workerId, claimed);
+        return claimed;
     }
 
     /** Complete the worker's current operation and return its operation id. */
     public int complete(int workerId) {
-        Integer operation = inFlight.remove(workerId);
-        if (operation == null) {
-            throw new IllegalStateException("worker has no in-flight operation: " + workerId);
-        }
-        completedOperations++;
-        return operation;
+        List<Integer> completed = completeBatch(workerId);
+        return completed.get(0);
+    }
+
+    public List<Integer> completeBatch(int workerId) {
+        List<Integer> completed = removeInFlight(workerId);
+        completedOperations += completed.size();
+        return completed;
     }
 
     /**
@@ -49,11 +60,19 @@ public final class OperationQueue {
      * remains unsettled so the owner can clean the machine and refund it later.
      */
     public int abandon(int workerId) {
-        Integer operation = inFlight.remove(workerId);
-        if (operation == null) {
+        return abandonBatch(workerId).get(0);
+    }
+
+    public List<Integer> abandonBatch(int workerId) {
+        return removeInFlight(workerId);
+    }
+
+    private List<Integer> removeInFlight(int workerId) {
+        List<Integer> operations = inFlight.remove(workerId);
+        if (operations == null) {
             throw new IllegalStateException("worker has no in-flight operation: " + workerId);
         }
-        return operation;
+        return operations;
     }
 
     /** Stop assigning queued work while allowing existing leases to settle. */
@@ -70,7 +89,7 @@ public final class OperationQueue {
     }
 
     public int runningOperations() {
-        return inFlight.size();
+        return inFlight.values().stream().mapToInt(List::size).sum();
     }
 
     public int completedOperations() {

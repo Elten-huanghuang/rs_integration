@@ -139,6 +139,52 @@ class ResolutionContextSupplyTest extends BootstrapTest {
     }
 
     @Test
+    void producedOnlyConsumptionPreservesMatchingInitialInventory() {
+        ResolutionContext context = new ResolutionContext(null, Map.of(),
+                List.of(new ItemStack(Items.IRON_INGOT)), null);
+        OutputPortId output = new OutputPortId(new NodeId(3), 0);
+        context.addProduced(new ItemStack(Items.IRON_INGOT),
+                new MaterialSource.ProducerOutput(output));
+
+        ResolutionContext.SupplyConsumption produced =
+                context.consumeProducedMatchingDetailed(Ingredient.of(Items.IRON_INGOT), 1);
+
+        assertTrue(produced.complete());
+        assertEquals(new MaterialSource.ProducerOutput(output), produced.slices().get(0).source());
+        assertEquals(1, context.countMatching(Ingredient.of(Items.IRON_INGOT)));
+
+        ResolutionContext.SupplyConsumption initial = context.consumeMatchingDetailed(
+                Ingredient.of(Items.IRON_INGOT), 1);
+        assertTrue(initial.complete());
+        assertTrue(initial.slices().get(0).source() instanceof MaterialSource.InitialPool);
+    }
+
+    @Test
+    void forcedRecipeLookupPrefersExactTaggedOutputVariant() {
+        ItemStack enchantedBook = new ItemStack(Items.ENCHANTED_BOOK);
+        enchantedBook.getOrCreateTag().putString("test_enchantment", "minecraft:infinity");
+        ResourceLocation exactKey = CraftingResolver.preferenceKey(enchantedBook);
+        ResourceLocation exactRecipe = new ResourceLocation("enigmaticlegacy", "enchantment_transposing");
+        ResourceLocation itemRecipe = new ResourceLocation("goety", "enchant/infinity");
+        ResolutionContext context = new ResolutionContext(null, Map.of(), List.of(), null,
+                Map.of(exactKey, exactRecipe,
+                        new ResourceLocation("minecraft", "enchanted_book"), itemRecipe));
+
+        assertEquals(exactRecipe, context.forcedRecipeFor(Ingredient.of(enchantedBook)));
+    }
+
+    @Test
+    void configuredPreferenceDoesNotForceProduction() {
+        ResourceLocation itemKey = new ResourceLocation("minecraft", "iron_ingot");
+        ResourceLocation preferredRecipe = new ResourceLocation("test", "preferred_iron");
+        ResolutionContext context = new ResolutionContext(null, Map.of(),
+                List.of(new ItemStack(Items.IRON_INGOT)), Map.of(itemKey, preferredRecipe));
+
+        assertEquals(null, context.forcedRecipeFor(Ingredient.of(Items.IRON_INGOT)));
+        assertTrue(context.consumeMatchingDetailed(Ingredient.of(Items.IRON_INGOT), 1).complete());
+    }
+
+    @Test
     void taggedSupplyLotsRemainDistinct() {
         ItemStack red = taggedDiamond("red", 2);
         ItemStack blue = taggedDiamond("blue", 3);

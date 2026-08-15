@@ -128,6 +128,25 @@ public final class CraftOutputInterceptor {
         return false;
     }
 
+    /**
+     * Returns whether a collector scan overlaps an active world-output operation.
+     * Collectors should skip that scan so they cannot pull a machine input out of
+     * place before the machine consumes it.
+     */
+    public static boolean intersectsActiveZone(Level level, AABB region) {
+        return level != null && intersectsActiveZone(level.dimension(), region);
+    }
+
+    static boolean intersectsActiveZone(ResourceKey<Level> dimension, AABB region) {
+        if (dimension == null || region == null || ZONES.isEmpty()) return false;
+        Map<UUID, ActiveZone> dimZones = ZONES.get(dimension);
+        if (dimZones == null || dimZones.isEmpty()) return false;
+        for (ActiveZone zone : dimZones.values()) {
+            if (zone.region.intersects(region)) return true;
+        }
+        return false;
+    }
+
     @SubscribeEvent(priority = EventPriority.HIGHEST)
     public static void onEntityJoin(EntityJoinLevelEvent event) {
         if (ZONES.isEmpty()) return;

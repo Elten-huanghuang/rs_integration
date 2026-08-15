@@ -25,6 +25,8 @@ import java.util.List;
 
 /** Real single-input Mana Pool operation. Catalyst matching is performed by Botania. */
 public final class ManaPoolBatchDelegate extends AbstractBatchDelegate {
+    static final int MAX_PHYSICAL_BATCH = 1024;
+    static final int MAX_PARALLEL_WORKER_BATCH = 128;
     private ServerLevel level;
     private BlockPos bindingPos;
     private BlockPos poolPos;
@@ -32,8 +34,9 @@ public final class ManaPoolBatchDelegate extends AbstractBatchDelegate {
     private INetwork rsNetwork;
     private ItemStack expected = ItemStack.EMPTY;
     private boolean started;
+    private int requestedBatch = 1;
     private long startTick;
-    private java.util.UUID inputEntityId;
+    private final java.util.Set<java.util.UUID> inputEntityIds = new java.util.HashSet<>();
     private java.util.Set<java.util.UUID> entitiesBefore = java.util.Set.of();
 
     @Override
@@ -57,6 +60,8 @@ public final class ManaPoolBatchDelegate extends AbstractBatchDelegate {
         this.poolPos = null;
         this.recipe = null;
         this.expected = ItemStack.EMPTY;
+        this.requestedBatch = 1;
+        this.inputEntityIds.clear();
         this.rsNetwork = null;
 
         ServerLevel resolved = dim == null ? player.serverLevel() : player.getServer().getLevel(
@@ -109,6 +114,46 @@ public final class ManaPoolBatchDelegate extends AbstractBatchDelegate {
         return recipe == null ? null : List.of(new IngredientSpec(recipe.getIngredients().get(0), 1));
     }
 
+    @Override
+    public int prepareFlatBatch(int remainingOperations) {
+        int mana = level != null && poolPos != null
+                && level.getBlockEntity(poolPos) instanceof ManaPoolBlockEntity pool
+                ? pool.getCurrentMana() : 0;
+        int manaCost = recipe == null ? 0 : recipe.getManaToConsume();
+        requestedBatch = physicalBatchSize(remainingOperations, mana, manaCost);
+        return requestedBatch;
+    }
+
+    @Override
+    public void prepareGraphBatch(int executions) {
+        requestedBatch = graphBatchSize(executions);
+    }
+
+    @Override
+    public int preferredParallelBatchSize(int totalOperations, int workerCount) {
+        return parallelWorkerBatchSize(totalOperations, workerCount);
+    }
+
+    static int parallelWorkerBatchSize(int totalOperations, int workerCount) {
+        if (totalOperations <= 0 || workerCount <= 0) return 1;
+        int evenShare = (totalOperations + workerCount - 1) / workerCount;
+        return Math.max(1, Math.min(MAX_PARALLEL_WORKER_BATCH, evenShare));
+    }
+
+    static int graphBatchSize(int executions) {
+        return Math.max(1, Math.min(executions, MAX_PHYSICAL_BATCH));
+    }
+
+    static int physicalBatchSize(int remainingOperations, int availableMana, int manaPerItem) {
+        if (remainingOperations <= 0) return 0;
+        int requested = Math.min(remainingOperations, MAX_PHYSICAL_BATCH);
+        if (manaPerItem <= 0) return requested;
+        int affordable = Math.max(0, availableMana) / manaPerItem;
+        // Keep the normal wait-for-mana behaviour when even one operation is not
+        // currently affordable; larger batches are admitted only atomically.
+        return affordable <= 0 ? 1 : Math.max(1, Math.min(requested, affordable));
+    }
+
     @Override public boolean tryStartSingleCraft(@Nonnull ServerPlayer player) {
         if (recipe == null || level == null) return false;
         if (rsNetwork == null) rsNetwork = resolveNetwork(player);
@@ -116,7 +161,8 @@ public final class ManaPoolBatchDelegate extends AbstractBatchDelegate {
         List<ItemStack> extracted = BotaniaDelegateSupport.extractAtomically(rsNetwork, getRequiredMaterials());
         if (extracted.isEmpty()) return false;
         ItemStack input = extracted.get(0);
-        if (startEntity(input)) return true;
+        requestedBatch = Math.max(1, input.getCount());
+        if (startEntities(input)) return true;
         refundStandalone(player, input);
         return false;
     }
@@ -127,18 +173,31 @@ public final class ManaPoolBatchDelegate extends AbstractBatchDelegate {
 
     @Override public boolean tryStartWithMaterials(@Nonnull ServerPlayer player, @Nonnull List<ItemStack> materials,
                                                     @Nonnull ExtractionLedger sharedLedger) {
-        return materials.size() == 1 && !materials.get(0).isEmpty() && startEntity(materials.get(0).copy());
+        return materials.size() == 1 && !materials.get(0).isEmpty()
+                && startEntities(materials.get(0).copy());
     }
 
-    private boolean startEntity(ItemStack input) {
+    private boolean startEntities(ItemStack input) {
         if (!(level.getBlockEntity(poolPos) instanceof ManaPoolBlockEntity pool)) return false;
-        ItemEntity entity = new ItemEntity(level, poolPos.getX()+0.5, poolPos.getY()+1.15, poolPos.getZ()+0.5, input);
-        entity.setDeltaMovement(0, 0, 0);
-        // This operation owns the entity; nearby players and collectors must not steal it.
-        BotaniaDelegateSupport.protectOperationInput(entity);
         entitiesBefore = BotaniaDelegateSupport.snapshot(level, new AABB(poolPos).inflate(1.5));
-        if (!level.addFreshEntity(entity)) return false;
-        inputEntityId = entity.getUUID();
+        inputEntityIds.clear();
+        int remaining = input.getCount();
+        int stackLimit = Math.max(1, input.getMaxStackSize());
+        while (remaining > 0) {
+            int count = Math.min(remaining, stackLimit);
+            ItemEntity entity = new ItemEntity(level, poolPos.getX()+0.5,
+                    poolPos.getY()+1.15, poolPos.getZ()+0.5, input.copyWithCount(count));
+            entity.setDeltaMovement(0, 0, 0);
+            // This operation owns the entities; nearby players and collectors must not steal them.
+            BotaniaDelegateSupport.protectOperationInput(entity);
+            if (!level.addFreshEntity(entity)) {
+                discardOwnedInputs();
+                return false;
+            }
+            inputEntityIds.add(entity.getUUID());
+            remaining -= count;
+        }
+        requestedBatch = input.getCount();
         started = true; startTick = level.getGameTime(); markCraftStarted(); return true;
     }
 
@@ -155,21 +214,25 @@ public final class ManaPoolBatchDelegate extends AbstractBatchDelegate {
     @Override protected boolean isMachineCraftFinished(@Nonnull ServerLevel level, @Nonnull BlockEntity be) {
         if (!started) return false;
         AABB box = new AABB(poolPos).inflate(1.5);
-        return level.getEntitiesOfClass(ItemEntity.class, box, this::isCraftOutput).stream().findAny().isPresent();
+        int outputCount = level.getEntitiesOfClass(ItemEntity.class, box, this::isCraftOutput)
+                .stream().mapToInt(entity -> entity.getItem().getCount()).sum();
+        return outputCount >= expectedOutputCount();
     }
 
     @Override public ItemStack collectResult(@Nonnull ServerPlayer player) {
         if (level == null) return ItemStack.EMPTY;
         AABB box = new AABB(poolPos).inflate(1.5);
+        int collected = 0;
         for (ItemEntity e : level.getEntitiesOfClass(ItemEntity.class, box, this::isCraftOutput)) {
-            ItemStack result = e.getItem().copy(); e.discard(); return result;
+            collected += e.getItem().getCount();
+            e.discard();
         }
-        return ItemStack.EMPTY;
+        return collected <= 0 ? ItemStack.EMPTY : expected.copyWithCount(collected);
     }
 
     private boolean isCraftOutput(ItemEntity entity) {
         return entity.isAlive()
-                && !entity.getUUID().equals(inputEntityId)
+                && !inputEntityIds.contains(entity.getUUID())
                 && BotaniaDelegateSupport.isNew(entity, entitiesBefore)
                 && !entity.getItem().isEmpty()
                 && ItemStack.isSameItemSameTags(entity.getItem(), expected)
@@ -178,13 +241,30 @@ public final class ManaPoolBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override protected void clearMachineState(BlockEntity be, ServerPlayer player) {
-        if (level == null || inputEntityId == null) return;
-        var entity = level.getEntity(inputEntityId);
-        if (entity instanceof ItemEntity item && item.isAlive()) {
-            ItemStack stack = item.getItem().copy();
-            item.discard();
-            if (!usingSharedLedger) refundStandalone(player, stack);
+        if (level == null || inputEntityIds.isEmpty()) return;
+        for (java.util.UUID id : java.util.List.copyOf(inputEntityIds)) {
+            var entity = level.getEntity(id);
+            if (entity instanceof ItemEntity item && item.isAlive()) {
+                ItemStack stack = item.getItem().copy();
+                item.discard();
+                if (!usingSharedLedger) refundStandalone(player, stack);
+            }
         }
+        inputEntityIds.clear();
+    }
+
+    private void discardOwnedInputs() {
+        if (level == null) return;
+        for (java.util.UUID id : java.util.List.copyOf(inputEntityIds)) {
+            var entity = level.getEntity(id);
+            if (entity != null && entity.isAlive()) entity.discard();
+        }
+        inputEntityIds.clear();
+    }
+
+    private int expectedOutputCount() {
+        long count = (long) Math.max(1, expected.getCount()) * Math.max(1, requestedBatch);
+        return (int) Math.min(Integer.MAX_VALUE, count);
     }
 
     private void refundStandalone(@Nullable ServerPlayer player, ItemStack stack) {
@@ -215,8 +295,19 @@ public final class ManaPoolBatchDelegate extends AbstractBatchDelegate {
                 com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities.PreparationContract.RETRY_SAFE,
                 java.util.List.of());
     }
-    @Override public ItemStack getExpectedOutput() { return expected.isEmpty() ? null : expected; }
-    @Override public AABB getOutputCaptureRegion() { return poolPos == null ? null : new AABB(poolPos).inflate(1.5); }
+    @Override public ItemStack getExpectedOutput() {
+        return expected.isEmpty() ? null : expected.copyWithCount(expectedOutputCount());
+    }
+    @Override public AABB getOutputCaptureRegion() {
+        return poolPos == null ? null : captureRegion(poolPos);
+    }
+
+    static AABB captureRegion(BlockPos poolPos) {
+        // Inputs and Botania's replacement outputs stay over the pool centre.
+        // A pool-local box lets adjacent bound pools own distinct capture zones.
+        return new AABB(poolPos.getX() + 0.05, poolPos.getY() + 0.70, poolPos.getZ() + 0.05,
+                poolPos.getX() + 0.95, poolPos.getY() + 1.80, poolPos.getZ() + 0.95);
+    }
     @Override public BlockPos getMachinePos() { return poolPos; }
     @Override public void onBatchFinished(@Nonnull ServerPlayer player) { resetState(); }
 }

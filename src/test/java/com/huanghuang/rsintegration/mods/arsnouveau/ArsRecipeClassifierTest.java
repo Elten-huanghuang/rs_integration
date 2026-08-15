@@ -12,6 +12,8 @@ class ArsRecipeClassifierTest {
         assertTrue(ArsRecipeClassifier.isDynamicApparatus("ars_nouveau:armor_upgrade"));
         assertTrue(ArsRecipeClassifier.isApparatus("ars_nouveau:enchantment"));
         assertTrue(ArsRecipeClassifier.isApparatus("ars_nouveau:armor_upgrade"));
+        assertFalse(ArsRecipeClassifier.isDynamicApparatus("ars_nouveau:enchanting_apparatus"));
+        assertFalse(ArsRecipeClassifier.isDynamicApparatus("ars_nouveau:imbuement"));
     }
 
     @Test

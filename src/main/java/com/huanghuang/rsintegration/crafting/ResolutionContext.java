@@ -82,6 +82,8 @@ final class ResolutionContext {
     int nextNodeId;
     long nextAllocationId;
     @Nullable final Map<ResourceLocation, ResourceLocation> preferredRecipes;
+    @Nullable final Map<ResourceLocation, ResourceLocation> forcedRecipes;
+    final Set<ResourceLocation> activeForcedRecipes = new HashSet<>();
     @Nullable final ServerPlayer player;
     @Nullable final INetwork network;
     final boolean bestEffort;
@@ -99,13 +101,31 @@ final class ResolutionContext {
                       Map<Item, List<RecipeIndex.Entry>> index,
                       List<ItemStack> available,
                       @Nullable Map<ResourceLocation, ResourceLocation> preferredRecipes) {
-        this(level, index, available, preferredRecipes, null, null);
+        this(level, index, available, preferredRecipes, null, null, null);
     }
 
     ResolutionContext(Level level,
                       Map<Item, List<RecipeIndex.Entry>> index,
                       List<ItemStack> available,
                       @Nullable Map<ResourceLocation, ResourceLocation> preferredRecipes,
+                      @Nullable Map<ResourceLocation, ResourceLocation> forcedRecipes) {
+        this(level, index, available, preferredRecipes, forcedRecipes, null, null);
+    }
+
+    ResolutionContext(Level level,
+                      Map<Item, List<RecipeIndex.Entry>> index,
+                      List<ItemStack> available,
+                      @Nullable Map<ResourceLocation, ResourceLocation> preferredRecipes,
+                      @Nullable ServerPlayer player,
+                      @Nullable INetwork network) {
+        this(level, index, available, preferredRecipes, null, player, network);
+    }
+
+    ResolutionContext(Level level,
+                      Map<Item, List<RecipeIndex.Entry>> index,
+                      List<ItemStack> available,
+                      @Nullable Map<ResourceLocation, ResourceLocation> preferredRecipes,
+                      @Nullable Map<ResourceLocation, ResourceLocation> forcedRecipes,
                       @Nullable ServerPlayer player,
                       @Nullable INetwork network) {
         this.level = level;
@@ -116,7 +136,8 @@ final class ResolutionContext {
         this.steps = new ArrayList<>();
         this.resolving = new HashSet<>();
         this.resolvingOutputs = new HashSet<>();
-        this.preferredRecipes = preferredRecipes;
+        this.preferredRecipes = immutableOrNull(preferredRecipes);
+        this.forcedRecipes = immutableOrNull(forcedRecipes);
         this.player = player;
         this.network = network;
         this.deadlineNanos = resolveDeadlineNanos();
@@ -135,7 +156,8 @@ final class ResolutionContext {
                       @Nullable Map<ResourceLocation, ResourceLocation> preferredRecipes,
                       boolean bestEffort,
                       @Nullable List<String> missingOut) {
-        this(level, index, keyedCounts, preferredRecipes, null, null, bestEffort, missingOut);
+        this(level, index, keyedCounts, preferredRecipes, null, null, null,
+                bestEffort, missingOut);
     }
 
     ResolutionContext(Level level,
@@ -146,8 +168,8 @@ final class ResolutionContext {
                       @Nullable List<String> missingOut,
                       long deadlineNanos,
                       boolean abortOnTimeout) {
-        this(level, index, keyedCounts, preferredRecipes, null, null, bestEffort,
-                missingOut, deadlineNanos, abortOnTimeout);
+        this(level, index, keyedCounts, preferredRecipes, null, null, null,
+                bestEffort, missingOut, deadlineNanos, abortOnTimeout);
     }
 
     ResolutionContext(Level level,
@@ -158,14 +180,28 @@ final class ResolutionContext {
                       @Nullable INetwork network,
                       boolean bestEffort,
                       @Nullable List<String> missingOut) {
-        this(level, index, keyedCounts, preferredRecipes, player, network, bestEffort,
-                missingOut, resolveDeadlineNanos(), false);
+        this(level, index, keyedCounts, preferredRecipes, null, player, network,
+                bestEffort, missingOut, resolveDeadlineNanos(), false);
     }
 
     ResolutionContext(Level level,
                       Map<Item, List<RecipeIndex.Entry>> index,
                       Map<CraftingResolver.StackKey, Integer> keyedCounts,
                       @Nullable Map<ResourceLocation, ResourceLocation> preferredRecipes,
+                      @Nullable Map<ResourceLocation, ResourceLocation> forcedRecipes,
+                      @Nullable ServerPlayer player,
+                      @Nullable INetwork network,
+                      boolean bestEffort,
+                      @Nullable List<String> missingOut) {
+        this(level, index, keyedCounts, preferredRecipes, forcedRecipes, player, network,
+                bestEffort, missingOut, resolveDeadlineNanos(), false);
+    }
+
+    ResolutionContext(Level level,
+                      Map<Item, List<RecipeIndex.Entry>> index,
+                      Map<CraftingResolver.StackKey, Integer> keyedCounts,
+                      @Nullable Map<ResourceLocation, ResourceLocation> preferredRecipes,
+                      @Nullable Map<ResourceLocation, ResourceLocation> forcedRecipes,
                       @Nullable ServerPlayer player,
                       @Nullable INetwork network,
                       boolean bestEffort,
@@ -180,7 +216,8 @@ final class ResolutionContext {
         this.steps = new ArrayList<>();
         this.resolving = new HashSet<>();
         this.resolvingOutputs = new HashSet<>();
-        this.preferredRecipes = preferredRecipes;
+        this.preferredRecipes = immutableOrNull(preferredRecipes);
+        this.forcedRecipes = immutableOrNull(forcedRecipes);
         this.player = player;
         this.network = network;
         this.deadlineNanos = deadlineNanos;
@@ -195,6 +232,39 @@ final class ResolutionContext {
             }
         }
         buildInventoryIndex();
+    }
+
+    @Nullable
+    private static Map<ResourceLocation, ResourceLocation> immutableOrNull(
+            @Nullable Map<ResourceLocation, ResourceLocation> values) {
+        return values == null || values.isEmpty() ? null : Map.copyOf(values);
+    }
+
+    @Nullable
+    ResourceLocation forcedRecipeFor(Ingredient ingredient) {
+        if (forcedRecipes == null || ingredient == null || ingredient.isEmpty()) return null;
+        for (ItemStack option : ingredient.getItems()) {
+            if (option == null || option.isEmpty()) continue;
+            ResourceLocation exactKey = CraftingResolver.preferenceKey(option);
+            ResourceLocation forced = exactKey == null ? null : forcedRecipes.get(exactKey);
+            if (forced != null) return forced;
+            ResourceLocation itemKey = ForgeRegistries.ITEMS.getKey(option.getItem());
+            forced = itemKey == null ? null : forcedRecipes.get(itemKey);
+            if (forced != null) return forced;
+        }
+        return null;
+    }
+
+    boolean activateForcedRecipe(ResourceLocation recipeId) {
+        return activeForcedRecipes.add(recipeId);
+    }
+
+    void deactivateForcedRecipe(ResourceLocation recipeId) {
+        activeForcedRecipes.remove(recipeId);
+    }
+
+    boolean isForcedRecipeActive(ResourceLocation recipeId) {
+        return activeForcedRecipes.contains(recipeId);
     }
 
     void diag(String msg) {
@@ -437,6 +507,15 @@ final class ResolutionContext {
     }
 
     SupplyConsumption consumeMatchingDetailed(Ingredient ingredient, int needed) {
+        return consumeMatchingDetailed(ingredient, needed, false);
+    }
+
+    SupplyConsumption consumeProducedMatchingDetailed(Ingredient ingredient, int needed) {
+        return consumeMatchingDetailed(ingredient, needed, true);
+    }
+
+    private SupplyConsumption consumeMatchingDetailed(
+            Ingredient ingredient, int needed, boolean producedOnly) {
         int remaining = needed;
         List<SupplySlice> slices = new ArrayList<>();
         List<CraftingResolver.StackKey> sortedKeys = sortedMatchingKeys(ingredient);
@@ -445,17 +524,16 @@ final class ResolutionContext {
             if (remaining <= 0) break;
             int available = counts.getOrDefault(key, 0);
             if (available <= 0 || !matches(ingredient, key)) continue;
-            int take = Math.min(available, remaining);
+            int requested = Math.min(available, remaining);
             CachedStack cached = stacksByKey.get(key);
             MaterialKey material = cached != null
                     ? cached.material : MaterialKey.of(key.toStack());
-            int supplied = consumeSupplyLots(material, take, slices);
-            if (supplied != take) {
-                return new SupplyConsumption(List.copyOf(slices), needed, needed - remaining);
-            }
-            decrement(key, take);
-            remaining -= take;
-            addRemainder(key, take);
+            int supplied = consumeSupplyLots(material, requested, slices, producedOnly);
+            if (supplied <= 0) continue;
+            decrement(key, supplied);
+            remaining -= supplied;
+            addRemainder(key, supplied);
+            if (!producedOnly && supplied != requested) break;
         }
         return new SupplyConsumption(List.copyOf(slices), needed, needed - remaining);
     }
@@ -503,11 +581,21 @@ final class ResolutionContext {
             }
             sortedKeys = new ArrayList<>(matchingItems);
         }
-        sortedKeys.sort(Comparator.comparing((CraftingResolver.StackKey k) -> k.tag() != null)
-                .thenComparing(k -> {
-                    var rl = ForgeRegistries.ITEMS.getKey(k.item());
-                    return rl != null ? rl.toString() : "";
-                }));
+        if (SpellScrollSelection.acceptsAnyScroll(ingredient)) {
+            sortedKeys.sort(Comparator
+                    .comparingInt((CraftingResolver.StackKey key) ->
+                            SpellScrollSelection.rarity(key.toStack()))
+                    .thenComparingInt(key ->
+                            SpellScrollSelection.level(key.toStack()))
+                    .thenComparing(key -> SpellScrollSelection.spellId(key.toStack()))
+                    .thenComparing(key -> key.tag() == null ? "" : key.tag()));
+        } else {
+            sortedKeys.sort(Comparator.comparing((CraftingResolver.StackKey k) -> k.tag() != null)
+                    .thenComparing(k -> {
+                        var rl = ForgeRegistries.ITEMS.getKey(k.item());
+                        return rl != null ? rl.toString() : "";
+                    }));
+        }
         return sortedKeys;
     }
 
@@ -518,13 +606,15 @@ final class ResolutionContext {
                 : IngredientMatcher.test(ingredient, key);
     }
 
-    private int consumeSupplyLots(MaterialKey material, int needed, List<SupplySlice> slices) {
+    private int consumeSupplyLots(MaterialKey material, int needed, List<SupplySlice> slices,
+                                  boolean producedOnly) {
         int remaining = needed;
         List<SupplyLot> matchingSupplies = suppliesByMaterial.get(material);
         if (matchingSupplies == null) return 0;
         for (SupplyLot supply : matchingSupplies) {
             if (remaining <= 0) break;
             if (supply.remaining <= 0) continue;
+            if (producedOnly && !(supply.source instanceof MaterialSource.ProducerOutput)) continue;
             int take = Math.min(supply.remaining, remaining);
             if (!supplyUndoCheckpoints.isEmpty()) {
                 supplyUndoStack.push(new SupplyUndoEntry(supply, supply.remaining));
