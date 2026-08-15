@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
+import com.huanghuang.rsintegration.crafting.batch.ParallelBatchSizing;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.core.BlockPos;
@@ -77,9 +78,30 @@ public final class PureDaisyBlockConversionDelegate extends AbstractBatchDelegat
 
     @Override
     public int prepareFlatBatch(int remainingOperations) {
-        requestedBatch = Math.min(Math.min(OFFSETS.length, targets.size()),
-                Math.max(1, remainingOperations));
+        requestedBatch = graphBatchSize(remainingOperations, availableBatchCapacity());
         return requestedBatch;
+    }
+
+    @Override
+    public void prepareGraphBatch(int executions) {
+        requestedBatch = graphBatchSize(executions, availableBatchCapacity());
+    }
+
+    @Override
+    public int preferredParallelBatchSize(int totalOperations, int workerCount) {
+        return parallelWorkerBatchSize(totalOperations, workerCount, availableBatchCapacity());
+    }
+
+    private int availableBatchCapacity() {
+        return Math.min(OFFSETS.length, targets.size());
+    }
+
+    static int graphBatchSize(int executions, int capacity) {
+        return ParallelBatchSizing.boundedBatch(executions, capacity);
+    }
+
+    static int parallelWorkerBatchSize(int totalOperations, int workerCount, int capacity) {
+        return ParallelBatchSizing.boundedEvenShare(totalOperations, workerCount, capacity);
     }
 
     @Override

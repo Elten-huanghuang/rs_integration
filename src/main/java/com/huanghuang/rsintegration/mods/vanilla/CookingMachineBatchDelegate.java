@@ -91,6 +91,16 @@ public final class CookingMachineBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
+    public void prepareGraphBatch(int executions) {
+        active().prepareGraphBatch(executions);
+    }
+
+    @Override
+    public int preferredParallelBatchSize(int totalOperations, int workerCount) {
+        return active().preferredParallelBatchSize(totalOperations, workerCount);
+    }
+
+    @Override
     public boolean validateExecutionContext(@Nullable ServerPlayer player) {
         configureChild();
         return active().validateExecutionContext(player);

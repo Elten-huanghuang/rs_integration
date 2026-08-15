@@ -36,6 +36,16 @@ public final class BotaniaRSModule implements IModIntegration {
         configureJei("botania_terra_plate", "botania:terra_plate", "RecipeTerraPlate", "terra_plate", "terra_plate");
         register("botania_pure_daisy", "PureDaisyRecipe", "pure_daisy", "PureDaisyBlockConversionDelegate");
         configureJei("botania_pure_daisy", "botania:pure_daisy", "PureDaisyRecipe", "pure_daisy", "pure_daisy");
+
+        ModType.register("mythicbotany_mana_infuser",
+                new String[]{"mythicbotany.infuser.InfuserRecipe"},
+                new String[]{"mana_infuser"}, new String[]{"mana_infuser"},
+                ModType.delegateSupplier(
+                        "com.huanghuang.rsintegration.mods.botania.MythicBotanyManaInfuserBatchDelegate"));
+        ModType.configureJei("mythicbotany_mana_infuser",
+                new String[][]{{"mythicbotany:infuser", "mana_infuser"}},
+                new String[][]{{"mythicbotany.infuser.InfuserRecipe", "mana_infuser"}},
+                "gui.rs_integration.jei.mythicbotany_mana_infuser_craft");
     }
 
     private static void configureJei(String id, String uid, String recipeClass,
@@ -63,6 +73,11 @@ public final class BotaniaRSModule implements IModIntegration {
         target("botania_elven_trade", "alfheim_portal", "vazkii.botania.common.block.AlfheimPortalBlock");
         target("botania_terra_plate", "terra_plate", "vazkii.botania.common.block.mana.TerrestrialAgglomerationPlateBlock");
         BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
+                "mythicbotany", ModType.byId("mythicbotany_mana_infuser"),
+                RSIntegrationConfig.ENABLE_BOTANIA,
+                List.of("mythicbotany.infuser.BlockManaInfuser"),
+                "mana_infuser", false));
+        BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
                 "botania", ModType.byId("botania_pure_daisy"), RSIntegrationConfig.ENABLE_BOTANIA,
                 List.of(), List.of("botania:pure_daisy"), "pure_daisy", false));
     }
@@ -84,5 +99,6 @@ public final class BotaniaRSModule implements IModIntegration {
         ModRecipeHandlers.register(new BotaniaRecipeHandler(BotaniaRecipeHandler.Kind.ELVEN_TRADE, "botania_elven_trade"));
         ModRecipeHandlers.register(new BotaniaRecipeHandler(BotaniaRecipeHandler.Kind.TERRA_PLATE, "botania_terra_plate"));
         ModRecipeHandlers.register(new BotaniaRecipeHandler(BotaniaRecipeHandler.Kind.PURE_DAISY, "botania_pure_daisy"));
+        ModRecipeHandlers.register(new MythicBotanyInfuserRecipeHandler());
     }
 }

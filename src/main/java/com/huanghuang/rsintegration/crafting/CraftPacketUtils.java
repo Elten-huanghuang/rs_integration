@@ -12,6 +12,7 @@ import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
+import com.huanghuang.rsintegration.mods.goety.GoetySoulTotemCrafting;
 import com.huanghuang.rsintegration.util.CraftLogContext;
 import com.huanghuang.rsintegration.util.PlayerUtils;
 import com.huanghuang.rsintegration.util.Reflect;
@@ -88,6 +89,7 @@ public final class CraftPacketUtils {
         craftingDemandRoleCache.clear();
         ingredientFieldCache.clear();
         methodAbsenceMarkers.clear();
+        KubeJsCraftingSemantics.clearRecipeCache();
     }
 
     // ── shared utilities used by all craft packets ──────────────
@@ -256,26 +258,62 @@ public final class CraftPacketUtils {
                         }
                     }
 
-                    ItemStack result = assembleCraftingOutput(craftingRecipe, consumed, player);
-                    if (result.isEmpty()) {
-                        result = ModRecipeHandlers.tryGetResultItem(
-                                craftingRecipe, player.serverLevel().registryAccess());
+                    ItemStack[] reusableState = java.util.Arrays.stream(consumed)
+                            .map(stack -> stack == null ? ItemStack.EMPTY : stack.copy())
+                            .toArray(ItemStack[]::new);
+                    for (int operation = 0; operation < executions; operation++) {
+                        ItemStack[] operationInputs = new ItemStack[consumed.length];
+                        for (int i = 0; i < consumed.length; i++) {
+                            ItemStack source = specs.get(i).role() == DemandRole.CATALYST
+                                    ? reusableState[i] : consumed[i];
+                            operationInputs[i] = source == null || source.isEmpty()
+                                    ? ItemStack.EMPTY
+                                    : source.copyWithCount(Math.max(1, specs.get(i).count()));
+                        }
+
+                        ItemStack result = assembleCraftingOutput(
+                                craftingRecipe, operationInputs, player);
+                        if (result.isEmpty()) {
+                            result = ModRecipeHandlers.tryGetResultItem(
+                                    craftingRecipe, player.serverLevel().registryAccess());
+                        }
+                        if (result.isEmpty()) return false;
+                        addToVirtual(virtualInventory, result);
+
+                        List<ItemStack> remainders = getRecipeRemaindersBySpec(
+                                craftingRecipe, operationInputs);
+                        for (int i = 0; i < specs.size(); i++) {
+                            ItemStack remainder = i < remainders.size()
+                                    ? remainders.get(i) : ItemStack.EMPTY;
+                            if (specs.get(i).role() == DemandRole.CATALYST) {
+                                if (remainder.isEmpty()) {
+                                    boolean exhaustedGoetyTotem = operation + 1 == executions
+                                            && GoetySoulTotemCrafting.isSoulTotem(operationInputs[i]);
+                                    if (!exhaustedGoetyTotem) return false;
+                                    reusableState[i] = ItemStack.EMPTY;
+                                    continue;
+                                }
+                                if (operation + 1 < executions
+                                        && !IngredientMatcher.test(
+                                        craftingRecipe.getIngredients().get(i), remainder)) {
+                                    return false;
+                                }
+                                reusableState[i] = remainder.copy();
+                            } else if (!remainder.isEmpty()) {
+                                addToVirtual(virtualInventory, remainder);
+                            }
+                        }
                     }
-                    if (!result.isEmpty()) {
-                        addToVirtual(virtualInventory, result.copyWithCount(StepExecutor.mulCount(result.getCount(), executions)));
-                        RSIntegrationMod.LOGGER.debug(ctx.format("Step {}/{} {}: produced {} to virtual"),
-                                stepIdx + 1, steps.size(), stepId,
-                                net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(result.getItem()) + "x" + StepExecutor.mulCount(result.getCount(), executions));
+                    for (int i = 0; i < specs.size(); i++) {
+                        if (specs.get(i).role() == DemandRole.CATALYST
+                                && reusableState[i] != null && !reusableState[i].isEmpty()) {
+                            addToVirtual(virtualInventory, reusableState[i]);
+                        }
                     }
-                    // Add secondary outputs (byproducts) to virtual inventory.
-                    // For CraftingRecipe, getRecipeRemainders (Forge API) already
-                    // handles all remainders correctly — reflection-based scanning
-                    // would duplicate them, causing a dupe exploit with buckets etc.
-                    for (ItemStack remainder : getRecipeRemainders(craftingRecipe, consumed)) {
-                        int remainderExecutions = remainderExecutions(remainder, specs, executions);
-                        addToVirtual(virtualInventory, remainder.copyWithCount(
-                                StepExecutor.mulCount(remainder.getCount(), remainderExecutions)));
-                    }
+                    RSIntegrationMod.LOGGER.debug(ctx.format(
+                            "Step {}/{} {}: completed {} stateful crafting operation(s)"),
+                            stepIdx + 1, steps.size(), stepId, executions);
+                    // Primary outputs and remainders were accumulated per operation.
                 } else {
                     // Non-crafting recipe (sawmill, custom mod type, etc.)
                     List<IngredientSpec> specs = extractIngredientSpecs(recipe);
@@ -408,6 +446,16 @@ public final class CraftPacketUtils {
      * @param consumed the items that were actually placed in the crafting grid
      */
     public static List<ItemStack> getRecipeRemainders(CraftingRecipe recipe, ItemStack[] consumed) {
+        List<ItemStack> result = new ArrayList<>();
+        for (ItemStack remainder : getRecipeRemaindersBySpec(recipe, consumed)) {
+            if (!remainder.isEmpty()) result.add(remainder);
+        }
+        return result;
+    }
+
+    /** Returns crafting remainders aligned with the recipe ingredient list. */
+    public static List<ItemStack> getRecipeRemaindersBySpec(
+            CraftingRecipe recipe, ItemStack[] consumed) {
         List<IngredientSpec> specs = extractCraftingIngredientSpecs(recipe);
         AbstractContainerMenu dummyMenu = new AbstractContainerMenu(null, -1) {
             @Override public ItemStack quickMoveStack(net.minecraft.world.entity.player.Player p, int i) { return ItemStack.EMPTY; }
@@ -426,11 +474,14 @@ public final class CraftPacketUtils {
             }
         }
         NonNullList<ItemStack> allRemainders = recipe.getRemainingItems(container);
-        List<ItemStack> result = new ArrayList<>();
-        for (ItemStack r : allRemainders) {
-            if (!r.isEmpty()) result.add(r.copy());
+        List<ItemStack> result = new ArrayList<>(specs.size());
+        for (int i = 0; i < specs.size(); i++) {
+            int slot = craftingGridSlot(recipe, i);
+            ItemStack remainder = slot >= 0 && slot < allRemainders.size()
+                    ? allRemainders.get(slot) : ItemStack.EMPTY;
+            result.add(remainder == null ? ItemStack.EMPTY : remainder.copy());
         }
-        return result;
+        return List.copyOf(result);
     }
 
     /**
@@ -471,8 +522,9 @@ public final class CraftPacketUtils {
      */
     public static ItemStack assembleCraftingOutput(CraftingRecipe recipe, ItemStack[] consumed,
                                                     ServerPlayer player) {
-        return assembleCraftingOutput(
-                recipe, consumed, player.serverLevel().registryAccess());
+        if (!KubeJsCraftingSemantics.hasRequiredStage(recipe, player)) return ItemStack.EMPTY;
+        return assembleCraftingOutput(recipe, consumed,
+                player.serverLevel().registryAccess(), player.inventoryMenu);
     }
 
     public static ItemStack assembleCraftingOutput(CraftingRecipe recipe, ItemStack[] consumed,
@@ -481,13 +533,24 @@ public final class CraftPacketUtils {
             @Override public ItemStack quickMoveStack(net.minecraft.world.entity.player.Player p, int i) { return ItemStack.EMPTY; }
             @Override public boolean stillValid(net.minecraft.world.entity.player.Player p) { return false; }
         };
-        var container = new net.minecraft.world.inventory.TransientCraftingContainer(dummyMenu, 3, 3);
+        return assembleCraftingOutput(recipe, consumed, registryAccess, dummyMenu);
+    }
+
+    private static ItemStack assembleCraftingOutput(CraftingRecipe recipe, ItemStack[] consumed,
+                                                     RegistryAccess registryAccess,
+                                                     AbstractContainerMenu menu) {
+        var container = new net.minecraft.world.inventory.TransientCraftingContainer(menu, 3, 3);
         for (int i = 0; i < consumed.length && i < 9; i++) {
             if (consumed[i] != null && !consumed[i].isEmpty()) {
                 container.setItem(craftingGridSlot(recipe, i), consumed[i].copy());
             }
         }
         return recipe.assemble(container, registryAccess);
+    }
+
+    public static boolean isCraftingRecipeAvailable(CraftingRecipe recipe,
+                                                     @Nullable ServerPlayer player) {
+        return KubeJsCraftingSemantics.hasRequiredStage(recipe, player);
     }
 
     static int craftingGridSlot(CraftingRecipe recipe, int ingredientIndex) {
@@ -989,6 +1052,10 @@ public final class CraftPacketUtils {
     @Nullable
     @SuppressWarnings("unchecked")
     public static List<IngredientSpec> extractIngredientSpecs(Object recipe) {
+        if (recipe instanceof CraftingRecipe craftingRecipe) {
+            List<IngredientSpec> kubeJsSpecs = KubeJsCraftingSemantics.extractSpecs(craftingRecipe);
+            if (kubeJsSpecs != null) return kubeJsSpecs;
+        }
         if (recipe instanceof net.minecraft.world.item.crafting.Recipe<?> r) {
             var handler = ModRecipeHandlers.handlerFor(r);
             if (handler != null && handler.preferHandlerIngredients()) {
@@ -1027,6 +1094,8 @@ public final class CraftPacketUtils {
     public static List<IngredientSpec> extractCraftingIngredientSpecs(CraftingRecipe recipe) {
         List<IngredientSpec> craftTweakerSpecs = tryExtractCraftTweakerSpecs(recipe);
         if (craftTweakerSpecs != null) return craftTweakerSpecs;
+        List<IngredientSpec> kubeJsSpecs = KubeJsCraftingSemantics.extractSpecs(recipe);
+        if (kubeJsSpecs != null) return kubeJsSpecs;
         return recipe.getIngredients().stream()
                 .map(ingredient -> ingredient.isEmpty()
                         ? IngredientSpec.EMPTY
@@ -1048,6 +1117,9 @@ public final class CraftPacketUtils {
     static DemandRole craftingDemandRole(
             Ingredient ingredient,
             java.util.function.Function<ItemStack, ItemStack> remainderLookup) {
+        if (GoetySoulTotemCrafting.isSoulTotemIngredient(ingredient)) {
+            return DemandRole.CATALYST;
+        }
         ItemStack[] candidates;
         try {
             candidates = ingredient.getItems();

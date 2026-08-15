@@ -84,6 +84,8 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
     private int insufficientWissenRequired = -1;
     private int insufficientXpCurrent = -1;
     private int insufficientXpRequired = -1;
+    private int insufficientPedestalsAvailable = -1;
+    private int insufficientPedestalsRequired = -1;
     // Timeout: max of 7200 ticks (6 min) or wissenCost/5*2 (double the
     // theoretical time, accounting for XP/health drain cooldowns).
     // Stall threshold kicks in at 5 seconds of no progress.
@@ -114,6 +116,16 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
                                      @Nullable ResourceLocation dim, BlockPos pos) {
         if (validateAndInit(player, recipeId, dim, pos)) {
             return PreparationResult.ready();
+        }
+        if (insufficientPedestalsRequired > 0
+                && insufficientPedestalsAvailable < insufficientPedestalsRequired) {
+            return PreparationResult.fatal(
+                    "Insufficient Arcane Iterator pedestals (have "
+                            + Math.max(0, insufficientPedestalsAvailable) + ", need "
+                            + insufficientPedestalsRequired + ")",
+                    Component.translatable("rsi.wr.error.pedestals_insufficient",
+                            insufficientPedestalsRequired,
+                            Math.max(0, insufficientPedestalsAvailable)));
         }
         if (insufficientWissenRequired > 0
                 && insufficientWissenCurrent < insufficientWissenRequired) {
@@ -160,6 +172,8 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         this.insufficientWissenRequired = -1;
         this.insufficientXpCurrent = -1;
         this.insufficientXpRequired = -1;
+        this.insufficientPedestalsAvailable = -1;
+        this.insufficientPedestalsRequired = -1;
 
         ServerLevel level = CraftPacketUtils.resolveLevel(player.server, dim, player);
         if (level == null) {
@@ -220,6 +234,24 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
 
         // Validate idle state per machine type
         if (!validateIdle(player, level)) return false;
+
+        // Capacity is a property of this concrete Iterator structure, so reject
+        // it during candidate probing. The graph scheduler can then try another
+        // bound Iterator instead of committing inputs and failing at start time.
+        if (machineType == MachineType.ARCANE_ITERATOR) {
+            List<Ingredient> ingredients = CraftPacketUtils.extractIngredients(recipe);
+            if (ingredients != null && !ingredients.isEmpty()) {
+                int availablePedestals = pedestalRefs != null ? pedestalRefs.size() : 0;
+                if (!hasIteratorPedestalCapacity(ingredients.size(), availablePedestals)) {
+                    this.insufficientPedestalsRequired = ingredients.size();
+                    this.insufficientPedestalsAvailable = availablePedestals;
+                    RSIntegrationMod.LOGGER.debug(
+                            "[RSI-Batch-WR] validateAndInit rejected {}: insufficient Arcane Iterator pedestals (have {}, need {})",
+                            recipeId, availablePedestals, ingredients.size());
+                    return false;
+                }
+            }
+        }
 
         // Wissen is consumed by the machine when the wand function is invoked.
         // Check it while the machine is still untouched so graph/flat dispatch
@@ -289,6 +321,10 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         // Iterator; CrystalInfusionRecipe is the recipe run by the crystal block.
         if (name.endsWith("crystalritualrecipe")) return MachineType.ARCANE_ITERATOR;
         return MachineType.UNKNOWN;
+    }
+
+    static boolean hasIteratorPedestalCapacity(int requiredIngredients, int availablePedestals) {
+        return requiredIngredients > 0 && availablePedestals >= requiredIngredients;
     }
 
     private boolean validateIdle(ServerPlayer player, ServerLevel level) {
@@ -703,8 +739,20 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         }
         this.pedestalRefs = pedestals;
 
-        if (pedestals.size() < ingredients.size()) return false;
-        if (ingredients.isEmpty()) return false;
+        if (ingredients.isEmpty()) {
+            RSIntegrationMod.LOGGER.warn(
+                    "[RSI-Batch-WR] Arcane Iterator start rejected for {}: recipe has no ingredients",
+                    recipe.getId());
+            return false;
+        }
+        if (!hasIteratorPedestalCapacity(ingredients.size(), pedestals.size())) {
+            RSIntegrationMod.LOGGER.warn(
+                    "[RSI-Batch-WR] Arcane Iterator start rejected for {}: insufficient pedestals (have {}, need {})",
+                    recipe.getId(), pedestals.size(), ingredients.size());
+            player.sendSystemMessage(Component.translatable(
+                    "rsi.wr.error.pedestals_insufficient", ingredients.size(), pedestals.size()));
+            return false;
+        }
 
         // Determine the enchant level the player clicked. Levels I/II/III share
         // one recipe id and declare no static output, so the level is inferred by

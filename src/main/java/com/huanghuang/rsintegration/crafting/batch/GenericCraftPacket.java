@@ -44,6 +44,7 @@ import com.huanghuang.rsintegration.mods.embers.EmbersPlanInfo;
 import com.huanghuang.rsintegration.mods.farmingforblockheads.MarketBatchDelegate;
 import com.huanghuang.rsintegration.mods.apotheosis.ApotheosisGemCuttingCatalog;
 import com.huanghuang.rsintegration.mods.arsnouveau.ArsDynamicApparatusRecipe;
+import com.huanghuang.rsintegration.mods.goety.GoetySoulTotemCrafting;
 import com.huanghuang.rsintegration.mods.forbidden.FaRitualHelper;
 import com.huanghuang.rsintegration.mods.forbidden.FaRitualWrapper;
 import com.huanghuang.rsintegration.mods.vanilla.SmithingRecipeHandler;
@@ -947,6 +948,11 @@ public final class GenericCraftPacket {
             player.sendSystemMessage(Component.translatable("rsi.generic.error.recipe_not_found", recipeId.toString()));
             return;
         }
+        if (recipe instanceof CraftingRecipe craftingRecipe
+                && !CraftPacketUtils.isCraftingRecipeAvailable(craftingRecipe, player)) {
+            player.sendSystemMessage(Component.translatable("rsi.generic.error.recipe_stage_missing"));
+            return;
+        }
 
         // FA ApplyModifierRecipe: no fixed base item, so auto-crafting is impossible.
         // Redirect to opening the smithing table GUI with template & addition pre-filled.
@@ -1836,6 +1842,11 @@ public final class GenericCraftPacket {
         Recipe<?> recipe = resolveRecipe(player.serverLevel(), recipeId);
         if (recipe == null) {
             sink.error(Component.translatable("rsi.generic.error.recipe_not_found", recipeId.toString()));
+            return;
+        }
+        if (recipe instanceof CraftingRecipe craftingRecipe
+                && !CraftPacketUtils.isCraftingRecipeAvailable(craftingRecipe, player)) {
+            sink.error(Component.translatable("rsi.generic.error.recipe_stage_missing"));
             return;
         }
         ModType previewModType = ModType.classifyRecipe(recipe);
@@ -3080,6 +3091,41 @@ public final class GenericCraftPacket {
             modWarnings.add(Component.translatable(
                     "rsi.ars_nouveau.warn.total_source_required",
                     String.format("%,d", totalArsSource)));
+        }
+
+        long totalGoetyRitualSouls = 0L;
+        long totalGoetyTotemSouls = 0L;
+        for (PlanStep step : steps) {
+            Recipe<?> stepRecipe = player.serverLevel().getRecipeManager()
+                    .byKey(step.recipeId()).orElse(null);
+            if (stepRecipe == null) continue;
+            long executions = Math.max(1, step.batches());
+            long ritualCost = (long) PlanWarnings.goetyRitualSoulCost(stepRecipe) * executions;
+            totalGoetyRitualSouls = ritualCost > Long.MAX_VALUE - totalGoetyRitualSouls
+                    ? Long.MAX_VALUE : totalGoetyRitualSouls + ritualCost;
+            long totemCost = (long) PlanWarnings.goetyTotemSoulCost(stepRecipe) * executions;
+            totalGoetyTotemSouls = totemCost > Long.MAX_VALUE - totalGoetyTotemSouls
+                    ? Long.MAX_VALUE : totalGoetyTotemSouls + totemCost;
+        }
+        if (totalGoetyRitualSouls > 0) {
+            modWarnings.add(Component.translatable(
+                    "rsi.goety.warn.total_ritual_souls_required",
+                    String.format("%,d", totalGoetyRitualSouls)));
+        }
+        if (totalGoetyTotemSouls > 0) {
+            int availableTotemSouls = GoetySoulTotemCrafting.maxAvailableSouls(available);
+            if (availableTotemSouls < totalGoetyTotemSouls) {
+                feasible = false;
+                modWarnings.add(Component.translatable(
+                        "rsi.goety.warn.totem_souls_insufficient",
+                        String.format("%,d", totalGoetyTotemSouls),
+                        String.format("%,d", availableTotemSouls)));
+            } else {
+                modWarnings.add(Component.translatable(
+                        "rsi.goety.warn.total_totem_souls_required",
+                        String.format("%,d", totalGoetyTotemSouls),
+                        String.format("%,d", availableTotemSouls)));
+            }
         }
 
         List<MachineCandidateView> machineCandidates = recipeModType != null

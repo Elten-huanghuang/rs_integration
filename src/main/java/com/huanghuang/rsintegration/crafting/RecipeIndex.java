@@ -152,6 +152,7 @@ public final class RecipeIndex {
             Set<ResourceLocation> catalystOutputIds = new LinkedHashSet<>();
             Set<ResourceLocation> catalystRecipeIds = new LinkedHashSet<>();
             Map<Item, List<ReusableCatalystRoute>> catalystRoutes = new HashMap<>();
+            Map<String, UnknownRecipeTypeStats> unknownRecipeTypes = new HashMap<>();
             BuildTiming timing = new BuildTiming();
             int skippedUnknown = 0, skippedEmptyResult = 0, skippedIdentity = 0;
 
@@ -162,7 +163,10 @@ public final class RecipeIndex {
                 IndexOutcome outcome = indexRecipe(level, idx, seen, projected,
                         catalystOutputIds, catalystRecipeIds, catalystRoutes, timing, recipe);
                 timing.recordRecipe(recipe, System.nanoTime() - recipeStarted);
-                if (outcome == IndexOutcome.UNKNOWN) skippedUnknown++;
+                if (outcome == IndexOutcome.UNKNOWN) {
+                    skippedUnknown++;
+                    recordUnknownRecipeType(unknownRecipeTypes, recipe);
+                }
                 else if (outcome == IndexOutcome.EMPTY_RESULT) skippedEmptyResult++;
                 else if (outcome == IndexOutcome.IDENTITY) skippedIdentity++;
             }
@@ -215,6 +219,11 @@ public final class RecipeIndex {
                     timing.graphNanos / 1_000_000L, skippedUnknown, skippedEmptyResult,
                     skippedIdentity, faIndexed, marketIndexed, distantWorldsIndexed,
                     timing.slowestRecipe, timing.slowestRecipeNanos / 1_000_000L);
+            if (!unknownRecipeTypes.isEmpty()) {
+                RSIntegrationMod.LOGGER.debug(
+                        "[RecipeCatalog] unsupported native recipe types ({} types): {}",
+                        unknownRecipeTypes.size(), summarizeUnknownRecipeTypes(unknownRecipeTypes));
+            }
             return publishedIndex;
         }
     }
@@ -359,6 +368,48 @@ public final class RecipeIndex {
 
     private enum IndexOutcome {
         INDEXED, DUPLICATE, UNKNOWN, EMPTY_RESULT, IDENTITY
+    }
+
+    private static void recordUnknownRecipeType(
+            Map<String, UnknownRecipeTypeStats> target, Recipe<?> recipe) {
+        String typeId = "<unregistered>";
+        try {
+            ResourceLocation id = recipe.getType() == null
+                    ? null : ForgeRegistries.RECIPE_TYPES.getKey(recipe.getType());
+            if (id != null) typeId = id.toString();
+            else if (recipe.getType() != null) typeId = recipe.getType().toString();
+        } catch (RuntimeException ignored) {
+            // A broken third-party recipe type must not abort catalog creation.
+        }
+        target.computeIfAbsent(typeId, ignored -> new UnknownRecipeTypeStats())
+                .record(recipe.getId());
+    }
+
+    static String summarizeUnknownRecipeTypes(Map<String, UnknownRecipeTypeStats> types) {
+        final int limit = 32;
+        List<Map.Entry<String, UnknownRecipeTypeStats>> sorted = types.entrySet().stream()
+                .sorted(Comparator
+                        .<Map.Entry<String, UnknownRecipeTypeStats>>comparingInt(
+                                entry -> entry.getValue().count)
+                        .reversed()
+                        .thenComparing(Map.Entry::getKey))
+                .toList();
+        String summary = sorted.stream().limit(limit)
+                .map(entry -> entry.getKey() + "=" + entry.getValue().count
+                        + " samples=" + entry.getValue().samples)
+                .collect(java.util.stream.Collectors.joining("; "));
+        int omitted = Math.max(0, sorted.size() - limit);
+        return omitted == 0 ? summary : summary + "; ... " + omitted + " more types";
+    }
+
+    static final class UnknownRecipeTypeStats {
+        private int count;
+        private final List<ResourceLocation> samples = new ArrayList<>(3);
+
+        void record(ResourceLocation recipeId) {
+            count++;
+            if (samples.size() < 3) samples.add(recipeId);
+        }
     }
 
     private static int indexPmmoSalvage(Map<Item, List<Entry>> idx,
@@ -886,21 +937,26 @@ public final class RecipeIndex {
         List<ItemStack> results = new ArrayList<>();
         Set<Object> seenOutputContainers = Collections.newSetFromMap(new IdentityHashMap<>());
         if (recipe == null) return results;
-        try {
-            Method m = Reflect.findMethod(recipe.getClass(), "getRemainingItems", new Class<?>[0]);
-            if (m != null) {
-                Object obj = m.invoke(recipe);
-                if (seenOutputContainers.add(obj) && obj instanceof List<?> list) {
-                    for (Object e : list) {
-                        if (e instanceof ItemStack s && !s.isEmpty()) results.add(s.copy());
-                    }
-                } else if (obj instanceof ItemStack[] arr) {
-                    for (ItemStack s : arr) {
-                        if (!s.isEmpty()) results.add(s.copy());
+        // CraftingRecipe#getRemainingItems requires the actual crafting grid.
+        // Probing a non-existent zero-argument overload both loses KubeJS actions
+        // and produces one warning for every shaped/shapeless implementation.
+        if (!(recipe instanceof CraftingRecipe)) {
+            try {
+                Method m = Reflect.findMethod(recipe.getClass(), "getRemainingItems", new Class<?>[0]);
+                if (m != null) {
+                    Object obj = m.invoke(recipe);
+                    if (seenOutputContainers.add(obj) && obj instanceof List<?> list) {
+                        for (Object e : list) {
+                            if (e instanceof ItemStack s && !s.isEmpty()) results.add(s.copy());
+                        }
+                    } else if (obj instanceof ItemStack[] arr) {
+                        for (ItemStack s : arr) {
+                            if (!s.isEmpty()) results.add(s.copy());
+                        }
                     }
                 }
-            }
-        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
+            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
+        }
         try {
             Method m = Reflect.findMethod(recipe.getClass(), "getByproducts", new Class<?>[0]);
             if (m != null) {

@@ -10,6 +10,7 @@ import com.huanghuang.rsintegration.util.CraftLogContext;
 import com.huanghuang.rsintegration.util.Diagnostics;
 import com.huanghuang.rsintegration.util.ModIds;
 import com.huanghuang.rsintegration.util.PlayerUtils;
+import com.huanghuang.rsintegration.mods.goety.GoetySoulTotemCrafting;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.core.BlockPos;
@@ -228,7 +229,8 @@ public final class ExtractionLedger implements AutoCloseable {
         if (matched.isEmpty()) return ItemStack.EMPTY;
 
         ItemStack template = matched.copyWithCount(count);
-        recordEntry(new Entry(Source.NETWORK, ingredient, template.copy(), null, null, null, network));
+        recordEntry(new Entry(Source.NETWORK, ingredient, template.copy(), null, null, null, network,
+                GoetySoulTotemCrafting.isSoulTotemIngredient(ingredient)));
         return template;
     }
 
@@ -843,6 +845,10 @@ public final class ExtractionLedger implements AutoCloseable {
                 return list;
             });
             if (stacks.isEmpty()) return ItemStack.EMPTY;
+            if (GoetySoulTotemCrafting.isSoulTotemIngredient(ingredient)) {
+                stacks = new ArrayList<>(stacks);
+                stacks.sort(Comparator.comparingInt(GoetySoulTotemCrafting::storedSouls).reversed());
+            }
 
             // Single-stack fast path: one stack has enough → track pendingNet here
             for (ItemStack stored : stacks) {
@@ -921,6 +927,37 @@ public final class ExtractionLedger implements AutoCloseable {
     }
 
     private ItemStack findAvailableInInventory(ServerPlayer player, Ingredient ingredient, int needed) {
+        if (GoetySoulTotemCrafting.isSoulTotemIngredient(ingredient)) {
+            ItemStack best = ItemStack.EMPTY;
+            for (ItemStack stack : player.getInventory().items) {
+                if (!IngredientMatcher.test(ingredient, stack)) continue;
+                int available = stack.getCount()
+                        - pendingInv.getOrDefault(CraftingResolver.StackKey.of(stack, true), 0);
+                if (available >= needed && (best.isEmpty()
+                        || GoetySoulTotemCrafting.storedSouls(stack)
+                        > GoetySoulTotemCrafting.storedSouls(best))) {
+                    best = stack;
+                }
+            }
+            for (IItemHandler backpack : findAllBackpackInventories(player)) {
+                for (int slot = 0; slot < backpack.getSlots(); slot++) {
+                    ItemStack stack = backpack.getStackInSlot(slot);
+                    if (!IngredientMatcher.test(ingredient, stack)
+                            || !InventoryProtectionPolicy.mayUseFromBackpack(stack, ingredient)) continue;
+                    int available = stack.getCount()
+                            - pendingInv.getOrDefault(CraftingResolver.StackKey.of(stack, true), 0);
+                    if (available >= needed && (best.isEmpty()
+                            || GoetySoulTotemCrafting.storedSouls(stack)
+                            > GoetySoulTotemCrafting.storedSouls(best))) {
+                        best = stack;
+                    }
+                }
+            }
+            if (best.isEmpty()) return ItemStack.EMPTY;
+            CraftingResolver.StackKey key = CraftingResolver.StackKey.of(best, true);
+            pendingInv.merge(key, needed, Integer::sum);
+            return best.copyWithCount(1);
+        }
         // Single-stack fast path: one stack has enough → track pendingInv here
         for (ItemStack stack : player.getInventory().items) {
             if (!IngredientMatcher.test(ingredient, stack)) continue;

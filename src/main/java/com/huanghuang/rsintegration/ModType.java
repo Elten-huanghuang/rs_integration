@@ -7,6 +7,8 @@ import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.mods.forbidden.FaRitualWrapper;
 import com.huanghuang.rsintegration.mods.distantworlds.LithumAltarRecipeWrapper;
 import com.huanghuang.rsintegration.util.ModIds;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.crafting.Recipe;
 
 import javax.annotation.Nullable;
@@ -305,6 +307,11 @@ public final class ModType {
         }
         if (recipe instanceof LithumAltarRecipeWrapper) {
             return byId("distant_worlds_lithum_altar");
+        }
+        ResourceLocation serializerId = BuiltInRegistries.RECIPE_SERIALIZER.getKey(recipe.getSerializer());
+        if (new ResourceLocation("mythicbotany", "infuser").equals(serializerId)) {
+            ModType infuser = findById("mythicbotany_mana_infuser");
+            if (infuser != null) return infuser;
         }
         // ApplyModifierRecipe is a smithing-table recipe, not a Hephaestus Forge ritual
         if (cn.endsWith("ApplyModifierRecipe")) return null;

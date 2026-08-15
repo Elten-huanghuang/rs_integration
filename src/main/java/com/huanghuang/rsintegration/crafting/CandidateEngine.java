@@ -273,6 +273,10 @@ final class CandidateEngine {
     }
 
     private static boolean isMachineAvailable(RecipeIndex.Entry entry, ResolutionContext ctx) {
+        if (entry.recipe() instanceof CraftingRecipe craftingRecipe
+                && !CraftPacketUtils.isCraftingRecipeAvailable(craftingRecipe, ctx.player)) {
+            return false;
+        }
         if (entry.recipe() instanceof net.minecraft.world.item.crafting.SmithingTransformRecipe
                 || entry.recipe() instanceof net.minecraft.world.item.crafting.SmithingTrimRecipe) {
             if (ctx.player == null) return false;

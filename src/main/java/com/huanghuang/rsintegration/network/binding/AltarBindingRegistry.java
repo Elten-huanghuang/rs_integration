@@ -844,6 +844,14 @@ public final class AltarBindingRegistry {
                 || ModIds.ID_ARS_IMBUEMENT.equals(type.id())) {
             return null;
         }
+        // MythicBotany exposes one Mana Infuser recipe type and one physical
+        // machine, but its native IDs use the unrelated folder
+        // "mythicbotany_infusion/". Once the serializer has selected this leaf
+        // ModType, recipe folders (including explicit KubeJS IDs) must not
+        // override the machine binding.
+        if ("mythicbotany_mana_infuser".equals(type.id())) {
+            return null;
+        }
         if (ModIds.WIZARDS_REBORN.equals(type.id())) {
             if ("crystal_infusion".equals(hint)) {
                 return "crystal_ritual";

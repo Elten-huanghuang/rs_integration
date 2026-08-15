@@ -6,6 +6,7 @@ import net.minecraft.resources.ResourceLocation;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -89,6 +90,24 @@ class AltarBindingRegistryTest {
                 "ultimate", ModType.byId(ModIds.ID_ARS_APPARATUS)));
         assertNull(AltarBindingRegistry.normalizeSubType(
                 "greater", ModType.byId(ModIds.ID_ARS_IMBUEMENT)));
+    }
+
+    @Test
+    void mythicBotanyRecipeFoldersDoNotRestrictManaInfuserBindings() {
+        registerLeafType("mythicbotany_mana_infuser");
+        ModType infuser = ModType.byId("mythicbotany_mana_infuser");
+        ResourceLocation nativeRecipe = new ResourceLocation(
+                "mythicbotany", "mythicbotany_infusion/terrasteel_ingot");
+
+        assertEquals("mythicbotany_infusion",
+                AltarBindingRegistry.recipeSubTypeHint(nativeRecipe));
+        assertNull(AltarBindingRegistry.normalizeSubType(
+                AltarBindingRegistry.recipeSubTypeHint(nativeRecipe), infuser));
+        assertNull(AltarBindingRegistry.normalizeSubType("custom_pack_folder", infuser));
+        registerLeafType("test_machine_subtypes");
+        assertEquals("mythicbotany_infusion",
+                AltarBindingRegistry.normalizeSubType(
+                        "mythicbotany_infusion", ModType.byId("test_machine_subtypes")));
     }
 
     @Test

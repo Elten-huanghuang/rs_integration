@@ -7,7 +7,9 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.crafting.IngredientMatcher;
 import com.huanghuang.rsintegration.crafting.RecipeIndex;
+import com.huanghuang.rsintegration.mods.goety.GoetySoulTotemCrafting;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
@@ -165,7 +167,8 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
     @Override
     @Nullable
     public List<IngredientSpec> getRequiredMaterials() {
-        return CraftPacketUtils.extractIngredientSpecs(recipe);
+        return GoetySoulTotemCrafting.requireBatchCharge(
+                CraftPacketUtils.extractIngredientSpecs(recipe), preparedGraphExecutions);
     }
 
     @Override
@@ -247,11 +250,16 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
         if (executions <= 0) return false;
 
         RepeatedCraftingOutputAccumulator outputs = new RepeatedCraftingOutputAccumulator();
+        List<ItemStack> reusableState = materials.stream()
+                .map(stack -> stack == null ? ItemStack.EMPTY : stack.copy())
+                .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
         for (int operation = 0; operation < executions; operation++) {
             List<ItemStack> operationMaterials = new ArrayList<>(materials.size());
             for (int i = 0; i < specs.size(); i++) {
                 IngredientSpec spec = specs.get(i);
-                ItemStack material = materials.get(i);
+                boolean reusable = i < scopes.size()
+                        && scopes.get(i) == MaterialReservationScope.PER_WORKER_REUSABLE;
+                ItemStack material = reusable ? reusableState.get(i) : materials.get(i);
                 operationMaterials.add(spec.isEmpty() || material == null || material.isEmpty()
                         ? ItemStack.EMPTY : material.copyWithCount(spec.count()));
             }
@@ -259,12 +267,48 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
             // returns empty, pendingResult would still hold the computeResult
             // template (or the previous iteration's output) — accumulating that
             // ×N would fabricate items the recipe never produced.
-            if (!captureActualCraftingOutputs(
-                    craftingRecipe, operationMaterials, specs, operation == 0,
-                    registryAccess)) {
-                return false;
-            }
+            ItemStack[] consumed = operationMaterials.stream()
+                    .map(stack -> stack == null ? ItemStack.EMPTY : stack.copy())
+                    .toArray(ItemStack[]::new);
+            ItemStack assembled = CraftPacketUtils.assembleCraftingOutput(
+                    craftingRecipe, consumed, registryAccess);
+            if (assembled.isEmpty()) return false;
+            pendingResult = assembled;
             if (!outputs.add(pendingResult)) return false;
+
+            List<ItemStack> remainders = CraftPacketUtils.getRecipeRemaindersBySpec(
+                    craftingRecipe, consumed);
+            for (int i = 0; i < specs.size(); i++) {
+                ItemStack remainder = i < remainders.size()
+                        ? remainders.get(i) : ItemStack.EMPTY;
+                boolean reusable = i < scopes.size()
+                        && scopes.get(i) == MaterialReservationScope.PER_WORKER_REUSABLE;
+                if (reusable) {
+                    if (remainder.isEmpty()) {
+                        boolean exhaustedGoetyTotem = operation + 1 == executions
+                                && GoetySoulTotemCrafting.isSoulTotem(consumed[i]);
+                        if (!exhaustedGoetyTotem) return false;
+                        reusableState.set(i, ItemStack.EMPTY);
+                        continue;
+                    }
+                    if (operation + 1 < executions) {
+                        Ingredient continuationIngredient = i < craftingRecipe.getIngredients().size()
+                                ? craftingRecipe.getIngredients().get(i)
+                                : specs.get(i).ingredient();
+                        if (!IngredientMatcher.test(continuationIngredient, remainder)) return false;
+                    }
+                    reusableState.set(i, remainder.copy());
+                } else if (!remainder.isEmpty()) {
+                    pendingSecondary.add(remainder.copy());
+                }
+            }
+        }
+        for (int i = 0; i < specs.size(); i++) {
+            boolean reusable = i < scopes.size()
+                    && scopes.get(i) == MaterialReservationScope.PER_WORKER_REUSABLE;
+            if (reusable && !reusableState.get(i).isEmpty()) {
+                pendingSecondary.add(reusableState.get(i).copy());
+            }
         }
         pendingResult = outputs.result();
         return true;

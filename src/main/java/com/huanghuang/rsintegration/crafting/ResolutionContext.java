@@ -9,6 +9,7 @@ import com.huanghuang.rsintegration.crafting.graph.InputPortId;
 import com.huanghuang.rsintegration.crafting.graph.MaterialAllocation;
 import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
 import com.huanghuang.rsintegration.crafting.graph.MaterialSource;
+import com.huanghuang.rsintegration.mods.goety.GoetySoulTotemCrafting;
 import com.huanghuang.rsintegration.crafting.graph.NodeId;
 import com.huanghuang.rsintegration.crafting.graph.UnresolvedDemand;
 import com.huanghuang.rsintegration.util.Diagnostics;
@@ -581,7 +582,13 @@ final class ResolutionContext {
             }
             sortedKeys = new ArrayList<>(matchingItems);
         }
-        if (SpellScrollSelection.acceptsAnyScroll(ingredient)) {
+        if (GoetySoulTotemCrafting.isSoulTotemIngredient(ingredient)) {
+            sortedKeys.sort(Comparator
+                    .comparingInt((CraftingResolver.StackKey key) ->
+                            GoetySoulTotemCrafting.storedSouls(key.toStack()))
+                    .reversed()
+                    .thenComparing(key -> key.tag() == null ? "" : key.tag()));
+        } else if (SpellScrollSelection.acceptsAnyScroll(ingredient)) {
             sortedKeys.sort(Comparator
                     .comparingInt((CraftingResolver.StackKey key) ->
                             SpellScrollSelection.rarity(key.toStack()))

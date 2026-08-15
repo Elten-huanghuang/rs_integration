@@ -66,7 +66,32 @@ class GenericBatchDelegateTest extends BootstrapTest {
         assertEquals(1, results.get(1).getCount());
     }
 
-    private static final class ReusableCatalystRecipe extends ShapelessRecipe {
+    @Test
+    void repeatedCraftingFeedsAStatefulCatalystRemainderForward() {
+        GenericBatchDelegate delegate = new GenericBatchDelegate();
+        ShapelessRecipe recipe = new StatefulCatalystRecipe();
+        List<IngredientSpec> specs = List.of(
+                new IngredientSpec(Ingredient.of(Items.SHEARS), 1, DemandRole.CATALYST),
+                new IngredientSpec(Ingredient.of(Items.IRON_INGOT), 1, DemandRole.CONSUMED));
+        List<IBatchDelegate.MaterialReservationScope> scopes = List.of(
+                IBatchDelegate.MaterialReservationScope.PER_WORKER_REUSABLE,
+                IBatchDelegate.MaterialReservationScope.PER_OPERATION);
+        ItemStack catalyst = new ItemStack(Items.SHEARS);
+        catalyst.getOrCreateTag().putInt("uses", 0);
+
+        assertTrue(delegate.captureRepeatedCraftingOutputs(
+                recipe, specs, scopes,
+                List.of(catalyst, new ItemStack(Items.IRON_INGOT, 3)),
+                3, RegistryAccess.EMPTY));
+
+        List<ItemStack> results = delegate.collectAllResults(null);
+        assertEquals(2, results.size());
+        assertEquals(3, results.get(0).getCount());
+        assertEquals(Items.SHEARS, results.get(1).getItem());
+        assertEquals(3, results.get(1).getTag().getInt("uses"));
+    }
+
+    private static class ReusableCatalystRecipe extends ShapelessRecipe {
         private ReusableCatalystRecipe() {
             super(new ResourceLocation("test", "reusable_catalyst_batch"), "",
                     CraftingBookCategory.MISC, new ItemStack(Items.DIAMOND),
@@ -82,6 +107,21 @@ class GenericBatchDelegateTest extends BootstrapTest {
                 ItemStack input = container.getItem(slot);
                 if (input.is(Items.SHEARS)) {
                     remainders.set(slot, input.copyWithCount(1));
+                }
+            }
+            return remainders;
+        }
+    }
+
+    private static final class StatefulCatalystRecipe extends ReusableCatalystRecipe {
+        @Override
+        public NonNullList<ItemStack> getRemainingItems(CraftingContainer container) {
+            NonNullList<ItemStack> remainders = super.getRemainingItems(container);
+            for (int slot = 0; slot < remainders.size(); slot++) {
+                ItemStack remainder = remainders.get(slot);
+                if (remainder.is(Items.SHEARS)) {
+                    remainder.getOrCreateTag().putInt("uses",
+                            remainder.getOrCreateTag().getInt("uses") + 1);
                 }
             }
             return remainders;
