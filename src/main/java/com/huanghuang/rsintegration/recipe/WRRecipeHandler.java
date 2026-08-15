@@ -28,6 +28,12 @@ public final class WRRecipeHandler extends AbstractRecipeHandler {
     public ModType modType() { return ModType.byId("wizards_reborn"); }
 
     @Override
+    public boolean useClickedPrimaryOutput(Recipe<?> recipe, ItemStack declared, ItemStack clicked) {
+        return recipe.getClass().getName().endsWith("ArcaneIteratorRecipe")
+                || super.useClickedPrimaryOutput(recipe, declared, clicked);
+    }
+
+    @Override
     public ItemStack getResultItem(Recipe<?> recipe, RegistryAccess access) {
         // CrystalRitualRecipe.getResultItem(RegistryAccess) returns EMPTY and
         // getResultItem() returns RUNIC_PEDESTAL (the machine block icon).

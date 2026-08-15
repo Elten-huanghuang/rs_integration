@@ -6,6 +6,7 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.network.chat.Component;
+import net.minecraftforge.items.ItemStackHandler;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Method;
@@ -39,6 +40,32 @@ class GoetyBatchDelegateTest extends BootstrapTest {
         assertTrue(IBatchDelegate.matchesProducedItem(enchanted, expected));
         assertFalse(IBatchDelegate.matchesProducedItem(
                 new ItemStack(Items.IRON_CHESTPLATE), expected));
+    }
+
+    @Test
+    void claimsAltarOutputExactlyOnceForDeferredSettlement() {
+        ItemStackHandler altar = new ItemStackHandler(1);
+        altar.setStackInSlot(0, new ItemStack(Items.NETHERITE_INGOT));
+        ItemStack expected = new ItemStack(Items.NETHERITE_INGOT);
+
+        ItemStack claimed = GoetyBatchDelegate.claimMatchingOutput(altar, 0, expected);
+
+        assertEquals(1, claimed.getCount());
+        assertTrue(altar.getStackInSlot(0).isEmpty());
+        assertTrue(GoetyBatchDelegate.claimMatchingOutput(altar, 0, expected).isEmpty());
+    }
+
+    @Test
+    void doesNotClaimPartialOrWrongAltarOutput() {
+        ItemStackHandler altar = new ItemStackHandler(1);
+        altar.setStackInSlot(0, new ItemStack(Items.IRON_INGOT));
+
+        assertTrue(GoetyBatchDelegate.claimMatchingOutput(
+                altar, 0, new ItemStack(Items.IRON_INGOT, 2)).isEmpty());
+        assertEquals(1, altar.getStackInSlot(0).getCount());
+        assertTrue(GoetyBatchDelegate.claimMatchingOutput(
+                altar, 0, new ItemStack(Items.GOLD_INGOT)).isEmpty());
+        assertEquals(1, altar.getStackInSlot(0).getCount());
     }
 
     @Test

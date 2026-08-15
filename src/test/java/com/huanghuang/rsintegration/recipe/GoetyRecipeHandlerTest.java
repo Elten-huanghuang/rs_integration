@@ -7,6 +7,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class GoetyRecipeHandlerTest {
 
+    private static final class CraftItemRitual {}
+    private static final class EnchantItemRitual {}
+
     @Test
     void ritualEligibilityIsNeverCachedByRecipeClass() {
         assertFalse(GoetyRecipeHandler.ritual().cacheByRecipeClass());
@@ -17,5 +20,12 @@ class GoetyRecipeHandlerTest {
     void goetySemanticInputsTakePriorityOverGenericExtraction() {
         assertTrue(GoetyRecipeHandler.ritual().preferHandlerIngredients());
         assertTrue(GoetyRecipeHandler.brazier().preferHandlerIngredients());
+    }
+
+    @Test
+    void craftItemRitualOutputNbtIsRuntimeDependent() {
+        assertTrue(GoetyRecipeHandler.isCraftItemRitual(new CraftItemRitual()));
+        assertFalse(GoetyRecipeHandler.isCraftItemRitual(new EnchantItemRitual()));
+        assertFalse(GoetyRecipeHandler.isCraftItemRitual(null));
     }
 }

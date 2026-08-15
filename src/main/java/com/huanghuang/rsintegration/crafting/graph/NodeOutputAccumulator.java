@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting.graph;
 
 import com.huanghuang.rsintegration.crafting.MaterialMatcher;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.item.ItemStack;
 
 import java.util.ArrayList;
@@ -11,9 +12,11 @@ import java.util.Objects;
 
 /** Accumulates actual node outputs and publishes each declared unit once. */
 public final class NodeOutputAccumulator {
+    private static final org.slf4j.Logger LOGGER = com.mojang.logging.LogUtils.getLogger();
     private final List<OutputDeclaration> declarations;
     private final Map<OutputPortId, Integer> published = new LinkedHashMap<>();
     private final List<ItemStack> pending = new ArrayList<>();
+    private boolean mismatchLogged;
 
     public NodeOutputAccumulator(List<OutputDeclaration> declarations) {
         this.declarations = List.copyOf(declarations);
@@ -45,6 +48,17 @@ public final class NodeOutputAccumulator {
             }
         }
         pending.removeIf(ItemStack::isEmpty);
+        if (publications.isEmpty() && !pending.isEmpty() && !mismatchLogged) {
+            mismatchLogged = true;
+            ItemStack actualStack = pending.get(0);
+            String expected = declarations.stream()
+                    .map(declaration -> BuiltInRegistries.ITEM.getKey(declaration.material().item())
+                            + " tag=" + declaration.material().tag())
+                    .collect(java.util.stream.Collectors.joining("; "));
+            LOGGER.debug(
+                    "[RSI-GraphOutput] unmatched actual={} tag={} declarations=[{}]",
+                    BuiltInRegistries.ITEM.getKey(actualStack.getItem()), actualStack.getTag(), expected);
+        }
         return List.copyOf(publications);
     }
 

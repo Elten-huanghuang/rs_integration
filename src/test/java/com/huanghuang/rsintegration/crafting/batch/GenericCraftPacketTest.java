@@ -17,6 +17,7 @@ import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.ShapelessRecipe;
 import net.minecraft.world.item.crafting.SmithingTransformRecipe;
@@ -33,6 +34,96 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class GenericCraftPacketTest extends BootstrapTest {
+
+    @Test
+    void taglessRecipeDeclarationIgnoresJeiDisplayNbt() {
+        ShapelessRecipe recipe = new ShapelessRecipe(new ResourceLocation("test", "display_nbt"), "",
+                net.minecraft.world.item.crafting.CraftingBookCategory.MISC,
+                new ItemStack(Items.BOOK),
+                net.minecraft.core.NonNullList.of(Ingredient.EMPTY, Ingredient.of(Items.PAPER)));
+        ItemStack clicked = new ItemStack(Items.BOOK);
+        CompoundTag displayData = new CompoundTag();
+        displayData.putString("jei_display", "client-only");
+        clicked.setTag(displayData);
+
+        ItemStack selected = GenericCraftPacket.selectTerminalGraphOutput(
+                recipe, recipe.getResultItem(net.minecraft.core.RegistryAccess.EMPTY), clicked);
+
+        assertFalse(selected.hasTag());
+        assertEquals(Items.BOOK, selected.getItem());
+    }
+
+    @Test
+    void taggedRecipeDeclarationKeepsConcreteClickedVariant() {
+        ItemStack declared = new ItemStack(Items.ENCHANTED_BOOK);
+        CompoundTag levelOne = new CompoundTag();
+        levelOne.putInt("level", 1);
+        declared.setTag(levelOne);
+        ShapelessRecipe recipe = new ShapelessRecipe(new ResourceLocation("test", "variant"), "",
+                net.minecraft.world.item.crafting.CraftingBookCategory.MISC, declared,
+                net.minecraft.core.NonNullList.of(Ingredient.EMPTY, Ingredient.of(Items.BOOK)));
+        ItemStack clicked = new ItemStack(Items.ENCHANTED_BOOK);
+        CompoundTag levelTwo = new CompoundTag();
+        levelTwo.putInt("level", 2);
+        clicked.setTag(levelTwo);
+
+        ItemStack selected = GenericCraftPacket.selectTerminalGraphOutput(
+                recipe, recipe.getResultItem(net.minecraft.core.RegistryAccess.EMPTY), clicked);
+
+        assertEquals(2, selected.getTag().getInt("level"));
+    }
+
+    @Test
+    void runtimeDependentOutputDropsRecipeAndClickedNbt() {
+        ItemStack declared = new ItemStack(Items.BOOK);
+        CompoundTag recipeData = new CompoundTag();
+        recipeData.putInt("Damage", 0);
+        declared.setTag(recipeData);
+        ShapelessRecipe recipe = new ShapelessRecipe(new ResourceLocation("test", "runtime_nbt"), "",
+                net.minecraft.world.item.crafting.CraftingBookCategory.MISC, declared,
+                net.minecraft.core.NonNullList.of(Ingredient.EMPTY, Ingredient.of(Items.PAPER)));
+        ItemStack clicked = declared.copy();
+        CompoundTag clickedData = clicked.getOrCreateTag();
+        clickedData.putInt("display_only", 1);
+
+        com.huanghuang.rsintegration.recipe.ModRecipeHandler handler =
+                new com.huanghuang.rsintegration.recipe.ModRecipeHandler() {
+                    @Override
+                    public ModType modType() {
+                        return ModType.GENERIC;
+                    }
+
+                    @Override
+                    public boolean canHandle(net.minecraft.world.item.crafting.Recipe<?> ignored) {
+                        return true;
+                    }
+
+                    @Override
+                    public ItemStack getResultItem(
+                            net.minecraft.world.item.crafting.Recipe<?> ignored,
+                            net.minecraft.core.RegistryAccess access) {
+                        return declared.copy();
+                    }
+
+                    @Override
+                    public List<IngredientSpec> getIngredients(
+                            net.minecraft.world.item.crafting.Recipe<?> ignored) {
+                        return List.of();
+                    }
+
+                    @Override
+                    public boolean hasRuntimeDependentPrimaryNbt(
+                            net.minecraft.world.item.crafting.Recipe<?> ignored) {
+                        return true;
+                    }
+                };
+
+        ItemStack selected = GenericCraftPacket.selectTerminalGraphOutput(
+                recipe, declared, clicked, handler);
+
+        assertEquals(Items.BOOK, selected.getItem());
+        assertFalse(selected.hasTag());
+    }
 
     @Test
     void infeasiblePurePlanFallsBackToTypedResolverForVirtualIntermediates() {

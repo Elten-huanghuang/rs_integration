@@ -70,6 +70,8 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
     private ItemStack activationExtractedFromPlayer;
     /** Activation item held until the manual ritual handoff is observed. */
     private ItemStack pendingManualActivation = ItemStack.EMPTY;
+    /** Result claimed atomically when completion is first observed. */
+    private ItemStack pendingRitualResult = ItemStack.EMPTY;
     private boolean ritualPreparedForManualStart;
 
     // Brazier-mode state
@@ -328,6 +330,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
         this.activationExtractedFromPlayer = null;
         this.pendingManualActivation = ItemStack.EMPTY;
+        this.pendingRitualResult = ItemStack.EMPTY;
         this.ritualPreparedForManualStart = false;
 
         ServerLevel machineLevel = resolveMachineLevel(player);
@@ -946,12 +949,25 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         ItemStack expected = RecipeIndex.tryGetResultItem((Recipe<?>) ritualRecipe, level.registryAccess());
         if (expected.isEmpty()) return false;
 
+        // Completion and collection used to happen on different ticks. During the
+        // idle-stability window an attached importer could move the altar result
+        // into RS, leaving collectResult() with nothing to publish. Claim the
+        // operation-owned slot output as soon as it is observed and retain it
+        // until graph settlement.
+        if (!pendingRitualResult.isEmpty()) return true;
+
         var handlerOpt = Reflect.<Object>getField(altar, "itemStackHandler");
         if (handlerOpt.isPresent() && handlerOpt.get() instanceof LazyOptional<?> lazy) {
             var resolved = lazy.resolve();
-            if (resolved.isPresent() && resolved.get() instanceof IItemHandler handler
-                    && IBatchDelegate.matchesProducedItem(handler.getStackInSlot(0), expected)) {
-                return true;
+            if (resolved.isPresent() && resolved.get() instanceof IItemHandler handler) {
+                ItemStack claimed = claimMatchingOutput(handler, 0, expected);
+                if (!claimed.isEmpty()) {
+                    pendingRitualResult = claimed;
+                    RSIntegrationMod.LOGGER.debug(
+                            "[RSI-Batch-Goety] Claimed altar result for settlement: {} x{}",
+                            claimed.getItem(), claimed.getCount());
+                    return true;
+                }
             }
         }
 
@@ -974,6 +990,29 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         return false;
     }
 
+    static ItemStack claimMatchingOutput(IItemHandler handler, int slot, ItemStack expected) {
+        if (handler == null || expected.isEmpty() || expected.getCount() <= 0
+                || slot < 0 || slot >= handler.getSlots()) {
+            return ItemStack.EMPTY;
+        }
+        ItemStack available = handler.getStackInSlot(slot);
+        if (!IBatchDelegate.matchesProducedItem(available, expected)
+                || available.getCount() < expected.getCount()) {
+            return ItemStack.EMPTY;
+        }
+        ItemStack simulated = handler.extractItem(slot, expected.getCount(), true);
+        if (!IBatchDelegate.matchesProducedItem(simulated, expected)
+                || simulated.getCount() < expected.getCount()) {
+            return ItemStack.EMPTY;
+        }
+        ItemStack claimed = handler.extractItem(slot, expected.getCount(), false);
+        if (!IBatchDelegate.matchesProducedItem(claimed, expected)
+                || claimed.getCount() != expected.getCount()) {
+            return ItemStack.EMPTY;
+        }
+        return claimed;
+    }
+
     private boolean isBrazierCraftComplete(ServerLevel level) {
         if (!brazierCraftStarted) return false;
         // Recipe was non-null (processing), now null (finished — success or failure)
@@ -990,6 +1029,15 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
     public ItemStack collectResult(ServerPlayer player) {
         if (isBrazier) return collectBrazierResult(player);
         if (isCurrentManualRecipe()) return ItemStack.EMPTY;
+
+        if (!pendingRitualResult.isEmpty()) {
+            ItemStack collected = pendingRitualResult;
+            pendingRitualResult = ItemStack.EMPTY;
+            RSIntegrationMod.LOGGER.debug(
+                    "[RSI-Batch-Goety] Published claimed altar result: {} x{}",
+                    collected.getItem(), collected.getCount());
+            return collected;
+        }
 
         ItemStack expected = RecipeIndex.tryGetResultItem((Recipe<?>) ritualRecipe, player.serverLevel().registryAccess());
         if (expected.isEmpty()) return ItemStack.EMPTY;
@@ -1112,10 +1160,22 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         } else {
             ritualEverSeenActive = false;
             ritualIdleSinceGameTime = -1L;
+            recoverPendingRitualResult(player);
             refundActivationToPlayer();
             recoverFromPedestals();
         }
         pendingManualActivation = ItemStack.EMPTY;
+        pendingRitualResult = ItemStack.EMPTY;
+        ritualPreparedForManualStart = false;
+        resetState();
+        activationExtractedFromPlayer = null;
+    }
+
+    @Override
+    protected void clearMissingMachineState(@Nullable ServerPlayer player) {
+        recoverPendingRitualResult(player);
+        pendingManualActivation = ItemStack.EMPTY;
+        pendingRitualResult = ItemStack.EMPTY;
         ritualPreparedForManualStart = false;
         resetState();
         activationExtractedFromPlayer = null;
@@ -1137,6 +1197,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             }
         }
         pendingManualActivation = ItemStack.EMPTY;
+        pendingRitualResult = ItemStack.EMPTY;
         ritualPreparedForManualStart = false;
         resetState();
         activationExtractedFromPlayer = null;
@@ -1461,6 +1522,31 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             // inventory, not through the ledger — shared/private ledger doesn't matter.
             ItemHandlerHelper.giveItemToPlayer(player, activationExtractedFromPlayer.copy());
             activationExtractedFromPlayer = null;
+        }
+    }
+
+    private void recoverPendingRitualResult(@Nullable ServerPlayer player) {
+        if (pendingRitualResult.isEmpty()) return;
+        ItemStack result = pendingRitualResult;
+        pendingRitualResult = ItemStack.EMPTY;
+        ItemStack remainder = result;
+        if (network != null) {
+            remainder = network.insertItem(result.copy(), result.getCount(),
+                    com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+        }
+        if (!remainder.isEmpty() && player != null) {
+            ItemHandlerHelper.giveItemToPlayer(player, remainder);
+            remainder = ItemStack.EMPTY;
+        }
+        if (!remainder.isEmpty()) {
+            ServerLevel level = resolveMachineLevel((ServerLevel) null);
+            if (level != null && myPos != null) {
+                net.minecraft.world.entity.item.ItemEntity entity =
+                        new net.minecraft.world.entity.item.ItemEntity(
+                                level, myPos.getX() + 0.5D, myPos.getY() + 1.0D,
+                                myPos.getZ() + 0.5D, remainder.copy());
+                level.addFreshEntity(entity);
+            }
         }
     }
 

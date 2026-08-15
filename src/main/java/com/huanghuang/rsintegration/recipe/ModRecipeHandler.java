@@ -67,6 +67,16 @@ public interface ModRecipeHandler {
     }
 
     /**
+     * Whether the JEI stack clicked by the player selects a concrete output
+     * variant that cannot be recovered from the recipe's declared result alone.
+     */
+    default boolean useClickedPrimaryOutput(@Nonnull Recipe<?> recipe,
+                                            @Nonnull ItemStack declared,
+                                            @Nonnull ItemStack clicked) {
+        return declared.hasTag() && clicked.hasTag();
+    }
+
+    /**
      * Whether the primary result should be exposed as a recursive item producer.
      * Some recipes use a JEI-only placeholder for an entity/fluid/world action;
      * those recipes may still be previewable, but the placeholder must not enter

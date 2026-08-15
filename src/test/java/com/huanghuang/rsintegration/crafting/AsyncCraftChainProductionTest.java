@@ -3,6 +3,13 @@ package com.huanghuang.rsintegration.crafting;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
+import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
+import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
+import com.huanghuang.rsintegration.crafting.graph.MaterialSource;
+import com.huanghuang.rsintegration.crafting.graph.NodeId;
+import com.huanghuang.rsintegration.crafting.graph.OutputPortId;
+import com.huanghuang.rsintegration.crafting.graph.RootAllocation;
+import com.huanghuang.rsintegration.crafting.graph.RootDemand;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
@@ -152,5 +159,24 @@ class AsyncCraftChainProductionTest extends BootstrapTest {
     void nullExpectationOptsOut() {
         assertEquals(0, AsyncCraftChain.countMatchingProduction(
                 List.of(new ItemStack(Items.IRON_INGOT, 64)), null));
+    }
+
+    @Test
+    void graphFinalOutputUsesRootDeclarationInsteadOfClickedStackNbt() {
+        MaterialKey declared = new MaterialKey(Items.DIAMOND_SWORD, null);
+        MaterialSource source = new MaterialSource.ProducerOutput(
+                new OutputPortId(new NodeId(0), 0));
+        CraftPlanGraph graph = new CraftPlanGraph(CraftPlanGraph.CURRENT_VERSION,
+                List.of(), List.of(),
+                List.of(new RootDemand(Ingredient.of(Items.DIAMOND_SWORD), 1, 0,
+                        new ItemStack(Items.DIAMOND_SWORD),
+                        List.of(new RootAllocation(source, declared, 1)))),
+                List.of(), List.of());
+        ItemStack runtimeOutput = new ItemStack(Items.DIAMOND_SWORD);
+        runtimeOutput.getOrCreateTag().putInt("runtime_state", 1);
+
+        assertTrue(AsyncCraftChain.matchesGraphFinalOutput(graph, runtimeOutput));
+        assertFalse(AsyncCraftChain.matchesGraphFinalOutput(graph,
+                new ItemStack(Items.IRON_SWORD)));
     }
 }
