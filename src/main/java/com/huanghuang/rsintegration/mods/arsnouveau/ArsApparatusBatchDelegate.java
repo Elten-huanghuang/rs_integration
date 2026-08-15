@@ -404,6 +404,9 @@ public final class ArsApparatusBatchDelegate extends AbstractBatchDelegate {
     }
 
     private ItemStack getRecipeOutput(Recipe<?> recipe) {
+        if (ArsRecipeClassifier.TYPE_ENCHANTMENT.equals(ArsTileAccess.recipeTypeId(recipe))) {
+            return ArsDynamicApparatusRecipe.canonicalEnchantmentOutput(recipe);
+        }
         // EnchantingApparatusRecipe has a `result` field
         return Reflect.<ItemStack>getField(recipe, "result")
                 .map(ItemStack::copy)
@@ -416,7 +419,11 @@ public final class ArsApparatusBatchDelegate extends AbstractBatchDelegate {
     }
 
     private List<IngredientSpec> buildMaterialsList(Recipe<?> recipe) {
-        if (ArsDynamicApparatusRecipe.isSupported(recipe)) return List.of();
+        if (ArsDynamicApparatusRecipe.isSupported(recipe)) {
+            ItemStack target = expectedOutput == null || expectedOutput.isEmpty()
+                    ? null : expectedOutput;
+            return ArsDynamicApparatusRecipe.buildMaterials(recipe, target);
+        }
         Ingredient reagent = Reflect.<Ingredient>getField(recipe, "reagent").orElse(Ingredient.EMPTY);
         List<Ingredient> pedestalItems = Reflect.<List<Ingredient>>getField(recipe, "pedestalItems")
                 .orElse(List.of());

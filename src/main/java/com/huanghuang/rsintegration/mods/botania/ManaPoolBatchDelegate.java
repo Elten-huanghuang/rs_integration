@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.ParallelBatchSizing;
 import com.huanghuang.rsintegration.util.PlayerUtils;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;
@@ -135,9 +136,8 @@ public final class ManaPoolBatchDelegate extends AbstractBatchDelegate {
     }
 
     static int parallelWorkerBatchSize(int totalOperations, int workerCount) {
-        if (totalOperations <= 0 || workerCount <= 0) return 1;
-        int evenShare = (totalOperations + workerCount - 1) / workerCount;
-        return Math.max(1, Math.min(MAX_PARALLEL_WORKER_BATCH, evenShare));
+        return ParallelBatchSizing.boundedEvenShare(
+                totalOperations, workerCount, MAX_PARALLEL_WORKER_BATCH);
     }
 
     static int graphBatchSize(int executions) {

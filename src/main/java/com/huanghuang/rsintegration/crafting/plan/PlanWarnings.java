@@ -17,6 +17,7 @@ import com.huanghuang.rsintegration.mods.farmingforblockheads.MarketBatchDelegat
 import com.huanghuang.rsintegration.mods.forbidden.ClibanoBatchDelegate;
 import com.huanghuang.rsintegration.mods.forbidden.FaBatchDelegate;
 import com.huanghuang.rsintegration.mods.goety.GoetyBatchDelegate;
+import com.huanghuang.rsintegration.mods.goety.GoetySoulTotemCrafting;
 import com.huanghuang.rsintegration.mods.malum.MalumBatchDelegate;
 import com.huanghuang.rsintegration.mods.pmmo.PmmoSalvageRecipeWrapper;
 import com.huanghuang.rsintegration.mods.pmmo.PmmoSalvageRuntime;
@@ -58,6 +59,15 @@ public final class PlanWarnings {
 
     public static int arsSourceCost(Recipe<?> recipe) {
         return ArsPlanWarnings.sourceCost(recipe);
+    }
+
+    public static int goetyRitualSoulCost(Recipe<?> recipe) {
+        return GoetySoulTotemCrafting.ritualSoulCost(recipe);
+    }
+
+    public static int goetyTotemSoulCost(Recipe<?> recipe) {
+        return recipe instanceof net.minecraft.world.item.crafting.CraftingRecipe crafting
+                ? GoetySoulTotemCrafting.soulCostPerCraft(crafting) : 0;
     }
 
     private static int botaniaInt(Object recipe, String typeName, String methodName) {

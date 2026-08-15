@@ -38,6 +38,19 @@ class ArsDynamicApparatusRecipeTest extends BootstrapTest {
     }
 
     @Test
+    void levelFourEnchantRequiresTheExactLevelThreeBook() {
+        var input = ArsDynamicApparatusRecipe.buildEnchantmentInput(Enchantments.BLOCK_EFFICIENCY, 4);
+        var output = ArsDynamicApparatusRecipe.buildEnchantmentOutput(
+                input, Enchantments.BLOCK_EFFICIENCY, 4);
+
+        assertTrue(input.getItem() instanceof EnchantedBookItem);
+        assertEquals(3, EnchantmentHelper.getEnchantments(input)
+                .getOrDefault(Enchantments.BLOCK_EFFICIENCY, 0));
+        assertEquals(4, EnchantmentHelper.getEnchantments(output)
+                .getOrDefault(Enchantments.BLOCK_EFFICIENCY, 0));
+    }
+
+    @Test
     void tierZeroArmorMaterialUsesTheNormalTaglessPerkRepresentation() {
         var input = new net.minecraft.world.item.ItemStack(Items.DIAMOND_HELMET);
         input.getOrCreateTag().putInt("Damage", 0);

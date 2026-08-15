@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.mods.arsnouveau.ArsApparatusMaterials;
+import com.huanghuang.rsintegration.mods.arsnouveau.ArsDynamicApparatusRecipe;
 import com.huanghuang.rsintegration.mods.arsnouveau.ArsImbuementMaterials;
 import com.huanghuang.rsintegration.mods.arsnouveau.ArsRecipeClassifier;
 import com.huanghuang.rsintegration.mods.arsnouveau.ArsTileAccess;
@@ -21,10 +22,9 @@ import java.util.List;
  * Recipe handler for Ars Nouveau Imbuement and Enchanting Apparatus recipes.
  *
  * <p>Imbuement and ordinary Apparatus recipes expose fixed inputs and outputs.
- * Enchantment and armor-upgrade recipes are also supported, but their concrete
- * NBT input/output pair is supplied by the JEI request and resolved by
- * {@code ArsDynamicApparatusRecipe}; they intentionally return no context-free
- * result or ingredient list here.</p>
+ * Enchantment recipes have deterministic enchanted-book inputs and outputs,
+ * so every level is indexed for recursive crafting. Armor upgrades still need
+ * the concrete NBT-bearing armor selected through JEI.</p>
  *
  * <p><strong>Key implementation notes:</strong></p>
  * <ul>
@@ -74,10 +74,9 @@ public final class ArsNouveauRecipeHandler extends AbstractRecipeHandler {
             return getImbuementResult(recipe);
         } else if (ArsRecipeClassifier.TYPE_APPARATUS.equals(typeId)) {
             return getApparatusResult(recipe);
-        } else if (ArsRecipeClassifier.isDynamicApparatus(typeId)) {
-            // Enchantment and armor-upgrade outputs depend on the concrete
-            // NBT-bearing centre item selected in JEI. Their context-free
-            // result is intentionally empty and is resolved later.
+        } else if (ArsRecipeClassifier.TYPE_ENCHANTMENT.equals(typeId)) {
+            return ArsDynamicApparatusRecipe.canonicalEnchantmentOutput(recipe);
+        } else if (ArsRecipeClassifier.TYPE_ARMOR_UPGRADE.equals(typeId)) {
             return ItemStack.EMPTY;
         }
 
@@ -95,6 +94,9 @@ public final class ArsNouveauRecipeHandler extends AbstractRecipeHandler {
             return getImbuementIngredients(recipe);
         } else if (ArsRecipeClassifier.TYPE_APPARATUS.equals(typeId)) {
             return getApparatusIngredients(recipe);
+        } else if (ArsRecipeClassifier.TYPE_ENCHANTMENT.equals(typeId)) {
+            List<IngredientSpec> specs = ArsDynamicApparatusRecipe.buildMaterials(recipe, null);
+            return specs.isEmpty() ? null : specs;
         }
 
         return null;

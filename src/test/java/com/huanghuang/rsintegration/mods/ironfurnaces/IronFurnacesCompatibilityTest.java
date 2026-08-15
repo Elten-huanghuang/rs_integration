@@ -78,6 +78,28 @@ class IronFurnacesCompatibilityTest extends BootstrapTest {
     }
 
     @Test
+    void graphBatchesShareOperationsAcrossWorkersWithinPhysicalCapacity() {
+        assertEquals(129, IronFurnacesBatchDelegate.parallelWorkerBatchSize(129, 1, 384));
+        assertEquals(65, IronFurnacesBatchDelegate.parallelWorkerBatchSize(129, 2, 384));
+        assertEquals(64, IronFurnacesBatchDelegate.parallelWorkerBatchSize(129, 1, 64));
+        assertEquals(1, IronFurnacesBatchDelegate.parallelWorkerBatchSize(0, 1, 64));
+        assertEquals(1, IronFurnacesBatchDelegate.parallelWorkerBatchSize(129, 0, 64));
+        assertEquals(1, IronFurnacesBatchDelegate.parallelWorkerBatchSize(129, 1, 0));
+    }
+
+    @Test
+    void rainbowFactorySplitsA129OperationGraphBatchAcrossPhysicalLanes() {
+        var lanes = IronFurnacesBatchDelegate.splitFactoryMaterials(
+                java.util.List.of(
+                        new ItemStack(Items.CLAY_BALL, 64),
+                        new ItemStack(Items.CLAY_BALL, 64),
+                        new ItemStack(Items.CLAY_BALL, 1)), 64);
+
+        assertEquals(java.util.List.of(64, 64, 1),
+                lanes.stream().map(ItemStack::getCount).toList());
+    }
+
+    @Test
     void rainbowBatchMergesAFullStackForOneSmeltCycle() {
         ItemStack merged = IronFurnacesBatchDelegate.mergeBatchMaterials(
                 java.util.List.of(new ItemStack(Items.CLAY_BALL, 32),

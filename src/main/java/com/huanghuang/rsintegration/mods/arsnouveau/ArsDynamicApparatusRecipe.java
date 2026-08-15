@@ -37,7 +37,7 @@ public final class ArsDynamicApparatusRecipe {
      * its tier advanced by one.
      */
     public static ItemStack deriveInput(Recipe<?> recipe, @Nullable ItemStack requestedOutput) {
-        if (recipe == null || requestedOutput == null || requestedOutput.isEmpty()) {
+        if (recipe == null) {
             return ItemStack.EMPTY;
         }
         String typeId = ArsTileAccess.recipeTypeId(recipe);
@@ -48,6 +48,7 @@ public final class ArsDynamicApparatusRecipe {
             return buildEnchantmentInput(enchantment, level);
         }
         if (ArsRecipeClassifier.TYPE_ARMOR_UPGRADE.equals(typeId)) {
+            if (requestedOutput == null || requestedOutput.isEmpty()) return ItemStack.EMPTY;
             int tier = Reflect.<Integer>getField(recipe, "tier").orElse(-1);
             if (tier < 1) return ItemStack.EMPTY;
             ItemStack input = requestedOutput.copyWithCount(1);
@@ -60,6 +61,16 @@ public final class ArsDynamicApparatusRecipe {
 
     /** Recomputes the recipe output through Ars itself and rejects forged NBT targets. */
     public static ItemStack validatedOutput(Recipe<?> recipe, @Nullable ItemStack requestedOutput) {
+        if (recipe != null && ArsRecipeClassifier.TYPE_ENCHANTMENT.equals(
+                ArsTileAccess.recipeTypeId(recipe))) {
+            ItemStack canonical = canonicalEnchantmentOutput(recipe);
+            if (canonical.isEmpty()) return ItemStack.EMPTY;
+            if (requestedOutput != null && !requestedOutput.isEmpty()
+                    && !ItemStack.isSameItemSameTags(canonical, requestedOutput)) {
+                return ItemStack.EMPTY;
+            }
+            return canonical;
+        }
         ItemStack input = deriveInput(recipe, requestedOutput);
         if (input.isEmpty()) return ItemStack.EMPTY;
         ItemStack machineInput = prepareMachineInput(recipe, input, requestedOutput);
@@ -70,6 +81,18 @@ public final class ArsDynamicApparatusRecipe {
             return ItemStack.EMPTY;
         }
         return computed.copyWithCount(1);
+    }
+
+    /** Returns the deterministic enchanted-book result used by recipe indexing. */
+    public static ItemStack canonicalEnchantmentOutput(Recipe<?> recipe) {
+        if (recipe == null || !ArsRecipeClassifier.TYPE_ENCHANTMENT.equals(
+                ArsTileAccess.recipeTypeId(recipe))) {
+            return ItemStack.EMPTY;
+        }
+        int level = Reflect.<Integer>getField(recipe, "enchantLevel").orElse(0);
+        Enchantment enchantment = Reflect.<Enchantment>getField(recipe, "enchantment").orElse(null);
+        if (level < 1 || enchantment == null) return ItemStack.EMPTY;
+        return buildEnchantmentOutput(buildEnchantmentInput(enchantment, level), enchantment, level);
     }
 
     public static List<IngredientSpec> buildMaterials(Recipe<?> recipe,

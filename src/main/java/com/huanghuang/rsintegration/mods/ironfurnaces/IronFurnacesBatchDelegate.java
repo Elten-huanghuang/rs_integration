@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.ParallelBatchSizing;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.mods.vanilla.VanillaFurnaceFuelPolicy;
@@ -86,6 +87,20 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
                 factoryMode, rainbowMode, remainingOperations, physicalBatch,
                 plannedFactoryLanes, laneCapacity);
         return plannedOperations;
+    }
+
+    @Override
+    public void prepareGraphBatch(int executions) {
+        plannedOperations = Math.max(1, executions);
+    }
+
+    @Override
+    public int preferredParallelBatchSize(int totalOperations, int workerCount) {
+        return parallelWorkerBatchSize(totalOperations, workerCount, physicalBatchCapacity());
+    }
+
+    static int parallelWorkerBatchSize(int totalOperations, int workerCount, int capacity) {
+        return ParallelBatchSizing.boundedEvenShare(totalOperations, workerCount, capacity);
     }
 
     static int plannedBatchSize(boolean factory, boolean rainbow,
