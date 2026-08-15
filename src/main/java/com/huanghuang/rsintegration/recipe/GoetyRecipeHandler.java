@@ -105,6 +105,19 @@ public final class GoetyRecipeHandler extends AbstractRecipeHandler {
     }
 
     @Override
+    public boolean hasRuntimeDependentPrimaryNbt(Recipe<?> recipe) {
+        if (!RITUAL_CLASS.equals(supportedRecipeClass)) return false;
+        return Reflect.invoke(recipe, "getRitual")
+                .map(GoetyRecipeHandler::isCraftItemRitual)
+                .orElse(false);
+    }
+
+    static boolean isCraftItemRitual(Object ritual) {
+        return ritual != null
+                && ritual.getClass().getName().endsWith("CraftItemRitual");
+    }
+
+    @Override
     public boolean indexPrimaryOutput(Recipe<?> recipe) {
         // Manual rituals remain directly previewable by ID, but cannot serve as
         // recursive producers for another automated plan.

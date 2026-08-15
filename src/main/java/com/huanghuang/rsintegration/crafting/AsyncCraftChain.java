@@ -3826,10 +3826,23 @@ public final class AsyncCraftChain {
     }
 
     private boolean matchesFinalTarget(ItemStack stack) {
-        if (targetOutput == null || targetOutput.isEmpty() || stack.isEmpty()) return false;
+        if (stack.isEmpty()) return false;
+        if (useGraphExecution && graph != null) {
+            return matchesGraphFinalOutput(graph, stack);
+        }
+        if (targetOutput == null || targetOutput.isEmpty()) return false;
         return targetOutput.hasTag()
                 ? ItemStack.isSameItemSameTags(stack, targetOutput)
                 : ItemStack.isSameItem(stack, targetOutput);
+    }
+
+    static boolean matchesGraphFinalOutput(CraftPlanGraph graph, ItemStack stack) {
+        if (graph == null || stack == null || stack.isEmpty()) return false;
+        return graph.rootDemands().stream()
+                .flatMap(root -> root.allocations().stream())
+                .filter(allocation -> allocation.source() instanceof MaterialSource.ProducerOutput)
+                .anyMatch(allocation -> MaterialMatcher.matchesOutputDeclaration(
+                        allocation.material(), stack));
     }
 
     private ItemStack insertIntoPlayerInventory(ServerPlayer player, ItemStack stack) {

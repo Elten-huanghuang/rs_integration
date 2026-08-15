@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.crafting.graph;
 
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.Tag;
 import net.minecraft.nbt.TagParser;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -15,8 +17,18 @@ public record MaterialKey(Item item, @Nullable String tag) {
 
     public static MaterialKey of(ItemStack stack) {
         Objects.requireNonNull(stack, "stack");
-        String tag = stack.hasTag() && !stack.getTag().isEmpty() ? stack.getTag().toString() : null;
+        CompoundTag stackTag = stack.getTag();
+        String tag = stackTag != null && !stackTag.isEmpty() && !isDefaultDamageTag(stack, stackTag)
+                ? stackTag.toString()
+                : null;
         return new MaterialKey(stack.getItem(), tag);
+    }
+
+    private static boolean isDefaultDamageTag(ItemStack stack, CompoundTag tag) {
+        return stack.isDamageableItem()
+                && tag.size() == 1
+                && tag.contains("Damage", Tag.TAG_ANY_NUMERIC)
+                && tag.getInt("Damage") == 0;
     }
 
     public ItemStack toStack(int count) {

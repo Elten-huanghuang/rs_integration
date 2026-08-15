@@ -9,6 +9,8 @@ import net.minecraft.world.item.crafting.Ingredient;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class MaterialMatcherTest extends BootstrapTest {
@@ -42,6 +44,22 @@ class MaterialMatcherTest extends BootstrapTest {
 
         assertFalse(MaterialMatcher.matchesOutputDeclaration(
                 MaterialKey.of(declared), actual));
+    }
+
+    @Test
+    void pristineDamageTagDoesNotConstrainRuntimeOutputNbt() {
+        ItemStack pristine = new ItemStack(Items.DIAMOND_SWORD);
+        pristine.getOrCreateTag().putInt("Damage", 0);
+        MaterialKey declaration = MaterialKey.of(pristine);
+
+        ItemStack runtimeOutput = pristine.copy();
+        runtimeOutput.getOrCreateTag().putInt("runtime_state", 1);
+        ItemStack damaged = pristine.copy();
+        damaged.setDamageValue(1);
+
+        assertNull(declaration.tag());
+        assertTrue(MaterialMatcher.matchesOutputDeclaration(declaration, runtimeOutput));
+        assertNotNull(MaterialKey.of(damaged).tag());
     }
 
     private static ItemStack tagged(String value) {

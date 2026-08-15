@@ -864,6 +864,55 @@ public final class GenericCraftPacket {
         return completeGraph;
     }
 
+    static ItemStack selectTerminalGraphOutput(Recipe<?> recipe, ItemStack recipeOutput,
+                                               @Nullable ItemStack clickedOutput) {
+        ModRecipeHandler handler = ModRecipeHandlers.handlerFor(recipe);
+        return selectTerminalGraphOutput(recipe, recipeOutput, clickedOutput, handler);
+    }
+
+    static ItemStack selectTerminalGraphOutput(Recipe<?> recipe, ItemStack recipeOutput,
+                                               @Nullable ItemStack clickedOutput,
+                                               @Nullable ModRecipeHandler handler) {
+        boolean runtimeNbt = handler != null && handler.hasRuntimeDependentPrimaryNbt(recipe);
+        ItemStack declared = runtimeNbt
+                ? itemOnlyDeclaration(recipeOutput)
+                : CraftingResolver.resolveDeclaredOutput(recipe, recipeOutput);
+        if (declared.isEmpty() || clickedOutput == null || clickedOutput.isEmpty()
+                || clickedOutput.getItem() != declared.getItem() || runtimeNbt) {
+            logTerminalOutputSelection(recipe, handler, runtimeNbt, recipeOutput,
+                    clickedOutput, declared, false);
+            return declared;
+        }
+        boolean useClicked = handler != null
+                ? handler.useClickedPrimaryOutput(recipe, declared, clickedOutput)
+                : declared.hasTag() && clickedOutput.hasTag();
+        ItemStack selected = useClicked
+                ? clickedOutput.copyWithCount(declared.getCount())
+                : declared;
+        logTerminalOutputSelection(recipe, handler, runtimeNbt, recipeOutput,
+                clickedOutput, selected, useClicked);
+        return selected;
+    }
+
+    private static ItemStack itemOnlyDeclaration(ItemStack output) {
+        return output == null || output.isEmpty()
+                ? ItemStack.EMPTY
+                : new ItemStack(output.getItem(), output.getCount());
+    }
+
+    private static void logTerminalOutputSelection(
+            Recipe<?> recipe, @Nullable ModRecipeHandler handler, boolean runtimeNbt,
+            ItemStack recipeOutput, @Nullable ItemStack clickedOutput,
+            ItemStack selected, boolean useClicked) {
+        if (!"goety".equals(recipe.getId().getNamespace())) return;
+        RSIntegrationMod.LOGGER.debug(
+                "[RSI-GraphOutput] recipe={} handler={} runtimeNbt={} useClicked={} "
+                        + "recipeTag={} clickedTag={} selectedTag={}",
+                recipe.getId(), handler == null ? "none" : handler.getClass().getSimpleName(),
+                runtimeNbt, useClicked, recipeOutput.getTag(),
+                clickedOutput == null ? null : clickedOutput.getTag(), selected.getTag());
+    }
+
     private static void tryResolve(ServerPlayer player, ResourceLocation recipeId,
                                    Map<String, String> forcedRecipes,
                                    @Nullable ResourceLocation dim,
@@ -1040,10 +1089,7 @@ public final class GenericCraftPacket {
                 }
                 ResolutionStep terminalStep = new ResolutionStep(recipeId, modType, recipeId,
                         List.of(), List.of(), inferMode, repeatCount);
-                if (targetOutput != null && !targetOutput.isEmpty()
-                        && !recipeOutput.isEmpty() && targetOutput.getItem() == recipeOutput.getItem()) {
-                    recipeOutput = targetOutput.copyWithCount(recipeOutput.getCount());
-                }
+                recipeOutput = selectTerminalGraphOutput(recipe, recipeOutput, targetOutput);
                 ModRecipeHandler recipeHandler = ModRecipeHandlers.handlerFor(recipe);
                 boolean deterministicPrimary = recipeHandler == null
                         || recipeHandler.hasDeterministicPrimaryOutput(recipe);
@@ -1114,11 +1160,7 @@ public final class GenericCraftPacket {
                         recipe, player.serverLevel().registryAccess());
                 if (needsAsync && !legacySyntheticStep) {
                     ResolutionStep terminalStep = genericTerminalStep(recipeId, repeatCount);
-                    if (targetOutput != null && !targetOutput.isEmpty()
-                            && !recipeOutput.isEmpty()
-                            && targetOutput.getItem() == recipeOutput.getItem()) {
-                        recipeOutput = targetOutput.copyWithCount(recipeOutput.getCount());
-                    }
+                    recipeOutput = selectTerminalGraphOutput(recipe, recipeOutput, targetOutput);
                     if (!selfAmplifying) {
                         try {
                             CraftPlanGraph completeGraph = composeEquivalentTerminalGraph(
@@ -1221,11 +1263,7 @@ public final class GenericCraftPacket {
                 ResolutionStep terminalStep = genericTerminalStep(recipeId, repeatCount);
                 execSteps2.add(terminalStep);
                 if (needsAsync && !legacySyntheticStep) {
-                    if (targetOutput != null && !targetOutput.isEmpty()
-                            && !recipeOutput.isEmpty()
-                            && targetOutput.getItem() == recipeOutput.getItem()) {
-                        recipeOutput = targetOutput.copyWithCount(recipeOutput.getCount());
-                    }
+                    recipeOutput = selectTerminalGraphOutput(recipe, recipeOutput, targetOutput);
                     if (!selfAmplifying) {
                         try {
                             CraftPlanGraph completeGraph = composeEquivalentTerminalGraph(
@@ -1318,11 +1356,7 @@ public final class GenericCraftPacket {
                         if (!legacySyntheticStep) {
                             ItemStack recipeOutput = ModRecipeHandlers.tryGetResultItem(
                                     recipe, player.serverLevel().registryAccess());
-                            if (targetOutput != null && !targetOutput.isEmpty()
-                                    && !recipeOutput.isEmpty()
-                                    && targetOutput.getItem() == recipeOutput.getItem()) {
-                                recipeOutput = targetOutput.copyWithCount(recipeOutput.getCount());
-                            }
+                            recipeOutput = selectTerminalGraphOutput(recipe, recipeOutput, targetOutput);
                             boolean selfAmplifying = isSelfAmplifyingRecipe(
                                     recipe, player.serverLevel().registryAccess());
                             if (!selfAmplifying) {

@@ -33,6 +33,11 @@ public final class SmithingRecipeHandler implements ModRecipeHandler {
         return recipe.getResultItem(access);
     }
 
+    @Override
+    public boolean useClickedPrimaryOutput(Recipe<?> recipe, ItemStack declared, ItemStack clicked) {
+        return clicked.hasTag() || ModRecipeHandler.super.useClickedPrimaryOutput(recipe, declared, clicked);
+    }
+
     public static ItemStack selectAvailableBase(SmithingTransformRecipe recipe,
                                                 java.util.Map<com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey, Integer> available,
                                                 int needed) {
