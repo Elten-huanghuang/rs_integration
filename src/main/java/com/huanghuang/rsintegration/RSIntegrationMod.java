@@ -244,6 +244,10 @@ public final class RSIntegrationMod {
         DistExecutor.safeRunWhenOn(Dist.CLIENT,
                 () -> RSIKeyBindings::registerKeyMappings);
         DistExecutor.safeRunWhenOn(Dist.CLIENT,
+                () -> com.huanghuang.rsintegration.mods.rs.recentsearch.RecentSearchClient::init);
+        DistExecutor.safeRunWhenOn(Dist.CLIENT,
+                () -> com.huanghuang.rsintegration.sidepanel.client.MachineFavoritesClient::init);
+        DistExecutor.safeRunWhenOn(Dist.CLIENT,
                 () -> () -> {
                     com.huanghuang.rsintegration.crafting.CraftProgressKeybind.register();
                     MinecraftForge.EVENT_BUS.register(com.huanghuang.rsintegration.crafting.CraftProgressOverlay.class);

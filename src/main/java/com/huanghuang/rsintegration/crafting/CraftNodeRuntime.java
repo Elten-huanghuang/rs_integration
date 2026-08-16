@@ -43,6 +43,8 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
     private boolean terminalOutputsDrained;
     private int waitTicks;
     private int drainingTicks;
+    private int observedCompletedOperations;
+    private boolean progressObserved;
     private boolean stopRequested;
     private String failureReason;
     private boolean terminal;
@@ -89,11 +91,21 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
     List<NodeOutputAccumulator.Publication> drainIncrementalOutputs() {
         if (outputs == null) return List.of();
         List<ItemStack> actual = new java.util.ArrayList<>(drainSettledResults());
+        if (!actual.isEmpty()) {
+            waitTicks = 0;
+            progressObserved = true;
+        }
         if (terminal && !terminalOutputsDrained) {
             terminalOutputsDrained = true;
             actual.addAll(confirmedOutputs);
         }
         return outputs.add(actual);
+    }
+
+    boolean consumeProgressSignal() {
+        boolean observed = progressObserved;
+        progressObserved = false;
+        return observed;
     }
 
     boolean outputsComplete() {
@@ -250,6 +262,14 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
             }
 
             IBatchDelegate.CraftObservation observation = delegate.observeCraft(null);
+            if (delegate instanceof ParallelCraftGroup group) {
+                int completed = group.getCompletedOperations();
+                if (completed > observedCompletedOperations) {
+                    observedCompletedOperations = completed;
+                    waitTicks = 0;
+                    progressObserved = true;
+                }
+            }
             if (observation.phase() == IBatchDelegate.CraftPhase.FAILED) {
                 failureReason = observation.detail();
                 return ConcurrentNodeExecutor.Observation.FAILED;

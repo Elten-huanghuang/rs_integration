@@ -54,6 +54,7 @@ public final class MachineHub {
     private final List<BindingInfo> machines = new ArrayList<>();
     private final List<BindingInfo> filteredMachines = new ArrayList<>();
     private int hoveredIndex = -1;
+    private int favoriteHoveredIndex = -1;
     private boolean closeButtonHovered;
     private int closeButtonX, closeButtonY, closeButtonW, closeButtonH;
     private String filterText = "";
@@ -90,6 +91,8 @@ public final class MachineHub {
     }
     public static int getHoveredIndex() { return INSTANCE.hoveredIndex; }
     public static void setHoveredIndex(int idx) { INSTANCE.hoveredIndex = idx; }
+    public static int getFavoriteHoveredIndex() { return INSTANCE.favoriteHoveredIndex; }
+    public static void setFavoriteHoveredIndex(int idx) { INSTANCE.favoriteHoveredIndex = idx; }
     public static boolean isCloseButtonHovered() { return INSTANCE.closeButtonHovered; }
     public static void setCloseButtonHovered(boolean v) { INSTANCE.closeButtonHovered = v; }
     public static void setCloseButtonBounds(int x, int y, int w, int h) {
@@ -194,6 +197,7 @@ public final class MachineHub {
         }
         scrollOffset = 0;
         hoveredIndex = -1;
+        favoriteHoveredIndex = -1;
     }
 
     private static boolean matchesPinyin(String text, String lowerQuery) {
@@ -278,6 +282,7 @@ public final class MachineHub {
         INSTANCE.filterText = "";
         INSTANCE.scrollOffset = 0;
         INSTANCE.hoveredIndex = -1;
+        INSTANCE.favoriteHoveredIndex = -1;
         INSTANCE.closeButtonHovered = false;
         INSTANCE.closeButtonW = 0;
         INSTANCE.closeButtonH = 0;

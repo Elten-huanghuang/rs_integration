@@ -477,7 +477,7 @@
   "rsi.async.abort.machine_start_failed": "多方块合成启动失败：%s",
   "rsi.async.abort.scheduler_missing": "内部错误：合成图调度器不可用",
   "rsi.async.abort.executor_missing": "内部错误：合成图执行器未初始化",
-  "rsi.async.abort.global_timeout": "合成链超出全局超时限制（%s 秒）",
+  "rsi.async.abort.global_timeout": "合成链连续 %s 秒没有进展，已超时终止",
   "rsi.async.abort.executor_error": "合成图执行器错误：%s",
   "rsi.async.abort.missing_material": "缺少材料：%s",
   "rsi.async.abort.drop_throttle": "RS 网络已满且玩家离线，掉落物已被限流",
@@ -685,6 +685,9 @@
   "rsi.hub.controls.quick_has_output": "空手左键:收取  空手Shift:回收RS  右键:打开",
   "rsi.hub.controls.quick_normal": "拿物品左键:放入  拿物品Shift:放燃料  空手左键:打开GUI",
   "rsi.hub.controls.gui": "左键/右键:打开GUI",
+  "rsi.hub.favorite": "左键左上角星标：添加到机器快捷栏",
+  "rsi.hub.unfavorite": "左键左上角星标：从机器快捷栏移除",
+  "rsi.hub.favorite_limit": "机器快捷栏最多收藏 %s 台机器",
 
   "rsi.plan.open_machine": "打开机器",
   "rsi.jei.open_machine": "打开绑定的机器界面",
@@ -949,5 +952,8 @@
   "rsi.machine_candidate.ready": "可用",
   "rsi.machine_candidate.temporary": "暂不可用",
   "rsi.machine_candidate.incompatible": "条件不满足",
-  "rsi.machine_candidate.check_failed": "检查失败"
+  "rsi.machine_candidate.check_failed": "检查失败",
+  "rsi.recent_search.favorite": "收藏或取消收藏",
+  "rsi.recent_search.delete": "删除这条搜索记录",
+  "rsi.recent_search.clear_all": "清空当前世界或服务器的搜索记录"
 }
