@@ -123,4 +123,12 @@ class GoetyBatchDelegateTest extends BootstrapTest {
         assertEquals(GoetyBatchDelegate.PlanStructureOutcome.NO_BINDING,
                 GoetyBatchDelegate.summarizePlanStructureProbes(List.of()));
     }
+
+    @Test
+    void machineSpecificPrerequisiteFailureRemainsRetryable() {
+        assertEquals(IBatchDelegate.PreparationState.RETRY,
+                GoetyBatchDelegate.prerequisiteFailureState(false));
+        assertEquals(IBatchDelegate.PreparationState.FATAL,
+                GoetyBatchDelegate.prerequisiteFailureState(true));
+    }
 }

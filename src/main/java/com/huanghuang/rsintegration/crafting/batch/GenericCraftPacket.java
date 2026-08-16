@@ -44,6 +44,7 @@ import com.huanghuang.rsintegration.mods.embers.EmbersPlanInfo;
 import com.huanghuang.rsintegration.mods.farmingforblockheads.MarketBatchDelegate;
 import com.huanghuang.rsintegration.mods.apotheosis.ApotheosisGemCuttingCatalog;
 import com.huanghuang.rsintegration.mods.arsnouveau.ArsDynamicApparatusRecipe;
+import com.huanghuang.rsintegration.mods.goety.GoetyDynamicRitualRecipe;
 import com.huanghuang.rsintegration.mods.goety.GoetySoulTotemCrafting;
 import com.huanghuang.rsintegration.mods.forbidden.FaRitualHelper;
 import com.huanghuang.rsintegration.mods.forbidden.FaRitualWrapper;
@@ -962,10 +963,19 @@ public final class GenericCraftPacket {
         }
 
         boolean arsDynamic = ArsDynamicApparatusRecipe.isSupported(recipe);
+        boolean goetyDynamic = GoetyDynamicRitualRecipe.isSupported(recipe);
         List<IngredientSpec> specs;
         if (arsDynamic) {
             ItemStack validated = ArsDynamicApparatusRecipe.validatedOutput(recipe, targetOutput);
             specs = ArsDynamicApparatusRecipe.buildMaterials(recipe, targetOutput);
+            if (validated.isEmpty() || specs.isEmpty()) {
+                player.sendSystemMessage(Component.translatable(
+                        "rsi.generic.error.unsupported_machine", recipe.getClass().getSimpleName()));
+                return;
+            }
+        } else if (goetyDynamic) {
+            ItemStack validated = GoetyDynamicRitualRecipe.validatedOutput(recipe, targetOutput);
+            specs = GoetyDynamicRitualRecipe.buildMaterials(recipe, targetOutput);
             if (validated.isEmpty() || specs.isEmpty()) {
                 player.sendSystemMessage(Component.translatable(
                         "rsi.generic.error.unsupported_machine", recipe.getClass().getSimpleName()));
@@ -1075,8 +1085,10 @@ public final class GenericCraftPacket {
                 // fails while trying to reserve material that was never planned.
                 ItemStack recipeOutput = arsDynamic
                         ? ArsDynamicApparatusRecipe.validatedOutput(recipe, targetOutput)
-                        : ModRecipeHandlers.tryGetResultItem(
-                                recipe, player.serverLevel().registryAccess());
+                        : goetyDynamic
+                                ? GoetyDynamicRitualRecipe.validatedOutput(recipe, targetOutput)
+                                : ModRecipeHandlers.tryGetResultItem(
+                                        recipe, player.serverLevel().registryAccess());
                 List<IngredientSpec> graphSpecs = scaleTerminalIngredientSpecs(
                         executionSpecs, recipeOutput, repeatCount);
                 Map<StackKey, Integer> avail = MaterialSources.listAllAvailable(player, network);
@@ -1866,6 +1878,7 @@ public final class GenericCraftPacket {
             return;
         }
         boolean arsDynamic = ArsDynamicApparatusRecipe.isSupported(recipe);
+        boolean goetyDynamic = GoetyDynamicRitualRecipe.isSupported(recipe);
         if (arsDynamic && (clickedOutput == null || clickedOutput.isEmpty())) {
             sink.error(Component.translatable(
                     "rsi.generic.error.unsupported_machine", recipe.getClass().getSimpleName()));
@@ -1967,6 +1980,23 @@ public final class GenericCraftPacket {
                     .toList();
             displayInputRoles = nonEmptyInputRoles(specs);
             recipeSpecs = scaleIngredientSpecs(specs, repeatCount);
+            recipeIngredients = expandIngredientSpecs(recipeSpecs);
+            targetOutput = validated;
+            recipeModType = ModType.classifyRecipe(recipe);
+        } else if (goetyDynamic) {
+            ItemStack validated = GoetyDynamicRitualRecipe.validatedOutput(recipe, clickedOutput);
+            List<IngredientSpec> specs = GoetyDynamicRitualRecipe.buildMaterials(recipe, clickedOutput);
+            if (validated.isEmpty() || specs.isEmpty()) {
+                sink.error(Component.translatable(
+                        "rsi.generic.error.unsupported_machine", recipe.getClass().getSimpleName()));
+                return;
+            }
+            displayIngredients = specs.stream()
+                    .filter(spec -> !spec.isEmpty())
+                    .map(IngredientSpec::ingredient)
+                    .toList();
+            displayInputRoles = nonEmptyInputRoles(specs);
+            recipeSpecs = scaleTerminalIngredientSpecs(specs, validated, repeatCount);
             recipeIngredients = expandIngredientSpecs(recipeSpecs);
             targetOutput = validated;
             recipeModType = ModType.classifyRecipe(recipe);

@@ -3,15 +3,13 @@ package com.huanghuang.rsintegration.recipe;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.mods.goety.GoetyDynamicRitualRecipe;
 import com.huanghuang.rsintegration.mods.goety.GoetyRitualPolicy;
 import com.huanghuang.rsintegration.util.Reflect;
 import net.minecraft.core.RegistryAccess;
-import net.minecraft.world.item.EnchantedBookItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
-import net.minecraft.world.item.enchantment.Enchantment;
-import net.minecraft.world.item.enchantment.EnchantmentInstance;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
@@ -66,6 +64,10 @@ public final class GoetyRecipeHandler extends AbstractRecipeHandler {
 
     private static final String RITUAL_CLASS = "com.Polarice3.Goety.common.crafting.RitualRecipe";
     private static final String BRAZIER_CLASS = "com.Polarice3.Goety.common.crafting.BrazierRecipe";
+
+    public static boolean isRitualRecipe(Recipe<?> recipe) {
+        return recipe != null && RITUAL_CLASS.equals(recipe.getClass().getName());
+    }
 
     @Override
     public boolean canHandle(Recipe<?> recipe) {
@@ -133,7 +135,7 @@ public final class GoetyRecipeHandler extends AbstractRecipeHandler {
         //  new EnchantmentInstance(recipe.getEnchantment(), 1))). So the plain
         // result below would render a blank book in the plan tree. Reconstruct
         // the enchanted book here to mirror the ritual's output exactly.
-        ItemStack book = buildEnchantedBookOutput(recipe);
+        ItemStack book = GoetyDynamicRitualRecipe.buildOutput(recipe, 1);
         if (!book.isEmpty()) return book;
 
         // Try standard getResultItem first (may work on some subclasses)
@@ -171,29 +173,6 @@ public final class GoetyRecipeHandler extends AbstractRecipeHandler {
             scan = scan.getSuperclass();
         }
 
-        return ItemStack.EMPTY;
-    }
-
-    /**
-     * Reconstruct the enchanted-book output for a goety:enchant ritual whose
-     * {@code result} is a plain enchanted book. The enchantment is carried in
-     * the recipe's own {@code enchantment} field (exposed via getEnchantment())
-     * and the ritual applies it at level 1 via
-     * {@code EnchantedBookItem.createForEnchantment(new EnchantmentInstance(ench, 1))}.
-     *
-     * @return the enchanted book, or EMPTY if the recipe has no enchantment
-     *         (e.g. summon/brazier recipes with a real item output).
-     */
-    private static ItemStack buildEnchantedBookOutput(Recipe<?> recipe) {
-        try {
-            var enchOpt = Reflect.invoke(recipe, "getEnchantment");
-            if (enchOpt.isPresent() && enchOpt.get() instanceof Enchantment enchantment) {
-                return EnchantedBookItem.createForEnchantment(
-                        new EnchantmentInstance(enchantment, 1));
-            }
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Goety] Failed to build enchant-ritual book output", e);
-        }
         return ItemStack.EMPTY;
     }
 

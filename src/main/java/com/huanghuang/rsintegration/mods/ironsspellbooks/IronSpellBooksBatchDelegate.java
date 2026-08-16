@@ -107,64 +107,68 @@ public final class IronSpellBooksBatchDelegate extends AbstractBatchDelegate {
 
     private boolean start(ServerPlayer player, List<ItemStack> materials) {
         List<IngredientSpec> specs = getRequiredMaterials();
-        if (specs == null || materials.size() != specs.size()) return false;
-        MenuProvider provider = level.getBlockState(pos).getMenuProvider(level, pos);
-        if (provider == null) return false;
-        AbstractContainerMenu created = provider.createMenu(-1, player.getInventory(), player);
-        if (!(created instanceof ScrollForgeMenu) && !(created instanceof ArcaneAnvilMenu)) return false;
-        this.menu = created;
-        if (!machineSlotsEmpty(created)) {
-            this.menu = null;
-            return false;
+        if (specs == null) return fail("recipe has no material specification", ItemStack.EMPTY, materials);
+        if (materials.size() != specs.size()) {
+            return fail("material count does not match recipe specification", ItemStack.EMPTY, materials);
         }
         for (int i = 0; i < specs.size(); i++) {
             ItemStack stack = materials.get(i);
             if (stack.isEmpty() || stack.getCount() < specs.get(i).count()
-                    || !specs.get(i).ingredient().test(stack)) { this.menu = null; return false; }
+                    || !specs.get(i).ingredient().test(stack)) {
+                return fail("material " + i + " does not satisfy the runtime recipe",
+                        ItemStack.EMPTY, materials);
+            }
         }
-        if (recipe.machine() == IronSpellBooksRecipe.Machine.SCROLL_FORGE) {
-            ScrollForgeMenu forge = (ScrollForgeMenu) created;
-            forge.getInkSlot().set(materials.get(0).copyWithCount(1));
-            forge.getBlankScrollSlot().set(materials.get(1).copyWithCount(1));
-            forge.getFocusSlot().set(materials.get(2).copyWithCount(1));
-            var spell = SpellRegistry.getSpell(new ResourceLocation(recipe.spellId()));
-            if (spell == null || spell == SpellRegistry.none()) {
-                return fail("spell is not registered", ItemStack.EMPTY, materials);
-            }
-            forge.setRecipeSpell(spell);
-            ItemStack displayed = forge.getResultSlot().getItem().copy();
-            if (sameExpectedOutput(displayed)) {
-                Slot resultSlot = forge.getResultSlot();
-                result = resultSlot.remove(displayed.getCount());
-                resultSlot.onTake(player, result);
-            } else {
-                String fallbackRejection = deterministicScrollForgeRejection(spell, materials);
-                if (fallbackRejection != null) {
-                    return fail("native Scroll Forge output mismatch; " + fallbackRejection,
-                            displayed, materials);
-                }
-                RSIntegrationMod.LOGGER.info(
-                        "[RSI-IronSpells] Native Scroll Forge menu returned {} for {}; "
-                                + "using validated deterministic output {}",
-                        displayed, recipe.getId(), expected);
-                result = expected.copy();
-            }
-        } else {
-            ArcaneAnvilMenu anvil = (ArcaneAnvilMenu) created;
-            anvil.getSlot(0).set(materials.get(0).copyWithCount(1));
-            anvil.getSlot(1).set(materials.get(1).copyWithCount(1));
-            anvil.slotsChanged(anvil.getSlot(0).container);
-            ItemStack displayed = anvil.getSlot(2).getItem().copy();
-            if (!sameExpectedOutput(displayed)) {
-                return fail("Arcane Anvil output mismatch", displayed, materials);
-            }
-            Slot resultSlot = anvil.getSlot(2);
-            result = resultSlot.remove(displayed.getCount());
-            resultSlot.onTake(player, result);
+
+        if (usesDeterministicScrollOutput(recipe.machine())) {
+            return startDeterministicScrollForge(materials);
         }
+
+        MenuProvider provider = level.getBlockState(pos).getMenuProvider(level, pos);
+        if (provider == null) return fail("machine has no menu provider", ItemStack.EMPTY, materials);
+        AbstractContainerMenu created = provider.createMenu(-1, player.getInventory(), player);
+        if (!(created instanceof ArcaneAnvilMenu anvil)) {
+            return fail("machine created an unexpected menu type", ItemStack.EMPTY, materials);
+        }
+        this.menu = created;
+        if (!machineSlotsEmpty(created)) {
+            return fail("machine inventory is occupied", ItemStack.EMPTY, materials);
+        }
+        anvil.getSlot(0).set(materials.get(0).copyWithCount(1));
+        anvil.getSlot(1).set(materials.get(1).copyWithCount(1));
+        anvil.slotsChanged(anvil.getSlot(0).container);
+        ItemStack displayed = anvil.getSlot(2).getItem().copy();
+        if (!sameExpectedOutput(displayed)) {
+            return fail("Arcane Anvil output mismatch", displayed, materials);
+        }
+        Slot resultSlot = anvil.getSlot(2);
+        result = resultSlot.remove(displayed.getCount());
+        resultSlot.onTake(player, result);
         clearMenu();
         done = !result.isEmpty();
         return done;
+    }
+
+    private boolean startDeterministicScrollForge(List<ItemStack> materials) {
+        var spell = SpellRegistry.getSpell(new ResourceLocation(recipe.spellId()));
+        if (spell == null || spell == SpellRegistry.none()) {
+            return fail("spell is not registered", ItemStack.EMPTY, materials);
+        }
+        String rejection = deterministicScrollForgeRejection(spell, materials);
+        if (rejection != null) {
+            return fail("validated Scroll Forge output rejected: " + rejection,
+                    ItemStack.EMPTY, materials);
+        }
+        result = expected.copy();
+        done = !result.isEmpty();
+        RSIntegrationMod.LOGGER.debug(
+                "[RSI-IronSpells] Created validated deterministic Scroll Forge output {} for {}",
+                result, recipe.getId());
+        return done;
+    }
+
+    static boolean usesDeterministicScrollOutput(IronSpellBooksRecipe.Machine machine) {
+        return machine == IronSpellBooksRecipe.Machine.SCROLL_FORGE;
     }
 
     private boolean sameExpectedOutput(ItemStack displayed) {

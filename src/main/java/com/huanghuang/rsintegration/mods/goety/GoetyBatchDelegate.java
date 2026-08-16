@@ -65,6 +65,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
     private int soulCost;
     private boolean ritualEverSeenActive;
     private boolean prerequisiteBlocked;
+    private boolean prerequisiteFailurePermanent;
     private long ritualIdleSinceGameTime = -1L;
     private static final int RITUAL_IDLE_STABILITY_TICKS = 20;
     private ItemStack activationExtractedFromPlayer;
@@ -90,7 +91,11 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             return PreparationResult.ready();
         }
         if (prerequisiteBlocked) {
-            return PreparationResult.fatal("Goety ritual prerequisites not met for " + recipeId);
+            String detail = "Goety ritual prerequisites not met for " + recipeId;
+            return prerequisiteFailureState(prerequisiteFailurePermanent)
+                    == PreparationState.FATAL
+                    ? PreparationResult.fatal(detail)
+                    : PreparationResult.retry(detail);
         }
         if (altar != null && Reflect.getField(altar, GoetyReflection.F_CURRENT_RITUAL_RECIPE).orElse(null) != null) {
             return PreparationResult.retry("Goety altar is still processing");
@@ -118,6 +123,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         this.myPos = pos;
         this.player = player;
         this.prerequisiteBlocked = false;
+        this.prerequisiteFailurePermanent = false;
         // Set machineDim NOW so resolveMachineLevel() resolves the machine's own
         // dimension during validation (e.g. checkStructureRequirements). The chain
         // otherwise calls setMachineDim only AFTER validateAndInit returns true, so
@@ -192,6 +198,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             player.sendSystemMessage(Component.translatable(
                     "rsi.goety.error.prerequisite_check_failed"));
             prerequisiteBlocked = true;
+            prerequisiteFailurePermanent = true;
             return false;
         } else {
             if (GoetyReflection.teleportRitualClass != null && GoetyReflection.teleportRitualClass.isInstance(ritualObj)) {
@@ -254,6 +261,10 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
 
         RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] validateAndInit [OK] all checks passed: recipe={} altar at {}", recipeId, pos);
         return true;
+    }
+
+    static PreparationState prerequisiteFailureState(boolean permanentContractFailure) {
+        return permanentContractFailure ? PreparationState.FATAL : PreparationState.RETRY;
     }
 
     private boolean validateAndInitBrazier(Object be, ResourceLocation recipeId, ServerLevel level) {
@@ -365,9 +376,13 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
 
         if (!checkRitualPrerequisites(ritualRecipe, ritual)) return false;
 
-        List<IngredientSpec> specList = collectIngredients(ritualRecipe);
-        Ingredient activationIng = Reflect.<Ingredient>invoke(ritualRecipe, GoetyReflection.M_GET_ACTIVATION_ITEM).orElse(Ingredient.EMPTY);
-        if (activationIng != null && !activationIng.isEmpty()) {
+        boolean dynamicEnchant = ritualRecipe instanceof Recipe<?> recipe
+                && GoetyDynamicRitualRecipe.isSupported(recipe);
+        List<IngredientSpec> specList = dynamicEnchant
+                ? rawRitualIngredients((Recipe<?>) ritualRecipe)
+                : collectIngredients(ritualRecipe);
+        Ingredient activationIng = effectiveActivationIngredient();
+        if (!dynamicEnchant && activationIng != null && !activationIng.isEmpty()) {
             ItemStack[] actItems = activationIng.getItems();
             if (actItems.length > 0) {
                 Item actBase = actItems[0].getItem();
@@ -686,6 +701,10 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         // activation" because the activation was never reserved. Reconstructing
         // the list from the recipe directly makes this deterministic.
         Recipe<?> r = (Recipe<?>) ritualRecipe;
+        if (GoetyDynamicRitualRecipe.isSupported(r)) {
+            List<IngredientSpec> dynamic = GoetyDynamicRitualRecipe.buildMaterials(r, targetOutput);
+            return dynamic.isEmpty() ? null : dynamic;
+        }
         List<IngredientSpec> specs = new ArrayList<>();
         for (Ingredient ing : r.getIngredients()) {
             if (!ing.isEmpty()) specs.add(new IngredientSpec(ing, 1));
@@ -743,7 +762,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
 
         List<ItemStack> remainingMaterials = new ArrayList<>(materials);
         ItemStack activationItem = ItemStack.EMPTY;
-        Ingredient activationIng = Reflect.<Ingredient>invoke(ritualRecipe, GoetyReflection.M_GET_ACTIVATION_ITEM).orElse(Ingredient.EMPTY);
+        Ingredient activationIng = effectiveActivationIngredient();
         if (activationIng != null && !activationIng.isEmpty()) {
             activationItem = removeActivationFromMaterials(remainingMaterials, activationIng);
             if (activationItem.isEmpty()) {
@@ -935,8 +954,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
                 ItemStack activation = pendingManualActivation.copy();
                 pendingManualActivation = ItemStack.EMPTY;
                 ItemHandlerHelper.giveItemToPlayer(player, activation);
-                Ingredient activationIng = Reflect.<Ingredient>invoke(
-                        ritualRecipe, GoetyReflection.M_GET_ACTIVATION_ITEM).orElse(Ingredient.EMPTY);
+                Ingredient activationIng = effectiveActivationIngredient();
                 Component itemName = CraftPacketUtils.describeIngredient(activationIng);
                 player.sendSystemMessage(Component.translatable("rsi.goety.manual_ritual_prepared", itemName));
             }
@@ -946,7 +964,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
     }
 
     private boolean hasExpectedRitualOutput(ServerLevel level, BlockEntity be) {
-        ItemStack expected = RecipeIndex.tryGetResultItem((Recipe<?>) ritualRecipe, level.registryAccess());
+        ItemStack expected = expectedRitualOutput(level);
         if (expected.isEmpty()) return false;
 
         // Completion and collection used to happen on different ticks. During the
@@ -1039,7 +1057,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             return collected;
         }
 
-        ItemStack expected = RecipeIndex.tryGetResultItem((Recipe<?>) ritualRecipe, player.serverLevel().registryAccess());
+        ItemStack expected = expectedRitualOutput(player.serverLevel());
         if (expected.isEmpty()) return ItemStack.EMPTY;
 
         // 1. Check altar's own inventory (slot 0 is where Ritual.finish() places the result)
@@ -1254,8 +1272,29 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         if (outputRecipe == null || player == null) return null;
         ServerLevel level = resolveMachineLevel(player);
         if (level == null) return null;
-        ItemStack expected = RecipeIndex.tryGetResultItem(outputRecipe, level.registryAccess());
+        ItemStack expected = !isBrazier
+                ? expectedRitualOutput(level)
+                : RecipeIndex.tryGetResultItem(outputRecipe, level.registryAccess());
         return expected.isEmpty() ? null : expected;
+    }
+
+    private Ingredient effectiveActivationIngredient() {
+        if (ritualRecipe instanceof Recipe<?> recipe
+                && GoetyDynamicRitualRecipe.isSupported(recipe)) {
+            Ingredient dynamic = GoetyDynamicRitualRecipe.activationIngredient(recipe, targetOutput);
+            return dynamic;
+        }
+        return Reflect.<Ingredient>invoke(ritualRecipe, GoetyReflection.M_GET_ACTIVATION_ITEM)
+                .orElse(Ingredient.EMPTY);
+    }
+
+    private ItemStack expectedRitualOutput(ServerLevel level) {
+        if (!(ritualRecipe instanceof Recipe<?> recipe)) return ItemStack.EMPTY;
+        if (GoetyDynamicRitualRecipe.isSupported(recipe)) {
+            ItemStack dynamic = GoetyDynamicRitualRecipe.validatedOutput(recipe, targetOutput);
+            return dynamic;
+        }
+        return RecipeIndex.tryGetResultItem(recipe, level.registryAccess());
     }
 
     private static boolean requiresManualStart(Object recipe, Object ritual) {
@@ -1368,6 +1407,14 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             if (!result.isEmpty()) return result;
         }
         return new ArrayList<>();
+    }
+
+    private static List<IngredientSpec> rawRitualIngredients(Recipe<?> recipe) {
+        List<IngredientSpec> result = new ArrayList<>();
+        for (Ingredient ingredient : recipe.getIngredients()) {
+            if (!ingredient.isEmpty()) result.add(new IngredientSpec(ingredient, 1));
+        }
+        return result;
     }
 
     // ── Pedestal helpers ─────────────────────────────────────────
@@ -1715,6 +1762,19 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
     private boolean checkEnchantmentRequirements(Object recipe, Object ritual) {
         if (GoetyReflection.enchantItemRitualClass == null || !GoetyReflection.enchantItemRitualClass.isInstance(ritual)) return true;
         int xpCost = Reflect.<Integer>invoke(recipe, "getXPLevelCost").orElse(0);
+        if (recipe instanceof Recipe<?> dynamicRecipe
+                && GoetyDynamicRitualRecipe.isSupported(dynamicRecipe)) {
+            int targetLevel = GoetyDynamicRitualRecipe.inferTargetLevel(dynamicRecipe, targetOutput);
+            ItemStack centre = GoetyDynamicRitualRecipe.buildInput(
+                    dynamicRecipe, targetLevel, targetOutput);
+            if (targetLevel == 0 || centre.isEmpty()) {
+                player.sendSystemMessage(Component.translatable(
+                        "rsi.goety.error.prerequisite_check_failed"));
+                return false;
+            }
+            xpCost = Reflect.<Integer>invoke(ritual, "getLevelCost", centre)
+                    .orElse(Math.multiplyExact(xpCost, targetLevel));
+        }
         if (xpCost > 0 && player.experienceLevel < xpCost) {
             player.sendSystemMessage(Component.translatable(
                     "rsi.goety.error.insufficient_xp", xpCost, player.experienceLevel));
