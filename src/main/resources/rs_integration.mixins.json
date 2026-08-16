@@ -12,6 +12,8 @@
     "minecraft.FurnaceMenuMixin",
     "minecraft.InventoryAccessor",
     "minecraft.ItemEntityAccessor",
+    "placebo.PlaceboBlockEntityMenuMixin",
+    "placebo.PlaceboContainerMenuMixin",
     "ftbquests.SubmitTaskMessageMixin",
     "ftbquests.InventoryTaskAutoSubmissionMixin",
     "ftbquests.ClaimAllRewardsMessageMixin",

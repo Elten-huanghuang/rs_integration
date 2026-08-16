@@ -158,7 +158,12 @@ public final class ParallelCraftGroup implements IBatchDelegate {
             workers.add(new WorkerSlot(workerId++, machine, preparation.delegate()));
             if (representativePos.equals(BlockPos.ZERO)) representativePos = machine.pos();
         }
-        refreshMaterialSpecs();
+        try {
+            refreshMaterialSpecs();
+        } catch (RuntimeException exception) {
+            releasePreparationResources();
+            throw exception;
+        }
         RSIntegrationMod.LOGGER.debug("[RSI-ParallelGroup] Created {}/{} workers for {} operations of {}",
                 workers.size(), machines.size(), totalOperations, recipeId);
     }
@@ -181,6 +186,12 @@ public final class ParallelCraftGroup implements IBatchDelegate {
     @Nullable
     public List<IngredientSpec> getOperationMaterials() {
         return graphSpecs.isEmpty() ? null : List.copyOf(graphSpecs);
+    }
+
+    /** Complete per-operation material layout used by the flat executor. */
+    @Nullable
+    public List<IngredientSpec> getFlatOperationMaterials() {
+        return baseSpecs == null || baseSpecs.isEmpty() ? null : List.copyOf(baseSpecs);
     }
 
     @Override
@@ -322,7 +333,8 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         int operationId = operations.nextQueuedOperation();
         if (operationId < 0) return false;
 
-        ChildPreparation preparation = worker.pristineDelegate
+        boolean reusingPreparedDelegate = worker.pristineDelegate;
+        ChildPreparation preparation = reusingPreparedDelegate
                 ? ChildPreparation.ready(worker.delegate)
                 : prepareChildDelegate(worker.machine, player);
         if (preparation.state() == ChildPreparationState.RETRY) return false;
@@ -334,19 +346,43 @@ public final class ParallelCraftGroup implements IBatchDelegate {
             return false;
         }
         IBatchDelegate delegate = preparation.delegate();
-        int requestedBatch = sharedMaterialMode
-                ? Math.max(1, delegate.preferredParallelBatchSize(
-                        operations.totalOperations(), workers.size()))
-                : 1;
-        int batchSize = compatibleBatchSize(operationId,
-                Math.min(requestedBatch, operations.queuedOperations()));
-        delegate.prepareGraphBatch(batchSize);
+        int batchSize;
+        try {
+            int requestedBatch = sharedMaterialMode
+                    ? Math.max(1, delegate.preferredParallelBatchSize(
+                            operations.totalOperations(), workers.size()))
+                    : 1;
+            batchSize = compatibleBatchSize(operationId,
+                    Math.min(requestedBatch, operations.queuedOperations()));
+            delegate.prepareGraphBatch(batchSize);
+        } catch (RuntimeException exception) {
+            if (!reusingPreparedDelegate) releasePreparationQuietly(delegate, worker.machine);
+            beginDraining("worker batch preparation threw at " + worker.machine.pos());
+            RSIntegrationMod.LOGGER.warn(
+                    "[RSI-ParallelGroup] Worker batch preparation threw at {}",
+                    worker.machine.pos(), exception);
+            return false;
+        }
         // Acquire the operation scope before consuming the queue id. A busy
         // machine/capture/budget leaves the operation queued for a later tick.
-        if (!acquireOperationResources(worker, delegate, operationId)) return false;
+        boolean acquired;
+        try {
+            acquired = acquireOperationResources(worker, delegate, operationId);
+        } catch (RuntimeException exception) {
+            acquired = false;
+            beginDraining("worker resource preparation threw at " + worker.machine.pos());
+            RSIntegrationMod.LOGGER.warn(
+                    "[RSI-ParallelGroup] Worker resource preparation threw at {}",
+                    worker.machine.pos(), exception);
+        }
+        if (!acquired) {
+            if (!reusingPreparedDelegate) releasePreparationQuietly(delegate, worker.machine);
+            return false;
+        }
         List<Integer> claimedOperations = operations.claimBatch(worker.id, batchSize);
         if (claimedOperations.isEmpty() || claimedOperations.get(0) != operationId) {
             closeOperationResources(worker);
+            if (!reusingPreparedDelegate) releasePreparationQuietly(delegate, worker.machine);
             throw new IllegalStateException("operation queue changed during resource acquisition");
         }
         worker.pristineDelegate = false;
@@ -671,9 +707,10 @@ public final class ParallelCraftGroup implements IBatchDelegate {
             // and the ledger refunds only the remaining reservation tokens.
             preserveCapturedProgress(worker, drainCapture(worker));
             closeOperationResources(worker);
-            if (worker.delegate != null && (worker.running() || worker.needsFailureCleanup)) {
+            if (worker.delegate != null) {
+                boolean physicalCleanupRequired = worker.running() || worker.needsFailureCleanup;
                 try {
-                    worker.delegate.onBatchFailed(player, reason);
+                    cleanupPreparedDelegate(worker.delegate, physicalCleanupRequired, player, reason);
                 } catch (Exception e) {
                     RSIntegrationMod.LOGGER.debug("[RSI-ParallelGroup] Worker cleanup failed at {}",
                             worker.machine.pos(), e);
@@ -683,6 +720,14 @@ public final class ParallelCraftGroup implements IBatchDelegate {
             worker.needsFailureCleanup = false;
         }
         started = false;
+    }
+
+    static void cleanupPreparedDelegate(IBatchDelegate delegate,
+                                        boolean physicalCleanupRequired,
+                                        @Nullable ServerPlayer player,
+                                        String reason) {
+        if (physicalCleanupRequired) delegate.onBatchFailed(player, reason);
+        else delegate.releasePreparationResources();
     }
 
     private void preserveCapturedProgress(WorkerSlot worker, List<ItemStack> captured) {
@@ -716,6 +761,19 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         for (WorkerSlot worker : workers) {
             drainCapture(worker);
             closeOperationResources(worker);
+            if (worker.delegate != null) {
+                releasePreparationQuietly(worker.delegate, worker.machine);
+            }
+        }
+    }
+
+    @Override
+    public void releasePreparationResources() {
+        for (WorkerSlot worker : workers) {
+            closeOperationResources(worker);
+            if (worker.delegate != null) {
+                releasePreparationQuietly(worker.delegate, worker.machine);
+            }
         }
     }
 
@@ -777,17 +835,29 @@ public final class ParallelCraftGroup implements IBatchDelegate {
             IBatchDelegate.PreparationResult result = PreparationMessageScope.prepare(
                     delegate, player, recipeId, machine.dim(), machine.pos());
             if (result.state() == IBatchDelegate.PreparationState.RETRY) {
+                releasePreparationQuietly(delegate, machine);
                 return ChildPreparation.retry(result.detail());
             }
             if (result.state() == IBatchDelegate.PreparationState.FATAL) {
+                releasePreparationQuietly(delegate, machine);
                 return ChildPreparation.fatal(result.detail());
             }
             configureDelegate(delegate, machine);
             return ChildPreparation.ready(delegate);
         } catch (Exception e) {
+            releasePreparationQuietly(delegate, machine);
             RSIntegrationMod.LOGGER.debug("[RSI-ParallelGroup] Worker preparation failed at {}",
                     machine.pos(), e);
             return ChildPreparation.retry("worker preparation temporarily failed at " + machine.pos());
+        }
+    }
+
+    private static void releasePreparationQuietly(IBatchDelegate delegate, BoundMachine machine) {
+        try {
+            delegate.releasePreparationResources();
+        } catch (RuntimeException exception) {
+            RSIntegrationMod.LOGGER.debug(
+                    "[RSI-ParallelGroup] Preparation cleanup failed at {}", machine.pos(), exception);
         }
     }
 
@@ -806,7 +876,7 @@ public final class ParallelCraftGroup implements IBatchDelegate {
                     && globalOperationBudget != null) {
                 return OperationBudget.tryRecordStart(craftOperationBudget, globalOperationBudget);
             }
-            armCaptureLegacy(worker);
+            armCaptureLegacy(worker, delegate);
             return true;
         }
         GraphConcurrencyPolicy.Decision concurrency = GraphConcurrencyPolicy.decide(
@@ -854,10 +924,10 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         return !exclusive || workerCount == 1;
     }
 
-    private void armCaptureLegacy(WorkerSlot worker) {
-        ItemStack expected = worker.delegate.getExpectedOutput();
+    private void armCaptureLegacy(WorkerSlot worker, IBatchDelegate delegate) {
+        ItemStack expected = delegate.getExpectedOutput();
         if (expected == null || expected.isEmpty()) return;
-        var region = worker.delegate.getOutputCaptureRegion();
+        var region = delegate.getOutputCaptureRegion();
         if (region == null) return;
         ResourceKey<Level> dimension = ResourceKey.create(Registries.DIMENSION, worker.machine.dim());
         CraftOutputInterceptor.CaptureHandle handle = CraftOutputInterceptor.arm(dimension, region, expected);

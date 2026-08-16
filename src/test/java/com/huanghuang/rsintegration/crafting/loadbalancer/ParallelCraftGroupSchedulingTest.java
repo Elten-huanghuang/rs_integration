@@ -1,7 +1,12 @@
 package com.huanghuang.rsintegration.crafting.loadbalancer;
 
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
+import net.minecraft.core.BlockPos;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Ingredient;
@@ -56,5 +61,44 @@ class ParallelCraftGroupSchedulingTest extends BootstrapTest {
     @Test
     void concurrencySafeDelegateCanJoinMultiWorkerGroup() {
         assertTrue(ParallelCraftGroup.operationGroupAcceptsChild(false, 2));
+    }
+
+    @Test
+    void preparedButUnstartedWorkerReleasesOnlyPreparationResources() {
+        TrackingDelegate delegate = new TrackingDelegate();
+
+        ParallelCraftGroup.cleanupPreparedDelegate(delegate, false, null, "start rejected");
+
+        assertEquals(1, delegate.preparationReleases);
+        assertEquals(0, delegate.failureCleanups);
+    }
+
+    @Test
+    void startedWorkerUsesFullFailureCleanup() {
+        TrackingDelegate delegate = new TrackingDelegate();
+
+        ParallelCraftGroup.cleanupPreparedDelegate(delegate, true, null, "start rejected");
+
+        assertEquals(0, delegate.preparationReleases);
+        assertEquals(1, delegate.failureCleanups);
+    }
+
+    private static final class TrackingDelegate implements IBatchDelegate {
+        int preparationReleases;
+        int failureCleanups;
+
+        @Override
+        public boolean validateAndInit(ServerPlayer player, ResourceLocation recipeId,
+                                       ResourceLocation dim, BlockPos pos) {
+            return true;
+        }
+
+        @Override public boolean tryStartSingleCraft(ServerPlayer player) { return false; }
+        @Override public boolean isCraftComplete(ServerLevel level) { return false; }
+        @Override public ItemStack collectResult(ServerPlayer player) { return ItemStack.EMPTY; }
+        @Override public void releasePreparationResources() { preparationReleases++; }
+        @Override public void onBatchFailed(ServerPlayer player, String reason) { failureCleanups++; }
+        @Override public void onBatchFinished(ServerPlayer player) {}
+        @Override public BlockPos getMachinePos() { return BlockPos.ZERO; }
     }
 }

@@ -65,39 +65,49 @@ public final class OperationResourceCoordinator {
             return null;
         }
         OperationBudget.Permit permit = OperationBudget.combine(craftPermit, globalPermit);
-        MachineLeaseRegistry.Owner machineOwner = new MachineLeaseRegistry.Owner(
-                craftId, nodeId, operationId);
-        List<MachineLeaseRegistry.Lease> machineLeases = machines.tryAcquireAll(
-                machineScope, machineOwner);
-        if (machineLeases == null) {
-            permit.cancelBeforeStart();
-            return null;
-        }
-
+        List<MachineLeaseRegistry.Lease> machineLeases = null;
         CaptureSession captureSession = null;
-        if (capture != null) {
-            CaptureLeaseRegistry.Owner captureOwner = new CaptureLeaseRegistry.Owner(
+        CaptureLeaseRegistry.Lease captureLease = null;
+        try {
+            MachineLeaseRegistry.Owner machineOwner = new MachineLeaseRegistry.Owner(
                     craftId, nodeId, operationId);
-            CaptureLeaseRegistry.Lease captureLease = captures.tryAcquire(
-                    capture.dimension(), capture.region(), MaterialKey.of(capture.expected()), captureOwner,
-                    capture.allowOverlappingOrigins());
-            if (captureLease == null) {
-                machines.releaseAll(machineLeases);
+            machineLeases = machines.tryAcquireAll(machineScope, machineOwner);
+            if (machineLeases == null) {
                 permit.cancelBeforeStart();
                 return null;
             }
-            ResourceKey<Level> dimension = ResourceKey.create(Registries.DIMENSION, capture.dimension());
-            CraftOutputInterceptor.CaptureHandle handle = CraftOutputInterceptor.arm(
-                    dimension, capture.region(), capture.expected(), capture.allowOverlappingOrigins());
-            if (handle == null) {
-                captures.release(captureLease);
-                machines.releaseAll(machineLeases);
-                permit.cancelBeforeStart();
-                return null;
+
+            if (capture != null) {
+                CaptureLeaseRegistry.Owner captureOwner = new CaptureLeaseRegistry.Owner(
+                        craftId, nodeId, operationId);
+                captureLease = captures.tryAcquire(
+                        capture.dimension(), capture.region(), MaterialKey.of(capture.expected()), captureOwner,
+                        capture.allowOverlappingOrigins());
+                if (captureLease == null) {
+                    machines.releaseAll(machineLeases);
+                    permit.cancelBeforeStart();
+                    return null;
+                }
+                ResourceKey<Level> dimension = ResourceKey.create(Registries.DIMENSION, capture.dimension());
+                CraftOutputInterceptor.CaptureHandle handle = CraftOutputInterceptor.arm(
+                        dimension, capture.region(), capture.expected(), capture.allowOverlappingOrigins());
+                if (handle == null) {
+                    captures.release(captureLease);
+                    machines.releaseAll(machineLeases);
+                    permit.cancelBeforeStart();
+                    return null;
+                }
+                captureSession = new CaptureSession(captures, captureLease, handle);
+                captureLease = null;
             }
-            captureSession = new CaptureSession(captures, captureLease, handle);
+            return new Scope(machines, machineLeases, permit, captureSession);
+        } catch (RuntimeException exception) {
+            if (captureSession != null) captureSession.close();
+            else if (captureLease != null) captures.release(captureLease);
+            if (machineLeases != null) machines.releaseAll(machineLeases);
+            permit.cancelBeforeStart();
+            throw exception;
         }
-        return new Scope(machines, machineLeases, permit, captureSession);
     }
 
     public record CaptureRequest(ResourceLocation dimension, AABB region, ItemStack expected,

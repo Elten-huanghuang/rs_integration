@@ -1159,7 +1159,7 @@ public final class AsyncCraftChain {
         NodeAdmissionCoordinator.Admission admission = graphAdmissions.tryAdmitClaimed(candidate);
         if (admission == null) {
             logGraphRetry(nodeId, "material admission unavailable", candidate.materialRequests());
-            prepared.delegate().releasePreparationResources();
+            releasePreparationQuietly(prepared.delegate());
             return ConcurrentNodeExecutor.StartResult.retry();
         }
 
@@ -1167,7 +1167,6 @@ public final class AsyncCraftChain {
                 nodeId, prepared, online, admission);
         if (dispatch.state() == DispatchState.RETRY) {
             logGraphRetry(nodeId, dispatch.detail(), candidate.materialRequests());
-            prepared.delegate().releasePreparationResources();
             graphAdmissions.releaseMaterial(admission);
             return ConcurrentNodeExecutor.StartResult.retry();
         }
@@ -1175,7 +1174,6 @@ public final class AsyncCraftChain {
             graphFailureDetails.put(nodeId, dispatch.detail());
             RSIntegrationMod.LOGGER.warn(ctx.format("Graph node {} dispatch failed: {}"),
                     nodeId, dispatch.detail());
-            prepared.delegate().releasePreparationResources();
             graphAdmissions.releaseMaterial(admission);
             return ConcurrentNodeExecutor.StartResult.failed();
         }
@@ -1189,6 +1187,29 @@ public final class AsyncCraftChain {
             RSIntegrationMod.LOGGER.warn(ctx.format(
                     "[RSI-GraphRetry] node={} detail={} requests={}"),
                     nodeId, detail, requests);
+        }
+    }
+
+    static boolean validatePreparedDelegate(
+            IBatchDelegate delegate, ServerPlayer player, ResourceLocation recipeId,
+            @Nullable ResourceLocation dimension, BlockPos position) {
+        boolean valid = false;
+        try {
+            valid = PreparationMessageScope.validate(
+                    delegate, player, recipeId, dimension, position);
+            return valid;
+        } finally {
+            if (!valid) releasePreparationQuietly(delegate);
+        }
+    }
+
+    private static void releasePreparationQuietly(IBatchDelegate delegate) {
+        try {
+            delegate.releasePreparationResources();
+        } catch (RuntimeException exception) {
+            RSIntegrationMod.LOGGER.debug(
+                    "[RSI-Delegate] Preparation resource cleanup failed for {}",
+                    delegate.getClass().getSimpleName(), exception);
         }
     }
 
@@ -1211,13 +1232,19 @@ public final class AsyncCraftChain {
         // Only the exact generic delegate is logical/positionless. Physical adapters may
         // reuse its material transaction logic while still requiring a bound machine.
         if (delegate.getClass() == GenericBatchDelegate.class) {
-            if (!PreparationMessageScope.validate(
+            if (!validatePreparedDelegate(
                     delegate, online, step.recipeId(), null, BlockPos.ZERO)) {
                 return PreparationResult.fatal("Virtual recipe validation failed for " + step.recipeId());
             }
-            if (delegate instanceof AbstractBatchDelegate abd) {
-                abd.setMachineServer(server);
-                if (targetOutput != null && isGraphTerminalNode(nodeId)) abd.setTargetOutput(targetOutput);
+            try {
+                if (delegate instanceof AbstractBatchDelegate abd) {
+                    abd.setMachineServer(server);
+                    if (targetOutput != null && isGraphTerminalNode(nodeId)) abd.setTargetOutput(targetOutput);
+                }
+            } catch (RuntimeException exception) {
+                releasePreparationQuietly(delegate);
+                return PreparationResult.fatal(
+                        "Virtual delegate configuration failed for " + step.recipeId());
             }
             BoundMachine virtual = new BoundMachine(online.level().dimension().location(),
                     BlockPos.ZERO, step.modType(), "virtual");
@@ -1233,7 +1260,7 @@ public final class AsyncCraftChain {
             return PreparationResult.retry("all bound machines are busy, unloaded, or unavailable");
         }
         List<BoundMachine> eligible = new ArrayList<>();
-        delegate.releasePreparationResources();
+        releasePreparationQuietly(delegate);
         delegate = null;
         boolean validationThrew = false;
         boolean retryableRejection = false;
@@ -1241,6 +1268,8 @@ public final class AsyncCraftChain {
         String fatalDetail = "";
         Component fatalUserMessage = null;
         for (BoundMachine machine : available) {
+            IBatchDelegate candidate = null;
+            boolean retained = false;
             try {
                 ResourceKey<Level> dimKey = ResourceKey.create(
                         net.minecraft.core.registries.Registries.DIMENSION, machine.dim());
@@ -1250,7 +1279,7 @@ public final class AsyncCraftChain {
                     protectionRejection = true;
                     continue;
                 }
-                IBatchDelegate candidate = createStepDelegate(step);
+                candidate = createStepDelegate(step);
                 if (candidate == null) {
                     fatalDetail = "delegate factory returned null for " + step.modType().id();
                     continue;
@@ -1265,23 +1294,23 @@ public final class AsyncCraftChain {
                             abd.setTargetOutput(targetOutput);
                         }
                     }
-                    if (eligible.isEmpty()) delegate = candidate;
-                    else candidate.releasePreparationResources();
+                    if (eligible.isEmpty()) {
+                        delegate = candidate;
+                        retained = true;
+                    }
                     eligible.add(machine);
                 } else if (result.state() == IBatchDelegate.PreparationState.RETRY) {
-                    candidate.releasePreparationResources();
                     retryableRejection = true;
                 } else if (fatalDetail.isEmpty()) {
-                    candidate.releasePreparationResources();
                     fatalDetail = result.detail();
                     fatalUserMessage = result.userMessage();
-                } else {
-                    candidate.releasePreparationResources();
                 }
             } catch (RuntimeException exception) {
                 validationThrew = true;
                 RSIntegrationMod.LOGGER.debug(ctx.format("Graph node probe failed for {}"),
                         machine.pos(), exception);
+            } finally {
+                if (candidate != null && !retained) releasePreparationQuietly(candidate);
             }
         }
         if (eligible.isEmpty()) {
@@ -1369,28 +1398,31 @@ public final class AsyncCraftChain {
         ExtractionLedger nodeLedger = new ExtractionLedger();
         nodeLedger.setLogContext(ctx);
         IBatchDelegate delegate = prepared.delegate();
-        delegate.prepareGraphBatch(Math.max(1, prepared.step().executions()));
-        if (prepared.parallelGroup()) {
-            List<BoundMachine> workers = new ArrayList<>(
-                    prepared.machines().subList(0, prepared.operationCost()));
-            var groupCapability = concurrencyDecision(prepared.step(), delegate).capabilities();
-            ParallelCraftGroup group = new ParallelCraftGroup(workers,
-                    prepared.step().modType(), prepared.step().recipeId(), online,
-                    prepared.step().executions(), prepared.step().inferMode(), groupCapability);
-            if (PreparationMessageScope.validate(
-                    group, online, prepared.step().recipeId(), null, BlockPos.ZERO)) {
-                delegate.releasePreparationResources();
-                group.setMachineServer(server);
-                if (targetOutput != null && isGraphTerminalNode(nodeId)) {
-                    group.setTargetOutput(targetOutput);
-                }
-                delegate = group;
-            } else {
-                return GraphDispatchResult.retry(
-                        "operation group could not prepare a worker for serial dispatch");
-            }
-        }
+        OperationExecutionKernel.Session operationSession = null;
+        boolean ownershipTransferred = false;
+        boolean terminalCleanupInvoked = false;
         try {
+            delegate.prepareGraphBatch(Math.max(1, prepared.step().executions()));
+            if (prepared.parallelGroup()) {
+                List<BoundMachine> workers = new ArrayList<>(
+                        prepared.machines().subList(0, prepared.operationCost()));
+                var groupCapability = concurrencyDecision(prepared.step(), delegate).capabilities();
+                ParallelCraftGroup group = new ParallelCraftGroup(workers,
+                        prepared.step().modType(), prepared.step().recipeId(), online,
+                        prepared.step().executions(), prepared.step().inferMode(), groupCapability);
+                if (validatePreparedDelegate(
+                        group, online, prepared.step().recipeId(), null, BlockPos.ZERO)) {
+                    releasePreparationQuietly(delegate);
+                    delegate = group;
+                    group.setMachineServer(server);
+                    if (targetOutput != null && isGraphTerminalNode(nodeId)) {
+                        group.setTargetOutput(targetOutput);
+                    }
+                } else {
+                    return GraphDispatchResult.retry(
+                            "operation group could not prepare a worker for serial dispatch");
+                }
+            }
             GraphNodeMaterials reserved;
             if (delegate instanceof CrockPotBatchDelegate crockPot
                     && crockPot.usesPlannedCategoryMaterials()) {
@@ -1400,8 +1432,10 @@ public final class AsyncCraftChain {
                 List<IngredientSpec> graphSpecs = delegate.getGraphSpecs();
                 if (graphSpecs == null || graphSpecs.isEmpty()) {
                     if (shouldUsePrivateLedgerGraphDispatch(delegate, graphSpecs)) {
-                        return dispatchPrivateLedgerGraphNode(nodeId, prepared, delegate, online,
-                                admission, nodeLedger);
+                        GraphDispatchResult result = dispatchPrivateLedgerGraphNode(
+                                nodeId, prepared, delegate, online, admission, nodeLedger);
+                        ownershipTransferred = result.state() == DispatchState.STARTED;
+                        return result;
                     }
                     return GraphDispatchResult.fatal("delegate did not expose graph materials");
                 }
@@ -1425,7 +1459,6 @@ public final class AsyncCraftChain {
                 return GraphDispatchResult.fatal(
                         "execution context changed before material commit");
             }
-            OperationExecutionKernel.Session operationSession = null;
             if (delegate instanceof ParallelCraftGroup group) {
                 group.setReservationTokens(reserved.operationTokens());
                 group.setVirtualDebits(reserved.virtualDebits());
@@ -1487,6 +1520,7 @@ public final class AsyncCraftChain {
             graphAdmissions.commit(admission);
             runtime.markDispatched();
             nodeRuntimes.put(nodeId, runtime);
+            ownershipTransferred = true;
             IBatchDelegate startDelegate = delegate;
             List<ItemStack> startMaterials = materials;
             boolean accepted = operationSession != null
@@ -1505,13 +1539,23 @@ public final class AsyncCraftChain {
                     nodeId, delegate.getClass().getSimpleName(), exception);
             CraftNodeRuntime runtime = nodeRuntimes.get(nodeId);
             if (runtime != null) {
+                ownershipTransferred = true;
                 runtime.markStartFailed(message);
                 return GraphDispatchResult.started(runtime);
             }
+            if (operationSession != null) operationSession.close();
             if (nodeLedger.isCommitted()) nodeLedger.refundCommitted(network, online);
-            try { delegate.onBatchFailed(online, "graph dispatch failed before start"); }
-            catch (RuntimeException ignored) { }
+            try {
+                delegate.onBatchFailed(online, "graph dispatch failed before start");
+                terminalCleanupInvoked = true;
+            } catch (RuntimeException ignored) {
+                terminalCleanupInvoked = true;
+            }
             return GraphDispatchResult.fatal(message);
+        } finally {
+            if (!ownershipTransferred && !terminalCleanupInvoked) {
+                releasePreparationQuietly(delegate);
+            }
         }
     }
 
@@ -2730,12 +2774,19 @@ public final class AsyncCraftChain {
         machineStartFailureMessage = null;
         if (step.modType().isVirtual()) {
             IBatchDelegate virtualDelegate = createStepDelegate(step);
-            if (virtualDelegate == null || !PreparationMessageScope.validate(
+            if (virtualDelegate == null || !validatePreparedDelegate(
                     virtualDelegate, online, step.recipeId(), null, BlockPos.ZERO)) {
                 return null;
             }
-            if (virtualDelegate instanceof AbstractBatchDelegate abd) {
-                abd.setMachineServer(server);
+            try {
+                if (virtualDelegate instanceof AbstractBatchDelegate abd) {
+                    abd.setMachineServer(server);
+                }
+            } catch (RuntimeException exception) {
+                releasePreparationQuietly(virtualDelegate);
+                RSIntegrationMod.LOGGER.error(ctx.format(
+                        "Virtual delegate configuration failed for {}"), step.recipeId(), exception);
+                return null;
             }
             return startGenericStep(virtualDelegate, step, online);
         }
@@ -2840,12 +2891,19 @@ public final class AsyncCraftChain {
         // intermediate outputs from prior chain steps (in virtualInventory) are
         // visible to subsequent steps.
         if (initialDelegate.getClass() == GenericBatchDelegate.class) {
-            if (!PreparationMessageScope.validate(
+            if (!validatePreparedDelegate(
                     initialDelegate, online, step.recipeId(), null, BlockPos.ZERO)) {
                 return null;
             }
-            if (initialDelegate instanceof AbstractBatchDelegate abd) {
-                abd.setMachineServer(server);
+            try {
+                if (initialDelegate instanceof AbstractBatchDelegate abd) {
+                    abd.setMachineServer(server);
+                }
+            } catch (RuntimeException exception) {
+                releasePreparationQuietly(initialDelegate);
+                RSIntegrationMod.LOGGER.error(ctx.format(
+                        "Generic delegate configuration failed for {}"), step.recipeId(), exception);
+                return null;
             }
             return startGenericStep(initialDelegate, step, online);
         }
@@ -2866,7 +2924,7 @@ public final class AsyncCraftChain {
                             && ProtectionChecker.canInteract(online, machineLevel, machine.pos());
                 });
 
-        initialDelegate.releasePreparationResources();
+        releasePreparationQuietly(initialDelegate);
         IBatchDelegate delegate = null;
         // Try each bound machine until one is ready. Retryable preparation never
         // reaches material reservation or ledger commit.
@@ -2877,22 +2935,24 @@ public final class AsyncCraftChain {
         String fatalDetail = "";
         Component fatalUserMessage = null;
         for (BoundMachine m : candidateSelection.usable()) {
+            IBatchDelegate candidate = null;
+            boolean retained = false;
             try {
-                IBatchDelegate candidate = createStepDelegate(step);
+                candidate = createStepDelegate(step);
                 if (candidate == null) continue;
                 IBatchDelegate.PreparationResult preparation = PreparationMessageScope.prepare(
                         candidate, online, step.recipeId(), m.dim(), m.pos());
                 if (preparation.state() == IBatchDelegate.PreparationState.READY) {
-                    delegate = candidate;
-                    matchedMachine = m;
-                    if (delegate instanceof AbstractBatchDelegate abd) {
+                    if (candidate instanceof AbstractBatchDelegate abd) {
                         abd.setMachineDim(m.dim());
                         abd.setMachineServer(server);
                         applyTargetOutput(abd);
                     }
+                    delegate = candidate;
+                    matchedMachine = m;
+                    retained = true;
                     break;
                 }
-                candidate.releasePreparationResources();
                 if (preparation.state() == IBatchDelegate.PreparationState.RETRY) {
                     retryableRejection = true;
                 } else if (fatalDetail.isEmpty()) {
@@ -2902,6 +2962,8 @@ public final class AsyncCraftChain {
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.debug(ctx.format("prepare failed for machine at {}"), m.pos(), e);
                 if (fatalDetail.isEmpty()) fatalDetail = e.getMessage();
+            } finally {
+                if (candidate != null && !retained) releasePreparationQuietly(candidate);
             }
         }
         if (matchedMachine == null) {
@@ -2933,6 +2995,7 @@ public final class AsyncCraftChain {
                 RSIntegrationMod.LOGGER.warn(ctx.format(
                         "Delegate selected invalid flat batch size {} for {} remaining operation(s)"),
                         flatBatch, stepRemaining);
+                releasePreparationQuietly(startedDelegate);
                 return null;
             }
             machineCount = flatBatch;
@@ -3033,6 +3096,7 @@ public final class AsyncCraftChain {
                     return true;
                 })) {
                     closeFlatOperationScope();
+                    releasePreparationQuietly(startedDelegate);
                     return null;
                 }
                 if (!flatOperationSession.tryStart(
@@ -3237,7 +3301,7 @@ public final class AsyncCraftChain {
         ParallelCraftGroup group = new ParallelCraftGroup(available, step.modType(),
                 step.recipeId(), online, stepRemaining, step.inferMode(),
                 capabilityDecision.capabilities());
-        if (!PreparationMessageScope.validate(
+        if (!validatePreparedDelegate(
                 group, online, step.recipeId(), null, BlockPos.ZERO)) {
             RSIntegrationMod.LOGGER.debug(ctx.format("Parallel group empty -all children failed validateAndInit"));
             return null;
@@ -3263,7 +3327,7 @@ public final class AsyncCraftChain {
             // Mirror the single-machine path: pre-reserve from virtualInventory
             // first so intermediate outputs from prior steps are visible to all children.
             List<IngredientSpec> operationSpecs = group instanceof ParallelCraftGroup parallel
-                    ? parallel.getOperationMaterials() : null;
+                    ? parallel.getFlatOperationMaterials() : null;
             List<IngredientSpec> specs = operationSpecs != null ? operationSpecs : group.getRequiredMaterials();
             if (specs != null && !specs.isEmpty()) {
                 List<ItemStack> materials;

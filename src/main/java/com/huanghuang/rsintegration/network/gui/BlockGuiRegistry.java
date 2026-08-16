@@ -4,16 +4,18 @@ import com.huanghuang.rsintegration.util.ChunkUtils;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.machine.StandardMenuProviderOpener;
-import com.huanghuang.rsintegration.network.gui.RemoteGuiAuth;
+import com.huanghuang.rsintegration.sidepanel.network.PlaceboRemoteMenuSnapshotPacket;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.resources.ResourceKey;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.MenuProvider;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraftforge.registries.ForgeRegistries;
 import net.minecraft.world.level.block.entity.BlockEntityType;
@@ -66,31 +68,20 @@ public final class BlockGuiRegistry {
         RSIntegrationMod.LOGGER.debug("[RSI-MachineGUI] openGui: block={} at {} dim={}", blockId, pos, dim);
         // Authorize the remote container access (no distance limit)
         RemoteGuiAuth.authorize(player, dim, pos, blockId);
-        boolean success = false;
         BlockEntity be = level.getBlockEntity(pos);
-        if (be == null) {
-            // No BlockEntity (smithing table, market, etc.):
-            // prefer state.getMenuProvider() which is the vanilla/Forge-approved
-            // way to open these.  Block.use() is tried as a fallback for blocks
-            // that wire their GUI through the interaction handler (e.g. Eidolon
-            // worktable) without exposing a MenuProvider on the block state.
-            if (openWithoutBlockEntity(player, dim, pos)) {
-                success = true;
-            } else if (openViaBlockUse(player, level, pos)) {
-                success = true;
-            }
-        } else {
-            // Has BlockEntity (furnace, TACZ, CrockPot, etc.):
-            // prefer Block.use() which replicates the exact player interaction
-            // (including extra data writers like TACZ's gun-id buffer).
-            // Fall back to direct MenuProvider if the block doesn't respond.
-            if (openViaBlockUse(player, level, pos)) {
-                success = true;
-            } else if (openWithBlockEntity(player, be, dim, pos)) {
-                success = true;
-            }
+        boolean success = false;
+        boolean clientSnapshotSent = false;
+        try {
+            clientSnapshotSent = sendPlaceboClientSnapshotIfNeeded(player, level, pos, be);
+            success = RemoteMenuConstructionContext.withTarget(player, level,
+                    () -> openAtTarget(player, dim, pos, level, be));
+        } catch (RuntimeException exception) {
+            RSIntegrationMod.LOGGER.warn(
+                    "[RSI-MachineGUI] Menu construction failed for {} at {} dim={}",
+                    blockId, pos, dim, exception);
         }
         if (!success) {
+            if (clientSnapshotSent) PlaceboRemoteMenuSnapshotPacket.clear(player);
             RSIntegrationMod.LOGGER.warn("[RSI-MachineGUI] openGui failed for {} at {}: be={} beType={} isMenuProvider={}",
                     blockId, pos, be != null ? "present" : "null",
                     be != null ? be.getType().toString() : "N/A",
@@ -102,6 +93,47 @@ public final class BlockGuiRegistry {
             return false;
         }
         return success;
+    }
+
+    private static boolean sendPlaceboClientSnapshotIfNeeded(ServerPlayer player,
+                                                               ServerLevel level,
+                                                               BlockPos pos, BlockEntity blockEntity) {
+        if (blockEntity == null || player.level().dimension().equals(level.dimension())) return false;
+        MenuProvider provider = level.getBlockState(pos).getMenuProvider(level, pos);
+        if (provider == null
+                || !provider.getClass().getName().startsWith("dev.shadowsoffire.placebo.menu.")) {
+            return false;
+        }
+        PlaceboRemoteMenuSnapshotPacket.send(player, pos,
+                Block.getId(level.getBlockState(pos)), blockEntity.saveWithFullMetadata());
+        return true;
+    }
+
+    private static boolean openAtTarget(ServerPlayer player, ResourceKey<Level> dim, BlockPos pos,
+                                        ServerLevel level, BlockEntity be) {
+        if (be == null) {
+            // No BlockEntity (smithing table, market, etc.):
+            // prefer state.getMenuProvider() which is the vanilla/Forge-approved
+            // way to open these.  Block.use() is tried as a fallback for blocks
+            // that wire their GUI through the interaction handler (e.g. Eidolon
+            // worktable) without exposing a MenuProvider on the block state.
+            if (openWithoutBlockEntity(player, dim, pos)) {
+                return true;
+            } else if (openViaBlockUse(player, level, pos)) {
+                return true;
+            }
+        } else {
+            // Has BlockEntity (furnace, TACZ, CrockPot, etc.):
+            // prefer Block.use() which replicates the exact player interaction
+            // (including extra data writers like TACZ's gun-id buffer).
+            // Fall back to direct MenuProvider if the block doesn't respond.
+            if (openViaBlockUse(player, level, pos)) {
+                return true;
+            } else if (openWithBlockEntity(player, be, dim, pos)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static boolean openWithBlockEntity(ServerPlayer player, BlockEntity be,

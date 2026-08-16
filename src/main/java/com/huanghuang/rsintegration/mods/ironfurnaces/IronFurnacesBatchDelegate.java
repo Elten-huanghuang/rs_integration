@@ -48,6 +48,11 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
     private static final int[] FACTORY_INPUT = {7, 8, 9, 10, 11, 12};
     private static final Map<String, boolean[]> FACTORY_LEASES = new ConcurrentHashMap<>();
 
+    /** Server-lifecycle safety net after active craft delegates have been aborted. */
+    public static void clearFactoryLeases() {
+        FACTORY_LEASES.clear();
+    }
+
     private ServerPlayer player;
     private ServerLevel level;
     private ResourceKey<Level> dimension;

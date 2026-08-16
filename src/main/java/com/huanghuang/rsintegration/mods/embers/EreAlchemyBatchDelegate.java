@@ -1,16 +1,13 @@
 package com.huanghuang.rsintegration.mods.embers;
 
-import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
-
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
-import com.huanghuang.rsintegration.mods.embers.EreAlchemyLock;
-import com.huanghuang.rsintegration.mods.embers.KnownCodeSavedData;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
+import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.reflection.probes.EmbersReflection;
 import com.huanghuang.rsintegration.util.ChunkUtils;
 import com.huanghuang.rsintegration.util.Reflect;
@@ -354,6 +351,15 @@ extends AbstractBatchDelegate {
 
         RSIntegrationMod.LOGGER.warn("[RSI-Embers] collectResult: NO RESULT FOUND in outputHandler or IBin");
         return ItemStack.EMPTY;
+    }
+
+    @Nullable
+    @Override
+    public ExpectedProduction getExpectedProduction() {
+        if (!(this.recipe instanceof Recipe<?> alchemyRecipe) || this.level == null) return null;
+        ItemStack result = ModRecipeHandlers.tryGetResultItem(
+                alchemyRecipe, this.level.registryAccess());
+        return result.isEmpty() ? null : new ExpectedProduction(result, result.getCount());
     }
 
     @Override
