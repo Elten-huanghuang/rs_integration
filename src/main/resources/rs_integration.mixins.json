@@ -90,6 +90,7 @@
     "refinedstorage.GridScreenMouseMixin",
     "refinedstorage.GridScreenKeyboardMixin",
     "refinedstorage.GridScreenTooltipMixin",
+    "refinedstorage.SearchWidgetHistoryMixin",
     "refinedstorage.GridViewImplSearchMixin",
     "refinedstorage.TooltipGridFilterMixin",
     "refinedstorage.TagGridFilterMixin",

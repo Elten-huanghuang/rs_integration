@@ -59,6 +59,8 @@ public final class NetworkPacketIds {
     // 52-53 formerly RSItemLockPacket / RSItemLockSyncPacket (removed in 1.1.1) — do not reuse.
     public static final int SIDE_PANEL_OPERATION_RESULT = 54;
     public static final int UNBIND_MACHINE = 55;
+    public static final int MACHINE_FAVORITE_TOGGLE = 56;
+    public static final int MACHINE_FAVORITES_SYNC = 57;
 
     // ── Resonance backpack (70-79) ──────────────────────────────────
     public static final int OPEN_RESONANCE_BACKPACK = 70;

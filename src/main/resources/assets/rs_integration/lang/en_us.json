@@ -471,7 +471,7 @@
   "rsi.async.abort.machine_start_failed": "Failed to start multi-block craft: %s",
   "rsi.async.abort.scheduler_missing": "Internal error: crafting graph scheduler unavailable",
   "rsi.async.abort.executor_missing": "Internal error: crafting graph executor not initialised",
-  "rsi.async.abort.global_timeout": "Crafting chain exceeded the global timeout (%s seconds)",
+  "rsi.async.abort.global_timeout": "Crafting chain made no progress for %s seconds and timed out",
   "rsi.async.abort.executor_error": "Crafting graph executor error: %s",
   "rsi.async.abort.missing_material": "Missing material: %s",
   "rsi.async.abort.drop_throttle": "RS network is full and the player is offline — item drops were throttled",
@@ -679,6 +679,9 @@
   "rsi.hub.controls.quick_has_output": "Empty L: Collect  Empty Shift: →RS  R: Open",
   "rsi.hub.controls.quick_normal": "Hold item L: Insert  Shift: Fuel  Empty L: Open",
   "rsi.hub.controls.gui": "L/R: Open GUI",
+  "rsi.hub.favorite": "Left-click the top-left star: add to machine shortcuts",
+  "rsi.hub.unfavorite": "Left-click the top-left star: remove from machine shortcuts",
+  "rsi.hub.favorite_limit": "Machine shortcuts can contain up to %s machines",
 
   "rsi.plan.open_machine": "Open Machine",
   "rsi.jei.open_machine": "Open bound machine GUI",
@@ -947,5 +950,8 @@
   "rsi.machine_candidate.ready": "Ready",
   "rsi.machine_candidate.temporary": "Temporarily unavailable",
   "rsi.machine_candidate.incompatible": "Conditions not met",
-  "rsi.machine_candidate.check_failed": "Check failed"
+  "rsi.machine_candidate.check_failed": "Check failed",
+  "rsi.recent_search.favorite": "Favorite or unfavorite",
+  "rsi.recent_search.delete": "Delete this search entry",
+  "rsi.recent_search.clear_all": "Clear search history for this world or server"
 }

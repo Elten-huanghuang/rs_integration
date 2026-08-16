@@ -60,6 +60,8 @@ public final class RSIntegrationConfig {
     public static final int DEFAULT_GRID_SEARCH_DISK_CACHE_ENTRIES = 20_000;
     public static final int DEFAULT_GRID_SEARCH_DISK_CACHE_MAX_MIB = 32;
     public static final int DEFAULT_GRID_SEARCH_DISK_CACHE_SAVE_DELAY_MS = 2_000;
+    public static final int DEFAULT_RECENT_SEARCH_MAX_VISIBLE_ENTRIES = 8;
+    public static final int DEFAULT_RECENT_SEARCH_MAX_STORED_ENTRIES = 100;
 
     public static final ForgeConfigSpec COMMON_SPEC;
     public static final ForgeConfigSpec SERVER_SPEC;
@@ -142,6 +144,11 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.IntValue GRID_SEARCH_DISK_CACHE_MAX_MIB;
     public static ForgeConfigSpec.IntValue GRID_SEARCH_DISK_CACHE_SAVE_DELAY_MS;
     public static ForgeConfigSpec.BooleanValue LIGHTWEIGHT_SLASHBLADE_LIST_RENDERING;
+    public static ForgeConfigSpec.BooleanValue RS_RECENT_SEARCH_ENABLED;
+    public static ForgeConfigSpec.IntValue RS_RECENT_SEARCH_MAX_VISIBLE_ENTRIES;
+    public static ForgeConfigSpec.IntValue RS_RECENT_SEARCH_MAX_STORED_ENTRIES;
+    public static ForgeConfigSpec.BooleanValue RS_RECENT_SEARCH_FAVORITES_ENABLED;
+    public static ForgeConfigSpec.BooleanValue RS_RECENT_SEARCH_DELETE_BUTTONS_ENABLED;
     public static ForgeConfigSpec.BooleanValue DEPOSIT_UPGRADE_RS;
     public static ForgeConfigSpec.BooleanValue ENABLE_MAJ_ACCESSORY_COMPRESSION;
     public static ForgeConfigSpec.BooleanValue ENABLE_MACHINE_GUI_TABS;
@@ -675,10 +682,10 @@ public final class RSIntegrationConfig {
                         "Range: 10-600.")
                 .defineInRange("multiblockCraftTimeoutSeconds", 300, 10, 600);
         CRAFTING_CHAIN_GLOBAL_TIMEOUT_SECONDS = s
-                .comment("Maximum total time (in seconds) for an entire graph crafting chain.",
-                        "This is a whole-chain ceiling on top of the per-node timeout: even if",
-                        "individual nodes keep making progress, the chain is aborted once this",
-                        "elapses, so a wedged or livelocked chain cannot run forever.",
+                .comment("Maximum time without meaningful progress (in seconds) for a graph crafting chain.",
+                        "Completed operations, published outputs, and completed nodes reset this timer.",
+                        "Long-running orders may exceed this duration while they keep making progress;",
+                        "a genuinely wedged chain is still aborted after this idle period.",
                         "Materials already dispatched into a machine are NOT refunded (never duped);",
                         "only undispatched/settled materials are returned. Range: 60-3600.")
                 .defineInRange("craftingChainGlobalTimeoutSeconds", 900, 60, 3600);
@@ -1074,6 +1081,26 @@ public final class RSIntegrationConfig {
                 .comment("在 RS 网格和 JEI 物品列表中使用轻量的 SlashBlade 图标渲染。",
                         "保留刀身与纹理，但省略发光、3D 耐久装饰和附魔的重复模型绘制。")
                 .define("lightweightSlashBladeRendering", false);
+        cl.pop();
+        cl.push("recentSearch");
+        RS_RECENT_SEARCH_ENABLED = cl
+                .comment("在 RS 网格搜索框下方显示按世界或服务器隔离的最近搜索记录。")
+                .define("enabled", true);
+        RS_RECENT_SEARCH_MAX_VISIBLE_ENTRIES = cl
+                .comment("搜索浮层最多显示的历史记录数量。范围：1-20。")
+                .defineInRange("maxVisibleEntries",
+                        DEFAULT_RECENT_SEARCH_MAX_VISIBLE_ENTRIES, 1, 20);
+        RS_RECENT_SEARCH_MAX_STORED_ENTRIES = cl
+                .comment("每个玩家在每个世界或服务器最多保存的搜索记录数量。范围：10-1000。",
+                        "达到上限时优先删除最旧的非收藏记录。")
+                .defineInRange("maxStoredEntries",
+                        DEFAULT_RECENT_SEARCH_MAX_STORED_ENTRIES, 10, 1_000);
+        RS_RECENT_SEARCH_FAVORITES_ENABLED = cl
+                .comment("允许收藏搜索记录并将收藏项显示在普通记录之前。")
+                .define("favoritesEnabled", true);
+        RS_RECENT_SEARCH_DELETE_BUTTONS_ENABLED = cl
+                .comment("在搜索历史浮层中显示单条删除和清空按钮。")
+                .define("deleteButtonsEnabled", true);
         cl.pop();
         cl.push("distantWorlds");
         ENABLE_DISTANT_WORLDS_HUD = cl

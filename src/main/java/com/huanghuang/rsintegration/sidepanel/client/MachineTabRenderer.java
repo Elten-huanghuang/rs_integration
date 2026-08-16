@@ -124,7 +124,7 @@ public final class MachineTabRenderer {
      * "{prefix}||block.modid.name".  Convert it to a registry key to
      * look up the block, falling back to the crafting table icon.
      */
-    private static ItemStack resolveIcon(BindingInfo info) {
+    public static ItemStack resolveIcon(BindingInfo info) {
         return BindingEventHandler.resolveBlockIcon(
                 info.blockRegKey(), info.blockKey(), info.displayStack());
     }

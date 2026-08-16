@@ -127,6 +127,7 @@ public final class AsyncCraftChain {
     private IBatchDelegate currentDelegate;
     private int waitTicks;
     private int drainingTicks;
+    private int flatObservedCompletedOperations;
     private int stepRemaining;
     private State state = State.PENDING;
     private int taintSlot = -1;
@@ -187,8 +188,7 @@ public final class AsyncCraftChain {
     private final NodeAdmissionCoordinator graphAdmissions;
     private final Map<NodeId, List<MaterialBroker.Request>> graphRequests = new HashMap<>();
     private final Map<NodeId, CraftNode> graphNodes = new HashMap<>();
-    private int graphTotalTicks;
-    private final int graphGlobalTimeoutTicks;
+    private final ProgressWatchdog graphProgressWatchdog;
     private final int graphRunningNodeCap;
     private final int graphDispatchPerTick;
     private final int graphDispatchPerCraft;
@@ -294,7 +294,8 @@ public final class AsyncCraftChain {
         int globalTimeoutSeconds;
         try { globalTimeoutSeconds = RSIntegrationConfig.CRAFTING_CHAIN_GLOBAL_TIMEOUT_SECONDS.get(); }
         catch (Exception e) { globalTimeoutSeconds = 900; }
-        this.graphGlobalTimeoutTicks = Math.max(1, globalTimeoutSeconds) * 20;
+        this.graphProgressWatchdog = new ProgressWatchdog(
+                Math.max(1, globalTimeoutSeconds) * 20);
         if (graph != null) {
             this.graph = graph;
             this.graphScheduler = new DagScheduler(graph);
@@ -542,6 +543,11 @@ public final class AsyncCraftChain {
                     drainingTicks = 0;
                 }
                 if (currentDelegate instanceof ParallelCraftGroup group) {
+                    int completed = group.getCompletedOperations();
+                    if (completed > flatObservedCompletedOperations) {
+                        flatObservedCompletedOperations = completed;
+                        waitTicks = 0;
+                    }
                     List<ItemStack> settled = group.drainSettledResults();
                     if (!settled.isEmpty()) {
                         for (ItemStack result : settled) addToVirtualInventory(result);
@@ -667,6 +673,7 @@ public final class AsyncCraftChain {
                     }
                     currentDelegate = null;
                     waitTicks = 0;
+                    flatObservedCompletedOperations = 0;
                     ledger.reset();
                     if (parallelGroup) {
                         stepRemaining = 0;
@@ -750,6 +757,7 @@ public final class AsyncCraftChain {
                 machineCount = 1;
             }
             currentDelegate = startModStep(step, online);
+            flatObservedCompletedOperations = 0;
             if (currentDelegate == null) {
                 if (waitingForMachineLease) {
                     machineLeaseWaitTicks++;
@@ -825,21 +833,6 @@ public final class AsyncCraftChain {
             return true;
         }
 
-        // Chain-global watchdog: a whole-chain ceiling on top of per-node
-        // timeouts. Even if individual nodes keep making progress (or the
-        // scheduler wedges with ready nodes but nothing running), the chain
-        // cannot run forever. abort() is REFUND_AND_DELIVER, and conservation
-        // is already correct: materials dispatched into a machine live in each
-        // node's committed ledger, whose close() is a no-op (never refunded, so
-        // never duped); only settled/undispatched materials are returned.
-        if (++graphTotalTicks > graphGlobalTimeoutTicks) {
-            abort("Crafting chain exceeded global timeout ("
-                    + (graphGlobalTimeoutTicks / 20) + "s)",
-                    Component.translatable("rsi.async.abort.global_timeout",
-                            graphGlobalTimeoutTicks / 20));
-            return true;
-        }
-
         // Process synchronous GENERIC nodes outside the executor.
         // They complete immediately and don't wait for observation ticks.
         settleReadyVanillaNodes(online, vanillaAllowance);
@@ -876,6 +869,16 @@ public final class AsyncCraftChain {
         if (graphScheduler.allSucceeded()) {
             state = State.COMPLETING;
             finish(online);
+            return true;
+        }
+
+        // Check after this tick's machine observations and settlements so an
+        // output produced on the deadline tick can renew the idle window.
+        if (graphProgressWatchdog.tick()) {
+            abort("Crafting chain made no progress for "
+                    + (graphProgressWatchdog.timeoutTicks() / 20) + "s",
+                    Component.translatable("rsi.async.abort.global_timeout",
+                            graphProgressWatchdog.timeoutTicks() / 20));
             return true;
         }
 
@@ -973,6 +976,7 @@ public final class AsyncCraftChain {
             }
             snapshotCommittedVirtual();
             graphScheduler.succeed(vanillaNode);
+            graphProgressWatchdog.markProgress();
             currentStepIdx = idx + 1;
         }
     }
@@ -1591,7 +1595,11 @@ public final class AsyncCraftChain {
 
     private void publishIncrementalGraphOutputs(NodeId nodeId, ConcurrentNodeExecutor.Worker worker) {
         if (!(worker instanceof CraftNodeRuntime runtime) || graphMaterials == null) return;
-        for (NodeOutputAccumulator.Publication publication : runtime.drainIncrementalOutputs()) {
+        List<NodeOutputAccumulator.Publication> publications = runtime.drainIncrementalOutputs();
+        if (runtime.consumeProgressSignal() || !publications.isEmpty()) {
+            graphProgressWatchdog.markProgress();
+        }
+        for (NodeOutputAccumulator.Publication publication : publications) {
             graphMaterials.publishActual(new MaterialSource.ProducerOutput(publication.port()),
                     publication.material(), publication.stack());
         }
@@ -1640,6 +1648,7 @@ public final class AsyncCraftChain {
             for (ItemStack stack : runtime.drainOutputSurplus()) addToVirtualInventory(stack);
             nodeRuntimes.remove(nodeId);
             snapshotCommittedVirtual();
+            graphProgressWatchdog.markProgress();
             return ConcurrentNodeExecutor.CompletionStatus.SUCCEEDED;
         } catch (RuntimeException exception) {
             String message = exception.getMessage();

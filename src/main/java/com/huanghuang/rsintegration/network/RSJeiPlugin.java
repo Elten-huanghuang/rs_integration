@@ -17,7 +17,9 @@ import com.huanghuang.rsintegration.mods.distantworlds.LithumAltarRecipeResolver
 import com.huanghuang.rsintegration.mods.distantworlds.LithumAltarRecipeWrapper;
 import com.huanghuang.rsintegration.mods.distantworlds.client.LithumAltarFironRecipeCategory;
 import com.huanghuang.rsintegration.sidepanel.RSInventoryTransferHandler;
+import com.huanghuang.rsintegration.sidepanel.client.MachineFavoritesClient;
 import com.huanghuang.rsintegration.util.ModIds;
+import com.refinedmods.refinedstorage.screen.grid.GridScreen;
 import mezz.jei.api.IModPlugin;
 import mezz.jei.api.JeiPlugin;
 import mezz.jei.api.registration.IRecipeCategoryRegistration;
@@ -188,6 +190,14 @@ public final class RSJeiPlugin implements IModPlugin {
     @Override
     @SuppressWarnings({"rawtypes", "unchecked"})
     public void registerGuiHandlers(IGuiHandlerRegistration registration) {
+        registration.addGuiContainerHandler(GridScreen.class,
+                new IGuiContainerHandler<GridScreen>() {
+                    @Override
+                    public java.util.List<net.minecraft.client.renderer.Rect2i> getGuiExtraAreas(
+                            GridScreen screen) {
+                        return MachineFavoritesClient.getJeiExtraAreas(screen);
+                    }
+                });
         if (!ModList.get().isLoaded(ModIds.APOTHEOSIS)) return;
         try {
             Class<?> raw = Class.forName(

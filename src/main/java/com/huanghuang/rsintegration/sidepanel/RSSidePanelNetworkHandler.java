@@ -14,11 +14,14 @@ import com.huanghuang.rsintegration.network.gui.RemoteGuiAuth;
 import com.huanghuang.rsintegration.sidepanel.data.BindingInfo;
 import com.huanghuang.rsintegration.sidepanel.network.MachineCollectPacket;
 import com.huanghuang.rsintegration.sidepanel.network.MachineInsertPacket;
+import com.huanghuang.rsintegration.sidepanel.network.MachineFavoriteTogglePacket;
+import com.huanghuang.rsintegration.sidepanel.network.MachineFavoritesSyncPacket;
 import com.huanghuang.rsintegration.sidepanel.network.MachineStatusDeltaPacket;
 import com.huanghuang.rsintegration.sidepanel.network.OpenBoundMachineGuiPacket;
 import com.huanghuang.rsintegration.sidepanel.network.ReturnToRSPacket;
 import com.huanghuang.rsintegration.sidepanel.network.RSBindingSyncPacket;
 import com.huanghuang.rsintegration.sidepanel.network.UnbindMachinePacket;
+import com.huanghuang.rsintegration.sidepanel.favorite.MachineFavoritesSavedData;
 import com.refinedmods.refinedstorage.api.storage.cache.IStorageCache;
 import com.refinedmods.refinedstorage.api.storage.cache.IStorageCacheListener;
 import com.refinedmods.refinedstorage.api.util.StackListResult;
@@ -104,6 +107,14 @@ public final class RSSidePanelNetworkHandler {
         ch.registerMessage(NetworkPacketIds.UNBIND_MACHINE, UnbindMachinePacket.class,
                 UnbindMachinePacket::encode, UnbindMachinePacket::decode, UnbindMachinePacket::handle,
                 java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_SERVER));
+        ch.registerMessage(NetworkPacketIds.MACHINE_FAVORITE_TOGGLE, MachineFavoriteTogglePacket.class,
+                MachineFavoriteTogglePacket::encode, MachineFavoriteTogglePacket::decode,
+                MachineFavoriteTogglePacket::handle,
+                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_SERVER));
+        ch.registerMessage(NetworkPacketIds.MACHINE_FAVORITES_SYNC, MachineFavoritesSyncPacket.class,
+                MachineFavoritesSyncPacket::encode, MachineFavoritesSyncPacket::decode,
+                MachineFavoritesSyncPacket::handle,
+                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_CLIENT));
         ch.registerMessage(NetworkPacketIds.OPEN_RESONANCE_BACKPACK, OpenResonanceBackpackPacket.class,
                 OpenResonanceBackpackPacket::encode, OpenResonanceBackpackPacket::decode, OpenResonanceBackpackPacket::handle,
                 java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_SERVER));
@@ -295,18 +306,10 @@ public final class RSSidePanelNetworkHandler {
     }
 
     public static void sendBindingSync(ServerPlayer player) {
-        List<BindingInfo> bindings = new ArrayList<>();
-        try {
-            collectBindingsFromStacks(player.getInventory().items, bindings);
-            collectBindingsFromStacks(player.getInventory().offhand, bindings);
-            collectBindingsFromStacks(player.getInventory().armor, bindings);
-            collectBindingsFromStacks(
-                    com.huanghuang.rsintegration.util.CuriosAccess.stacks(player), bindings);
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI] Failed to collect bindings for sync", e);
-        }
+        List<BindingInfo> bindings = collectPlayerBindings(player);
         CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
                 new RSBindingSyncPacket(bindings));
+        sendMachineFavoritesSync(player);
     }
 
     public static void sendSync(ServerPlayer player, List<UUID> ids, List<ItemStack> items,
@@ -316,16 +319,7 @@ public final class RSSidePanelNetworkHandler {
                                 String networkName) {
         synchronizedStackIds.put(player.getUUID(), Set.copyOf(ids));
         // Build binding info list from player's inventory bindings
-        List<BindingInfo> bindings = new ArrayList<>();
-        try {
-            collectBindingsFromStacks(player.getInventory().items, bindings);
-            collectBindingsFromStacks(player.getInventory().offhand, bindings);
-            collectBindingsFromStacks(player.getInventory().armor, bindings);
-            collectBindingsFromStacks(
-                    com.huanghuang.rsintegration.util.CuriosAccess.stacks(player), bindings);
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI] Failed to build binding info", e);
-        }
+        List<BindingInfo> bindings = collectPlayerBindings(player);
 
         int total = ids.size();
         if (total <= RSSidePanelSyncPacket.CHUNK_SIZE) {
@@ -352,6 +346,27 @@ public final class RSSidePanelNetworkHandler {
                                 cBindings, i, totalChunks, generation));
             }
         }
+        sendMachineFavoritesSync(player);
+    }
+
+    public static List<BindingInfo> collectPlayerBindings(ServerPlayer player) {
+        List<BindingInfo> bindings = new ArrayList<>();
+        try {
+            collectBindingsFromStacks(player.getInventory().items, bindings);
+            collectBindingsFromStacks(player.getInventory().offhand, bindings);
+            collectBindingsFromStacks(player.getInventory().armor, bindings);
+            collectBindingsFromStacks(
+                    com.huanghuang.rsintegration.util.CuriosAccess.stacks(player), bindings);
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI] Failed to collect player bindings", e);
+        }
+        return List.copyOf(bindings);
+    }
+
+    public static void sendMachineFavoritesSync(ServerPlayer player) {
+        MachineFavoritesSavedData data = MachineFavoritesSavedData.get(player.server);
+        CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
+                new MachineFavoritesSyncPacket(data.getFavorites(player.getUUID())));
     }
 
     private static void collectBindingsFromStacks(List<ItemStack> stacks, List<BindingInfo> out) {

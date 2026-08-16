@@ -5,6 +5,8 @@ import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
 import com.huanghuang.rsintegration.network.binding.BindingStorage;
 import com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler;
+import com.huanghuang.rsintegration.sidepanel.favorite.MachineFavoriteKey;
+import com.huanghuang.rsintegration.sidepanel.favorite.MachineFavoritesSavedData;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
@@ -72,6 +74,8 @@ public final class UnbindMachinePacket {
 
         Component name = BindingEventHandler.resolveBlockName(
                 entry.blockKey(), entry.blockRegKey(), entry.displayStack());
+        MachineFavoritesSavedData.get(player.server).remove(player.getUUID(),
+                new MachineFavoriteKey(dim, pos, entry.blockKey()));
         player.sendSystemMessage(Component.translatable("gui.rs_integration.altar.unbound", name));
         RSSidePanelNetworkHandler.sendBindingSync(player);
         RSIntegrationMod.LOGGER.debug(

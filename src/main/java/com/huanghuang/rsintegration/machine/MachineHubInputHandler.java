@@ -53,6 +53,14 @@ public final class MachineHubInputHandler {
 
         BindingInfo info = MachineHub.getMachines().get(idx);
 
+        int favoriteIndex = MachineHub.getFavoriteHoveredIndex();
+        if (button == GLFW.GLFW_MOUSE_BUTTON_LEFT
+                && favoriteIndex >= 0 && favoriteIndex < MachineHub.getMachines().size()) {
+            com.huanghuang.rsintegration.sidepanel.client.MachineFavoritesClient.requestToggle(
+                    MachineHub.getMachines().get(favoriteIndex));
+            return true;
+        }
+
         // Shift already means collect-to-RS / fuel insertion in this UI.
         // Control-click is therefore reserved for the destructive unbind action.
         var screen = Minecraft.getInstance().screen;

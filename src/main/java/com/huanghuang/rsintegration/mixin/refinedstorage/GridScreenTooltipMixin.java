@@ -1,7 +1,10 @@
 package com.huanghuang.rsintegration.mixin.refinedstorage;
 
 import com.huanghuang.rsintegration.machine.MachineHub;
+import com.huanghuang.rsintegration.mods.rs.recentsearch.RecentSearchClient;
 import com.huanghuang.rsintegration.sidepanel.client.MachineTabHandler;
+import com.refinedmods.refinedstorage.screen.grid.GridScreen;
+import com.refinedmods.refinedstorage.screen.grid.stack.IGridStack;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -21,6 +24,12 @@ public abstract class GridScreenTooltipMixin {
     @Inject(method = "m_280003_", at = @At("HEAD"), cancellable = true, remap = false)
     private void rsi$suppressGridTooltip(GuiGraphics gfx, int mouseX, int mouseY, CallbackInfo ci) {
         if (MachineHub.isVisible()) {
+            ci.cancel();
+            return;
+        }
+
+        if (RecentSearchClient.shouldSuppressGridTooltip(
+                (GridScreen) (Object) this, mouseX, mouseY)) {
             ci.cancel();
             return;
         }
@@ -49,6 +58,15 @@ public abstract class GridScreenTooltipMixin {
             lines.add(Component.translatable("rsi.resonance_backpack.tooltip_click")
                     .withStyle(ChatFormatting.AQUA));
             gfx.renderTooltip(Minecraft.getInstance().font, lines, Optional.empty(), mouseX, mouseY);
+            ci.cancel();
+        }
+    }
+
+    @Inject(method = "drawGridTooltip", at = @At("HEAD"), cancellable = true, remap = false)
+    private void rsi$suppressGridStackTooltip(GuiGraphics gfx, IGridStack stack,
+                                               int mouseX, int mouseY, CallbackInfo ci) {
+        if (RecentSearchClient.shouldSuppressGridTooltip(
+                (GridScreen) (Object) this, mouseX, mouseY)) {
             ci.cancel();
         }
     }

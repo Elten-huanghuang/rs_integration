@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.machine;
 import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
 import com.huanghuang.rsintegration.sidepanel.data.BindingInfo;
 import com.huanghuang.rsintegration.sidepanel.data.MachineStatusCache;
+import com.huanghuang.rsintegration.sidepanel.client.MachineFavoritesClient;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
@@ -159,6 +160,7 @@ public final class MachineHubRenderer {
         int hovered = -1;
         // Clear stale hit target when the mouse leaves a machine slot.
         MachineHub.setHoveredIndex(-1);
+        MachineHub.setFavoriteHoveredIndex(-1);
 
         for (int i = 0; i < machines.size(); i++) {
             BindingInfo info = machines.get(i);
@@ -171,6 +173,12 @@ public final class MachineHubRenderer {
 
             boolean isHovered = mouseX >= sx && mouseX < sx + SLOT_SIZE
                     && mouseY >= sy && mouseY < sy + SLOT_SIZE;
+            boolean favorite = MachineFavoritesClient.isFavorite(info);
+            int favoriteX = sx + 1;
+            int favoriteY = sy + 1;
+            boolean favoriteHovered = isHovered
+                    && mouseX >= favoriteX - 1 && mouseX < favoriteX + 9
+                    && mouseY >= favoriteY - 1 && mouseY < favoriteY + 9;
 
             MachineInteractType iType = MachineInteractType.fromBlockKey(info.blockKey());
             MachineStatus iStatus = MachineStatusCache.getInstance().get(info);
@@ -201,6 +209,17 @@ public final class MachineHubRenderer {
                 g.renderItemDecorations(font, icon, sx + 1, sy + 1);
             }
 
+            g.fill(favoriteX - 1, favoriteY - 1,
+                    favoriteX + 9, favoriteY + 9,
+                    favorite ? 0xDD514400 : 0xCC282828);
+            if (favoriteHovered) {
+                g.renderOutline(favoriteX - 1, favoriteY - 1, 10, 10, 0xFFFFFFFF);
+                MachineHub.setFavoriteHoveredIndex(i);
+            }
+            drawFavoriteStar(g, favoriteX, favoriteY,
+                    favorite ? 0xFFFFD740
+                            : favoriteHovered ? 0xFFFFFFFF : 0xFFB8B8B8);
+
             // Working progress bar
             if (iType == MachineInteractType.QUICK
                     && iStatus.state() == MachineState.WORKING
@@ -216,12 +235,14 @@ public final class MachineHubRenderer {
                 int cnt = iStatus.outputItem().getCount();
                 String cntStr = cnt > 99 ? "…" : String.valueOf(cnt);
                 int tw = font.width(cntStr);
-                g.fill(sx + SLOT_SIZE - tw - 3, sy + 1, sx + SLOT_SIZE - 1, sy + 9, 0xDD224488);
-                g.drawString(font, cntStr, sx + SLOT_SIZE - tw - 2, sy + 2, 0xFFFFFF);
+                g.fill(sx + SLOT_SIZE - tw - 3, sy + SLOT_SIZE - 9,
+                        sx + SLOT_SIZE - 1, sy + SLOT_SIZE - 1, 0xDD224488);
+                g.drawString(font, cntStr, sx + SLOT_SIZE - tw - 2,
+                        sy + SLOT_SIZE - 8, 0xFFFFFF);
             }
 
             // GUI-type indicator (gear dots)
-            if (iType == MachineInteractType.GUI) {
+            if (iType == MachineInteractType.GUI && !favorite && !isHovered) {
                 int dx = sx + SLOT_SIZE - 6;
                 int dy = sy + 1;
                 for (int r = 0; r < 2; r++)
@@ -270,6 +291,9 @@ public final class MachineHubRenderer {
                     tip.add(Component.translatable("rsi.hub.controls.gui")
                             .withStyle(net.minecraft.ChatFormatting.DARK_GRAY));
                 }
+                tip.add(Component.translatable(favorite
+                                ? "rsi.hub.unfavorite" : "rsi.hub.favorite")
+                        .withStyle(net.minecraft.ChatFormatting.YELLOW));
                 MachineHub.isRenderingOurTooltip = true;
                 g.renderTooltip(font, tip, java.util.Optional.empty(), mouseX, mouseY);
                 MachineHub.isRenderingOurTooltip = false;
@@ -296,5 +320,16 @@ public final class MachineHubRenderer {
     static ItemStack resolveIcon(BindingInfo info) {
         return BindingEventHandler.resolveBlockIcon(
                 info.blockRegKey(), info.blockKey(), info.displayStack());
+    }
+
+    private static void drawFavoriteStar(GuiGraphics graphics, int x, int y, int color) {
+        graphics.fill(x + 3, y, x + 5, y + 2, color);
+        graphics.fill(x, y + 2, x + 8, y + 3, color);
+        graphics.fill(x + 1, y + 3, x + 7, y + 4, color);
+        graphics.fill(x + 2, y + 4, x + 6, y + 5, color);
+        graphics.fill(x + 1, y + 5, x + 3, y + 6, color);
+        graphics.fill(x + 5, y + 5, x + 7, y + 6, color);
+        graphics.fill(x, y + 6, x + 2, y + 7, color);
+        graphics.fill(x + 6, y + 6, x + 8, y + 7, color);
     }
 }
