@@ -65,9 +65,14 @@ public final class ArsApparatusBatchDelegate extends AbstractBatchDelegate {
     private final List<BlockPos> activePedestalPositions = new ArrayList<>();
     private boolean craftStarted;
     private long craftStartTick;
+    private ItemStack pendingReagent = ItemStack.EMPTY;
+    private long startRetryDeadline;
+    private long nextStartRetryTick;
+    private int startAttempts;
 
     // Timeout: 210 craft ticks + margin for Source accumulation
     private static final long CRAFT_TIMEOUT_TICKS = 210 + 200;
+    private static final long START_RETRY_TICKS = 20;
 
     // ── IBatchDelegate implementation ─────────────────────────────────────────
 
@@ -128,6 +133,10 @@ public final class ArsApparatusBatchDelegate extends AbstractBatchDelegate {
         this.machinePos = pos;
         this.craftStarted = false;
         this.craftStartTick = 0;
+        this.pendingReagent = ItemStack.EMPTY;
+        this.startRetryDeadline = 0L;
+        this.nextStartRetryTick = 0L;
+        this.startAttempts = 0;
         this.activePedestalPositions.clear();
 
         if (!level.hasChunkAt(pos)) return false;
@@ -238,17 +247,17 @@ public final class ArsApparatusBatchDelegate extends AbstractBatchDelegate {
         // EnchantingApparatusTile.setItem invokes attemptCraft(reagent, null).
         // Verify that the native insertion path accepted and started the recipe.
         if (!ArsTileAccess.isApparatusCrafting(be)) {
-            RSIntegrationMod.LOGGER.warn("[RSI-ArsApparatus] Native reagent insertion did not start crafting");
-            container.setItem(0, ItemStack.EMPTY);
-            discardPedestalItems(level);
-            refundRejectedStart(player, level, materials);
-            return false;
+            this.pendingReagent = reagent.copy();
+            this.startRetryDeadline = level.getGameTime() + START_RETRY_TICKS;
+            this.nextStartRetryTick = level.getGameTime() + 1L;
+            this.startAttempts = 1;
+            RSIntegrationMod.LOGGER.debug(
+                    "[RSI-ArsApparatus] Native insertion did not start immediately; retrying for {} tick(s)",
+                    START_RETRY_TICKS);
+            return true;
         }
 
-        this.craftStarted = true;
-        this.craftStartTick = level.getGameTime();
-
-        RSIntegrationMod.LOGGER.debug("[RSI-ArsApparatus] Craft started successfully");
+        markNativeCraftStarted(level);
         return true;
     }
 
@@ -257,6 +266,10 @@ public final class ArsApparatusBatchDelegate extends AbstractBatchDelegate {
     protected CraftObservation observeMachineCraft(@Nonnull ServerLevel level, @Nonnull BlockEntity be) {
         if (!ArsTileAccess.isApparatus(be)) {
             return failObservation("Machine disappeared");
+        }
+
+        if (!craftStarted) {
+            return observePendingStart(level, be);
         }
 
         // Check timeout
@@ -297,6 +310,49 @@ public final class ArsApparatusBatchDelegate extends AbstractBatchDelegate {
 
         // Intermediate state: counter > 210 but isCrafting still true (settling)
         return workingObservation();
+    }
+
+    private CraftObservation observePendingStart(ServerLevel level, BlockEntity be) {
+        if (ArsTileAccess.isApparatusCrafting(be)) {
+            markNativeCraftStarted(level);
+            return workingObservation();
+        }
+        long now = level.getGameTime();
+        if (retryWindowExpired(now, startRetryDeadline)) {
+            return failObservation("Enchanting Apparatus rejected start after "
+                    + startAttempts + " attempt(s)");
+        }
+        if (now < nextStartRetryTick) return workingObservation();
+        if (!(be instanceof Container container) || pendingReagent.isEmpty()) {
+            return failObservation("Cannot retry Enchanting Apparatus start");
+        }
+        ItemStack central = container.getItem(0);
+        if (!central.isEmpty() && !ItemStack.isSameItemSameTags(central, pendingReagent)) {
+            return failObservation("Enchanting Apparatus central slot changed before retry");
+        }
+
+        container.setItem(0, ItemStack.EMPTY);
+        container.setItem(0, pendingReagent.copy());
+        be.setChanged();
+        startAttempts++;
+        nextStartRetryTick = now + 1L;
+        if (ArsTileAccess.isApparatusCrafting(be)) {
+            markNativeCraftStarted(level);
+        }
+        return workingObservation();
+    }
+
+    private void markNativeCraftStarted(ServerLevel level) {
+        this.craftStarted = true;
+        this.craftStartTick = level.getGameTime();
+        this.pendingReagent = ItemStack.EMPTY;
+        RSIntegrationMod.LOGGER.debug(
+                "[RSI-ArsApparatus] Craft started successfully after {} attempt(s)",
+                Math.max(1, startAttempts));
+    }
+
+    static boolean retryWindowExpired(long now, long deadline) {
+        return now >= deadline;
     }
 
     @Override
@@ -489,6 +545,7 @@ public final class ArsApparatusBatchDelegate extends AbstractBatchDelegate {
 
     private void refundRejectedStart(ServerPlayer player, ServerLevel level,
                                      List<ItemStack> materials) {
+        if (!ownsRejectedStartRefund(usingSharedLedger)) return;
         if (network == null) {
             network = CraftPacketUtils.resolveNetworkForCraft(
                     player, level.dimension(), machinePos);
@@ -506,6 +563,10 @@ public final class ArsApparatusBatchDelegate extends AbstractBatchDelegate {
         }
         RSIntegrationMod.LOGGER.debug("[RSI-ArsApparatus] Refunded {} material stack(s) after rejected start",
                 materials.stream().filter(stack -> stack != null && !stack.isEmpty()).count());
+    }
+
+    static boolean ownsRejectedStartRefund(boolean usingSharedLedger) {
+        return !usingSharedLedger;
     }
 
     private void collectPedestalRemainders(ServerLevel level) {

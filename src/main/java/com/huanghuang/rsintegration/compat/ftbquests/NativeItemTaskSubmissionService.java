@@ -70,6 +70,17 @@ public final class NativeItemTaskSubmissionService {
                 return;
             }
 
+            // Inventory extraction can synchronously trigger other FTB callbacks. Re-check
+            // the lock after commit because TeamData#setProgress silently ignores writes
+            // while locked; without this guard the paid items would be settled at 0 progress.
+            if (data.isLocked()) {
+                RSIntegrationMod.LOGGER.warn(
+                        "[RSI-FTBQuests] Team data locked after reserving task {}; refunding {} item(s)",
+                        task.getId(), reserved);
+                ledger.refundCommitted(token, network, player);
+                return;
+            }
+
             long before = data.getProgress(task);
             data.addProgress(task, reserved);
             long accepted = data.getProgress(task) - before;
@@ -77,8 +88,14 @@ public final class NativeItemTaskSubmissionService {
                 RSIntegrationMod.LOGGER.error(
                         "[RSI-FTBQuests] Transaction invariant failed for task {}: reserved={}, accepted={}",
                         task.getId(), reserved, accepted);
-                // Progress may already have mutated. Settling is conservative:
-                // refunding here could return paid items while keeping progress.
+                if (QuestProgressSettlement.shouldRefundRejectedProgress(accepted)) {
+                    ledger.refundCommitted(token, network, player);
+                    sendMissing(player, display,
+                            Math.max(0L, task.getMaxProgress() - data.getProgress(task)));
+                    return;
+                }
+                // A partial write may already have fired completion side effects. The token
+                // cannot be split safely here, so keep the conservative paid settlement.
                 ledger.settleCommitted(token);
                 return;
             }
