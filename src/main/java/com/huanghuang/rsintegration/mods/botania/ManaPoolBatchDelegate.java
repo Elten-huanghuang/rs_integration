@@ -28,6 +28,7 @@ import java.util.List;
 public final class ManaPoolBatchDelegate extends AbstractBatchDelegate {
     static final int MAX_PHYSICAL_BATCH = 1024;
     static final int MAX_PARALLEL_WORKER_BATCH = 128;
+    static final double INPUT_SPAWN_HEIGHT = 0.75;
     private ServerLevel level;
     private BlockPos bindingPos;
     private BlockPos poolPos;
@@ -186,7 +187,7 @@ public final class ManaPoolBatchDelegate extends AbstractBatchDelegate {
         while (remaining > 0) {
             int count = Math.min(remaining, stackLimit);
             ItemEntity entity = new ItemEntity(level, poolPos.getX()+0.5,
-                    poolPos.getY()+1.15, poolPos.getZ()+0.5, input.copyWithCount(count));
+                    inputSpawnY(poolPos), poolPos.getZ()+0.5, input.copyWithCount(count));
             entity.setDeltaMovement(0, 0, 0);
             // This operation owns the entities; nearby players and collectors must not steal them.
             BotaniaDelegateSupport.protectOperationInput(entity);
@@ -195,6 +196,11 @@ public final class ManaPoolBatchDelegate extends AbstractBatchDelegate {
                 return false;
             }
             inputEntityIds.add(entity.getUUID());
+            // A pylon or another solid block directly above the pool prevents a
+            // dropped item from falling into the basin. The safe in-pool spawn
+            // keeps it below that collision shape; process once immediately and
+            // let Botania's normal entityInside callback handle later mana waits.
+            if (entity.isAlive()) pool.collideEntityItem(entity);
             remaining -= count;
         }
         requestedBatch = input.getCount();
@@ -307,6 +313,10 @@ public final class ManaPoolBatchDelegate extends AbstractBatchDelegate {
         // A pool-local box lets adjacent bound pools own distinct capture zones.
         return new AABB(poolPos.getX() + 0.05, poolPos.getY() + 0.70, poolPos.getZ() + 0.05,
                 poolPos.getX() + 0.95, poolPos.getY() + 1.80, poolPos.getZ() + 0.95);
+    }
+
+    static double inputSpawnY(BlockPos poolPos) {
+        return poolPos.getY() + INPUT_SPAWN_HEIGHT;
     }
     @Override public BlockPos getMachinePos() { return poolPos; }
     @Override public void onBatchFinished(@Nonnull ServerPlayer player) { resetState(); }

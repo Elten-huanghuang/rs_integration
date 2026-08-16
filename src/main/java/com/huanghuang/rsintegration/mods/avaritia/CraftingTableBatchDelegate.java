@@ -21,6 +21,7 @@ import net.minecraftforge.common.util.LazyOptional;
 import net.minecraftforge.items.IItemHandler;
 import net.minecraftforge.items.ItemHandlerHelper;
 import net.minecraftforge.items.ItemStackHandler;
+import net.minecraftforge.registries.ForgeRegistries;
 import org.jetbrains.annotations.NotNull;
 
 import javax.annotation.Nullable;
@@ -43,6 +44,8 @@ public final class CraftingTableBatchDelegate extends AbstractBatchDelegate {
     private ItemStack cachedResult = ItemStack.EMPTY;
     private boolean craftDone;
     private int gridSlots;
+    private int machineTier;
+    private int recipeTier;
 
     @Override
     public boolean validateAndInit(ServerPlayer player, ResourceLocation recipeId,
@@ -64,6 +67,16 @@ public final class CraftingTableBatchDelegate extends AbstractBatchDelegate {
         recipe = found;
         craftDone = false;
 
+        ResourceLocation blockId = ForgeRegistries.BLOCKS.getKey(level.getBlockState(pos).getBlock());
+        machineTier = machineTier(blockId);
+        recipeTier = recipeTier(found);
+        if (machineTier > 0 && recipeTier > 0 && machineTier != recipeTier) {
+            RSIntegrationMod.LOGGER.debug(
+                    "[RSI-Batch-CT] Tier mismatch: recipe={} requires tier {} but {} at {} is tier {}",
+                    recipeId, recipeTier, blockId, pos, machineTier);
+            return false;
+        }
+
         // Determine expected grid size from the BE
         BlockEntity be = level.getBlockEntity(pos);
         if (be == null) return false;
@@ -72,13 +85,24 @@ public final class CraftingTableBatchDelegate extends AbstractBatchDelegate {
             gridSlots = handler.getSlots();
         }
 
-        RSIntegrationMod.LOGGER.debug("[RSI-Batch-CT] validateAndInit OK: recipe={} pos={}", recipeId, pos);
+        RSIntegrationMod.LOGGER.debug("[RSI-Batch-CT] validateAndInit OK: recipe={} pos={} block={} tier={}/{} gridSlots={}",
+                recipeId, pos, blockId, recipeTier, machineTier, gridSlots);
         return true;
     }
 
     @Nullable
     @Override
     public List<IngredientSpec> getRequiredMaterials() {
+        if (recipe != null && recipe.getClass().getName().endsWith("ShapedTableCraftingRecipe")) {
+            // Avaritia's shaped matcher reads the complete square handler and
+            // preserves empty cells. Keep those cells in the material contract
+            // so a pattern is inserted at its original coordinates.
+            List<IngredientSpec> layout = new ArrayList<>();
+            for (var ingredient : recipe.getIngredients()) {
+                layout.add(new IngredientSpec(ingredient, ingredient.isEmpty() ? 0 : 1));
+            }
+            return layout;
+        }
         var handler = ModRecipeHandlers.handlerFor(recipe);
         if (handler != null) {
             return handler.getIngredients(recipe);
@@ -102,7 +126,10 @@ public final class CraftingTableBatchDelegate extends AbstractBatchDelegate {
             if (network == null) return false;
 
             for (IngredientSpec spec : specs) {
-                if (spec.isEmpty()) continue;
+                if (spec.isEmpty()) {
+                    materials.add(ItemStack.EMPTY);
+                    continue;
+                }
                 ItemStack reserved = CraftPacketUtils.ensureMaterialAvailable(
                         player, myDim, myPos, spec.ingredient(), spec.count(), ledger);
                 if (reserved.isEmpty()) {
@@ -142,20 +169,19 @@ public final class CraftingTableBatchDelegate extends AbstractBatchDelegate {
         refundGrid(handler, player);
 
         // Insert materials into grid slots
-        int slot = 0;
-        for (ItemStack mat : materials) {
-            if (mat.isEmpty()) continue;
+        for (int slot = 0; slot < materials.size(); slot++) {
+            ItemStack mat = materials.get(slot);
             if (slot >= handler.getSlots()) {
                 RSIntegrationMod.LOGGER.warn("[RSI-Batch-CT] Grid overflow at {}: need > {} slots", myPos, handler.getSlots());
                 return false;
             }
+            if (mat == null || mat.isEmpty()) continue;
             ItemStack remainder = handler.insertItem(slot, mat.copy(), false);
             if (!remainder.isEmpty()) {
                 RSIntegrationMod.LOGGER.warn("[RSI-Batch-CT] Failed to insert into slot {} at {}", slot, myPos);
                 refundGrid(handler, player);
                 return false;
             }
-            slot++;
         }
 
         // Verify recipe matches and assemble
@@ -277,5 +303,30 @@ public final class CraftingTableBatchDelegate extends AbstractBatchDelegate {
 
     private void forceChunkLoad(boolean load) {
         forceMachineChunk(myLevel, myPos, load);
+    }
+
+    /** Avaritia's four tiered tables use one block entity class, so the block ID
+     * is the authoritative machine identity for recipe routing. */
+    public static int machineTier(@Nullable ResourceLocation blockId) {
+        if (blockId == null || !"avaritia".equals(blockId.getNamespace())) return 0;
+        return switch (blockId.getPath()) {
+            case "sculk_crafting_table" -> 1;
+            case "nether_crafting_table" -> 2;
+            case "end_crafting_table" -> 3;
+            case "extreme_crafting_table" -> 4;
+            default -> 0;
+        };
+    }
+
+    /** Re-Avaritia exposes the required tier on both shaped and shapeless table recipes. */
+    public static int recipeTier(@Nullable Recipe<?> recipe) {
+        if (recipe == null) return 0;
+        try {
+            Method method = recipe.getClass().getMethod("getTier");
+            Object value = method.invoke(recipe);
+            return value instanceof Number number ? Math.max(0, number.intValue()) : 0;
+        } catch (ReflectiveOperationException | LinkageError ignored) {
+            return 0;
+        }
     }
 }

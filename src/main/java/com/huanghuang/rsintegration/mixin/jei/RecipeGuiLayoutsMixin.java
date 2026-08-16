@@ -273,7 +273,7 @@ public class RecipeGuiLayoutsMixin {
                 bindingDim = player.level().dimension().location();
                 machinePos = player.blockPosition();
             } else {
-                BindingStorage.BindingEntry binding = findBinding(filter);
+                BindingStorage.BindingEntry binding = findBinding(filter, recipe);
                 if (binding == null) {
                     if (isFa) faNoBinding++;
                 if (isFaOrTlm) {
@@ -1542,7 +1542,7 @@ public class RecipeGuiLayoutsMixin {
     }
 
     @Unique
-    private static BindingStorage.BindingEntry findBinding(String filter) {
+    private static BindingStorage.BindingEntry findBinding(String filter, @javax.annotation.Nullable Object recipe) {
         var player = Minecraft.getInstance().player;
         if (player == null) return null;
 
@@ -1556,20 +1556,23 @@ public class RecipeGuiLayoutsMixin {
         for (ItemStack stack : inv.items) {
             for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
                 if (debug) allBlockKeys.add(entry.blockKey());
-                if (rsi$bindingMatchesFilter(entry, filter)) return entry;
+                if (rsi$bindingMatchesFilter(entry, filter)
+                        && rsi$bindingMatchesRecipe(entry, filter, recipe)) return entry;
             }
         }
         for (ItemStack stack : inv.offhand) {
             for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
                 if (debug) allBlockKeys.add(entry.blockKey());
-                if (rsi$bindingMatchesFilter(entry, filter)) return entry;
+                if (rsi$bindingMatchesFilter(entry, filter)
+                        && rsi$bindingMatchesRecipe(entry, filter, recipe)) return entry;
             }
         }
 
         for (ItemStack stack : com.huanghuang.rsintegration.util.CuriosAccess.stacks(player)) {
             for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
                 if (debug) allBlockKeys.add(entry.blockKey());
-                if (rsi$bindingMatchesFilter(entry, filter)) return entry;
+                if (rsi$bindingMatchesFilter(entry, filter)
+                        && rsi$bindingMatchesRecipe(entry, filter, recipe)) return entry;
             }
         }
 
@@ -1579,6 +1582,30 @@ public class RecipeGuiLayoutsMixin {
         }
 
         return null;
+    }
+
+    @Unique
+    private static boolean rsi$bindingMatchesRecipe(BindingStorage.BindingEntry entry,
+                                                     String filter, @javax.annotation.Nullable Object recipe) {
+        if (!ModIds.ID_AVARITIA_CRAFTING.equals(filter) || !(recipe instanceof net.minecraft.world.item.crafting.Recipe<?> avaritiaRecipe)) {
+            return true;
+        }
+        int requiredTier = com.huanghuang.rsintegration.mods.avaritia.CraftingTableBatchDelegate
+                .recipeTier(avaritiaRecipe);
+        if (requiredTier <= 0) return true;
+
+        String blockId = entry.blockRegKey();
+        if (blockId == null || blockId.isBlank()) blockId = entry.blockKey();
+        int machineTier = com.huanghuang.rsintegration.mods.avaritia.CraftingTableBatchDelegate
+                .machineTier(net.minecraft.resources.ResourceLocation.tryParse(blockId));
+        if (machineTier <= 0 && blockId != null) {
+            String lower = blockId.toLowerCase(java.util.Locale.ROOT);
+            machineTier = lower.contains("sculk_crafting_table") ? 1
+                    : lower.contains("nether_crafting_table") ? 2
+                    : lower.contains("end_crafting_table") ? 3
+                    : lower.contains("extreme_crafting_table") ? 4 : 0;
+        }
+        return machineTier <= 0 || machineTier == requiredTier;
     }
 
     @Unique

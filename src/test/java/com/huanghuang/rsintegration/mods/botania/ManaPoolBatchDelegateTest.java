@@ -45,4 +45,10 @@ class ManaPoolBatchDelegateTest {
         var second = ManaPoolBatchDelegate.captureRegion(new BlockPos(1, 64, 0));
         assertFalse(first.intersects(second));
     }
+
+    @Test
+    void inputSpawnsInsidePoolBelowAnOccupiedTopBlock() {
+        assertEquals(64.75, ManaPoolBatchDelegate.inputSpawnY(new BlockPos(0, 64, 0)));
+        assertEquals(0.75, ManaPoolBatchDelegate.INPUT_SPAWN_HEIGHT);
+    }
 }

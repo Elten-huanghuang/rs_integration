@@ -27,6 +27,14 @@ class ManaPoolBindingRulesTest {
                 "conjuration_catalyst||block.botania.conjuration_catalyst"));
         assertEquals(manaPool, ModType.fromBlockKey(
                 "mana_pool||block.botania.creative_pool"));
+        assertEquals(manaPool, ModType.fromBlockKey(
+                "mana_pool||block.improved_botania_pools.alfheim_mana_pool"));
+        assertEquals(manaPool, ModType.fromBlockKey(
+                "mana_pool||block.improved_botania_pools.asgard_mana_pool"));
+        assertEquals(manaPool, ModType.fromBlockKey(
+                "mana_pool||block.improved_botania_pools.muspelheim_mana_pool"));
+        assertEquals(manaPool, ModType.fromBlockKey(
+                "mana_pool||block.improved_botania_pools.nilfheim_mana_pool"));
     }
 
     @Test
