@@ -53,6 +53,14 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
             return isClassPresent("dev.shadowsoffire.apotheosis.ench.library.EnchLibraryScreen")
                     && hasField(targetClassName, "filter");
         }
+        if (mixinClassName.contains("placebo.PlaceboContainerMenuMixin")) {
+            return isClassPresent("dev.shadowsoffire.placebo.menu.PlaceboContainerMenu")
+                    && hasField(targetClassName, "level");
+        }
+        if (mixinClassName.contains("placebo.PlaceboBlockEntityMenuMixin")) {
+            return isClassPresent("dev.shadowsoffire.placebo.menu.BlockEntityMenu")
+                    && hasMethod(targetClassName, "<init>");
+        }
         if (mixinClassName.contains("crockpot.CrockPotMenuMixin")) {
             return hasField(targetClassName, "blockEntity");
         }

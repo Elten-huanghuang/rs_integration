@@ -620,6 +620,12 @@ public final class RSIntegrationMod {
             com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket.cancelAllPlanning();
             com.huanghuang.rsintegration.crafting.RecipeIndex.invalidate();
             AsyncCraftManager.abortAll();
+            com.huanghuang.rsintegration.crafting.CraftOutputInterceptor.clearAll();
+            com.huanghuang.rsintegration.mods.embers.EreAlchemyLock.clearAll();
+            if (ModList.get().isLoaded(ModIds.IRON_FURNACES)) {
+                com.huanghuang.rsintegration.mods.ironfurnaces.IronFurnacesBatchDelegate
+                        .clearFactoryLeases();
+            }
             RemoteGuiAuth.clearServerState();
             RSSidePanelNetworkHandler.clearServerState();
         });

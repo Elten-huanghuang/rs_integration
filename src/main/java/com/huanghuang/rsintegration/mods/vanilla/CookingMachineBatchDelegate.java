@@ -32,6 +32,7 @@ public final class CookingMachineBatchDelegate extends AbstractBatchDelegate {
     @Override
     public PreparationResult prepare(@Nonnull ServerPlayer player, @Nonnull ResourceLocation recipeId,
                                      @Nullable ResourceLocation dim, @Nonnull BlockPos pos) {
+        if (delegate != null) delegate.releasePreparationResources();
         delegate = selectDelegate(player, dim, pos);
         if (delegate == null) return PreparationResult.retry("unsupported cooking machine");
         PreparationResult result = delegate.prepare(player, recipeId, dim, pos);

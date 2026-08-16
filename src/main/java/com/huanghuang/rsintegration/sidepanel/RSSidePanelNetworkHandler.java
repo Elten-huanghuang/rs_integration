@@ -18,6 +18,7 @@ import com.huanghuang.rsintegration.sidepanel.network.MachineFavoriteTogglePacke
 import com.huanghuang.rsintegration.sidepanel.network.MachineFavoritesSyncPacket;
 import com.huanghuang.rsintegration.sidepanel.network.MachineStatusDeltaPacket;
 import com.huanghuang.rsintegration.sidepanel.network.OpenBoundMachineGuiPacket;
+import com.huanghuang.rsintegration.sidepanel.network.PlaceboRemoteMenuSnapshotPacket;
 import com.huanghuang.rsintegration.sidepanel.network.ReturnToRSPacket;
 import com.huanghuang.rsintegration.sidepanel.network.RSBindingSyncPacket;
 import com.huanghuang.rsintegration.sidepanel.network.UnbindMachinePacket;
@@ -114,6 +115,11 @@ public final class RSSidePanelNetworkHandler {
         ch.registerMessage(NetworkPacketIds.MACHINE_FAVORITES_SYNC, MachineFavoritesSyncPacket.class,
                 MachineFavoritesSyncPacket::encode, MachineFavoritesSyncPacket::decode,
                 MachineFavoritesSyncPacket::handle,
+                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_CLIENT));
+        ch.registerMessage(NetworkPacketIds.PLACEBO_REMOTE_MENU_SNAPSHOT,
+                PlaceboRemoteMenuSnapshotPacket.class,
+                PlaceboRemoteMenuSnapshotPacket::encode, PlaceboRemoteMenuSnapshotPacket::decode,
+                PlaceboRemoteMenuSnapshotPacket::handle,
                 java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_CLIENT));
         ch.registerMessage(NetworkPacketIds.OPEN_RESONANCE_BACKPACK, OpenResonanceBackpackPacket.class,
                 OpenResonanceBackpackPacket::encode, OpenResonanceBackpackPacket::decode, OpenResonanceBackpackPacket::handle,

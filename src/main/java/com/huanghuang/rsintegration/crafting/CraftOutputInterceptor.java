@@ -117,6 +117,13 @@ public final class CraftOutputInterceptor {
         return total;
     }
 
+    /** Server-lifecycle safety net after active crafts have been aborted. */
+    public static int clearAll() {
+        int count = activeZoneCount();
+        ZONES.clear();
+        return count;
+    }
+
     /** Used by optional magnet mixins to leave protected entities untouched. */
     public static boolean isInActiveZone(Level level, Vec3 pos) {
         if (ZONES.isEmpty()) return false;

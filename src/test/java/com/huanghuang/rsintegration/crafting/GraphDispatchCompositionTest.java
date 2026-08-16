@@ -22,6 +22,7 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Ingredient;
 import org.junit.jupiter.api.Test;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
 
@@ -29,6 +30,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class GraphDispatchCompositionTest extends BootstrapTest {
@@ -111,6 +113,24 @@ class GraphDispatchCompositionTest extends BootstrapTest {
         assertEquals(0, harness.globalBudget.active());
         assertEquals(0, harness.machines.size());
         assertEquals(0, harness.broker.heldBy(harness.node));
+    }
+
+    @Test
+    void resourcePreparationExceptionRollsBackBudgetsAndLeases() {
+        Harness harness = new Harness();
+        List<MachineLeaseRegistry.MachineKey> invalidScope = Arrays.asList(
+                harness.machine, null);
+
+        assertThrows(NullPointerException.class, () -> harness.kernel.tryPrepare(
+                harness.craftId, harness.node, 0, harness.craftBudget,
+                invalidScope, null));
+
+        assertEquals(0, harness.craftBudget.active());
+        assertEquals(0, harness.craftBudget.starts());
+        assertEquals(0, harness.globalBudget.active());
+        assertEquals(0, harness.globalBudget.starts());
+        assertEquals(0, harness.machines.size());
+        assertEquals(0, harness.captures.size());
     }
 
     @Test
