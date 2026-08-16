@@ -67,6 +67,18 @@ public final class BotaniaRSModule implements IModIntegration {
         target("botania_mana_pool", "conjuration_catalyst", "vazkii.botania.common.block.mana.ConjurationCatalystBlock");
         target("botania_mana_pool", "alchemy_catalyst", "vazkii.botania.common.block.mana.AlchemyCatalystBlock");
         target("botania_mana_pool", "mana_pool", "vazkii.botania.common.block.mana.ManaPoolBlock");
+        // Improved Botania Pools uses a different block class, but its pool tile
+        // extends Botania's ManaPoolBlockEntity and exposes the same infusion API.
+        BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
+                "improved_botania_pools", ModType.byId("botania_mana_pool"),
+                RSIntegrationConfig.ENABLE_BOTANIA,
+                List.of(),
+                List.of(
+                        "improved_botania_pools:alfheim_mana_pool",
+                        "improved_botania_pools:asgard_mana_pool",
+                        "improved_botania_pools:muspelheim_mana_pool",
+                        "improved_botania_pools:nilfheim_mana_pool"),
+                "mana_pool", false));
         target("botania_apothecary", "apothecary", "vazkii.botania.common.block.PetalApothecaryBlock");
         target("botania_runic_altar", "runic_altar", "vazkii.botania.common.block.mana.RunicAltarBlock");
         target("botania_brewery", "brewery", "vazkii.botania.common.block.mana.BotanicalBreweryBlock");
