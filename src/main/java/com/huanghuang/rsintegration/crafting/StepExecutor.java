@@ -17,6 +17,7 @@ import com.huanghuang.rsintegration.crafting.graph.OutputKind;
 import com.huanghuang.rsintegration.crafting.graph.OutputPortId;
 import com.huanghuang.rsintegration.command.PerformanceMonitor;
 import com.huanghuang.rsintegration.mods.crockpot.CrockPotBatchDelegate;
+import com.huanghuang.rsintegration.mods.goety.GoetyDynamicRitualRecipe;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
@@ -107,7 +108,8 @@ final class StepExecutor {
 
     static boolean craftBatched(RecipeIndex.Entry entry, ResolutionContext ctx, int depth,
                                 List<ResourceLocation> altIds, List<String> altModTypes,
-                                CraftingResolver.EdgeTracker edges, int batches) {
+                                CraftingResolver.EdgeTracker edges, int batches,
+                                ItemStack demandedOutput) {
         if (ctx.timedOut()) {
             PerformanceMonitor.recordResolveTimeout();
             return false;
@@ -129,7 +131,11 @@ final class StepExecutor {
         edges.beginUndo();
         NodeId graphNodeId = ctx.allocateNodeId();
 
-        List<IngredientSpec> specs = CraftPacketUtils.extractIngredientSpecs(entry.recipe());
+        boolean goetyDynamic = GoetyDynamicRitualRecipe.isSupported(entry.recipe())
+                && demandedOutput != null && !demandedOutput.isEmpty();
+        List<IngredientSpec> specs = goetyDynamic
+                ? GoetyDynamicRitualRecipe.buildMaterials(entry.recipe(), demandedOutput)
+                : CraftPacketUtils.extractIngredientSpecs(entry.recipe());
         if (entry.modType() == ModType.byId("crockpot")
                 && CrockPotRecipeHandler.hasCategoryConstraints(entry.recipe())) {
             List<IngredientSpec> categorySpecs = CrockPotBatchDelegate.buildCategoryPlanIngredients(
@@ -190,8 +196,10 @@ final class StepExecutor {
         }
 
         var handler = ModRecipeHandlers.handlerFor(entry.recipe());
-        ItemStack result = ItemStack.EMPTY;
-        if (handler != null) {
+        ItemStack result = goetyDynamic
+                ? GoetyDynamicRitualRecipe.validatedOutput(entry.recipe(), demandedOutput)
+                : ItemStack.EMPTY;
+        if (result.isEmpty() && handler != null) {
             result = handler.getResultItem(entry.recipe(), ctx.level.registryAccess());
         }
         if (result.isEmpty()) {

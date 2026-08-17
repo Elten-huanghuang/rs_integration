@@ -20,18 +20,10 @@ final class RecentSearchHistory {
         return List.copyOf(entries);
     }
 
-    List<RecentSearchEntry> visibleEntries(int limit) {
-        return visibleEntries(limit, true);
-    }
-
-    List<RecentSearchEntry> visibleEntries(int limit, boolean favoritesFirst) {
+    List<RecentSearchEntry> favoriteEntries(int limit) {
         if (limit <= 0 || entries.isEmpty()) return List.of();
-        if (!favoritesFirst) {
-            return List.copyOf(entries.subList(0, Math.min(limit, entries.size())));
-        }
         List<RecentSearchEntry> visible = new ArrayList<>(Math.min(limit, entries.size()));
         appendGroup(visible, true, limit);
-        appendGroup(visible, false, limit);
         return List.copyOf(visible);
     }
 

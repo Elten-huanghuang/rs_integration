@@ -1479,8 +1479,7 @@ public final class CraftingPlanScreen extends Screen {
         selectedPath.selectBranch(treeKey, selected, choices.get(selected).recipeId);
 
         Map<String, String> forced = exportForcedSelections();
-        boolean isTarget = plan.targetResult() != null
-                && IngredientKey.of(plan.targetResult()).equals(treeKey);
+        boolean isTarget = treeModel != null && treeModel.root.key.equals(treeKey);
         ResourceLocation rid = ResourceLocation.tryParse(plan.recipeId());
         if (isTarget && selected != 0) {
             rid = choices.get(selected).recipeId;
@@ -2184,8 +2183,7 @@ public final class CraftingPlanScreen extends Screen {
 
         Map<String, String> forced = exportForcedSelections();
         ResourceLocation rootRid = ResourceLocation.tryParse(plan.recipeId());
-        boolean isTarget = plan.targetResult() != null
-                && IngredientKey.of(plan.targetResult()).equals(node.key);
+        boolean isTarget = node.depth == 0;
         if (isTarget) {
             rootRid = recipeId;
             ResourceLocation preferenceKey = com.huanghuang.rsintegration.crafting.CraftingResolver

@@ -10,6 +10,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class CraftingPreviewPolicyTest {
     @Test
+    void legacyDefaultCacheTtlMigratesWithoutOverwritingCustomValues() {
+        assertEquals(CraftingPreviewPolicy.DEFAULT_CACHE_TTL_MS,
+                RSIntegrationConfig.migratePlanCacheTtlMs(4, 500));
+        assertEquals(500, RSIntegrationConfig.migratePlanCacheTtlMs(5, 500));
+        assertEquals(4_000, RSIntegrationConfig.migratePlanCacheTtlMs(4, 4_000));
+    }
+
+    @Test
     void loadsMinimumAndMaximumValues() {
         CommentedConfig config = defaultConfig();
         setPolicy(config, CraftingPreviewPolicy.MIN_RATE_LIMIT_MS,

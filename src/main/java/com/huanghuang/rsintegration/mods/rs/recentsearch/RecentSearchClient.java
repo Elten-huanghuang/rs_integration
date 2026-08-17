@@ -218,8 +218,10 @@ public final class RecentSearchClient {
 
     private static RecentSearchOverlay.Layout layout(GridScreen screen, SearchWidget field) {
         boolean favorites = RSIntegrationConfig.RS_RECENT_SEARCH_FAVORITES_ENABLED.get();
-        List<RecentSearchEntry> entries = history.visibleEntries(
-                RSIntegrationConfig.RS_RECENT_SEARCH_MAX_VISIBLE_ENTRIES.get(), favorites);
+        List<RecentSearchEntry> entries = favorites
+                ? history.favoriteEntries(
+                        RSIntegrationConfig.RS_RECENT_SEARCH_MAX_VISIBLE_ENTRIES.get())
+                : List.of();
         return RecentSearchOverlay.layout(screen, field, entries, favorites,
                 RSIntegrationConfig.RS_RECENT_SEARCH_DELETE_BUTTONS_ENABLED.get());
     }

@@ -284,6 +284,22 @@ public final class RSIntegrationMod {
             LOGGER.info("[RSI-Config] Migrated craftingTypedPreviewTimeoutMs from 50 to {}",
                     migratedTypedTimeout);
         }
+        int currentPureTimeout = RSIntegrationConfig.CRAFTING_PURE_PLANNING_TIMEOUT_MS.get();
+        int migratedPureTimeout = RSIntegrationConfig.migratePurePlanningTimeoutMs(
+                schema, currentPureTimeout);
+        if (migratedPureTimeout != currentPureTimeout) {
+            RSIntegrationConfig.CRAFTING_PURE_PLANNING_TIMEOUT_MS.set(migratedPureTimeout);
+            LOGGER.info("[RSI-Config] Migrated craftingPurePlanningTimeoutMs from 500 to {}",
+                    migratedPureTimeout);
+        }
+        int currentPlanCacheTtl = RSIntegrationConfig.CRAFTING_PLAN_CACHE_TTL_MS.get();
+        int migratedPlanCacheTtl = RSIntegrationConfig.migratePlanCacheTtlMs(
+                schema, currentPlanCacheTtl);
+        if (migratedPlanCacheTtl != currentPlanCacheTtl) {
+            RSIntegrationConfig.CRAFTING_PLAN_CACHE_TTL_MS.set(migratedPlanCacheTtl);
+            LOGGER.info("[RSI-Config] Migrated craftingPlanCacheTtlMs from 500 to {}",
+                    migratedPlanCacheTtl);
+        }
         RSIntegrationConfig.SERVER_CONFIG_SCHEMA_VERSION
                 .set(RSIntegrationConfig.SERVER_CONFIG_SCHEMA);
         config.save();

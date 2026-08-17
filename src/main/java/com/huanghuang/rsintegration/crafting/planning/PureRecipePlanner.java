@@ -6,12 +6,10 @@ import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.Recip
 import net.minecraft.resources.ResourceLocation;
 
 import java.util.ArrayList;
-import java.util.ArrayDeque;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -51,7 +49,7 @@ public final class PureRecipePlanner {
                           int maxMemoizedFailures, long deadlineNanos) {
         List<IngredientRef> normalizedRoots = PureDemandNormalizer.mergeEquivalent(roots);
         Search search = new Search(graph, available, maxSteps, maxSearchStates,
-                maxMemoizedFailures, deadlineNanos, normalizedRoots);
+                maxMemoizedFailures, deadlineNanos);
         List<Task> pending = normalizedRoots.stream()
                 .map(DemandTask::new).map(Task.class::cast).toList();
         Status status;
@@ -63,9 +61,23 @@ public final class PureRecipePlanner {
         } catch (TimeLimitException ignored) {
             status = Status.TIME_LIMIT;
         }
-        List<IngredientRef> missing = status == Status.SUCCESS || roots.isEmpty()
-                ? List.of() : List.of(search.deepestFailure != null ? search.deepestFailure : roots.get(0));
-        List<PlannedStep> resultSteps = status == Status.SUCCESS ? search.steps : List.of();
+        IngredientRef unresolved = search.deepestFailure != null
+                ? search.deepestFailure : (roots.isEmpty() ? null : roots.get(0));
+        List<PlannedStep> resultSteps = switch (status) {
+            case SUCCESS -> search.steps;
+            case UNRESOLVABLE -> search.bestFailureSteps;
+            case STEP_LIMIT, SEARCH_LIMIT, TIME_LIMIT -> List.of();
+        };
+        if (status == Status.UNRESOLVABLE && !roots.isEmpty()) {
+            PartialTrace partial = new PartialPlanBuilder(
+                    graph, available, maxSteps).build(normalizedRoots);
+            if (partial.missing() != null && partial.steps().size() >= resultSteps.size()) {
+                unresolved = partial.missing();
+                resultSteps = partial.steps();
+            }
+        }
+        List<IngredientRef> missing = status == Status.SUCCESS || unresolved == null
+                ? List.of() : List.of(unresolved);
         Map<MaterialRef, Integer> resultStock = status == Status.SUCCESS ? search.stock : search.initialStock;
         return new Result(Feasibility.from(status), resultSteps, missing, resultStock, status,
                 search.expandedStates, search.backtracks, search.memoHits);
@@ -132,17 +144,22 @@ public final class PureRecipePlanner {
         private final Set<MaterialRef> resolving = new HashSet<>();
         private final Set<FailureKey> failedStates = new HashSet<>();
         private final SeededReachability reachability;
+        private final Map<List<MaterialRef>, BroadFamilyAnalysis> broadFamilyAnalyses =
+                new HashMap<>();
+        private static final long FAMILY_COST_UNKNOWN = Long.MAX_VALUE / 4L;
         private int expandedStates;
         private int backtracks;
         private int memoHits;
-        private int deepestPending = Integer.MAX_VALUE;
         private IngredientRef deepestFailure;
+        private int bestFailureDepth = -1;
+        private int bestFailureStepCount = -1;
+        private List<PlannedStep> bestFailureSteps = List.of();
         private boolean stepLimitReached;
         private int callDepth;
 
         private Search(ImmutableRecipeGraph graph, Map<MaterialRef, Integer> available,
                        int maxSteps, int maxSearchStates, int maxMemoizedFailures,
-                       long deadlineNanos, List<IngredientRef> roots) {
+                       long deadlineNanos) {
             this.graph = graph;
             available.forEach((material, count) -> {
                 if (count != null && count > 0) stock.put(material, count);
@@ -152,15 +169,11 @@ public final class PureRecipePlanner {
             this.maxSearchStates = Math.max(1, maxSearchStates);
             this.maxMemoizedFailures = Math.max(0, maxMemoizedFailures);
             this.deadlineNanos = deadlineNanos;
-            this.reachability = new SeededReachability(graph, available, roots);
+            this.reachability = new SeededReachability(graph, available);
         }
 
         private boolean solve(List<Task> pending) {
-            PlanningThreadContext.throwIfCancelled();
-            if (deadlineNanos != Long.MAX_VALUE
-                    && System.nanoTime() - deadlineNanos >= 0L) {
-                throw new TimeLimitException();
-            }
+            checkBudget();
             if (++callDepth > MAX_SEARCH_CALL_DEPTH) {
                 callDepth--;
                 throw new SearchLimitException();
@@ -186,13 +199,14 @@ public final class PureRecipePlanner {
             Task current = pending.get(0);
             List<Task> rest = pending.subList(1, pending.size());
             boolean solved = current instanceof DemandTask demand
-                    ? solveDemand(demand.ingredient(), rest, pending.size())
+                    ? solveDemand(demand.ingredient(), rest, pending)
                     : completeRecipe((CompleteRecipeTask) current, rest);
             if (!solved && failedStates.size() < maxMemoizedFailures) failedStates.add(key);
             return solved;
         }
 
-        private boolean solveDemand(IngredientRef ingredient, List<Task> rest, int pendingCount) {
+        private boolean solveDemand(IngredientRef ingredient, List<Task> rest,
+                                    List<Task> pending) {
             List<MaterialRef> orderedAlternatives = inventoryFirst(ingredient.alternatives());
             for (MaterialRef alternative : orderedAlternatives) {
                 int have = stock.getOrDefault(alternative, 0);
@@ -217,8 +231,9 @@ public final class PureRecipePlanner {
                 int have = stock.getOrDefault(wanted, 0);
                 int needed = ingredient.count() - have;
                 if (needed <= 0) continue;
-                if (!reachability.canReach(wanted)) continue;
-                for (RecipeNode candidate : inventoryFirstCandidates(wanted, true)) {
+                boolean broadFamily = ingredient.alternatives().size() > 1;
+                if (!broadFamily && !reachability.canReach(wanted)) continue;
+                for (RecipeNode candidate : inventoryFirstCandidates(wanted, !broadFamily)) {
                     if (steps.size() + scheduledRecipes(rest) >= maxSteps) {
                         stepLimitReached = true;
                         continue;
@@ -228,6 +243,12 @@ public final class PureRecipePlanner {
                     int batches = batchesFor(needed,
                             selfConsumed > 0 ? netGain : candidate.outputCount());
                     if (batches <= 0) continue;
+                    if (isNonProductiveBroadFamilyConversion(
+                            candidate, ingredient.alternatives(), batches)) continue;
+                    // Broad tags are pruned by family gain before reachability. In large
+                    // modpacks, probing all log/chest variants first can traverse most of the
+                    // recipe graph even though their recipes are only neutral conversion rings.
+                    if (broadFamily && !reachability.canReach(candidate)) continue;
                     if (selfConsumed == 0
                             && isUnseededReverseConversion(candidate, wanted, batches)) {
                         continue;
@@ -253,11 +274,26 @@ public final class PureRecipePlanner {
                     backtracks++;
                 }
             }
-            if (pendingCount < deepestPending) {
-                deepestPending = pendingCount;
-                deepestFailure = ingredient;
-            }
+            recordFailure(ingredient, pending);
             return false;
+        }
+
+        private void recordFailure(IngredientRef ingredient, List<Task> pending) {
+            int depth = resolving.size();
+            List<PlannedStep> partial = new ArrayList<>(steps);
+            for (Task task : pending) {
+                if (task instanceof CompleteRecipeTask completion) {
+                    partial.add(new PlannedStep(completion.recipeId(), completion.batches()));
+                }
+            }
+            if (depth < bestFailureDepth
+                    || (depth == bestFailureDepth && partial.size() <= bestFailureStepCount)) {
+                return;
+            }
+            bestFailureDepth = depth;
+            bestFailureStepCount = partial.size();
+            bestFailureSteps = List.copyOf(partial);
+            deepestFailure = ingredient;
         }
 
         /**
@@ -355,15 +391,16 @@ public final class PureRecipePlanner {
         private List<MaterialRef> inventoryFirst(List<MaterialRef> alternatives) {
             if (alternatives.size() < 2) return alternatives;
             List<MaterialRef> ordered = new ArrayList<>(alternatives);
-            ordered.sort(Comparator
-                    .comparingInt((MaterialRef material) -> alternativeRank(material))
-                    .thenComparingInt(material -> reachability.depth(material)));
+            // Do not probe reachability for every member just to sort a broad tag.
+            // A large tag (logs, chests, fuels, ...) can contain hundreds of entries;
+            // reachability is lazy and will be queried only as each branch is visited.
+            ordered.sort(Comparator.comparingInt(this::alternativeRank));
             return ordered;
         }
 
         private int alternativeRank(MaterialRef material) {
             if (stock.getOrDefault(material, 0) > 0) return 0;
-            return reachability.canReach(material) ? 1 : 2;
+            return 1;
         }
 
         private List<RecipeNode> inventoryFirstCandidates(MaterialRef wanted, boolean pruneUnseeded) {
@@ -373,8 +410,13 @@ public final class PureRecipePlanner {
                     .filter(candidate -> !pruneUnseeded || reachability.canReach(candidate))
                     .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
             if (ordered.size() < 2) return ordered;
-            ordered.sort(Comparator.comparingDouble(this::inputStockCoverage).reversed()
-                    .thenComparingInt(reachability::depth));
+            Comparator<RecipeNode> coverage = Comparator
+                    .comparingDouble(this::inputStockCoverage).reversed();
+            // Avoid making the sort itself perform a reachability walk for every recipe of a
+            // broad tag. Those candidates are checked lazily after the family-gain guard.
+            ordered.sort(pruneUnseeded
+                    ? coverage.thenComparingInt(reachability::depth)
+                    : coverage);
             return ordered;
         }
 
@@ -430,6 +472,112 @@ public final class PureRecipePlanner {
             return total;
         }
 
+        /**
+         * Rejects neutral compression/conversion rings while resolving a broad tag. For example,
+         * log -> board -> another log has no net gain in the logs family and should not be tried
+         * once the aggregate log stock is short. A genuinely amplifying recipe (one family item
+         * producing two) remains eligible. Missing non-family leaves are treated as zero-cost so
+         * the normal planner can still report them as missing instead of this guard hiding them.
+         */
+        private boolean isNonProductiveBroadFamilyConversion(
+                RecipeNode candidate, List<MaterialRef> familyAlternatives, int batches) {
+            if (familyAlternatives.size() < 2
+                    || !familyAlternatives.contains(candidate.output())) return false;
+            long produced = (long) candidate.outputCount() * batches;
+            if (produced <= 0L) return false;
+
+            List<MaterialRef> familyKey = List.copyOf(familyAlternatives);
+            BroadFamilyAnalysis analysis = broadFamilyAnalyses.computeIfAbsent(
+                    familyKey, BroadFamilyAnalysis::new);
+            long consumed = 0L;
+            for (IngredientRef input : PureDemandNormalizer.mergeEquivalent(candidate.inputs())) {
+                long required = (long) input.count() * batches;
+                if (required <= 0L) continue;
+                long cost = analysis.costForIngredient(input, required, new HashSet<>());
+                if (cost >= FAMILY_COST_UNKNOWN) return false;
+                consumed = Math.min(FAMILY_COST_UNKNOWN, consumed + cost);
+                if (consumed >= produced) return true;
+            }
+            return consumed >= produced;
+        }
+
+        private record FamilyCostKey(MaterialRef material, long quantity) {}
+
+        /** Inventory-independent family cost, shared by every candidate of one broad tag. */
+        private final class BroadFamilyAnalysis {
+            private final Set<MaterialRef> family;
+            private final Map<FamilyCostKey, Long> memo = new HashMap<>();
+
+            private BroadFamilyAnalysis(List<MaterialRef> family) {
+                this.family = Set.copyOf(family);
+            }
+
+            private long costForIngredient(IngredientRef input, long quantity,
+                                           Set<MaterialRef> visiting) {
+                checkBudget();
+                long best = FAMILY_COST_UNKNOWN;
+                for (MaterialRef alternative : input.alternatives()) {
+                    best = Math.min(best, costForMaterial(alternative, quantity, visiting));
+                    if (best == 0L) break;
+                }
+                return best;
+            }
+
+            private long costForMaterial(MaterialRef material, long quantity,
+                                         Set<MaterialRef> visiting) {
+                checkBudget();
+                if (quantity <= 0L) return 0L;
+                if (family.contains(material)) return quantity;
+
+                FamilyCostKey key = new FamilyCostKey(material, quantity);
+                Long cached = memo.get(key);
+                if (cached != null) return cached;
+                if (!visiting.add(material)) return FAMILY_COST_UNKNOWN;
+
+                long best = FAMILY_COST_UNKNOWN;
+                try {
+                    List<RecipeNode> producers = graph.recipesByOutput()
+                            .getOrDefault(material, List.of());
+                    // A leaf outside the family is an external cost, not consumed family stock.
+                    if (producers.isEmpty()) {
+                        memo.put(key, 0L);
+                        return 0L;
+                    }
+                    for (RecipeNode producer : producers) {
+                        long producerBatches = (quantity + producer.outputCount() - 1L)
+                                / producer.outputCount();
+                        if (producerBatches <= 0L || producerBatches > Integer.MAX_VALUE) continue;
+                        long cost = 0L;
+                        for (IngredientRef input : PureDemandNormalizer.mergeEquivalent(
+                                producer.inputs())) {
+                            long scaled = (long) input.count() * producerBatches;
+                            if (scaled <= 0L || scaled >= FAMILY_COST_UNKNOWN) {
+                                cost = FAMILY_COST_UNKNOWN;
+                                break;
+                            }
+                            long inputCost = costForIngredient(input, scaled, visiting);
+                            cost = Math.min(FAMILY_COST_UNKNOWN, cost + inputCost);
+                            if (cost >= FAMILY_COST_UNKNOWN) break;
+                        }
+                        best = Math.min(best, cost);
+                        if (best == 0L) break;
+                    }
+                } finally {
+                    visiting.remove(material);
+                }
+                if (best < FAMILY_COST_UNKNOWN) memo.put(key, best);
+                return best;
+            }
+        }
+
+        private void checkBudget() {
+            PlanningThreadContext.throwIfCancelled();
+            if (deadlineNanos != Long.MAX_VALUE
+                    && System.nanoTime() - deadlineNanos >= 0L) {
+                throw new TimeLimitException();
+            }
+        }
+
         private static int batchesFor(int needed, int outputCount) {
             if (outputCount <= 0) return -1;
             long batches = ((long) needed + outputCount - 1L) / outputCount;
@@ -461,135 +609,323 @@ public final class PureRecipePlanner {
         }
     }
 
+    /** Builds a deterministic partial recipe trace after feasibility search finds raw shortages. */
+    private static final class PartialPlanBuilder {
+        private static final long COST_UNKNOWN = Long.MAX_VALUE / 4L;
+
+        private final ImmutableRecipeGraph graph;
+        private final Map<MaterialRef, Integer> stock = new HashMap<>();
+        private final int maxSteps;
+        private final List<PlannedStep> steps = new ArrayList<>();
+        private final Set<MaterialRef> visiting = new HashSet<>();
+        private final Map<List<MaterialRef>, PartialFamilyCost> familyCosts = new HashMap<>();
+        private IngredientRef missing;
+
+        private PartialPlanBuilder(ImmutableRecipeGraph graph,
+                                   Map<MaterialRef, Integer> available,
+                                   int maxSteps) {
+            this.graph = graph;
+            available.forEach((material, count) -> {
+                if (material != null && count != null && count > 0) stock.put(material, count);
+            });
+            this.maxSteps = Math.max(1, maxSteps);
+        }
+
+        private PartialTrace build(List<IngredientRef> roots) {
+            for (IngredientRef root : roots) expand(root);
+            return new PartialTrace(List.copyOf(steps), missing);
+        }
+
+        private boolean expand(IngredientRef ingredient) {
+            PlanningThreadContext.throwIfCancelled();
+            int remaining = consumeAvailable(ingredient);
+            if (remaining == 0) return true;
+            if (steps.size() >= maxSteps || visiting.size() >= MAX_SEARCH_CALL_DEPTH) {
+                noteMissing(ingredient, remaining);
+                return false;
+            }
+
+            List<PartialChoice> choices = choicesFor(ingredient);
+            for (PartialChoice choice : choices) {
+                if (visiting.contains(choice.output())) continue;
+                RecipeNode recipe = choice.recipe();
+                int batches = Search.batchesFor(remaining, recipe.outputCount());
+                if (batches <= 0) continue;
+                if (ingredient.alternatives().size() > 1
+                        && isNonProductiveFamilyRecipe(
+                        recipe, ingredient.alternatives(), batches)) continue;
+
+                List<IngredientRef> scaledInputs = new ArrayList<>();
+                boolean valid = true;
+                for (IngredientRef input : PureDemandNormalizer.mergeEquivalent(recipe.inputs())) {
+                    long scaled = (long) input.count() * batches;
+                    if (scaled <= 0L || scaled > Integer.MAX_VALUE) {
+                        valid = false;
+                        break;
+                    }
+                    scaledInputs.add(new IngredientRef(input.alternatives(), (int) scaled));
+                }
+                if (!valid) continue;
+
+                visiting.add(choice.output());
+                boolean covered = true;
+                try {
+                    for (IngredientRef input : scaledInputs) {
+                        if (!expand(input)) covered = false;
+                    }
+                } finally {
+                    visiting.remove(choice.output());
+                }
+                steps.add(new PlannedStep(recipe.recipeId(), batches));
+                long surplus = (long) recipe.outputCount() * batches - remaining;
+                if (surplus > 0L) {
+                    stock.merge(choice.output(), (int) Math.min(Integer.MAX_VALUE, surplus),
+                            (left, right) -> (int) Math.min(
+                                    Integer.MAX_VALUE, (long) left + right));
+                }
+                return covered;
+            }
+
+            noteMissing(ingredient, remaining);
+            return false;
+        }
+
+        private int consumeAvailable(IngredientRef ingredient) {
+            int remaining = ingredient.count();
+            List<MaterialRef> ordered = new ArrayList<>(ingredient.alternatives());
+            ordered.sort(Comparator
+                    .comparingInt((MaterialRef material) -> stock.getOrDefault(material, 0))
+                    .reversed());
+            for (MaterialRef material : ordered) {
+                int have = stock.getOrDefault(material, 0);
+                if (have <= 0) continue;
+                int take = Math.min(have, remaining);
+                if (take == have) stock.remove(material);
+                else stock.put(material, have - take);
+                remaining -= take;
+                if (remaining == 0) break;
+            }
+            return remaining;
+        }
+
+        private List<PartialChoice> choicesFor(IngredientRef ingredient) {
+            List<PartialChoice> choices = new ArrayList<>();
+            for (MaterialRef alternative : ingredient.alternatives()) {
+                for (RecipeNode recipe : graph.recipesByOutput()
+                        .getOrDefault(alternative, List.of())) {
+                    choices.add(new PartialChoice(alternative, recipe));
+                }
+            }
+            choices.sort(Comparator
+                    .comparingDouble((PartialChoice choice) -> inputStockCoverage(choice.recipe()))
+                    .reversed()
+                    .thenComparing(choice -> choice.recipe().recipeId().toString()));
+            return choices;
+        }
+
+        private double inputStockCoverage(RecipeNode recipe) {
+            long required = 0L;
+            long available = 0L;
+            for (IngredientRef input : PureDemandNormalizer.mergeEquivalent(recipe.inputs())) {
+                required += input.count();
+                long matching = 0L;
+                for (MaterialRef alternative : input.alternatives()) {
+                    matching += stock.getOrDefault(alternative, 0);
+                }
+                available += Math.min(input.count(), matching);
+            }
+            return required == 0L ? 1.0D : (double) available / (double) required;
+        }
+
+        private boolean isNonProductiveFamilyRecipe(RecipeNode recipe,
+                                                     List<MaterialRef> family,
+                                                     int batches) {
+            if (!family.contains(recipe.output())) return false;
+            long produced = (long) recipe.outputCount() * batches;
+            PartialFamilyCost analysis = familyCosts.computeIfAbsent(
+                    List.copyOf(family), PartialFamilyCost::new);
+            long consumed = 0L;
+            for (IngredientRef input : PureDemandNormalizer.mergeEquivalent(recipe.inputs())) {
+                long scaled = (long) input.count() * batches;
+                long cost = analysis.ingredientCost(input, scaled, new HashSet<>());
+                if (cost >= COST_UNKNOWN) return false;
+                consumed = Math.min(COST_UNKNOWN, consumed + cost);
+                if (consumed >= produced) return true;
+            }
+            return consumed >= produced;
+        }
+
+        private void noteMissing(IngredientRef ingredient, int count) {
+            if (missing == null) missing = new IngredientRef(ingredient.alternatives(), count);
+        }
+
+        private record PartialChoice(MaterialRef output, RecipeNode recipe) {}
+
+        private final class PartialFamilyCost {
+            private final Set<MaterialRef> family;
+            private final Map<MaterialRef, Long> unitCosts = new HashMap<>();
+
+            private PartialFamilyCost(List<MaterialRef> family) {
+                this.family = Set.copyOf(family);
+            }
+
+            private long ingredientCost(IngredientRef ingredient, long count,
+                                        Set<MaterialRef> path) {
+                long best = COST_UNKNOWN;
+                for (MaterialRef alternative : ingredient.alternatives()) {
+                    long unit = materialUnitCost(alternative, path);
+                    if (unit >= COST_UNKNOWN || count > COST_UNKNOWN / Math.max(1L, unit)) continue;
+                    best = Math.min(best, unit * count);
+                }
+                return best;
+            }
+
+            private long materialUnitCost(MaterialRef material, Set<MaterialRef> path) {
+                if (family.contains(material)) return 1L;
+                Long cached = unitCosts.get(material);
+                if (cached != null) return cached;
+                if (!path.add(material)) return COST_UNKNOWN;
+                long best = COST_UNKNOWN;
+                try {
+                    List<RecipeNode> producers = graph.recipesByOutput()
+                            .getOrDefault(material, List.of());
+                    if (producers.isEmpty()) return 0L;
+                    for (RecipeNode producer : producers) {
+                        long cost = 0L;
+                        for (IngredientRef input : PureDemandNormalizer.mergeEquivalent(
+                                producer.inputs())) {
+                            long inputCost = ingredientCost(input, input.count(), path);
+                            if (inputCost >= COST_UNKNOWN) {
+                                cost = COST_UNKNOWN;
+                                break;
+                            }
+                            cost = Math.min(COST_UNKNOWN, cost + inputCost);
+                        }
+                        if (cost < COST_UNKNOWN) {
+                            long perOutput = (cost + producer.outputCount() - 1L)
+                                    / producer.outputCount();
+                            best = Math.min(best, perOutput);
+                        }
+                    }
+                } finally {
+                    path.remove(material);
+                }
+                if (best < COST_UNKNOWN) unitCosts.put(material, best);
+                return best;
+            }
+        }
+    }
+
+    private record PartialTrace(List<PlannedStep> steps, IngredientRef missing) {}
+
     /**
-     * Marks the part of a demand graph that can be bootstrapped from the planning snapshot.
-     * Large tags often contain dozens of compressed-block or chest variants whose recipes lead
-     * only to missing leaves. Proving those branches unreachable once avoids exponential search.
+     * Proves seeded reachability only when the search is about to visit a branch.
+     * Eagerly walking the complete dependency closure is itself expensive for broad tags: a
+     * 60-item logs tag can fan out into most of a large modpack's crafting graph before the
+     * inventory-first search gets a chance to select one stocked variant.
+     *
+     * <p>Cycles are treated conservatively as provisionally reachable. The real search still
+     * validates quantities and rejects conversion loops, so this can retain an extra candidate
+     * but can never hide a valid recipe.</p>
      */
     private static final class SeededReachability {
         private static final int UNREACHABLE_DEPTH = Integer.MAX_VALUE;
 
-        private final Set<MaterialRef> reachable = new HashSet<>();
+        private final ImmutableRecipeGraph graph;
+        private final Set<MaterialRef> seeds;
         private final Map<MaterialRef, Integer> materialDepth = new HashMap<>();
         private final Map<RecipeNode, Integer> recipeDepth = new IdentityHashMap<>();
+        private final Set<MaterialRef> unreachable = new HashSet<>();
 
         private SeededReachability(ImmutableRecipeGraph graph,
-                                   Map<MaterialRef, Integer> available,
-                                   List<IngredientRef> roots) {
-            Set<MaterialRef> relevantMaterials = new LinkedHashSet<>();
-            Set<RecipeNode> relevantRecipes = java.util.Collections.newSetFromMap(
-                    new IdentityHashMap<>());
-            ArrayDeque<MaterialRef> discover = new ArrayDeque<>();
-            for (IngredientRef root : roots) discover.addAll(root.alternatives());
-
-            while (!discover.isEmpty()) {
-                PlanningThreadContext.throwIfCancelled();
-                MaterialRef material = discover.removeFirst();
-                if (!relevantMaterials.add(material)) continue;
-                for (RecipeNode recipe : graph.recipesByOutput()
-                        .getOrDefault(material, List.of())) {
-                    if (!relevantRecipes.add(recipe)) continue;
-                    for (IngredientRef input : recipe.inputs()) {
-                        discover.addAll(input.alternatives());
-                    }
-                }
-            }
-
-            Map<MaterialRef, List<ReachableInput>> waiting = new HashMap<>();
-            ArrayDeque<MaterialRef> ready = new ArrayDeque<>();
-
-            for (RecipeNode recipe : relevantRecipes) {
-                List<IngredientRef> inputs = recipe.inputs();
-                ReachableRecipeState state = new ReachableRecipeState(recipe, inputs.size());
-                for (int inputIndex = 0; inputIndex < inputs.size(); inputIndex++) {
-                    for (MaterialRef alternative : inputs.get(inputIndex).alternatives()) {
-                        waiting.computeIfAbsent(alternative, ignored -> new ArrayList<>())
-                                .add(new ReachableInput(state, inputIndex));
-                    }
-                }
-                if (inputs.isEmpty()) markRecipeReady(state, ready);
-            }
-
+                                   Map<MaterialRef, Integer> available) {
+            this.graph = graph;
+            Set<MaterialRef> present = new HashSet<>();
             for (Map.Entry<MaterialRef, Integer> entry : available.entrySet()) {
-                if (entry.getValue() != null && entry.getValue() > 0
-                        && relevantMaterials.contains(entry.getKey())) {
-                    markMaterialReady(entry.getKey(), 0, ready);
-                }
+                if (entry.getValue() != null && entry.getValue() > 0) present.add(entry.getKey());
             }
-
-            while (!ready.isEmpty()) {
-                PlanningThreadContext.throwIfCancelled();
-                MaterialRef material = ready.removeFirst();
-                int depth = materialDepth.getOrDefault(material, 0);
-                for (ReachableInput input : waiting.getOrDefault(material, List.of())) {
-                    if (input.state().satisfy(input.index(), depth)) {
-                        markRecipeReady(input.state(), ready);
-                    }
-                }
-            }
-        }
-
-        private void markRecipeReady(ReachableRecipeState state,
-                                     ArrayDeque<MaterialRef> ready) {
-            int depth = state.depth();
-            recipeDepth.put(state.recipe(), depth);
-            markMaterialReady(state.recipe().output(), depth, ready);
-        }
-
-        private void markMaterialReady(MaterialRef material, int depth,
-                                       ArrayDeque<MaterialRef> ready) {
-            if (!reachable.add(material)) return;
-            materialDepth.put(material, depth);
-            ready.addLast(material);
+            this.seeds = Set.copyOf(present);
         }
 
         private boolean canReach(MaterialRef material) {
-            return reachable.contains(material);
+            return probeMaterial(material, new HashSet<>()).reachable();
         }
 
         private boolean canReach(RecipeNode recipe) {
-            return recipeDepth.containsKey(recipe);
-        }
-
-        private int depth(MaterialRef material) {
-            return materialDepth.getOrDefault(material, UNREACHABLE_DEPTH);
+            return probeRecipe(recipe, new HashSet<>()).reachable();
         }
 
         private int depth(RecipeNode recipe) {
+            if (!recipeDepth.containsKey(recipe)) probeRecipe(recipe, new HashSet<>());
             return recipeDepth.getOrDefault(recipe, UNREACHABLE_DEPTH);
         }
+
+        private Probe probeMaterial(MaterialRef material, Set<MaterialRef> visiting) {
+            PlanningThreadContext.throwIfCancelled();
+            if (seeds.contains(material)) return Probe.seeded();
+            Integer cached = materialDepth.get(material);
+            if (cached != null) return new Probe(true, cached, false);
+            if (unreachable.contains(material)) return Probe.unreachable();
+            if (!visiting.add(material)) return Probe.cycle();
+
+            int bestDepth = UNREACHABLE_DEPTH;
+            boolean provisional = false;
+            try {
+                for (RecipeNode recipe : graph.recipesByOutput()
+                        .getOrDefault(material, List.of())) {
+                    Probe recipeProbe = probeRecipe(recipe, visiting);
+                    if (!recipeProbe.reachable()) continue;
+                    bestDepth = Math.min(bestDepth, recipeProbe.depth());
+                    provisional |= recipeProbe.provisional();
+                }
+            } finally {
+                visiting.remove(material);
+            }
+
+            if (bestDepth == UNREACHABLE_DEPTH) {
+                unreachable.add(material);
+                return Probe.unreachable();
+            }
+            // A result that depended on the current DFS cycle is deliberately not cached:
+            // another branch may later prove or reject it from a real inventory seed.
+            if (!provisional) materialDepth.put(material, bestDepth);
+            return new Probe(true, bestDepth, provisional);
+        }
+
+        private Probe probeRecipe(RecipeNode recipe, Set<MaterialRef> visiting) {
+            PlanningThreadContext.throwIfCancelled();
+            Integer cached = recipeDepth.get(recipe);
+            if (cached != null) return new Probe(true, cached, false);
+
+            int deepestInput = 0;
+            boolean provisional = false;
+            for (IngredientRef input : recipe.inputs()) {
+                Probe best = Probe.unreachable();
+                for (MaterialRef alternative : input.alternatives()) {
+                    Probe candidate = probeMaterial(alternative, visiting);
+                    if (!candidate.reachable()) continue;
+                    if (!best.reachable() || candidate.depth() < best.depth()) best = candidate;
+                    if (candidate.depth() == 0 && !candidate.provisional()) break;
+                }
+                if (!best.reachable()) return Probe.unreachable();
+                deepestInput = Math.max(deepestInput, best.depth());
+                provisional |= best.provisional();
+            }
+
+            int depth = deepestInput == Integer.MAX_VALUE
+                    ? Integer.MAX_VALUE : deepestInput + 1;
+            if (!provisional) recipeDepth.put(recipe, depth);
+            return new Probe(true, depth, provisional);
+        }
     }
 
-    private static final class ReachableRecipeState {
-        private final RecipeNode recipe;
-        private final boolean[] satisfied;
-        private int remaining;
-        private int deepestInput;
-
-        private ReachableRecipeState(RecipeNode recipe, int inputCount) {
-            this.recipe = recipe;
-            this.satisfied = new boolean[inputCount];
-            this.remaining = inputCount;
-        }
-
-        private boolean satisfy(int inputIndex, int depth) {
-            if (satisfied[inputIndex]) return false;
-            satisfied[inputIndex] = true;
-            remaining--;
-            deepestInput = Math.max(deepestInput, depth);
-            return remaining == 0;
-        }
-
-        private RecipeNode recipe() {
-            return recipe;
-        }
-
-        private int depth() {
-            return deepestInput == Integer.MAX_VALUE ? Integer.MAX_VALUE : deepestInput + 1;
+    private record Probe(boolean reachable, int depth, boolean provisional) {
+        private static Probe seeded() { return new Probe(true, 0, false); }
+        private static Probe cycle() { return new Probe(true, 0, true); }
+        private static Probe unreachable() {
+            return new Probe(false, Integer.MAX_VALUE, false);
         }
     }
-
-    private record ReachableInput(ReachableRecipeState state, int index) {}
 
     private static final class SearchLimitException extends RuntimeException {
         private SearchLimitException() {

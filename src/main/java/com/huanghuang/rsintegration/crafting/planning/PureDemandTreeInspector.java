@@ -17,6 +17,8 @@ import java.util.Set;
 
 /** Bounded inventory-aware check that pure planning covers the requested demand tree. */
 public final class PureDemandTreeInspector {
+    private static final int LARGE_ALTERNATIVE_THRESHOLD = 16;
+
     private PureDemandTreeInspector() {}
 
     public static Result inspect(ImmutableRecipeGraph graph,
@@ -52,6 +54,18 @@ public final class PureDemandTreeInspector {
                                  int maxNodes,
                                  Set<ResourceLocation> reusableCatalystOutputIds,
                                  Set<ResourceLocation> reusableCatalystRecipeIds) {
+        return inspect(graph, available, targetRecipeId, repeatCount, maxNodes,
+                reusableCatalystOutputIds, reusableCatalystRecipeIds, Set.of());
+    }
+
+    public static Result inspect(ImmutableRecipeGraph graph,
+                                 Map<MaterialRef, Integer> available,
+                                 ResourceLocation targetRecipeId,
+                                 int repeatCount,
+                                 int maxNodes,
+                                 Set<ResourceLocation> reusableCatalystOutputIds,
+                                 Set<ResourceLocation> reusableCatalystRecipeIds,
+                                 Set<ResourceLocation> pureIncompatibleOutputIds) {
         boolean targetUsesReusableCatalyst = reusableCatalystRecipeIds != null
                 && reusableCatalystRecipeIds.contains(targetRecipeId);
         RecipeNode target = graph.recipesById().get(targetRecipeId);
@@ -61,15 +75,34 @@ public final class PureDemandTreeInspector {
         }
 
         Walker walker = new Walker(graph, available, Math.max(1, maxNodes),
-                reusableCatalystOutputIds);
+                reusableCatalystOutputIds, pureIncompatibleOutputIds);
         walker.catalystRouteAvailable = targetUsesReusableCatalyst;
+        Coverage targetCoverage = Coverage.COVERED;
         for (IngredientRef input : PureDemandNormalizer.mergeEquivalent(
                 SelfAmplifyingRecipePolicy.scaleTargetInputs(target, repeatCount))) {
-            if (!walker.coverIngredient(input)) {
-                Status status = walker.nodeLimitReached ? Status.NODE_LIMIT : Status.INCOMPLETE;
-                return new Result(status, walker.visitedNodes, walker.firstUnresolved,
-                        walker.catalystRouteAvailable);
+            Coverage coverage = walker.coverIngredient(input);
+            if (coverage == Coverage.NODE_LIMIT) {
+                targetCoverage = coverage;
+                break;
             }
+            // Target inputs are AND branches. Keep inspecting after a raw shortage so a later
+            // typed-only dependency cannot be hidden by ingredient order.
+            if (coverage == Coverage.UNPROJECTED_DEPENDENCY) {
+                targetCoverage = coverage;
+            } else if (coverage == Coverage.MISSING_MATERIALS
+                    && targetCoverage == Coverage.COVERED) {
+                targetCoverage = coverage;
+            }
+        }
+        if (targetCoverage != Coverage.COVERED) {
+            Status status = switch (targetCoverage) {
+                case MISSING_MATERIALS -> Status.MISSING_MATERIALS;
+                case UNPROJECTED_DEPENDENCY -> Status.UNPROJECTED_DEPENDENCY;
+                case NODE_LIMIT -> Status.NODE_LIMIT;
+                case COVERED -> throw new IllegalStateException("covered demand reported as failure");
+            };
+            return new Result(status, walker.visitedNodes, walker.firstUnresolved,
+                    walker.catalystRouteAvailable);
         }
         return new Result(Status.COMPLETE, walker.visitedNodes, null,
                 walker.catalystRouteAvailable);
@@ -81,8 +114,9 @@ public final class PureDemandTreeInspector {
 
     public enum Status {
         COMPLETE,
+        MISSING_MATERIALS,
+        UNPROJECTED_DEPENDENCY,
         TARGET_NOT_PROJECTED,
-        INCOMPLETE,
         NODE_LIMIT
     }
 
@@ -91,6 +125,17 @@ public final class PureDemandTreeInspector {
         public boolean complete() {
             return status == Status.COMPLETE;
         }
+
+        public boolean pureCompatible() {
+            return status == Status.COMPLETE || status == Status.MISSING_MATERIALS;
+        }
+    }
+
+    private enum Coverage {
+        COVERED,
+        MISSING_MATERIALS,
+        UNPROJECTED_DEPENDENCY,
+        NODE_LIMIT
     }
 
     private static final class Walker {
@@ -98,6 +143,7 @@ public final class PureDemandTreeInspector {
         private final Ledger ledger;
         private final Set<MaterialRef> visiting = new HashSet<>();
         private final Set<ResourceLocation> reusableCatalystOutputIds;
+        private final Set<ResourceLocation> pureIncompatibleOutputIds;
         private final int maxNodes;
         private int visitedNodes;
         private boolean nodeLimitReached;
@@ -105,28 +151,47 @@ public final class PureDemandTreeInspector {
         private MaterialRef firstUnresolved;
 
         private Walker(ImmutableRecipeGraph graph, Map<MaterialRef, Integer> available,
-                       int maxNodes, Set<ResourceLocation> reusableCatalystOutputIds) {
+                       int maxNodes, Set<ResourceLocation> reusableCatalystOutputIds,
+                       Set<ResourceLocation> pureIncompatibleOutputIds) {
             this.graph = graph;
             this.ledger = new Ledger(available);
             this.maxNodes = maxNodes;
             this.reusableCatalystOutputIds = reusableCatalystOutputIds == null
                     ? Set.of() : reusableCatalystOutputIds;
+            this.pureIncompatibleOutputIds = pureIncompatibleOutputIds == null
+                    ? Set.of() : pureIncompatibleOutputIds;
         }
 
-        private boolean coverIngredient(IngredientRef ingredient) {
+        private Coverage coverIngredient(IngredientRef ingredient) {
             noteCatalystOpportunity(ingredient);
             int mark = ledger.mark();
-            if (consumeAcrossAlternatives(ingredient) == 0) return true;
+            if (consumeAcrossAlternatives(ingredient) == 0) return Coverage.COVERED;
 
+            Coverage best = Coverage.UNPROJECTED_DEPENDENCY;
+            boolean largeAlternativeSet = ingredient.alternatives().size()
+                    >= LARGE_ALTERNATIVE_THRESHOLD;
             for (MaterialRef alternative : inventoryFirst(ingredient.alternatives())) {
                 ledger.rollback(mark);
                 int remaining = consumeMatching(alternative, ingredient.count());
-                if (coverMaterial(alternative, remaining)) return true;
-                if (nodeLimitReached) break;
+                Coverage coverage = coverMaterial(alternative, remaining);
+                if (coverage == Coverage.COVERED) return coverage;
+                if (coverage == Coverage.NODE_LIMIT) {
+                    best = Coverage.NODE_LIMIT;
+                    break;
+                }
+                // Alternatives are OR branches. A fully projected branch that ends in raw
+                // shortages is preferable to an unrelated typed-only producer.
+                if (coverage == Coverage.MISSING_MATERIALS) {
+                    best = Coverage.MISSING_MATERIALS;
+                    // A large tag can contain hundreds of reverse-conversion variants. Once
+                    // one inventory-first branch is known to be pure-compatible but short on
+                    // stock, probing the remaining variants cannot improve route selection.
+                    if (largeAlternativeSet) break;
+                }
             }
             ledger.rollback(mark);
             if (firstUnresolved == null) firstUnresolved = first(ingredient);
-            return false;
+            return best;
         }
 
         private int consumeAcrossAlternatives(IngredientRef ingredient) {
@@ -157,21 +222,27 @@ public final class PureDemandTreeInspector {
             return remaining;
         }
 
-        private boolean coverMaterial(MaterialRef material, int count) {
-            if (count <= 0) return true;
-            if (nodeLimitReached || visiting.contains(material)) return false;
+        private Coverage coverMaterial(MaterialRef material, int count) {
+            if (count <= 0) return Coverage.COVERED;
+            if (nodeLimitReached) return Coverage.NODE_LIMIT;
+            // A closed conversion ring cannot create missing stock. It is still a normal
+            // material shortage, not evidence that main-thread recipe semantics are needed.
+            if (visiting.contains(material)) return Coverage.MISSING_MATERIALS;
             if (++visitedNodes > maxNodes) {
                 nodeLimitReached = true;
-                return false;
+                return Coverage.NODE_LIMIT;
             }
 
             List<RecipeNode> candidates = graph.recipesByOutput().getOrDefault(material, List.of());
             if (candidates.isEmpty()) {
                 if (firstUnresolved == null) firstUnresolved = material;
-                return false;
+                return pureIncompatibleOutputIds.contains(material.itemId())
+                        ? Coverage.UNPROJECTED_DEPENDENCY
+                        : Coverage.MISSING_MATERIALS;
             }
 
             int mark = ledger.mark();
+            Coverage best = Coverage.UNPROJECTED_DEPENDENCY;
             visiting.add(material);
             try {
                 noteCatalystAlternatives(candidates, count);
@@ -182,25 +253,50 @@ public final class PureDemandTreeInspector {
                     if (batches <= 0L || batches > Integer.MAX_VALUE) continue;
                     if (isUnseededReverseConversion(candidate, material, (int) batches)) continue;
 
-                    boolean covered = true;
+                    Coverage candidateCoverage = Coverage.COVERED;
                     for (IngredientRef input : PureDemandNormalizer.mergeEquivalent(
                             candidate.inputs())) {
                         long scaled = (long) input.count() * batches;
-                        if (scaled > Integer.MAX_VALUE
-                                || !coverIngredient(new IngredientRef(
-                                input.alternatives(), (int) scaled))) {
-                            covered = false;
+                        if (scaled > Integer.MAX_VALUE) {
+                            candidateCoverage = Coverage.UNPROJECTED_DEPENDENCY;
                             break;
                         }
+                        Coverage inputCoverage = coverIngredient(new IngredientRef(
+                                input.alternatives(), (int) scaled));
+                        if (inputCoverage == Coverage.NODE_LIMIT) {
+                            candidateCoverage = Coverage.NODE_LIMIT;
+                            break;
+                        }
+                        // Recipe inputs are AND branches: one unprojected dependency means the
+                        // candidate still needs typed planning even if another input is missing.
+                        if (inputCoverage == Coverage.UNPROJECTED_DEPENDENCY) {
+                            candidateCoverage = Coverage.UNPROJECTED_DEPENDENCY;
+                        } else if (inputCoverage == Coverage.MISSING_MATERIALS
+                                && candidateCoverage == Coverage.COVERED) {
+                            candidateCoverage = Coverage.MISSING_MATERIALS;
+                        }
                     }
-                    if (covered) return true;
-                    if (nodeLimitReached) break;
+                    if (candidateCoverage == Coverage.COVERED) return Coverage.COVERED;
+                    if (candidateCoverage == Coverage.NODE_LIMIT) return Coverage.NODE_LIMIT;
+                    // Candidate recipes are OR branches, so any fully projected shortage path
+                    // makes this material safe for the background planner.
+                    if (candidateCoverage == Coverage.MISSING_MATERIALS) {
+                        // This inspector chooses the planner, not the final recipe. Once one
+                        // candidate is representable by the pure graph, searching every
+                        // compression/decompression sibling only risks walking conversion rings.
+                        // The background planner still evaluates all candidates for feasibility.
+                        return Coverage.MISSING_MATERIALS;
+                    }
                 }
             } finally {
                 visiting.remove(material);
             }
             ledger.rollback(mark);
-            return false;
+            if (best == Coverage.UNPROJECTED_DEPENDENCY
+                    && !pureIncompatibleOutputIds.contains(material.itemId())) {
+                best = Coverage.MISSING_MATERIALS;
+            }
+            return best;
         }
 
         private List<MaterialRef> inventoryFirst(List<MaterialRef> alternatives) {
@@ -274,7 +370,7 @@ public final class PureDemandTreeInspector {
                         if (scaled > Integer.MAX_VALUE) break;
                         IngredientRef demand = new IngredientRef(input.alternatives(), (int) scaled);
                         int remaining = consumeAcrossAlternatives(demand);
-                        if (remaining > 0 && containsReusableCatalystOutput(demand)) {
+                        if (remaining > 0 && requiresReusableCatalystOutput(demand)) {
                             catalystRouteAvailable = true;
                             return;
                         }
@@ -288,14 +384,15 @@ public final class PureDemandTreeInspector {
         private void noteCatalystOpportunity(IngredientRef ingredient) {
             if (catalystRouteAvailable || reusableCatalystOutputIds.isEmpty()) return;
             if (ledger.countAcrossAlternatives(ingredient) < ingredient.count()
-                    && containsReusableCatalystOutput(ingredient)) {
+                    && requiresReusableCatalystOutput(ingredient)) {
                 catalystRouteAvailable = true;
             }
         }
 
-        private boolean containsReusableCatalystOutput(IngredientRef ingredient) {
-            return ingredient.alternatives().stream()
-                    .anyMatch(material -> reusableCatalystOutputIds.contains(material.itemId()));
+        private boolean requiresReusableCatalystOutput(IngredientRef ingredient) {
+            return !ingredient.alternatives().isEmpty()
+                    && ingredient.alternatives().stream()
+                    .allMatch(material -> reusableCatalystOutputIds.contains(material.itemId()));
         }
 
         private static boolean matchesAny(MaterialRef stocked, List<MaterialRef> alternatives) {

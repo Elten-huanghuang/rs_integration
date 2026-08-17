@@ -24,7 +24,7 @@ class RecentSearchHistoryTest {
     }
 
     @Test
-    void visibleEntriesGroupFavoritesWithoutChangingStoredMruOrder() {
+    void favoriteEntriesExcludeOrdinaryHistoryWithoutChangingStoredMruOrder() {
         RecentSearchHistory history = new RecentSearchHistory(10);
         history.replaceAll(List.of(
                 new RecentSearchEntry("new", false),
@@ -32,10 +32,8 @@ class RecentSearchHistoryTest {
                 new RecentSearchEntry("old", false)
         ));
 
-        assertEquals(List.of(
-                new RecentSearchEntry("pinned", true),
-                new RecentSearchEntry("new", false)
-        ), history.visibleEntries(2));
+        assertEquals(List.of(new RecentSearchEntry("pinned", true)),
+                history.favoriteEntries(2));
         assertEquals("new", history.entries().get(0).query());
     }
 
@@ -51,7 +49,16 @@ class RecentSearchHistoryTest {
         assertEquals(List.of(
                 new RecentSearchEntry("pinned-one", true),
                 new RecentSearchEntry("pinned-two", true)
-        ), history.visibleEntries(2));
+        ), history.favoriteEntries(2));
+    }
+
+    @Test
+    void favoriteEntriesAreEmptyWhenOnlyOrdinaryHistoryExists() {
+        RecentSearchHistory history = new RecentSearchHistory(10);
+        history.record("stone");
+        history.record("iron");
+
+        assertTrue(history.favoriteEntries(10).isEmpty());
     }
 
     @Test

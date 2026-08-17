@@ -6,6 +6,7 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.item.enchantment.EnchantmentHelper;
 import net.minecraft.world.item.enchantment.EnchantmentInstance;
 import net.minecraft.world.item.enchantment.Enchantments;
+import net.minecraftforge.common.crafting.StrictNBTIngredient;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -56,5 +57,16 @@ class GoetyDynamicRitualRecipeTest extends BootstrapTest {
                 Enchantments.UNBREAKING, wrong));
         assertTrue(GoetyDynamicRitualRecipe.buildInput(
                 Enchantments.UNBREAKING, 2, wrong).isEmpty());
+    }
+
+    @Test
+    void sharedRecipeMatchesTheExactDemandedLevel() {
+        var levelThree = GoetyDynamicRitualRecipe.buildOutput(Enchantments.UNBREAKING, 3);
+
+        var matched = GoetyDynamicRitualRecipe.matchingOutput(
+                Enchantments.UNBREAKING, StrictNBTIngredient.of(levelThree));
+
+        assertEquals(3, EnchantmentHelper.getEnchantments(matched)
+                .getOrDefault(Enchantments.UNBREAKING, 0));
     }
 }

@@ -65,6 +65,7 @@ public final class RecipeIndex {
     private static volatile Map<Item, List<ReusableCatalystRoute>> reusableCatalystRoutes = Map.of();
     private static volatile Set<ResourceLocation> reusableCatalystOutputIds = Set.of();
     private static volatile Set<ResourceLocation> reusableCatalystRecipeIds = Set.of();
+    private static volatile Set<ResourceLocation> pureIncompatibleOutputIds = Set.of();
     private static volatile RecipeManager source;
     private static volatile long sourceRevision;
     private static volatile boolean generationBuildFailed;
@@ -193,6 +194,14 @@ public final class RecipeIndex {
             reusableCatalystOutputIds = Set.copyOf(catalystOutputIds);
             reusableCatalystRecipeIds = Set.copyOf(catalystRecipeIds);
             reusableCatalystRoutes = freezeCatalystRoutes(catalystRoutes);
+            Set<ResourceLocation> projectedOutputIds = graph.recipesByOutput().keySet().stream()
+                    .map(ImmutableRecipeGraph.MaterialRef::itemId)
+                    .collect(java.util.stream.Collectors.toSet());
+            pureIncompatibleOutputIds = publishedIndex.keySet().stream()
+                    .map(ForgeRegistries.ITEMS::getKey)
+                    .filter(Objects::nonNull)
+                    .filter(id -> !projectedOutputIds.contains(id))
+                    .collect(java.util.stream.Collectors.toUnmodifiableSet());
             index = publishedIndex;
             spellScrollIndex = publishedSpellScrollIndex;
             source = rm;
@@ -347,6 +356,12 @@ public final class RecipeIndex {
     public static Set<ResourceLocation> reusableCatalystRecipeIds(Level level) {
         get(level);
         return reusableCatalystRecipeIds;
+    }
+
+    /** Outputs that have indexed producers but no producer representable in the pure graph. */
+    public static Set<ResourceLocation> pureIncompatibleOutputIds(Level level) {
+        get(level);
+        return pureIncompatibleOutputIds;
     }
 
     public static Map<Item, List<ReusableCatalystRoute>> reusableCatalystRoutes(Level level) {
@@ -790,6 +805,7 @@ public final class RecipeIndex {
             reusableCatalystRoutes = Map.of();
             reusableCatalystOutputIds = Set.of();
             reusableCatalystRecipeIds = Set.of();
+            pureIncompatibleOutputIds = Set.of();
             source = null;
             sourceRevision = 0L;
             generationBuildFailed = false;

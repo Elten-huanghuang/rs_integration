@@ -259,6 +259,156 @@ class PureRecipePlannerTest {
     }
 
     @Test
+    void prefabTimberChainDoesNotPrewalkEveryLogVariantRecipe() {
+        List<MaterialRef> logs = new ArrayList<>();
+        Map<MaterialRef, Integer> stock = new LinkedHashMap<>();
+        Map<MaterialRef, List<RecipeNode>> recipes = new LinkedHashMap<>();
+        for (int species = 0; species < 67; species++) {
+            MaterialRef log = material("log_species_" + species);
+            logs.add(log);
+            stock.put(log, species == 66 ? 3 : 11); // 66 * 11 + 3 = 729 logs
+
+            MaterialRef previous = material("dead_log_input_" + species + "_0");
+            recipes.put(log, List.of(recipe("dead_log_recipe_" + species, log, 1,
+                    ingredient(previous, 1))));
+            for (int depth = 1; depth < 128; depth++) {
+                MaterialRef next = material("dead_log_input_" + species + "_" + depth);
+                recipes.put(previous, List.of(recipe(
+                        "dead_log_chain_" + species + "_" + depth,
+                        previous, 1, ingredient(next, 1))));
+                previous = next;
+            }
+        }
+
+        MaterialRef bundle = material("bundle_of_timber");
+        MaterialRef heap = material("heap_of_timber");
+        MaterialRef ton = material("ton_of_timber");
+        recipes.put(bundle, List.of(recipe("bundle_of_timber", bundle, 1,
+                new IngredientRef(logs, 9))));
+        recipes.put(heap, List.of(recipe("heap_of_timber", heap, 1,
+                ingredient(bundle, 9))));
+        recipes.put(ton, List.of(recipe("ton_of_timber", ton, 1,
+                ingredient(heap, 9))));
+
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(
+                new ImmutableRecipeGraph(recipes), stock, List.of(ingredient(ton, 1)),
+                20, 1_000, 1_000, System.nanoTime() + 200_000_000L);
+
+        assertTrue(result.feasible());
+        assertEquals(PureRecipePlanner.Status.SUCCESS, result.status());
+        assertEquals(List.of(
+                new PureRecipePlanner.PlannedStep(id("bundle_of_timber"), 81),
+                new PureRecipePlanner.PlannedStep(id("heap_of_timber"), 9),
+                new PureRecipePlanner.PlannedStep(id("ton_of_timber"), 1)), result.steps());
+        assertTrue(result.expandedStates() < 20);
+    }
+
+    @Test
+    void missingPrefabLogsStillReturnTheSelectedCompressionTrace() {
+        List<MaterialRef> logs = new ArrayList<>();
+        Map<MaterialRef, List<RecipeNode>> recipes = new LinkedHashMap<>();
+        for (int species = 0; species < 67; species++) {
+            logs.add(material("missing_log_" + species));
+        }
+        MaterialRef bundle = material("missing_bundle");
+        MaterialRef heap = material("missing_heap");
+        MaterialRef ton = material("missing_ton");
+        recipes.put(bundle, List.of(recipe("missing_bundle", bundle, 1,
+                new IngredientRef(logs, 9))));
+        recipes.put(heap, List.of(recipe("missing_heap", heap, 1,
+                ingredient(bundle, 9))));
+        recipes.put(ton, List.of(recipe("missing_ton", ton, 1,
+                ingredient(heap, 9))));
+
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(
+                new ImmutableRecipeGraph(recipes), Map.of(), List.of(ingredient(ton, 1)),
+                20, 2_000, 1_000, System.nanoTime() + 200_000_000L);
+
+        assertFalse(result.feasible());
+        assertEquals(PureRecipePlanner.Status.UNRESOLVABLE, result.status());
+        assertEquals(logs, result.missing().get(0).alternatives());
+        assertEquals(729, result.missing().get(0).count());
+        assertEquals(List.of(
+                new PureRecipePlanner.PlannedStep(id("missing_bundle"), 81),
+                new PureRecipePlanner.PlannedStep(id("missing_heap"), 9),
+                new PureRecipePlanner.PlannedStep(id("missing_ton"), 1)), result.steps());
+    }
+
+    @Test
+    void partialBroadWoodStockRejectsCrossVariantConversionRingWithinBudget() {
+        List<MaterialRef> logs = new ArrayList<>();
+        List<MaterialRef> boards = new ArrayList<>();
+        Map<MaterialRef, List<RecipeNode>> recipes = new LinkedHashMap<>();
+        for (int species = 0; species < 67; species++) {
+            logs.add(material("ring_log_" + species));
+            boards.add(material("ring_board_" + species));
+        }
+        for (int species = 0; species < logs.size(); species++) {
+            MaterialRef log = logs.get(species);
+            MaterialRef board = boards.get(species);
+            MaterialRef nextLog = logs.get((species + 1) % logs.size());
+            recipes.put(log, List.of(recipe("ring_log_" + species, log, 1,
+                    ingredient(board, 1))));
+            recipes.put(board, List.of(recipe("ring_board_" + species, board, 1,
+                    ingredient(nextLog, 1))));
+        }
+
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(
+                new ImmutableRecipeGraph(recipes), Map.of(logs.get(0), 1),
+                List.of(new IngredientRef(logs, 2)), 20, 20_000, 4_000,
+                System.nanoTime() + 200_000_000L);
+
+        assertFalse(result.feasible());
+        assertEquals(PureRecipePlanner.Status.UNRESOLVABLE, result.status());
+        assertTrue(result.expandedStates() < 1_000);
+    }
+
+    @Test
+    void partialPrefabWoodStockRejectsDeepUnseededVariantsWithinBudget() {
+        List<MaterialRef> logs = new ArrayList<>();
+        Map<MaterialRef, List<RecipeNode>> recipes = new LinkedHashMap<>();
+        for (int species = 0; species < 67; species++) {
+            MaterialRef log = material("partial_log_" + species);
+            logs.add(log);
+            MaterialRef input = material("partial_input_" + species + "_0");
+            recipes.put(log, List.of(recipe("partial_log_recipe_" + species, log, 1,
+                    ingredient(input, 1))));
+            for (int depth = 1; depth < 128; depth++) {
+                MaterialRef next = material("partial_input_" + species + "_" + depth);
+                recipes.put(input, List.of(recipe(
+                        "partial_chain_" + species + "_" + depth,
+                        input, 1, ingredient(next, 1))));
+                input = next;
+            }
+        }
+
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(
+                new ImmutableRecipeGraph(recipes), Map.of(logs.get(0), 1),
+                List.of(new IngredientRef(logs, 729)), 20, 20_000, 4_000,
+                System.nanoTime() + 200_000_000L);
+
+        assertFalse(result.feasible());
+        assertEquals(PureRecipePlanner.Status.UNRESOLVABLE, result.status());
+        assertEquals(1, result.expandedStates());
+    }
+
+    @Test
+    void broadFamilyGuardPreservesRealAmplification() {
+        MaterialRef oak = material("amplify_oak");
+        MaterialRef birch = material("amplify_birch");
+        RecipeNode duplicate = recipe("duplicate_birch", birch, 2,
+                ingredient(oak, 1));
+
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(
+                new ImmutableRecipeGraph(Map.of(birch, List.of(duplicate))),
+                Map.of(oak, 1), List.of(new IngredientRef(List.of(oak, birch), 2)), 20);
+
+        assertTrue(result.feasible());
+        assertEquals(List.of(new PureRecipePlanner.PlannedStep(
+                id("duplicate_birch"), 1)), result.steps());
+    }
+
+    @Test
     void entirelyUnseededLargeTagFailsWithoutSearchingEveryVariant() {
         List<MaterialRef> variants = new ArrayList<>();
         Map<MaterialRef, List<RecipeNode>> recipes = new LinkedHashMap<>();
