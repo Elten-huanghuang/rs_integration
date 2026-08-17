@@ -1879,7 +1879,7 @@ public final class GenericCraftPacket {
         }
         boolean arsDynamic = ArsDynamicApparatusRecipe.isSupported(recipe);
         boolean goetyDynamic = GoetyDynamicRitualRecipe.isSupported(recipe);
-        if (arsDynamic && (clickedOutput == null || clickedOutput.isEmpty())) {
+        if ((arsDynamic || goetyDynamic) && (clickedOutput == null || clickedOutput.isEmpty())) {
             sink.error(Component.translatable(
                     "rsi.generic.error.unsupported_machine", recipe.getClass().getSimpleName()));
             return;
@@ -2197,7 +2197,8 @@ public final class GenericCraftPacket {
         final ItemStack planTargetOutput = smithingOutput;
 
         PlanCache.Entry cached = PLAN_CACHE.get(cacheKey, System.nanoTime());
-        if (cached != null && PlanningStateValidator.sameState(cached.snapshot(), planningSnapshot)) {
+        if (cached != null && PlanningStateValidator.sameRelevantState(
+                cached.snapshot(), planningSnapshot, cached.plan())) {
             RSIntegrationMod.debug("[RSI-tryBuildPlan] Validated cache hit: recipeId={}", recipeId);
             sink.success(cached.plan(), planningSnapshot);
             return;
@@ -2218,27 +2219,38 @@ public final class GenericCraftPacket {
         }
 
         long demandTreeStarted = System.nanoTime();
+        long demandTreeElapsed;
         PureDemandTreeInspector.Result demandTree;
         Set<ResourceLocation> reusableCatalystOutputIds =
                 RSIntegrationConfig.ENABLE_CATALYST_RECIPE_PREFERENCE.get()
                         ? RecipeIndex.reusableCatalystOutputIds(player.serverLevel()) : Set.of();
         Set<ResourceLocation> reusableCatalystRecipeIds =
                 RecipeIndex.reusableCatalystRecipeIds(player.serverLevel());
+        Set<ResourceLocation> pureIncompatibleOutputIds =
+                RecipeIndex.pureIncompatibleOutputIds(player.serverLevel());
         try {
             demandTree = PureDemandTreeInspector.inspect(
                     planningSnapshot.recipeGraph(), routingAvailability(planningSnapshot.availableItems()),
                     recipeId, repeatCount, RSIntegrationConfig.CRAFTING_PURE_DEMAND_MAX_NODES.get(),
-                    reusableCatalystOutputIds, reusableCatalystRecipeIds);
+                    reusableCatalystOutputIds, reusableCatalystRecipeIds,
+                    pureIncompatibleOutputIds);
         } finally {
-            PerformanceMonitor.recordDemandTreeInspection(System.nanoTime() - demandTreeStarted);
+            demandTreeElapsed = System.nanoTime() - demandTreeStarted;
+            PerformanceMonitor.recordDemandTreeInspection(demandTreeElapsed);
         }
-        boolean pureRoute = demandTree.complete()
+        if (demandTreeElapsed >= 100_000_000L) {
+            RSIntegrationMod.LOGGER.warn(
+                    "[RSI-plan] Slow demand-tree inspection: recipe={} elapsedMs={} status={} nodes={} unresolved={}",
+                    recipeId, demandTreeElapsed / 1_000_000L, demandTree.status(),
+                    demandTree.visitedNodes(), demandTree.unresolved());
+        }
+        boolean pureRoute = demandTree.pureCompatible()
                 && effectiveOverrides.isEmpty()
                 && !planningSnapshot.mainThreadOnly()
                 && !demandTree.catalystRouteAvailable();
         boolean typedResolverAvailable = RSIntegrationConfig.ENABLE_MULTIBLOCK_AUTO_CRAFTING.get()
                 && network != null;
-        RSIntegrationMod.debug(
+        RSIntegrationMod.LOGGER.debug(
                 "[RSI-plan] planner route recipe={} pure={} coverage={} nodes={} unresolved={} overrides={} mainThreadOnly={} catalystRoute={}",
                 recipeId, pureRoute, demandTree.status(), demandTree.visitedNodes(),
                 demandTree.unresolved(), !effectiveOverrides.isEmpty(), planningSnapshot.mainThreadOnly(),
@@ -2276,7 +2288,7 @@ public final class GenericCraftPacket {
                         ? java.util.Optional.<SynchronousFallbackReason>empty()
                         : SynchronousFallbackReason.whenPureRouteUnavailable(
                                 planningSnapshot.mainThreadOnly(), !effectiveOverrides.isEmpty(),
-                                demandTree.complete(), demandTree.catalystRouteAvailable());
+                                demandTree.pureCompatible(), demandTree.catalystRouteAvailable());
         synchronousFallbackReason.ifPresent(reason ->
                 PerformanceMonitor.recordSynchronousPlanningFallback(reason, recipeId));
 
@@ -2363,7 +2375,9 @@ public final class GenericCraftPacket {
                     missing.add(unresolved.alternatives().get(0).itemId().toString());
                 }
             }
-            resolutionSteps = List.of();
+            resolutionSteps = PurePlanAdapter.toResolutionSteps(precomputedPlan,
+                    planningSnapshot.recipeGraph());
+            usedPurePlan = true;
         } else {
             selectedTypedResolver = true;
             long typedResolverStarted = System.nanoTime();

@@ -17,16 +17,17 @@ public enum SynchronousFallbackReason {
     ASYNC_FAILURE;
 
     public static Optional<SynchronousFallbackReason> whenPureRouteUnavailable(
-            boolean mainThreadOnly, boolean hasOverrides, boolean demandTreeComplete) {
-        return whenPureRouteUnavailable(mainThreadOnly, hasOverrides, demandTreeComplete, false);
+            boolean mainThreadOnly, boolean hasOverrides, boolean demandTreePureCompatible) {
+        return whenPureRouteUnavailable(mainThreadOnly, hasOverrides,
+                demandTreePureCompatible, false);
     }
 
     public static Optional<SynchronousFallbackReason> whenPureRouteUnavailable(
-            boolean mainThreadOnly, boolean hasOverrides, boolean demandTreeComplete,
+            boolean mainThreadOnly, boolean hasOverrides, boolean demandTreePureCompatible,
             boolean catalystRouteAvailable) {
         if (mainThreadOnly) return Optional.of(MAIN_THREAD_ONLY);
         if (hasOverrides) return Optional.of(RECIPE_OVERRIDES);
-        if (!demandTreeComplete) return Optional.of(INCOMPLETE_DEMAND_TREE);
+        if (!demandTreePureCompatible) return Optional.of(INCOMPLETE_DEMAND_TREE);
         if (catalystRouteAvailable) return Optional.of(CATALYST_ROUTE);
         return Optional.empty();
     }

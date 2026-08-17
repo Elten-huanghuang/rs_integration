@@ -324,6 +324,14 @@ public class RecipeGuiLayoutsMixin {
                 concreteTargetOutput = extractOutputStack(recipeLayout);
                 RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] WR arcane iterator output capture: recipeId={} output={}",
                         recipeId, concreteTargetOutput != null ? concreteTargetOutput.getHoverName().getString() : "null");
+            } else if (recipe instanceof Recipe<?> goetyRecipe
+                    && com.huanghuang.rsintegration.mods.goety.GoetyDynamicRitualRecipe
+                            .isSupported(goetyRecipe)) {
+                concreteTargetOutput = extractOutputStack(recipeLayout);
+                RSIntegrationMod.LOGGER.debug(
+                        "[RSI-JEI-Mixin] Goety dynamic enchant output capture: recipeId={} output={}",
+                        recipeId, concreteTargetOutput != null
+                                ? concreteTargetOutput.getHoverName().getString() : "null");
             } else if (recipeClassName.equals(
                     "com.hollingsworth.arsnouveau.api.enchanting_apparatus.EnchantmentRecipe")
                     || recipeClassName.equals(
@@ -1474,8 +1482,11 @@ public class RecipeGuiLayoutsMixin {
                 RSIntegrationMod.LOGGER.error("[RSI-JEI] Failed to create GenericCraftPacket: recipeId={} dim={} pos={}", recipeId, dim, machinePos, e);
                 return;
             }
-            RSIntegrationMod.LOGGER.debug("[RSI-JEI] Sending GenericCraftPacket: recipeId={} dim={} pos={} baseItem={}",
-                    recipeId, dim, machinePos, finalCapturedBase != null ? finalCapturedBase.getHoverName().getString() : "null");
+            RSIntegrationMod.LOGGER.debug(
+                    "[RSI-JEI] Sending GenericCraftPacket: recipeId={} dim={} pos={} baseItem={} targetOutput={}",
+                    recipeId, dim, machinePos,
+                    finalCapturedBase != null ? finalCapturedBase.getHoverName().getString() : "null",
+                    finalTargetOutput != null ? finalTargetOutput.getHoverName().getString() : "null");
             BatchCraftNetworkHandler.CHANNEL.sendToServer(pkt);
         };
     }

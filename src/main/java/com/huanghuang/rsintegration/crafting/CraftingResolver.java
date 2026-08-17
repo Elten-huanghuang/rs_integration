@@ -38,6 +38,7 @@ import net.minecraftforge.registries.ForgeRegistries;
 
 import javax.annotation.Nullable;
 import java.util.*;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 public final class CraftingResolver {
@@ -574,12 +575,8 @@ public final class CraftingResolver {
         long candStart = System.nanoTime();
         List<RecipeIndex.Entry> candidates = CandidateEngine.findCandidates(ingredient, ctx);
         if (forceProduction) {
-            ResourceLocation selected = forcedRecipeId;
-            candidates = candidates.stream()
-                    .filter(candidate -> candidate.recipe().getId().equals(selected))
-                    .toList();
-            ctx.diag("ensureIngredient forced recipe=" + selected
-                    + " candidates=" + candidates.size());
+            candidates = prioritizeForcedCandidate(candidates,
+                    candidate -> candidate.recipe().getId(), forcedRecipeId);
         }
         long candMs = (System.nanoTime() - candStart) / 1_000_000;
         ctx.diag("ensureIngredient candidates=" + candidates.size() + " remaining=" + remaining + " depth=" + depth);
@@ -604,8 +601,7 @@ public final class CraftingResolver {
                 PerformanceMonitor.recordResolveTimeout();
                 break;
             }
-            ItemStack out = ModRecipeHandlers.tryGetResultItem(
-                    candidate.recipe(), ctx.level.registryAccess());
+            ItemStack out = CandidateEngine.outputForDemand(candidate, ingredient, ctx);
             // If the result is bare (no NBT), scan fields for the real
             // NBT-carrying output — TACZ/Applied Armorer hide it there.
             out = resolveDeclaredOutput(candidate.recipe(), out);
@@ -617,6 +613,17 @@ public final class CraftingResolver {
                 continue;
             }
             alive.add(new AliveCandidate(candidate, out, ng));
+        }
+
+        // Forced selection controls which candidate may execute, but the complete viable list
+        // must remain available as UI alternatives so the player can switch back afterwards.
+        List<AliveCandidate> selectableAlive = List.copyOf(alive);
+        if (forceProduction) {
+            alive = forcedExecutionCandidates(alive,
+                    candidate -> candidate.entry().recipe().getId(), forcedRecipeId);
+            ctx.diag("ensureIngredient forced recipe=" + forcedRecipeId
+                    + " candidates=" + alive.size()
+                    + " alternatives=" + selectableAlive.size());
         }
 
         long aliveMs = (System.nanoTime() - aliveStart) / 1_000_000;
@@ -661,7 +668,7 @@ public final class CraftingResolver {
             // certain to be a vanilla recipe with fast craftBatched.
             List<ResourceLocation> altIds = new ArrayList<>();
             List<String> altModTypes = new ArrayList<>();
-            for (AliveCandidate other : alive) {
+            for (AliveCandidate other : selectableAlive) {
                 if (other == a) continue;
                 altIds.add(other.entry.recipe().getId());
                 altModTypes.add(other.entry.modType().id());
@@ -734,7 +741,7 @@ public final class CraftingResolver {
                         }
                     }
                     allOk = StepExecutor.craftBatched(
-                            a.entry, ctx, depth, altIds, altModTypes, edges, stageBatches);
+                            a.entry, ctx, depth, altIds, altModTypes, edges, stageBatches, a.output);
                     batchesLeft -= stageBatches;
                 } while (allOk && batchesLeft > 0);
             } finally {
@@ -796,6 +803,29 @@ public final class CraftingResolver {
             return true;
         }
         return false;
+    }
+
+    static <T> List<T> forcedExecutionCandidates(List<T> viable,
+                                                  Function<T, ResourceLocation> id,
+                                                  @Nullable ResourceLocation forcedRecipeId) {
+        if (forcedRecipeId == null) return viable;
+        return viable.stream()
+                .filter(candidate -> forcedRecipeId.equals(id.apply(candidate)))
+                .toList();
+    }
+
+    static <T> List<T> prioritizeForcedCandidate(List<T> candidates,
+                                                  Function<T, ResourceLocation> id,
+                                                  @Nullable ResourceLocation forcedRecipeId) {
+        if (forcedRecipeId == null || candidates.size() < 2) return candidates;
+        List<T> ordered = new ArrayList<>(candidates.size());
+        for (T candidate : candidates) {
+            if (forcedRecipeId.equals(id.apply(candidate))) ordered.add(candidate);
+        }
+        for (T candidate : candidates) {
+            if (!forcedRecipeId.equals(id.apply(candidate))) ordered.add(candidate);
+        }
+        return List.copyOf(ordered);
     }
 
     static List<IngredientSpec> coalesceRootSpecs(List<IngredientSpec> specs) {

@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
+import com.huanghuang.rsintegration.mods.goety.GoetyDynamicRitualRecipe;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.recipe.SlashBladeRecipeHandler;
 import net.minecraft.resources.ResourceLocation;
@@ -125,7 +126,7 @@ final class CandidateEngine {
             if (ctx.timedOut()) break;
             if (!(entry.recipe() instanceof CraftingRecipe cr)) continue;
             vanillaCount++;
-            ItemStack output = ModRecipeHandlers.tryGetResultItem(cr, ctx.level.registryAccess());
+            ItemStack output = outputForDemand(entry, ingredient, ctx);
             if (passesOutputCheck(entry, output, ingredient, ingredientAllNbt, nbtStrict, diag)) {
                 boolean skipConversion = variantGuardEnabled()
                         && (NonProductiveTagConversionGuard.shouldSkip(ingredient, cr, output)
@@ -145,7 +146,7 @@ final class CandidateEngine {
             if (ctx.timedOut()) break;
             if (entry.recipe() instanceof CraftingRecipe) continue;
             modCount++;
-            ItemStack output = ModRecipeHandlers.tryGetResultItem(entry.recipe(), ctx.level.registryAccess());
+            ItemStack output = outputForDemand(entry, ingredient, ctx);
             if (passesOutputCheck(entry, output, ingredient, ingredientAllNbt, nbtStrict, diag)) {
                 dedup.put(entry.recipe().getId(), entry);
             }
@@ -214,6 +215,16 @@ final class CandidateEngine {
         }
 
         return result;
+    }
+
+    /** Resolves shared runtime recipes against the exact NBT-bearing item being requested. */
+    static ItemStack outputForDemand(RecipeIndex.Entry entry, Ingredient demand,
+                                     ResolutionContext ctx) {
+        if (GoetyDynamicRitualRecipe.isSupported(entry.recipe())) {
+            ItemStack dynamic = GoetyDynamicRitualRecipe.matchingOutput(entry.recipe(), demand);
+            if (!dynamic.isEmpty()) return dynamic;
+        }
+        return ModRecipeHandlers.tryGetResultItem(entry.recipe(), ctx.level.registryAccess());
     }
 
     @javax.annotation.Nullable

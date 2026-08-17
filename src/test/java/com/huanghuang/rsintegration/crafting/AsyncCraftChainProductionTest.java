@@ -4,9 +4,12 @@ import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
+import com.huanghuang.rsintegration.crafting.graph.CraftNode;
 import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
 import com.huanghuang.rsintegration.crafting.graph.MaterialSource;
 import com.huanghuang.rsintegration.crafting.graph.NodeId;
+import com.huanghuang.rsintegration.crafting.graph.OutputDeclaration;
+import com.huanghuang.rsintegration.crafting.graph.OutputKind;
 import com.huanghuang.rsintegration.crafting.graph.OutputPortId;
 import com.huanghuang.rsintegration.crafting.graph.RootAllocation;
 import com.huanghuang.rsintegration.crafting.graph.RootDemand;
@@ -16,6 +19,10 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Ingredient;
+import net.minecraft.world.item.EnchantedBookItem;
+import net.minecraft.world.item.enchantment.EnchantmentHelper;
+import net.minecraft.world.item.enchantment.EnchantmentInstance;
+import net.minecraft.world.item.enchantment.Enchantments;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -142,6 +149,24 @@ class AsyncCraftChainProductionTest extends BootstrapTest {
                 List.of(new ItemStack(Items.IRON_INGOT)), List.of()));
         assertFalse(AsyncCraftChain.graphMaterialPoolsDrained(
                 List.of(), List.of(new ItemStack(Items.GOLD_INGOT))));
+    }
+
+    @Test
+    void graphNodeTargetKeepsIntermediateEnchantLevel() {
+        ItemStack efficiencyFour = EnchantedBookItem.createForEnchantment(
+                new EnchantmentInstance(Enchantments.BLOCK_EFFICIENCY, 4));
+        NodeId nodeId = new NodeId(4);
+        CraftNode node = new CraftNode(nodeId,
+                new ResourceLocation("goety", "enchant/efficiency"), "goety", null,
+                2, List.of(), List.of(), false, null, null, List.of(),
+                List.of(new OutputDeclaration(new OutputPortId(nodeId, 0),
+                        MaterialKey.of(efficiencyFour), 2, OutputKind.PRIMARY)));
+
+        ItemStack target = AsyncCraftChain.graphNodeTargetOutput(node);
+
+        assertEquals(1, target.getCount());
+        assertEquals(4, EnchantmentHelper.getEnchantments(target)
+                .getOrDefault(Enchantments.BLOCK_EFFICIENCY, 0));
     }
 
     @Test

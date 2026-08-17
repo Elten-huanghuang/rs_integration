@@ -101,6 +101,23 @@ public final class GoetyDynamicRitualRecipe {
                 ? canonical : ItemStack.EMPTY;
     }
 
+    /** Returns the concrete level of this shared recipe that satisfies a resolver demand. */
+    public static ItemStack matchingOutput(Recipe<?> recipe, Ingredient demand) {
+        if (!isSupported(recipe) || demand == null || demand.isEmpty()) return ItemStack.EMPTY;
+        return matchingOutput(enchantment(recipe), demand);
+    }
+
+    static ItemStack matchingOutput(Enchantment enchantment, Ingredient demand) {
+        if (enchantment == null || demand == null || demand.isEmpty()) return ItemStack.EMPTY;
+        for (ItemStack option : demand.getItems()) {
+            int level = inferTargetLevel(enchantment, option);
+            if (level == 0) continue;
+            ItemStack canonical = buildOutput(enchantment, level);
+            if (!canonical.isEmpty() && demand.test(canonical)) return canonical;
+        }
+        return ItemStack.EMPTY;
+    }
+
     /** Material specs in the order expected by GoetyBatchDelegate. */
     public static List<IngredientSpec> buildMaterials(Recipe<?> recipe,
                                                        @Nullable ItemStack requestedOutput) {

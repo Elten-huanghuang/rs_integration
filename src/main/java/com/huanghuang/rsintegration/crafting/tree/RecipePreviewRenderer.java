@@ -39,6 +39,7 @@ public final class RecipePreviewRenderer {
     private net.minecraft.world.item.Item marketItem;
     private net.minecraft.world.item.Item scrollForgeItem;
     private net.minecraft.world.item.Item arcaneAnvilItem;
+    private net.minecraft.world.item.Item goetyDarkAltarItem;
 
     public RecipePreviewRenderer() {
         this.mc = Minecraft.getInstance();
@@ -52,6 +53,7 @@ public final class RecipePreviewRenderer {
         marketItem = null;
         scrollForgeItem = null;
         arcaneAnvilItem = null;
+        goetyDarkAltarItem = null;
     }
 
     /**
@@ -300,6 +302,13 @@ public final class RecipePreviewRenderer {
             }
             if (renderItemIcon(gfx, item, x, y, size)) return true;
         }
+        if (isGoetyRitualRecipe(recipeId)) {
+            if (goetyDarkAltarItem == null) {
+                goetyDarkAltarItem = net.minecraftforge.registries.ForgeRegistries.ITEMS
+                        .getValue(new ResourceLocation("goety", "dark_altar"));
+            }
+            if (renderItemIcon(gfx, goetyDarkAltarItem, x, y, size)) return true;
+        }
         if (isPmmoSalvageRecipe(recipeId)) {
             ItemStack salvageBlock = com.huanghuang.rsintegration.mods.pmmo.client
                     .PmmoSalvageAccess.salvageBlock();
@@ -386,6 +395,15 @@ public final class RecipePreviewRenderer {
         String path = recipeId.getPath();
         return path.startsWith("irons_spellbooks/scroll_forge/")
                 || path.startsWith("irons_spellbooks/arcane_anvil/");
+    }
+
+    private boolean isGoetyRitualRecipe(ResourceLocation recipeId) {
+        if (recipeId == null || !"goety".equals(recipeId.getNamespace()) || mc.level == null) {
+            return false;
+        }
+        Recipe<?> recipe = mc.level.getRecipeManager().byKey(recipeId).orElse(null);
+        return recipe != null && recipe.getClass().getName()
+                .equals("com.Polarice3.Goety.common.crafting.RitualRecipe");
     }
 
     private static boolean renderItemIcon(GuiGraphics gfx, @Nullable net.minecraft.world.item.Item item,

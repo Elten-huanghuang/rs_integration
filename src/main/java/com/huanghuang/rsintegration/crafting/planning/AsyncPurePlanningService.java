@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting.planning;
 
 import com.huanghuang.rsintegration.config.CraftingPlanningConfig;
+import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.SelfAmplifyingRecipePolicy;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.IngredientRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.RecipeNode;
@@ -69,8 +70,16 @@ public final class AsyncPurePlanningService {
         PureRecipePlanner.Result result = PureRecipePlanner.resolve(
                 snapshot.recipeGraph(), stock, roots, maxSteps,
                 maxSearchStates, maxMemoizedFailures, deadlineNanos);
+        long elapsedNanos = System.nanoTime() - searchStarted;
         com.huanghuang.rsintegration.command.PerformanceMonitor.recordPurePlanningSearch(
-                result, System.nanoTime() - searchStarted);
+                result, elapsedNanos);
+        if (result.status() == PureRecipePlanner.Status.TIME_LIMIT) {
+            RSIntegrationMod.LOGGER.warn(
+                    "[RSI-plan] Pure planning timed out: recipe={} elapsedMs={} states={} backtracks={} memoHits={} stockTypes={} recipes={}",
+                    snapshot.recipeId(), elapsedNanos / 1_000_000L, result.expandedStates(),
+                    result.backtracks(), result.memoHits(), stock.size(),
+                    snapshot.recipeGraph().recipesById().size());
+        }
         return result;
     }
 

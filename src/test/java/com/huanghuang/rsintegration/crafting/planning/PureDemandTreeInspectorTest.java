@@ -37,11 +37,98 @@ class PureDemandTreeInspectorTest {
         RecipeNode target = recipe("target", material("result"), 1, ingredient(special, 1));
 
         var result = PureDemandTreeInspector.inspect(graph(target), Map.of(),
-                target.recipeId(), 1);
+                target.recipeId(), 1, 64, Set.of(), Set.of(), Set.of(special.itemId()));
 
         assertFalse(result.complete());
-        assertEquals(PureDemandTreeInspector.Status.INCOMPLETE, result.status());
+        assertFalse(result.pureCompatible());
+        assertEquals(PureDemandTreeInspector.Status.UNPROJECTED_DEPENDENCY, result.status());
         assertEquals(special, result.unresolved());
+    }
+
+    @Test
+    void missingRawMaterialRemainsPureCompatible() {
+        MaterialRef raw = material("raw");
+        RecipeNode target = recipe("target", material("result"), 1, ingredient(raw, 3));
+
+        var result = PureDemandTreeInspector.inspect(graph(target), Map.of(),
+                target.recipeId(), 1, 64, Set.of(), Set.of(), Set.of());
+
+        assertFalse(result.complete());
+        assertTrue(result.pureCompatible());
+        assertEquals(PureDemandTreeInspector.Status.MISSING_MATERIALS, result.status());
+        assertEquals(raw, result.unresolved());
+    }
+
+    @Test
+    void rawShortageDoesNotHideLaterTypedOnlyDependency() {
+        MaterialRef raw = material("raw");
+        MaterialRef special = material("special");
+        RecipeNode target = recipe("target", material("result"), 1,
+                ingredient(raw, 1), ingredient(special, 1));
+
+        var result = PureDemandTreeInspector.inspect(graph(target), Map.of(),
+                target.recipeId(), 1, 64, Set.of(), Set.of(), Set.of(special.itemId()));
+
+        assertEquals(PureDemandTreeInspector.Status.UNPROJECTED_DEPENDENCY, result.status());
+        assertFalse(result.pureCompatible());
+    }
+
+    @Test
+    void advancedFarmStyleTreeWithMissingLogsStaysOnPureRoute() {
+        List<MaterialRef> logs = java.util.stream.IntStream.range(0, 67)
+                .mapToObj(index -> material("farm_log_" + index)).toList();
+        MaterialRef bundle = material("farm_bundle");
+        MaterialRef heap = material("farm_heap");
+        MaterialRef ton = material("farm_ton");
+        MaterialRef dirt = material("farm_dirt");
+        MaterialRef compressedDirt = material("farm_compressed_dirt");
+        MaterialRef doubleDirt = material("farm_double_dirt");
+        RecipeNode bundleRecipe = recipe("farm_bundle", bundle, 1,
+                new IngredientRef(logs, 9));
+        RecipeNode heapRecipe = recipe("farm_heap", heap, 1, ingredient(bundle, 9));
+        RecipeNode tonRecipe = recipe("farm_ton", ton, 1, ingredient(heap, 9));
+        RecipeNode compressedDirtRecipe = recipe("farm_compressed_dirt", compressedDirt, 1,
+                ingredient(dirt, 9));
+        RecipeNode doubleDirtRecipe = recipe("farm_double_dirt", doubleDirt, 1,
+                ingredient(compressedDirt, 9));
+        RecipeNode target = recipe("farm_advanced", material("farm"), 1,
+                ingredient(ton, 1), ingredient(doubleDirt, 3));
+
+        var result = PureDemandTreeInspector.inspect(graph(
+                        bundleRecipe, heapRecipe, tonRecipe,
+                        compressedDirtRecipe, doubleDirtRecipe, target), Map.of(),
+                target.recipeId(), 1, 512, Set.of(logs.get(66).itemId()), Set.of(), Set.of());
+
+        assertEquals(PureDemandTreeInspector.Status.MISSING_MATERIALS, result.status());
+        assertTrue(result.pureCompatible());
+        assertFalse(result.catalystRouteAvailable());
+        assertTrue(result.visitedNodes() < 100);
+    }
+
+    @Test
+    void exactCompressionRingDoesNotConsumeTheDemandNodeBudget() {
+        MaterialRef brick = material("brick");
+        MaterialRef pile = material("pile");
+        MaterialRef pallet = material("pallet");
+        RecipeNode pileFromBrick = recipe("pile_from_brick", pile, 1, ingredient(brick, 9));
+        RecipeNode brickFromPile = recipe("brick_from_pile", brick, 9, ingredient(pile, 1));
+        RecipeNode palletFromPile = recipe("pallet_from_pile", pallet, 1, ingredient(pile, 9));
+        RecipeNode pileFromPallet = recipe("pile_from_pallet", pile, 9, ingredient(pallet, 1));
+        RecipeNode target = recipe("farm", material("farm"), 1, ingredient(pallet, 1));
+        ImmutableRecipeGraph graph = graph(
+                pileFromBrick, brickFromPile, palletFromPile, pileFromPallet, target);
+
+        var missing = PureDemandTreeInspector.inspect(
+                graph, Map.of(), target.recipeId(), 1, 32, Set.of(), Set.of(), Set.of());
+        var complete = PureDemandTreeInspector.inspect(
+                graph, Map.of(brick, 81), target.recipeId(), 1, 32,
+                Set.of(), Set.of(), Set.of());
+
+        assertEquals(PureDemandTreeInspector.Status.MISSING_MATERIALS, missing.status());
+        assertTrue(missing.pureCompatible());
+        assertTrue(missing.visitedNodes() < 10);
+        assertTrue(complete.pureCompatible());
+        assertTrue(complete.visitedNodes() < 10);
     }
 
     @Test
@@ -177,7 +264,8 @@ class PureDemandTreeInspectorTest {
                 graph(leftFromRight, rightFromLeft, target), Map.of(), target.recipeId(), 1);
 
         assertFalse(result.complete());
-        assertEquals(PureDemandTreeInspector.Status.INCOMPLETE, result.status());
+        assertTrue(result.pureCompatible());
+        assertEquals(PureDemandTreeInspector.Status.MISSING_MATERIALS, result.status());
     }
 
     @Test
@@ -237,6 +325,21 @@ class PureDemandTreeInspectorTest {
                 Set.of(nugget.itemId()));
 
         assertTrue(result.complete());
+        assertFalse(result.catalystRouteAvailable());
+    }
+
+    @Test
+    void oneCatalystProducerDoesNotPoisonABroadMaterialTag() {
+        MaterialRef ordinaryLog = material("ordinary_log");
+        MaterialRef exoticLog = material("exotic_log");
+        RecipeNode target = recipe("bundle", material("bundle"), 1,
+                new IngredientRef(List.of(ordinaryLog, exoticLog), 9));
+
+        var result = PureDemandTreeInspector.inspect(graph(target), Map.of(),
+                target.recipeId(), 1, 64, Set.of(exoticLog.itemId()));
+
+        assertEquals(PureDemandTreeInspector.Status.MISSING_MATERIALS, result.status());
+        assertTrue(result.pureCompatible());
         assertFalse(result.catalystRouteAvailable());
     }
 

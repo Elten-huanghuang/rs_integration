@@ -6,8 +6,8 @@ public record CraftingPreviewPolicy(int rateLimitMs, int cacheTtlMs, int cacheMa
     public static final int MAX_RATE_LIMIT_MS = 2_000;
     public static final int DEFAULT_RATE_LIMIT_MS = 100;
     public static final int MIN_CACHE_TTL_MS = 50;
-    public static final int MAX_CACHE_TTL_MS = 10_000;
-    public static final int DEFAULT_CACHE_TTL_MS = 500;
+    public static final int MAX_CACHE_TTL_MS = 120_000;
+    public static final int DEFAULT_CACHE_TTL_MS = 30_000;
     public static final int MIN_CACHE_MAX_ENTRIES = 8;
     public static final int MAX_CACHE_MAX_ENTRIES = 1_024;
     public static final int DEFAULT_CACHE_MAX_ENTRIES = 64;

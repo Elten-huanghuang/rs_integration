@@ -14,7 +14,7 @@ import java.util.List;
 public final class RSIntegrationConfig {
     public static final int REPEAT_COUNT_DEFAULT = 1024;
     public static final int REPEAT_COUNT_ABSOLUTE_MAX = 1024;
-    public static final int SERVER_CONFIG_SCHEMA = 4;
+    public static final int SERVER_CONFIG_SCHEMA = 6;
     public static final List<String> DEFAULT_ANVIL_MEMORY_ADAPTERS = List.of(
             "minecraft_anvil", "goety_dark_anvil", "irons_spellbooks_arcane_anvil");
     public static final int DEFAULT_CRAFTING_PLANNING_WORKERS = CraftingPlanningConfig.DEFAULT_WORKERS;
@@ -803,7 +803,8 @@ public final class RSIntegrationConfig {
                         CraftingPreviewPolicy.MAX_RATE_LIMIT_MS);
         CRAFTING_PLAN_CACHE_TTL_MS = s
                 .comment("Lifetime in milliseconds for reusable craft preview plans.",
-                        "Range: 50-10000.")
+                        "Cached plans are revalidated against only the materials they actually use.",
+                        "Range: 50-120000.")
                 .defineInRange("craftingPlanCacheTtlMs",
                         DEFAULT_CRAFTING_PLAN_CACHE_TTL_MS,
                         CraftingPreviewPolicy.MIN_CACHE_TTL_MS,
@@ -1124,8 +1125,21 @@ public final class RSIntegrationConfig {
     }
 
     public static int migrateTypedPreviewTimeoutMs(int schema, int currentValue) {
-        return schema < 4 && currentValue == 50
+        if (schema < 4 && currentValue == 50) {
+            return DEFAULT_CRAFTING_TYPED_PREVIEW_TIMEOUT_MS;
+        }
+        return schema < 6 && currentValue == 400
                 ? DEFAULT_CRAFTING_TYPED_PREVIEW_TIMEOUT_MS : currentValue;
+    }
+
+    public static int migratePurePlanningTimeoutMs(int schema, int currentValue) {
+        return schema < 6 && currentValue == 500
+                ? DEFAULT_CRAFTING_PURE_PLANNING_TIMEOUT_MS : currentValue;
+    }
+
+    public static int migratePlanCacheTtlMs(int schema, int currentValue) {
+        return schema < 5 && currentValue == 500
+                ? DEFAULT_CRAFTING_PLAN_CACHE_TTL_MS : currentValue;
     }
 
     public static void saveClientConfig() {

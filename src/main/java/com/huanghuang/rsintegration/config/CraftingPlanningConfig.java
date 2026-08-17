@@ -23,10 +23,10 @@ public record CraftingPlanningConfig(int workers, int queueCapacity,
     public static final int DEFAULT_DEMAND_TREE_NODES = 512;
     public static final int MIN_PURE_TIMEOUT_MS = 50;
     public static final int MAX_PURE_TIMEOUT_MS = 5_000;
-    public static final int DEFAULT_PURE_TIMEOUT_MS = 500;
+    public static final int DEFAULT_PURE_TIMEOUT_MS = 1_500;
     public static final int MIN_TYPED_PREVIEW_TIMEOUT_MS = 10;
     public static final int MAX_TYPED_PREVIEW_TIMEOUT_MS = 500;
-    public static final int DEFAULT_TYPED_PREVIEW_TIMEOUT_MS = 400;
+    public static final int DEFAULT_TYPED_PREVIEW_TIMEOUT_MS = 500;
 
     public CraftingPlanningConfig {
         requireRange("workers", workers, MIN_WORKERS, MAX_WORKERS);

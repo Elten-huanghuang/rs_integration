@@ -1239,7 +1239,12 @@ public final class AsyncCraftChain {
             try {
                 if (delegate instanceof AbstractBatchDelegate abd) {
                     abd.setMachineServer(server);
-                    if (targetOutput != null && isGraphTerminalNode(nodeId)) abd.setTargetOutput(targetOutput);
+                    ItemStack nodeTarget = graphNodeTargetOutput(graphNodes.get(nodeId));
+                    if (!nodeTarget.isEmpty()) {
+                        abd.setTargetOutput(nodeTarget);
+                    } else if (targetOutput != null && isGraphTerminalNode(nodeId)) {
+                        abd.setTargetOutput(targetOutput);
+                    }
                 }
             } catch (RuntimeException exception) {
                 releasePreparationQuietly(delegate);
@@ -1290,7 +1295,10 @@ public final class AsyncCraftChain {
                     if (candidate instanceof AbstractBatchDelegate abd) {
                         abd.setMachineDim(machine.dim());
                         abd.setMachineServer(server);
-                        if (targetOutput != null && isGraphTerminalNode(nodeId)) {
+                        ItemStack nodeTarget = graphNodeTargetOutput(graphNodes.get(nodeId));
+                        if (!nodeTarget.isEmpty()) {
+                            abd.setTargetOutput(nodeTarget);
+                        } else if (targetOutput != null && isGraphTerminalNode(nodeId)) {
                             abd.setTargetOutput(targetOutput);
                         }
                     }
@@ -1341,6 +1349,18 @@ public final class AsyncCraftChain {
         }
         return PreparationResult.ready(
                 new PreparedGraphNode(step, delegate, eligible, operationCost, operationGroup));
+    }
+
+    /** Exact per-execution output used to configure runtime-derived graph recipes. */
+    static ItemStack graphNodeTargetOutput(@Nullable CraftNode node) {
+        if (node == null) return ItemStack.EMPTY;
+        return node.outputs().stream()
+                .filter(output -> output.kind() == OutputKind.PRIMARY
+                        || output.kind() == OutputKind.DYNAMIC)
+                .findFirst()
+                .map(output -> output.material().toStack(Math.max(1,
+                        output.quantity() / Math.max(1, node.executions()))))
+                .orElse(ItemStack.EMPTY);
     }
 
     static boolean shouldUseGraphOperationGroup(int executions, int availableOperations) {
@@ -1415,7 +1435,10 @@ public final class AsyncCraftChain {
                     releasePreparationQuietly(delegate);
                     delegate = group;
                     group.setMachineServer(server);
-                    if (targetOutput != null && isGraphTerminalNode(nodeId)) {
+                    ItemStack nodeTarget = graphNodeTargetOutput(graphNodes.get(nodeId));
+                    if (!nodeTarget.isEmpty()) {
+                        group.setTargetOutput(nodeTarget);
+                    } else if (targetOutput != null && isGraphTerminalNode(nodeId)) {
                         group.setTargetOutput(targetOutput);
                     }
                 } else {
