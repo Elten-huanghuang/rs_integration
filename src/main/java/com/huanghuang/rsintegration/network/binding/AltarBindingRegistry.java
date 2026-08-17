@@ -841,7 +841,8 @@ public final class AltarBindingRegistry {
         // recipes that still run on the normal Enchanting Apparatus. The
         // concrete Ars ModType already distinguishes apparatus from imbuement.
         if (ModIds.ID_ARS_APPARATUS.equals(type.id())
-                || ModIds.ID_ARS_IMBUEMENT.equals(type.id())) {
+                || ModIds.ID_ARS_IMBUEMENT.equals(type.id())
+                || ModIds.ID_ARS_SCRIBES_TABLE.equals(type.id())) {
             return null;
         }
         // MythicBotany exposes one Mana Infuser recipe type and one physical

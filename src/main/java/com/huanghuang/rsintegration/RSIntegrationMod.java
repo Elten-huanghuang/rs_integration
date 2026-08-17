@@ -92,7 +92,7 @@ public final class RSIntegrationMod {
             "aether", "aether_altar", "aether_freezer", "aether_incubator",
             "aetherworks_anvil", "aetherworks_tool_station",
             "apotheosis_fletching", "apotheosis_gem_cutting", "apotheosis_library",
-            "ars_nouveau_apparatus", "ars_nouveau_imbuement",
+            "ars_nouveau_apparatus", "ars_nouveau_imbuement", "ars_nouveau_scribes_table",
             "avaritia_crafting", "avaritia_compressor", "avaritia_gui", "avaritia_smithing",
             "botania_apothecary", "botania_brewery", "botania_elven_trade",
             "botania_mana_pool", "botania_pure_daisy", "botania_runic_altar",

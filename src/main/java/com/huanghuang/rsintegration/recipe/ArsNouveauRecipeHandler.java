@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.mods.arsnouveau.ArsApparatusMaterials;
 import com.huanghuang.rsintegration.mods.arsnouveau.ArsDynamicApparatusRecipe;
+import com.huanghuang.rsintegration.mods.arsnouveau.ArsGlyphMaterials;
 import com.huanghuang.rsintegration.mods.arsnouveau.ArsImbuementMaterials;
 import com.huanghuang.rsintegration.mods.arsnouveau.ArsRecipeClassifier;
 import com.huanghuang.rsintegration.mods.arsnouveau.ArsTileAccess;
@@ -19,7 +20,7 @@ import javax.annotation.Nullable;
 import java.util.List;
 
 /**
- * Recipe handler for Ars Nouveau Imbuement and Enchanting Apparatus recipes.
+ * Recipe handler for Ars Nouveau Imbuement, Enchanting Apparatus, and glyph recipes.
  *
  * <p>Imbuement and ordinary Apparatus recipes expose fixed inputs and outputs.
  * Enchantment recipes have deterministic enchanted-book inputs and outputs,
@@ -78,6 +79,10 @@ public final class ArsNouveauRecipeHandler extends AbstractRecipeHandler {
             return ArsDynamicApparatusRecipe.canonicalEnchantmentOutput(recipe);
         } else if (ArsRecipeClassifier.TYPE_ARMOR_UPGRADE.equals(typeId)) {
             return ItemStack.EMPTY;
+        } else if (ArsRecipeClassifier.isGlyph(typeId)) {
+            return Reflect.<ItemStack>getField(recipe, "output")
+                    .map(ItemStack::copy)
+                    .orElse(ItemStack.EMPTY);
         }
 
         RSIntegrationMod.LOGGER.warn(
@@ -96,6 +101,11 @@ public final class ArsNouveauRecipeHandler extends AbstractRecipeHandler {
             return getApparatusIngredients(recipe);
         } else if (ArsRecipeClassifier.TYPE_ENCHANTMENT.equals(typeId)) {
             List<IngredientSpec> specs = ArsDynamicApparatusRecipe.buildMaterials(recipe, null);
+            return specs.isEmpty() ? null : specs;
+        } else if (ArsRecipeClassifier.isGlyph(typeId)) {
+            List<Ingredient> inputs = Reflect.<List<Ingredient>>getField(recipe, "inputs")
+                    .orElse(List.of());
+            List<IngredientSpec> specs = ArsGlyphMaterials.build(inputs);
             return specs.isEmpty() ? null : specs;
         }
 

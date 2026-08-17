@@ -52,6 +52,11 @@ public final class FermentationTankBatchDelegate extends AbstractBatchDelegate {
     // Water / fluid state
     private int requiredWater; // mb, from recipe
     private int recipeTime;    // ticks, from recipe
+    private FermentationRecipeOutputs.FluidMaterial inputFluidMaterial =
+            new FermentationRecipeOutputs.FluidMaterial(
+                    FluidStack.EMPTY, ItemStack.EMPTY, ItemStack.EMPTY, true);
+    private FluidStack ownedInputFluid = FluidStack.EMPTY;
+    private ItemStack pendingInputContainers = ItemStack.EMPTY;
 
     private int insertedCount;
     private ItemStack insertedSample = ItemStack.EMPTY;
@@ -111,20 +116,27 @@ public final class FermentationTankBatchDelegate extends AbstractBatchDelegate {
         probeReflection();
         this.requiredWater = readRecipeWater(found);
         this.recipeTime = readRecipeTime(found);
-        RSIntegrationMod.LOGGER.debug("[RSI-Ferment] validateAndInit: recipe={} water={}mb time={}ticks inputFluidF={} outFluidF={}",
-                recipeId, requiredWater, recipeTime,
+        this.inputFluidMaterial = FermentationRecipeOutputs.inputFluidMaterial(found);
+        this.ownedInputFluid = FluidStack.EMPTY;
+        this.pendingInputContainers = ItemStack.EMPTY;
+        RSIntegrationMod.LOGGER.debug("[RSI-Ferment] validateAndInit: recipe={} water={}mb time={}ticks inputFluid={} holders={} supported={} inputFluidF={} outFluidF={}",
+                recipeId, requiredWater, recipeTime, inputFluidMaterial.fluid(),
+                inputFluidMaterial.filledContainers(), inputFluidMaterial.supported(),
                 recipeInputFluidField != null, recipeOutputFluidField != null);
-        return true;
+        return inputFluidMaterial.supported();
     }
 
     @Nullable
     @Override
     public List<IngredientSpec> getRequiredMaterials() {
         List<Ingredient> ingredients = getRecipeIngredients();
-        if (ingredients.isEmpty()) return null;
         List<IngredientSpec> specs = new ArrayList<>();
         for (Ingredient ing : ingredients) {
             if (!ing.isEmpty()) specs.add(new IngredientSpec(ing, 1));
+        }
+        if (inputFluidMaterial.requiresPlannedContainers()) {
+            ItemStack holders = inputFluidMaterial.filledContainers();
+            specs.add(new IngredientSpec(Ingredient.of(holders), holders.getCount()));
         }
         return specs.isEmpty() ? null : specs;
     }
@@ -212,11 +224,63 @@ public final class FermentationTankBatchDelegate extends AbstractBatchDelegate {
                 return false;
             }
         }
+
+        List<ItemStack> remainingMaterials = new ArrayList<>();
+        for (ItemStack material : materials) {
+            if (material != null && !material.isEmpty()) {
+                remainingMaterials.add(material.copy());
+            }
+        }
+        List<ItemStack> solidMaterials = new ArrayList<>();
+        for (Ingredient ingredient : getRecipeIngredients()) {
+            if (ingredient.isEmpty()) continue;
+            List<ItemStack> matched = takeMatchingMaterials(remainingMaterials, ingredient, 1);
+            if (countItems(matched) != 1) {
+                RSIntegrationMod.LOGGER.warn(
+                        "[RSI-Ferment] Missing solid ingredient for recipe {}", recipe.getId());
+                forceChunkLoad(false);
+                return false;
+            }
+            solidMaterials.addAll(matched);
+        }
+        List<ItemStack> fluidMaterials = List.of();
+        if (inputFluidMaterial.requiresPlannedContainers()) {
+            ItemStack holders = inputFluidMaterial.filledContainers();
+            fluidMaterials = takeMatchingMaterials(remainingMaterials,
+                    Ingredient.of(holders), holders.getCount());
+            if (countItems(fluidMaterials) != holders.getCount()) {
+                RSIntegrationMod.LOGGER.warn(
+                        "[RSI-Ferment] Missing bottled input fluid for recipe {}: need={} found={}",
+                        recipe.getId(), holders.getCount(), countItems(fluidMaterials));
+                forceChunkLoad(false);
+                return false;
+            }
+        }
+        remainingMaterials.removeIf(ItemStack::isEmpty);
+        if (!remainingMaterials.isEmpty()) {
+            RSIntegrationMod.LOGGER.warn(
+                    "[RSI-Ferment] Refusing unclassified materials for recipe {}: {}",
+                    recipe.getId(), remainingMaterials);
+            forceChunkLoad(false);
+            return false;
+        }
+
         IFluidHandler fluidHandler = getFluidHandler(be);
+        FluidStack requiredInputFluid = inputFluidMaterial.fluid();
+        if (fluidHandler == null && !requiredInputFluid.isEmpty()) {
+            player.sendSystemMessage(Component.translatable(
+                    "rsi.generic.error.machine_valid_failed", recipe.getId()));
+            forceChunkLoad(false);
+            return false;
+        }
         if (fluidHandler != null) {
-            FluidStack tf = fluidHandler.getFluidInTank(0);
-            if (!tf.isEmpty() && tf.getFluid() != Fluids.WATER
-                    && tf.getFluid() != net.minecraft.world.level.material.Fluids.EMPTY) {
+            FluidStack tankFluid = fluidHandler.getFluidInTank(0);
+            boolean wrongExistingFluid = requiredInputFluid.isEmpty()
+                    ? !tankFluid.isEmpty()
+                    : requiredInputFluid.getFluid() == Fluids.WATER
+                    ? !tankFluid.isEmpty() && tankFluid.getFluid() != Fluids.WATER
+                    : !tankFluid.isEmpty();
+            if (wrongExistingFluid) {
                 player.sendSystemMessage(Component.translatable("rsi.generic.error.machine_valid_failed", recipe.getId()));
                 forceChunkLoad(false);
                 return false;
@@ -235,6 +299,36 @@ public final class FermentationTankBatchDelegate extends AbstractBatchDelegate {
             }
         }
 
+        ownedInputFluid = FluidStack.EMPTY;
+        pendingInputContainers = ItemStack.EMPTY;
+        if (fluidHandler != null && inputFluidMaterial.requiresPlannedContainers()) {
+            int accepted = fluidHandler.fill(requiredInputFluid.copy(),
+                    IFluidHandler.FluidAction.SIMULATE);
+            if (accepted != requiredInputFluid.getAmount()) {
+                RSIntegrationMod.LOGGER.warn(
+                        "[RSI-Ferment] Tank rejected input fluid for recipe {}: accepted={} required={}",
+                        recipe.getId(), accepted, requiredInputFluid.getAmount());
+                forceChunkLoad(false);
+                return false;
+            }
+            int filled = fluidHandler.fill(requiredInputFluid.copy(),
+                    IFluidHandler.FluidAction.EXECUTE);
+            if (filled != requiredInputFluid.getAmount()) {
+                if (filled > 0) {
+                    fluidHandler.drain(new FluidStack(requiredInputFluid.getFluid(), filled),
+                            IFluidHandler.FluidAction.EXECUTE);
+                }
+                forceChunkLoad(false);
+                return false;
+            }
+            ownedInputFluid = requiredInputFluid.copy();
+            pendingInputContainers = inputFluidMaterial.emptyContainers();
+            be.setChanged();
+            RSIntegrationMod.LOGGER.debug(
+                    "[RSI-Ferment] Filled planned input fluid: recipe={} fluid={} materials={} emptyContainers={}",
+                    recipe.getId(), requiredInputFluid, fluidMaterials, pendingInputContainers);
+        }
+
         // ── Place ingredients into slots ──
         ItemStack[] snapshot = new ItemStack[itemHandler.getContainerSize()];
         for (int i = 0; i < snapshot.length; i++) {
@@ -244,7 +338,7 @@ public final class FermentationTankBatchDelegate extends AbstractBatchDelegate {
         insertedCount = 0;
         insertedSample = ItemStack.EMPTY;
         placedInputs.clear();
-        for (ItemStack mat : materials) {
+        for (ItemStack mat : solidMaterials) {
             if (mat.isEmpty()) continue;
             ItemStack single = mat.copyWithCount(1);
             boolean inserted = false;
@@ -260,6 +354,7 @@ public final class FermentationTankBatchDelegate extends AbstractBatchDelegate {
                 for (int i = 0; i < snapshot.length; i++) {
                     itemHandler.setItem(i, snapshot[i]);
                 }
+                rollbackOwnedInputFluid(fluidHandler);
                 notifyTile(be);
                 return false;
             }
@@ -274,6 +369,7 @@ public final class FermentationTankBatchDelegate extends AbstractBatchDelegate {
                 : new ExpectedProduction(production.primary(), production.primary().getCount());
         if (expectedProduction == null) {
             for (int i = 0; i < snapshot.length; i++) itemHandler.setItem(i, snapshot[i]);
+            rollbackOwnedInputFluid(fluidHandler);
             notifyTile(be);
             player.sendSystemMessage(Component.translatable(
                     "rsi.youkaishomecoming.ferment_unsafe_output", recipe.getId()));
@@ -388,6 +484,10 @@ public final class FermentationTankBatchDelegate extends AbstractBatchDelegate {
                 if (!extracted.isEmpty()) collected.add(extracted);
             }
         }
+        if (!collected.isEmpty() && !pendingInputContainers.isEmpty()) {
+            collected.add(pendingInputContainers.copy());
+            pendingInputContainers = ItemStack.EMPTY;
+        }
         notifyTile(be);
         craftDone = true;
         return List.copyOf(collected);
@@ -478,6 +578,10 @@ public final class FermentationTankBatchDelegate extends AbstractBatchDelegate {
         previousLidOpen = true;
         requiredWater = 0;
         recipeTime = 0;
+        inputFluidMaterial = new FermentationRecipeOutputs.FluidMaterial(
+                FluidStack.EMPTY, ItemStack.EMPTY, ItemStack.EMPTY, true);
+        ownedInputFluid = FluidStack.EMPTY;
+        pendingInputContainers = ItemStack.EMPTY;
         resetState();
     }
 
@@ -622,6 +726,47 @@ public final class FermentationTankBatchDelegate extends AbstractBatchDelegate {
             if (!matched) return false;
         }
         return true;
+    }
+
+    static List<ItemStack> takeMatchingMaterials(
+            List<ItemStack> pool, Ingredient ingredient, int count) {
+        if (pool == null || ingredient == null || ingredient.isEmpty() || count <= 0) {
+            return List.of();
+        }
+        int remaining = count;
+        List<ItemStack> taken = new ArrayList<>();
+        for (ItemStack stack : pool) {
+            if (remaining <= 0) break;
+            if (stack == null || stack.isEmpty() || !ingredient.test(stack)) continue;
+            int amount = Math.min(remaining, stack.getCount());
+            taken.add(stack.copyWithCount(amount));
+            stack.shrink(amount);
+            remaining -= amount;
+        }
+        return List.copyOf(taken);
+    }
+
+    private static int countItems(List<ItemStack> stacks) {
+        int count = 0;
+        for (ItemStack stack : stacks) {
+            if (stack != null && !stack.isEmpty()) count += stack.getCount();
+        }
+        return count;
+    }
+
+    private void rollbackOwnedInputFluid(@Nullable IFluidHandler fluidHandler) {
+        if (fluidHandler != null && !ownedInputFluid.isEmpty()) {
+            FluidStack current = fluidHandler.getFluidInTank(0);
+            if (!current.isEmpty() && current.getFluid() == ownedInputFluid.getFluid()) {
+                int amount = Math.min(current.getAmount(), ownedInputFluid.getAmount());
+                if (amount > 0) {
+                    fluidHandler.drain(new FluidStack(current.getFluid(), amount),
+                            IFluidHandler.FluidAction.EXECUTE);
+                }
+            }
+        }
+        ownedInputFluid = FluidStack.EMPTY;
+        pendingInputContainers = ItemStack.EMPTY;
     }
 
     /** If the recipe has an outputFluid field, convert it to the bottled item form. */
@@ -1022,7 +1167,7 @@ public final class FermentationTankBatchDelegate extends AbstractBatchDelegate {
             return new ItemStack(net.minecraft.world.item.Items.BUCKET);
         if (holder.is(net.minecraft.world.item.Items.POTION))
             return new ItemStack(net.minecraft.world.item.Items.GLASS_BOTTLE);
-        // YHK fluid holders — read fluid's type holder, call asStack(0) for empty container
+        // YHK fluid holders expose their real empty container directly.
         if (yhFluidTypeField != null && holderAsStackMethod != null
                 && YHKReflection.yhFluidHolderClass != null
                 && YHKReflection.yhFluidHolderClass.isInstance(holder.getItem())) {
@@ -1033,7 +1178,13 @@ public final class FermentationTankBatchDelegate extends AbstractBatchDelegate {
                         && YHKReflection.yhFluidClass.isInstance(fluid)) {
                     Object typeHolder = yhFluidTypeField.get(fluid);
                     if (typeHolder != null) {
-                        return (ItemStack) holderAsStackMethod.invoke(typeHolder, 0);
+                        Method containerMethod = YHKReflection.yhFluidHolderClass.getMethod(
+                                "getContainer");
+                        Object container = containerMethod.invoke(typeHolder);
+                        if (container instanceof Item item
+                                && item != net.minecraft.world.item.Items.AIR) {
+                            return new ItemStack(item);
+                        }
                     }
                 }
             } catch (Exception ignored) { /* fall through */ }
@@ -1048,11 +1199,20 @@ public final class FermentationTankBatchDelegate extends AbstractBatchDelegate {
         BlockEntity be = myLevel.getBlockEntity(myPos);
         if (be == null || !isFermentationBE(be)) return;
 
-        // Refund fluid left in the tank (always — fluid is independent of the extraction ledger)
+        // Planned non-water input belongs to the shared graph ledger. On graph
+        // rollback, drain machine state and let that ledger restore the original
+        // filled containers; refunding both would duplicate them.
         {
             IFluidHandler fh = getFluidHandler(be);
             if (fh != null) {
                 FluidStack tankFluid = fh.getFluidInTank(0);
+                if (!tankFluid.isEmpty()) {
+                    if (usingSharedLedger && !ownedInputFluid.isEmpty()) {
+                        fh.drain(tankFluid.copy(), IFluidHandler.FluidAction.EXECUTE);
+                        be.setChanged();
+                        tankFluid = FluidStack.EMPTY;
+                    }
+                }
                 if (!tankFluid.isEmpty()) {
                     boolean isYH = YHKReflection.yhFluidClass != null
                             && YHKReflection.yhFluidClass.isInstance(tankFluid.getFluid());

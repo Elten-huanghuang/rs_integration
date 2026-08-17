@@ -91,7 +91,12 @@ public final class YoukaisHomecomingRecipeHandler implements ModRecipeHandler {
     public List<ItemStack> getSecondaryOutputs(Recipe<?> recipe, RegistryAccess access) {
         if (!FERMENT_RECIPE.equals(recipe.getClass().getName())) return List.of();
         int inputs = FermentationRecipeOutputs.effectiveIngredientCount(recipe);
-        return FermentationRecipeOutputs.fromRecipe(recipe, inputs).secondary();
+        List<ItemStack> outputs = new ArrayList<>(
+                FermentationRecipeOutputs.fromRecipe(recipe, inputs).secondary());
+        ItemStack emptyContainers = FermentationRecipeOutputs.inputFluidMaterial(recipe)
+                .emptyContainers();
+        if (!emptyContainers.isEmpty()) outputs.add(emptyContainers);
+        return List.copyOf(outputs);
     }
 
     @Nullable
@@ -109,6 +114,18 @@ public final class YoukaisHomecomingRecipeHandler implements ModRecipeHandler {
                     for (Object obj : list) {
                         if (obj instanceof Ingredient ing && !ing.isEmpty())
                             specs.add(new IngredientSpec(ing, 1));
+                    }
+                    FermentationRecipeOutputs.FluidMaterial fluidMaterial =
+                            FermentationRecipeOutputs.inputFluidMaterial(recipe);
+                    if (!fluidMaterial.supported()) {
+                        RSIntegrationMod.LOGGER.warn(
+                                "[RSI-YHK] Unsupported fermentation input fluid: recipe={} fluid={}",
+                                recipe.getId(), fluidMaterial.fluid());
+                        return null;
+                    }
+                    if (fluidMaterial.requiresPlannedContainers()) {
+                        ItemStack holders = fluidMaterial.filledContainers();
+                        specs.add(new IngredientSpec(Ingredient.of(holders), holders.getCount()));
                     }
                     return specs.isEmpty() ? null : specs;
                 }

@@ -2,8 +2,11 @@ package com.huanghuang.rsintegration.mods.youkaishomecoming.ferment;
 
 import com.huanghuang.rsintegration.reflection.probes.YHKReflection;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
+import net.minecraft.world.level.material.Fluids;
 import net.minecraftforge.fluids.FluidStack;
 
 import javax.annotation.Nullable;
@@ -30,11 +33,96 @@ public final class FermentationRecipeOutputs {
         }
     }
 
+    /** Item representation of a recipe's non-water input fluid. */
+    public record FluidMaterial(FluidStack fluid, ItemStack filledContainers,
+                                ItemStack emptyContainers, boolean supported) {
+        public FluidMaterial {
+            fluid = fluid == null ? FluidStack.EMPTY : fluid.copy();
+            filledContainers = filledContainers == null
+                    ? ItemStack.EMPTY : filledContainers.copy();
+            emptyContainers = emptyContainers == null
+                    ? ItemStack.EMPTY : emptyContainers.copy();
+        }
+
+        public boolean requiresPlannedContainers() {
+            return !filledContainers.isEmpty();
+        }
+    }
+
     public static Production fromRecipe(Recipe<?> recipe, int effectiveInputCount) {
         if (recipe == null) return new Production(ItemStack.EMPTY, List.of());
         Production itemProduction = calculate(isSimple(recipe), effectiveInputCount, readResults(recipe));
         if (!itemProduction.primary().isEmpty()) return itemProduction;
         return new Production(readFluidResult(recipe), List.of());
+    }
+
+    /**
+     * Converts the recipe's input fluid into the filled item containers that
+     * recursive crafting can reserve. Water keeps the legacy tank-fill path;
+     * YHK fluids use their native holder API, and ordinary Forge fluids fall
+     * back to buckets when the amount is an exact bucket multiple.
+     */
+    public static FluidMaterial inputFluidMaterial(Recipe<?> recipe) {
+        return fluidMaterial(readFluidField(recipe, "inputFluid"));
+    }
+
+    static FluidMaterial fluidMaterial(FluidStack fluid) {
+        if (fluid == null) fluid = FluidStack.EMPTY;
+        if (fluid.isEmpty() || fluid.getFluid() == Fluids.WATER) {
+            return new FluidMaterial(fluid, ItemStack.EMPTY, ItemStack.EMPTY, true);
+        }
+
+        // Keep ordinary Forge fluids independent from YHK's reflection probe.
+        // Besides being cheaper, this lets standard bucket fluids work in
+        // environments where Youkai's Homecoming is not loaded.
+        int buckets = exactContainerCount(fluid.getAmount(), 1000);
+        Item bucket = fluid.getFluid().getBucket();
+        if (buckets > 0 && bucket != Items.AIR) {
+            return new FluidMaterial(fluid, new ItemStack(bucket, buckets),
+                    new ItemStack(Items.BUCKET, buckets), true);
+        }
+
+        if (YHKReflection.yhFluidClass != null
+                && YHKReflection.yhFluidClass.isInstance(fluid.getFluid())) {
+            try {
+                Field typeField = YHKReflection.yhFluidClass.getField("type");
+                Object holder = typeField.get(fluid.getFluid());
+                if (holder == null || YHKReflection.yhFluidHolderClass == null
+                        || !YHKReflection.yhFluidHolderClass.isInstance(holder)) {
+                    return unsupportedFluid(fluid);
+                }
+                Method amountMethod = YHKReflection.yhFluidHolderClass.getMethod("amount");
+                Method asStackMethod = YHKReflection.yhFluidHolderClass.getMethod(
+                        "asStack", int.class);
+                Method containerMethod = YHKReflection.yhFluidHolderClass.getMethod(
+                        "getContainer");
+                int perContainer = (int) amountMethod.invoke(holder);
+                int count = exactContainerCount(fluid.getAmount(), perContainer);
+                if (count <= 0) return unsupportedFluid(fluid);
+
+                Object filledValue = asStackMethod.invoke(holder, count);
+                if (!(filledValue instanceof ItemStack filled) || filled.isEmpty()) {
+                    return unsupportedFluid(fluid);
+                }
+                ItemStack empty = ItemStack.EMPTY;
+                Object containerValue = containerMethod.invoke(holder);
+                if (containerValue instanceof Item container && container != Items.AIR) {
+                    empty = new ItemStack(container, count);
+                }
+                return new FluidMaterial(fluid, filled, empty, true);
+            } catch (ReflectiveOperationException | ClassCastException e) {
+                return unsupportedFluid(fluid);
+            }
+        }
+
+        return unsupportedFluid(fluid);
+    }
+
+    static int exactContainerCount(int fluidAmount, int perContainer) {
+        if (fluidAmount <= 0 || perContainer <= 0 || fluidAmount % perContainer != 0) {
+            return 0;
+        }
+        return fluidAmount / perContainer;
     }
 
     public static int effectiveIngredientCount(Recipe<?> recipe) {
@@ -109,14 +197,11 @@ public final class FermentationRecipeOutputs {
     }
 
     private static ItemStack readFluidResult(Recipe<?> recipe) {
-        Field field = findFieldUp(recipe.getClass(), "outputFluid");
-        if (field == null || YHKReflection.yhFluidClass == null
+        FluidStack fluid = readFluidField(recipe, "outputFluid");
+        if (fluid.isEmpty() || YHKReflection.yhFluidClass == null
                 || YHKReflection.yhFluidHolderClass == null) return ItemStack.EMPTY;
         try {
-            field.setAccessible(true);
-            Object value = field.get(recipe);
-            if (!(value instanceof FluidStack fluid) || fluid.isEmpty()
-                    || !YHKReflection.yhFluidClass.isInstance(fluid.getFluid())) {
+            if (!YHKReflection.yhFluidClass.isInstance(fluid.getFluid())) {
                 return ItemStack.EMPTY;
             }
 
@@ -138,6 +223,23 @@ public final class FermentationRecipeOutputs {
         } catch (Exception ignored) {
             return ItemStack.EMPTY;
         }
+    }
+
+    private static FluidStack readFluidField(Recipe<?> recipe, String fieldName) {
+        if (recipe == null) return FluidStack.EMPTY;
+        Field field = findFieldUp(recipe.getClass(), fieldName);
+        if (field == null) return FluidStack.EMPTY;
+        try {
+            field.setAccessible(true);
+            Object value = field.get(recipe);
+            return value instanceof FluidStack fluid ? fluid.copy() : FluidStack.EMPTY;
+        } catch (Exception ignored) {
+            return FluidStack.EMPTY;
+        }
+    }
+
+    private static FluidMaterial unsupportedFluid(FluidStack fluid) {
+        return new FluidMaterial(fluid, ItemStack.EMPTY, ItemStack.EMPTY, false);
     }
 
     private static void merge(List<ItemStack> groups, ItemStack incoming) {

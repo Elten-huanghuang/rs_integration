@@ -16,13 +16,15 @@ import java.util.List;
 /**
  * Ars Nouveau integration module for RS.
  *
- * <p>Registers two independent {@link ModType}s:</p>
+ * <p>Registers three independent {@link ModType}s:</p>
  * <ul>
  *   <li>{@code ars_nouveau_imbuement} — Imbuement Chamber (single block + optional pedestals)</li>
  *   <li>{@code ars_nouveau_apparatus} — Enchanting Apparatus (single block + radius-3 pedestals)</li>
+ *   <li>{@code ars_nouveau_scribes_table} — Scribes' Table (two-block table)</li>
  * </ul>
  *
- * <p>Both machines consume Source (magical energy) during crafting. Source is
+ * <p>The Imbuement Chamber and Enchanting Apparatus consume Source during crafting.
+ * The Scribes' Table consumes player experience. Source is
  * a per-tile integer resource, NOT an item ingredient, and is handled by the
  * delegates as a soft throughput limiter.</p>
  */
@@ -37,6 +39,10 @@ public final class ArsNouveauRSModule implements IModIntegration {
             "com.hollingsworth.arsnouveau.common.block.EnchantingApparatusBlock");
     static final List<String> APPARATUS_BLOCK_IDS = List.of(
             "ars_nouveau:enchanting_apparatus");
+    static final List<String> SCRIBES_TABLE_BLOCK_CLASSES = List.of(
+            "com.hollingsworth.arsnouveau.common.block.ScribesBlock");
+    static final List<String> SCRIBES_TABLE_BLOCK_IDS = List.of(
+            "ars_nouveau:scribes_table");
 
     private ArsNouveauRSModule() {}
 
@@ -95,6 +101,30 @@ public final class ArsNouveauRSModule implements IModIntegration {
                 },
                 "gui.rs_integration.jei.ars_nouveau_apparatus_craft"
         );
+
+        // Scribes' Table glyph crafting
+        ModType.register(
+                ModIds.ID_ARS_SCRIBES_TABLE,
+                new String[]{"com.hollingsworth.arsnouveau.common.crafting.recipes.GlyphRecipe"},
+                new String[]{"glyph", "scribes"},
+                new String[]{"glyph", "scribes"},
+                ModType.delegateSupplier(
+                        "com.huanghuang.rsintegration.mods.arsnouveau.ArsScribesTableBatchDelegate")
+        );
+
+        ModType.configureJei(
+                ModIds.ID_ARS_SCRIBES_TABLE,
+                new String[][]{
+                        // Ars Nouveau 4.12.x exposes this JEI category as
+                        // glyph_recipe; older releases used glyph.
+                        {"ars_nouveau:glyph_recipe", ModIds.ID_ARS_SCRIBES_TABLE},
+                        {"ars_nouveau:glyph", ModIds.ID_ARS_SCRIBES_TABLE}
+                },
+                new String[][]{{
+                        "com.hollingsworth.arsnouveau.common.crafting.recipes.GlyphRecipe",
+                        ModIds.ID_ARS_SCRIBES_TABLE}},
+                "gui.rs_integration.jei.ars_nouveau_scribes_table_craft"
+        );
     }
 
     @Override
@@ -107,6 +137,18 @@ public final class ArsNouveauRSModule implements IModIntegration {
                 IMBUEMENT_BLOCK_CLASSES,
                 IMBUEMENT_BLOCK_IDS,
                 "ars_nouveau_imbuement",
+                false
+        ));
+
+        // Both physical halves are ScribesBlock instances. BindingEventHandler
+        // canonicalizes either click to the native logic tile.
+        BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
+                ModIds.ARS_NOUVEAU,
+                ModType.byId(ModIds.ID_ARS_SCRIBES_TABLE),
+                RSIntegrationConfig.ENABLE_ARS_NOUVEAU,
+                SCRIBES_TABLE_BLOCK_CLASSES,
+                SCRIBES_TABLE_BLOCK_IDS,
+                "ars_nouveau_scribes_table",
                 false
         ));
 

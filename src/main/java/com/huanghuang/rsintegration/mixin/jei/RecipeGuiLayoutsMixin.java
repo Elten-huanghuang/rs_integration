@@ -804,6 +804,17 @@ public class RecipeGuiLayoutsMixin {
             }
             if (filter != null) return filter;
 
+            // Ars Nouveau has kept the native recipe type stable while its
+            // JEI category UID changed from glyph to glyph_recipe.  Prefer
+            // the native type as a final fallback so wrapped/third-party JEI
+            // categories still resolve to the bound Scribes' Table.
+            if (recipe instanceof net.minecraft.world.item.crafting.Recipe<?> arsRecipe
+                    && com.huanghuang.rsintegration.mods.arsnouveau.ArsRecipeClassifier
+                    .isGlyph(com.huanghuang.rsintegration.mods.arsnouveau.ArsTileAccess
+                            .recipeTypeId(arsRecipe))) {
+                return ModIds.ID_ARS_SCRIBES_TABLE;
+            }
+
             // 2. Vanilla / unregistered UIDs not covered by ModType registry
             if (SMITHING_UID.equals(uid)) {
                 String cn = recipe.getClass().getName();

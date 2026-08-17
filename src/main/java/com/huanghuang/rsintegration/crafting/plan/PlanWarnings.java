@@ -143,6 +143,7 @@ public final class PlanWarnings {
                 break;
             case ModIds.ID_ARS_IMBUEMENT:
             case ModIds.ID_ARS_APPARATUS:
+            case ModIds.ID_ARS_SCRIBES_TABLE:
                 warnings.addAll(ArsPlanWarnings.getPlanWarnings(player, recipe, dim, pos));
                 break;
             case ModIds.MALUM:

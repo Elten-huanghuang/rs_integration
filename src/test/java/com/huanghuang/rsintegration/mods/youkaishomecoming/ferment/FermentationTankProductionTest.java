@@ -6,6 +6,8 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.level.material.Fluids;
+import net.minecraftforge.fluids.FluidStack;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -98,5 +100,38 @@ class FermentationTankProductionTest extends BootstrapTest {
         assertTrue(FermentationTankBatchDelegate.containsPlacedInputs(container, placed));
         container.setItem(1, ItemStack.EMPTY);
         assertFalse(FermentationTankBatchDelegate.containsPlacedInputs(container, placed));
+    }
+
+    @Test
+    void pureFluidRecipesCanReserveExactBucketMaterials() {
+        var material = FermentationRecipeOutputs.fluidMaterial(
+                new FluidStack(Fluids.LAVA, 1000));
+
+        assertTrue(material.supported());
+        assertEquals(Items.LAVA_BUCKET, material.filledContainers().getItem());
+        assertEquals(1, material.filledContainers().getCount());
+        assertEquals(Items.BUCKET, material.emptyContainers().getItem());
+    }
+
+    @Test
+    void partialContainersFailClosedInsteadOfDroppingFluidRequirements() {
+        assertEquals(4, FermentationRecipeOutputs.exactContainerCount(1000, 250));
+        assertEquals(0, FermentationRecipeOutputs.exactContainerCount(900, 250));
+        assertEquals(0, FermentationRecipeOutputs.exactContainerCount(1000, 0));
+    }
+
+    @Test
+    void fluidMaterialsAreSeparatedFromSolidSlotInputs() {
+        List<ItemStack> pool = new java.util.ArrayList<>(List.of(
+                new ItemStack(Items.SUGAR), new ItemStack(Items.LAVA_BUCKET, 2)));
+
+        List<ItemStack> solids = FermentationTankBatchDelegate.takeMatchingMaterials(
+                pool, net.minecraft.world.item.crafting.Ingredient.of(Items.SUGAR), 1);
+        List<ItemStack> fluids = FermentationTankBatchDelegate.takeMatchingMaterials(
+                pool, net.minecraft.world.item.crafting.Ingredient.of(Items.LAVA_BUCKET), 2);
+
+        assertEquals(1, solids.size());
+        assertEquals(2, fluids.get(0).getCount());
+        assertTrue(pool.stream().allMatch(ItemStack::isEmpty));
     }
 }

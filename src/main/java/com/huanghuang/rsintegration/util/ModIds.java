@@ -60,9 +60,10 @@ public final class ModIds {
     public static final String ID_FR_KETTLE = "farmersrespite_kettle";
     public static final String ID_FA_CLIBANO = "forbidden_arcanus_clibano";
 
-    // Ars Nouveau (one mod -> two automatable machine types)
+    // Ars Nouveau (one mod -> three automatable machine types)
     public static final String ID_ARS_IMBUEMENT = "ars_nouveau_imbuement";
     public static final String ID_ARS_APPARATUS = "ars_nouveau_apparatus";
+    public static final String ID_ARS_SCRIBES_TABLE = "ars_nouveau_scribes_table";
 
     // Youkai's Homecoming
     public static final String YOUKAISHOMECOMING = "youkaishomecoming";

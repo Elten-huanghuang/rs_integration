@@ -51,6 +51,18 @@ public final class ArsPlanWarnings {
                                                @Nullable ResourceLocation dim,
                                                @Nullable BlockPos pos) {
         List<Component> warnings = new ArrayList<>();
+        if (recipe != null && ArsRecipeClassifier.isGlyph(ArsTileAccess.recipeTypeId(recipe))) {
+            int requiredExperience = Math.max(0, readIntField(recipe, "exp"));
+            if (requiredExperience > 0) {
+                int availableExperience = totalExperience(player);
+                String key = player.isCreative() || availableExperience >= requiredExperience
+                        ? "rsi.ars_nouveau.warn.experience_available"
+                        : "rsi.ars_nouveau.warn.experience_insufficient";
+                warnings.add(Component.translatable(
+                        key, format(requiredExperience), format(availableExperience)));
+            }
+        }
+
         int required = sourceCost(recipe);
         if (required <= 0) return warnings;
 
@@ -75,6 +87,21 @@ public final class ArsPlanWarnings {
                     format(required), format(snapshot.current), format(snapshot.max)));
         }
         return warnings;
+    }
+
+    private static int totalExperience(ServerPlayer player) {
+        int completedLevels = player.experienceLevel;
+        int base;
+        if (completedLevels <= 16) {
+            base = completedLevels * completedLevels + 6 * completedLevels;
+        } else if (completedLevels <= 31) {
+            base = (int) (2.5D * completedLevels * completedLevels
+                    - 40.5D * completedLevels + 360.0D);
+        } else {
+            base = (int) (4.5D * completedLevels * completedLevels
+                    - 162.5D * completedLevels + 2220.0D);
+        }
+        return base + (int) (player.experienceProgress * player.getXpNeededForNextLevel());
     }
 
     private static String format(long value) {
