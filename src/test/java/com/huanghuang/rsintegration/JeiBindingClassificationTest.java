@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration;
 
 import com.huanghuang.rsintegration.mods.malum.MalumRSModule;
+import com.huanghuang.rsintegration.mods.arsnouveau.ArsNouveauRSModule;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
@@ -12,6 +13,7 @@ class JeiBindingClassificationTest {
     @BeforeAll
     static void registerMalumTypes() {
         MalumRSModule.INSTANCE.registerModType();
+        ArsNouveauRSModule.INSTANCE.registerModType();
     }
 
     @Test
@@ -31,5 +33,16 @@ class JeiBindingClassificationTest {
     @Test
     void mapsMarketCategoryToCanonicalBindingPrefix() {
         assertEquals("market", ModType.filterForJeiUid("farmingforblockheads:market"));
+    }
+
+    @Test
+    void mapsBothArsGlyphJeiIdsToTheScribesTableBinding() {
+        assertEquals("ars_nouveau_scribes_table",
+                ModType.filterForJeiUid("ars_nouveau:glyph_recipe"));
+        assertEquals("ars_nouveau_scribes_table",
+                ModType.filterForJeiUid("ars_nouveau:glyph"));
+        assertEquals("ars_nouveau_scribes_table",
+                ModType.filterForRecipeClass(
+                        "com.hollingsworth.arsnouveau.common.crafting.recipes.GlyphRecipe"));
     }
 }

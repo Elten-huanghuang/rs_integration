@@ -94,13 +94,14 @@ public final class BindingEventHandler {
         BlockPos clickedPos = event.getPos();
         BlockPos pos = clickedPos;
         BlockPos bindingPos = resolveRootPos(event.getLevel(), pos, block, className);
-        if ("goety_cursed_infuser".equals(matched.modType.id())
-                && !event.getLevel().getBlockState(bindingPos.below())
-                .is(net.minecraft.world.level.block.Blocks.SPAWNER)) {
-            player.displayClientMessage(Component.translatable(
-                    "rsi.goety.cursed_infuser.spawner_required"), true);
-            event.setCanceled(true);
-            return;
+        if ("goety_cursed_infuser".equals(matched.modType.id())) {
+            Component problem = com.huanghuang.rsintegration.mods.goety
+                    .GoetyInfuserMachineSupport.bindingProblem(event.getLevel(), bindingPos);
+            if (problem != null) {
+                player.displayClientMessage(problem, true);
+                event.setCanceled(true);
+                return;
+            }
         }
         if ("forbidden_arcanus_clibano".equals(matched.modType.id())
                 && bindingPos.equals(pos)
@@ -235,8 +236,8 @@ public final class BindingEventHandler {
 
         BlockPos rootPos = resolveRootPos(level, clickedPos, block, className);
         if ("goety_cursed_infuser".equals(target.modType.id())
-                && !level.getBlockState(rootPos.below())
-                .is(net.minecraft.world.level.block.Blocks.SPAWNER)) {
+                && com.huanghuang.rsintegration.mods.goety.GoetyInfuserMachineSupport
+                .bindingProblem(level, rootPos) != null) {
             return null;
         }
         if ("forbidden_arcanus_clibano".equals(target.modType.id())
@@ -827,6 +828,16 @@ public final class BindingEventHandler {
         // Malum Spirit Crucible: the visible component occupies the block
         // above the core. Both halves must resolve to one binding position.
         ResourceLocation blockKey = ForgeRegistries.BLOCKS.getKey(block);
+        if (blockKey != null && blockKey.toString().equals("ars_nouveau:scribes_table")) {
+            BlockEntity clickedTile = level.getBlockEntity(pos);
+            if (clickedTile != null) {
+                Object logic = com.huanghuang.rsintegration.util.Reflect
+                        .invoke(clickedTile, "getLogicTile").orElse(null);
+                if (logic instanceof BlockEntity logicTile && !logicTile.isRemoved()) {
+                    return logicTile.getBlockPos();
+                }
+            }
+        }
         if (blockKey != null && blockKey.toString().equals("malum:spirit_crucible_component")) {
             BlockPos corePos = pos.below();
             ResourceLocation coreKey = ForgeRegistries.BLOCKS.getKey(

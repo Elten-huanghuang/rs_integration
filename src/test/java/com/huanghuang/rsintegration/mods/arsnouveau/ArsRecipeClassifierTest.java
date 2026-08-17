@@ -18,6 +18,8 @@ class ArsRecipeClassifierTest {
 
     @Test
     void unrelatedNbtRecipesRemainExcluded() {
+        assertTrue(ArsRecipeClassifier.isGlyph("ars_nouveau:glyph"));
+        assertTrue(ArsRecipeClassifier.isAutomatable("ars_nouveau:glyph"));
         assertFalse(ArsRecipeClassifier.isAutomatable("ars_nouveau:spell_write"));
         assertFalse(ArsRecipeClassifier.isAutomatable("ars_nouveau:reactive_enchantment"));
         assertFalse(ArsRecipeClassifier.isAutomatable(null));

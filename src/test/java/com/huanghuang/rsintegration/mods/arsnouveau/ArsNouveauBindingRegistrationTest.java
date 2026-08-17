@@ -27,4 +27,12 @@ class ArsNouveauBindingRegistrationTest {
         assertTrue(ArsNouveauRSModule.APPARATUS_BLOCK_CLASSES.stream()
                 .noneMatch(name -> name.contains(".block.tile.")));
     }
+
+    @Test
+    void scribesTableBindingTargetsBothHalvesThroughTheSharedBlockType() {
+        assertEquals(List.of("com.hollingsworth.arsnouveau.common.block.ScribesBlock"),
+                ArsNouveauRSModule.SCRIBES_TABLE_BLOCK_CLASSES);
+        assertEquals(List.of("ars_nouveau:scribes_table"),
+                ArsNouveauRSModule.SCRIBES_TABLE_BLOCK_IDS);
+    }
 }

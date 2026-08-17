@@ -22,12 +22,7 @@ public final class CursedInfuserRecipeHandler extends AbstractRecipeHandler {
 
     @Override
     public boolean canHandle(Recipe<?> recipe) {
-        if (!RECIPE_CLASS.equals(recipe.getClass().getName())) return false;
-        try {
-            return !(boolean) recipe.getClass().getMethod("isGrim").invoke(recipe);
-        } catch (ReflectiveOperationException ignored) {
-            return false;
-        }
+        return RECIPE_CLASS.equals(recipe.getClass().getName());
     }
 
     @Override

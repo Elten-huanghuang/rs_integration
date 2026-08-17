@@ -20,6 +20,14 @@ public final class GoetyRSModule implements IModIntegration {
 
     public static final GoetyRSModule INSTANCE = new GoetyRSModule();
     public static final String BRAZIER_TYPE_ID = "goety_brazier";
+    public static final List<String> CURSED_INFUSER_BLOCK_CLASSES = List.of(
+            "com.Polarice3.Goety.common.blocks.CursedInfuserBlock",
+            "com.Polarice3.Goety.common.blocks.GrimInfuserBlock",
+            "com.k1sak1.goetyawaken.common.blocks.DarkMenderBlock");
+    public static final List<String> CURSED_INFUSER_BLOCK_IDS = List.of(
+            "goety:cursed_infuser",
+            "goety:grim_infuser",
+            "goetyawaken:dark_mender");
 
     private GoetyRSModule() {}
 
@@ -37,7 +45,8 @@ public final class GoetyRSModule implements IModIntegration {
     public void registerModType() {
         ModType.register("goety_cursed_infuser",
                 new String[]{"com.Polarice3.Goety.common.crafting.CursedInfuserRecipes"},
-                new String[]{"cursed_infuser"}, new String[]{"goety_cursed_infuser"},
+                new String[]{"cursed_infuser", "grim_infuser", "dark_mender"},
+                new String[]{"goety_cursed_infuser"},
                 ModType.delegateSupplier("com.huanghuang.rsintegration.mods.goety.CursedInfuserBatchDelegate"));
         ModType.configureJei("goety_cursed_infuser",
                 new String[][]{{"goety:cursed_infuser"}},
@@ -66,8 +75,8 @@ public final class GoetyRSModule implements IModIntegration {
     public void registerBindingTargets() {
         BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
                 "goety", ModType.byId("goety_cursed_infuser"), RSIntegrationConfig.ENABLE_GOETY,
-                List.of("com.Polarice3.Goety.common.blocks.CursedInfuserBlock"),
-                List.of("goety:cursed_infuser"), "goety_cursed_infuser", false));
+                CURSED_INFUSER_BLOCK_CLASSES, CURSED_INFUSER_BLOCK_IDS,
+                "goety_cursed_infuser", false));
         // NecroBrazier is an in-world ritual block, no container GUI.
         BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
                 "goety", ModType.byId(BRAZIER_TYPE_ID), RSIntegrationConfig.ENABLE_GOETY, List.of(
