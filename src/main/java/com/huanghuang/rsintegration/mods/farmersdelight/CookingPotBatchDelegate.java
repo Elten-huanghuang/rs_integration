@@ -7,6 +7,7 @@ import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
+import com.huanghuang.rsintegration.recipe.FarmersDelightRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.reflection.probes.FarmersDelightReflection;
 import com.refinedmods.refinedstorage.api.network.INetwork;
@@ -83,12 +84,9 @@ public final class CookingPotBatchDelegate extends AbstractBatchDelegate {
                 && FarmersDelightReflection.cookingPotBEClass.isInstance(existing)
                 ? getInventory(existing) : null;
         if (existingInventory == null || existingInventory.getSlots() < 9) return false;
-        for (int slot = 0; slot < INPUT_SLOTS; slot++) {
-            if (!existingInventory.getStackInSlot(slot).isEmpty()) return false;
-        }
-        if (!existingInventory.getStackInSlot(MEAL_DISPLAY_SLOT).isEmpty()
-                || !existingInventory.getStackInSlot(CONTAINER_SLOT).isEmpty()
-                || !existingInventory.getStackInSlot(OUTPUT_SLOT).isEmpty()) return false;
+        // Existing contents are drained to the active RS network immediately
+        // before a new operation starts. Preparation must remain side-effect
+        // free because it is also used while probing candidate machines.
         return true;
     }
 
@@ -99,8 +97,13 @@ public final class CookingPotBatchDelegate extends AbstractBatchDelegate {
         if (specs == null) specs = new ArrayList<>();
         else specs = new ArrayList<>(specs);
 
-        ItemStack container = getContainerItem(recipe, myLevel != null ? myLevel.registryAccess() : null);
-        if (!container.isEmpty()) {
+        // Declared output containers are already appended by the recipe handler
+        // so they participate in graph planning. Only add the legacy result-
+        // remainder fallback here when the recipe declares no container.
+        ItemStack declared = getDeclaredContainerItem(recipe);
+        ItemStack container = getContainerItem(recipe,
+                myLevel != null ? myLevel.registryAccess() : null);
+        if (declared.isEmpty() && !container.isEmpty()) {
             specs.add(new IngredientSpec(Ingredient.of(container), 1));
         }
         return specs.isEmpty() ? null : specs;
@@ -108,16 +111,16 @@ public final class CookingPotBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public List<IngredientSpec> getGraphSpecs() {
-        List<IngredientSpec> specs = getRecipeIngredientSpecs();
+        // The serving container is a real per-operation input. Keep it in the
+        // graph demand so a missing bowl blocks planning instead of producing a
+        // retry loop in supplemental reservation.
+        List<IngredientSpec> specs = getRequiredMaterials();
         return specs != null ? specs : List.of();
     }
 
     @Override
     public List<IngredientSpec> getSupplementalSpecs() {
-        ItemStack container = getContainerItem(recipe, myLevel != null ? myLevel.registryAccess() : null);
-        return container.isEmpty()
-                ? List.of()
-                : List.of(new IngredientSpec(Ingredient.of(container), 1));
+        return List.of();
     }
 
     @Nullable
@@ -191,14 +194,14 @@ public final class CookingPotBatchDelegate extends AbstractBatchDelegate {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-CookingPot] Cannot access item handler");
             return false;
         }
-        if (!itemHandler.getStackInSlot(OUTPUT_SLOT).isEmpty()) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Batch-CookingPot] Output slot occupied at {}", myPos);
-            return false;
+
+        // A stale/partially completed pot must not block the scheduler. Drain
+        // every slot before reserving this operation's inputs; the old contents
+        // are not owned by the new shared ledger.
+        if (network == null) {
+            network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
         }
-        if (!itemHandler.getStackInSlot(MEAL_DISPLAY_SLOT).isEmpty()) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Batch-CookingPot] Meal display slot occupied at {}", myPos);
-            return false;
-        }
+        if (network == null || !drainExistingContentsToNetwork(itemHandler)) return false;
 
         forceChunkLoad(true);
 
@@ -212,22 +215,23 @@ public final class CookingPotBatchDelegate extends AbstractBatchDelegate {
         ItemStack requiredContainer = getContainerItem(recipe, myLevel.registryAccess());
         List<ItemStack> inputMaterials = new ArrayList<>();
         ItemStack containerMaterial = ItemStack.EMPTY;
-        for (ItemStack material : materials) {
-            if (material.isEmpty()) continue;
-            if (containerMaterial.isEmpty() && !requiredContainer.isEmpty()
-                    && ItemStack.isSameItemSameTags(material, requiredContainer)) {
-                containerMaterial = material.copyWithCount(1);
-                if (material.getCount() > 1) {
-                    inputMaterials.add(material.copyWithCount(material.getCount() - 1));
-                }
-            } else {
-                inputMaterials.add(material);
+        int inputEnd = materials.size();
+        if (!requiredContainer.isEmpty()) {
+            if (materials.isEmpty()) return false;
+            ItemStack suppliedContainer = materials.get(materials.size() - 1);
+            if (suppliedContainer.isEmpty()
+                    || !ItemStack.isSameItemSameTags(suppliedContainer, requiredContainer)
+                    || suppliedContainer.getCount() < 1) {
+                RSIntegrationMod.LOGGER.warn("[RSI-Batch-CookingPot] Planned container missing for recipe {}: {}",
+                        recipe.getId(), requiredContainer);
+                return false;
             }
+            containerMaterial = suppliedContainer.copyWithCount(1);
+            inputEnd--;
         }
-        if (!requiredContainer.isEmpty() && containerMaterial.isEmpty()) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Batch-CookingPot] Planned container missing for recipe {}: {}",
-                    recipe.getId(), requiredContainer);
-            return false;
+        for (int i = 0; i < inputEnd; i++) {
+            ItemStack material = materials.get(i);
+            if (!material.isEmpty()) inputMaterials.add(material);
         }
 
         long materialCount = inputMaterials.stream().filter(s -> !s.isEmpty()).count();
@@ -418,17 +422,8 @@ public final class CookingPotBatchDelegate extends AbstractBatchDelegate {
     }
 
     private static ItemStack getDeclaredContainerItem(Recipe<?> recipe) {
-        try {
-            Method m = recipe.getClass().getMethod("getOutputContainer");
-            Object result = m.invoke(recipe);
-            if (result instanceof ItemStack s && !s.isEmpty()) return s;
-        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-CookingPot] getOutputContainer failed", e); }
-        try {
-            Field f = recipe.getClass().getDeclaredField("container");
-            f.setAccessible(true);
-            Object v = f.get(recipe);
-            if (v instanceof ItemStack s && !s.isEmpty()) return s;
-        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-CookingPot] container field access failed", e); }
+        ItemStack declared = FarmersDelightRecipeHandler.getOutputContainer(recipe);
+        if (!declared.isEmpty()) return declared;
         // Fallback: the recipe declares no explicit container, but the meal item
         // may itself be a bowl/cup food (getCraftingRemainingItem() = the empty
         // bowl). FD's moveMealToOutput() refuses to move the meal to the output
@@ -504,6 +499,35 @@ public final class CookingPotBatchDelegate extends AbstractBatchDelegate {
         // cleanup, never discard it merely because this delegate used that ledger.
         if (!out.isEmpty()) refundToRSNetwork(out);
         be.setChanged();
+    }
+
+    /** Drain stale machine contents before a new operation owns the slots. */
+    private boolean drainExistingContentsToNetwork(IItemHandler handler) {
+        boolean drained = true;
+        boolean changed = false;
+        for (int slot = 0; slot < handler.getSlots(); slot++) {
+            ItemStack existing = handler.getStackInSlot(slot);
+            if (existing.isEmpty()) continue;
+            ItemStack removed = handler.extractItem(slot, existing.getCount(), false);
+            if (removed.isEmpty()) {
+                drained = false;
+                continue;
+            }
+            changed = true;
+            ItemStack leftover = network.insertItem(removed.copy(), removed.getCount(), Action.PERFORM);
+            if (!leftover.isEmpty()) {
+                if (player != null) ItemHandlerHelper.giveItemToPlayer(player, leftover);
+                RSIntegrationMod.LOGGER.warn(
+                        "[RSI-Batch-CookingPot] RS rejected {} stale item(s) from {}",
+                        leftover.getCount(), myPos);
+            }
+            if (!handler.getStackInSlot(slot).isEmpty()) drained = false;
+        }
+        if (changed) {
+            BlockEntity be = myLevel.getBlockEntity(myPos);
+            if (be != null) be.setChanged();
+        }
+        return drained;
     }
 
     private void refundToRSNetwork(ItemStack stack) {

@@ -903,14 +903,12 @@ public final class AltarBindingRegistry {
         if (ModType.byId(ModIds.ID_AETHERWORKS_ANVIL) == type && "aetherium_anvil".equals(hint)) {
             return "forge_anvil";
         }
-        // CrockPot registers campfire recipes under "campfire_cooking/" but
-        // the blockKey uses vanilla description IDs (e.g. "block.minecraft.campfire").
-        // When FD is loaded, farmersdelight_skillet handles all campfire recipes
-        // and campfire bindings (including vanilla campfires).  The blockKey
-        // prefix "farmersdelight_skillet||" needs "campfire" extracted from
-        // the hint so it can match against the description-ID segment.
-        if ("campfire_cooking".equals(hint)
-                && ("vanilla_campfire".equals(type.id()) || "farmersdelight_skillet".equals(type.id()))) {
+        // Vanilla campfire bindings use the block description ID, so their
+        // campfire_cooking/ recipe folder can safely narrow the candidate.
+        // Farmer's Delight deliberately uses one ModType for both skillets and
+        // campfires; narrowing that type to "campfire" would incorrectly reject
+        // a bound skillet for third-party IDs such as campfire_cooking/foo.
+        if ("campfire_cooking".equals(hint) && "vanilla_campfire".equals(type.id())) {
             return "campfire";
         }
         // CrockPot registers smoker recipes under "smoking/" but the

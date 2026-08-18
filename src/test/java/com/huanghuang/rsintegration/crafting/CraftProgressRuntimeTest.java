@@ -30,6 +30,7 @@ import java.util.ArrayList;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class CraftProgressRuntimeTest extends BootstrapTest {
@@ -90,6 +91,16 @@ class CraftProgressRuntimeTest extends BootstrapTest {
                 () -> calls.add("cleanup"));
 
         assertEquals(List.of("cleanup"), calls);
+    }
+
+    @Test
+    void inFlightInputsRefundOnlyAfterPhysicalMachineCleanup() {
+        assertTrue(CraftNodeRuntime.shouldRefundInFlightMaterials(
+                OperationExecutionKernel.TerminalClass.IN_FLIGHT, true));
+        assertFalse(CraftNodeRuntime.shouldRefundInFlightMaterials(
+                OperationExecutionKernel.TerminalClass.IN_FLIGHT, false));
+        assertFalse(CraftNodeRuntime.shouldRefundInFlightMaterials(
+                OperationExecutionKernel.TerminalClass.SETTLED, true));
     }
 
     @Test

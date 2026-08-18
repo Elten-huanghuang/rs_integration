@@ -654,6 +654,10 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
 
     private ItemStack computeResult() {
         try {
+            if (recipe instanceof CampfireCookingRecipe) {
+                return com.huanghuang.rsintegration.recipe.CampfireRecipeSupport.resolveOutput(
+                        recipe, myLevel.registryAccess());
+            }
             return recipe.getResultItem(myLevel.registryAccess()).copy();
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.error("[RSI-Vanilla] computeResult failed for {}",
@@ -785,8 +789,10 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
             }
         }
 
-        // Fallback: entity already despawned or chunk unloaded
-        return computeResult();
+        // Never fabricate a result when the real world entity is absent. The
+        // operation capture is authoritative and prevents refund + output
+        // duplication when another collector races this scan.
+        return ItemStack.EMPTY;
     }
 
     private void clearCampfireSlot(boolean refundToRS) {

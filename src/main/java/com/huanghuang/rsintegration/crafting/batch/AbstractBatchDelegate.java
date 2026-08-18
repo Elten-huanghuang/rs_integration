@@ -51,6 +51,8 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
      * the state reset that its own cleanup performs.
      */
     private boolean terminalCleanupDone;
+    /** True only when a loaded machine was actually given its failure cleanup hook. */
+    private boolean physicalFailureCleanupCompleted;
 
     /**
      * A forced-chunk ticket is owned by the delegate operation, not by the
@@ -206,6 +208,7 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
                     getClass().getSimpleName(), reason);
             return;
         }
+        physicalFailureCleanupCompleted = false;
         try {
             releasePreparationResources();
             BlockPos pos = getMachinePos();
@@ -222,8 +225,12 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
                 return;
             }
             BlockEntity be = level.getBlockEntity(pos);
-            if (be != null) clearMachineState(be, player);
-            else clearMissingMachineState(player);
+            if (be != null) {
+                clearMachineState(be, player);
+                physicalFailureCleanupCompleted = true;
+            } else {
+                clearMissingMachineState(player);
+            }
         } finally {
             releaseMachineChunk();
         }
@@ -343,6 +350,15 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
     /** True once a terminal callback has run for this operation. */
     protected final boolean isTerminalCleanupDone() {
         return terminalCleanupDone;
+    }
+
+    /**
+     * Whether failure cleanup reached a loaded machine and ran its inventory
+     * cleanup hook. Graph execution uses this to distinguish recoverable
+     * in-machine inputs from items that may still be inside an unavailable block.
+     */
+    public final boolean physicalFailureCleanupCompleted() {
+        return physicalFailureCleanupCompleted;
     }
 
     /**

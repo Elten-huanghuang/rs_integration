@@ -35,6 +35,11 @@ class AltarBindingRegistryTest {
             ModType.register(ModIds.ID_ARS_IMBUEMENT, new String[0], new String[]{"imbuement"},
                     new String[]{"imbuement"}, () -> null);
         }
+        if (ModType.byId(ModIds.ID_FD_SKILLET) == ModType.GENERIC) {
+            ModType.register(ModIds.ID_FD_SKILLET, new String[0],
+                    new String[]{"skillet", "campfire"},
+                    new String[]{ModIds.ID_FD_SKILLET}, () -> null);
+        }
     }
 
     @Test
@@ -126,6 +131,17 @@ class AltarBindingRegistryTest {
         org.junit.jupiter.api.Assertions.assertEquals("wissen_crystallizer",
                 AltarBindingRegistry.recipeSubTypeHint(new ResourceLocation(
                         "wizards_reborn", "wissen_crystallizer/earth_crystal_seed")));
+    }
+
+    @Test
+    void campfireRecipeFolderDoesNotRejectFarmersDelightSkilletBinding() {
+        ResourceLocation recipeId = new ResourceLocation(
+                "alexsmobsdelight", "campfire_cooking/cooked_moose_rib_piece");
+
+        assertEquals("campfire_cooking", AltarBindingRegistry.recipeSubTypeHint(recipeId));
+        assertNull(AltarBindingRegistry.normalizeSubType(
+                AltarBindingRegistry.recipeSubTypeHint(recipeId),
+                ModType.byId(ModIds.ID_FD_SKILLET)));
     }
 
     @Test

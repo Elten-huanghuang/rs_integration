@@ -178,6 +178,14 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
 
         probeReflection();
 
+        // Existing ingredients belong to the machine, not this operation's
+        // reservation ledger. Return them to RS before placing fresh inputs so
+        // a stale/partially completed pot cannot make the scheduler retry.
+        if (network == null) {
+            network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+        }
+        if (network == null || !drainExistingContentsToNetwork(be)) return false;
+
         if (!isHeated(be)) {
             player.sendSystemMessage(Component.translatable("rsi.youkaishomecoming.no_heat"));
             forceChunkLoad(false);
@@ -740,6 +748,53 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
             }
             be.setChanged();
         }
+    }
+
+    /** Drain stale pot contents before a new operation owns the machine. */
+    private boolean drainExistingContentsToNetwork(BlockEntity be) {
+        Container container = getItemsContainer(be);
+        if (container == null) {
+            IItemHandler handler = be.getCapability(
+                    net.minecraftforge.common.capabilities.ForgeCapabilities.ITEM_HANDLER)
+                    .resolve().orElse(null);
+            if (handler == null) return true;
+            boolean drained = true;
+            for (int i = 0; i < handler.getSlots(); i++) {
+                ItemStack existing = handler.getStackInSlot(i);
+                if (existing.isEmpty()) continue;
+                ItemStack removed = handler.extractItem(i, existing.getCount(), false);
+                if (removed.isEmpty()) {
+                    drained = false;
+                    continue;
+                }
+                ItemStack leftover = network.insertItem(
+                        removed.copy(), removed.getCount(), Action.PERFORM);
+                if (!leftover.isEmpty()) {
+                    if (player != null) ItemHandlerHelper.giveItemToPlayer(player, leftover);
+                    RSIntegrationMod.LOGGER.warn(
+                            "[RSI-CookPot] RS rejected {} stale item(s) from {}",
+                            leftover.getCount(), myPos);
+                }
+                if (!handler.getStackInSlot(i).isEmpty()) drained = false;
+            }
+            be.setChanged();
+            return drained;
+        }
+        boolean drained = true;
+        for (int i = 0; i < container.getContainerSize(); i++) {
+            ItemStack existing = container.getItem(i);
+            if (existing.isEmpty()) continue;
+            container.setItem(i, ItemStack.EMPTY);
+            ItemStack leftover = network.insertItem(existing.copy(), existing.getCount(), Action.PERFORM);
+            if (!leftover.isEmpty()) {
+                if (player != null) ItemHandlerHelper.giveItemToPlayer(player, leftover);
+                RSIntegrationMod.LOGGER.warn(
+                        "[RSI-CookPot] RS rejected {} stale item(s) from {}",
+                        leftover.getCount(), myPos);
+            }
+        }
+        be.setChanged();
+        return drained;
     }
 
     private void refund(ItemStack stack) {
