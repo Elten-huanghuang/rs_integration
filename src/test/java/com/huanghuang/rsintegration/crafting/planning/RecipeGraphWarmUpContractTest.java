@@ -11,7 +11,9 @@ import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.Opcodes;
 
 import java.io.IOException;
+import java.util.Collections;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -47,6 +49,14 @@ class RecipeGraphWarmUpContractTest {
 
         assertFalse(calls.contains(owner(RecipeIndex.class) + ".buildSynchronously"));
         assertFalse(calls.contains(owner(RecipeIndex.class) + ".warmUp"));
+    }
+
+    @Test
+    void freezingRecipeIndexDoesNotCopyTheCompletedMapTwice() throws IOException {
+        Set<String> calls = methodCalls(RecipeIndex.class, "freezeIndex");
+
+        assertTrue(calls.contains(owner(Collections.class) + ".unmodifiableMap"));
+        assertFalse(calls.contains(owner(Map.class) + ".copyOf"));
     }
 
     @Test

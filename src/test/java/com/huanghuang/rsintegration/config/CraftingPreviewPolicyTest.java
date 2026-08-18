@@ -5,10 +5,16 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class CraftingPreviewPolicyTest {
+    @Test
+    void recipeTreeNetworkValidationIsOptIn() {
+        assertFalse(RSIntegrationConfig.REQUIRE_RS_NETWORK_FOR_RECIPE_TREE.getDefault());
+    }
+
     @Test
     void legacyDefaultCacheTtlMigratesWithoutOverwritingCustomValues() {
         assertEquals(CraftingPreviewPolicy.DEFAULT_CACHE_TTL_MS,

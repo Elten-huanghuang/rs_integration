@@ -52,8 +52,7 @@ final class ResolutionContext {
     final Map<Item, List<RecipeIndex.ReusableCatalystRoute>> reusableCatalystRoutes;
     final Map<CraftingResolver.StackKey, Integer> counts;
     final List<CraftingResolver.ResolutionStep> steps;
-    final Set<String> resolving;
-    final Set<CraftingResolver.StackKey> resolvingOutputs;
+    final RecipeCycleGuard recipeCycles;
     final Deque<Set<Item>> activeConversionFamilies = new ArrayDeque<>();
     final long deadlineNanos;
     final boolean abortOnTimeout;
@@ -135,8 +134,7 @@ final class ResolutionContext {
                 ? Map.of() : RecipeIndex.reusableCatalystRoutes(level);
         this.counts = new LinkedHashMap<>();
         this.steps = new ArrayList<>();
-        this.resolving = new HashSet<>();
-        this.resolvingOutputs = new HashSet<>();
+        this.recipeCycles = new RecipeCycleGuard();
         this.preferredRecipes = immutableOrNull(preferredRecipes);
         this.forcedRecipes = immutableOrNull(forcedRecipes);
         this.player = player;
@@ -215,8 +213,7 @@ final class ResolutionContext {
                 ? Map.of() : RecipeIndex.reusableCatalystRoutes(level);
         this.counts = new LinkedHashMap<>(keyedCounts);
         this.steps = new ArrayList<>();
-        this.resolving = new HashSet<>();
-        this.resolvingOutputs = new HashSet<>();
+        this.recipeCycles = new RecipeCycleGuard();
         this.preferredRecipes = immutableOrNull(preferredRecipes);
         this.forcedRecipes = immutableOrNull(forcedRecipes);
         this.player = player;
