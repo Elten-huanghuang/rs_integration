@@ -282,6 +282,11 @@ public final class NearbyBindingService {
             if (completed) return;
             completed = true;
             if (bound > 0) {
+                // The scan mutates the connector's server-side NBT directly,
+                // outside a normal inventory click. Mark the inventory dirty
+                // and push both the player inventory and any open menu so a
+                // multiplayer client receives the new binding immediately.
+                syncPlayerInventory(player);
                 AltarBindingRegistry.invalidateScanCache();
                 RSIntegrationNetwork.invalidateNetworkResolution(player.getUUID());
                 BindingEventHandler.sendBindingRefresh(player);
@@ -293,6 +298,14 @@ public final class NearbyBindingService {
                     "[RSI-Bind] Nearby scan player={} candidates={} bound={} alreadyBound={} denied={} invalid={} elapsedMs={}",
                     player.getGameProfile().getName(), candidates, bound, alreadyBound, denied, invalid,
                     (System.nanoTime() - startedNanos) / 1_000_000L);
+        }
+
+        private static void syncPlayerInventory(ServerPlayer player) {
+            player.getInventory().setChanged();
+            player.inventoryMenu.broadcastChanges();
+            if (player.containerMenu != player.inventoryMenu) {
+                player.containerMenu.broadcastChanges();
+            }
         }
 
         private void cancel(String key) {
