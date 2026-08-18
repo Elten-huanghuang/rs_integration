@@ -10,6 +10,7 @@ import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
+import com.huanghuang.rsintegration.util.TrackedNetworkInsertion;
 import com.huanghuang.rsintegration.util.Reflect;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
@@ -783,8 +784,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
                     .resolveNetworkForCraft(player, myLevel.dimension(), myPos);
         }
         if (network != null) {
-            ItemStack leftover = network.insertItem(stack.copy(), stack.getCount(),
-                    com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+            ItemStack leftover = TrackedNetworkInsertion.insert(network, player, stack.copy());
             if (!leftover.isEmpty() && player != null) {
                 net.minecraftforge.items.ItemHandlerHelper.giveItemToPlayer(player, leftover);
             }

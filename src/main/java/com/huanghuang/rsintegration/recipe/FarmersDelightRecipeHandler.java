@@ -29,8 +29,8 @@ public final class FarmersDelightRecipeHandler extends AbstractRecipeHandler {
 
     @Override
     public ItemStack getResultItem(Recipe<?> recipe, RegistryAccess access) {
-        if (recipe instanceof CampfireCookingRecipe ccr) {
-            return ccr.getResultItem(access);
+        if (recipe instanceof CampfireCookingRecipe) {
+            return CampfireRecipeSupport.resolveOutput(recipe, access);
         }
         return ModRecipeHandlers.tryGetResultItem(recipe, access);
     }
@@ -50,7 +50,9 @@ public final class FarmersDelightRecipeHandler extends AbstractRecipeHandler {
             for (Ingredient ing : ingredients) {
                 if (!ing.isEmpty()) specs.add(new IngredientSpec(ing, 1));
             }
-            return specs.isEmpty() ? null : specs;
+            return specs.isEmpty()
+                    ? null
+                    : appendOutputContainerSpec(specs, getOutputContainer(recipe));
         }
         return null;
     }
@@ -71,15 +73,26 @@ public final class FarmersDelightRecipeHandler extends AbstractRecipeHandler {
     }
 
     /** Get the output container item for a CookingPotRecipe (e.g., bowl). */
-    @Nullable
     public static ItemStack getOutputContainer(Recipe<?> recipe) {
         if (recipe.getClass().getName().equals(COOKING_POT_CLASS)) {
             try {
-                return (ItemStack) recipe.getClass().getMethod("getOutputContainer").invoke(recipe);
+                ItemStack container = (ItemStack) recipe.getClass()
+                        .getMethod("getOutputContainer").invoke(recipe);
+                return container == null ? ItemStack.EMPTY : container.copy();
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.debug("[RSI-Recipe] reflection probe failed", e);
             }
         }
-        return null;
+        return ItemStack.EMPTY;
+    }
+
+    static List<IngredientSpec> appendOutputContainerSpec(
+            List<IngredientSpec> inputSpecs, ItemStack container) {
+        List<IngredientSpec> specs = new ArrayList<>(inputSpecs.size() + 1);
+        specs.addAll(inputSpecs);
+        if (container != null && !container.isEmpty()) {
+            specs.add(new IngredientSpec(Ingredient.of(container.copyWithCount(1)), 1));
+        }
+        return List.copyOf(specs);
     }
 }

@@ -6,6 +6,7 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.recipe.CampfireRecipeSupport;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.reflection.probes.FarmersDelightReflection;
 import com.refinedmods.refinedstorage.api.network.INetwork;
@@ -346,7 +347,10 @@ public final class SkilletBatchDelegate extends AbstractBatchDelegate {
                 Object result = removeItem.invoke(be);
                 be.setChanged();
                 craftDone = true;
-                if (result instanceof ItemStack s) return s;
+                // Older FD versions may retain a transformed stack. Current FD
+                // spawns the cooked result into the world and clears this slot;
+                // that output is owned by CraftOutputInterceptor instead.
+                if (result instanceof ItemStack s && !s.isEmpty()) return s;
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.error("[RSI-Batch-Skillet] Failed to remove item", e);
             }
@@ -354,10 +358,11 @@ public final class SkilletBatchDelegate extends AbstractBatchDelegate {
         }
 
         if (isCampfireBE(be)) {
-            // Campfire spawns result as ItemEntity — collect it
+            // Campfire spawns the result as an ItemEntity. The operation's
+            // exact-output capture is authoritative and is drained by the
+            // runtime before this method is called.
             craftDone = true;
             campfireForceLoad(false);
-            ItemStack result = recipe.getResultItem(myLevel.registryAccess()).copy();
             // Clear the slot
             try {
                 @SuppressWarnings("unchecked")
@@ -371,7 +376,7 @@ public final class SkilletBatchDelegate extends AbstractBatchDelegate {
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.warn("[RSI-Skillet] Reflection read failed", e);
             }
-            return result;
+            return ItemStack.EMPTY;
         }
 
         return ItemStack.EMPTY;
@@ -410,10 +415,35 @@ public final class SkilletBatchDelegate extends AbstractBatchDelegate {
     @Override
     public ItemStack getExpectedOutput() {
         if (recipe == null || myLevel == null || myPos == null) return null;
-        BlockEntity be = myLevel.getBlockEntity(myPos);
-        if (be == null || !isCampfireBE(be)) return null;
-        ItemStack expected = recipe.getResultItem(myLevel.registryAccess());
+        // Both vanilla campfires and FD skillets eject CampfireCookingRecipe
+        // results into the world in current versions.
+        ItemStack expected = CampfireRecipeSupport.resolveOutput(
+                recipe, myLevel.registryAccess());
         return expected.isEmpty() ? null : expected;
+    }
+
+    /**
+     * Older Farmer's Delight builds retained the transformed item in the
+     * skillet inventory. Newer builds eject it as a world item. Only the former
+     * may complete without a captured world output.
+     */
+    @Override
+    public boolean canCollectResultWithoutWorldCapture() {
+        if (recipe == null || myLevel == null || myPos == null) return false;
+        BlockEntity be = myLevel.getBlockEntity(myPos);
+        if (be == null || !isSkilletBE(be)) return false;
+        try {
+            Object value = be.getClass().getMethod("getStoredStack").invoke(be);
+            if (!(value instanceof ItemStack stored) || stored.isEmpty()) return false;
+            ItemStack rawInput = recipe.getIngredients().isEmpty()
+                    ? ItemStack.EMPTY
+                    : recipe.getIngredients().get(0).getItems().length > 0
+                    ? recipe.getIngredients().get(0).getItems()[0] : ItemStack.EMPTY;
+            return rawInput.isEmpty() || !ItemStack.isSameItem(stored, rawInput);
+        } catch (Exception ignored) {
+            // Builds without getStoredStack use world output capture.
+            return false;
+        }
     }
 
     @Override

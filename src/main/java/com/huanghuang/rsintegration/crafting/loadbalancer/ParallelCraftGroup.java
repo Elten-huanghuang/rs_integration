@@ -65,6 +65,9 @@ public final class ParallelCraftGroup implements IBatchDelegate {
     private List<List<ItemStack>> virtualDebits = List.of();
     private List<List<ItemStack>> producerDebits = List.of();
     private List<ExtractionLedger.ReservationToken> reservationTokens = List.of();
+    /** Reservations for reusable materials, grouped by physical worker. */
+    private List<ExtractionLedger.ReservationToken> reusableReservationTokens = List.of();
+    private boolean[] reusableReservationsSettled = new boolean[0];
     private List<IngredientSpec> baseSpecs;
     private List<IngredientSpec> graphSpecs = List.of();
     private List<IngredientSpec> supplementalSpecs = List.of();
@@ -245,6 +248,17 @@ public final class ParallelCraftGroup implements IBatchDelegate {
 
     public void setReservationTokens(List<ExtractionLedger.ReservationToken> tokens) {
         this.reservationTokens = List.copyOf(tokens);
+    }
+
+    /**
+     * Records the reservations that equip each worker with its reusable
+     * materials. They are intentionally separate from operation tokens because
+     * operation completion must not consume a catalyst that remains installed
+     * for later operations.
+     */
+    public void setReusableReservationTokens(List<ExtractionLedger.ReservationToken> tokens) {
+        this.reusableReservationTokens = List.copyOf(tokens);
+        this.reusableReservationsSettled = new boolean[this.reusableReservationTokens.size()];
     }
 
     public void setVirtualDebits(List<List<ItemStack>> debits) {
@@ -779,8 +793,21 @@ public final class ParallelCraftGroup implements IBatchDelegate {
 
     @Override
     public void releaseReusableMaterials(@NotNull ServerPlayer player) {
-        for (WorkerSlot worker : workers) {
-            if (worker.delegate != null) worker.delegate.releaseReusableMaterials(player);
+        for (int workerIndex = 0; workerIndex < workers.size(); workerIndex++) {
+            WorkerSlot worker = workers.get(workerIndex);
+            if (worker.delegate == null) continue;
+            worker.delegate.releaseReusableMaterials(player);
+
+            // A started worker has physically received its reusable material.
+            // Its delegate has just returned that material to RS, so remove only
+            // the corresponding reservation from the shared ledger. Queued
+            // workers never owned their physical material and remain refundable.
+            if (sharedMaterialMode && sharedLedger != null && worker.hasStartedOperation
+                    && workerIndex < reusableReservationTokens.size()
+                    && !reusableReservationsSettled[workerIndex]) {
+                sharedLedger.settleCommitted(reusableReservationTokens.get(workerIndex));
+                reusableReservationsSettled[workerIndex] = true;
+            }
         }
     }
 

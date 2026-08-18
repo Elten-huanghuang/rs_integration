@@ -49,6 +49,9 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
     private String failureReason;
     private boolean terminal;
     private boolean reusableMaterialsRecovered;
+    private List<ExtractionLedger.ReservationToken> reusableReservationTokens = List.of();
+    private boolean reusableReservationsSettled;
+    private boolean physicalFailureCleanupCompleted;
     private List<ItemStack> virtualInventory;
     @Nullable
     private ServerPlayer player;
@@ -165,6 +168,21 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
                     : OperationExecutionKernel.CompletionResult.OUTPUT_SHORTAGE;
         }
         return operationSession.complete(outputs, settlement);
+    }
+
+    void setReusableReservationTokens(List<ExtractionLedger.ReservationToken> tokens) {
+        this.reusableReservationTokens = tokens == null ? List.of() : List.copyOf(tokens);
+    }
+
+    boolean physicalFailureCleanupCompleted() {
+        return physicalFailureCleanupCompleted;
+    }
+
+    static boolean shouldRefundInFlightMaterials(
+            @Nullable OperationExecutionKernel.TerminalClass terminalClass,
+            boolean physicalCleanupCompleted) {
+        return physicalCleanupCompleted
+                && terminalClass == OperationExecutionKernel.TerminalClass.IN_FLIGHT;
     }
 
     void settleOperation(OperationExecutionKernel.SettlementAction action) {
@@ -358,9 +376,15 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
             boolean recoverReusable = !reusableMaterialsRecovered && player != null;
             if (recoverReusable) reusableMaterialsRecovered = true;
             runFailureCleanup(recoverReusable,
-                    () -> delegate.releaseReusableMaterials(player),
-                    () -> delegate.onBatchFailed(null,
-                            failureReason != null ? failureReason : "node failure"));
+                    () -> releaseReusableMaterials(player),
+                    () -> {
+                        delegate.onBatchFailed(null,
+                                failureReason != null ? failureReason : "node failure");
+                        if (delegate instanceof com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate abstractDelegate) {
+                            physicalFailureCleanupCompleted =
+                                    abstractDelegate.physicalFailureCleanupCompleted();
+                        }
+                    });
         }
         disarmCapture();
     }
@@ -425,7 +449,7 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
         if (delegate != null) {
             try {
                 delegate.onBatchFinished(player);
-                delegate.releaseReusableMaterials(player);
+                releaseReusableMaterials(player);
             } catch (Exception ignored) {
                 // Best-effort
             }
@@ -442,6 +466,19 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
         for (ItemStack s : queued) {
             if (s != null && !s.isEmpty()) virtualInventory.add(s.copy());
         }
+    }
+
+    private void releaseReusableMaterials(@Nullable ServerPlayer online) {
+        if (delegate == null || online == null) return;
+        delegate.releaseReusableMaterials(online);
+        if (delegate instanceof com.huanghuang.rsintegration.crafting.loadbalancer.ParallelCraftGroup) return;
+        if (reusableReservationsSettled || reusableReservationTokens.isEmpty()
+                || nodeLedger == null || !nodeLedger.isCommitted()
+                || operationSession == null || !operationSession.startAttempted()) return;
+        for (ExtractionLedger.ReservationToken token : reusableReservationTokens) {
+            nodeLedger.settleCommitted(token);
+        }
+        reusableReservationsSettled = true;
     }
 
     List<ItemStack> collectResults(ServerPlayer player) {
