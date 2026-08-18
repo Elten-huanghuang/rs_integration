@@ -88,7 +88,11 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
     }
 
     void attachOutputs(NodeOutputAccumulator outputs) {
-        this.outputs = outputs;
+        // Some JEI recipes use an item stack only as a clickable representation
+        // of a world mutation. Such a delegate proves success from machine state
+        // and must not be forced to manufacture the display-only stack.
+        this.outputs = delegate != null && delegate.publishesDeclaredGraphOutputs()
+                ? outputs : null;
     }
 
     List<NodeOutputAccumulator.Publication> drainIncrementalOutputs() {

@@ -339,6 +339,16 @@ public interface IBatchDelegate {
         return null;
     }
 
+    /**
+     * Whether graph output declarations describe physical item stacks that this
+     * operation must publish. Return {@code false} for recipes whose displayed
+     * result is only a UI handle for a world-state change, such as upgrading an
+     * already placed machine.
+     */
+    default boolean publishesDeclaredGraphOutputs() {
+        return true;
+    }
+
     /** Release resources acquired during preparation when this candidate is discarded. */
     default void releasePreparationResources() {
     }
