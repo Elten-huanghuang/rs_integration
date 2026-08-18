@@ -213,16 +213,38 @@ public final class FaRitualHelper {
 
     /** Reads the exact required tier from an UpgradeTierResult. Returns -1 on failure. */
     static int readUpgradeRequiredTier(Object upgradeResult) {
+        return readUpgradeTier(upgradeResult, "getRequiredTier", "requiredTier");
+    }
+
+    /** Reads the resulting tier from an UpgradeTierResult. Returns -1 on failure. */
+    static int readUpgradeTargetTier(Object upgradeResult) {
+        return readUpgradeTier(upgradeResult, "getUpgradedTier", "upgradedTier");
+    }
+
+    private static int readUpgradeTier(Object upgradeResult, String getterName, String fieldName) {
+        if (upgradeResult == null) return -1;
         try {
-            return (int) Reflect.getMethodOrThrow(FAReflection.upgradeTierResultClass, "requiredTier", "requiredTier").invoke(upgradeResult);
+            java.lang.reflect.Method getter = Reflect.findMethod(
+                    upgradeResult.getClass(), getterName, new Class<?>[0]);
+            if (getter == null) {
+                getter = Reflect.findMethod(upgradeResult.getClass(), fieldName, new Class<?>[0]);
+            }
+            if (getter != null) {
+                Object value = getter.invoke(upgradeResult);
+                if (value instanceof Number number) return number.intValue();
+            }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-FA] readUpgradeRequiredTier method failed", e);
+            RSIntegrationMod.LOGGER.debug("[RSI-FA] Upgrade tier accessor failed: {}", getterName, e);
         }
         try {
-            java.lang.reflect.Field f = Reflect.findField(FAReflection.upgradeTierResultClass, "requiredTier").orElse(null);
-            if (f != null) { f.setAccessible(true); return f.getInt(upgradeResult); }
+            java.lang.reflect.Field field = Reflect.findField(
+                    upgradeResult.getClass(), fieldName).orElse(null);
+            if (field != null) {
+                Object value = field.get(upgradeResult);
+                if (value instanceof Number number) return number.intValue();
+            }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-FA] readUpgradeRequiredTier field failed", e);
+            RSIntegrationMod.LOGGER.debug("[RSI-FA] Upgrade tier field failed: {}", fieldName, e);
         }
         return -1;
     }

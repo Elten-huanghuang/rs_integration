@@ -66,6 +66,9 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
     private List<Object> filledPedestals;
     private List<Object> emptyPedestals;
     private boolean ritualEverSeenActive; // guards against premature completion
+    private boolean tierUpgradeRitual;
+    private int upgradeInitialTier = -1;
+    private int upgradeTargetTier = -1;
 
     // ── IBatchDelegate impl ───────────────────────────────────────
 
@@ -82,6 +85,9 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
         this.filledPedestals = null;
         this.emptyPedestals = null;
         this.ritualEverSeenActive = false;
+        this.tierUpgradeRitual = false;
+        this.upgradeInitialTier = -1;
+        this.upgradeTargetTier = -1;
 
         if (FAReflection.hephaestusForgeBEClass == null || FAReflection.ritualManagerClass == null) {
             player.sendSystemMessage(Component.translatable("rsi.batch.error.mod_missing", "Forbidden Arcanus"));
@@ -125,8 +131,13 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
         try {
             Object result = FaRitualHelper.invoke(ritual, "result");
             if (result != null && FAReflection.upgradeTierResultClass.isInstance(result)) {
-                RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] UpgradeTierResult ritual — output depends on main ingredient");
+                tierUpgradeRitual = true;
+                upgradeInitialTier = forgeTier;
                 int upgradeReqTier = FaRitualHelper.readUpgradeRequiredTier(result);
+                upgradeTargetTier = FaRitualHelper.readUpgradeTargetTier(result);
+                RSIntegrationMod.LOGGER.debug(
+                        "[RSI-Batch-FA] UpgradeTierResult ritual: current={} required={} target={}",
+                        forgeTier, upgradeReqTier, upgradeTargetTier);
                 if (upgradeReqTier >= 0 && forgeTier != upgradeReqTier) {
                     player.sendSystemMessage(Component.translatable(
                             "rsi.fa.error.tier_exact_required", upgradeReqTier, forgeTier));
@@ -708,7 +719,30 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
                 }
             }
         } catch (Exception e) { RSIntegrationMod.debug("[RSI-Batch-FA] Reflection probe failed", e); }
-        return ritualEverSeenActive;
+        if (!ritualEverSeenActive) return false;
+        if (!tierUpgradeRitual) return true;
+
+        // UpgradeTierResult applies to the placed forge block entity/state. A
+        // ritual becoming inactive is not enough proof: an interrupted ritual
+        // can also become inactive without changing the tier.
+        int currentTier = FaRitualHelper.getForgeTier(
+                level.getBlockState(myPos), be);
+        boolean upgraded = upgradeTargetTier >= 0
+                ? currentTier >= upgradeTargetTier
+                : currentTier > upgradeInitialTier;
+        if (!upgraded) {
+            RSIntegrationMod.LOGGER.debug(
+                    "[RSI-Batch-FA] Upgrade ritual ended without tier change: before={} target={} current={}",
+                    upgradeInitialTier, upgradeTargetTier, currentTier);
+        }
+        return upgraded;
+    }
+
+    @Override
+    public boolean publishesDeclaredGraphOutputs() {
+        // UpgradeTierResult mutates the placed forge. The tiered forge stack in
+        // the recipe wrapper is a JEI/plan icon, not an item produced by FA.
+        return !tierUpgradeRitual;
     }
 
     @Override
@@ -726,16 +760,8 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
                 }
             }
             if (result != null && FAReflection.upgradeTierResultClass.isInstance(result)) {
-                try {
-                    int mainSlot = FaRitualHelper.getMainSlot();
-                    ItemStack upgraded = FaRitualHelper.getForgeSlot(forge, mainSlot);
-                    if (!upgraded.isEmpty()) {
-                        FaRitualHelper.setForgeSlot(forge, mainSlot, ItemStack.EMPTY);
-                        return upgraded.copy();
-                    }
-                } catch (Exception e) {
-                    RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] UpgradeTierResult collect failed", e);
-                }
+                // The result was applied to the placed forge block state. There
+                // is no forge item to remove from the main ingredient slot.
                 return ItemStack.EMPTY;
             }
         } catch (Exception e) {

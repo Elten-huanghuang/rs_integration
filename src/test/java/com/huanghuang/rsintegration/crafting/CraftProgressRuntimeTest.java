@@ -122,6 +122,25 @@ class CraftProgressRuntimeTest extends BootstrapTest {
     }
 
     @Test
+    void worldStateMutationDoesNotRequireDisplayOnlyGraphOutput() {
+        StubDelegate delegate = new StubDelegate(IBatchDelegate.CraftPhase.DONE, "") {
+            @Override
+            public boolean publishesDeclaredGraphOutputs() {
+                return false;
+            }
+        };
+        NodeId node = new NodeId(9);
+        CraftNodeRuntime runtime = new CraftNodeRuntime(
+                node, "test:world-state-mutation", delegate, null, null);
+        runtime.attachOutputs(new NodeOutputAccumulator(List.of(new OutputDeclaration(
+                new OutputPortId(node, 0), MaterialKey.of(new ItemStack(Items.DIAMOND)),
+                1, OutputKind.PRIMARY))));
+
+        assertEquals(ConcurrentNodeExecutor.Observation.SUCCEEDED, runtime.observe());
+        assertTrue(runtime.outputsComplete());
+    }
+
+    @Test
     void worldCaptureRuntimeDoesNotTrustDoneBeforePhysicalOutputArrives() {
         NodeId node = new NodeId(7);
         StubDelegate delegate = new StubDelegate(IBatchDelegate.CraftPhase.DONE, "");
