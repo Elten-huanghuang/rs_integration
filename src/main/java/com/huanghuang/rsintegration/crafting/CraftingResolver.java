@@ -42,6 +42,19 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 public final class CraftingResolver {
+
+    /** The terminal recipe currently consuming the roots being resolved. */
+    public record ActiveRootRecipe(ResourceLocation recipeId, ItemStack output) {
+        public ActiveRootRecipe {
+            Objects.requireNonNull(recipeId, "recipeId");
+            output = Objects.requireNonNull(output, "output").copy();
+        }
+
+        @Override
+        public ItemStack output() {
+            return output.copy();
+        }
+    }
     /** Stable preference key that preserves NBT identity while remaining wire-compatible. */
     public static ResourceLocation preferenceKey(ItemStack stack) {
         ResourceLocation itemId = ForgeRegistries.ITEMS.getKey(stack.getItem());
@@ -313,7 +326,7 @@ public final class CraftingResolver {
             @Nullable Map<ResourceLocation, ResourceLocation> forcedOverrides,
             boolean bestEffort) {
         return resolveGraphForSpecsWithTypes(needed, availableKeyed, level, player, network,
-                missingOut, forcedOverrides, bestEffort, false, -1);
+                missingOut, forcedOverrides, bestEffort, false, -1, null);
     }
 
     public static CraftPlanGraph resolveGraphForSpecsWithTypes(
@@ -327,7 +340,22 @@ public final class CraftingResolver {
             boolean bestEffort,
             int timeoutMs) {
         return resolveGraphForSpecsWithTypes(needed, availableKeyed, level, player, network,
-                missingOut, forcedOverrides, bestEffort, false, timeoutMs);
+                missingOut, forcedOverrides, bestEffort, false, timeoutMs, null);
+    }
+
+    public static CraftPlanGraph resolveGraphForSpecsWithTypes(
+            List<IngredientSpec> needed,
+            Map<StackKey, Integer> availableKeyed,
+            Level level,
+            @Nullable ServerPlayer player,
+            @Nullable INetwork network,
+            @Nullable List<String> missingOut,
+            @Nullable Map<ResourceLocation, ResourceLocation> forcedOverrides,
+            boolean bestEffort,
+            int timeoutMs,
+            ActiveRootRecipe activeRoot) {
+        return resolveGraphForSpecsWithTypes(needed, availableKeyed, level, player, network,
+                missingOut, forcedOverrides, bestEffort, false, timeoutMs, activeRoot);
     }
 
     /**
@@ -346,7 +374,7 @@ public final class CraftingResolver {
             @Nullable Map<ResourceLocation, ResourceLocation> forcedOverrides,
             boolean bestEffort) {
         return resolveGraphForSpecsWithTypes(needed, availableKeyed, level, player, network,
-                missingOut, forcedOverrides, bestEffort, true, -1);
+                missingOut, forcedOverrides, bestEffort, true, -1, null);
     }
 
     public static CraftPlanGraph resolveMachineGraphForSpecsWithTypes(
@@ -360,7 +388,22 @@ public final class CraftingResolver {
             boolean bestEffort,
             int timeoutMs) {
         return resolveGraphForSpecsWithTypes(needed, availableKeyed, level, player, network,
-                missingOut, forcedOverrides, bestEffort, true, timeoutMs);
+                missingOut, forcedOverrides, bestEffort, true, timeoutMs, null);
+    }
+
+    public static CraftPlanGraph resolveMachineGraphForSpecsWithTypes(
+            List<IngredientSpec> needed,
+            Map<StackKey, Integer> availableKeyed,
+            Level level,
+            @Nullable ServerPlayer player,
+            @Nullable INetwork network,
+            @Nullable List<String> missingOut,
+            @Nullable Map<ResourceLocation, ResourceLocation> forcedOverrides,
+            boolean bestEffort,
+            int timeoutMs,
+            ActiveRootRecipe activeRoot) {
+        return resolveGraphForSpecsWithTypes(needed, availableKeyed, level, player, network,
+                missingOut, forcedOverrides, bestEffort, true, timeoutMs, activeRoot);
     }
 
     private static CraftPlanGraph resolveGraphForSpecsWithTypes(
@@ -373,7 +416,8 @@ public final class CraftingResolver {
             @Nullable Map<ResourceLocation, ResourceLocation> forcedOverrides,
             boolean bestEffort,
             boolean singleVariantRoots,
-            int timeoutMs) {
+            int timeoutMs,
+            @Nullable ActiveRootRecipe activeRoot) {
         Map<ResourceLocation, ResourceLocation> prefs = mergeForcedOverrides(level, forcedOverrides);
         ResolutionContext ctx = timeoutMs > 0
                 ? new ResolutionContext(level, RecipeIndex.get(level), availableKeyed,
@@ -384,44 +428,55 @@ public final class CraftingResolver {
         EdgeTracker edges = new EdgeTracker();
         List<RootDemand> roots = new ArrayList<>();
 
-        // Crafting-grid roots are fungible planning demand and may be coalesced.
-        // Machine roots are physical input slots and must retain their boundaries.
-        List<IngredientSpec> rootsToResolve = singleVariantRoots
-                ? StepExecutor.machineSpecsForGraph(needed)
-                : coalesceRootSpecs(needed);
-        if (!singleVariantRoots) {
-            // Resolve reusable catalysts after ordinary inputs. This lets an
-            // intermediate CraftTweaker recipe return a shared catalyst before
-            // the terminal root reserves it.
-            rootsToResolve = new ArrayList<>(rootsToResolve);
-            rootsToResolve.sort(java.util.Comparator.comparingInt(spec ->
-                    spec.role() == DemandRole.CATALYST ? 1 : 0));
+        boolean rootActive = activeRoot != null && !activeRoot.output().isEmpty();
+        if (rootActive) {
+            ctx.recipeCycles.enter(activeRoot.recipeId(), activeRoot.output());
         }
-        for (int rootIndex = 0; rootIndex < rootsToResolve.size(); rootIndex++) {
-            IngredientSpec spec = rootsToResolve.get(rootIndex);
-            if (spec.isEmpty()) continue;
-            List<ResolutionContext.SupplySlice> consumed = new ArrayList<>();
-            Ingredient resolvedIngredient = spec.ingredient();
-            boolean resolved;
-            if (singleVariantRoots) {
-                resolvedIngredient = StepExecutor.ensureSingleVariantMachineInput(
-                        spec.ingredient(), spec.count(), ctx, 0, edges, null, consumed);
-                resolved = resolvedIngredient != null;
-                if (!resolved) resolvedIngredient = spec.ingredient();
-            } else {
-                resolved = ensureIngredient(resolvedIngredient, spec.count(),
-                        ctx, 0, edges, null, consumed);
+
+        try {
+            // Crafting-grid roots are fungible planning demand and may be coalesced.
+            // Machine roots are physical input slots and must retain their boundaries.
+            List<IngredientSpec> rootsToResolve = singleVariantRoots
+                    ? StepExecutor.machineSpecsForGraph(needed)
+                    : coalesceRootSpecs(needed);
+            if (!singleVariantRoots) {
+                // Resolve reusable catalysts after ordinary inputs. This lets an
+                // intermediate CraftTweaker recipe return a shared catalyst before
+                // the terminal root reserves it.
+                rootsToResolve = new ArrayList<>(rootsToResolve);
+                rootsToResolve.sort(java.util.Comparator.comparingInt(spec ->
+                        spec.role() == DemandRole.CATALYST ? 1 : 0));
             }
-            List<RootAllocation> allocations = new ArrayList<>(consumed.size());
-            for (ResolutionContext.SupplySlice slice : consumed) {
-                allocations.add(new RootAllocation(slice.source(), slice.material(), slice.quantity()));
+            for (int rootIndex = 0; rootIndex < rootsToResolve.size(); rootIndex++) {
+                IngredientSpec spec = rootsToResolve.get(rootIndex);
+                if (spec.isEmpty()) continue;
+                List<ResolutionContext.SupplySlice> consumed = new ArrayList<>();
+                Ingredient resolvedIngredient = spec.ingredient();
+                boolean resolved;
+                if (singleVariantRoots) {
+                    resolvedIngredient = StepExecutor.ensureSingleVariantMachineInput(
+                            spec.ingredient(), spec.count(), ctx, 0, edges, null, consumed);
+                    resolved = resolvedIngredient != null;
+                    if (!resolved) resolvedIngredient = spec.ingredient();
+                } else {
+                    resolved = ensureIngredient(resolvedIngredient, spec.count(),
+                            ctx, 0, edges, null, consumed);
+                }
+                List<RootAllocation> allocations = new ArrayList<>(consumed.size());
+                for (ResolutionContext.SupplySlice slice : consumed) {
+                    allocations.add(new RootAllocation(slice.source(), slice.material(), slice.quantity()));
+                }
+                int supplied = consumed.stream().mapToInt(ResolutionContext.SupplySlice::quantity).sum();
+                int missing = Math.max(0, spec.count() - supplied);
+                if (!resolved && missingOut != null) missingOut.add(describeFirstItem(resolvedIngredient));
+                roots.add(new RootDemand(resolvedIngredient, spec.count(), missing,
+                        firstDisplayStack(resolvedIngredient), allocations, spec.role()));
+                if (!resolved && !bestEffort) break;
             }
-            int supplied = consumed.stream().mapToInt(ResolutionContext.SupplySlice::quantity).sum();
-            int missing = Math.max(0, spec.count() - supplied);
-            if (!resolved && missingOut != null) missingOut.add(describeFirstItem(resolvedIngredient));
-            roots.add(new RootDemand(resolvedIngredient, spec.count(), missing,
-                    firstDisplayStack(resolvedIngredient), allocations, spec.role()));
-            if (!resolved && !bestEffort) break;
+        } finally {
+            if (rootActive) {
+                ctx.recipeCycles.leave(activeRoot.recipeId(), activeRoot.output());
+            }
         }
 
         CraftPlanGraph graph = new CraftPlanGraph(CraftPlanGraph.CURRENT_VERSION,
@@ -674,14 +729,13 @@ public final class CraftingResolver {
                 altModTypes.add(other.entry.modType().id());
             }
 
-            String bk = branchKey(a.entry.recipe().getId(), a.output);
-            if (ctx.resolving.contains(bk)) {
+            if (ctx.recipeCycles.containsBranch(a.entry.recipe().getId(), a.output)) {
                 ctx.diag("ensureIngredient SKIP " + a.entry.recipe().getId() + ": cycle detected");
                 continue;
             }
 
             StackKey outKey = StackKey.of(a.output, a.output.hasTag());
-            if (ctx.resolvingOutputs.contains(outKey)) {
+            if (ctx.recipeCycles.containsOutput(a.output)) {
                 ctx.diag("ensureIngredient SKIP " + a.entry.recipe().getId()
                         + ": ancestor output cycle detected");
                 continue;
@@ -714,8 +768,7 @@ public final class CraftingResolver {
 
             ctx.beginUndo();
             edges.beginUndo();
-            ctx.resolving.add(bk);
-            ctx.resolvingOutputs.add(outKey);
+            ctx.recipeCycles.enter(a.entry.recipe().getId(), a.output);
             Set<Set<Item>> conversionFamilies = a.entry.recipe() instanceof CraftingRecipe cr
                     ? NonProductiveTagConversionGuard.conversionFamilies(cr, a.output)
                     : Set.of();
@@ -748,8 +801,7 @@ public final class CraftingResolver {
                 if (activatedForcedRecipe) {
                     ctx.deactivateForcedRecipe(a.entry.recipe().getId());
                 }
-                ctx.resolving.remove(bk);
-                ctx.resolvingOutputs.remove(outKey);
+                ctx.recipeCycles.leave(a.entry.recipe().getId(), a.output);
                 for (Set<Item> family : conversionFamilies) ctx.popConversionFamily(family);
             }
 
@@ -1021,13 +1073,6 @@ public final class CraftingResolver {
                 selfConsumed += spec.count();
         }
         return selfConsumed;
-    }
-
-    private static String branchKey(ResourceLocation recipeId, ItemStack output) {
-        ResourceLocation rl = ForgeRegistries.ITEMS.getKey(output.getItem());
-        String itemKey = rl != null ? rl.toString() : "unreg:" + output.getItem().hashCode();
-        String nbt = output.getTag() != null ? output.getTag().toString() : "";
-        return recipeId + "|" + itemKey + "|" + nbt;
     }
 
     private static List<ItemStack> stacksFromCounts(Map<Item, Integer> counts) {

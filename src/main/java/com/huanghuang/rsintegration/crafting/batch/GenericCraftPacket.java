@@ -1096,10 +1096,12 @@ public final class GenericCraftPacket {
                 CraftPlanGraph inputGraph = usesPhysicalMachineInputSlots(recipe)
                         ? CraftingResolver.resolveMachineGraphForSpecsWithTypes(
                                 graphSpecs, avail, player.serverLevel(), player, network, missing,
-                                forcedOverrides, false)
+                                forcedOverrides, false, -1,
+                                new CraftingResolver.ActiveRootRecipe(recipeId, recipeOutput))
                         : CraftingResolver.resolveGraphForSpecsWithTypes(
                                 graphSpecs, avail, player.serverLevel(), player, network, missing,
-                                forcedOverrides, false);
+                                forcedOverrides, false, -1,
+                                new CraftingResolver.ActiveRootRecipe(recipeId, recipeOutput));
                 if (!missing.isEmpty()) {
                     player.sendSystemMessage(Component.translatable(
                             "rsi.generic.error.missing_materials", CraftPacketUtils.formatMissingSummary(missing)));
@@ -1167,7 +1169,8 @@ public final class GenericCraftPacket {
             List<String> graphMissing = new ArrayList<>();
             CraftPlanGraph inputGraph = CraftingResolver.resolveGraphForSpecsWithTypes(
                     graphSpecs, available, player.serverLevel(), player, network,
-                    graphMissing, null, false);
+                    graphMissing, null, false, -1,
+                    new CraftingResolver.ActiveRootRecipe(recipeId, recipeOutput));
             List<ResolutionStep> allSteps = ExecutionEquivalence.projectFlatSteps(inputGraph);
             if (!allSteps.isEmpty() && graphMissing.isEmpty()) {
                 boolean legacySyntheticStep = allSteps.stream().anyMatch(
@@ -1268,7 +1271,8 @@ public final class GenericCraftPacket {
                     CraftPacketUtils.extractIngredientSpecs(cr2), recipeOutput, repeatCount);
             CraftPlanGraph inputGraph = CraftingResolver.resolveGraphForSpecsWithTypes(
                     scaledSpecs, avail, player.serverLevel(),
-                    player, network, missingCheck, forcedOverrides, false);
+                    player, network, missingCheck, forcedOverrides, false, -1,
+                    new CraftingResolver.ActiveRootRecipe(recipeId, recipeOutput));
             List<ResolutionStep> planSteps = ExecutionEquivalence.projectFlatSteps(inputGraph);
             if (planSteps != null && !planSteps.isEmpty() && missingCheck.isEmpty()) {
                 boolean legacySyntheticStep = planSteps.stream().anyMatch(
@@ -2140,6 +2144,10 @@ public final class GenericCraftPacket {
                 : player.serverLevel().dimension();
         net.minecraft.core.BlockPos planLookupPos = pos != null ? pos : player.blockPosition();
         INetwork network = CraftPacketUtils.resolveNetworkForCraft(player, planDimKey, planLookupPos);
+        if (RSIntegrationConfig.REQUIRE_RS_NETWORK_FOR_RECIPE_TREE.get() && network == null) {
+            sink.error(Component.translatable("rsi.generic.error.network_unavailable"));
+            return;
+        }
 
         Map<ResourceLocation, ResourceLocation> effectiveOverrides =
                 forcedOverrides == null ? Map.of() : forcedOverrides;
@@ -2383,13 +2391,17 @@ public final class GenericCraftPacket {
             long typedResolverStarted = System.nanoTime();
             try {
                 int typedTimeoutMs = RSIntegrationConfig.CRAFTING_TYPED_PREVIEW_TIMEOUT_MS.get();
+                CraftingResolver.ActiveRootRecipe activeRoot =
+                        new CraftingResolver.ActiveRootRecipe(recipeId, targetOutput);
                 planGraph = usesPhysicalMachineInputSlots(recipe)
                         ? CraftingResolver.resolveMachineGraphForSpecsWithTypes(
                                 recipeSpecs, available, player.serverLevel(),
-                                player, network, missing, forcedOverrides, true, typedTimeoutMs)
+                                player, network, missing, forcedOverrides, true, typedTimeoutMs,
+                                activeRoot)
                         : CraftingResolver.resolveGraphForSpecsWithTypes(
                                 recipeSpecs, available, player.serverLevel(),
-                                player, network, missing, forcedOverrides, true, typedTimeoutMs);
+                                player, network, missing, forcedOverrides, true, typedTimeoutMs,
+                                activeRoot);
             } catch (CraftingPlanningTimeoutException timeout) {
                 PerformanceMonitor.recordResolveTimeout();
                 sink.error(Component.translatable("rsi.plan.failure.time_limit"));

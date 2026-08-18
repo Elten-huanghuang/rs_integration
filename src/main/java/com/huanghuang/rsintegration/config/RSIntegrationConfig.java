@@ -227,6 +227,7 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.IntValue RECIPE_TREE_MAX_NODES;
     public static ForgeConfigSpec.IntValue RECIPE_TREE_BATCH_DEBOUNCE_MS;
     public static ForgeConfigSpec.IntValue RECIPE_TREE_MAX_CANDIDATES;
+    public static ForgeConfigSpec.BooleanValue REQUIRE_RS_NETWORK_FOR_RECIPE_TREE;
 
     //  client-only
     public static ForgeConfigSpec.IntValue RS_SIDE_PANEL_X;
@@ -898,6 +899,11 @@ public final class RSIntegrationConfig {
                         "Nodes with more alternatives than this are marked 'limited' and the extras are hidden.",
                         "Range: 2-32.")
                 .defineInRange("recipeTreeMaxCandidates", 8, 2, 32);
+        REQUIRE_RS_NETWORK_FOR_RECIPE_TREE = s
+                .comment("Require an available RS network when opening a recipe tree preview.",
+                        "When false, previews may use the player's own inventory without a wireless terminal.",
+                        "This setting affects previews only; actual crafting still requires its normal network validation.")
+                .define("requireRsNetworkForRecipeTree", false);
         PROTECTED_ITEMS = s
                 .comment("Items that should be kept in reserve during recursive auto-crafting.",
                         "When a recipe would consume these items, the system first crafts extra",

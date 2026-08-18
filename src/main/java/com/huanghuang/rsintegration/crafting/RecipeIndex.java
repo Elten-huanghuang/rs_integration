@@ -309,7 +309,10 @@ public final class RecipeIndex {
     private static Map<Item, List<Entry>> freezeIndex(Map<Item, List<Entry>> mutable) {
         Map<Item, List<Entry>> frozen = new HashMap<>(mutable.size());
         mutable.forEach((item, entries) -> frozen.put(item, List.copyOf(entries)));
-        return Map.copyOf(frozen);
+        // The map is a private snapshot and every value above is immutable. Wrapping it is
+        // sufficient; Map.copyOf would rebuild the entire (potentially very large) index a
+        // second time on the server thread during startup.
+        return Collections.unmodifiableMap(frozen);
     }
 
     private static Map<IronSpellBooksRecipeCatalog.SpellScrollKey, List<Entry>> buildSpellScrollIndex(
