@@ -291,6 +291,7 @@ public final class CraftingPlanScreen extends Screen {
 
     // Deferred tooltip — set during draw, rendered after all scissors disabled
     private ItemStack hoveredItemForTooltip = ItemStack.EMPTY;
+    private List<Component> hoveredStepWarnings = List.of();
     private int hoveredTooltipX, hoveredTooltipY;
     private int hoveredTooltipAvail, hoveredTooltipNeeded;
 
@@ -856,6 +857,7 @@ public final class CraftingPlanScreen extends Screen {
         this.mouseX = mouseX;
         this.mouseY = mouseY;
         hoveredItemForTooltip = ItemStack.EMPTY;
+        hoveredStepWarnings = List.of();
         bookmarkHits.clear();
         bookmarkAllActionW = 0;
         bookmarkAllActionH = 0;
@@ -1953,7 +1955,12 @@ public final class CraftingPlanScreen extends Screen {
         if (dropdownNode == null && (hovered == null || hovered.step == null)) {
             resetHoverIntent();
         }
-        if (hovered != null && !hovered.displayStack.isEmpty()) {
+        if (hovered != null && (!hovered.warnings.isEmpty() || hovered.prerequisiteBlocked)) {
+            hoveredStepWarnings = hovered.warnings;
+            hoveredTooltipX = mouseX;
+            hoveredTooltipY = mouseY;
+            resetHoverIntent();
+        } else if (hovered != null && !hovered.displayStack.isEmpty()) {
             // Recipe preview takes priority over the plain item tooltip (§3.7). Only fall back
             // to the item tooltip when no preview was drawn (leaf node, or JEI unavailable), or
             // while the 150ms hover-intent delay hasn't elapsed yet.
@@ -2891,6 +2898,11 @@ public final class CraftingPlanScreen extends Screen {
      *  Builds the component list via {@code getTooltipLines()} so Forge's
      *  {@code RenderTooltipEvent} fires and Legendary Tooltips can intercept. */
     private void renderDeferredTooltip(GuiGraphics gfx, Font font) {
+        if (!hoveredStepWarnings.isEmpty()) {
+            gfx.renderComponentTooltip(font, hoveredStepWarnings, hoveredTooltipX, hoveredTooltipY);
+            hoveredStepWarnings = List.of();
+            return;
+        }
         if (hoveredBookmark != null) {
             gfx.renderComponentTooltip(font, List.of(
                     hoveredBookmark.stack().getHoverName(),

@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.crafting.plan.PlanGraphView;
 import com.huanghuang.rsintegration.crafting.plan.PlanResponse;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import org.junit.jupiter.api.Test;
@@ -43,9 +44,13 @@ class PlanTreeModelGraphTest extends BootstrapTest {
         PlanResponse plan = new PlanResponse(true, "root", new ItemStack(Items.DIAMOND),
                 List.of(), Map.of(), List.of(), "test:root", null, null, 0, 0, 0,
                 List.of(), 1, null, null, null, 0, false, false, false, null,
-                Set.of(), Map.of(), null, graph);
+                Set.of(), Map.of(), null, graph, true, List.of(),
+                Map.of(gun.recipeId(), new PlanResponse.StepIssue(
+                        List.of(Component.literal("Missing altar structure")), true)));
 
         PlanTreeNode gunTree = PlanTreeModel.from(plan).root.children.get(0);
+        assertTrue(gunTree.prerequisiteBlocked);
+        assertEquals("Missing altar structure", gunTree.warnings.get(0).getString());
         assertEquals(1, gunTree.children.size());
         assertEquals(10, gunTree.children.get(0).amount);
         assertEquals(10, gunTree.children.get(0).edgeQuantity);

@@ -185,6 +185,14 @@ public final class PlanResponsePacket {
             buf.writeVarInt(candidate.state().ordinal());
             buf.writeComponent(candidate.status());
         }
+        // Per-recipe prerequisite diagnostics for intermediate tree nodes.
+        buf.writeVarInt(plan.stepIssues().size());
+        for (Map.Entry<ResourceLocation, PlanResponse.StepIssue> entry : plan.stepIssues().entrySet()) {
+            buf.writeResourceLocation(entry.getKey());
+            buf.writeBoolean(entry.getValue().blocked());
+            buf.writeVarInt(entry.getValue().warnings().size());
+            for (Component warning : entry.getValue().warnings()) buf.writeComponent(warning);
+        }
         buf.writeBoolean(requestId != 0L);
         if (requestId != 0L) buf.writeVarLong(requestId);
         PerformanceMonitor.recordPlanPacketBytes(buf.writerIndex() - startIndex);
@@ -323,7 +331,17 @@ public final class PlanResponsePacket {
             machineCandidates.add(new MachineCandidateView(
                     dimension, x, y, z, icon, machineStates[stateOrdinal], status));
         }
-        // requestId follows graph and is a required protocol field.
+        int stepIssueCount = readBoundedCount(buf);
+        Map<ResourceLocation, PlanResponse.StepIssue> stepIssues = new LinkedHashMap<>();
+        for (int i = 0; i < stepIssueCount; i++) {
+            ResourceLocation stepRecipeId = buf.readResourceLocation();
+            boolean blocked = buf.readBoolean();
+            int warningCount = readBoundedCount(buf);
+            List<Component> warnings = new ArrayList<>(warningCount);
+            for (int j = 0; j < warningCount; j++) warnings.add(readComponentOrEmpty(buf));
+            stepIssues.put(stepRecipeId, new PlanResponse.StepIssue(warnings, blocked));
+        }
+        // requestId follows the per-step diagnostics and is a required protocol field.
         long requestId = 0L;
         if (buf.readBoolean()) {
             requestId = buf.readVarLong();
@@ -340,7 +358,8 @@ public final class PlanResponsePacket {
                 execModType, execDim, execX, execY, execZ, modWarnings, repeatCount,
                 embersCode, embersAspectNames, embersInputNames, embersSeed, embersCanInfer,
                 embersCodeFromCache, executionMachineSupportsGui, baseItem, boundMachineTypes,
-                leftovers, clickedOutput, graph, executionBlocked, machineCandidates), requestId);
+                leftovers, clickedOutput, graph, executionBlocked, machineCandidates,
+                stepIssues), requestId);
     }
 
     private static void writeGraph(FriendlyByteBuf buf, PlanGraphView graph) {

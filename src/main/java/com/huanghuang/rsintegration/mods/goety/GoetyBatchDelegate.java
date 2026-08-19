@@ -64,9 +64,13 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
     private List<Object> filledPedestals;
     private int soulCost;
     private boolean ritualEverSeenActive;
+    /** True after startRitual accepted the operation; the ritual may still fail before becoming active. */
+    private boolean ritualStartRequested;
     private boolean prerequisiteBlocked;
     private boolean prerequisiteFailurePermanent;
     private long ritualIdleSinceGameTime = -1L;
+    /** Tracks a ritual that stopped before yielding an output. */
+    private long ritualStoppedSinceGameTime = -1L;
     private static final int RITUAL_IDLE_STABILITY_TICKS = 20;
     private ItemStack activationExtractedFromPlayer;
     /** Activation item held until the manual ritual handoff is observed. */
@@ -181,6 +185,8 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         }
         this.ritualRecipe = foundRecipe;
         this.ritualEverSeenActive = false;
+        this.ritualStartRequested = false;
+        this.ritualStoppedSinceGameTime = -1L;
         this.ritualIdleSinceGameTime = -1L;
         RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] validateAndInit [5/9] recipe verified as RitualRecipe");
 
@@ -512,6 +518,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
                 ledger.refundCommitted(network, player);
                 return false;
             }
+            ritualStartRequested = true;
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.error("[RSI-Batch-Goety] Failed to start ritual", e);
             refundActivationToPlayer();
@@ -579,6 +586,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
                 recoverFromPedestals();
                 return false;
             }
+            ritualStartRequested = true;
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.error("[RSI-Batch-Goety] Placement/start failed:", e);
             refundActivationToPlayer();
@@ -790,6 +798,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
                     return false;
                 }
                 if (startAltarRitual(altar, player, activationItem, ritualRecipe)) {
+                    ritualStartRequested = true;
                     return true;
                 }
                 player.sendSystemMessage(Component.translatable("rsi.goety.error.one_click_failed"));
@@ -838,6 +847,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
                 recoverFromPedestals();
                 return false;
             }
+            ritualStartRequested = true;
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.error("[RSI-Batch-Goety] Material placement/start failed:", e);
             player.sendSystemMessage(Component.translatable("rsi.goety.error.one_click_failed"));
@@ -929,8 +939,13 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         // via recipe-manager lookup, which defeats null-after-completion detection.
         if (Reflect.getField(altar, GoetyReflection.F_CURRENT_RITUAL_RECIPE).orElse(null) != null) {
             ritualEverSeenActive = true;
+            ritualStartRequested = true;
             ritualIdleSinceGameTime = -1L;
+            ritualStoppedSinceGameTime = -1L;
             return false;
+        }
+        if ((ritualEverSeenActive || ritualStartRequested) && ritualStoppedSinceGameTime < 0L) {
+            ritualStoppedSinceGameTime = level.getGameTime();
         }
         if (!hasExpectedRitualOutput(level, be)) {
             ritualIdleSinceGameTime = -1L;
@@ -960,7 +975,13 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             }
             return doneObservation();
         }
-        return super.observeMachineCraft(level, be);
+        if (isMachineCraftFinished(level, be)) return doneObservation();
+        if (ritualStartRequested && ritualStoppedSinceGameTime >= 0L
+                && level.getGameTime() - ritualStoppedSinceGameTime >= RITUAL_IDLE_STABILITY_TICKS) {
+            return failObservation("Goety ritual stopped without producing its expected output; "
+                    + "ritual prerequisites may have changed");
+        }
+        return workingObservation();
     }
 
     private boolean hasExpectedRitualOutput(ServerLevel level, BlockEntity be) {
@@ -1177,6 +1198,8 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             recoverBrazierItems();
         } else {
             ritualEverSeenActive = false;
+            ritualStartRequested = false;
+            ritualStoppedSinceGameTime = -1L;
             ritualIdleSinceGameTime = -1L;
             recoverPendingRitualResult(player);
             refundActivationToPlayer();
@@ -1205,6 +1228,8 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             brazierCraftStarted = false;
         } else {
             ritualEverSeenActive = false;
+            ritualStartRequested = false;
+            ritualStoppedSinceGameTime = -1L;
             ritualIdleSinceGameTime = -1L;
             if (ritualPreparedForManualStart) {
                 // Ownership has deliberately been handed to the player/altar.

@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting.tree;
 
 import com.huanghuang.rsintegration.crafting.plan.PlanStep;
+import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 
@@ -45,6 +46,10 @@ public final class PlanTreeNode {
     // ---- availability (from PlanResponse.materials) ----
     public int available;
     public int needed;
+
+    // ---- step prerequisites (server-authoritative) ----
+    public List<Component> warnings = List.of();
+    public boolean prerequisiteBlocked;
 
     // ---- structural flags ----
     public boolean cycle;

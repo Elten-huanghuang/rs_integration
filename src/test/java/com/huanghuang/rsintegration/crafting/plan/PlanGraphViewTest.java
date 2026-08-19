@@ -102,7 +102,10 @@ class PlanGraphViewTest extends BootstrapTest {
                 java.util.Set.of(), java.util.Map.of(), null, graph, true,
                 List.of(new MachineCandidateView("minecraft:overworld", 12, 64, -8,
                         new ItemStack(Items.ENCHANTING_TABLE),
-                        MachineCandidateView.State.READY, Component.literal("Ready"))));
+                        MachineCandidateView.State.READY, Component.literal("Ready"))),
+                java.util.Map.of(new ResourceLocation("goety", "dark_altar_step"),
+                        new PlanResponse.StepIssue(
+                                List.of(Component.literal("Missing altar structure")), true)));
         FriendlyByteBuf buf = new FriendlyByteBuf(Unpooled.buffer());
         new PlanResponsePacket(plan).encode(buf);
         int encodedSize = buf.readableBytes();
@@ -115,6 +118,11 @@ class PlanGraphViewTest extends BootstrapTest {
                 decoded.machineCandidates().get(0).dimension());
         assertEquals(MachineCandidateView.State.READY,
                 decoded.machineCandidates().get(0).state());
+        PlanResponse.StepIssue decodedIssue = decoded.stepIssues().get(
+                new ResourceLocation("goety", "dark_altar_step"));
+        assertNotNull(decodedIssue);
+        assertTrue(decodedIssue.blocked());
+        assertEquals("Missing altar structure", decodedIssue.warnings().get(0).getString());
         assertNotNull(decoded.graph());
         assertEquals(graph.topologicalOrder(), decoded.graph().topologicalOrder());
         assertEquals(graph.edges().size(), decoded.graph().edges().size());
