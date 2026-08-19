@@ -627,6 +627,10 @@
   "rsi.binding.nearby.invalid_connector": "RS 网络连接器尚未连接到有效网络",
   "rsi.binding.nearby.connector_removed": "连接器已被取下或更换，附近机器扫描已取消",
   "rsi.swipe.extracted": "§a已从 RS 网络提取 %s 种物品",
+  "rsi.world_pick.extracted": "§a已从 RS 网络取出 %s ×%s",
+  "rsi.world_pick.failed": "§eRS 网络中没有可取出的 %s",
+  "rsi.world_pick.bookmarked": "§eRS 中没有 %s，已加入 JEI 收藏",
+  "rsi.world_pick.bookmark_unavailable": "§eRS 中没有 %s，JEI 收藏不可用",
   "rsi.side_panel.no_network": "无 RS 网络",
   "rsi.side_panel.search_hint": "搜索...",
   "rsi.side_panel.search.prefix_mod": "@模组名  按模组搜索",
@@ -695,9 +699,10 @@
   "rsi.hub.controls.quick_has_output": "空手左键:收取  空手Shift:回收RS  右键:打开",
   "rsi.hub.controls.quick_normal": "拿物品左键:放入  拿物品Shift:放燃料  空手左键:打开GUI",
   "rsi.hub.controls.gui": "左键/右键:打开GUI",
-  "rsi.hub.favorite": "左键左上角星标：添加到机器快捷栏",
-  "rsi.hub.unfavorite": "左键左上角星标：从机器快捷栏移除",
-  "rsi.hub.favorite_limit": "机器快捷栏最多收藏 %s 台机器",
+ "rsi.hub.favorite": "左键左上角星标：添加到机器快捷栏",
+ "rsi.hub.unfavorite": "左键左上角星标：从机器快捷栏移除",
+ "rsi.hub.unbind": "Ctrl + 左键：解除绑定",
+ "rsi.hub.favorite_limit": "机器快捷栏最多收藏 %s 台机器",
 
   "rsi.plan.open_machine": "打开机器",
   "rsi.jei.open_machine": "打开绑定的机器界面",
@@ -965,5 +970,6 @@
   "rsi.machine_candidate.check_failed": "检查失败",
   "rsi.recent_search.favorite": "收藏或取消收藏",
   "rsi.recent_search.delete": "删除这条搜索记录",
-  "rsi.recent_search.clear_all": "清空当前世界或服务器的搜索记录"
+  "rsi.recent_search.clear_all": "清空当前世界或服务器的搜索记录",
+  "rsi.plan.machine_clear_notice": "下单后将清空机器内部槽位，原有物品会优先回收到 RS 网络"
 }

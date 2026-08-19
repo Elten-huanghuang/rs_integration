@@ -69,7 +69,6 @@ public abstract class GridScreenMouseMixin {
                 if (gs.getIngredient() instanceof ItemStack is && !is.isEmpty()
                         && self.rsi$swipedIds.add(gs.getId())) {
                     self.rsi$swipedItems.add(is.copy());
-                    gs.setQuantity(gs.getQuantity() - 1);
                 }
             }
         }
@@ -104,7 +103,6 @@ public abstract class GridScreenMouseMixin {
                         rsi$swipedItems.clear();
                         rsi$swipedIds.add(gs.getId());
                         rsi$swipedItems.add(is.copy());
-                        gs.setQuantity(gs.getQuantity() - 1);
                         cir.setReturnValue(true);
                         return;
                     }

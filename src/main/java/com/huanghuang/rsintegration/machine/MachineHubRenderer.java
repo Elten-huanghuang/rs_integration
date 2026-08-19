@@ -294,6 +294,8 @@ public final class MachineHubRenderer {
                 tip.add(Component.translatable(favorite
                                 ? "rsi.hub.unfavorite" : "rsi.hub.favorite")
                         .withStyle(net.minecraft.ChatFormatting.YELLOW));
+                tip.add(Component.translatable("rsi.hub.unbind")
+                        .withStyle(net.minecraft.ChatFormatting.RED));
                 MachineHub.isRenderingOurTooltip = true;
                 g.renderTooltip(font, tip, java.util.Optional.empty(), mouseX, mouseY);
                 MachineHub.isRenderingOurTooltip = false;

@@ -621,6 +621,10 @@
   "rsi.binding.nearby.invalid_connector": "The RS network connector is not linked to a valid network",
   "rsi.binding.nearby.connector_removed": "The connector was removed or replaced; nearby binding was cancelled",
   "rsi.swipe.extracted": "§aExtracted %s item(s) from RS network",
+  "rsi.world_pick.extracted": "§aPicked %s ×%s from RS network",
+  "rsi.world_pick.failed": "§eNo %s available in the RS network",
+  "rsi.world_pick.bookmarked": "§e%s is not in RS; added to JEI bookmarks",
+  "rsi.world_pick.bookmark_unavailable": "§e%s is not in RS; JEI bookmarks unavailable",
   "rsi.side_panel.no_network": "No RS Network",
   "rsi.side_panel.search_hint": "Search...",
   "rsi.side_panel.search.prefix_mod": "@modname  to search by mod",
@@ -689,9 +693,10 @@
   "rsi.hub.controls.quick_has_output": "Empty L: Collect  Empty Shift: →RS  R: Open",
   "rsi.hub.controls.quick_normal": "Hold item L: Insert  Shift: Fuel  Empty L: Open",
   "rsi.hub.controls.gui": "L/R: Open GUI",
-  "rsi.hub.favorite": "Left-click the top-left star: add to machine shortcuts",
-  "rsi.hub.unfavorite": "Left-click the top-left star: remove from machine shortcuts",
-  "rsi.hub.favorite_limit": "Machine shortcuts can contain up to %s machines",
+ "rsi.hub.favorite": "Left-click the top-left star: add to machine shortcuts",
+ "rsi.hub.unfavorite": "Left-click the top-left star: remove from machine shortcuts",
+ "rsi.hub.unbind": "Ctrl + Left-click: Unbind machine",
+ "rsi.hub.favorite_limit": "Machine shortcuts can contain up to %s machines",
 
   "rsi.plan.open_machine": "Open Machine",
   "rsi.jei.open_machine": "Open bound machine GUI",
@@ -963,5 +968,6 @@
   "rsi.machine_candidate.check_failed": "Check failed",
   "rsi.recent_search.favorite": "Favorite or unfavorite",
   "rsi.recent_search.delete": "Delete this search entry",
-  "rsi.recent_search.clear_all": "Clear search history for this world or server"
+  "rsi.recent_search.clear_all": "Clear search history for this world or server",
+  "rsi.plan.machine_clear_notice": "Submitting clears the machine slots; existing items are returned to the RS network first"
 }

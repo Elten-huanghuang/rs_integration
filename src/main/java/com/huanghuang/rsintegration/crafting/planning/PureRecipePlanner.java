@@ -13,6 +13,7 @@ import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.LongSupplier;
 
 /** Pure bounded backtracking search over immutable recipe and inventory values. */
 public final class PureRecipePlanner {
@@ -47,9 +48,17 @@ public final class PureRecipePlanner {
     static Result resolve(ImmutableRecipeGraph graph, Map<MaterialRef, Integer> available,
                           List<IngredientRef> roots, int maxSteps, int maxSearchStates,
                           int maxMemoizedFailures, long deadlineNanos) {
+        return resolve(graph, available, roots, maxSteps, maxSearchStates,
+                maxMemoizedFailures, deadlineNanos, System::nanoTime);
+    }
+
+    static Result resolve(ImmutableRecipeGraph graph, Map<MaterialRef, Integer> available,
+                          List<IngredientRef> roots, int maxSteps, int maxSearchStates,
+                          int maxMemoizedFailures, long deadlineNanos,
+                          LongSupplier nanoTime) {
         List<IngredientRef> normalizedRoots = PureDemandNormalizer.mergeEquivalent(roots);
         Search search = new Search(graph, available, maxSteps, maxSearchStates,
-                maxMemoizedFailures, deadlineNanos);
+                maxMemoizedFailures, deadlineNanos, nanoTime);
         List<Task> pending = normalizedRoots.stream()
                 .map(DemandTask::new).map(Task.class::cast).toList();
         Status status;
@@ -69,11 +78,16 @@ public final class PureRecipePlanner {
             case STEP_LIMIT, SEARCH_LIMIT, TIME_LIMIT -> List.of();
         };
         if (status == Status.UNRESOLVABLE && !roots.isEmpty()) {
-            PartialTrace partial = new PartialPlanBuilder(
-                    graph, available, maxSteps).build(normalizedRoots);
-            if (partial.missing() != null && partial.steps().size() >= resultSteps.size()) {
-                unresolved = partial.missing();
-                resultSteps = partial.steps();
+            try {
+                PartialTrace partial = new PartialPlanBuilder(
+                        graph, available, maxSteps, search::checkBudget).build(normalizedRoots);
+                if (partial.missing() != null && partial.steps().size() >= resultSteps.size()) {
+                    unresolved = partial.missing();
+                    resultSteps = partial.steps();
+                }
+            } catch (TimeLimitException ignored) {
+                // Feasibility is already known. Keep the search trace when the optional
+                // display-oriented partial expansion exhausts the remaining time budget.
             }
         }
         List<IngredientRef> missing = status == Status.SUCCESS || unresolved == null
@@ -140,6 +154,7 @@ public final class PureRecipePlanner {
         private final int maxSearchStates;
         private final int maxMemoizedFailures;
         private final long deadlineNanos;
+        private final LongSupplier nanoTime;
         private final List<PlannedStep> steps = new ArrayList<>();
         private final Set<MaterialRef> resolving = new HashSet<>();
         private final Set<FailureKey> failedStates = new HashSet<>();
@@ -159,7 +174,7 @@ public final class PureRecipePlanner {
 
         private Search(ImmutableRecipeGraph graph, Map<MaterialRef, Integer> available,
                        int maxSteps, int maxSearchStates, int maxMemoizedFailures,
-                       long deadlineNanos) {
+                       long deadlineNanos, LongSupplier nanoTime) {
             this.graph = graph;
             available.forEach((material, count) -> {
                 if (count != null && count > 0) stock.put(material, count);
@@ -169,7 +184,8 @@ public final class PureRecipePlanner {
             this.maxSearchStates = Math.max(1, maxSearchStates);
             this.maxMemoizedFailures = Math.max(0, maxMemoizedFailures);
             this.deadlineNanos = deadlineNanos;
-            this.reachability = new SeededReachability(graph, available);
+            this.nanoTime = java.util.Objects.requireNonNull(nanoTime, "nanoTime");
+            this.reachability = new SeededReachability(graph, available, this::checkBudget);
         }
 
         private boolean solve(List<Task> pending) {
@@ -226,7 +242,7 @@ public final class PureRecipePlanner {
             }
 
             for (MaterialRef wanted : orderedAlternatives) {
-                PlanningThreadContext.throwIfCancelled();
+                checkBudget();
                 if (resolving.contains(wanted)) continue;
                 int have = stock.getOrDefault(wanted, 0);
                 int needed = ingredient.count() - have;
@@ -573,7 +589,7 @@ public final class PureRecipePlanner {
         private void checkBudget() {
             PlanningThreadContext.throwIfCancelled();
             if (deadlineNanos != Long.MAX_VALUE
-                    && System.nanoTime() - deadlineNanos >= 0L) {
+                    && nanoTime.getAsLong() - deadlineNanos >= 0L) {
                 throw new TimeLimitException();
             }
         }
@@ -619,25 +635,31 @@ public final class PureRecipePlanner {
         private final List<PlannedStep> steps = new ArrayList<>();
         private final Set<MaterialRef> visiting = new HashSet<>();
         private final Map<List<MaterialRef>, PartialFamilyCost> familyCosts = new HashMap<>();
+        private final Runnable budgetCheck;
         private IngredientRef missing;
 
         private PartialPlanBuilder(ImmutableRecipeGraph graph,
                                    Map<MaterialRef, Integer> available,
-                                   int maxSteps) {
+                                   int maxSteps,
+                                   Runnable budgetCheck) {
             this.graph = graph;
             available.forEach((material, count) -> {
                 if (material != null && count != null && count > 0) stock.put(material, count);
             });
             this.maxSteps = Math.max(1, maxSteps);
+            this.budgetCheck = java.util.Objects.requireNonNull(budgetCheck, "budgetCheck");
         }
 
         private PartialTrace build(List<IngredientRef> roots) {
-            for (IngredientRef root : roots) expand(root);
+            for (IngredientRef root : roots) {
+                budgetCheck.run();
+                expand(root);
+            }
             return new PartialTrace(List.copyOf(steps), missing);
         }
 
         private boolean expand(IngredientRef ingredient) {
-            PlanningThreadContext.throwIfCancelled();
+            budgetCheck.run();
             int remaining = consumeAvailable(ingredient);
             if (remaining == 0) return true;
             if (steps.size() >= maxSteps || visiting.size() >= MAX_SEARCH_CALL_DEPTH) {
@@ -711,8 +733,10 @@ public final class PureRecipePlanner {
         private List<PartialChoice> choicesFor(IngredientRef ingredient) {
             List<PartialChoice> choices = new ArrayList<>();
             for (MaterialRef alternative : ingredient.alternatives()) {
+                budgetCheck.run();
                 for (RecipeNode recipe : graph.recipesByOutput()
                         .getOrDefault(alternative, List.of())) {
+                    budgetCheck.run();
                     choices.add(new PartialChoice(alternative, recipe));
                 }
             }
@@ -724,6 +748,7 @@ public final class PureRecipePlanner {
         }
 
         private double inputStockCoverage(RecipeNode recipe) {
+            budgetCheck.run();
             long required = 0L;
             long available = 0L;
             for (IngredientRef input : PureDemandNormalizer.mergeEquivalent(recipe.inputs())) {
@@ -771,6 +796,7 @@ public final class PureRecipePlanner {
 
             private long ingredientCost(IngredientRef ingredient, long count,
                                         Set<MaterialRef> path) {
+                budgetCheck.run();
                 long best = COST_UNKNOWN;
                 for (MaterialRef alternative : ingredient.alternatives()) {
                     long unit = materialUnitCost(alternative, path);
@@ -781,6 +807,7 @@ public final class PureRecipePlanner {
             }
 
             private long materialUnitCost(MaterialRef material, Set<MaterialRef> path) {
+                budgetCheck.run();
                 if (family.contains(material)) return 1L;
                 Long cached = unitCosts.get(material);
                 if (cached != null) return cached;
@@ -791,6 +818,7 @@ public final class PureRecipePlanner {
                             .getOrDefault(material, List.of());
                     if (producers.isEmpty()) return 0L;
                     for (RecipeNode producer : producers) {
+                        budgetCheck.run();
                         long cost = 0L;
                         for (IngredientRef input : PureDemandNormalizer.mergeEquivalent(
                                 producer.inputs())) {
@@ -836,15 +864,18 @@ public final class PureRecipePlanner {
         private final Map<MaterialRef, Integer> materialDepth = new HashMap<>();
         private final Map<RecipeNode, Integer> recipeDepth = new IdentityHashMap<>();
         private final Set<MaterialRef> unreachable = new HashSet<>();
+        private final Runnable budgetCheck;
 
         private SeededReachability(ImmutableRecipeGraph graph,
-                                   Map<MaterialRef, Integer> available) {
+                                   Map<MaterialRef, Integer> available,
+                                   Runnable budgetCheck) {
             this.graph = graph;
             Set<MaterialRef> present = new HashSet<>();
             for (Map.Entry<MaterialRef, Integer> entry : available.entrySet()) {
                 if (entry.getValue() != null && entry.getValue() > 0) present.add(entry.getKey());
             }
             this.seeds = Set.copyOf(present);
+            this.budgetCheck = java.util.Objects.requireNonNull(budgetCheck, "budgetCheck");
         }
 
         private boolean canReach(MaterialRef material) {
@@ -861,7 +892,7 @@ public final class PureRecipePlanner {
         }
 
         private Probe probeMaterial(MaterialRef material, Set<MaterialRef> visiting) {
-            PlanningThreadContext.throwIfCancelled();
+            budgetCheck.run();
             if (seeds.contains(material)) return Probe.seeded();
             Integer cached = materialDepth.get(material);
             if (cached != null) return new Probe(true, cached, false);
@@ -873,6 +904,7 @@ public final class PureRecipePlanner {
             try {
                 for (RecipeNode recipe : graph.recipesByOutput()
                         .getOrDefault(material, List.of())) {
+                    budgetCheck.run();
                     Probe recipeProbe = probeRecipe(recipe, visiting);
                     if (!recipeProbe.reachable()) continue;
                     bestDepth = Math.min(bestDepth, recipeProbe.depth());
@@ -893,15 +925,17 @@ public final class PureRecipePlanner {
         }
 
         private Probe probeRecipe(RecipeNode recipe, Set<MaterialRef> visiting) {
-            PlanningThreadContext.throwIfCancelled();
+            budgetCheck.run();
             Integer cached = recipeDepth.get(recipe);
             if (cached != null) return new Probe(true, cached, false);
 
             int deepestInput = 0;
             boolean provisional = false;
             for (IngredientRef input : recipe.inputs()) {
+                budgetCheck.run();
                 Probe best = Probe.unreachable();
                 for (MaterialRef alternative : input.alternatives()) {
+                    budgetCheck.run();
                     Probe candidate = probeMaterial(alternative, visiting);
                     if (!candidate.reachable()) continue;
                     if (!best.reachable() || candidate.depth() < best.depth()) best = candidate;
