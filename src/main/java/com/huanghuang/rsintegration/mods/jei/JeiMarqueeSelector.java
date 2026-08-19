@@ -21,9 +21,11 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.inventory.Slot;
 import net.minecraftforge.client.event.ScreenEvent;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.TickEvent;
@@ -323,18 +325,12 @@ public final class JeiMarqueeSelector {
         km = RSIKeyBindings.KEY_MOD_FILTER;
         if (km != null && km.isActiveAndMatches(mouseKey)
                 && runtime != null) {
-            IIngredientListOverlay overlay = runtime.getIngredientListOverlay();
-            if (overlay != null) {
-                var opt = overlay.getIngredientUnderMouse();
-                if (opt.isPresent()) {
-                    String modId = getModId(opt.get());
-                    if (modId != null && !modId.isEmpty()) {
-                        runtime.getIngredientFilter().setFilterText("@" + modId);
-                        clearSelection();
-                        event.setCanceled(true);
-                        return;
-                    }
-                }
+            String modId = getModIdUnderMouse(screen, mx, my, runtime);
+            if (modId != null && !modId.isEmpty()) {
+                runtime.getIngredientFilter().setFilterText("@" + modId);
+                clearSelection();
+                event.setCanceled(true);
+                return;
             }
         }
 
@@ -821,8 +817,7 @@ public final class JeiMarqueeSelector {
     private static String getModId(ITypedIngredient<?> ingredient) {
         Object ing = ingredient.getIngredient();
         if (ing instanceof ItemStack stack && !stack.isEmpty()) {
-            ResourceLocation key = BuiltInRegistries.ITEM.getKey(stack.getItem());
-            return key.getNamespace();
+            return getModId(stack);
         }
         if (ing instanceof FluidStack fluid && !fluid.isEmpty()) {
             ResourceLocation key = ForgeRegistries.FLUIDS.getKey(fluid.getFluid());
@@ -882,6 +877,39 @@ public final class JeiMarqueeSelector {
             }
         }
         return null;
+    }
+
+    /**
+     * Resolve the ingredient beneath the mouse for all JEI-visible item sources.
+     * JEI exposes the right list and bookmark panel separately; container slots
+     * (player inventory, hotbar, and mod GUI slots) are owned by the host screen.
+     */
+    @Nullable
+    private static String getModIdUnderMouse(Screen screen, int mx, int my, IJeiRuntime runtime) {
+        IIngredientListOverlay overlay = runtime.getIngredientListOverlay();
+        if (overlay != null) {
+            var ingredient = overlay.getIngredientUnderMouse();
+            if (ingredient.isPresent()) return getModId(ingredient.get());
+        }
+
+        IBookmarkOverlay bookmarks = runtime.getBookmarkOverlay();
+        if (bookmarks != null) {
+            var ingredient = bookmarks.getIngredientUnderMouse();
+            if (ingredient.isPresent()) return getModId(ingredient.get());
+        }
+
+        if (screen instanceof AbstractContainerScreen<?> container) {
+            Slot slot = container.getSlotUnderMouse();
+            if (slot != null) return getModId(slot.getItem());
+        }
+        return null;
+    }
+
+    @Nullable
+    private static String getModId(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return null;
+        ResourceLocation key = BuiltInRegistries.ITEM.getKey(stack.getItem());
+        return key == null ? null : key.getNamespace();
     }
 
     @Nullable
