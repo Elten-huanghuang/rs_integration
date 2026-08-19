@@ -34,6 +34,7 @@ import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.resources.language.I18n;
 import org.lwjgl.glfw.GLFW;
@@ -494,7 +495,7 @@ public final class CraftingPlanScreen extends Screen {
             outputSegmentW = 132;
             outputSelectorH = 20;
             outputSelectorX = width / 2 - outputSegmentW / 2;
-            outputSelectorY = btnY - 50;
+            outputSelectorY = btnY - 27;
         } else {
             outputSelectorH = 0;
         }
@@ -520,6 +521,8 @@ public final class CraftingPlanScreen extends Screen {
                 .pos(width / 2 - btnW - 10, btnY)
                 .size(selectedPath.isDirty() ? btnW + 20 : btnW, 20)
                 .build();
+        confirmButton.setTooltip(Tooltip.create(
+                Component.translatable("rsi.plan.machine_clear_notice")));
         confirmButton.active = !plan.executionBlocked() || selectedPath.isDirty();
         addRenderableWidget(confirmButton);
 
@@ -1038,15 +1041,6 @@ public final class CraftingPlanScreen extends Screen {
 
         // ── Repeat count row ─────────────────────────────────────────
         drawRepeatRow(gfx, font);
-
-        // Submission warning: placing an order clears the selected machine's internal
-        // slots; the server attempts to recover those items into the RS network.
-        int noticeY = height - 55;
-        String notice = Component.translatable("rsi.plan.machine_clear_notice").getString();
-        notice = font.plainSubstrByWidth(notice, Math.max(80, width - 40));
-        int noticeX = width / 2 - font.width(notice) / 2;
-        UIRenderer.textBackdrop(gfx, font, noticeX, noticeY, notice, 0xAA241A00);
-        gfx.drawString(font, notice, noticeX, noticeY, 0xFFFFD166, false);
 
         // Card view: JEI recipe preview for a hovered alternative-recipe badge (mirrors the
         // tree-view dropdown preview). Drawn here, post-scissor, so it's not clipped.

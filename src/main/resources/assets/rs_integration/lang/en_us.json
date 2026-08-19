@@ -969,5 +969,5 @@
   "rsi.recent_search.favorite": "Favorite or unfavorite",
   "rsi.recent_search.delete": "Delete this search entry",
   "rsi.recent_search.clear_all": "Clear search history for this world or server",
-  "rsi.plan.machine_clear_notice": "Submitting clears the machine slots; existing items are returned to the RS network first"
+  "rsi.plan.machine_clear_notice": "Before ordering, clear the machine slots; existing items will be returned to the RS network first"
 }
