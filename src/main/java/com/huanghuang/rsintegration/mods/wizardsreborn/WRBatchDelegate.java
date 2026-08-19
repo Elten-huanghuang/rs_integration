@@ -386,18 +386,11 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
                 for (int i = 0; i < pedestalRefs.size(); i++) {
                     ItemStack stack = getContainerItem(pedestalRefs.get(i), 0);
                     if (!stack.isEmpty()) {
-                        // Recover to RS network or player inventory
-                        if (network != null) {
-                            ItemStack leftover = network.insertItem(stack.copy(), stack.getCount(),
-                                    com.refinedmods.refinedstorage.api.util.Action.PERFORM);
-                            if (!leftover.isEmpty()) {
-                                net.minecraftforge.items.ItemHandlerHelper.giveItemToPlayer(player, leftover);
-                            }
-                        } else {
-                            net.minecraftforge.items.ItemHandlerHelper.giveItemToPlayer(player, stack.copy());
-                        }
                         setContainerItem(pedestalRefs.get(i), 0, ItemStack.EMPTY);
                         syncBlockEntity(pedestalRefs.get(i));
+                        // Clear first, then recover to RS network or player inventory.
+                        // This ordering prevents a failed clear from duplicating the item.
+                        returnItem(stack.copy());
                         hadStray = true;
                     }
                 }
@@ -611,8 +604,49 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
             RSIntegrationMod.LOGGER.debug("[RSI-Batch-WR] [step 6/6] ritual ID check exception", e);
         }
 
+        // Crystal Infusion does not expose a normal inventory busy flag. Once
+        // the ritual/cooldown checks above prove the room is idle, recover stale
+        // pedestal contents before the next recipe is placed. This is deliberately
+        // limited to the ritual area and never touches the crystal or runic plate.
+        recoverIdleCrystalPedestals(player, level);
+
         RSIntegrationMod.LOGGER.debug("[RSI-Batch-WR] Crystal setup validation PASSED at {}", myPos);
         return true;
+    }
+
+    private void recoverIdleCrystalPedestals(ServerPlayer player, ServerLevel level) {
+        try {
+            Object ritual = Reflect.getMethodOrThrow(
+                    WRReflection.runicPedestalBEClass, "getCrystalRitual", "getCrystalRitual")
+                    .invoke(level.getBlockEntity(myPos.below()));
+            if (ritual == null) return;
+            Object area = Reflect.getMethodOrThrow(
+                    ritual.getClass(), "getArea", "getArea", be.getClass()).invoke(ritual, be);
+            @SuppressWarnings("unchecked")
+            List<?> pedestals = (List<?>) Reflect.getMethodOrThrow(
+                    WRReflection.crystalRitualClass, "getPedestalsWithArea",
+                    "getPedestalsWithArea", Level.class, BlockPos.class,
+                    WRReflection.ritualAreaClass).invoke(null, level, myPos, area);
+            int recovered = 0;
+            for (Object pedestal : pedestals) {
+                ItemStack stack = getContainerItem(pedestal, 0);
+                if (stack.isEmpty()) continue;
+                setContainerItem(pedestal, 0, ItemStack.EMPTY);
+                syncBlockEntity(pedestal);
+                returnItem(stack.copy());
+                recovered++;
+            }
+            if (recovered > 0) {
+                RSIntegrationMod.LOGGER.info(
+                        "[RSI-Batch-WR] Recovered {} stale Crystal Infusion pedestal stack(s) at {}",
+                        recovered, myPos);
+            }
+        } catch (Exception e) {
+            // Recovery is best-effort. The normal placement checks still reject
+            // an occupied pedestal rather than risking an overwrite or loss.
+            RSIntegrationMod.LOGGER.debug(
+                    "[RSI-Batch-WR] Could not inspect Crystal Infusion pedestals for recovery", e);
+        }
     }
 
     @Override
