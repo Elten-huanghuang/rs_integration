@@ -79,11 +79,7 @@ public final class PlanTreeModel {
         if (targetStep != null) {
             root.limited = targetStep.alternatives().size() > maxTreeCandidates();
         }
-        PlanResponse.Availability rootAvail = plan.availability(target);
-        if (rootAvail != null) {
-            root.available = rootAvail.available();
-            root.needed = rootAvail.needed();
-        }
+        applyAvailability(root, plan, target);
 
         // Path-local stack (push on enter, pop on exit) — detects genuine cycles (A→B→A)
         // without misflagging DAG reuse (iron ingot shared by two sibling components).
@@ -111,7 +107,7 @@ public final class PlanTreeModel {
                 target.getCount() * Math.max(1, plan.repeatCount()), 0, targetStep);
         if (targetStep != null) {
             root.limited = targetStep.alternatives().size()
-                    > RSIntegrationConfig.RECIPE_TREE_MAX_CANDIDATES.get();
+                    > maxTreeCandidates();
         }
         applyAvailability(root, plan, target);
 
@@ -205,6 +201,7 @@ public final class PlanTreeModel {
             PlanTreeNode cycle = new PlanTreeNode(IngredientKey.of(material), material,
                     quantity, depth, producer.asPlanStep(), producer.nodeId()).markCycle();
             cycle.edgeQuantity = quantity;
+            applyAvailability(cycle, plan, material);
             return cycle;
         }
 
@@ -438,7 +435,7 @@ public final class PlanTreeModel {
                 PlanTreeNode child = new PlanTreeNode(
                         inputKey, childStep.output(), amount, parent.depth + 1, childStep);
                 child.limited = childStep.alternatives().size()
-                        > RSIntegrationConfig.RECIPE_TREE_MAX_CANDIDATES.get();
+                        > maxTreeCandidates();
                 applyAvailability(child, plan, input);
                 parent.children.add(child);
 
@@ -463,6 +460,13 @@ public final class PlanTreeModel {
         if (a != null) {
             node.available = a.available();
             node.needed = a.needed();
+        }
+        if (node.step != null) {
+            PlanResponse.StepIssue issue = plan.stepIssues().get(node.step.recipeId());
+            if (issue != null) {
+                node.warnings = issue.warnings();
+                node.prerequisiteBlocked = issue.blocked();
+            }
         }
     }
 

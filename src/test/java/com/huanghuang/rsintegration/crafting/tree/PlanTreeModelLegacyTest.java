@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.crafting.plan.PlanResponse;
 import com.huanghuang.rsintegration.crafting.plan.PlanStep;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import org.junit.jupiter.api.Test;
@@ -36,5 +37,28 @@ class PlanTreeModelLegacyTest extends BootstrapTest {
         assertEquals(selected, root.step.recipeId());
         assertEquals(List.of(alternative), root.step.alternatives());
         assertTrue(root.hasAlternatives());
+    }
+
+    @Test
+    void intermediateStepReceivesItsOwnPrerequisiteIssue() {
+        ResourceLocation rootId = new ResourceLocation("test", "root");
+        ResourceLocation altarId = new ResourceLocation("goety", "dark_altar_step");
+        PlanStep altarStep = new PlanStep(altarId, new ItemStack(Items.EMERALD), 1,
+                List.of(new ItemStack(Items.COAL)), List.of(), ModType.byId("goety"));
+        PlanStep rootStep = new PlanStep(rootId, new ItemStack(Items.DIAMOND), 1,
+                List.of(new ItemStack(Items.EMERALD)), List.of(), ModType.byId("generic"));
+        PlanResponse plan = new PlanResponse(true, "Diamond", new ItemStack(Items.DIAMOND),
+                List.of(altarStep, rootStep), Map.of(), List.of(), rootId.toString(),
+                null, null, 0, 0, 0, List.of(), 1,
+                null, null, null, 0, false, false, false, null,
+                java.util.Set.of(), Map.of(), null, null, true, List.of(),
+                Map.of(altarId, new PlanResponse.StepIssue(
+                        List.of(Component.literal("Missing altar structure")), true)));
+
+        PlanTreeNode altarNode = PlanTreeModel.from(plan).root.children.get(0);
+
+        assertEquals(altarId, altarNode.step.recipeId());
+        assertTrue(altarNode.prerequisiteBlocked);
+        assertEquals("Missing altar structure", altarNode.warnings.get(0).getString());
     }
 }

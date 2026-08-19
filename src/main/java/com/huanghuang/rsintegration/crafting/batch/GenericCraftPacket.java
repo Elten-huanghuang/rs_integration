@@ -45,6 +45,7 @@ import com.huanghuang.rsintegration.mods.farmingforblockheads.MarketBatchDelegat
 import com.huanghuang.rsintegration.mods.apotheosis.ApotheosisGemCuttingCatalog;
 import com.huanghuang.rsintegration.mods.arsnouveau.ArsDynamicApparatusRecipe;
 import com.huanghuang.rsintegration.mods.goety.GoetyDynamicRitualRecipe;
+import com.huanghuang.rsintegration.mods.goety.GoetyBatchDelegate;
 import com.huanghuang.rsintegration.mods.goety.GoetySoulTotemCrafting;
 import com.huanghuang.rsintegration.mods.forbidden.FaRitualHelper;
 import com.huanghuang.rsintegration.mods.forbidden.FaRitualWrapper;
@@ -3011,6 +3012,36 @@ public final class GenericCraftPacket {
                 itemAvailable, itemSource, neededCounts, repeatCount);
 
         PlanGraphView planGraphView = planGraph != null ? PlanGraphView.from(planGraph) : null;
+        Map<ResourceLocation, PlanResponse.StepIssue> stepIssues = new LinkedHashMap<>();
+        Set<ResourceLocation> intermediateGoetyRecipes = new LinkedHashSet<>();
+        for (PlanStep step : steps) {
+            String modTypeId = step.modType() != null ? step.modType().id() : "";
+            if (!step.recipeId().equals(recipeId)
+                    && (ModIds.GOETY.equals(modTypeId) || "goety_brazier".equals(modTypeId))) {
+                intermediateGoetyRecipes.add(step.recipeId());
+            }
+        }
+        if (planGraphView != null) {
+            for (PlanGraphView.NodeView node : planGraphView.nodes()) {
+                if (!node.recipeId().equals(recipeId)
+                        && (ModIds.GOETY.equals(node.modTypeId())
+                        || "goety_brazier".equals(node.modTypeId()))) {
+                    intermediateGoetyRecipes.add(node.recipeId());
+                }
+            }
+        }
+        for (ResourceLocation intermediateRecipeId : intermediateGoetyRecipes) {
+            Recipe<?> intermediateRecipe = resolveRecipe(player.serverLevel(), intermediateRecipeId);
+            if (intermediateRecipe == null) continue;
+            GoetyBatchDelegate.PlanPrerequisiteCheck check =
+                    GoetyBatchDelegate.checkPlanPrerequisites(
+                            player, intermediateRecipe, null, null);
+            if (!check.warnings().isEmpty() || check.blocked()) {
+                stepIssues.put(intermediateRecipeId,
+                        new PlanResponse.StepIssue(check.warnings(), check.blocked()));
+            }
+            blockingPrerequisiteFailure |= check.blocked();
+        }
         PlanMaterialBill.Result materialBill = PlanMaterialBill.summarize(
                 neededCounts, itemSource, itemAvailable, available, planTargetOutput,
                 steps, repeatCount, planGraphView, !missing.isEmpty());
@@ -3228,7 +3259,8 @@ public final class GenericCraftPacket {
                 clickedOutput,
                 planGraphView,
                 blockingPrerequisiteFailure,
-                machineCandidates
+                machineCandidates,
+                stepIssues
         );
 
         int responseStepCount = steps.size();

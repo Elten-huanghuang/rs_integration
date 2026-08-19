@@ -51,6 +51,8 @@ public final class PlanTreeRenderer {
     private static final int C_PATH_TINT       = 0x111A3E1A;
     private static final int C_LIMITED         = 0xFFF0A040;  // over-candidate-cap badge
     private static final int C_CAROUSEL        = 0xFF66CCEE;  // tag-input carousel indicator
+    private static final int C_PREREQ_WARNING  = 0xFFFFAA33;
+    private static final int C_PREREQ_BLOCKED  = 0xFFFF4444;
 
     private static final float NODE_RADIUS = 4f;
     private static final int LINE_THICKNESS = 2;
@@ -215,6 +217,9 @@ public final class PlanTreeRenderer {
         if (node.limited) {
             drawLimitedBadge(gfx, x + w - 6, y - 1);
         }
+        if (!node.warnings.isEmpty() || node.prerequisiteBlocked) {
+            drawPrerequisiteBadge(gfx, x + w - 10, y - 8, node.prerequisiteBlocked);
+        }
 
         // 6c. Fold indicator on the left edge for foldable nodes (non-root with a subtree). A
         //     collapsed step otherwise looks identical to a raw leaf, so the [+]/[−] is the primary
@@ -262,6 +267,8 @@ public final class PlanTreeRenderer {
 
     private int borderColor(PlanTreeNode node, boolean hovered, boolean isSelected) {
         if (hovered) return C_BORDER_HOVER;
+        if (node.prerequisiteBlocked) return C_PREREQ_BLOCKED;
+        if (!node.warnings.isEmpty()) return C_PREREQ_WARNING;
         if (isSelected) return C_BORDER_SELECT;
         // Availability tint for leaves with known numbers.
         if (node.needed > 0) {
@@ -332,6 +339,14 @@ public final class PlanTreeRenderer {
         for (int i = 0; i < 5; i++) {
             gfx.fill(cornerX - i, topY + i, cornerX + 5 - i, topY + i + 1, C_LIMITED);
         }
+    }
+
+    private void drawPrerequisiteBadge(GuiGraphics gfx, int x, int y, boolean blocked) {
+        int color = blocked ? C_PREREQ_BLOCKED : C_PREREQ_WARNING;
+        UIRenderer.rounded(gfx, x, y, 13, 13, 6.5f, 0xFF140805);
+        UIRenderer.rounded(gfx, x + 1, y + 1, 11, 11, 5.5f, color);
+        UIRenderer.rounded(gfx, x + 3, y + 3, 7, 7, 3.5f, 0xFF32100D);
+        gfx.drawString(font, "!", x + 5, y + 2, 0xFFFFE8E8, true);
     }
 
     /** Bottom bar of dots under a carousel icon, one dot per tag member (max 5). */
