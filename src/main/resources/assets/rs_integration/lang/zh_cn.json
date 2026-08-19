@@ -971,5 +971,5 @@
   "rsi.recent_search.favorite": "收藏或取消收藏",
   "rsi.recent_search.delete": "删除这条搜索记录",
   "rsi.recent_search.clear_all": "清空当前世界或服务器的搜索记录",
-  "rsi.plan.machine_clear_notice": "下单后将清空机器内部槽位，原有物品会优先回收到 RS 网络"
+  "rsi.plan.machine_clear_notice": "下单前请清空机器内部槽位，原有物品会优先回收到 RS 网络"
 }
