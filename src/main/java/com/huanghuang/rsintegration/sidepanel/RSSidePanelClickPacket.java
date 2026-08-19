@@ -29,6 +29,7 @@ public final class RSSidePanelClickPacket {
     public static final byte ACTION_EXTRACT_MAX = 2;
     public static final byte ACTION_DRAG_DISTRIBUTE = 3;
     public static final byte ACTION_INSERT = 4;
+    public static final byte ACTION_PICK_BLOCK = 5;
 
     final byte action;
     final boolean isShift;
@@ -116,7 +117,8 @@ public final class RSSidePanelClickPacket {
             if (buf.readableBytes() != 0) throw new IllegalArgumentException("trailing side-panel insert bytes");
             return packet;
         }
-        if (action < ACTION_EXTRACT_ONE || action > ACTION_EXTRACT_MAX)
+        if ((action < ACTION_EXTRACT_ONE || action > ACTION_EXTRACT_MAX)
+                && action != ACTION_PICK_BLOCK)
             throw new IllegalArgumentException("invalid side-panel action: " + action);
         ItemStack item = readStack(buf);
         boolean shift = buf.readBoolean();
@@ -176,6 +178,13 @@ public final class RSSidePanelClickPacket {
         handleSingleClick(player, targetItem, action, isShift, panelId);
         int after = storedCount(player, panelId, targetItem);
         int actual = Math.max(0, before - after);
+        if (action == ACTION_PICK_BLOCK && actual > 0) {
+            player.displayClientMessage(Component.translatable(
+                    "rsi.world_pick.extracted", targetItem.getHoverName(), actual), true);
+        } else if (action == ACTION_PICK_BLOCK) {
+            player.displayClientMessage(Component.translatable(
+                    "rsi.world_pick.failed", targetItem.getHoverName()), true);
+        }
         return actual > 0
                 ? OperationResult.success(panelId, actual)
                 : OperationResult.failure(panelId, RSSidePanelOperationResultPacket.ErrorCode.NOTHING_TRANSFERRED);
@@ -245,6 +254,11 @@ public final class RSSidePanelClickPacket {
         INetwork network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
         if (network == null || targetItem.isEmpty()) return;
 
+        if (action == ACTION_PICK_BLOCK
+                && (player.isCreative() || !player.getMainHandItem().isEmpty())) {
+            return;
+        }
+
         if (network.getSecurityManager() != null
                 && !network.getSecurityManager().hasPermission(Permission.EXTRACT, player)) {
             RSIntegrationMod.LOGGER.debug("[RSI] Extract blocked by security manager for {}", player.getGameProfile().getName());
@@ -295,6 +309,7 @@ public final class RSSidePanelClickPacket {
                 if (count < 1) count = 1;
                 break;
             case ACTION_EXTRACT_MAX:
+            case ACTION_PICK_BLOCK:
                 count = maxStack;
                 break;
             default:
@@ -310,7 +325,7 @@ public final class RSSidePanelClickPacket {
         // the client.  Therefore creative-mode extractions always route items to the
         // player inventory directly (the isShift path).
         ItemStack cursor = player.containerMenu.getCarried();
-        if (!isShift && !player.isCreative()) {
+        if (action != ACTION_PICK_BLOCK && !isShift && !player.isCreative()) {
             if (!cursor.isEmpty()) {
                 if (!ItemHandlerHelper.canItemStacksStack(cursor, stored)) {
                     return; // cursor holds a different item — deny extraction
@@ -341,7 +356,12 @@ public final class RSSidePanelClickPacket {
         ItemStack extracted = network.extractItem(extractTemplate, count, Action.PERFORM);
         if (extracted.isEmpty()) return;
 
-        if (isShift || (player.isCreative() && action == ACTION_EXTRACT_MAX)) {
+        if (action == ACTION_PICK_BLOCK) {
+            player.getInventory().setItem(player.getInventory().selected, extracted);
+            player.getInventory().setChanged();
+            player.inventoryMenu.broadcastChanges();
+            player.containerMenu.broadcastChanges();
+        } else if (isShift || (player.isCreative() && action == ACTION_EXTRACT_MAX)) {
             ItemStack remainder = ItemHandlerHelper.insertItemStacked(
                     playerFullInv(player), extracted, false);
             if (!remainder.isEmpty()) player.drop(remainder, false);

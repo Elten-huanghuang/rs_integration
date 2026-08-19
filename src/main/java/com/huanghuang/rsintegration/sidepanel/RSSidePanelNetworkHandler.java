@@ -63,6 +63,8 @@ public final class RSSidePanelNetworkHandler {
     private static int machineScanCounter;
     private static long machineStatusSequence;
     private static boolean registered;
+    private static final java.util.concurrent.atomic.AtomicLong CLIENT_OPERATION_IDS =
+            new java.util.concurrent.atomic.AtomicLong(1L);
 
     private RSSidePanelNetworkHandler() {}
 
@@ -428,9 +430,16 @@ public final class RSSidePanelNetworkHandler {
     }
 
     public static long sendClick(ItemStack targetItem, byte action, boolean isShift, UUID panelId) {
-        RSSidePanelClickPacket packet = new RSSidePanelClickPacket(targetItem, action, isShift, panelId);
+        long operationId = nextClientOperationId();
+        RSSidePanelClickPacket packet = new RSSidePanelClickPacket(
+                targetItem, action, isShift, panelId, operationId);
         CHANNEL.sendToServer(packet);
         return packet.operationId;
+    }
+
+    private static long nextClientOperationId() {
+        return CLIENT_OPERATION_IDS.getAndUpdate(current ->
+                current >= Long.MAX_VALUE ? 1L : current + 1L);
     }
 
     public static long sendDragDistribute(List<ItemStack> items) {

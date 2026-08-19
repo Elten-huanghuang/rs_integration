@@ -24,7 +24,8 @@ final class RSSidePanelClientPacketHandler {
     }
 
     static void onOperationResult(RSSidePanelOperationResultPacket packet) {
-        if (!RSSidePanelModule.isEnabled()) return;
-        RSSidePanelClient.onOperationResult(packet);
+        com.huanghuang.rsintegration.sidepanel.client.WorldPickClient.onOperationResult(
+                packet.operationId(), packet.success(), packet.actualCount());
+        if (RSSidePanelModule.isEnabled()) RSSidePanelClient.onOperationResult(packet);
     }
 }

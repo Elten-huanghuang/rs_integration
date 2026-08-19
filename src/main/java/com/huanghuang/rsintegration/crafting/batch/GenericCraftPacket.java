@@ -2301,8 +2301,11 @@ public final class GenericCraftPacket {
                 PerformanceMonitor.recordSynchronousPlanningFallback(reason, recipeId));
 
         boolean terminalPureResult = precomputedPlan != null && pendingFallbackReason == null;
+        boolean timedOutMissingRoute = terminalPureResult
+                && canOpenBoundedMissingPlan(precomputedPlan, demandTree);
         if (terminalPureResult
-                && precomputedPlan.feasibility() == PureRecipePlanner.Feasibility.UNKNOWN) {
+                && precomputedPlan.feasibility() == PureRecipePlanner.Feasibility.UNKNOWN
+                && !timedOutMissingRoute) {
             sink.error(Component.translatable("rsi.plan.failure.time_limit"));
             return;
         }
@@ -2378,9 +2381,13 @@ public final class GenericCraftPacket {
                     planningSnapshot.recipeGraph());
             usedPurePlan = true;
         } else if (selectedPureResolver) {
-            for (var unresolved : precomputedPlan.missing()) {
-                if (!unresolved.alternatives().isEmpty()) {
-                    missing.add(unresolved.alternatives().get(0).itemId().toString());
+            if (timedOutMissingRoute) {
+                missing.add(demandTree.unresolved().itemId().toString());
+            } else {
+                for (var unresolved : precomputedPlan.missing()) {
+                    if (!unresolved.alternatives().isEmpty()) {
+                        missing.add(unresolved.alternatives().get(0).itemId().toString());
+                    }
                 }
             }
             resolutionSteps = PurePlanAdapter.toResolutionSteps(precomputedPlan,
@@ -2741,6 +2748,9 @@ public final class GenericCraftPacket {
         // ── Add the target recipe itself as the last step so its grid is visible ──
         // Components, not Strings: a dedicated server cannot resolve rsi.* keys.
         List<Component> modWarnings = new ArrayList<>();
+        if (timedOutMissingRoute) {
+            modWarnings.add(Component.translatable("rsi.plan.failure.time_limit"));
+        }
         boolean blockingPrerequisiteFailure = false;
         // Items the plan's intermediate steps actually produce. When the target's
         // ingredient is a tag with no member in stock (e.g. a wood-tag gun slot),
@@ -3473,6 +3483,15 @@ public final class GenericCraftPacket {
 
     static boolean canUsePrecomputedPlan(@Nullable PureRecipePlanner.Result result) {
         return result != null && result.feasible();
+    }
+
+    static boolean canOpenBoundedMissingPlan(
+            @Nullable PureRecipePlanner.Result plan,
+            PureDemandTreeInspector.Result demandTree) {
+        return plan != null
+                && plan.feasibility() == PureRecipePlanner.Feasibility.UNKNOWN
+                && demandTree.status() == PureDemandTreeInspector.Status.MISSING_MATERIALS
+                && demandTree.unresolved() != null;
     }
 
     /** Projects each physical stack once so broad and exact-NBT demands cannot reuse it. */

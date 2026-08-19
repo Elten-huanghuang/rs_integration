@@ -7,6 +7,7 @@ import com.huanghuang.rsintegration.crafting.OutputDestination;
 import com.huanghuang.rsintegration.crafting.RecipeIndex;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.crafting.planning.PureRecipePlanner;
+import com.huanghuang.rsintegration.crafting.planning.PureDemandTreeInspector;
 import com.huanghuang.rsintegration.crafting.planning.AsyncPlanningCoordinator;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph;
 import com.huanghuang.rsintegration.crafting.planning.PlanningSnapshot;
@@ -140,6 +141,24 @@ class GenericCraftPacketTest extends BootstrapTest {
                 List.of(), List.of(), Map.of());
 
         assertTrue(GenericCraftPacket.canUsePrecomputedPlan(complete));
+    }
+
+    @Test
+    void boundedPureSearchStillOpensKnownMissingMaterialTree() {
+        var diamondPickaxe = new ImmutableRecipeGraph.MaterialRef(
+                new ResourceLocation("minecraft", "diamond_pickaxe"), "");
+        PureRecipePlanner.Result timedOut = new PureRecipePlanner.Result(
+                PureRecipePlanner.Feasibility.UNKNOWN, List.of(), List.of(), Map.of(),
+                PureRecipePlanner.Status.TIME_LIMIT, 10, 0, 0);
+        PureDemandTreeInspector.Result missing = new PureDemandTreeInspector.Result(
+                PureDemandTreeInspector.Status.MISSING_MATERIALS, 2,
+                diamondPickaxe, false);
+
+        assertTrue(GenericCraftPacket.canOpenBoundedMissingPlan(timedOut, missing));
+        assertFalse(GenericCraftPacket.canOpenBoundedMissingPlan(timedOut,
+                new PureDemandTreeInspector.Result(
+                        PureDemandTreeInspector.Status.NODE_LIMIT, 2,
+                        diamondPickaxe, false)));
     }
 
     @Test

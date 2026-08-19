@@ -11,6 +11,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -576,6 +577,43 @@ class PureRecipePlannerTest {
         assertFalse(result.feasible());
         assertEquals(PureRecipePlanner.Feasibility.UNKNOWN, result.feasibility());
         assertEquals(PureRecipePlanner.Status.TIME_LIMIT, result.status());
+    }
+
+    @Test
+    void deadlineIsEnforcedInsideReachabilityTraversal() {
+        MaterialRef target = material("reachability_target");
+        MaterialRef missing = material("reachability_missing");
+        RecipeNode producer = recipe("reachability_producer", target, 1,
+                ingredient(missing, 1));
+        AtomicLong clock = new AtomicLong();
+
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(
+                new ImmutableRecipeGraph(Map.of(target, List.of(producer))), Map.of(),
+                List.of(ingredient(target, 1)), 20, 100, 100, 8L,
+                clock::incrementAndGet);
+
+        assertFalse(result.feasible());
+        assertEquals(PureRecipePlanner.Status.TIME_LIMIT, result.status());
+        assertTrue(clock.get() >= 8L);
+    }
+
+    @Test
+    void partialTraceTimeoutKeepsKnownUnresolvableResult() {
+        MaterialRef target = material("partial_target");
+        MaterialRef missing = material("partial_missing");
+        RecipeNode producer = recipe("partial_producer", target, 1,
+                ingredient(missing, 1));
+        AtomicLong clock = new AtomicLong();
+
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(
+                new ImmutableRecipeGraph(Map.of(target, List.of(producer))), Map.of(),
+                List.of(ingredient(target, 1)), 20, 100, 100, 12L,
+                clock::incrementAndGet);
+
+        assertFalse(result.feasible());
+        assertEquals(PureRecipePlanner.Status.UNRESOLVABLE, result.status());
+        assertEquals(List.of(ingredient(target, 1)), result.missing());
+        assertTrue(clock.get() >= 12L);
     }
 
     @Test
