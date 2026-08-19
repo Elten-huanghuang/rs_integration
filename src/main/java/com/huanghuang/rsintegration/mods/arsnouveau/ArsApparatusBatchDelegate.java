@@ -221,6 +221,19 @@ public final class ArsApparatusBatchDelegate extends AbstractBatchDelegate {
             return false;
         }
 
+        // Ars refuses to start while any scanned pedestal contains an old item.
+        // Recover every stale stack before placing this operation's materials.
+        if (network == null) {
+            network = CraftPacketUtils.resolveNetworkForCraft(player, level.dimension(), machinePos);
+        }
+        int recovered = ArsPedestalRecovery.recover(
+                level, pedestalLayout.pedestalPositions(), player, network);
+        if (recovered > 0) {
+            RSIntegrationMod.LOGGER.info(
+                    "[RSI-ArsApparatus] Recovered {} occupied pedestal stack(s) into RS",
+                    recovered);
+        }
+
         // First item is reagent (catalyst), rest are pedestal items
         ItemStack reagent = ArsDynamicApparatusRecipe.isSupported(recipe)
                 ? ArsDynamicApparatusRecipe.prepareMachineInput(

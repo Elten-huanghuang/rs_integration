@@ -203,6 +203,8 @@ public final class IronSpellBooksRecipeCatalog {
 
     @SuppressWarnings("unchecked")
     private static void addArcaneAnvilRecipes(Map<ResourceLocation, IronSpellBooksRecipe> result) {
+        Map<ResourceLocation, IronSpellBooksRecipe> reflected = new LinkedHashMap<>();
+        boolean reflectionCompleted = false;
         try {
             Class<?> recipeClass = findClass(
                     "io.redspace.ironsspellbooks.jei.ArcaneAnvilJeiRecipe",
@@ -218,7 +220,7 @@ public final class IronSpellBooksRecipeCatalog {
                     if (leftItems.isEmpty() || rightItems.isEmpty() || outputs.isEmpty()) continue;
                     ResourceLocation id = id("arcane_anvil/scroll_upgrade",
                             spell.getSpellResource(), level + 1, null);
-                    result.put(id, new IronSpellBooksRecipe(id,
+                    reflected.put(id, new IronSpellBooksRecipe(id,
                             IronSpellBooksRecipe.Machine.ARCANE_ANVIL,
                             List.of(leftItems.get(0), rightItems.get(0)),
                             List.of(exactIngredientOf(leftItems), exactIngredientOf(rightItems)),
@@ -226,9 +228,37 @@ public final class IronSpellBooksRecipeCatalog {
                             spell.getSpellId(), level + 1));
                 }
             }
+            reflectionCompleted = true;
         } catch (ReflectiveOperationException | LinkageError e) {
-            RSIntegrationMod.LOGGER.warn(
-                    "[RSI-IronSpells] Arcane Anvil recipe catalog is unavailable for this version", e);
+            RSIntegrationMod.LOGGER.debug(
+                    "[RSI-IronSpells] Arcane Anvil JEI recipe reflection unavailable; using native fallback", e);
+        }
+        if (reflectionCompleted) {
+            result.putAll(reflected);
+            return;
+        }
+
+        // Dedicated servers may not load the JEI-only recipe class at all. The
+        // native rule is intentionally only a fallback: supported JEI versions
+        // remain authoritative, while servers still get the same level -> rarity
+        // -> ink mapping instead of an empty or partial catalog.
+        RSIntegrationMod.LOGGER.warn(
+                "[RSI-IronSpells] Arcane Anvil JEI recipes unavailable; generating native scroll upgrades");
+        for (AbstractSpell spell : SpellRegistry.getEnabledSpells()) {
+            for (int level = spell.getMinLevel(); level < spell.getMaxLevel(); level++) {
+                InkItem ink = InkItem.getInkForRarity(spell.getRarity(level + 1));
+                if (ink == null) continue;
+                ItemStack left = scroll(spell, level);
+                ItemStack right = new ItemStack(ink);
+                ItemStack output = scroll(spell, level + 1);
+                ResourceLocation id = id("arcane_anvil/scroll_upgrade",
+                        spell.getSpellResource(), level + 1, null);
+                result.put(id, new IronSpellBooksRecipe(id,
+                        IronSpellBooksRecipe.Machine.ARCANE_ANVIL,
+                        List.of(left, right),
+                        List.of(exactIngredientOf(List.of(left)), exactIngredientOf(List.of(right))),
+                        output, spell.getSpellId(), level + 1));
+            }
         }
     }
 

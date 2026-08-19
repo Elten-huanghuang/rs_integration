@@ -216,6 +216,22 @@ public final class ArsImbuementBatchDelegate extends AbstractBatchDelegate {
             return false;
         }
 
+        // On the first operation, clear every pedestal scanned by the chamber.
+        // Later operations keep this batch's reusable catalysts installed.
+        if (!pedestalCatalystsInstalled && pedestalLayout != null) {
+            if (network == null) {
+                network = CraftPacketUtils.resolveNetworkForCraft(
+                        player, level.dimension(), machinePos);
+            }
+            int recovered = ArsPedestalRecovery.recover(
+                    level, pedestalLayout.pedestalPositions(), player, network);
+            if (recovered > 0) {
+                RSIntegrationMod.LOGGER.info(
+                        "[RSI-ArsImbuement] Recovered {} occupied pedestal stack(s) into RS",
+                        recovered);
+            }
+        }
+
         ItemStack inputStack = materials.get(0);
         List<ItemStack> pedestalStacks = materials.subList(1, materials.size());
 
