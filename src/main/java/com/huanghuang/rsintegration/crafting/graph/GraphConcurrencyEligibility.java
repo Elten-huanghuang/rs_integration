@@ -61,6 +61,13 @@ public final class GraphConcurrencyEligibility {
             return capability(BatchConcurrencyCapabilities.OutputOwnership.OWNED_WORLD_CAPTURE,
                     BatchConcurrencyCapabilities.SideEffects.ADJACENT_MACHINE, 0);
         }
+        // Aether Freezers and Altars keep item results in their own furnace-like
+        // output slot and can safely run one operation per bound machine. The
+        // Incubator produces entities, so it intentionally remains exclusive.
+        if ("aether_freezer".equals(type) || "aether_altar".equals(type)) {
+            return capability(BatchConcurrencyCapabilities.OutputOwnership.MACHINE_SLOT,
+                    BatchConcurrencyCapabilities.SideEffects.MACHINE_LOCAL, 0);
+        }
         if (WORLD_CAPTURE_TYPES.contains(type)) {
             return capability(BatchConcurrencyCapabilities.OutputOwnership.OWNED_WORLD_CAPTURE,
                     RITUAL_TYPES.contains(type)

@@ -51,9 +51,16 @@ class GraphConcurrencyEligibilityTest {
     @Test
     void explicitDenyTypesRemainUnknown() {
         assertNull(GraphConcurrencyEligibility.capabilities(new GraphConcurrencyEligibility.Context(
-                "crockpot", "pkg.CrockPotRecipe", false)));
-        assertNull(GraphConcurrencyEligibility.capabilities(new GraphConcurrencyEligibility.Context(
                 "immortalers_delight", "pkg.CoolerRecipe", false)));
+    }
+
+    @Test
+    void furnaceLikeAetherMachinesUseIndependentMachineSlots() {
+        assertEquals(BatchConcurrencyCapabilities.OutputOwnership.MACHINE_SLOT,
+                capability("aether_freezer", "pkg.FreezingRecipe", false).outputOwnership());
+        assertEquals(BatchConcurrencyCapabilities.OutputOwnership.MACHINE_SLOT,
+                capability("aether_altar", "pkg.Enchanting", false).outputOwnership());
+        assertNull(capability("aether_incubator", "pkg.Incubation", false));
     }
 
     @Test

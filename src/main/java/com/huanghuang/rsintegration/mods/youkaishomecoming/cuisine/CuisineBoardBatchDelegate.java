@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.reflection.probes.YHKReflection;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;
@@ -31,6 +32,16 @@ import java.util.Map;
 
 /** Batch delegate for Youkais Homecoming Cuisine Board. */
 public final class CuisineBoardBatchDelegate extends AbstractBatchDelegate {
+
+    @Override
+    public BatchConcurrencyCapabilities concurrencyCapabilities() {
+        return BatchConcurrencyCapabilities.delegateResult();
+    }
+
+    @Override
+    public boolean supportsConcurrentNodeExecution() {
+        return true;
+    }
 
     private ServerPlayer player;
     private ServerLevel myLevel;

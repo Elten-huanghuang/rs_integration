@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
@@ -30,6 +31,16 @@ import java.util.List;
  * process them, then collects from slot 0 (output).
  */
 public final class CompressorBatchDelegate extends AbstractBatchDelegate {
+
+    @Override
+    public BatchConcurrencyCapabilities concurrencyCapabilities() {
+        return BatchConcurrencyCapabilities.machineSlot();
+    }
+
+    @Override
+    public boolean supportsConcurrentNodeExecution() {
+        return true;
+    }
 
     private static final String BE_CLASS = "committee.nova.mods.avaritia.common.tile.NeutronCompressorTile";
 

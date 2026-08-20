@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.reflection.probes.YHKReflection;
 import com.huanghuang.rsintegration.util.PlayerUtils;
 import com.huanghuang.rsintegration.util.TrackedNetworkInsertion;
@@ -39,6 +40,18 @@ import java.util.Map;
 
 /** Batch delegate for Youkais Homecoming Kettle. */
 public final class KettleBatchDelegate extends AbstractBatchDelegate {
+
+    @Override
+    public BatchConcurrencyCapabilities concurrencyCapabilities() {
+        // The result is drained from this kettle and converted to an item by
+        // the delegate; no shared output slot or world capture is involved.
+        return BatchConcurrencyCapabilities.delegateResult();
+    }
+
+    @Override
+    public boolean supportsConcurrentNodeExecution() {
+        return true;
+    }
 
     private ServerPlayer player;
     private ServerLevel myLevel;
