@@ -68,8 +68,9 @@ class GraphConcurrencyPolicyTest {
         assertFalse(farmersDelight.exclusive());
         assertEquals(BatchConcurrencyCapabilities.SideEffects.LOCAL_WORLD_ITEMS,
                 farmersDelight.capabilities().sideEffects());
-        assertTrue(crockPot.exclusive());
-        assertEquals("delegate has no concurrency capability", crockPot.reason());
+        assertFalse(crockPot.exclusive());
+        assertEquals(BatchConcurrencyCapabilities.OutputOwnership.MACHINE_SLOT,
+                crockPot.capabilities().outputOwnership());
     }
 
     @Test

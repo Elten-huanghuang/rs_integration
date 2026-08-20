@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.batch.ParallelBatchSizing;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
@@ -41,6 +42,18 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /** Batch delegate for Iron Furnaces ordinary furnace mode. */
 public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
+
+    @Override
+    public BatchConcurrencyCapabilities concurrencyCapabilities() {
+        // Furnace and factory lanes are leased per bound block, so outputs and
+        // cleanup remain local to each worker.
+        return BatchConcurrencyCapabilities.machineSlot();
+    }
+
+    @Override
+    public boolean supportsConcurrentNodeExecution() {
+        return true;
+    }
 
     private static final int INPUT = 0;
     private static final int FUEL = 1;

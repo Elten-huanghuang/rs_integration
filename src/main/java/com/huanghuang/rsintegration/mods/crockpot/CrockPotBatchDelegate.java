@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.mods.crockpot;
 
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.MachineSlotOwnershipPolicy;
 
@@ -46,6 +47,18 @@ import java.util.Arrays;
 
 /** Batch delegate for Crock Pot cooking recipes (all pot levels). */
 public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
+
+    @Override
+    public BatchConcurrencyCapabilities concurrencyCapabilities() {
+        // Each pot owns its input/output slots; the chain reserves one recipe
+        // operation per worker before any physical insertion occurs.
+        return BatchConcurrencyCapabilities.machineSlot();
+    }
+
+    @Override
+    public boolean supportsConcurrentNodeExecution() {
+        return true;
+    }
 
     private ServerPlayer player;
     private ServerLevel myLevel;
