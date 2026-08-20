@@ -6,6 +6,7 @@ import com.huanghuang.rsintegration.mods.crockpot.CrockPotBatchDelegate;
 import com.huanghuang.rsintegration.mods.farmersdelight.CookingPotBatchDelegate;
 import com.huanghuang.rsintegration.mods.vanilla.brewing.BrewingStandBatchDelegate;
 import com.huanghuang.rsintegration.mods.vanilla.VanillaMachineBatchDelegate;
+import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
@@ -19,7 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-class GraphConcurrencyPolicyTest {
+class GraphConcurrencyPolicyTest extends BootstrapTest {
 
     @Test
     void disabledModOverridesDelegateCapability() {

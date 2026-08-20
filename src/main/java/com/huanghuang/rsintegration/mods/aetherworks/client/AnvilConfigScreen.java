@@ -8,7 +8,7 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 
 /**
- * Config screen for Aetherium Anvil automation settings.
+ * Config screen for Aetherium Anvil temperature and refill settings.
  * Opened by Shift+Right-clicking an anvil with a Tinker Hammer.
  */
 public final class AnvilConfigScreen extends Screen {
@@ -20,13 +20,11 @@ public final class AnvilConfigScreen extends Screen {
     private EditBox tempMaxField;
     private boolean leverControl;
     private boolean autoRefill;
-    private boolean autoHammer;
 
     public AnvilConfigScreen() {
         super(Component.literal("天华砧 设置"));
         this.leverControl = LeverBinder.isLeverControlEnabled();
         this.autoRefill = LeverBinder.isAutoRefillEnabled();
-        this.autoHammer = AetherworksClientSetup.isAutoHammerEnabled();
     }
 
     @Override
@@ -42,14 +40,6 @@ public final class AnvilConfigScreen extends Screen {
         tempMaxField = new EditBox(font, cx + 80, cy + 46, 90, 20, Component.literal("最高温度"));
         tempMaxField.setValue(String.valueOf(LeverBinder.getTempMax()));
         addRenderableWidget(tempMaxField);
-
-        addRenderableWidget(Button.builder(
-                Component.literal(autoHammer ? "自动锤炼: 开" : "自动锤炼: 关"),
-                b -> {
-                    autoHammer = !autoHammer;
-                    b.setMessage(Component.literal(autoHammer ? "自动锤炼: 开" : "自动锤炼: 关"));
-                })
-                .pos(cx + 10, cy + 74).size(95, 20).build());
 
         addRenderableWidget(Button.builder(
                 Component.literal(autoRefill ? "自动补货: 开" : "自动补货: 关"),
@@ -93,7 +83,6 @@ public final class AnvilConfigScreen extends Screen {
             int max = Integer.parseInt(tempMaxField.getValue());
             LeverBinder.setTempRange(min, max);
         } catch (NumberFormatException ignored) {}
-        AetherworksClientSetup.setAutoHammerEnabled(autoHammer);
         LeverBinder.setLeverControlEnabled(leverControl);
         LeverBinder.setAutoRefill(autoRefill);
     }
