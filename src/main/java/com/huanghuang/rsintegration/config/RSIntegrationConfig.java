@@ -127,6 +127,7 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.BooleanValue ENABLE_SOPHISTICATED_BACKPACKS;
     public static ForgeConfigSpec.BooleanValue ENABLE_FTB_QUEST_EXTERNAL_ITEM_PROGRESS;
     public static ForgeConfigSpec.BooleanValue ENABLE_JEI;
+    public static ForgeConfigSpec.BooleanValue ENABLE_VILLAGER_TRADE_LOCK;
     public static ForgeConfigSpec.BooleanValue ENABLE_JEI_MARQUEE_SELECTION;
     public static ForgeConfigSpec.BooleanValue ENABLE_JEI_BOOKMARK_MARQUEE_SELECTION;
     public static ForgeConfigSpec.BooleanValue ENABLE_RS_GRID_SWIPE_EXTRACT;
@@ -609,6 +610,10 @@ public final class RSIntegrationConfig {
                 .defineInRange("configSchemaVersion", 1, 1, SERVER_CONFIG_SCHEMA);
 
         s.push("integrations");
+        ENABLE_VILLAGER_TRADE_LOCK = s
+                .comment("Lock villager trade rerolls when a current trade result is bookmarked in JEI.",
+                        "Supports Retraining and Trade Cycling. Disable to bypass all server-side trade-lock checks.")
+                .define("enableVillagerTradeLock", true);
         CROCKPOT_FILLER_ITEM = s
                 .comment("Default filler item for CrockPot recipes when input slots are not",
                         "fully occupied by the recipe's must-contain ingredients.",

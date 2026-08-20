@@ -218,7 +218,8 @@ public final class PlanTreeRenderer {
             drawLimitedBadge(gfx, x + w - 6, y - 1);
         }
         if (!node.warnings.isEmpty() || node.prerequisiteBlocked) {
-            drawPrerequisiteBadge(gfx, x + w - 10, y - 8, node.prerequisiteBlocked);
+            drawPrerequisiteBadge(gfx, x + w - PlanTreeLayout.ITEM_ICON_SIZE / 2,
+                    iconY, node.prerequisiteBlocked);
         }
 
         // 6c. Fold indicator on the left edge for foldable nodes (non-root with a subtree). A
@@ -343,10 +344,13 @@ public final class PlanTreeRenderer {
 
     private void drawPrerequisiteBadge(GuiGraphics gfx, int x, int y, boolean blocked) {
         int color = blocked ? C_PREREQ_BLOCKED : C_PREREQ_WARNING;
-        UIRenderer.rounded(gfx, x, y, 13, 13, 6.5f, 0xFF140805);
-        UIRenderer.rounded(gfx, x + 1, y + 1, 11, 11, 5.5f, color);
-        UIRenderer.rounded(gfx, x + 3, y + 3, 7, 7, 3.5f, 0xFF32100D);
-        gfx.drawString(font, "!", x + 5, y + 2, 0xFFFFE8E8, true);
+        int size = PlanTreeLayout.ITEM_ICON_SIZE;
+        UIRenderer.rounded(gfx, x, y, size, size, size / 2f, 0xFF140303);
+        UIRenderer.rounded(gfx, x + 1, y + 1, size - 2, size - 2,
+                (size - 2) / 2f, color);
+        UIRenderer.rounded(gfx, x + 3, y + 3, size - 6, size - 6,
+                (size - 6) / 2f, 0xFF32100D);
+        gfx.drawString(font, "!", x + 6, y + 2, color, true);
     }
 
     /** Bottom bar of dots under a carousel icon, one dot per tag member (max 5). */

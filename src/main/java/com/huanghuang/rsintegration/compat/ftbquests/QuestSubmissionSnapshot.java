@@ -46,4 +46,21 @@ public record QuestSubmissionSnapshot(
         }
         return true;
     }
+
+    /** Compares the projection rendered by JEI, excluding noisy live task state. */
+    public boolean jeiContentEquals(QuestSubmissionSnapshot other) {
+        if (other == null || questId != other.questId || !title.equals(other.title)
+                || repeatable != other.repeatable || rewardCount != other.rewardCount
+                || requirements.size() != other.requirements.size()
+                || itemRewards.size() != other.itemRewards.size()) {
+            return false;
+        }
+        for (int i = 0; i < requirements.size(); i++) {
+            if (!requirements.get(i).jeiContentEquals(other.requirements.get(i))) return false;
+        }
+        for (int i = 0; i < itemRewards.size(); i++) {
+            if (!itemRewards.get(i).contentEquals(other.itemRewards.get(i))) return false;
+        }
+        return true;
+    }
 }

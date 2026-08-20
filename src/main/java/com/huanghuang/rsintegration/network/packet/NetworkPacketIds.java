@@ -103,4 +103,5 @@ public final class NetworkPacketIds {
 
     // Nearby machine binding (126-129)
     public static final int NEARBY_BINDING_REQUEST = 126;
+    public static final int VILLAGER_TRADE_LOCK_SNAPSHOT = 127;
 }

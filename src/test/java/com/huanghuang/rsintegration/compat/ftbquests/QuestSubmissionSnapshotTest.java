@@ -81,11 +81,51 @@ class QuestSubmissionSnapshotTest extends BootstrapTest {
         assertFalse(first.contentEquals(snapshotWithRequirement(changedNbt, 2L)));
     }
 
+    @Test
+    void jeiComparisonIgnoresProgressAboveVisibleCountLimit() {
+        QuestSubmissionSnapshot first = snapshotWithRequirement(
+                new ItemStack(Items.DIAMOND), 1L, 100L);
+        QuestSubmissionSnapshot second = snapshotWithRequirement(
+                new ItemStack(Items.DIAMOND), 20L, 100L);
+
+        assertFalse(first.contentEquals(second));
+        assertTrue(first.jeiContentEquals(second));
+    }
+
+    @Test
+    void jeiComparisonDetectsVisibleRemainingCountChanges() {
+        QuestSubmissionSnapshot first = snapshotWithRequirement(
+                new ItemStack(Items.DIAMOND), 2L, 8L);
+        QuestSubmissionSnapshot second = snapshotWithRequirement(
+                new ItemStack(Items.DIAMOND), 3L, 8L);
+
+        assertFalse(first.jeiContentEquals(second));
+    }
+
+    @Test
+    void jeiComparisonIgnoresEquivalentCandidateOrderAndStackCounts() {
+        ItemStack diamond = new ItemStack(Items.DIAMOND, 2);
+        ItemStack emerald = new ItemStack(Items.EMERALD, 3);
+        QuestItemRequirement firstRequirement = new QuestItemRequirement(10L, diamond,
+                List.of(diamond, emerald), 100L, 0L, true, false, false, false);
+        QuestItemRequirement secondRequirement = new QuestItemRequirement(10L,
+                new ItemStack(Items.DIAMOND, 17),
+                List.of(new ItemStack(Items.EMERALD, 9), new ItemStack(Items.DIAMOND, 11)),
+                100L, 0L, true, false, false, false);
+
+        assertTrue(firstRequirement.jeiContentEquals(secondRequirement));
+    }
+
     private static QuestSubmissionSnapshot snapshotWithRequirement(ItemStack stack, long progress) {
+        return snapshotWithRequirement(stack, progress, 8L);
+    }
+
+    private static QuestSubmissionSnapshot snapshotWithRequirement(
+            ItemStack stack, long progress, long required) {
         return new QuestSubmissionSnapshot(1L, "Quest", stack, false, false,
                 QuestSubmissionEligibility.ELIGIBLE,
                 List.of(new QuestItemRequirement(10L, stack, List.of(stack),
-                        8L, progress, true, false, false, false)),
+                        required, progress, true, false, false, false)),
                 List.of(), 0, false);
     }
 }

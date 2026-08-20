@@ -70,7 +70,10 @@
     "namelesstrinkets.SuperMagnetMixin",
     "wizardterracurios.BuffItemMixin",
     "terraequipment.AutoPotionTickerMixin",
-    "slashblade.RecipeManagerMixin"
+    "slashblade.RecipeManagerMixin",
+    "retraining.RetrainingTradeLockMixin",
+    "tradecycling.TradeCyclingTradeLockMixin",
+    "traderefresh.TradeRefreshTradeLockMixin"
   ],
   "client": [
     "apotheosis.EnchLibraryScreenMixin",
@@ -81,6 +84,7 @@
     "jei.RecipesGuiMixin",
     "jei.RecipeBookmarkMixin",
     "jei.BookmarkOverlayAccessor",
+    "jei.BookmarkListTradeLockMixin",
     "jei.IngredientFilterSolCarrotMixin",
     "jei.ElementSearchSolCarrotMixin",
     "jei.ElementSearchLowMemSolCarrotMixin",
