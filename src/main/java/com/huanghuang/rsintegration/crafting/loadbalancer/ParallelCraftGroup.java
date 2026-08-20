@@ -1013,6 +1013,15 @@ public final class ParallelCraftGroup implements IBatchDelegate {
     private void handleFailedStart(WorkerSlot worker, String detail) {
         List<ItemStack> captured = drainCapture(worker);
         preserveCapturedProgress(worker, captured);
+        // A delegate returning false has rejected this batch. Its cleanup path
+        // removes any materials it inserted, so the uncompleted operation
+        // inputs must become eligible for virtual recovery. Keep operations
+        // already proven by captured output settled to avoid duplicating them.
+        int completed = completedExecutionsFromCapture(
+                worker.delegate.getExpectedOutput(), worker.operationIds.size(), captured);
+        for (int index = completed; index < worker.operationIds.size(); index++) {
+            safelyRecoverableVirtual[worker.operationIds.get(index)] = true;
+        }
         abandonUnstarted(worker);
         beginDraining(detail);
     }
