@@ -904,6 +904,7 @@
   "rsi.autoeat.error.diet_no_groups": "No Diet nutrition groups"
 ,
   "rsi.villager.restock.complete": "Restocked to maximum (inventory: %s, RS: %s)",
+  "rsi.villager.trade_lock.blocked": "Trade refresh locked by a JEI-bookmarked result",
   "rsi.villager.restock.partial": "Partially restocked; missing items added to JEI bookmarks",
   "rsi.villager.restock.no_network": "No RS network; missing items added to JEI bookmarks",
   "rsi.villager.restock.no_permission": "No RS extract permission; missing items added to JEI bookmarks",

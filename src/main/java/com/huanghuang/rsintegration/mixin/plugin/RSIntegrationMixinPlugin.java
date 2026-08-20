@@ -205,6 +205,18 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
         if (mixinClassName.contains("jei.BookmarkOverlayAccessor")) {
             return hasField(targetClassName, "bookmarkList");
         }
+        if (mixinClassName.contains("retraining.RetrainingTradeLockMixin")) {
+            return isClassPresent("com.mrbysco.retraining.CommonRetraining")
+                    && hasMethod(targetClassName, "resetTrades");
+        }
+        if (mixinClassName.contains("tradecycling.TradeCyclingTradeLockMixin")) {
+            return isClassPresent("de.maxhenkel.tradecycling.TradeCyclingMod")
+                    && hasMethod(targetClassName, "onCycleTrades");
+        }
+        if (mixinClassName.contains("traderefresh.TradeRefreshTradeLockMixin")) {
+            return isClassPresent("dev.xkmc.traderefresh.network.RefreshToServer")
+                    && hasMethod(targetClassName, "handle");
+        }
         if (mixinClassName.contains("jei.GuiIconToggleButtonAccessor")) {
             return hasField(targetClassName, "button");
         }

@@ -555,6 +555,10 @@ public final class RSIntegrationMod {
         // Crafting
         BatchCraftNetworkHandler.register();
         com.huanghuang.rsintegration.villager.VillagerRestockNetworkHandler.register();
+        com.huanghuang.rsintegration.villager.tradelock.VillagerTradeLockSnapshotPacket.register();
+        DistExecutor.safeRunWhenOn(Dist.CLIENT, () -> () ->
+                MinecraftForge.EVENT_BUS.register(
+                        com.huanghuang.rsintegration.villager.tradelock.client.VillagerTradeLockClient.class));
         DistExecutor.safeRunWhenOn(Dist.CLIENT,
                 () -> com.huanghuang.rsintegration.villager.client.VillagerRestockClient::init);
         com.huanghuang.rsintegration.reforging.ReforgingRestockNetworkHandler.register();
@@ -595,6 +599,8 @@ public final class RSIntegrationMod {
                 com.huanghuang.rsintegration.autoeat.AutoEatRateLimiter.onPlayerLogout(sp.getUUID());
                 com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket
                         .onPlayerLogout(sp.getUUID());
+                com.huanghuang.rsintegration.villager.tradelock.VillagerTradeLockService
+                        .remove(sp.getUUID());
             }
         });
         // Compile and publish one complete recipe generation before normal server
@@ -646,6 +652,7 @@ public final class RSIntegrationMod {
             }
             RemoteGuiAuth.clearServerState();
             RSSidePanelNetworkHandler.clearServerState();
+            com.huanghuang.rsintegration.villager.tradelock.VillagerTradeLockService.clear();
         });
 
         // Chunk unload safety net: force-close remote GUI whose machine

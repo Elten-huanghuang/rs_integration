@@ -57,6 +57,8 @@ public final class RSJeiPlugin implements IModPlugin {
     @Override
     public void onRuntimeAvailable(@NotNull IJeiRuntime jeiRuntime) {
         cachedRuntime = jeiRuntime;
+        com.huanghuang.rsintegration.villager.tradelock.client.VillagerTradeLockClient
+                .onRuntimeAvailable();
         RSGridSearchCache.onJeiRuntimeAvailable();
         if (ClientSyncedConfig.isSynced() ? !ClientSyncedConfig.ENABLE_JEI : !RSIntegrationConfig.ENABLE_JEI.get()) return;
         JeiMarqueeSelector.register();
@@ -76,6 +78,8 @@ public final class RSJeiPlugin implements IModPlugin {
     public void onRuntimeUnavailable() {
         JeiMarqueeSelector.unregister();
         cachedRuntime = null;
+        com.huanghuang.rsintegration.villager.tradelock.client.VillagerTradeLockClient
+                .onRuntimeUnavailable();
         RSGridSearchCache.onJeiRuntimeUnavailable();
         if (ModList.get().isLoaded(ModIds.FTB_QUESTS)) {
             FtbQuestJeiRuntime
