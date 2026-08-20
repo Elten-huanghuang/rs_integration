@@ -31,6 +31,8 @@ public final class ReforgingRestockClient {
     private static boolean initialized;
     private static ReforgingRestockResultPacket last;
     private static long visibleUntil;
+    private static long lastRequestAt;
+    private static boolean suppressNextRefresh;
 
     private ReforgingRestockClient() {}
 
@@ -46,13 +48,33 @@ public final class ReforgingRestockClient {
         if (!SUPPORTED_SCREENS.contains(event.getScreen().getClass().getName())
                 || event.getKeyCode() != GLFW.GLFW_KEY_SPACE
                 || event.getModifiers() != 0) return;
+        // Space is the restock hotkey only. Do not let the underlying screen
+        // process the same key, and suppress OS key-repeat duplicates while
+        // the server is synchronizing the menu slots.
+        event.setCanceled(true);
+        long now = System.currentTimeMillis();
+        if (now - lastRequestAt < 250L) return;
+        lastRequestAt = now;
+        suppressNextRefresh = true;
         NetworkHandler.CHANNEL.sendToServer(new ReforgingRestockRequestPacket());
+    }
+
+    /** Called by the Apotheosis menu mixin when its client-side container update arrives. */
+    public static boolean consumeRefreshSuppression() {
+        if (!suppressNextRefresh) return false;
+        suppressNextRefresh = false;
+        return true;
     }
 
     public static void accept(ReforgingRestockResultPacket result) {
         Minecraft minecraft = Minecraft.getInstance();
         var player = minecraft.player;
         if (player == null) return;
+
+        // A response means the slot synchronization for this request has
+        // completed. If Apotheosis did not invoke its client callback, avoid
+        // carrying suppression into the next genuine menu interaction.
+        suppressNextRefresh = false;
 
         last = result;
         visibleUntil = System.currentTimeMillis() + 4500;

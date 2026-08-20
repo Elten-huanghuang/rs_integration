@@ -31,7 +31,6 @@ final class AetherworksHelper {
     private static final boolean LOADED;
 
     private static Field f_anvil_progress;
-    private static Field f_anvil_hitTimeout;
     private static Field f_anvil_mistakes;
     private static Field f_anvil_inventory;
 
@@ -64,24 +63,22 @@ final class AetherworksHelper {
         boolean ok = false;
         if (AetherworksReflection.isAvailable()) {
             try {
-                // Essential: anvil fields for HUD + auto-hammer
+                // Essential: anvil progress, mistakes and inventory for the HUD
                 f_anvil_progress = AetherworksReflection.anvilBEClass.getDeclaredField("progress");
-                f_anvil_hitTimeout = AetherworksReflection.anvilBEClass.getDeclaredField("hitTimeout");
                 f_anvil_mistakes = AetherworksReflection.anvilBEClass.getDeclaredField("mistakes");
                 f_anvil_inventory = AetherworksReflection.anvilBEClass.getDeclaredField("inventory");
                 f_anvil_progress.setAccessible(true);
-                f_anvil_hitTimeout.setAccessible(true);
                 f_anvil_mistakes.setAccessible(true);
                 f_anvil_inventory.setAccessible(true);
 
-                ok = true; // Core HUD and auto-hammer can work
+                ok = true;
 
                 // Tool station (non-essential for HUD)
                 try {
                     f_ts_inventory = AetherworksReflection.toolStationBEClass.getField("inventory");
                 } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Aetherworks] reflection probe failed", e); }
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] Anvil block entity field probe failed — HUD disabled", e);
+                RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] Anvil block entity field probe failed", e);
             }
 
             if (ok) {
@@ -167,14 +164,6 @@ final class AetherworksHelper {
     static int getAnvilProgress(BlockEntity anvil) {
         if (f_anvil_progress == null) return 0;
         try { return f_anvil_progress.getInt(anvil); } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] Reflection read failed", e);
-            return 0;
-        }
-    }
-
-    static int getAnvilHitTimeout(BlockEntity anvil) {
-        if (f_anvil_hitTimeout == null) return 0;
-        try { return f_anvil_hitTimeout.getInt(anvil); } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] Reflection read failed", e);
             return 0;
         }

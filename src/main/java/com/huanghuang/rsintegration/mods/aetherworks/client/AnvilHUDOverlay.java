@@ -199,8 +199,5 @@ public final class AnvilHUDOverlay implements IGuiOverlay {
         graphics.drawString(font, refillOn ? "[自动补货: 开]" : "[自动补货: 关]", x, y, refillOn ? goodColor : 0xAAAAAA);
         y += lineHeight;
 
-        // Auto-hammer
-        boolean autoOn = AetherworksClientSetup.isAutoHammerEnabled();
-        graphics.drawString(font, autoOn ? "[自动锤炼: 开]" : "[自动锤炼: 关]", x, y, autoOn ? goodColor : 0xAAAAAA);
     }
 }
