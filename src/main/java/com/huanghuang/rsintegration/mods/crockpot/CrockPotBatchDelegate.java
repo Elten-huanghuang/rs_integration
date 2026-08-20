@@ -32,6 +32,7 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraftforge.common.crafting.StrictNBTIngredient;
 import net.minecraftforge.items.IItemHandler;
+import net.minecraftforge.common.ForgeHooks;
 import net.minecraftforge.items.ItemHandlerHelper;
 import org.jetbrains.annotations.NotNull;
 
@@ -599,7 +600,7 @@ public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
             if (rl == null) continue;
             Item item = net.minecraftforge.registries.ForgeRegistries.ITEMS.getValue(rl);
             if (item != null && item != Items.AIR && itemAvailable.getOrDefault(item, 0) > 0
-                    && new ItemStack(item).getBurnTime(null) > 0) {
+                    && ForgeHooks.getBurnTime(new ItemStack(item), null) > 0) {
                 preferred = item;
                 break;
             }
@@ -720,7 +721,7 @@ public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
 
     private static boolean isFuel(ItemStack stack) {
         if (stack.isEmpty()) return false;
-        return stack.getBurnTime(null) > 0;
+        return ForgeHooks.getBurnTime(stack, null) > 0;
     }
 
     private boolean topUpFuel(IItemHandler handler) {
@@ -773,7 +774,7 @@ public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
         }
         ItemStack selected = CrockPotFuelPolicy.select(
                 candidates, RSIntegrationConfig.CROCKPOT_FUEL_PRIORITY.get(),
-                stack -> stack.getBurnTime(null));
+                stack -> ForgeHooks.getBurnTime(stack, null));
         return selected != null ? selected : ItemStack.EMPTY;
     }
 

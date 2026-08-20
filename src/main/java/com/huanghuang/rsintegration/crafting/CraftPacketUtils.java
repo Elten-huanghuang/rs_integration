@@ -1671,7 +1671,8 @@ public final class CraftPacketUtils {
         int bestScore = 0;
         for (var entry : itemAvailable.entrySet()) {
             try {
-                if (new ItemStack(entry.getKey()).getBurnTime(null) > 0) {
+                if (net.minecraftforge.common.ForgeHooks.getBurnTime(
+                        new ItemStack(entry.getKey()), null) > 0) {
                     int score = entry.getValue();
                     ResourceLocation rl = net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(entry.getKey());
                     if (rl != null && "minecraft".equals(rl.getNamespace())) score += 64;
