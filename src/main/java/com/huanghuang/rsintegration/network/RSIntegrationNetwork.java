@@ -151,47 +151,53 @@ public final class RSIntegrationNetwork {
     public static INetwork resolveNetwork(MinecraftServer server,
                                           ResourceKey<Level> dimension,
                                           BlockPos controllerPos) {
-        if (dimension == null || controllerPos == null) return null;
         try {
-            ServerLevel level = server.getLevel(dimension);
-            if (level == null) {
-                RSIntegrationMod.LOGGER.debug("[RSI] resolveNetwork: null level for dim {}", dimension.location());
-                return null;
-            }
-            if (!level.isLoaded(controllerPos)) {
-                RSIntegrationMod.LOGGER.debug("[RSI] resolveNetwork: chunk not loaded at pos={} dim={}",
-                        controllerPos, dimension.location());
-                return null;
-            }
-            BlockEntity be = level.getBlockEntity(controllerPos);
-            if (be == null) {
-                RSIntegrationMod.LOGGER.debug("[RSI] resolveNetwork: no BlockEntity at pos={} dim={}",
-                        controllerPos, dimension.location());
-                return null;
-            }
-            if (be instanceof INetworkNode node) {
-                INetwork net = node.getNetwork();
-                if (net != null) return net;
-                RSIntegrationMod.LOGGER.debug("[RSI] resolveNetwork: INetworkNode at {} has null network", controllerPos);
-            }
-            // Fallback: ControllerBlockEntity (and some other RS blocks) do not implement
-            // INetworkNode but still have a getNetwork() method via their own hierarchy.
-            try {
-                java.lang.reflect.Method getNetwork = be.getClass().getMethod("getNetwork");
-                Object result = getNetwork.invoke(be);
-                if (result instanceof INetwork net) {
-                    // Don't log on success path - this method is called frequently during
-                    // recipe resolution (once per binding per tick), making logs unreadable.
-                    return net;
-                }
-            } catch (Exception e) {
-                RSIntegrationMod.LOGGER.debug("[RSI] resolveNetwork: getNetwork() not available on {}", be.getClass().getName());
-            }
-            RSIntegrationMod.LOGGER.debug("[RSI] resolveNetwork: BE at {} is {} (no network accessible)",
-                    controllerPos, be.getClass().getName());
+            return resolveNetworkStrict(server, dimension, controllerPos);
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.debug("[RSI] resolveNetwork error", e);
         }
+        return null;
+    }
+
+    /** Resolves an explicit network without collapsing backend failures into a missing network. */
+    @Nullable
+    public static INetwork resolveNetworkStrict(MinecraftServer server,
+                                                ResourceKey<Level> dimension,
+                                                BlockPos controllerPos) {
+        if (server == null || dimension == null || controllerPos == null) return null;
+        ServerLevel level = server.getLevel(dimension);
+        if (level == null) {
+            RSIntegrationMod.LOGGER.debug("[RSI] resolveNetwork: null level for dim {}", dimension.location());
+            return null;
+        }
+        if (!level.isLoaded(controllerPos)) {
+            RSIntegrationMod.LOGGER.debug("[RSI] resolveNetwork: chunk not loaded at pos={} dim={}",
+                    controllerPos, dimension.location());
+            return null;
+        }
+        BlockEntity be = level.getBlockEntity(controllerPos);
+        if (be == null) {
+            RSIntegrationMod.LOGGER.debug("[RSI] resolveNetwork: no BlockEntity at pos={} dim={}",
+                    controllerPos, dimension.location());
+            return null;
+        }
+        if (be instanceof INetworkNode node) {
+            INetwork net = node.getNetwork();
+            if (net != null) return net;
+            RSIntegrationMod.LOGGER.debug("[RSI] resolveNetwork: INetworkNode at {} has null network", controllerPos);
+        }
+        try {
+            java.lang.reflect.Method getNetwork = be.getClass().getMethod("getNetwork");
+            Object result = getNetwork.invoke(be);
+            if (result instanceof INetwork net) return net;
+        } catch (NoSuchMethodException e) {
+            RSIntegrationMod.LOGGER.debug("[RSI] resolveNetwork: getNetwork() not available on {}",
+                    be.getClass().getName());
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException("RS block entity getNetwork() failed", e);
+        }
+        RSIntegrationMod.LOGGER.debug("[RSI] resolveNetwork: BE at {} is {} (no network accessible)",
+                controllerPos, be.getClass().getName());
         return null;
     }
 

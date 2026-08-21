@@ -1221,6 +1221,263 @@ git diff --check
 
 阶段之间有重叠，不能简单把上限相加；完整最终 diff 仍预计约 18,000–30,000 行，测试新增约 5,000–10,000 行。最值得先做的是阶段 1–4：它们决定后续功能是复用还是继续复制 RS 分支。
 
+## 17. 实施进度记录
+
+### 17.1 2026-08-22：阶段 1 原型完成，阶段 2 适配器骨架完成
+
+本轮已新增后端无关公共包 `com.huanghuang.rsintegration.storage` 原型。后续 17.2、17.3 的接入前审查发现契约仍需修订，因此这里的“完成”只表示首版代码和基础测试已经落地，不表示已经达到业务接入条件：
+
+- `StorageBackendId`、`StorageReference`、`StoragePermission`
+- `StoredItem`、`StorageSnapshot`、`StorageOperationResult`
+- `StorageSession`、`StorageBackend`、`StorageBackendRegistry`
+
+已落实的契约约束：
+
+- 公共包不引用 `INetwork`、`DimensionsNet`、`UnifiedStorage`、`ItemStackKey` 或 `KeyAmount`。
+- 库存快照数量使用 `long`，精确物品身份保留 ItemStack NBT，并对可变栈做防御性复制。
+- 插入结果返回真实余量和实际接收量；提取结果允许返回多个精确 NBT 分片。
+- 所有权限判断显式携带 `ServerPlayer`。
+- 注册表可以同时暴露多个可用后端，不在底层隐式决定 RS/BD 优先级。
+
+已新增 `storage/rs` 下的 RS 适配器骨架：
+
+- `RefinedStorageBackend`：玩家网络和持久化引用解析。
+- `RefinedStorageSession`：快照、权限、精确/Ingredient 提取、插入和 tracker 记录。
+- `RefinedStorageReference`：RS 控制器维度与坐标的内部编码；RS 原生类型不离开适配器包。
+
+已通过的验证：
+
+- `StorageReferenceTest`
+- `StorageOperationResultTest`
+- `StorageSnapshotTest`
+- `StorageBackendRegistryTest`
+- storage 定向测试、完整 `test`、`compileJava`、`git diff --check`
+
+当前明确未完成：
+
+- 现有业务调用点仍以 `INetwork` 为主，尚未切到 `StorageSession`。
+- RS 适配器尚未注册到统一生命周期；RS 仍是强制依赖。
+- BD 适配器尚未加入 RSI 构建和实现。
+- RS-only、BD-only、双后端及 no-backend 启动矩阵尚不能执行。
+
+下一批按以下顺序推进：
+
+1. 将 `TrackedNetworkInsertion`、`MaterialSources` 和 `ExtractionLedger` 的存取入口迁到通用会话，同时保留旧 RS facade。
+2. 为 RS 适配器增加可替换 native-operation 夹具，锁定 simulate/perform、权限、NBT 分片和退款语义。
+3. 完成递归规划与执行核心迁移后，再接入 BD 1.20.1 API；在此之前不修改 `mods.toml`。
+
+### 17.2 2026-08-22：接入前契约审查与修订
+
+在迁移任何业务调用点前，对阶段 1 原型进行了第二轮限制审查。审查确认原模型不能安全表达 BD 的 `item + tag + Forge capabilities` 身份，且空结果无法区分缺货、拒绝、权限不足和后端异常，因此暂停接入并完成以下修订：
+
+- 新增 `StorageItemKey`，以 `backendId + 完整身份 NBT` 作为精确键，展示用 `ItemStack` 不再是权威身份。
+- `StoredItem` 和 `StorageSnapshot.countExact` 改为按 `StorageItemKey` 计数；快照增加可选 revision，列表不再反复深复制不可变条目。
+- `StorageOperationResult` 增加结构化状态，并将有效提取栈、插入余量和异常恢复栈分开，错误身份不能计入成功转移量。
+- 新增 `StorageSnapshotResult`；读取失败不再伪装为空库存。
+- 新增 `StorageResolutionResult`；后端缺失、非法引用、网络不存在、区块未加载、权限拒绝和异常可分别表达。
+- 新增版本化 `StorageReferenceCodec`，并限制 backend/network 标识长度。
+- 新增 `StorageBackendLoader`、provider 和纯字符串 descriptor。未确认可选 mod 存在前不会加载对应适配器类。
+- 注册表隔离后端的运行时异常和链接错误，并保留每个后端的解析结果，不让一个坏后端阻断另一个后端。
+- RS 控制器引用增加 `v1` 格式前缀；RS 适配器公开 API 不再暴露 `INetwork`。
+- RS 精确提取从权威身份载荷重建请求，并按完整序列化身份验证返回物，覆盖 Forge capabilities。
+
+新增测试覆盖精确身份隔离、结构化失败、恢复栈、引用编解码、缺失 mod 时禁止 provider 类加载，以及核心 storage 字节码无 RS/BD 链接。此时仍未注册后端、未迁移业务调用点、未修改强制依赖。
+
+接入前剩余门槛：把 RS 原生调用抽成可替换 driver，补 simulate/perform 竞争、错误身份、部分提取、tracker 顺序和异常后已提取物的 adapter 级测试。完成该夹具前，不迁移 `MaterialSources`、`ExtractionLedger` 或其他功能。
+
+### 17.3 2026-08-22：第三轮遗漏与限制审查
+
+本轮继续保持只读审查：未迁移业务调用点，未实现 BD adapter，未注册 RS adapter，未修改 `mods.toml`。审查范围覆盖 storage 公共包、RS adapter 骨架、BD 1.20.1 的物品键/网络/统一存储实现，以及 RSI 现有所有直接 RS 使用点。
+
+#### 17.3.1 阻断级问题
+
+| 级别 | 问题 | 代码证据 | 可能后果 | 接入前要求 |
+|---|---|---|---|---|
+| P0 | 后端身份等价规则无法由 `StorageItemKey` 表达 | `StorageItemKey.equals/hashCode` 直接使用 `CompoundTag.equals/hashCode`；BD `ItemStackKey.isSameTypeSameComponents` 使用 canonical bytes，失败时回退 `NbtEq.equalsRelaxed` | NaN 的不同位型、`-0.0/+0.0` 等 BD 认为相同的键会在 RSI 中分裂，导致快照计数、精确提取、预留和退款对账错误 | 把“可重建的后端载荷”和“不可变规范身份”拆开；键的 equals/hashCode 只使用 backend 提供的 canonical identity bytes，并补 NaN、signed zero、tag/caps 顺序测试 |
+| P0 | 异常后的实际转移量可能未知，但结果模型强制写成 0 | `RefinedStorageSession.insert` 捕获异常后调用 `failedInsert(input, FAILED)`；提取异常也只能报告已收到的返回栈 | 后端可能已完成部分/全部 mutation 后才抛异常；调用方按“0 转移”重试或退款可复制物品，反向也可能丢物品 | 增加 `INDETERMINATE`/unknown transfer 语义，禁止把未知状态当成可重试；native driver 必须测试 perform 后抛异常、tracker 抛异常和部分 mutation |
+| P0 | 一个后端只能为玩家返回一个网络 | `StorageBackend.resolveForPlayer` 返回单个 `StorageResolutionResult`；registry 的 `resolveAllForPlayer` 实际最多每个 backend 一个 session；BD 提供 `getAllNetFromPlayer` | BD 多网络成员只能看到 primary 网络；绑定、机器中心、侧栏和一键吃无法可靠选择目标，双后端时也容易误用默认库 | 增加网络发现结果/descriptor 列表及显式选择策略；“默认网络解析”和“枚举可访问网络”分成两个 API |
+| P0 | 活网络调用没有线程约束 | `StorageSession` 所有方法都能从任意线程调用，接口注释未规定 server thread；RS/BD adapter 都将访问活网络或 SavedData | 异步递归规划若误持 session，会跨线程读取或修改 Forge/RS/BD 状态，产生竞态或存档损坏 | 明确 session 仅 server thread；异步层只接收不可变快照和纯规划数据；加入线程断言或统一调度入口 |
+
+#### 17.3.2 高优先级限制
+
+1. **权限异常未被结构化隔离。** `RefinedStorageSession.snapshotItems`、`extractExact`、`extractMatching`、`insert` 都在进入 `try` 前调用 `hasPermission`；而 `hasPermission` 自身直接调用 RS security manager。安全扩展或链接错误会穿透 `StorageSession`，违反“返回结构化失败”的契约。权限检查必须进入 adapter 的异常边界，并且 `hasPermission` 最好也返回带状态的结果，而不是无法区分 denied/unavailable/failed 的 boolean。
+
+2. **BD 权限只能表达成员访问，不能伪造 RS 的 INSERT/EXTRACT 分权。** 通过持久化 network ID 调用 `DimensionsNet.getNetFromId` 后，adapter 必须逐次验证 `net.getPlayers().contains(player.getUUID())`；owner/manager/member 是管理级别，不等于 RS 的 INSERT/EXTRACT 权限。首期应将合法成员映射为 VIEW/INSERT/EXTRACT 全部允许，并在能力描述中明确“无细粒度权限”，而不是根据 manager 身份擅自限制普通成员。
+
+3. **RS 的 `int` 原生数量与公共 `long` 契约仍不完整。** `extractIdentity` 将请求切成 `int`，但 simulate 第一次调用后立即退出，因此大于 `Integer.MAX_VALUE` 的模拟必然被低报。需要规定每个后端的单操作上限，或让模拟返回“至少/上限/不支持完整 long”的明确信息；不能让业务层把部分模拟当成完整可用量。
+
+4. **缺少 batch reservation/commit 能力边界。** 现有 `ExtractionLedger` 是三阶段的多来源预留、预检查、逐项执行和反向退款；单条 `extractExact` 并不提供原子性。通用层必须明确：基础后端仅保证单操作，ledger 负责 best-effort 补偿；若后端能提供 revision 或批量事务，则作为可选能力使用。否则不能宣传“跨多种材料原子提取”。
+
+5. **RS adapter 没有可替换 native driver，现有测试只覆盖数据模型。** 当前测试运行时故意不加载 RS，无法覆盖错误返回身份、simulate/perform 竞争、部分提取、tracker 顺序、权限异常和 mutation 后异常。在建立 driver/port 及 adapter contract tests 前，RS 骨架不能视为已验证实现。
+
+6. **RS 持久引用是易失坐标。** `RefinedStorageReference.fromNetwork` 假定 `network.getLevel()` 和控制器位置始终存在；构造 session 时即可抛异常。控制器移动/重建后坐标引用会陈旧。解析层需要把“暂时无控制器位置”“坐标已失效”“网络已迁移”分开，并为旧绑定提供重新绑定策略。
+
+#### 17.3.3 能力模型遗漏
+
+当前接口只覆盖 item snapshot、精确/Ingredient 提取、插入和三种权限。它足以作为最低物品存储面，但不能承载现有 RSI 的全部 RS 联动语义：
+
+| 能力 | 当前 RSI 用途 | 处理结论 |
+|---|---|---|
+| 物品 tracker 时间戳/操作者 | 侧栏排序、变化时间、外部插入记录 | 定义可选 `StorageChangeTrackingCapability`；RS 实现原生 tracker，BD 若无等价 API则返回不支持并使用稳定 fallback 排序 |
+| RS crafting manager 状态 | 侧栏展示正在合成/可合成信息 | 定义 RS 专属或可选 crafting-status capability；不得塞入基础 item session，也不得让 BD 假装支持 |
+| 快照 revision/变更订阅 | 异步规划校验、增量侧栏同步 | 基础快照允许 unknown revision；可选 revision/subscription capability，执行前仍需重新校验 |
+| 网络显示名与可选择网络列表 | BD 多网络、双后端选择、机器绑定 | 增加 backend/network descriptor，不让 UI 通过解析 opaque `networkId` 猜名字 |
+| 操作诊断 | 区分权限、后端 hook 拒绝、异常、错误响应 | 结果增加稳定 diagnostic code/correlation id；详细异常只写限流日志，不把 native exception 暴露给业务/网络包 |
+| 资源类型 | 当前目标主要是物品，但 BD 还支持流体、能量等 | 明确 `ITEM_STORAGE` capability；首期不承诺其他资源，未来扩展不能破坏 item key 契约 |
+
+#### 17.3.4 现有 RSI 调用面的复核结果
+
+静态扫描得到 **142 个** storage 包之外直接引用 RS 类型、`INetwork` 或 `RSIntegrationNetwork` 的 Java 文件，分布以 `mods`（62）、`mixin`（25）、`crafting`（11）、`sidepanel`（10）、`resonance`（8）和 `network`（6）为主。这说明后续迁移不能只替换 `MaterialSources` 和 `ExtractionLedger`：
+
+- 合成和各机器 delegate 依赖枚举、模拟、精确提取、三阶段预留、来源保持、失败反向退款和 tracker 顺序。
+- 机器管理中心/侧栏除物品存取外，还依赖 RS crafting manager、tracker 时间戳、Grid 菜单和返回终端导航。
+- 一键吃、四类补货、Apotheosis、FTB Quests、背包升级依赖会话来源、权限和容器返还；同一次工作流必须固定同一个 `StorageReference`，不能中途重新解析默认后端。
+- `resonance` 和 `mixin/refinedstorage` 包含真正的 RS 原生 UI/磁盘/网格语义，应继续隔离为 RS-only，而不是强行映射到 BD。
+
+#### 17.3.5 接入闸门与最小修订批次
+
+因此阶段 1 当前状态调整为 **原型已落地、契约未冻结**。在以下项目全部完成前，继续禁止迁移 `MaterialSources`、`ExtractionLedger`、机器中心、一键吃或其他业务功能：
+
+1. 重做 `StorageItemKey`：canonical identity、后端载荷、展示栈三者分离，锁定 equals/hashCode 契约。
+2. 增加网络发现 API，支持同一 backend 的多个网络以及显式默认网络。
+3. 明确 server-thread-only live session；异步只传 immutable snapshot。
+4. 拆出可替换 native driver，补 RS adapter 的异常、竞争、部分结果和 tracker 测试。
+5. 修正权限异常边界，增加 indeterminate operation 和有界诊断信息。
+6. 建立 optional capability 查询，至少覆盖 item storage、change tracking、crafting status、revision/subscription。
+7. 写出 ledger 的跨来源预留/补偿契约测试，明确“不保证跨条目原子性”的产品边界。
+
+完成这批后先再做一次静态和测试审查；只有审查通过，才开始第一个业务 facade 迁移。BD adapter 仍排在通用契约和 RS driver 稳定之后。
+
+### 17.4 2026-08-22：第一批接入前契约修复
+
+根据 17.3 的阻断项完成第一批修复。本轮仍未迁移任何业务调用点，未实现 BD adapter，未注册后端，未修改 `mods.toml`。
+
+已完成：
+
+- `StorageItemKey` 将 backend payload、canonical identity bytes 和 display stack 分离。equals/hashCode 只依赖 `backendId + canonical bytes`；默认 ItemStack 路径使用 key 顺序稳定的确定性 NBT 编码，未来 BD adapter 可直接传入 BD relaxed canonical bytes。
+- `StorageSnapshot` 在构造时按 canonical key 聚合重复条目，避免 Ingredient 模拟对同一身份重复计数。
+- 新增 `StorageNetworkDescriptor`、`StorageDiscoveryResult` 和 backend discovery 汇总。默认网络解析与全部可选网络发现不再混为一谈；旧 `resolveAllForPlayer` 标记 deprecated，并明确它只表示每个后端的默认 session。
+- 新增 `StorageThreadGuard`；`StorageSession` 契约明确 live handle 仅能在 Minecraft server thread 使用，异步规划只允许保留 immutable snapshot 和 `StorageReference`。
+- 权限从 boolean 主契约升级为 `StoragePermissionResult`，区分 allowed、denied、unavailable、failed；RS security manager 异常现在被 adapter 边界捕获。
+- 操作结果新增 `INDETERMINATE`、`transferKnown`、`remainderKnown` 和稳定 diagnostic code。进入 native PERFORM 后抛异常不再谎报为零转移，也不会提供看似可安全退款的完整余量。
+- `RefinedStorageSession` 不再直接持有 `INetwork`，改为依赖无 RS 类型的 `RefinedStorageDriver`；只有 `NativeRefinedStorageDriver`、RS backend 和引用 codec 接触原生 RS API。
+- 新增纯 `RefinedStorageOperationExecutor`，锁定 simulate -> tracker -> perform 顺序，并覆盖 tracker 异常、perform 异常、部分提取、错误身份和回滚异常。
+- 新增 `StorageCapability`。当前 RS 骨架只声明 `ITEM_STORAGE`；change tracking、crafting status、snapshot revision 和 change subscription 在没有实际扩展接口前不会被伪报为支持。
+
+验证结果：
+
+- storage/RS executor 定向测试 35 项通过。
+- 完整项目 `test --no-daemon` 通过。
+- `compileJava` 由完整测试构建执行并通过。
+- `git diff --check` 通过。
+- 核心 storage 类型字节码不链接 RS/BD；可测试的 RS session/driver/executor 字节码不链接 native RS API。
+- `javap -public` 确认 `RefinedStorageBackend` 和 `RefinedStorageSession` 的公开/实现接口未暴露 `INetwork`。
+
+仍未解除的接入闸门：
+
+1. BD adapter 尚未实现，因此 BD `ItemStackKey` 的 canonical bytes、payload 重建和成员校验还没有 adapter 级测试。
+2. RS driver 已可单测，但真实 RS runtime 下的 security extension、控制器失效、tracker 和存储 hook 仍需 GameTest/专服冒烟。
+3. `ExtractionLedger` 的跨网络/背包/玩家库存预留与 best-effort 补偿尚未迁移成后端无关契约；目前不能开始合成核心切换。
+4. capability 目前只有声明模型；tracker/crafting/revision 的扩展操作接口要按实际消费者分别设计，不能先做空实现。
+5. structured diagnostic 已有稳定 code，但限流日志和 correlation id 尚未接入统一服务。
+
+下一批应先实现独立的 BD driver/adapter 测试夹具以及 ledger 补偿契约，不直接改 `MaterialSources`、机器中心或一键吃。
+
+### 17.5 2026-08-22：第四轮契约复查与加固
+
+本轮仍只修 storage 基础层和 RS adapter 边界：未实现 BD adapter，未迁移递归合成、次元磁铁、机器管理中心、一键吃或其他业务调用点，未注册统一后端，也未修改 `mods.toml`。
+
+第四轮复查发现 17.4 的几个接口仍允许调用方把“不知道”误当成“空/零”，同时 custom canonical identity 少了物品类型。现已完成以下修复；本节中的新契约覆盖 17.4 的对应旧描述：
+
+- `StorageItemKey.equals/hashCode` 改为 `backendId + 稳定物品注册 ID + canonical component bytes`。物品注册 ID 从 display/native key 中提取，未注册物品直接拒绝；因此 BD 的 canonical bytes 即使只包含 tag/capabilities，也不会把不同物品合并。
+- `StorageOperationResult.transferredAmount()` 改为 `OptionalLong`，`remainder()` 改为 `Optional<ItemStack>`，移除公开的 `-1` 和空栈哨兵以及容易漏检的 known boolean。mutation 后异常必须由调用方显式处理 unknown。
+- `StorageSnapshotResult.snapshot()` 改为 `Optional<StorageSnapshot>`；失败结果不再携带 `StorageSnapshot.EMPTY`，不能被误当成成功的空库存。
+- 快照状态从通用 `StorageOperationStatus` 拆为 `StorageSnapshotStatus`，只允许 SUCCESS、DENIED、UNAVAILABLE、INVALID_RESPONSE、FAILED，避免读取结果出现 NOT_FOUND、REJECTED、INDETERMINATE 等无关状态。
+- `StorageDiscoveryResult.success` 现在拒绝 null descriptor、重复 reference、多个默认网络和混合 backend ID。registry 还会验证 descriptor 的 backend ID 等于实际注册 backend，畸形 adapter 只得到结构化 FAILED。
+- registry 同样验证 resolved session 的 reference 属于被调用的 backend，防止错误 adapter 返回跨后端会话。
+- RS backend ID 移到不链接 RS API 的 `RefinedStorageIds`；可测试的 session/driver/executor 不再间接引用 `RefinedStorageBackend`。
+- `RefinedStorageBackend.resolve` 将引用解析、level 获取、区块加载检查、网络解析和 session 创建全部纳入结构化异常边界。
+- 纯 simulate 插入遇到错误 native remainder 时，统一返回 INVALID_RESPONSE + INVALID_NATIVE_RESPONSE，不再降级成普通 BACKEND_EXCEPTION。
+- RS 插入仍按现有语义执行 `simulate -> tracker -> perform`。tracker 记录的是 preflight accepted amount，只用于 RS 变化跟踪，不是结算依据；最终 `StorageOperationResult` 仅按 perform 返回值计算。若 hook 使 simulate 与 perform 数量不同，tracker 元数据可能不精确，因此后续任何账本和补偿逻辑禁止依赖 tracker 数量。
+
+新增回归覆盖：不同物品共享相同 canonical component bytes、unknown transfer/remainder、失败快照无值、重复/多默认/跨后端 discovery、跨后端 resolution、RS class-reference 隔离，以及模拟插入的非法 native response 分类。storage/RS 定向测试现为 **41 项通过**。
+
+验证同时通过完整 `test --no-daemon`、编译、`git diff --check`、核心/RS 字节码隔离测试和 `javap -public` 公共签名检查；公开 RS adapter 签名没有暴露 `INetwork`，旧的 known boolean、`-1` 哨兵和失败快照空值访问器均已从 storage 调用面清除。
+
+本轮后仍未解除接入闸门：
+
+1. 需要继续审查 operation result 的跨多条目补偿语义，并为后端无关 `ExtractionLedger` 写纯契约测试；尚不迁移真实合成业务。
+2. RS session 的 server-thread/权限路径因 `ServerPlayer` 与真实 server 依赖，当前只有 driver/executor 纯测试；仍需 GameTest 或专服冒烟。
+3. BD adapter 尚未开始。其实现前必须再次核对 1.20.1 `ItemStackKey` payload 重建、membership、primary/all network 和 long quantity 行为。
+4. RS tracker/crafting manager、snapshot revision/subscription 仍只是明确的可选能力边界，没有通用扩展接口；机器中心和侧栏暂不能迁移。
+5. 在下一轮静态审查和 ledger 契约测试通过前，不开始递归合成、次元磁铁、一键吃或机器管理中心接入。
+
+### 17.6 2026-08-22：第五轮基础层复查与修复
+
+本轮继续限制在 storage 公共契约和 RS adapter 边界内。未实现 BD adapter，未注册统一后端，未修改 `mods.toml`，也未迁移递归合成、次元磁铁、机器管理中心、一键吃或任何现有业务调用点。
+
+本轮修复如下：
+
+- registry 现在统一执行 server-thread guard；显式解析必须返回与请求完全相同的 `StorageReference`，同一 backend 下返回错误 network 也会得到 `INVALID_REFERENCE`。默认解析仍只校验 backend 归属，因为默认网络本来就由 adapter 选择。
+- 默认 discovery 使用 session 的真实 capability 集合，不再硬编码只有 `ITEM_STORAGE`；后端可用性、解析和发现异常继续按后端隔离。
+- `StorageOperationResult` 的 insert/extract 专属字段现在按 kind 拒绝错误访问；indeterminate 必须有诊断码。插入结果新增后端身份比较入口，因此未来 BD 可使用自己的 canonical equality 校验余量，同时通用层仍强制物品类型相同，并用副本调用比较器以防比较器修改数量。
+- `StoragePermissionResult` 拒绝状态与诊断码矛盾的组合。RS 的 VIEW 不再无条件允许，而是由 INSERT、EXTRACT、AUTOCRAFTING 三项原生权限组合得出。
+- `StorageSnapshotResult` 现在也携带稳定诊断码。权限检查失败、backend exception、null/malformed native snapshot 的原因会继续传到 extraction result，不再退化为无原因的 `FAILED`。
+- 新增严格的显式 RS 网络解析路径。旧 `resolveNetwork` 保留 catch-and-null 兼容行为；storage adapter 使用 `resolveNetworkStrict`，反射调用失败不会伪装成网络不存在。
+- RS insert 的 null native response 按 mutation 阶段区分：simulate/preflight 为 `INVALID_RESPONSE`，进入 perform 后为 `INDETERMINATE`。tracker、应用观察器和 native perform 的失败分别使用独立诊断码。
+- 插入观察器在每次真实 perform 尝试前运行，即使 preflight 估算接收量为 0，也能覆盖 simulate/perform 之间状态变化；tracker 仍只在 preflight 接收量大于 0 时记录。RS 观察器保留现有 `MaterialSources.invalidateFor(player)` 和菜单广播行为，并留在 RS-only 包内。
+- 原版/RS canonical identity 继续折叠 `+0.0/-0.0` 并拒绝 NaN；测试同时确认 1.20.1 原版会折叠不同声明元素类型的空 NBT list，编码器保持同样规则。BD 未来仍可通过 custom canonical bytes 表达自己的 relaxed equality。
+- `RefinedStorageSnapshotRead` 现在深复制输入和输出的 `ItemStack`，不再把可变 native 快照栈泄漏给 mapper 或测试夹具。optional loader 也会隔离 mod-presence predicate 和类加载阶段的 runtime/linkage failure。
+- 修复 `RefinedStorageSession` 遗漏的 `StoredItem` 导入；该遗漏曾导致定向构建直接编译失败，现已由完整构建覆盖。
+
+本轮验证结果：
+
+- storage/RS 定向测试 **57 项全部通过**。
+- 完整 `test --no-daemon` 通过，包含现有项目全套测试。
+- `git diff --check` 通过，仅报告仓库既有的 LF/CRLF 转换提示，没有空白错误。
+- 核心 storage 源码和字节码不链接 RS/BD 类型；可测试的 RS session/driver/executor 不链接原生 RS API。
+- `javap -public` 确认公共 storage 结果签名不含 RS 类型，`RefinedStorageBackend` 的公开接口也未暴露 `INetwork`。
+- `mods.toml` 无 diff；当前仍是原项目的 RS 强依赖发布形态。
+
+本轮后接入闸门仍然存在：
+
+1. 后端无关 ledger 的 reservation、commit、partial settlement、indeterminate 和 best-effort compensation 契约尚未建立；这是开始递归合成迁移前的下一项基础工作。
+2. RS adapter 仍未注册到 mod 生命周期，真实 RS runtime 的 security extension、控制器失效、tracker 和存储 hook 仍需 GameTest 或专服冒烟。
+3. BD adapter 尚未开始；BD 1.20.1 的 canonical payload 重建、membership、primary/all-network 和 long quantity 行为仍须在实现前再次逐项核对。
+4. change tracking、crafting status、revision/subscription 仍只有 capability 边界，没有通用扩展接口；机器中心和侧栏不能据此开始迁移。
+5. 因此当前结论仍是“基础层已进一步加固，但契约尚未冻结”。下一阶段不能直接接入递归合成、次元磁铁、一键吃、机器中心或其他业务代码。
+
+### 17.7 2026-08-22：后端无关结算账本与第六轮收尾审计
+
+本轮继续遵守接入冻结：没有实现 BD adapter，没有注册 RS adapter，没有修改 `mods.toml`，也没有替换旧 `crafting.ExtractionLedger` 或迁移递归合成、次元磁铁、机器管理中心、一键吃及其他业务调用点。新增代码只是可供后续编排层使用的纯结算模型，不会自行访问或修改任一存储网络、玩家背包或世界物品。
+
+本轮完成：
+
+- 新增 `StorageReservationSource`，明确区分存储网络、玩家背包和外部来源。网络来源必须携带 `StorageReference`，并在预留时校验其 backend 与 `StorageItemKey` 一致；本地来源只接受有界、非空的稳定 ID。
+- 新增 `StorageSettlementLedger`，覆盖 `OPEN -> COMMITTING -> COMMITTED/RECOVERY_REQUIRED/INDETERMINATE -> RECOVERING -> ROLLED_BACK/INDETERMINATE`，以及成功消费后的 `SETTLED`。该类只记录事实，不调用 `StorageSession`、RS `INetwork`、`ServerPlayer` 或任何 native API，并明确要求由单一编排线程持有。
+- 预留条目和恢复资产均使用账本 UUID 加单调序号作为 ID。另一个账本中数值相同的 ID、混入本账本 token 的外部 ID以及归属其他条目的恢复资产都会在任何状态变更前被拒绝；分组 settlement 先整体验证，再统一改变状态。
+- commit 只接受 `PERFORM` 的 extraction result。仅当状态为 `SUCCESS` 且已知转移量等于预留量时才视为 committed；部分结果、失败状态或数量不符进入恢复，未知 mutation 永远保持 `INDETERMINATE`，即使所有已确认物理碎片后来都已返还，也不会被伪报成完整 rollback。
+- 每个 confirmed extracted stack 和 native `recoveryStacks()` 都转换成独立的 opaque recovery asset。后者即使物品身份异常或无法生成合法 canonical key，仍可按原物理栈返还；账本不会为了满足键模型而吞掉未知资产。所有公开栈和快照均防御性复制。
+- recovery 支持部分返还和多轮重试；只有所有已确认资产都已返还且不存在未知 mutation，账本才进入 `ROLLED_BACK`。模拟插入、错误 result kind、超过剩余资产的数量以及跨条目/跨账本 asset ID 都会 fail closed。
+- 新增 `StorageOperationMode.SIMULATE/PERFORM` 并纳入 `StorageOperationResult`。RS executor/session 会准确传播调用模式，防止预检结果误入真实结算。为兼容当前内部调用，未带 mode 的旧工厂仍默认 `PERFORM`；后续迁移新调用点时应优先显式传 mode，并在契约冻结时再决定是否废弃默认重载。
+
+第六轮只读复核还确认一项必须由未来编排层承担的约束：`recordRecovery(entryId, assetId, result)` 可信任调用方传入的 result 确实来自对该 recovery asset 的插入尝试，因为通用 insert result 只表达数量、状态和余量，不携带原输入资产 ID。接入业务时必须在同一同步调用栈内以 `RecoveryAsset` 发起插入并立即以对应 ID 记账，不能缓存、重排或把另一个栈的结果套到该 ID 上。账本提供的是一致性校验和事实记录，不是跨存储系统的事务管理器。
+
+验证结果：
+
+- storage/RS 定向范围共 **77 项测试全部通过**，其中新增账本用例覆盖独立 token 结算、部分/失败/未知提取、可重试补偿、未知退款、模拟结果拒绝、跨 backend 来源、跨账本 ID、原子 token 校验、异常 recovery stack 和防御性复制。
+- 完整 `test --no-daemon` 共 **1105 项测试全部通过**，0 failure、0 error、0 skipped；`compileJava` 和 `compileTestJava` 同时通过。
+- `javap -public` 确认新账本、来源和 operation result 的公开签名不暴露 RS/BD native 类型。
+- 核心 storage 源码隔离扫描通过；native RS 引用仍只存在于 `storage.rs` 边界。`git diff --check` 无空白错误，只有现有 LF/CRLF 提示；`mods.toml` 仍无 diff。
+
+当前阶段定位：
+
+- 这不是阶段 0。阶段 1 的通用核心模型、结果语义、隔离边界和纯结算账本已经落地并经过多轮审查；阶段 2 的 RS adapter 骨架也已存在，但尚未注册、未经过真实游戏环境冒烟，不能算阶段 2 完成。
+- 阶段 1 现在是 **实现基本完成、等待适配器级验证后冻结**。冻结前仍需用真实 BD 1.20.1 行为验证 canonical payload、long quantity、网络成员/多网络选择和返还语义；这不等于现在开始写 BD adapter。
+- 旧 `crafting.ExtractionLedger` 仍是线上业务实际使用的账本，新 `StorageSettlementLedger` 目前没有业务调用者。因而当前构建仍然必须安装 RS，用户还不能在只安装 BD 的情况下使用这些功能。
+
+下一步仍应先做接入前审计，而不是直接迁移业务：锁定新账本与未来编排 facade 的调用协议，列出旧 `ExtractionLedger` 每一类来源和失败路径如何映射，再选择一个 blast radius 最小的只读/低风险调用面作为首次迁移。BD adapter、生命周期注册、`mods.toml` 可选依赖和核心功能切换继续留在后续明确阶段。
+
 ## 附录 A：关键代码证据
 
 ### RSI
