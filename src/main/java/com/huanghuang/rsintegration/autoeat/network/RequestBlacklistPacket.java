@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.autoeat.network;
 
 import com.huanghuang.rsintegration.autoeat.AutoEatEngine;
+import com.huanghuang.rsintegration.autoeat.AutoEatPreferences;
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
@@ -23,8 +24,10 @@ public class RequestBlacklistPacket {
             var sender = ctx.get().getSender();
             if (sender != null && !(sender instanceof net.minecraftforge.common.util.FakePlayer)) {
                 Set<ResourceLocation> blacklist = AutoEatEngine.getBlacklist(sender);
+                AutoEatPreferences preferences = AutoEatPreferences.load(sender);
                 NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> sender),
-                        new BlacklistSyncPacket(blacklist, AutoEatEngine.getEffectBlacklist(sender)));
+                        new BlacklistSyncPacket(blacklist, AutoEatEngine.getEffectBlacklist(sender),
+                                preferences.mode(), preferences.selectedItem()));
             }
         });
         ctx.get().setPacketHandled(true);

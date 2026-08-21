@@ -60,5 +60,24 @@ class AsyncPurePlanningServiceTest {
         assertTrue(result.remaining().isEmpty());
     }
 
+    @Test
+    void neutralTerminalConversionCannotConsumeItsOwnOutputFromBroadInput() {
+        MaterialRef chest = new MaterialRef(id("chest"), "");
+        MaterialRef trappedChest = new MaterialRef(id("trapped_chest"), "");
+        MaterialRef hook = new MaterialRef(id("tripwire_hook"), "");
+        RecipeNode target = new RecipeNode(id("make_trapped_chest"), trappedChest, 1,
+                List.of(new IngredientRef(List.of(chest, trappedChest), 1),
+                        new IngredientRef(List.of(hook), 1)));
+        ImmutableRecipeGraph graph = new ImmutableRecipeGraph(Map.of(trappedChest, List.of(target)));
+        List<IngredientRef> roots = com.huanghuang.rsintegration.crafting
+                .SelfAmplifyingRecipePolicy.scaleTargetInputs(target, 21);
+
+        assertEquals(List.of(chest), roots.get(0).alternatives());
+        assertEquals(21, roots.get(0).count());
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(graph,
+                Map.of(chest, 15, trappedChest, 6, hook, 21), roots, 20);
+        assertTrue(!result.feasible());
+    }
+
     private static ResourceLocation id(String path) { return new ResourceLocation("test", path); }
 }

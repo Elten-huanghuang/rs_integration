@@ -8,6 +8,7 @@ import net.minecraft.world.item.ItemStack;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.Stream;
 
 /** Scales terminal inputs while preserving the seed of a self-amplifying recipe. */
 public final class SelfAmplifyingRecipePolicy {
@@ -18,9 +19,16 @@ public final class SelfAmplifyingRecipePolicy {
         boolean amplification = isSelfAmplifying(target);
         List<IngredientRef> scaled = new ArrayList<>(target.inputs().size());
         for (IngredientRef input : target.inputs()) {
+            List<MaterialRef> alternatives = input.alternatives();
+            if (!amplification && alternatives.size() > 1
+                    && alternatives.contains(target.output())) {
+                alternatives = alternatives.stream()
+                        .filter(material -> !material.equals(target.output()))
+                        .toList();
+            }
             int count = amplification && input.alternatives().contains(target.output())
                     ? input.count() : saturatingMultiply(input.count(), multiplier);
-            scaled.add(new IngredientRef(input.alternatives(), count));
+            scaled.add(new IngredientRef(alternatives, count));
         }
         return List.copyOf(scaled);
     }
@@ -33,11 +41,36 @@ public final class SelfAmplifyingRecipePolicy {
         List<IngredientSpec> scaled = new ArrayList<>(specs.size());
         for (IngredientSpec spec : specs) {
             if (spec.isEmpty()) continue;
+            IngredientSpec effective = amplification
+                    ? spec : excludeNonProductiveSelfCandidate(spec, output);
             int count = amplification && isConsumedSelfInput(spec, output)
                     ? spec.count() : CraftPacketUtils.requiredCount(spec, multiplier);
-            scaled.add(new IngredientSpec(spec.ingredient(), count, spec.role()));
+            scaled.add(new IngredientSpec(effective.ingredient(), count, spec.role()));
         }
         return List.copyOf(scaled);
+    }
+
+    /**
+     * A broad terminal ingredient may contain the recipe's own output (for
+     * example the wooden-chests tag accepts a trapped chest). Consuming that
+     * output from an earlier batch gives zero net production, so remove only
+     * that alternative. Exact self-inputs and genuinely amplifying recipes are
+     * handled separately and remain untouched.
+     */
+    public static IngredientSpec excludeNonProductiveSelfCandidate(
+            IngredientSpec spec, ItemStack output) {
+        if (spec == null || spec.isEmpty() || output == null || output.isEmpty()
+                || spec.role() == DemandRole.CATALYST) return spec;
+        ItemStack[] candidates = spec.ingredient().getItems();
+        if (candidates.length < 2 || !spec.ingredient().test(output)) return spec;
+        List<ItemStack> filtered = Stream.of(candidates)
+                .filter(stack -> !ItemStack.isSameItemSameTags(stack, output))
+                .map(stack -> stack.copyWithCount(1))
+                .toList();
+        if (filtered.isEmpty() || filtered.size() == candidates.length) return spec;
+        return new IngredientSpec(
+                net.minecraft.world.item.crafting.Ingredient.of(filtered.stream()),
+                spec.count(), spec.role());
     }
 
     public static boolean isSelfAmplifying(RecipeNode recipe) {

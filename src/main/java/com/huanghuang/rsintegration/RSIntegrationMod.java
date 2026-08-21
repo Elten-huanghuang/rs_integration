@@ -555,12 +555,15 @@ public final class RSIntegrationMod {
         // Crafting
         BatchCraftNetworkHandler.register();
         com.huanghuang.rsintegration.villager.VillagerRestockNetworkHandler.register();
+        com.huanghuang.rsintegration.enchanting.EnchantingRestockNetworkHandler.register();
         com.huanghuang.rsintegration.villager.tradelock.VillagerTradeLockSnapshotPacket.register();
         DistExecutor.safeRunWhenOn(Dist.CLIENT, () -> () ->
                 MinecraftForge.EVENT_BUS.register(
                         com.huanghuang.rsintegration.villager.tradelock.client.VillagerTradeLockClient.class));
         DistExecutor.safeRunWhenOn(Dist.CLIENT,
                 () -> com.huanghuang.rsintegration.villager.client.VillagerRestockClient::init);
+        DistExecutor.safeRunWhenOn(Dist.CLIENT,
+                () -> com.huanghuang.rsintegration.enchanting.client.EnchantingRestockClient::init);
         com.huanghuang.rsintegration.reforging.ReforgingRestockNetworkHandler.register();
         DistExecutor.safeRunWhenOn(Dist.CLIENT,
                 () -> com.huanghuang.rsintegration.reforging.client.ReforgingRestockClient::init);

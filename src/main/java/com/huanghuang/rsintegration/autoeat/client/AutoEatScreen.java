@@ -353,7 +353,7 @@ public final class AutoEatScreen extends Screen {
             if (index >= 0) {
                 ResourceLocation key = filteredEntries.get(index);
                 if (mode == AutoEatMode.STACK) {
-                    ClientState.selectedItem = key;
+                    ClientState.selectItem(key);
                 } else {
                     Set<ResourceLocation> blacklist = activeBlacklist();
                     boolean wasBlacklisted = blacklist.contains(key);

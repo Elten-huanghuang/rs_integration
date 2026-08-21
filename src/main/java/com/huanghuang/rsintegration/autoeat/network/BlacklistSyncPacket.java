@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.autoeat.network;
 
+import com.huanghuang.rsintegration.autoeat.AutoEatMode;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraftforge.api.distmarker.Dist;
@@ -11,19 +12,35 @@ import java.util.Set;
 public class BlacklistSyncPacket {
     public final Set<ResourceLocation> blacklist;
     public final Set<ResourceLocation> effectBlacklist;
+    public final AutoEatMode mode;
+    public final ResourceLocation selectedItem;
 
     public BlacklistSyncPacket(Set<ResourceLocation> blacklist, Set<ResourceLocation> effectBlacklist) {
+        this(blacklist, effectBlacklist, AutoEatMode.DIVERSITY, null);
+    }
+
+    public BlacklistSyncPacket(Set<ResourceLocation> blacklist, Set<ResourceLocation> effectBlacklist,
+                               AutoEatMode mode, ResourceLocation selectedItem) {
         this.blacklist = blacklist;
         this.effectBlacklist = effectBlacklist;
+        this.mode = mode;
+        this.selectedItem = selectedItem;
     }
 
     public static void encode(BlacklistSyncPacket packet, FriendlyByteBuf buf) {
         writeSet(buf, packet.blacklist);
         writeSet(buf, packet.effectBlacklist);
+        buf.writeEnum(packet.mode);
+        buf.writeBoolean(packet.selectedItem != null);
+        if (packet.selectedItem != null) buf.writeResourceLocation(packet.selectedItem);
     }
 
     public static BlacklistSyncPacket decode(FriendlyByteBuf buf) {
-        return new BlacklistSyncPacket(readSet(buf), readSet(buf));
+        Set<ResourceLocation> blacklist = readSet(buf);
+        Set<ResourceLocation> effectBlacklist = readSet(buf);
+        AutoEatMode mode = buf.readEnum(AutoEatMode.class);
+        ResourceLocation selectedItem = buf.readBoolean() ? buf.readResourceLocation() : null;
+        return new BlacklistSyncPacket(blacklist, effectBlacklist, mode, selectedItem);
     }
 
     public static void handle(BlacklistSyncPacket packet, java.util.function.Supplier<net.minecraftforge.network.NetworkEvent.Context> ctx) {

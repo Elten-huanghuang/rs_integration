@@ -1,6 +1,8 @@
 package com.huanghuang.rsintegration.autoeat.client;
 
 import com.huanghuang.rsintegration.autoeat.AutoEatMode;
+import com.huanghuang.rsintegration.autoeat.network.UpdateAutoEatPreferencesPacket;
+import com.huanghuang.rsintegration.network.packet.NetworkHandler;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
@@ -20,6 +22,22 @@ public final class ClientState {
 
     public static void cycleMode() {
         currentMode = currentMode.next();
+        syncPreferences();
+    }
+
+    public static void selectItem(ResourceLocation item) {
+        selectedItem = item;
+        syncPreferences();
+    }
+
+    public static void applyPreferences(AutoEatMode mode, ResourceLocation item) {
+        currentMode = mode == null ? AutoEatMode.DIVERSITY : mode;
+        selectedItem = item;
+    }
+
+    private static void syncPreferences() {
+        NetworkHandler.CHANNEL.sendToServer(
+                new UpdateAutoEatPreferencesPacket(currentMode, selectedItem));
     }
 
     /** Reset all client state when disconnecting from a server / leaving a world. */
