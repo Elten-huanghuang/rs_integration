@@ -169,11 +169,13 @@ public final class BindingEventHandler {
                     && BindingStorage.hasBinding(held, dim, clickedPos)) {
                 BindingStorage.removeBinding(held, dim, clickedPos);
                 AltarBindingRegistry.unbind(
-                        event.getLevel().dimension(), clickedPos, AltarBinding.RS_NETWORK);
+                        player.getUUID(), event.getLevel().dimension(), clickedPos,
+                        AltarBinding.RS_NETWORK);
             }
             if (BindingStorage.hasBinding(held, dim, bindingPos)) {
                 BindingStorage.removeBinding(held, dim, bindingPos);
-                AltarBindingRegistry.unbind(event.getLevel().dimension(), bindingPos, AltarBinding.RS_NETWORK);
+                AltarBindingRegistry.unbind(player.getUUID(), event.getLevel().dimension(),
+                        bindingPos, AltarBinding.RS_NETWORK);
                 AltarBindingRegistry.invalidateScanCache();
                 RSIntegrationNetwork.invalidateNetworkResolution(player.getUUID());
                 player.displayClientMessage(
@@ -183,7 +185,8 @@ public final class BindingEventHandler {
             } else {
                 Optional<AltarBinding> binding = hook.get().createBinding(held);
                 if (binding.isPresent()) {
-                    AltarBindingRegistry.bind(event.getLevel().dimension(), bindingPos, binding.get());
+                    AltarBindingRegistry.bind(player.getUUID(), event.getLevel().dimension(),
+                            bindingPos, binding.get());
                     BindingStorage.addBinding(held, dim, bindingPos, blockKey, blockRegKey, displayStack);
                     AltarBindingRegistry.invalidateScanCache();
                     RSIntegrationNetwork.invalidateNetworkResolution(player.getUUID());
@@ -282,14 +285,14 @@ public final class BindingEventHandler {
         synchronized (BINDING_LOCK) {
             if (knownPlayerBindings.contains(pos)
                     || BindingStorage.hasBinding(connector, dim, pos)
-                    || AltarBindingRegistry.isBound(level.dimension(), pos)) {
+                    || AltarBindingRegistry.isBound(level.dimension(), pos, player)) {
                 return NearbyBindResult.ALREADY_BOUND;
             }
             if (!BindingStorage.addBinding(
                     connector, dim, pos, blockKey, blockRegKey, displayStack)) {
                 return NearbyBindResult.ALREADY_BOUND;
             }
-            AltarBindingRegistry.bind(level.dimension(), pos,
+            AltarBindingRegistry.bind(player.getUUID(), level.dimension(), pos,
                     new AltarBinding(networkBinding.type(), networkBinding.displayName(),
                             networkBinding.data().copy()));
             knownPlayerBindings.add(pos);
