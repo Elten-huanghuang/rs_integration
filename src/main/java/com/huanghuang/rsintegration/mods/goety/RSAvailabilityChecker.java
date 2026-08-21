@@ -1,12 +1,9 @@
 package com.huanghuang.rsintegration.mods.goety;
 
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
-
-import com.huanghuang.rsintegration.network.binding.AltarBinding;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
-import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.reflection.probes.GoetyReflection;
 import com.huanghuang.rsintegration.reflection.probes.MalumReflection;
 import com.huanghuang.rsintegration.util.Reflect;
@@ -175,21 +172,7 @@ public final class RSAvailabilityChecker {
         ResourceKey<Level> lookupDim = altarDimId != null
                 ? ResourceKey.create(net.minecraft.core.registries.Registries.DIMENSION, altarDimId)
                 : player.level().dimension();
-        var bindingOpt = AltarBindingRegistry.getBinding(lookupDim, pos, AltarBinding.RS_NETWORK);
-        if (bindingOpt.isPresent()) {
-            var binding = bindingOpt.get();
-            var data = binding.data();
-            ResourceLocation dimId = ResourceLocation.tryParse(data.getString("dim"));
-            if (dimId != null) {
-                ResourceKey<Level> dim = ResourceKey.create(
-                        net.minecraft.core.registries.Registries.DIMENSION, dimId);
-                BlockPos controllerPos = new BlockPos(
-                        data.getInt("x"), data.getInt("y"), data.getInt("z"));
-                INetwork net = RSIntegrationNetwork.resolveNetwork(player.server, dim, controllerPos);
-                if (net != null) return net;
-            }
-        }
-
-        return RSIntegrationNetwork.resolveNetworkFromPlayer(player);
+        INetwork bound = AltarBindingRegistry.resolveNetworkForAltar(player, lookupDim, pos);
+        return bound != null ? bound : RSIntegrationNetwork.resolveNetworkFromPlayer(player);
     }
 }

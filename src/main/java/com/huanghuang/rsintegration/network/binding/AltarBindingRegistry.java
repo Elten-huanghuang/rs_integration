@@ -2,9 +2,6 @@ package com.huanghuang.rsintegration.network.binding;
 
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler;
-
-import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
-
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.util.ModIds;
@@ -45,7 +42,8 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public final class AltarBindingRegistry {
 
-    private static final Map<GlobalPos, List<AltarBinding>> BINDINGS = new ConcurrentHashMap<>();
+    private static final OwnerScopedBindingIndex<GlobalPos, ResourceLocation, AltarBinding> BINDINGS =
+            new OwnerScopedBindingIndex<>();
     private static final Map<ResourceLocation, IBindingHook> HOOKS = new ConcurrentHashMap<>();
 
     // Per-player tick-scoped cache for hasAnyBindingForType.  During recipe
@@ -118,24 +116,20 @@ public final class AltarBindingRegistry {
         return HOOKS.get(type);
     }
 
-    public static void bind(ResourceKey<Level> dim, BlockPos altarPos, AltarBinding binding) {
+    public static void bind(UUID ownerId, ResourceKey<Level> dim, BlockPos altarPos,
+                            AltarBinding binding) {
         GlobalPos key = GlobalPos.of(dim, altarPos);
-        BINDINGS.computeIfAbsent(key, k -> Collections.synchronizedList(new ArrayList<>())).add(binding);
+        BINDINGS.put(key, ownerId, binding.type(), binding);
     }
 
-    public static void unbind(ResourceKey<Level> dim, BlockPos altarPos, ResourceLocation type) {
+    public static void unbind(UUID ownerId, ResourceKey<Level> dim, BlockPos altarPos,
+                              ResourceLocation type) {
         GlobalPos key = GlobalPos.of(dim, altarPos);
-        List<AltarBinding> list = BINDINGS.get(key);
-        if (list != null) {
-            synchronized (list) {
-                list.removeIf(b -> b.type().equals(type));
-                if (list.isEmpty()) BINDINGS.remove(key);
-            }
-        }
+        BINDINGS.remove(key, ownerId, type);
     }
 
     public static void unbindAll(ResourceKey<Level> dim, BlockPos altarPos) {
-        BINDINGS.remove(GlobalPos.of(dim, altarPos));
+        BINDINGS.removeAll(GlobalPos.of(dim, altarPos));
     }
 
     /**
@@ -159,23 +153,20 @@ public final class AltarBindingRegistry {
 
         ResourceKey<Level> dimKey = ResourceKey.create(
                 net.minecraft.core.registries.Registries.DIMENSION, dim);
-        unbindAll(dimKey, pos);
+        unbind(player.getUUID(), dimKey, pos, AltarBinding.RS_NETWORK);
         invalidateScanCache();
         RSIntegrationNetwork.invalidateNetworkResolution(player.getUUID());
         return removed[0];
     }
 
-    public static Optional<AltarBinding> getBinding(ResourceKey<Level> dim, BlockPos altarPos, ResourceLocation type) {
-        List<AltarBinding> list = BINDINGS.get(GlobalPos.of(dim, altarPos));
-        if (list == null) return Optional.empty();
-        synchronized (list) {
-            return list.stream().filter(b -> b.type().equals(type)).findFirst();
-        }
+    public static Optional<AltarBinding> getBinding(ServerPlayer player, ResourceKey<Level> dim,
+                                                    BlockPos altarPos, ResourceLocation type) {
+        return Optional.ofNullable(BINDINGS.get(
+                GlobalPos.of(dim, altarPos), player.getUUID(), type));
     }
 
     public static boolean isBound(ResourceKey<Level> dim, BlockPos altarPos) {
-        List<AltarBinding> list = BINDINGS.get(GlobalPos.of(dim, altarPos));
-        return list != null && !list.isEmpty();
+        return !BINDINGS.allValues(GlobalPos.of(dim, altarPos)).isEmpty();
     }
 
     /**
@@ -197,15 +188,20 @@ public final class AltarBindingRegistry {
                                                  ResourceKey<Level> dim,
                                                  BlockPos altarPos) {
         ResourceLocation dimLoc = dim.location();
-        ItemStack found = findInInventory(player, stacks -> findBindingItem(stacks, dimLoc, altarPos));
-        if (found == null || !com.refinedmods.refinedstorage.item.NetworkItem.isValid(found))
-            return false;
-        Optional<AltarBinding> binding = RSBindingHook.INSTANCE.createBinding(found);
-        if (binding.isPresent()) {
-            bind(dim, altarPos, binding.get());
-            return true;
-        }
-        return false;
+        boolean[] rebuilt = {false};
+        forEachInventoryGroup(player, stacks -> {
+            for (ItemStack stack : stacks) {
+                if (stack.isEmpty() || !BindingStorage.hasBinding(stack, dimLoc, altarPos)) continue;
+                for (IBindingHook hook : HOOKS.values()) {
+                    if (!hook.matches(stack)) continue;
+                    hook.createBinding(stack).ifPresent(binding -> {
+                        bind(player.getUUID(), dim, altarPos, binding);
+                        rebuilt[0] = true;
+                    });
+                }
+            }
+        });
+        return rebuilt[0];
     }
 
     @Nullable
@@ -223,17 +219,9 @@ public final class AltarBindingRegistry {
         });
     }
 
-    private static ItemStack findBindingItem(List<ItemStack> stacks,
-                                              ResourceLocation dimLoc, BlockPos pos) {
-        for (ItemStack stack : stacks) {
-            if (stack.isEmpty()) continue;
-            if (BindingStorage.hasBinding(stack, dimLoc, pos)) return stack;
-        }
-        return null;
-    }
-
     public static boolean isBound(ResourceKey<Level> dim, BlockPos altarPos, ResourceLocation type) {
-        return getBinding(dim, altarPos, type).isPresent();
+        return BINDINGS.allValues(GlobalPos.of(dim, altarPos)).stream()
+                .anyMatch(binding -> binding.type().equals(type));
     }
 
     /**
@@ -318,93 +306,48 @@ public final class AltarBindingRegistry {
     @Nullable
     public static INetwork resolveNetworkForAltar(ServerPlayer player, ResourceKey<Level> dim,
                                                    BlockPos altarPos) {
-        List<AltarBinding> list = BINDINGS.get(GlobalPos.of(dim, altarPos));
-        if (list != null) {
-            synchronized (list) {
-            for (AltarBinding binding : list) {
-                if (!binding.type().equals(AltarBinding.RS_NETWORK)) continue;
-                try {
-                    CompoundTag data = binding.data();
-                    ResourceLocation dimId = ResourceLocation.tryParse(data.getString("dim"));
-                    if (dimId == null) continue;
-                    ResourceKey<Level> netDim = ResourceKey.create(
-                            net.minecraft.core.registries.Registries.DIMENSION, dimId);
-                    BlockPos netPos = new BlockPos(
-                            data.getInt("x"), data.getInt("y"), data.getInt("z"));
-                    INetwork net = RSIntegrationNetwork.resolveNetwork(player.server, netDim, netPos);
-                    if (net != null) return net;
-                } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
-            }
-            }
+        AltarBinding binding = BINDINGS.get(
+                GlobalPos.of(dim, altarPos), player.getUUID(), AltarBinding.RS_NETWORK);
+        if (binding == null && rebuildBindingFromNBT(player, dim, altarPos)) {
+            binding = BINDINGS.get(
+                    GlobalPos.of(dim, altarPos), player.getUUID(), AltarBinding.RS_NETWORK);
         }
-        // Fallback: scan player inventory for bound NetworkItems
-        return resolveNetworkFromPlayerItems(player, dim, altarPos);
-    }
-
-    private static INetwork resolveNetworkFromPlayerItems(ServerPlayer player, ResourceKey<Level> dim,
-                                                           BlockPos altarPos) {
-        return findInInventory(player, stacks -> scanForNetwork(player, stacks, dim, altarPos));
-    }
-
-    private static INetwork scanForNetwork(ServerPlayer player, List<ItemStack> stacks,
-                                            ResourceKey<Level> dim, BlockPos altarPos) {
-        for (ItemStack stack : stacks) {
-            if (stack.isEmpty()) continue;
-            if (!BindingStorage.hasBinding(stack, dim.location(), altarPos)) continue;
-            if (com.refinedmods.refinedstorage.item.NetworkItem.isValid(stack)) {
-                return RSIntegrationNetwork.resolveNetwork(player.server,
-                        com.refinedmods.refinedstorage.item.NetworkItem.getDimension(stack),
-                        new BlockPos(com.refinedmods.refinedstorage.item.NetworkItem.getX(stack),
-                                com.refinedmods.refinedstorage.item.NetworkItem.getY(stack),
-                                com.refinedmods.refinedstorage.item.NetworkItem.getZ(stack)));
-            }
+        if (binding != null) {
+            INetwork network = resolveRsNetwork(player, binding);
+            if (network != null) return network;
         }
         return null;
     }
 
+    @Nullable
+    private static INetwork resolveRsNetwork(ServerPlayer player, AltarBinding binding) {
+        try {
+            CompoundTag data = binding.data();
+            ResourceLocation dimId = ResourceLocation.tryParse(data.getString("dim"));
+            if (dimId == null) return null;
+            ResourceKey<Level> netDim = ResourceKey.create(
+                    net.minecraft.core.registries.Registries.DIMENSION, dimId);
+            BlockPos netPos = new BlockPos(
+                    data.getInt("x"), data.getInt("y"), data.getInt("z"));
+            return RSIntegrationNetwork.resolveNetwork(player.server, netDim, netPos);
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e);
+            return null;
+        }
+    }
+
     public static ItemStack tryExtractFromBindings(ServerPlayer player, ResourceKey<Level> dim,
                                                     BlockPos altarPos, Ingredient ingredient, int count) {
-        List<AltarBinding> list = BINDINGS.get(GlobalPos.of(dim, altarPos));
-        if (list != null) {
-            synchronized (list) {
-            for (AltarBinding binding : list) {
-                IBindingHook hook = HOOKS.get(binding.type());
-                if (hook != null) {
-                    ItemStack stack = hook.extractItem(player, binding, ingredient, count);
-                    if (!stack.isEmpty()) return stack;
-                }
-            }
-            }
+        GlobalPos key = GlobalPos.of(dim, altarPos);
+        List<AltarBinding> bindings = BINDINGS.valuesFor(key, player.getUUID());
+        if (bindings.isEmpty() && rebuildBindingFromNBT(player, dim, altarPos)) {
+            bindings = BINDINGS.valuesFor(key, player.getUUID());
         }
-        // Fallback: rebuild binding from player items (survives server restart)
-        return tryExtractFromPlayerItems(player, dim, altarPos, ingredient, count);
-    }
-
-    private static ItemStack tryExtractFromPlayerItems(ServerPlayer player, ResourceKey<Level> dim,
-                                                        BlockPos altarPos, Ingredient ingredient, int count) {
-        ItemStack result = findInInventory(player, stacks -> {
-            ItemStack s = scanForNetworkItem(player, stacks, dim, altarPos, ingredient, count);
-            return s.isEmpty() ? null : s;
-        });
-        return result != null ? result : ItemStack.EMPTY;
-    }
-
-    private static ItemStack scanForNetworkItem(ServerPlayer player, List<ItemStack> stacks,
-                                                  ResourceKey<Level> dim, BlockPos altarPos,
-                                                  Ingredient ingredient, int count) {
-        for (ItemStack stack : stacks) {
-            if (stack.isEmpty()) continue;
-            if (!BindingStorage.hasBinding(stack, dim.location(), altarPos)) continue;
-            if (com.refinedmods.refinedstorage.item.NetworkItem.isValid(stack)) {
-                INetwork net = RSIntegrationNetwork.resolveNetwork(player.server,
-                        com.refinedmods.refinedstorage.item.NetworkItem.getDimension(stack),
-                        new BlockPos(com.refinedmods.refinedstorage.item.NetworkItem.getX(stack),
-                                com.refinedmods.refinedstorage.item.NetworkItem.getY(stack),
-                                com.refinedmods.refinedstorage.item.NetworkItem.getZ(stack)));
-                if (net != null) {
-                    ItemStack extracted = RSIntegrationNetwork.extractFromNetwork(net, ingredient, count, player);
-                    if (!extracted.isEmpty()) return extracted;
-                }
+        for (AltarBinding binding : bindings) {
+            IBindingHook hook = HOOKS.get(binding.type());
+            if (hook != null) {
+                ItemStack stack = hook.extractItem(player, binding, ingredient, count);
+                if (!stack.isEmpty()) return stack;
             }
         }
         return ItemStack.EMPTY;
@@ -430,25 +373,19 @@ public final class AltarBindingRegistry {
                 ResourceKey<Level> altarDim = ResourceKey.create(
                         net.minecraft.core.registries.Registries.DIMENSION, entry.dim());
                 BlockPos altarPos = entry.pos();
-                List<AltarBinding> altarBindings = BINDINGS.get(GlobalPos.of(altarDim, altarPos));
-                if (altarBindings == null) continue;
-                synchronized (altarBindings) {
-                    for (AltarBinding ab : altarBindings) {
-                    if (!ab.type().equals(AltarBinding.RS_NETWORK)) continue;
-                    try {
-                        CompoundTag data = ab.data();
-                        ResourceLocation dimId = ResourceLocation.tryParse(data.getString("dim"));
-                        if (dimId == null) continue;
-                        ResourceKey<Level> netDim = ResourceKey.create(
-                                net.minecraft.core.registries.Registries.DIMENSION, dimId);
-                        BlockPos netPos = new BlockPos(
-                                data.getInt("x"), data.getInt("y"), data.getInt("z"));
-                        INetwork net = RSIntegrationNetwork.resolveNetwork(player.server, netDim, netPos);
-                        if (net != null) return net;
-                    } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
-                    }
-                    }
+                List<AltarBinding> altarBindings = BINDINGS.valuesFor(
+                        GlobalPos.of(altarDim, altarPos), player.getUUID());
+                if (altarBindings.isEmpty()) {
+                    rebuildBindingFromNBT(player, altarDim, altarPos);
+                    altarBindings = BINDINGS.valuesFor(
+                            GlobalPos.of(altarDim, altarPos), player.getUUID());
                 }
+                for (AltarBinding ab : altarBindings) {
+                    if (!ab.type().equals(AltarBinding.RS_NETWORK)) continue;
+                    INetwork net = resolveRsNetwork(player, ab);
+                    if (net != null) return net;
+                }
+            }
         }
         return null;
     }
