@@ -30,6 +30,12 @@ public final class AutoEatNetworkHandler {
         ch.registerMessage(NetworkPacketIds.AUTO_EAT_BLACKLIST_SYNC, BlacklistSyncPacket.class,
                 BlacklistSyncPacket::encode, BlacklistSyncPacket::decode, BlacklistSyncPacket::handle,
                 java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_CLIENT));
+        ch.registerMessage(NetworkPacketIds.AUTO_EAT_PREFERENCES_UPDATE,
+                UpdateAutoEatPreferencesPacket.class,
+                UpdateAutoEatPreferencesPacket::encode,
+                UpdateAutoEatPreferencesPacket::decode,
+                UpdateAutoEatPreferencesPacket::handle,
+                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_SERVER));
         registered = true;
     }
 }

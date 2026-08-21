@@ -74,6 +74,7 @@ public final class NetworkPacketIds {
     public static final int AUTO_EAT_BLACKLIST_UPDATE = 83;
     public static final int AUTO_EAT_BLACKLIST_REQUEST = 84;
     public static final int AUTO_EAT_BLACKLIST_SYNC = 85;
+    public static final int AUTO_EAT_PREFERENCES_UPDATE = 86;
 
     // ── FTB Quests submission (90-99) ────────────────────────────────
     public static final int FTB_QUEST_SUBMISSION_REQUEST = 90;
@@ -104,4 +105,6 @@ public final class NetworkPacketIds {
     // Nearby machine binding (126-129)
     public static final int NEARBY_BINDING_REQUEST = 126;
     public static final int VILLAGER_TRADE_LOCK_SNAPSHOT = 127;
+    public static final int ENCHANTING_RESTOCK_REQUEST = 128;
+    public static final int ENCHANTING_RESTOCK_RESULT = 129;
 }

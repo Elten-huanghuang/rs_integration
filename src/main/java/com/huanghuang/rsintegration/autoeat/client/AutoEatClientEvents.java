@@ -27,6 +27,12 @@ public final class AutoEatClientEvents {
     private static boolean blacklistRequested;
 
     @SubscribeEvent
+    public static void onClientLogin(ClientPlayerNetworkEvent.LoggingIn event) {
+        blacklistRequested = true;
+        NetworkHandler.CHANNEL.sendToServer(new RequestBlacklistPacket());
+    }
+
+    @SubscribeEvent
     public static void onClientDisconnect(ClientPlayerNetworkEvent.LoggingOut event) {
         ClientState.reset();
         ClientSyncedConfig.reset();

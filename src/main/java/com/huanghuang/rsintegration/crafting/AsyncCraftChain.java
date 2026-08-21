@@ -2626,6 +2626,15 @@ public final class AsyncCraftChain {
 
             if (recipe instanceof net.minecraft.world.item.crafting.CraftingRecipe cr) {
                 List<IngredientSpec> specs = CraftPacketUtils.extractCraftingIngredientSpecs(cr);
+                ItemStack terminalOutput = terminalOutputFor(
+                        stepId, cr, overworld.registryAccess());
+                if (!terminalOutput.isEmpty()
+                        && !SelfAmplifyingRecipePolicy.isSelfAmplifying(specs, terminalOutput)) {
+                    specs = specs.stream()
+                            .map(spec -> SelfAmplifyingRecipePolicy
+                                    .excludeNonProductiveSelfCandidate(spec, terminalOutput))
+                            .toList();
+                }
                 for (int execution = 0; execution < executions; execution++) {
                     if (!executeCraftingOnceInline(cr, specs, stepId, online,
                             workingInventory, executionLedger, allowPhysicalFallback,
@@ -2716,6 +2725,17 @@ public final class AsyncCraftChain {
             }
         }
         return true;
+    }
+
+    private ItemStack terminalOutputFor(ResourceLocation stepId,
+                                        net.minecraft.world.item.crafting.CraftingRecipe recipe,
+                                        net.minecraft.core.RegistryAccess registryAccess) {
+        if (steps.isEmpty() || !steps.get(steps.size() - 1).recipeId().equals(stepId)) {
+            return ItemStack.EMPTY;
+        }
+        if (targetOutput != null && !targetOutput.isEmpty()) return targetOutput.copyWithCount(1);
+        ItemStack declared = ModRecipeHandlers.tryGetResultItem(recipe, registryAccess);
+        return declared.isEmpty() ? ItemStack.EMPTY : declared.copyWithCount(1);
     }
 
     private boolean executeCraftingOnceInline(
