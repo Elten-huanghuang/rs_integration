@@ -26,13 +26,11 @@ import com.huanghuang.rsintegration.reflection.probes.FAReflection;
 import com.huanghuang.rsintegration.reflection.probes.TLMReflection;
 import com.huanghuang.rsintegration.util.ModIds;
 import mezz.jei.api.gui.IRecipeLayoutDrawable;
+import mezz.jei.common.util.ImmutableRect2i;
 import mezz.jei.api.gui.ingredient.IRecipeSlotView;
 import mezz.jei.api.gui.ingredient.IRecipeSlotsView;
 import mezz.jei.api.recipe.RecipeIngredientRole;
-import mezz.jei.common.util.ImmutableRect2i;
 import mezz.jei.gui.recipes.RecipeGuiLayouts;
-import mezz.jei.gui.recipes.RecipeLayoutWithButtons;
-import mezz.jei.gui.recipes.RecipeTransferButton;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
@@ -81,7 +79,7 @@ public class RecipeGuiLayoutsMixin {
             new ResourceLocation("minecraft", "anvil");
 
     @Shadow
-    private List<RecipeLayoutWithButtons<?>> recipeLayoutsWithButtons;
+    private List<?> recipeLayoutsWithButtons;
 
     @Unique
     private final List<Integer> rsi$layoutIndices = new ArrayList<>();
@@ -94,12 +92,12 @@ public class RecipeGuiLayoutsMixin {
     private final List<Boolean> rsi$hasMachineGui = new ArrayList<>();
 
     @Inject(method = "setRecipeLayoutsWithButtons", at = @At("HEAD"))
-    private void rsi$onLayoutsSetHead(List<RecipeLayoutWithButtons<?>> layouts, CallbackInfo ci) {
+    private void rsi$onLayoutsSetHead(List<?> layouts, CallbackInfo ci) {
         if (layouts == null || layouts.isEmpty()) {
             RSIntegrationMod.LOGGER.trace("[RSI-JEI-Mixin] setRecipeLayoutsWithButtons HEAD: EMPTY list");
         } else {
             try {
-                String catUid = layouts.get(0).recipeLayout().getRecipeCategory()
+                String catUid = rsi$getRecipeLayout(layouts.get(0)).getRecipeCategory()
                         .getRecipeType().getUid().toString();
                 RSIntegrationMod.LOGGER.trace("[RSI-JEI-Mixin] setRecipeLayoutsWithButtons HEAD: {} recipes, uid={}",
                         layouts.size(), catUid);
@@ -139,8 +137,12 @@ public class RecipeGuiLayoutsMixin {
         int faNoBinding = 0;
 
         for (int i = 0; i < recipeLayoutsWithButtons.size(); i++) {
-            RecipeLayoutWithButtons<?> layout = recipeLayoutsWithButtons.get(i);
-            IRecipeLayoutDrawable<?> recipeLayout = layout.recipeLayout();
+            Object layout = recipeLayoutsWithButtons.get(i);
+            IRecipeLayoutDrawable<?> recipeLayout = rsi$getRecipeLayout(layout);
+            if (recipeLayout == null) {
+                skippedNoRecipe++;
+                continue;
+            }
             Object recipe = getRecipeFromLayout(recipeLayout);
             if (recipe == null) {
                 try {
@@ -437,8 +439,18 @@ public class RecipeGuiLayoutsMixin {
     @Unique
     private static final int SCREEN_MARGIN = 2;
 
-    @Inject(method = "updateRecipeButtonPositions", at = @At("RETURN"))
+    @Inject(method = "updateRecipeButtonPositions", at = @At("RETURN"), require = 0)
     private void rsi$updatePositions(CallbackInfo ci) {
+        rsi$refreshButtonPositions();
+    }
+
+    @Inject(method = "updateLayout", at = @At("RETURN"), require = 0)
+    private void rsi$updatePositionsNew(ImmutableRect2i area, int maxWidth, CallbackInfo ci) {
+        rsi$refreshButtonPositions();
+    }
+
+    @Unique
+    private void rsi$refreshButtonPositions() {
         AltarCraftButtons.clearTransferPositions();
         int mgIdx = 0;
         List<int[]> mgPos = AltarCraftButtons.getMachineGuiPositions();
@@ -449,10 +461,11 @@ public class RecipeGuiLayoutsMixin {
             int layoutIdx = rsi$layoutIndices.get(i);
             if (layoutIdx >= recipeLayoutsWithButtons.size()) continue;
 
-            RecipeLayoutWithButtons<?> layout = recipeLayoutsWithButtons.get(layoutIdx);
-            IRecipeLayoutDrawable<?> recipeLayout = layout.recipeLayout();
-            RecipeTransferButton transferBtn = layout.transferButton();
-            ImmutableRect2i area = ((GuiIconToggleButtonAccessor) transferBtn).getButton().getArea();
+            Object layout = recipeLayoutsWithButtons.get(layoutIdx);
+            IRecipeLayoutDrawable<?> recipeLayout = rsi$getRecipeLayout(layout);
+            if (recipeLayout == null) continue;
+            Rect2i area = rsi$getTransferButtonArea(layout, recipeLayout);
+            if (area == null) continue;
             int bw = Math.max(area.getWidth(), MIN_BUTTON_W);
             int bh = Math.max(area.getHeight(), MIN_BUTTON_H);
             boolean hasMachineGui = rsi$hasMachineGui.size() > i && rsi$hasMachineGui.get(i);
@@ -492,10 +505,33 @@ public class RecipeGuiLayoutsMixin {
     }
 
     @Unique
+    private static IRecipeLayoutDrawable<?> rsi$getRecipeLayout(Object layout) {
+        if (layout == null) return null;
+        for (String methodName : new String[]{"getRecipeLayout", "recipeLayout"}) {
+            try {
+                Method method = layout.getClass().getMethod(methodName);
+                Object result = method.invoke(layout);
+                if (result instanceof IRecipeLayoutDrawable<?> drawable) return drawable;
+            } catch (ReflectiveOperationException ignored) {
+                // JEI 15.49 renamed the accessor; try the other supported name.
+            }
+        }
+        RSIntegrationMod.LOGGER.warn("[RSI-JEI-Mixin] Unsupported recipe layout wrapper: {}",
+                layout.getClass().getName());
+        return null;
+    }
+
+    @Unique
+    private static Rect2i rsi$getTransferButtonArea(Object layout, IRecipeLayoutDrawable<?> recipeLayout) {
+        return recipeLayout != null ? recipeLayout.getRecipeTransferButtonArea() : null;
+    }
+
+    @Unique
     private List<int[]> rsi$collectJeiOccupiedAreas() {
         List<int[]> occupied = new ArrayList<>();
-        for (RecipeLayoutWithButtons<?> layout : recipeLayoutsWithButtons) {
-            IRecipeLayoutDrawable<?> drawable = layout.recipeLayout();
+        for (Object layout : recipeLayoutsWithButtons) {
+            IRecipeLayoutDrawable<?> drawable = rsi$getRecipeLayout(layout);
+            if (drawable == null) continue;
             rsi$addOccupiedArea(occupied, drawable.getRectWithBorder());
             rsi$addOccupiedArea(occupied, drawable.getRecipeTransferButtonArea());
             rsi$addOccupiedArea(occupied, drawable.getRecipeBookmarkButtonArea());
@@ -511,7 +547,7 @@ public class RecipeGuiLayoutsMixin {
     }
 
     @Unique
-    private static int[] rsi$findButtonPlacement(Rect2i recipeArea, ImmutableRect2i transferArea,
+    private static int[] rsi$findButtonPlacement(Rect2i recipeArea, Rect2i transferArea,
                                                   int width, int height, int screenWidth, int screenHeight,
                                                   List<int[]> occupied) {
         int recipeLeft = recipeArea.getX();

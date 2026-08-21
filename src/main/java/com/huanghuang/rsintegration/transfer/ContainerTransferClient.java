@@ -144,6 +144,10 @@ public final class ContainerTransferClient {
         var mc = Minecraft.getInstance();
         if (mc.player == null) return;
         if (event.getAction() != GLFW.GLFW_PRESS) return;
+        // Vanilla uses F3+G to toggle chunk borders. Since the transfer mode
+        // key is intentionally UNIVERSAL, the same G press also reaches this
+        // listener; keep the debug shortcut isolated from our mode toggle.
+        if (isDebugKeyChordActive(mc)) return;
         if (mc.screen != null
                 && (isAnyTextInputFocusedSafe(mc.screen) || isRecipeViewerFocused())) return;
 
@@ -160,6 +164,11 @@ public final class ContainerTransferClient {
             modeMessageUntil = System.currentTimeMillis() + 1800L;
             mc.player.displayClientMessage(modeMessage, true);
         }
+    }
+
+    private static boolean isDebugKeyChordActive(Minecraft mc) {
+        long window = mc.getWindow().getWindow();
+        return GLFW.glfwGetKey(window, GLFW.GLFW_KEY_F3) == GLFW.GLFW_PRESS;
     }
 
     private static void onRenderGui(RenderGuiEvent.Post event) {
