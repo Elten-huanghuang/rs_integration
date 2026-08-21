@@ -9,6 +9,7 @@ import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.batch.ParallelBatchSizing;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
+import com.huanghuang.rsintegration.mods.common.IdleInventoryEvacuator;
 import com.huanghuang.rsintegration.mods.vanilla.VanillaFurnaceFuelPolicy;
 import com.refinedmods.refinedstorage.api.util.Action;
 import ironfurnaces.items.augments.ItemAugmentFuel;
@@ -180,8 +181,8 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
             factoryLeaseKey = target.dimension().location() + ":" + pos.asLong();
             factorySlot = reserveFactorySlot(factoryLeaseKey, ironFurnace);
             if (factorySlot < 0) return PreparationResult.retry("Iron Furnace factory has no free slot");
-        } else if (!ironFurnace.getItem(INPUT).isEmpty() || !ironFurnace.getItem(OUTPUT).isEmpty()) {
-            return PreparationResult.retry("Iron Furnace input or output is occupied");
+        } else if (ironFurnace.cookTime > 0) {
+            return PreparationResult.retry("Iron Furnace is actively cooking");
         }
 
         this.player = player;
@@ -209,7 +210,7 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
         if (factoryMode) {
             return furnace.getEnergy() > 0 && ensureFactoryLeases(plannedFactoryLanes);
         }
-        return furnace.getItem(INPUT).isEmpty() && furnace.getItem(OUTPUT).isEmpty();
+        return furnace.cookTime <= 0;
     }
 
     @Override
@@ -406,7 +407,7 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
                     pos, rainbowMode, operations, queuedOperations - operations,
                     laneInputs.stream().map(ItemStack::getCount).toList());
         } else {
-            if (!furnace.getItem(INPUT).isEmpty() || !furnace.getItem(OUTPUT).isEmpty()) return false;
+            if (!evacuateIdleFurnaceSlots()) return false;
             ItemStack placed = queuedMaterial.copyWithCount(operations);
             furnace.setItem(INPUT, placed);
             inputPlaced = true;
@@ -420,6 +421,17 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
         observedWorking = false;
         markCraftStarted();
         return true;
+    }
+
+    private boolean evacuateIdleFurnaceSlots() {
+        IdleInventoryEvacuator.Result result = IdleInventoryEvacuator.evacuate(
+                furnace, furnace != null && furnace.cookTime <= 0,
+                slot -> slot == INPUT || slot == OUTPUT
+                        ? IdleInventoryEvacuator.SlotPolicy.RETURN
+                        : IdleInventoryEvacuator.SlotPolicy.PRESERVE,
+                this::refund);
+        if (result.cleared()) furnace.setChanged();
+        return result.cleared();
     }
 
     private boolean refreshMachine() {

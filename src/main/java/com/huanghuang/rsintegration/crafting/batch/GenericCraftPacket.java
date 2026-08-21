@@ -3039,6 +3039,9 @@ public final class GenericCraftPacket {
             if (!check.warnings().isEmpty() || check.blocked()) {
                 stepIssues.put(intermediateRecipeId,
                         new PlanResponse.StepIssue(check.warnings(), check.blocked()));
+                for (Component warning : check.warnings()) {
+                    if (!modWarnings.contains(warning)) modWarnings.add(warning);
+                }
             }
             blockingPrerequisiteFailure |= check.blocked();
         }

@@ -203,11 +203,18 @@ public final class ArsImbuementBatchDelegate extends AbstractBatchDelegate {
             return false;
         }
 
-        // Verify slot 0 is empty
-        if (!container.getItem(0).isEmpty()) {
-            RSIntegrationMod.LOGGER.warn("[RSI-ArsImbuement] Slot 0 occupied at start");
-            refundRejectedStart(player, level, materials);
-            return false;
+        // A completed manual output is safe to recover. Other contents may be an active
+        // manual imbuement and remain a busy-state signal.
+        ItemStack currentSlot = container.getItem(0);
+        if (!currentSlot.isEmpty()) {
+            if (!ItemStack.isSameItemSameTags(currentSlot, expectedOutput)) {
+                RSIntegrationMod.LOGGER.warn("[RSI-ArsImbuement] Slot 0 occupied at start");
+                refundRejectedStart(player, level, materials);
+                return false;
+            }
+            ItemStack recovered = container.removeItem(0, currentSlot.getCount());
+            be.setChanged();
+            returnCatalyst(player, level, recovered);
         }
 
         // Place materials: first item is input (slot 0), rest are pedestal items

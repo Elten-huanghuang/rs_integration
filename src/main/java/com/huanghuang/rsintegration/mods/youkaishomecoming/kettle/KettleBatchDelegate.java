@@ -5,7 +5,9 @@ import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
+import com.huanghuang.rsintegration.util.Reflect;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
+import com.huanghuang.rsintegration.mods.common.IdleInventoryEvacuator;
 import com.huanghuang.rsintegration.reflection.probes.YHKReflection;
 import com.huanghuang.rsintegration.util.PlayerUtils;
 import com.huanghuang.rsintegration.util.TrackedNetworkInsertion;
@@ -37,6 +39,7 @@ import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 
 /** Batch delegate for Youkais Homecoming Kettle. */
 public final class KettleBatchDelegate extends AbstractBatchDelegate {
@@ -183,6 +186,20 @@ public final class KettleBatchDelegate extends AbstractBatchDelegate {
             forceChunkLoad(false);
             return false;
         }
+        if (network == null) {
+            network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+        }
+        if (network == null) {
+            forceChunkLoad(false);
+            return false;
+        }
+        int evacuated = evacuateIdleItems(items, getProcessingProgress(be), this::refund);
+        if (evacuated < 0) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Kettle] Kettle is busy or could not be cleared at {}", myPos);
+            forceChunkLoad(false);
+            return false;
+        }
+        if (evacuated > 0) be.setChanged();
 
         // Ensure there's water in the fluid tank (needed for heating)
         IFluidHandler fluidHandler = getFluidHandler(be);
@@ -634,6 +651,19 @@ public final class KettleBatchDelegate extends AbstractBatchDelegate {
             items.setItem(i, ItemStack.EMPTY);
         }
         be.setChanged();
+    }
+
+    static int evacuateIdleItems(SimpleContainer items, float progress,
+                                 Consumer<ItemStack> returnItem) {
+        if (items == null || progress > 0.0F) return -1;
+        IdleInventoryEvacuator.Result result = IdleInventoryEvacuator.evacuate(
+                items, true, ignored -> IdleInventoryEvacuator.SlotPolicy.RETURN, returnItem);
+        return result.cleared() ? result.returnedCount() : -1;
+    }
+
+    private static float getProcessingProgress(BlockEntity be) {
+        return Reflect.<Number>invoke(be, "inProgress")
+                .map(Number::floatValue).orElse(1.0F);
     }
 
     private void clearAndRefund() {
