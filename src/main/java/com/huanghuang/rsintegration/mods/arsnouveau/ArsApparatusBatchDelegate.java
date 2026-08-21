@@ -208,12 +208,13 @@ public final class ArsApparatusBatchDelegate extends AbstractBatchDelegate {
             return false;
         }
 
-        // Verify central slot is empty
+        // The crafting flag is authoritative. When it is clear, any central item is a
+        // completed output or abandoned reagent and can be returned before this run.
         ItemStack centralSlot = container.getItem(0);
         if (!centralSlot.isEmpty()) {
-            RSIntegrationMod.LOGGER.warn("[RSI-ArsApparatus] Central slot occupied");
-            refundRejectedStart(player, level, materials);
-            return false;
+            ItemStack recovered = container.removeItem(0, centralSlot.getCount());
+            be.setChanged();
+            returnExistingCentralItem(player, level, recovered);
         }
 
         if (materials.isEmpty()) {
@@ -576,6 +577,21 @@ public final class ArsApparatusBatchDelegate extends AbstractBatchDelegate {
         }
         RSIntegrationMod.LOGGER.debug("[RSI-ArsApparatus] Refunded {} material stack(s) after rejected start",
                 materials.stream().filter(stack -> stack != null && !stack.isEmpty()).count());
+    }
+
+    private void returnExistingCentralItem(ServerPlayer player, ServerLevel level,
+                                           ItemStack stack) {
+        if (stack.isEmpty()) return;
+        if (network == null) {
+            network = CraftPacketUtils.resolveNetworkForCraft(
+                    player, level.dimension(), machinePos);
+        }
+        ItemStack remainder = stack.copy();
+        if (network != null) {
+            remainder = network.insertItem(remainder, remainder.getCount(),
+                    com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+        }
+        if (!remainder.isEmpty()) PlayerUtils.safeGiveToPlayer(player, remainder, network);
     }
 
     static boolean ownsRejectedStartRefund(boolean usingSharedLedger) {

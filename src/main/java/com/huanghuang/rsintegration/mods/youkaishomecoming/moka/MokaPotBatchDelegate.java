@@ -8,6 +8,7 @@ import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
+import com.huanghuang.rsintegration.mods.common.IdleInventoryEvacuator;
 import com.huanghuang.rsintegration.reflection.probes.YHKReflection;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;
@@ -21,6 +22,7 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
+import net.minecraft.world.inventory.ContainerData;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.properties.BooleanProperty;
@@ -34,6 +36,7 @@ import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 
 /** Batch delegate for Youkais Homecoming Moka Pot. */
 public final class MokaPotBatchDelegate extends AbstractBatchDelegate {
@@ -94,12 +97,7 @@ public final class MokaPotBatchDelegate extends AbstractBatchDelegate {
         IItemHandler existingInventory = existing != null && isMokaBE(existing)
                 ? getInventory(existing) : null;
         if (existingInventory == null || existingInventory.getSlots() <= OUTPUT_SLOT) return false;
-        for (int slot = 0; slot < INPUT_SLOTS; slot++) {
-            if (!existingInventory.getStackInSlot(slot).isEmpty()) return false;
-        }
-        if (!existingInventory.getStackInSlot(CONTAINER_SLOT).isEmpty()
-                || !existingInventory.getStackInSlot(OUTPUT_SLOT).isEmpty()) return false;
-        return true;
+        return getCookTime(existing) <= 0;
     }
 
     @Nullable
@@ -190,23 +188,27 @@ public final class MokaPotBatchDelegate extends AbstractBatchDelegate {
             forceChunkLoad(false);
             return false;
         }
-        if (!handler.getStackInSlot(OUTPUT_SLOT).isEmpty()) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Moka] Output slot occupied at {}", myPos);
+        this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+        if (network == null) {
             forceChunkLoad(false);
             return false;
         }
+        int evacuated = evacuateIdleInventory(handler, getCookTime(be), this::refund);
+        if (evacuated < 0) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Moka] Pot is busy or could not be cleared at {}", myPos);
+            forceChunkLoad(false);
+            return false;
+        }
+        if (evacuated > 0) be.setChanged();
 
         // Step 1: Place container (cup, bottle, etc.) into CONTAINER_SLOT.
         // Do NOT use addItem() -- it just calls ItemHandlerHelper.insertItem
         // which routes to the first empty slot (slot 0, an ingredient slot).
         ItemStack container = getOutputContainer(recipe);
         if (!container.isEmpty() && handler.getStackInSlot(CONTAINER_SLOT).isEmpty()) {
-            this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
-            if (this.network != null) {
-                ItemStack extracted = network.extractItem(container.copyWithCount(1), 1, Action.PERFORM);
-                if (!extracted.isEmpty()) {
-                    handler.insertItem(CONTAINER_SLOT, extracted, false);
-                }
+            ItemStack extracted = network.extractItem(container.copyWithCount(1), 1, Action.PERFORM);
+            if (!extracted.isEmpty()) {
+                handler.insertItem(CONTAINER_SLOT, extracted, false);
             }
         }
 
@@ -536,6 +538,18 @@ public final class MokaPotBatchDelegate extends AbstractBatchDelegate {
             RSIntegrationMod.LOGGER.warn("[RSI-MokaPot] getOutputContainer field failed", e);
         }
         return ItemStack.EMPTY;
+    }
+
+    static int evacuateIdleInventory(IItemHandler handler, int cookTime,
+                                     Consumer<ItemStack> returnItem) {
+        if (handler == null || handler.getSlots() < INVENTORY_SIZE || cookTime > 0) return -1;
+        IdleInventoryEvacuator.Result result = IdleInventoryEvacuator.evacuate(
+                handler, true, ignored -> IdleInventoryEvacuator.SlotPolicy.RETURN, returnItem);
+        return result.cleared() ? result.returnedCount() : -1;
+    }
+
+    private static int getCookTime(BlockEntity be) {
+        return be instanceof ContainerData data ? data.get(0) : 1;
     }
 
     // -- cleanup --

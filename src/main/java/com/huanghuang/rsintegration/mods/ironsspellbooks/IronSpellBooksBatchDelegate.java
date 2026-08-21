@@ -6,6 +6,8 @@ import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.mods.common.IdleInventoryEvacuator;
+import com.refinedmods.refinedstorage.api.util.Action;
 import io.redspace.ironsspellbooks.api.registry.SpellRegistry;
 import io.redspace.ironsspellbooks.api.registry.SchoolRegistry;
 import io.redspace.ironsspellbooks.api.spells.AbstractSpell;
@@ -21,12 +23,16 @@ import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraftforge.common.capabilities.ForgeCapabilities;
+import net.minecraftforge.items.IItemHandler;
+import net.minecraftforge.items.ItemHandlerHelper;
 import net.minecraftforge.registries.ForgeRegistries;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Consumer;
 
 /** Executes one dynamic Iron's Spell Books recipe through the actual server menu. */
 public final class IronSpellBooksBatchDelegate extends AbstractBatchDelegate {
@@ -121,6 +127,9 @@ public final class IronSpellBooksBatchDelegate extends AbstractBatchDelegate {
         }
 
         if (usesDeterministicScrollOutput(recipe.machine())) {
+            if (!evacuateScrollForge(player)) {
+                return fail("Scroll Forge inventory could not be cleared", ItemStack.EMPTY, materials);
+            }
             return startDeterministicScrollForge(materials);
         }
 
@@ -147,6 +156,47 @@ public final class IronSpellBooksBatchDelegate extends AbstractBatchDelegate {
         clearMenu();
         done = !result.isEmpty();
         return done;
+    }
+
+    /** Returns pre-existing real inputs to RS before the deterministic forge path runs. */
+    private boolean evacuateScrollForge(ServerPlayer player) {
+        BlockEntity blockEntity = level.getBlockEntity(pos);
+        if (blockEntity == null) return false;
+        IItemHandler handler = blockEntity.getCapability(ForgeCapabilities.ITEM_HANDLER)
+                .resolve().orElse(null);
+        if (handler == null) return false;
+        int returned = evacuateScrollForgeInventory(handler,
+                stack -> returnToNetworkOrPlayer(stack, player));
+        if (returned < 0) return false;
+
+        if (returned > 0) {
+            RSIntegrationMod.LOGGER.debug(
+                    "[RSI-IronSpells] Returned {} pre-existing Scroll Forge items to RS at {}",
+                    returned, pos);
+        }
+        return true;
+    }
+
+    static int evacuateScrollForgeInventory(IItemHandler handler,
+                                             Consumer<ItemStack> returnItem) {
+        if (handler == null || handler.getSlots() < 4) return -1;
+        IdleInventoryEvacuator.Result result = IdleInventoryEvacuator.evacuate(
+                handler, true,
+                slot -> slot < 3
+                        ? IdleInventoryEvacuator.SlotPolicy.RETURN
+                        : slot == 3
+                        ? IdleInventoryEvacuator.SlotPolicy.DISCARD
+                        : IdleInventoryEvacuator.SlotPolicy.PRESERVE,
+                returnItem);
+        return result.cleared() ? result.returnedCount() : -1;
+    }
+
+    private void returnToNetworkOrPlayer(ItemStack stack, ServerPlayer player) {
+        ItemStack remainder = stack.copy();
+        if (network != null) {
+            remainder = network.insertItem(remainder, remainder.getCount(), Action.PERFORM);
+        }
+        if (!remainder.isEmpty()) ItemHandlerHelper.giveItemToPlayer(player, remainder);
     }
 
     private boolean startDeterministicScrollForge(List<ItemStack> materials) {

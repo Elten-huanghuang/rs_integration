@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
+import com.huanghuang.rsintegration.mods.common.IdleInventoryEvacuator;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
@@ -35,6 +36,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 
 /** Batch delegate for Immortal's Delight Enchantal Cooler. */
 public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
@@ -103,11 +105,7 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
         }
         IItemHandler handler = getInventory(be);
         if (handler == null || handler.getSlots() < baselineSlots.length) return false;
-        if (getCookingProgress(be) > 0 || !areInputsEmpty(handler)
-                || !handler.getStackInSlot(CONTAINER_SLOT).isEmpty()) {
-            return false;
-        }
-        return true;
+        return getCookingProgress(be) <= 0;
     }
 
     @Override
@@ -210,7 +208,10 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
             return false;
         }
 
-        if (!drainCompletedManualOutput(itemHandler, be)
+        int evacuated = evacuateIdleProcessingSlots(itemHandler, getCookingProgress(be),
+                this::refundToRSNetwork);
+        if (evacuated > 0) be.setChanged();
+        if (evacuated < 0
                 || !acquireIdleInventory(itemHandler, be)) {
             RSIntegrationMod.LOGGER.warn(
                     "[RSI-Batch-Cooler] Refusing recipe {} because cooler at {} is already busy",
@@ -449,15 +450,16 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
         return true;
     }
 
-    private boolean drainCompletedManualOutput(IItemHandler handler, BlockEntity be) {
-        if (getCookingProgress(be) > 0 || !areInputsEmpty(handler)) return false;
-        ItemStack output = handler.getStackInSlot(OUTPUT_SLOT);
-        if (output.isEmpty()) return true;
-        ItemStack removed = handler.extractItem(OUTPUT_SLOT, output.getCount(), false);
-        if (removed.isEmpty()) return false;
-        refundToRSNetwork(removed);
-        be.setChanged();
-        return handler.getStackInSlot(OUTPUT_SLOT).isEmpty();
+    static int evacuateIdleProcessingSlots(IItemHandler handler, int cookingProgress,
+                                           Consumer<ItemStack> returnItem) {
+        if (handler == null || handler.getSlots() < 7 || cookingProgress > 0) return -1;
+        IdleInventoryEvacuator.Result result = IdleInventoryEvacuator.evacuate(
+                handler, true,
+                slot -> slot <= OUTPUT_SLOT
+                        ? IdleInventoryEvacuator.SlotPolicy.RETURN
+                        : IdleInventoryEvacuator.SlotPolicy.PRESERVE,
+                returnItem);
+        return result.cleared() ? result.returnedCount() : -1;
     }
 
     private void recordSlotSupply(int slot, ItemStack supplied, int count) {
