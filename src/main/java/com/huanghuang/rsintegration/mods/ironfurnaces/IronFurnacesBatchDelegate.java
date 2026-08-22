@@ -506,10 +506,9 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
     }
 
     private ItemStack extractExact(ItemStack template, int amount) {
-        if (network == null || amount <= 0) return ItemStack.EMPTY;
-        ItemStack extracted = network.extractItem(template.copyWithCount(1), amount, Action.PERFORM);
+        ItemStack extracted = extractExactFromStorage(player, template.copyWithCount(1), amount, false);
         if (extracted.getCount() == amount) return extracted;
-        if (!extracted.isEmpty()) network.insertItem(extracted, extracted.getCount(), Action.PERFORM);
+        if (!extracted.isEmpty()) insertIntoStorage(player, extracted, false);
         return ItemStack.EMPTY;
     }
 
@@ -726,13 +725,11 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
 
     private void refund(ItemStack stack) {
         if (stack.isEmpty()) return;
-        if (network != null) {
-            ItemStack leftover = network.insertItem(stack.copy(), stack.getCount(), Action.PERFORM);
-            if (!leftover.isEmpty() && player != null) ItemHandlerHelper.giveItemToPlayer(player, leftover);
-        } else if (player != null) {
-            ItemHandlerHelper.giveItemToPlayer(player, stack.copy());
-        } else if (level != null && pos != null) {
-            Block.popResource(level, pos, stack.copy());
+        ItemStack leftover = insertIntoStorage(player, stack, false);
+        if (player != null) {
+            if (!leftover.isEmpty()) ItemHandlerHelper.giveItemToPlayer(player, leftover);
+        } else if (!leftover.isEmpty()) {
+            if (level != null && pos != null) Block.popResource(level, pos, leftover.copy());
         }
     }
 

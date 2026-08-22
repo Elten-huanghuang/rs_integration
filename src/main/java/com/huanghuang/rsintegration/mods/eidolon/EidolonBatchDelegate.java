@@ -450,12 +450,8 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
             if (stack.hasCraftingRemainingItem()) {
                 ItemStack remainder = stack.getCraftingRemainingItem();
                 if (!remainder.isEmpty()) {
-                    if (network != null) {
-                        network.insertItem(remainder, remainder.getCount(),
-                                com.refinedmods.refinedstorage.api.util.Action.PERFORM);
-                    } else {
-                        ItemHandlerHelper.giveItemToPlayer(player, remainder);
-                    }
+                    ItemStack leftover = insertIntoStorage(player, remainder, false);
+                    if (!leftover.isEmpty()) ItemHandlerHelper.giveItemToPlayer(player, leftover);
                 }
             }
         }

@@ -362,7 +362,8 @@ public final class ApotheosisLibraryService {
     }
 
     private static RefundOutcome refund(INetwork network, ServerPlayer player, ItemStack stack) {
-        ItemStack remaining = network.insertItem(stack.copy(), stack.getCount(), Action.PERFORM);
+        ItemStack remaining = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
+                .insertLegacy(network, player, stack, false);
         if (remaining.isEmpty()) return RefundOutcome.REFUNDED;
         ItemStack inventoryCopy = remaining.copy();
         if (player.getInventory().add(inventoryCopy)) return RefundOutcome.REFUNDED;

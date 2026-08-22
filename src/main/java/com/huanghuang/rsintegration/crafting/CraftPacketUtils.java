@@ -1377,7 +1377,8 @@ public final class CraftPacketUtils {
      */
     private static boolean tryResolveAndRunChain(ServerPlayer player, INetwork network,
                                                   Ingredient ingredient, int count) {
-        Map<StackKey, Integer> available = MaterialSources.listAllAvailable(player, network);
+        Map<StackKey, Integer> available = MaterialSources.listAllAvailable(
+                player, CraftStorageEndpoints.fromLegacyNetwork(network));
         List<IngredientSpec> specs = List.of(new IngredientSpec(ingredient, count));
 
         // 1. Try typed resolver (includes multi-block candidates)
@@ -1576,7 +1577,8 @@ public final class CraftPacketUtils {
      */
     public static List<ResolutionStep> resolveIntermediateSteps(
             ServerPlayer player, INetwork network, CraftingRecipe recipe, int repeatCount) {
-        Map<StackKey, Integer> available = MaterialSources.listAllAvailable(player, network);
+        Map<StackKey, Integer> available = MaterialSources.listAllAvailable(
+                player, CraftStorageEndpoints.fromLegacyNetwork(network));
         int repeats = Math.max(1, repeatCount);
 
         List<IngredientSpec> specs = extractIngredientSpecs(recipe);
@@ -1643,7 +1645,8 @@ public final class CraftPacketUtils {
 
         INetwork network = resolveNetworkForCraft(player, altarDim, altarPos);
         if (network == null) return false;
-        Map<StackKey, Integer> available = MaterialSources.listAllAvailable(player, network);
+        Map<StackKey, Integer> available = MaterialSources.listAllAvailable(
+                player, CraftStorageEndpoints.fromLegacyNetwork(network));
         List<String> missing = new ArrayList<>();
         List<ResolutionStep> allSteps = CraftingResolver.resolveStepsForSpecsWithTypes(
                 needed, available, player.serverLevel(), player, network, missing, null, false);

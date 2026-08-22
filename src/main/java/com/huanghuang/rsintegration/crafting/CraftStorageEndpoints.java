@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.item.ItemStack;
 import com.huanghuang.rsintegration.storage.StorageReference;
 
 import javax.annotation.Nonnull;
@@ -16,6 +17,32 @@ public final class CraftStorageEndpoints {
     /** Transitional bridge for legacy call sites; native RS stays isolated here. */
     public static CraftStorageEndpoint fromLegacyNetwork(@Nonnull INetwork network) {
         return new LegacyRsCraftStorageEndpoint(network);
+    }
+
+    /** Transitional insert bridge for non-delegate compatibility services. */
+    @Nonnull
+    public static ItemStack insertLegacy(@Nonnull INetwork network,
+                                         @Nonnull ServerPlayer player,
+                                         @Nonnull ItemStack stack,
+                                         boolean simulate) {
+        return fromLegacyNetwork(network).insert(player, stack, simulate)
+                .remainder().orElse(ItemStack.EMPTY);
+    }
+
+    /** Transitional exact-extraction bridge for non-crafting compatibility services. */
+    @Nonnull
+    public static ItemStack extractExactLegacy(@Nonnull INetwork network,
+                                               @Nonnull ServerPlayer player,
+                                               @Nonnull ItemStack template,
+                                               int amount,
+                                               boolean simulate) {
+        var result = fromLegacyNetwork(network).extractExact(player, template, amount, simulate);
+        return result.extractedStacks().stream().reduce(ItemStack.EMPTY, (left, right) -> {
+            if (left.isEmpty()) return right.copy();
+            ItemStack merged = left.copy();
+            if (ItemStack.isSameItemSameTags(merged, right)) merged.grow(right.getCount());
+            return merged;
+        });
     }
 
     /**

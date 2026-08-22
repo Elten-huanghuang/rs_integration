@@ -614,8 +614,8 @@ public final class WRWandCraftPacket {
             if (t.isEmpty()) continue;
             ItemStack refund = t.copy();
             if (network != null) {
-                ItemStack leftover = network.insertItem(refund, refund.getCount(),
-                        com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                ItemStack leftover = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
+                        .insertLegacy(network, player, refund, false);
                 if (!leftover.isEmpty()) {
                     ItemHandlerHelper.giveItemToPlayer(player, leftover);
                 }

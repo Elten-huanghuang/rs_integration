@@ -108,8 +108,7 @@ public final class CrabTrapBatchDelegate extends AbstractBatchDelegate {
             if (!tryStartWithMaterials(player, materials, ledger)) {
                 for (ItemStack mat : materials) {
                     if (!mat.isEmpty())
-                        network.insertItem(mat.copy(), mat.getCount(),
-                                com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                        insertIntoStorage(player, mat.copy(), false);
                 }
                 return false;
             }
@@ -217,8 +216,7 @@ public final class CrabTrapBatchDelegate extends AbstractBatchDelegate {
         ItemStack primary = outputs.get(0);
         if (network != null) {
             for (int i = 1; i < outputs.size(); i++) {
-                network.insertItem(outputs.get(i), outputs.get(i).getCount(),
-                        com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                insertIntoStorage(player, outputs.get(i), false);
             }
         }
         return primary;
@@ -274,14 +272,9 @@ public final class CrabTrapBatchDelegate extends AbstractBatchDelegate {
     }
 
     private void refundToRSNetwork(ItemStack stack) {
-        if (network != null) {
-            ItemStack leftover = network.insertItem(stack.copy(), stack.getCount(),
-                    com.refinedmods.refinedstorage.api.util.Action.PERFORM);
-            if (!leftover.isEmpty() && player != null) {
-                net.minecraftforge.items.ItemHandlerHelper.giveItemToPlayer(player, leftover);
-            }
-        } else if (player != null) {
-            net.minecraftforge.items.ItemHandlerHelper.giveItemToPlayer(player, stack.copy());
+        ItemStack leftover = insertIntoStorage(player, stack, false);
+        if (!leftover.isEmpty() && player != null) {
+            net.minecraftforge.items.ItemHandlerHelper.giveItemToPlayer(player, leftover);
         }
     }
 

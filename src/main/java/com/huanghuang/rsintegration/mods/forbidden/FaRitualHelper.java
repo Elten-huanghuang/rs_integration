@@ -668,8 +668,8 @@ public final class FaRitualHelper {
 
                         ItemStack req = rsStack.copy();
                         req.setCount(1);
-                        ItemStack extracted = network.extractItem(req, 1,
-                                com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                        ItemStack extracted = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
+                                .extractExactLegacy(network, player, req, 1, false);
                         if (!extracted.isEmpty()) {
                             RSIntegrationMod.LOGGER.debug("[RSI-FA] Extracted RitualStarterItem '{}' from RS",
                                     extracted.getHoverName().getString());

@@ -625,12 +625,9 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
 
     private void returnItem(ItemStack stack) {
         if (stack.isEmpty()) return;
-        if (network != null) {
-            ItemStack leftover = network.insertItem(stack, stack.getCount(),
-                    com.refinedmods.refinedstorage.api.util.Action.PERFORM);
-            if (!leftover.isEmpty()) {
-                ItemHandlerHelper.giveItemToPlayer(player, leftover);
-            }
+        ItemStack leftover = insertIntoStorage(player, stack, false);
+        if (!leftover.isEmpty() && player != null) {
+            ItemHandlerHelper.giveItemToPlayer(player, leftover);
         } else if (player != null) {
             if (!player.getInventory().add(stack)) {
                 player.drop(stack, false);

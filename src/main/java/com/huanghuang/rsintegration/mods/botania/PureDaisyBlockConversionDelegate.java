@@ -7,7 +7,7 @@ import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.batch.ParallelBatchSizing;
 import com.refinedmods.refinedstorage.api.network.INetwork;
-import com.refinedmods.refinedstorage.api.util.Action;
+import net.minecraftforge.items.ItemHandlerHelper;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
@@ -197,7 +197,10 @@ public final class PureDaisyBlockConversionDelegate extends AbstractBatchDelegat
             if (!level.isEmptyBlock(target)) level.destroyBlock(target, false);
         }
         if (!usingSharedLedger && !input.isEmpty()) {
-            network.insertItem(input.copy(), input.getCount(), Action.PERFORM);
+            ItemStack leftover = insertIntoStorage(player, input, false);
+            if (!leftover.isEmpty() && player != null && !player.hasDisconnected()) {
+                ItemHandlerHelper.giveItemToPlayer(player, leftover);
+            }
         }
     }
 

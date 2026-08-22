@@ -210,8 +210,7 @@ public final class CraftingTableBatchDelegate extends AbstractBatchDelegate {
                     if (network != null) {
                         for (ItemStack rem : remains) {
                             if (!rem.isEmpty()) {
-                                network.insertItem(rem.copy(), rem.getCount(),
-                                        com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                                insertIntoStorage(player, rem.copy(), false);
                             }
                         }
                     }

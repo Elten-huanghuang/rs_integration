@@ -353,8 +353,7 @@ public final class MalumRunicWorkbenchBatchDelegate extends AbstractBatchDelegat
             network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
         }
         if (network != null) {
-            ItemStack leftover = network.insertItem(stack.copy(), stack.getCount(),
-                    com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+            ItemStack leftover = insertIntoStorage(player, stack, false);
             if (!leftover.isEmpty() && player != null && !player.hasDisconnected()) {
                 ItemHandlerHelper.giveItemToPlayer(player, leftover);
             }
@@ -366,8 +365,10 @@ public final class MalumRunicWorkbenchBatchDelegate extends AbstractBatchDelegat
     private void refundItem(ItemStack stack) {
         if (stack.isEmpty()) return;
         if (ledger != null && ledger.isCommitted() && network != null) {
-            network.insertItem(stack.copy(), stack.getCount(),
-                    com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+            ItemStack leftover = insertIntoStorage(player, stack, false);
+            if (!leftover.isEmpty() && player != null && !player.hasDisconnected()) {
+                ItemHandlerHelper.giveItemToPlayer(player, leftover);
+            }
         } else if (player != null && !player.hasDisconnected()) {
             ItemHandlerHelper.giveItemToPlayer(player, stack.copy());
         }

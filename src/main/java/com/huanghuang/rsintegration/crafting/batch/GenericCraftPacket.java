@@ -58,6 +58,7 @@ import com.huanghuang.rsintegration.crafting.OutputDestination;
 import com.huanghuang.rsintegration.crafting.AsyncCraftManager;
 import com.huanghuang.rsintegration.crafting.ChainRepeatController;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
 import com.huanghuang.rsintegration.crafting.graph.TerminalGraphComposer;
 import com.huanghuang.rsintegration.crafting.loadbalancer.LoadBalancer;
@@ -123,6 +124,14 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 public final class GenericCraftPacket {
+
+    private static Map<StackKey, Integer> listAvailable(ServerPlayer player,
+                                                          @Nullable INetwork network) {
+        return network == null
+                ? MaterialSources.listAllAvailable(player, (INetwork) null)
+                : MaterialSources.listAllAvailable(player,
+                        CraftStorageEndpoints.fromLegacyNetwork(network));
+    }
     private static final int MAX_DEFERRED_WARM_UP_REQUESTS = 128;
     private static final LogSampler FAILURE_LOG_SAMPLER = new LogSampler(2_000);
     private static volatile PlanRequestService PLAN_REQUESTS = newDefaultPlanRequestService();
@@ -1092,7 +1101,7 @@ public final class GenericCraftPacket {
                                         recipe, player.serverLevel().registryAccess());
                 List<IngredientSpec> graphSpecs = scaleTerminalIngredientSpecs(
                         executionSpecs, recipeOutput, repeatCount);
-                Map<StackKey, Integer> avail = MaterialSources.listAllAvailable(player, network);
+                Map<StackKey, Integer> avail = listAvailable(player, network);
                 List<String> missing = new ArrayList<>();
                 CraftPlanGraph inputGraph = usesPhysicalMachineInputSlots(recipe)
                         ? CraftingResolver.resolveMachineGraphForSpecsWithTypes(
@@ -1166,7 +1175,7 @@ public final class GenericCraftPacket {
                     player.serverLevel().registryAccess()).copy();
             List<IngredientSpec> graphSpecs = scaleTerminalIngredientSpecs(
                     extractPlanIngredientSpecs(cr), recipeOutput, repeatCount);
-            Map<StackKey, Integer> available = MaterialSources.listAllAvailable(player, network);
+            Map<StackKey, Integer> available = listAvailable(player, network);
             List<String> graphMissing = new ArrayList<>();
             CraftPlanGraph inputGraph = CraftingResolver.resolveGraphForSpecsWithTypes(
                     graphSpecs, available, player.serverLevel(), player, network,
@@ -1264,7 +1273,7 @@ public final class GenericCraftPacket {
                 }
                 return;
             }
-            Map<StackKey, Integer> avail = MaterialSources.listAllAvailable(player, network);
+            Map<StackKey, Integer> avail = listAvailable(player, network);
             List<String> missingCheck = new ArrayList<>();
             ItemStack recipeOutput = cr2.getResultItem(
                     player.serverLevel().registryAccess()).copy();
@@ -1355,7 +1364,7 @@ public final class GenericCraftPacket {
                 && RSIntegrationConfig.ENABLE_MULTIBLOCK_AUTO_CRAFTING.get()) {
             List<IngredientSpec> smithingSpecs = scaleIngredientSpecs(specs, repeatCount);
             if (!smithingSpecs.isEmpty()) {
-                Map<StackKey, Integer> avail = MaterialSources.listAllAvailable(player, network);
+                Map<StackKey, Integer> avail = listAvailable(player, network);
                 List<String> missing = new ArrayList<>();
                 CraftPlanGraph smithingInputGraph = CraftingResolver.resolveGraphForSpecsWithTypes(
                         smithingSpecs, avail, player.serverLevel(), player, network, missing,
@@ -1427,6 +1436,9 @@ public final class GenericCraftPacket {
             boolean extractionIncomplete = false;
 
             try (ExtractionLedger ledger = new ExtractionLedger()) {
+                if (network != null) {
+                    ledger.setStorageEndpoint(CraftStorageEndpoints.fromLegacyNetwork(network));
+                }
                 // Plan all extractions atomically — nothing physically moved yet
                 for (IngredientNeed need : grouped.values()) {
                     ItemStack reserved = CraftPacketUtils.ensureMaterialAvailable(
@@ -2168,7 +2180,7 @@ public final class GenericCraftPacket {
         } else {
             long snapshotStarted = System.nanoTime();
             try {
-                available = MaterialSources.listAllAvailable(player, network);
+                available = listAvailable(player, network);
                 planningSnapshot = PlanningSnapshotFactory.capture(
                         player.getUUID(), previewGeneration, recipeId, available,
                         effectiveOverrides,

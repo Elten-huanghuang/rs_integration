@@ -1266,8 +1266,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         if (player == null) {
             for (ItemStack stack : items) {
                 if (!stack.isEmpty() && network != null) {
-                    network.insertItem(stack.copy(), stack.getCount(),
-                            com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                    insertIntoStorage(player, stack.copy(), false);
                 }
             }
         }
@@ -1523,8 +1522,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
                 if (usingSharedLedger) {
                     // Shared ledger owns the refund — don't double-insert.
                 } else if (network != null) {
-                    ItemStack leftover = network.insertItem(stack, stack.getCount(),
-                            com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                    ItemStack leftover = insertIntoStorage(player, stack, false);
                     if (!leftover.isEmpty()) {
                         ItemHandlerHelper.giveItemToPlayer(player, leftover);
                     }
@@ -1551,8 +1549,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
                     // Shared ledger will refund the original extraction — do NOT
                     // re-insert items into RS or we double-refund (dupe exploit).
                 } else if (refundToRS && network != null) {
-                    ItemStack leftover = network.insertItem(stack, stack.getCount(),
-                            com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                    ItemStack leftover = insertIntoStorage(player, stack, false);
                     if (!leftover.isEmpty()) {
                         ItemHandlerHelper.giveItemToPlayer(player, leftover);
                     }
@@ -1573,8 +1570,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
                             if (usingSharedLedger) {
                                 // Shared ledger will refund — do not double-insert
                             } else if (refundToRS && network != null) {
-                                ItemStack leftover = network.insertItem(s, s.getCount(),
-                                        com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                                ItemStack leftover = insertIntoStorage(player, s, false);
                                 if (!leftover.isEmpty()) {
                                     ItemHandlerHelper.giveItemToPlayer(player, leftover);
                                 }
@@ -1603,8 +1599,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         pendingRitualResult = ItemStack.EMPTY;
         ItemStack remainder = result;
         if (network != null) {
-            remainder = network.insertItem(result.copy(), result.getCount(),
-                    com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+            remainder = insertIntoStorage(player, result.copy(), false);
         }
         if (!remainder.isEmpty() && player != null) {
             ItemHandlerHelper.giveItemToPlayer(player, remainder);

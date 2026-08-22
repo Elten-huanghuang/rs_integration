@@ -6,6 +6,7 @@ import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.IngredientMatcher;
 import com.huanghuang.rsintegration.crafting.RecipeIndex;
@@ -92,6 +93,9 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
         this.player = player;
         this.ledger = new ExtractionLedger();
         this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+        if (this.network != null) {
+            this.ledger.setStorageEndpoint(CraftStorageEndpoints.fromLegacyNetwork(this.network));
+        }
         this.craftDone = false;
         this.pendingSecondary.clear();
 
@@ -445,8 +449,7 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
             // the result (Phase 1 succeeds before Phase 3), insert the result
             // into RS so the materials are not simply lost.
             if (craftDone && !pendingResult.isEmpty() && network != null) {
-                var leftover = network.insertItem(pendingResult.copy(),
-                        pendingResult.getCount(), com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                var leftover = ledgerStorageInsert(pendingResult.copy());
                 if (!leftover.isEmpty() && player != null && !player.hasDisconnected() && !player.isRemoved()) {
                     ItemHandlerHelper.giveItemToPlayer(player, leftover);
                 }
@@ -458,5 +461,9 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
                         ledger.size(), recipe != null ? recipe.getId() : "unknown");
             }
         }
+    }
+
+    private ItemStack ledgerStorageInsert(ItemStack stack) {
+        return insertIntoStorage(player, stack, false);
     }
 }

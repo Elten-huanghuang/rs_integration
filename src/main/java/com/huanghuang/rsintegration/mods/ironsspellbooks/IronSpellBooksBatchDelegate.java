@@ -192,10 +192,7 @@ public final class IronSpellBooksBatchDelegate extends AbstractBatchDelegate {
     }
 
     private void returnToNetworkOrPlayer(ItemStack stack, ServerPlayer player) {
-        ItemStack remainder = stack.copy();
-        if (network != null) {
-            remainder = network.insertItem(remainder, remainder.getCount(), Action.PERFORM);
-        }
+        ItemStack remainder = insertIntoStorage(player, stack, false);
         if (!remainder.isEmpty()) ItemHandlerHelper.giveItemToPlayer(player, remainder);
     }
 

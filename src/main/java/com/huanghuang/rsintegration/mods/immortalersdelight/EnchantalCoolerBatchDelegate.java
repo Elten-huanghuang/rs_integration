@@ -134,8 +134,7 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
             if (!tryStartWithMaterialsImpl(player, materials, false)) {
                 for (ItemStack mat : materials) {
                     if (!mat.isEmpty())
-                        network.insertItem(mat.copy(), mat.getCount(),
-                                com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                        insertIntoStorage(player, mat.copy(), false);
                 }
                 return false;
             }
@@ -569,14 +568,9 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
     }
 
     private void refundToRSNetwork(ItemStack stack) {
-        if (network != null) {
-            ItemStack leftover = network.insertItem(stack.copy(), stack.getCount(),
-                    com.refinedmods.refinedstorage.api.util.Action.PERFORM);
-            if (!leftover.isEmpty() && player != null) {
-                net.minecraftforge.items.ItemHandlerHelper.giveItemToPlayer(player, leftover);
-            }
-        } else if (player != null) {
-            net.minecraftforge.items.ItemHandlerHelper.giveItemToPlayer(player, stack.copy());
+        ItemStack leftover = insertIntoStorage(player, stack, false);
+        if (!leftover.isEmpty() && player != null) {
+            net.minecraftforge.items.ItemHandlerHelper.giveItemToPlayer(player, leftover);
         }
     }
 
@@ -626,13 +620,11 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
         int inserted = 0;
 
         // 1) Try lapis lazuli directly
-        ItemStack lapis = network.extractItem(new ItemStack(Items.LAPIS_LAZULI), needed,
-                com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+        ItemStack lapis = extractExactFromStorage(player, new ItemStack(Items.LAPIS_LAZULI), needed, false);
         if (!lapis.isEmpty()) {
             ItemStack remainder = handler.insertItem(FUEL_SLOT, lapis, false);
             if (!remainder.isEmpty()) {
-                network.insertItem(remainder, remainder.getCount(),
-                        com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                insertIntoStorage(player, remainder, false);
             }
             inserted = lapis.getCount() - remainder.getCount();
             if (inserted >= needed) return inserted;
@@ -641,8 +633,7 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
         // 2) Not enough — try lapis blocks
         int stillNeeded = needed - inserted;
         int blocksNeeded = (int) Math.ceil(stillNeeded / 9.0);
-        ItemStack blocks = network.extractItem(new ItemStack(Items.LAPIS_BLOCK), blocksNeeded,
-                com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+        ItemStack blocks = extractExactFromStorage(player, new ItemStack(Items.LAPIS_BLOCK), blocksNeeded, false);
         if (!blocks.isEmpty()) {
             int totalLapis = blocks.getCount() * 9;
             int toInsert = Math.min(totalLapis, stillNeeded);
@@ -656,16 +647,14 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
                 ItemStack lapisStack = new ItemStack(Items.LAPIS_LAZULI, toInsert);
                 ItemStack remainder = handler.insertItem(FUEL_SLOT, lapisStack, false);
                 if (!remainder.isEmpty()) {
-                    network.insertItem(remainder, remainder.getCount(),
-                            com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                    insertIntoStorage(player, remainder, false);
                 }
                 inserted += toInsert - remainder.getCount();
             }
             // Return excess lapis lazuli (from overshoot on block conversion)
             int excess = totalLapis - toInsert;
             if (excess > 0) {
-                network.insertItem(new ItemStack(Items.LAPIS_LAZULI, excess), excess,
-                        com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                insertIntoStorage(player, new ItemStack(Items.LAPIS_LAZULI, excess), false);
             }
         }
 

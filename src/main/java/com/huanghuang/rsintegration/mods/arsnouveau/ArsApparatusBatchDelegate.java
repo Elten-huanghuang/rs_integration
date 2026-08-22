@@ -566,11 +566,7 @@ public final class ArsApparatusBatchDelegate extends AbstractBatchDelegate {
         }
         for (ItemStack material : materials) {
             if (material == null || material.isEmpty()) continue;
-            ItemStack remainder = material.copy();
-            if (network != null) {
-                remainder = network.insertItem(remainder, remainder.getCount(),
-                        com.refinedmods.refinedstorage.api.util.Action.PERFORM);
-            }
+            ItemStack remainder = insertIntoStorage(player, material, false);
             if (!remainder.isEmpty()) {
                 PlayerUtils.safeGiveToPlayer(player, remainder, network);
             }
@@ -586,11 +582,7 @@ public final class ArsApparatusBatchDelegate extends AbstractBatchDelegate {
             network = CraftPacketUtils.resolveNetworkForCraft(
                     player, level.dimension(), machinePos);
         }
-        ItemStack remainder = stack.copy();
-        if (network != null) {
-            remainder = network.insertItem(remainder, remainder.getCount(),
-                    com.refinedmods.refinedstorage.api.util.Action.PERFORM);
-        }
+        ItemStack remainder = insertIntoStorage(player, stack, false);
         if (!remainder.isEmpty()) PlayerUtils.safeGiveToPlayer(player, remainder, network);
     }
 

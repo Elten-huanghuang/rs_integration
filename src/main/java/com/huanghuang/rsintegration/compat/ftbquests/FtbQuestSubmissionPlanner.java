@@ -4,6 +4,8 @@ import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.CraftingResolver;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.MaterialSources;
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.crafting.plan.PlanGraphView;
 import com.huanghuang.rsintegration.crafting.plan.PlanResponse;
 import com.huanghuang.rsintegration.crafting.tree.IngredientKey;
@@ -25,6 +27,13 @@ public final class FtbQuestSubmissionPlanner {
     public static QuestSubmissionPlan plan(ServerPlayer player,
                                             QuestSubmissionSnapshot snapshot,
                                             INetwork network) {
+        return plan(player, snapshot, CraftStorageEndpoints.fromLegacyNetwork(network), network);
+    }
+
+    public static QuestSubmissionPlan plan(ServerPlayer player,
+                                            QuestSubmissionSnapshot snapshot,
+                                            CraftStorageEndpoint endpoint,
+                                            INetwork network) {
         List<IngredientSpec> specs = new ArrayList<>();
         List<String> overflow = new ArrayList<>();
         for (QuestItemRequirement requirement : snapshot.requirements()) {
@@ -40,7 +49,7 @@ public final class FtbQuestSubmissionPlanner {
         }
 
         Map<CraftingResolver.StackKey, Integer> available =
-                MaterialSources.listAllAvailable(player, network);
+                MaterialSources.listAllAvailable(player, endpoint);
         List<String> missing = new ArrayList<>(overflow);
         var graph = CraftingResolver.resolveGraphForSpecsWithTypes(specs, available,
                 player.serverLevel(), player, network, missing, null, false);

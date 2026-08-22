@@ -2097,8 +2097,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
     private void returnItem(ItemStack stack) {
         if (stack.isEmpty()) return;
         if (network != null) {
-            ItemStack leftover = network.insertItem(stack, stack.getCount(),
-                    com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+            ItemStack leftover = insertIntoStorage(player, stack, false);
             // The player may be offline (server stop / disconnect abort), so this
             // must not assume one is present the way the branch below does.
             if (!leftover.isEmpty()) {

@@ -488,7 +488,8 @@ extends AbstractBatchDelegate {
                     if (tracker != null) {
                         tracker.changed(player, s.copy());
                     }
-                    if (!(leftover = network.insertItem(s, s.getCount(), Action.PERFORM)).isEmpty()) {
+                    if (!(leftover = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
+                            .insertLegacy(network, player, s, false)).isEmpty()) {
                         RSIntegrationMod.LOGGER.warn("[RSI-Embers] Recycle partial: {} x{} \u2192 leftover {}", (Object)s.getHoverName().getString(), (Object)s.getCount(), (Object)leftover.getCount());
                         ItemHandlerHelper.giveItemToPlayer(player, (ItemStack)leftover);
                     }
@@ -564,7 +565,7 @@ extends AbstractBatchDelegate {
                 if (tracker != null && this.player != null) {
                     tracker.changed(this.player, (Object)stack.copy());
                 }
-                if ((leftover = this.network.insertItem(stack, stack.getCount(), Action.PERFORM)).isEmpty()) continue;
+                if ((leftover = insertIntoStorage(player, stack, false)).isEmpty()) continue;
                 RSIntegrationMod.LOGGER.warn("[RSI-Embers] Refund partial: {} x{}", (Object)leftover.getHoverName().getString(), (Object)leftover.getCount());
                 if (this.player == null) continue;
                 ItemHandlerHelper.giveItemToPlayer(this.player, (ItemStack)leftover);

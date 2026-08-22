@@ -89,9 +89,12 @@ public final class BackpackRSUtils {
             }
         }
 
-        if (simulate) return network.insertItem(stack.copy(), stack.getCount(), Action.SIMULATE);
+        var endpoint = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
+                .fromLegacyNetwork(network);
+        if (simulate) return endpoint.insert(getOrCreateFakePlayer((ServerLevel) world, backpackUuid),
+                stack.copy(), true).remainder().orElse(ItemStack.EMPTY);
         Player fakePlayer = getOrCreateFakePlayer((ServerLevel) world, backpackUuid);
-        return TrackedNetworkInsertion.insert(network, fakePlayer, stack);
+        return endpoint.insert(fakePlayer, stack, false).remainder().orElse(ItemStack.EMPTY);
     }
 
     public static List<ItemStack> handleRSRestock(ContentsFilterLogic filter, IStorageWrapper storageWrapper,
@@ -101,7 +104,10 @@ public final class BackpackRSUtils {
         if (network == null) return restocked;
 
         IItemHandler backpackInv = storageWrapper.getInventoryForUpgradeProcessing();
-        int flags = IComparer.COMPARE_NBT;
+        var endpoint = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
+                .fromLegacyNetwork(network);
+        Player fakePlayer = getOrCreateFakePlayer((ServerLevel) level,
+                new UUID(rsPos.asLong(), rsPos.asLong() ^ 0x5f3759dfL));
 
         IStorageCache<ItemStack> cache = network.getItemStorageCache();
         if (cache == null) return restocked;
@@ -112,7 +118,12 @@ public final class BackpackRSUtils {
             if (!filter.matchesFilter(storedStack)) continue;
 
             int toExtract = Math.min(storedStack.getMaxStackSize(), 64);
-            ItemStack extracted = network.extractItem(storedStack.copy(), toExtract, flags, Action.PERFORM);
+            ItemStack extracted = endpoint.extractExact(fakePlayer, storedStack.copy(), toExtract, false)
+                    .extractedStacks().stream().reduce(ItemStack.EMPTY, (left, right) -> {
+                        if (left.isEmpty()) return right.copy();
+                        if (ItemStack.isSameItemSameTags(left, right)) left.grow(right.getCount());
+                        return left;
+                    });
             if (extracted.isEmpty()) continue;
 
             ItemStack remaining = extracted.copy();
@@ -126,7 +137,8 @@ public final class BackpackRSUtils {
                 restocked.add(result);
             }
             if (!remaining.isEmpty()) {
-                ItemStack leftover2 = network.insertItem(remaining, remaining.getCount(), Action.PERFORM);
+                ItemStack leftover2 = endpoint.insert(fakePlayer, remaining, false)
+                        .remainder().orElse(ItemStack.EMPTY);
                 if (!leftover2.isEmpty()) {
                     RSIntegrationMod.LOGGER.warn("[RSI-Backpack] Restock return to RS failed: {}x{} lost",
                             leftover2.getCount(), leftover2.getDisplayName().getString());

@@ -125,7 +125,7 @@ public final class SteamerBatchDelegate extends AbstractBatchDelegate {
             if (!tryStartWithMaterials(player, materials, ledger)) {
                 for (ItemStack mat : materials) {
                     if (!mat.isEmpty())
-                        network.insertItem(mat.copy(), mat.getCount(), Action.PERFORM);
+                        insertIntoStorage(player, mat, false);
                 }
                 return false;
             }
@@ -633,13 +633,9 @@ public final class SteamerBatchDelegate extends AbstractBatchDelegate {
     }
 
     private void refund(ItemStack stack) {
-        if (network != null) {
-            ItemStack leftover = network.insertItem(stack.copy(), stack.getCount(), Action.PERFORM);
-            if (!leftover.isEmpty() && player != null)
-                ItemHandlerHelper.giveItemToPlayer(player, leftover);
-        } else if (player != null) {
-            ItemHandlerHelper.giveItemToPlayer(player, stack.copy());
-        }
+        ItemStack leftover = insertIntoStorage(player, stack, false);
+        if (!leftover.isEmpty() && player != null)
+            ItemHandlerHelper.giveItemToPlayer(player, leftover);
     }
 
     private void forceChunkLoad(boolean load) {

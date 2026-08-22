@@ -545,11 +545,7 @@ public final class ArsImbuementBatchDelegate extends AbstractBatchDelegate {
         }
         for (ItemStack material : materials) {
             if (material == null || material.isEmpty()) continue;
-            ItemStack remainder = material.copy();
-            if (network != null) {
-                remainder = network.insertItem(remainder, remainder.getCount(),
-                        com.refinedmods.refinedstorage.api.util.Action.PERFORM);
-            }
+            ItemStack remainder = insertIntoStorage(player, material, false);
             if (!remainder.isEmpty()) {
                 PlayerUtils.safeGiveToPlayer(player, remainder, network);
             }
@@ -563,11 +559,7 @@ public final class ArsImbuementBatchDelegate extends AbstractBatchDelegate {
         if (network == null) {
             network = CraftPacketUtils.resolveNetworkForCraft(player, level.dimension(), machinePos);
         }
-        ItemStack remainder = catalyst.copy();
-        if (network != null) {
-            remainder = network.insertItem(remainder, remainder.getCount(),
-                    com.refinedmods.refinedstorage.api.util.Action.PERFORM);
-        }
+        ItemStack remainder = insertIntoStorage(player, catalyst, false);
         if (!remainder.isEmpty()) {
             PlayerUtils.safeGiveToPlayer(player, remainder, network);
         }

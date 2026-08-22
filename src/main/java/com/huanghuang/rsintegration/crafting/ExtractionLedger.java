@@ -290,7 +290,11 @@ public final class ExtractionLedger implements AutoCloseable {
             List<ItemStack> stored = networkEntryCache.computeIfAbsent(network, n -> {
                 if (storageEndpoint != null) {
                     return storageEndpoint.snapshot(player).snapshot()
-                            .map(snapshot -> snapshot.items().stream().map(item -> item.stack().copy()).toList())
+                            .map(snapshot -> snapshot.items().stream().map(item -> {
+                                ItemStack stack = item.stack();
+                                stack.setCount((int) Math.min(Integer.MAX_VALUE, item.amount()));
+                                return stack;
+                            }).toList())
                             .orElseGet(List::of);
                 }
                 List<ItemStack> list = new ArrayList<>();
@@ -467,6 +471,24 @@ public final class ExtractionLedger implements AutoCloseable {
                 }
             }
             if (!neededByIngredient.isEmpty()) {
+                if (storageEndpoint != null) {
+                    var snapshot = storageEndpoint.snapshot(player).snapshot().orElse(null);
+                    if (snapshot == null) return false;
+                    for (var ingEntry : neededByIngredient.entrySet()) {
+                        long available = snapshot.items().stream()
+                                .filter(item -> ingEntry.getKey().test(item.stack()))
+                                .mapToLong(com.huanghuang.rsintegration.storage.StoredItem::amount)
+                                .sum();
+                        if (available < ingEntry.getValue()) {
+                            RSIntegrationMod.LOGGER.warn(
+                                    "[RSI-Ledger] Pre-check endpoint: insufficient {} in storage (need {}, have {})",
+                                    CraftPacketUtils.describeIngredient(ingEntry.getKey()),
+                                    ingEntry.getValue(), available);
+                            return false;
+                        }
+                    }
+                    return true;
+                }
                 var cache = network.getItemStorageCache();
                 if (cache == null) return false;
                 for (var ingEntry : neededByIngredient.entrySet()) {
@@ -491,7 +513,7 @@ public final class ExtractionLedger implements AutoCloseable {
     }
 
     /** Return extracted items back to their original source. */
-    private static void rollbackExtractedPhases(List<ExtractRecord> extracted, ServerPlayer player) {
+    private void rollbackExtractedPhases(List<ExtractRecord> extracted, ServerPlayer player) {
         for (ExtractRecord rec : extracted) {
             ItemStack s = rec.stack;
             if (s.isEmpty()) continue;
@@ -509,6 +531,12 @@ public final class ExtractionLedger implements AutoCloseable {
                     }
                 }
                 case NETWORK -> {
+                    if (storageEndpoint != null) {
+                        ItemStack leftover = storageEndpoint.insert(player, s, false)
+                                .remainder().orElse(ItemStack.EMPTY);
+                        if (!leftover.isEmpty()) PlayerUtils.safeGiveToPlayer(player, leftover, null);
+                        continue;
+                    }
                     if (rec.sourceNetwork != null) {
                         var tracker = rec.sourceNetwork.getItemStorageTracker();
                         if (tracker != null) tracker.changed(player, s.copy());
@@ -892,7 +920,11 @@ public final class ExtractionLedger implements AutoCloseable {
             List<ItemStack> stacks = networkEntryCache.computeIfAbsent(network, n -> {
                 if (storageEndpoint != null && player != null) {
                     return storageEndpoint.snapshot(player).snapshot()
-                            .map(snapshot -> snapshot.items().stream().map(item -> item.stack().copy()).toList())
+                            .map(snapshot -> snapshot.items().stream().map(item -> {
+                                ItemStack stack = item.stack();
+                                stack.setCount((int) Math.min(Integer.MAX_VALUE, item.amount()));
+                                return stack;
+                            }).toList())
                             .orElseGet(List::of);
                 }
                 List<ItemStack> list = new ArrayList<>();

@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.crafting;
 
+import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.storage.StorageOperationResult;
 import com.huanghuang.rsintegration.storage.StorageSession;
@@ -8,6 +9,7 @@ import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
+import net.minecraft.world.entity.player.Player;
 
 import javax.annotation.Nonnull;
 import java.util.Objects;
@@ -29,6 +31,28 @@ final class LegacyRsCraftStorageEndpoint implements CraftStorageEndpoint {
     INetwork network() { return network; }
 
     @Override public StorageSession session() { return session; }
+
+    @Override
+    public StorageOperationResult insert(Player player, ItemStack stack, boolean simulate) {
+        ItemStack remainder = network.insertItem(stack.copy(), stack.getCount(),
+                simulate ? com.refinedmods.refinedstorage.api.util.Action.SIMULATE
+                        : com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+        return StorageOperationResult.inserted(
+                simulate ? com.huanghuang.rsintegration.storage.StorageOperationMode.SIMULATE
+                        : com.huanghuang.rsintegration.storage.StorageOperationMode.PERFORM,
+                stack, remainder);
+    }
+
+    @Override
+    public StorageOperationResult extractExact(Player player, ItemStack template,
+                                               long amount, boolean simulate) {
+        ItemStack result = RSIntegrationNetwork.extractExactFromNetwork(network, template,
+                Math.toIntExact(amount), player instanceof ServerPlayer sp ? sp : null);
+        return StorageOperationResult.extracted(
+                simulate ? com.huanghuang.rsintegration.storage.StorageOperationMode.SIMULATE
+                        : com.huanghuang.rsintegration.storage.StorageOperationMode.PERFORM,
+                amount, result.isEmpty() ? java.util.List.of() : java.util.List.of(result));
+    }
 
     private static final class LegacyRsStorageSession implements StorageSession {
         private final INetwork network;
@@ -86,6 +110,12 @@ final class LegacyRsCraftStorageEndpoint implements CraftStorageEndpoint {
             ItemStack remainder = network.insertItem(stack.copy(), stack.getCount(),
                     simulate ? com.refinedmods.refinedstorage.api.util.Action.SIMULATE
                             : com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+            if (!simulate) {
+                RSIntegrationMod.LOGGER.debug(
+                        "[RSI-Storage-RS] insert {} x{} -> remainder x{} at {}",
+                        stack.getHoverName().getString(), stack.getCount(), remainder.getCount(),
+                        network.getPosition());
+            }
             return StorageOperationResult.inserted(
                     simulate ? com.huanghuang.rsintegration.storage.StorageOperationMode.SIMULATE
                             : com.huanghuang.rsintegration.storage.StorageOperationMode.PERFORM,

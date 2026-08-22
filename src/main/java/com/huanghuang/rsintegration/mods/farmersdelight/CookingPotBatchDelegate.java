@@ -162,7 +162,7 @@ public final class CookingPotBatchDelegate extends AbstractBatchDelegate {
             if (!tryStartWithMaterials(player, materials, ledger)) {
                 for (ItemStack mat : materials) {
                     if (!mat.isEmpty())
-                        network.insertItem(mat.copy(), mat.getCount(), Action.PERFORM);
+                        insertIntoStorage(player, mat, false);
                 }
                 return false;
             }
@@ -254,7 +254,7 @@ public final class CookingPotBatchDelegate extends AbstractBatchDelegate {
                 for (int back = 0; back < slot; back++) {
                     ItemStack refund = itemHandler.extractItem(back, 64, false);
                     if (!refund.isEmpty() && !usingSharedLedger && network != null)
-                        network.insertItem(refund, refund.getCount(), Action.PERFORM);
+                        insertIntoStorage(player, refund, false);
                 }
                 be.setChanged();
                 return false;
@@ -514,7 +514,7 @@ public final class CookingPotBatchDelegate extends AbstractBatchDelegate {
                 continue;
             }
             changed = true;
-            ItemStack leftover = network.insertItem(removed.copy(), removed.getCount(), Action.PERFORM);
+            ItemStack leftover = insertIntoStorage(player, removed.copy(), false);
             if (!leftover.isEmpty()) {
                 if (player != null) ItemHandlerHelper.giveItemToPlayer(player, leftover);
                 RSIntegrationMod.LOGGER.warn(
@@ -531,13 +531,9 @@ public final class CookingPotBatchDelegate extends AbstractBatchDelegate {
     }
 
     private void refundToRSNetwork(ItemStack stack) {
-        if (network != null) {
-            ItemStack leftover = network.insertItem(stack.copy(), stack.getCount(), Action.PERFORM);
-            if (!leftover.isEmpty() && player != null) {
-                ItemHandlerHelper.giveItemToPlayer(player, leftover);
-            }
-        } else if (player != null) {
-            ItemHandlerHelper.giveItemToPlayer(player, stack.copy());
+        ItemStack leftover = insertIntoStorage(player, stack, false);
+        if (!leftover.isEmpty() && player != null) {
+            ItemHandlerHelper.giveItemToPlayer(player, leftover);
         }
     }
 

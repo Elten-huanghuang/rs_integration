@@ -520,12 +520,10 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
 
     /** Extract exactly the requested count, refunding a concurrent partial result. */
     private ItemStack extractExactFuel(ItemStack fuelType, int amount) {
-        ItemStack extracted = network.extractItem(fuelType.copyWithCount(1), amount,
-                com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+        ItemStack extracted = extractExactFromStorage(player, fuelType.copyWithCount(1), amount, false);
         if (extracted.getCount() == amount) return extracted;
         if (!extracted.isEmpty()) {
-            network.insertItem(extracted, extracted.getCount(),
-                    com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+            insertIntoStorage(player, extracted, false);
         }
         return ItemStack.EMPTY;
     }
@@ -995,14 +993,9 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
     }
 
     private void refundToRSNetwork(ItemStack stack) {
-        if (network != null) {
-            ItemStack leftover = network.insertItem(stack.copy(), stack.getCount(),
-                    com.refinedmods.refinedstorage.api.util.Action.PERFORM);
-            if (!leftover.isEmpty() && player != null) {
-                ItemHandlerHelper.giveItemToPlayer(player, leftover);
-            }
-        } else if (player != null) {
-            ItemHandlerHelper.giveItemToPlayer(player, stack.copy());
+        ItemStack leftover = insertIntoStorage(player, stack, false);
+        if (!leftover.isEmpty() && player != null) {
+            ItemHandlerHelper.giveItemToPlayer(player, leftover);
         }
     }
 }

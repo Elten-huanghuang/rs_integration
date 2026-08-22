@@ -375,13 +375,9 @@ public final class AetherworksToolStationBatchDelegate extends AbstractBatchDele
     }
 
     private void refundToRSNetwork(ItemStack stack, ServerPlayer player) {
-        if (network != null) {
-            ItemStack remainder = network.insertItem(stack.copy(), stack.getCount(), Action.PERFORM);
-            if (!remainder.isEmpty() && player != null) {
-                ItemHandlerHelper.giveItemToPlayer(player, remainder);
-            }
-        } else if (player != null) {
-            ItemHandlerHelper.giveItemToPlayer(player, stack.copy());
+        ItemStack remainder = insertIntoStorage(player, stack, false);
+        if (!remainder.isEmpty() && player != null) {
+            ItemHandlerHelper.giveItemToPlayer(player, remainder);
         }
     }
 
