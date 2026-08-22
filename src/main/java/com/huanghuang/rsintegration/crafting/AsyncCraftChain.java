@@ -260,6 +260,9 @@ public final class AsyncCraftChain {
                 error -> RSIntegrationMod.LOGGER.error(ctx.format("onDone callback threw"), error),
                 AsyncCraftManager.getInstance()::enqueueCompletion);
         this.ledger.setLogContext(ctx);
+        if (network != null) {
+            this.ledger.setStorageEndpoint(CraftStorageEndpoints.fromLegacyNetwork(network));
+        }
         int cap;
         try { cap = RSIntegrationConfig.CRAFTING_MAX_CONCURRENT_GRAPH_NODES.get(); }
         catch (Exception e) { cap = 1; }
@@ -2669,7 +2672,7 @@ public final class AsyncCraftChain {
                         ItemStack reserved = ItemStack.EMPTY;
                         if (allowPhysicalFallback) {
                             reserved = executionLedger.reserveFromNetwork(
-                                    spec.ingredient(), stillNeeded, network);
+                                    spec.ingredient(), stillNeeded, network, online);
                             if (reserved.isEmpty()) {
                                 reserved = executionLedger.reserveFromInventory(
                                         spec.ingredient(), stillNeeded, online);
@@ -2769,7 +2772,7 @@ public final class AsyncCraftChain {
 
             ItemStack reserved = ItemStack.EMPTY;
             if (allowPhysicalFallback) {
-                reserved = executionLedger.reserveFromNetwork(ingredient, stillNeeded, network);
+                reserved = executionLedger.reserveFromNetwork(ingredient, stillNeeded, network, online);
                 if (reserved.isEmpty()) {
                     reserved = executionLedger.reserveFromInventory(ingredient, stillNeeded, online);
                 }
@@ -3625,7 +3628,7 @@ public final class AsyncCraftChain {
             }
 
             if (needed > 0 && network != null) {
-                ItemStack reserved = ledger.reserveFromNetwork(spec.ingredient(), needed, network);
+                ItemStack reserved = ledger.reserveFromNetwork(spec.ingredient(), needed, network, online);
                 if (!reserved.isEmpty()) {
                     if (material.isEmpty()) {
                         material = reserved;

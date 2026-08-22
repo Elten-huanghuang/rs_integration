@@ -198,6 +198,9 @@ public final class CraftPacketUtils {
         CraftLogContext ctx = CraftLogContext.create(player.getUUID(), primaryRecipe);
         try (ExtractionLedger ledger = new ExtractionLedger()) {
             ledger.setLogContext(ctx);
+            if (network != null) {
+                ledger.setStorageEndpoint(CraftStorageEndpoints.fromLegacyNetwork(network));
+            }
             List<ItemStack> virtualInventory = new ArrayList<>();
 
             RSIntegrationMod.LOGGER.debug(ctx.format("Starting {} steps"), steps.size());
@@ -240,7 +243,7 @@ public final class CraftPacketUtils {
 
                         if (stillNeeded > 0) {
                             ItemStack reserved = network != null
-                                    ? ledger.reserveFromNetwork(ing, stillNeeded, network)
+                                    ? ledger.reserveFromNetwork(ing, stillNeeded, network, player)
                                     : ItemStack.EMPTY;
                             if (reserved.isEmpty()) {
                                 reserved = ledger.reserveFromInventory(ing, stillNeeded, player);
@@ -342,7 +345,7 @@ public final class CraftPacketUtils {
                                     stepIdx + 1, steps.size(), stepId, stillNeeded,
                                     opts.length > 0 ? net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(opts[0].getItem()) : "?");
                             ItemStack reserved = network != null
-                                    ? ledger.reserveFromNetwork(spec.ingredient(), stillNeeded, network)
+                                    ? ledger.reserveFromNetwork(spec.ingredient(), stillNeeded, network, player)
                                     : ItemStack.EMPTY;
                             if (reserved.isEmpty()) {
                                 reserved = ledger.reserveFromInventory(spec.ingredient(), stillNeeded, player);

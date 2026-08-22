@@ -120,6 +120,9 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
             // disabled RS backpack pickup in RS-only modpacks.
             return hasMethod(targetClassName, "runPickupOnPickupResponseUpgrades");
         }
+        if (mixinClassName.contains("PlayerInventoryProviderMixin")) {
+            return hasMethod(targetClassName, "runOnBackpacks");
+        }
         if (mixinClassName.contains("ftbquests.SubmitTaskMessageMixin")) {
             return isClassPresent("dev.ftb.mods.ftbquests.net.SubmitTaskMessage")
                     && hasMethod(targetClassName, "handle")

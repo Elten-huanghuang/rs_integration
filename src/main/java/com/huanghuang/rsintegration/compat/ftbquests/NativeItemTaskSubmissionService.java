@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.compat.ftbquests;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;
 import com.huanghuang.rsintegration.mixin.ftbquests.ItemTaskSequenceAccessor;
@@ -56,6 +57,9 @@ public final class NativeItemTaskSubmissionService {
                                           @Nullable INetwork network, int count,
                                           ItemStack display) {
         try (ExtractionLedger ledger = new ExtractionLedger()) {
+            if (network != null) {
+                ledger.setStorageEndpoint(CraftStorageEndpoints.fromLegacyNetwork(network));
+            }
             int mark = ledger.reservationMark();
             Ingredient ingredient = new ItemTaskIngredient(task, display);
             int reserved = ledger.reserveUpToFromMainInventoryThenNetwork(
