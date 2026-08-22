@@ -115,9 +115,10 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
                     && isClassPresent("dev.ftb.mods.ftbquests.quest.TeamData");
         }
         if (mixinClassName.contains("InventoryHelperExternalItemMixin")) {
-            return isClassPresent("dev.ftb.mods.ftbquests.quest.ServerQuestFile")
-                    && isClassPresent("dev.ftb.mods.ftbquests.quest.TeamData")
-                    && isClassPresent("dev.ftb.mods.ftbquests.quest.task.ItemTask");
+            // This mixin belongs to Sophisticated Core's pickup path.  It must
+            // remain available without FTB Quests; the old guard accidentally
+            // disabled RS backpack pickup in RS-only modpacks.
+            return hasMethod(targetClassName, "runPickupOnPickupResponseUpgrades");
         }
         if (mixinClassName.contains("ftbquests.SubmitTaskMessageMixin")) {
             return isClassPresent("dev.ftb.mods.ftbquests.net.SubmitTaskMessage")

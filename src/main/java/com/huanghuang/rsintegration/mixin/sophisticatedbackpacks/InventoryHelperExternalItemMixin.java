@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.mixin.sophisticatedbackpacks;
 
 import com.huanghuang.rsintegration.util.ExternalItemProgressSuppression;
 import com.huanghuang.rsintegration.util.InsertedStackDelta;
+import com.huanghuang.rsintegration.util.RsOperationPlayerContext;
 import com.llamalad7.mixinextras.sugar.Share;
 import com.llamalad7.mixinextras.sugar.ref.LocalRef;
 import net.minecraft.server.level.ServerPlayer;
@@ -26,10 +27,13 @@ public abstract class InventoryHelperExternalItemMixin {
                                                 UpgradeHandler upgrades, ItemStack input,
                                                 boolean simulate,
                                                 CallbackInfoReturnable<ItemStack> cir,
-                                                @Share("originalInput") LocalRef<ItemStack> originalInput) {
+                                                @Share("originalInput") LocalRef<ItemStack> originalInput,
+                                                @Share("playerScope") LocalRef<RsOperationPlayerContext.Scope> playerScope) {
         // InventoryHelper overwrites the input parameter's local-variable slot with
         // each upgrade remainder. Capture it before the call so accepted = input - remainder.
         originalInput.set(input.copy());
+        playerScope.set(player instanceof ServerPlayer serverPlayer
+                ? RsOperationPlayerContext.push(serverPlayer) : null);
         ExternalItemProgressSuppression.beginOperation();
     }
 
@@ -40,11 +44,18 @@ public abstract class InventoryHelperExternalItemMixin {
                                                  UpgradeHandler upgrades, ItemStack input,
                                                  boolean simulate,
                                                  CallbackInfoReturnable<ItemStack> cir,
-                                                 @Share("originalInput") LocalRef<ItemStack> originalInput) {
+                                                 @Share("originalInput") LocalRef<ItemStack> originalInput,
+                                                 @Share("playerScope") LocalRef<RsOperationPlayerContext.Scope> playerScope) {
         if (simulate || !(player instanceof ServerPlayer serverPlayer)) {
+            closeScope(playerScope.get());
             ExternalItemProgressSuppression.consume();
             return;
         }
         InsertedStackDelta.report(serverPlayer, originalInput.get(), cir.getReturnValue());
+        closeScope(playerScope.get());
+    }
+
+    private static void closeScope(RsOperationPlayerContext.Scope scope) {
+        if (scope != null) scope.close();
     }
 }

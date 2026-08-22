@@ -1,6 +1,6 @@
 package com.huanghuang.rsintegration.mixin.sophisticatedbackpacks;
 
-import com.huanghuang.rsintegration.util.BackpackRSUtils;
+import com.huanghuang.rsintegration.mods.sophisticatedbackpacks.StorageBackpackUtils;
 import com.huanghuang.rsintegration.crafting.CraftOutputInterceptor;
 import com.huanghuang.rsintegration.util.ExternalItemProgressSuppression;
 import com.huanghuang.rsintegration.util.InsertedStackDelta;
@@ -37,7 +37,6 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 import java.util.List;
-import java.util.UUID;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
@@ -116,9 +115,7 @@ public abstract class MagnetUpgradeWrapperMixin
         rsi$magnetInput = itemEntity.getItem().copy();
         ExternalItemProgressSuppression.beginOperation();
         if (!this.rsi$isRs) return;
-        UUID backpackUuid = this.storageWrapper.getContentsUuid().orElse(null);
-        boolean inserted = BackpackRSUtils.handleRsInsertion(this.getFilterLogic(), itemEntity,
-                backpackUuid,
+        boolean inserted = StorageBackpackUtils.insertItem(this.getFilterLogic(), itemEntity,
                 this.rsi$rsBlockPos, this.rsi$rsDimensionKey,
                 rsi$getUpgradesOfType(VoidUpgradeWrapper.class), this.rsi$voidUpgrade);
         ItemStack input = rsi$magnetInput;
@@ -164,9 +161,7 @@ public abstract class MagnetUpgradeWrapperMixin
     private void pickup(Level world, ItemStack stack, boolean simulate,
                         CallbackInfoReturnable<ItemStack> cir) {
         if (!this.rsi$isRs) return;
-        UUID backpackUuid = this.storageWrapper.getContentsUuid().orElse(null);
-        cir.setReturnValue(BackpackRSUtils.handleRSPickup(this.getFilterLogic(), world, stack, simulate,
-                backpackUuid,
+        cir.setReturnValue(StorageBackpackUtils.pickupItem(this.getFilterLogic(), world, stack, simulate,
                 this.rsi$rsBlockPos, this.rsi$rsDimensionKey,
                 rsi$getUpgradesOfType(VoidUpgradeWrapper.class), this.rsi$voidUpgrade));
         cir.cancel();
