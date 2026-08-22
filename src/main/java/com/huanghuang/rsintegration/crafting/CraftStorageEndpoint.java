@@ -21,6 +21,13 @@ import java.util.Objects;
 public interface CraftStorageEndpoint {
     StorageSession session();
 
+    default StorageOperationResult insert(@Nonnull ItemStack stack, boolean simulate) {
+        return StorageOperationResult.failedInsert(
+                simulate ? com.huanghuang.rsintegration.storage.StorageOperationMode.SIMULATE
+                        : com.huanghuang.rsintegration.storage.StorageOperationMode.PERFORM,
+                stack, com.huanghuang.rsintegration.storage.StorageOperationStatus.UNAVAILABLE);
+    }
+
     default StorageSnapshotResult snapshot(@Nonnull ServerPlayer player) {
         return session().snapshotItems(Objects.requireNonNull(player, "player"));
     }

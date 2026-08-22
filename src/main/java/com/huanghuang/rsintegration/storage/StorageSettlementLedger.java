@@ -158,6 +158,20 @@ public final class StorageSettlementLedger {
 
     public State state() { return state; }
 
+    /**
+     * Discards this in-memory accounting scope after the caller has completed
+     * its own physical rollback. The storage ledger never performs rollback
+     * itself, so this is intentionally explicit and terminal-state agnostic.
+     */
+    public void reset() {
+        entries.clear();
+        entriesById.clear();
+        assetsById.clear();
+        state = State.OPEN;
+        nextId = 1;
+        nextAssetId = 1;
+    }
+
     public int size() { return entries.size(); }
 
     public int reservationMark() {

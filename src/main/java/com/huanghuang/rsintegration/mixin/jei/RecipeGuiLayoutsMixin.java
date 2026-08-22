@@ -93,6 +93,10 @@ public class RecipeGuiLayoutsMixin {
 
     @Inject(method = "setRecipeLayoutsWithButtons", at = @At("HEAD"))
     private void rsi$onLayoutsSetHead(List<?> layouts, CallbackInfo ci) {
+        if (layouts != null && !layouts.isEmpty()) {
+            RSIntegrationMod.LOGGER.info("[RSI-JEI-DIAG] setRecipeLayoutsWithButtons invoked: layouts={} firstClass={}",
+                    layouts.size(), layouts.get(0).getClass().getName());
+        }
         if (layouts == null || layouts.isEmpty()) {
             RSIntegrationMod.LOGGER.trace("[RSI-JEI-Mixin] setRecipeLayoutsWithButtons HEAD: EMPTY list");
         } else {
@@ -120,9 +124,6 @@ public class RecipeGuiLayoutsMixin {
 
         var player = Minecraft.getInstance().player;
         if (player == null) return;  // Unlikely but possible during screen transitions
-
-        // Compute once: RS available = mod loaded (server handler fails gracefully if no network)
-        boolean rsAvailable = ModList.get().isLoaded(ModIds.REFINED_STORAGE);
 
         int totalRecipes = 0;
         int buttonsAdded = 0;
@@ -214,8 +215,10 @@ public class RecipeGuiLayoutsMixin {
             String filter = getBindingFilter(recipe, recipeLayout);
             boolean isGeneric = false;
             if (filter == null) {
-                if (recipe instanceof net.minecraft.world.item.crafting.CraftingRecipe
-                        && rsAvailable) {
+                // Keep the generic crafting button visible without RS. The
+                // storage backend determines whether clicking it can execute;
+                // RS availability must not suppress the JEI affordance.
+                if (recipe instanceof net.minecraft.world.item.crafting.CraftingRecipe) {
                     filter = "generic";
                     isGeneric = true;
                 } else {
@@ -422,6 +425,11 @@ public class RecipeGuiLayoutsMixin {
             }
         }
 
+        RSIntegrationMod.LOGGER.info("[RSI-JEI-DIAG] Layouts processed: layouts={} totalRecipes={} buttonsAdded={} positions={} "
+                        + "skipped(filter={} recipeId={} binding={} noRecipe={})",
+                recipeLayoutsWithButtons.size(),
+                totalRecipes, buttonsAdded, rsi$positions.size(),
+                skippedNoFilter, skippedNoRecipeId, skippedNoBinding, skippedNoRecipe);
         RSIntegrationMod.LOGGER.trace("[RSI-JEI-Mixin] Layouts processed: totalRecipes={} buttonsAdded={} "
                         + "skipped(filter={} recipeId={} binding={} noRecipe={}) "
                         + "| FA: seen={} noRecipe={} noFilter={} noRecipeId={} noBinding={}",
@@ -538,13 +546,29 @@ public class RecipeGuiLayoutsMixin {
                     return new Rect2i(area.getX(), area.getY(), area.getWidth(), area.getHeight());
                 }
             }
+            // JEI 15.49 returns RecipeTransferButton rather than the old
+            // GuiIconToggleButton. Its public API does not expose an absolute
+            // area, so fall through to the drawable's relative transfer area.
         } catch (ReflectiveOperationException | RuntimeException ignored) {
             // JEI 15.49 can also provide an errored IRecipeLayoutWithButtons
             // implementation without transferButton(); use the API fallback.
         }
 
-        return rsi$absoluteRecipeArea(recipeLayout,
+        Rect2i declared = rsi$absoluteRecipeArea(recipeLayout,
                 recipeLayout.getRecipeTransferButtonArea());
+        if (declared != null && declared.getWidth() > 0 && declared.getHeight() > 0) {
+            return declared;
+        }
+
+        // Some JEI 15.49 layouts report no transfer area when the transfer
+        // handler is unavailable (which is expected without RS). Keep the
+        // RSI button visible by anchoring it to the recipe card instead of
+        // discarding the layout during position refresh.
+        Rect2i recipeArea = recipeLayout.getRectWithBorder();
+        if (recipeArea == null) return null;
+        int width = Math.max(1, recipeArea.getWidth());
+        int height = Math.max(1, recipeArea.getHeight());
+        return new Rect2i(recipeArea.getX() + width - 1, recipeArea.getY() + height - 1, 1, 1);
     }
 
     @Unique

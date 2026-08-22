@@ -30,6 +30,14 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
 
     @Override
     public boolean shouldApplyMixin(String targetClassName, String mixinClassName) {
+        // Every mixin under our refinedstorage namespace has RS types in its
+        // annotations or method bodies.  Forge may still parse the mixin
+        // configuration when the optional dependency is absent, so reject it
+        // before Mixin attempts to load the class.
+        if (mixinClassName.contains(".refinedstorage.")) {
+            return isClassPresent("com.refinedmods.refinedstorage.api.network.INetwork")
+                    && isClassPresent(targetClassName);
+        }
         if (isYzzzOwnedRefinedStorageMixin(mixinClassName)) {
             String simpleName = mixinClassName.substring(mixinClassName.lastIndexOf('.') + 1);
             if (isClassPresent("me.realseek.yzzzfix.mixin.refinedstorage." + simpleName)) {

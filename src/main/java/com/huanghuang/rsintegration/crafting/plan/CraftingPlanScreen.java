@@ -300,7 +300,9 @@ public final class CraftingPlanScreen extends Screen {
                 plan.targetResult().getHoverName().getString()));
         this.plan = plan;
         this.activeRequestId = 0L;
-        this.outputDestination = CraftingPlanPreferences.loadOutputDestination(PLAN_PREFS_PATH);
+        this.outputDestination = hasStorageBackend()
+                ? CraftingPlanPreferences.loadOutputDestination(PLAN_PREFS_PATH)
+                : OutputDestination.PLAYER_INVENTORY;
         // Adaptive view routing (§2.5): non-trivial plans open in the tree; simple ones stay on the card.
         this.viewMode = plan.steps().size() > 2 ? ViewMode.TREE : ViewMode.CARD;
         this.renderEngine = new PlanRenderEngine(Minecraft.getInstance().font);
@@ -643,6 +645,10 @@ public final class CraftingPlanScreen extends Screen {
     }
 
     private void selectOutputDestination(OutputDestination destination) {
+        if (!hasStorageBackend()) {
+            outputDestination = OutputDestination.PLAYER_INVENTORY;
+            return;
+        }
         OutputDestination selected = destination == null
                 ? OutputDestination.RS_NETWORK : destination;
         if (selected == outputDestination) return;
@@ -1086,6 +1092,11 @@ public final class CraftingPlanScreen extends Screen {
         int arrowW = font.width(" ↔");
         gfx.drawString(font, value + " ↔", outputSelectorX + (outputSegmentW - font.width(value + " ↔")) / 2,
                 textY, textColor, false);
+    }
+
+    private static boolean hasStorageBackend() {
+        return net.minecraftforge.fml.ModList.get().isLoaded("refinedstorage")
+                || net.minecraftforge.fml.ModList.get().isLoaded("beyonddimensions");
     }
     /** Card view: JEI recipe preview for the alternative-recipe badge under the mouse. */
     private void renderCardPreview(GuiGraphics gfx, Font font) {

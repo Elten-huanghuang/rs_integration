@@ -19,7 +19,6 @@ import com.huanghuang.rsintegration.mods.distantworlds.client.LithumAltarFironRe
 import com.huanghuang.rsintegration.sidepanel.RSInventoryTransferHandler;
 import com.huanghuang.rsintegration.sidepanel.client.MachineFavoritesClient;
 import com.huanghuang.rsintegration.util.ModIds;
-import com.refinedmods.refinedstorage.screen.grid.GridScreen;
 import mezz.jei.api.IModPlugin;
 import mezz.jei.api.JeiPlugin;
 import mezz.jei.api.registration.IRecipeCategoryRegistration;
@@ -194,14 +193,7 @@ public final class RSJeiPlugin implements IModPlugin {
     @Override
     @SuppressWarnings({"rawtypes", "unchecked"})
     public void registerGuiHandlers(IGuiHandlerRegistration registration) {
-        registration.addGuiContainerHandler(GridScreen.class,
-                new IGuiContainerHandler<GridScreen>() {
-                    @Override
-                    public java.util.List<net.minecraft.client.renderer.Rect2i> getGuiExtraAreas(
-                            GridScreen screen) {
-                        return MachineFavoritesClient.getJeiExtraAreas(screen);
-                    }
-                });
+        registerOptionalRefinedStorageGuiHandler(registration);
         if (!ModList.get().isLoaded(ModIds.APOTHEOSIS)) return;
         try {
             Class<?> raw = Class.forName(
@@ -220,6 +212,20 @@ public final class RSJeiPlugin implements IModPlugin {
         } catch (ReflectiveOperationException exception) {
             RSIntegrationMod.LOGGER.warn(
                     "[RSI-JEI] Failed to register Apotheosis library exclusion area", exception);
+        }
+    }
+
+    private static void registerOptionalRefinedStorageGuiHandler(
+            IGuiHandlerRegistration registration) {
+        if (!ModList.get().isLoaded(ModIds.REFINED_STORAGE)) return;
+        try {
+            Class<?> hooks = Class.forName(
+                    "com.huanghuang.rsintegration.network.RSJeiOptionalHooks");
+            hooks.getMethod("registerGridGuiHandler", IGuiHandlerRegistration.class)
+                    .invoke(null, registration);
+        } catch (ReflectiveOperationException exception) {
+            RSIntegrationMod.LOGGER.debug(
+                    "[RSI-JEI] Refined Storage GUI handler unavailable", exception);
         }
     }
 

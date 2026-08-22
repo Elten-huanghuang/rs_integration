@@ -33,10 +33,33 @@ final class LegacyRsCraftStorageEndpoint implements CraftStorageEndpoint {
     @Override public StorageSession session() { return session; }
 
     @Override
+    public StorageOperationResult insert(ItemStack stack, boolean simulate) {
+        ItemStack remainder = network.insertItem(stack.copy(), stack.getCount(),
+                simulate ? com.refinedmods.refinedstorage.api.util.Action.SIMULATE
+                        : com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+        return StorageOperationResult.inserted(
+                simulate ? com.huanghuang.rsintegration.storage.StorageOperationMode.SIMULATE
+                        : com.huanghuang.rsintegration.storage.StorageOperationMode.PERFORM,
+                stack, remainder);
+    }
+
+    @Override
     public StorageOperationResult insert(Player player, ItemStack stack, boolean simulate) {
         ItemStack remainder = network.insertItem(stack.copy(), stack.getCount(),
                 simulate ? com.refinedmods.refinedstorage.api.util.Action.SIMULATE
                         : com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+        if (!simulate && player != null) {
+            ItemStack accepted = stack.copy();
+            accepted.shrink(remainder.getCount());
+            if (!accepted.isEmpty()) {
+                var tracker = network.getItemStorageTracker();
+                if (tracker != null) tracker.changed(player, accepted);
+                if (player instanceof ServerPlayer serverPlayer) {
+                    com.huanghuang.rsintegration.crafting.MaterialSources.invalidateFor(serverPlayer);
+                    serverPlayer.containerMenu.broadcastChanges();
+                }
+            }
+        }
         return StorageOperationResult.inserted(
                 simulate ? com.huanghuang.rsintegration.storage.StorageOperationMode.SIMULATE
                         : com.huanghuang.rsintegration.storage.StorageOperationMode.PERFORM,

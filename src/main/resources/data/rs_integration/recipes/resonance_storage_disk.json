@@ -1,4 +1,7 @@
 {
+  "conditions": [
+    { "mod_loaded": "refinedstorage" }
+  ],
   "type": "minecraft:crafting_shaped",
   "pattern": [
     " A ",

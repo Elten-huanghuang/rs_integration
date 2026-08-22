@@ -2680,8 +2680,14 @@ public final class AsyncCraftChain {
                     if (stillNeeded > 0) {
                         ItemStack reserved = ItemStack.EMPTY;
                         if (allowPhysicalFallback) {
-                            reserved = executionLedger.reserveFromNetwork(
-                                    spec.ingredient(), stillNeeded, network, online);
+                            // A null network is the normal standalone-backend path.
+                            // Do not invoke an RS-typed method in that case: besides
+                            // being invalid, linking that signature crashes when RS is
+                            // absent from the classpath.
+                            if (network != null) {
+                                reserved = executionLedger.reserveFromNetwork(
+                                        spec.ingredient(), stillNeeded, network, online);
+                            }
                             if (reserved.isEmpty()) {
                                 reserved = executionLedger.reserveFromInventory(
                                         spec.ingredient(), stillNeeded, online);
@@ -2781,7 +2787,9 @@ public final class AsyncCraftChain {
 
             ItemStack reserved = ItemStack.EMPTY;
             if (allowPhysicalFallback) {
-                reserved = executionLedger.reserveFromNetwork(ingredient, stillNeeded, network, online);
+                if (network != null) {
+                    reserved = executionLedger.reserveFromNetwork(ingredient, stillNeeded, network, online);
+                }
                 if (reserved.isEmpty()) {
                     reserved = executionLedger.reserveFromInventory(ingredient, stillNeeded, online);
                 }
@@ -3991,7 +3999,16 @@ public final class AsyncCraftChain {
             }
         } else {
             for (ItemStack vi : virtualInventory) {
-                if (!vi.isEmpty()) safeGiveToPlayer(online, vi.copy());
+                if (!vi.isEmpty()) {
+                    // Keep the standalone path identical to the RS player's
+                    // inventory destination: insert first, then deliver only
+                    // a genuine remainder.  ItemHandlerHelper can trigger
+                    // equipment/curio handlers for wearable outputs; handing
+                    // the full stack to it after insertion leaves a client-side
+                    // duplicate until the equipped slot is clicked.
+                    ItemStack leftover = insertIntoPlayerInventory(online, vi.copy());
+                    if (!leftover.isEmpty()) safeGiveToPlayer(online, leftover);
+                }
             }
         }
 

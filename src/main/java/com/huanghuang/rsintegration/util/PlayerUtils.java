@@ -37,7 +37,7 @@ public final class PlayerUtils {
         ItemStack remainder = insertMaxSizedChunks(stack, player.getInventory()::add);
         player.getInventory().setChanged();
         MaterialSources.invalidateFor(player);
-        player.inventoryMenu.broadcastChanges();
+        broadcastInventoryChanges(player);
         return remainder;
     }
 
@@ -92,7 +92,7 @@ public final class PlayerUtils {
             // container is not guaranteed to observe that mutation until its next
             // scheduled sync. Broadcast now so chained crafts can use the result
             // immediately and the client does not render a stale stack.
-            player.containerMenu.broadcastChanges();
+            broadcastInventoryChanges(player);
             return;
         }
         if (network != null) {
@@ -117,6 +117,19 @@ public final class PlayerUtils {
                     spawnPos.getX() + 0.5, spawnPos.getY() + 0.5, spawnPos.getZ() + 0.5, stack));
             RSIntegrationMod.LOGGER.warn("[RSI] Refund dropped at world spawn (player {} in unloaded chunk): {} x{}",
                 player.getGameProfile().getName(), stack.getHoverName().getString(), stack.getCount());
+        }
+    }
+
+    /**
+     * Inventory mutations can happen while a custom container is open. Both
+     * menus maintain their own last-sent slot snapshots, so updating only the
+     * active menu leaves the player inventory client-side with ghost stacks
+     * until the screen is reopened.
+     */
+    public static void broadcastInventoryChanges(ServerPlayer player) {
+        player.inventoryMenu.broadcastChanges();
+        if (player.containerMenu != player.inventoryMenu) {
+            player.containerMenu.broadcastChanges();
         }
     }
 }

@@ -11,6 +11,11 @@ import com.huanghuang.rsintegration.util.Diagnostics;
 import com.huanghuang.rsintegration.util.ModIds;
 import com.huanghuang.rsintegration.util.PlayerUtils;
 import com.huanghuang.rsintegration.mods.goety.GoetySoulTotemCrafting;
+import com.huanghuang.rsintegration.storage.StorageItemKey;
+import com.huanghuang.rsintegration.storage.StorageReservationSource;
+import com.huanghuang.rsintegration.storage.StorageSettlementLedger;
+import com.huanghuang.rsintegration.storage.StorageOperationMode;
+import com.huanghuang.rsintegration.storage.StorageOperationResult;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.core.BlockPos;
@@ -49,6 +54,10 @@ public final class ExtractionLedger implements AutoCloseable {
     /** Backend-neutral endpoint used by migrated callers. */
     @Nullable
     private CraftStorageEndpoint storageEndpoint;
+
+    /** Backend-neutral settlement mirror; physical extraction remains here for compatibility. */
+    private StorageSettlementLedger settlementLedger = new StorageSettlementLedger();
+    private final Map<Integer, StorageSettlementLedger.EntryId> settlementEntries = new HashMap<>();
 
     public void setStorageEndpoint(@Nullable CraftStorageEndpoint endpoint) {
         this.storageEndpoint = endpoint;
@@ -94,6 +103,39 @@ public final class ExtractionLedger implements AutoCloseable {
                 "reserve item=" + itemId + " count=" + e.count + " src=" + e.source);
         entries.add(e);
         entriesById.put(e.id, e);
+        registerSettlementEntry(e);
+    }
+
+    private void registerSettlementEntry(Entry entry) {
+        try {
+            StorageReservationSource source;
+            StorageItemKey key;
+            CraftStorageEndpoint endpoint = endpointFor(entry.sourceNetwork);
+            if (entry.source == Source.PLAYER_INVENTORY) {
+                // Player inventory reservations are tied to the active player
+                // at execution time; this mirror is descriptive only.
+                source = StorageReservationSource.external("player_inventory");
+                key = StorageItemKey.fromItemStack(
+                        new com.huanghuang.rsintegration.storage.StorageBackendId("local"),
+                        entry.template);
+            } else if (endpoint != null) {
+                var reference = endpoint.session().reference();
+                source = StorageReservationSource.storage(reference);
+                key = endpoint.session().itemKey(entry.template);
+            } else {
+                source = StorageReservationSource.external(entry.source.name().toLowerCase(Locale.ROOT));
+                key = StorageItemKey.fromItemStack(
+                        new com.huanghuang.rsintegration.storage.StorageBackendId("unknown"),
+                        entry.template);
+            }
+            settlementEntries.put(entry.id,
+                    settlementLedger.reserve(source, key, entry.count));
+        } catch (RuntimeException ex) {
+            // The compatibility ledger must never change the established
+            // physical extraction path; an unavailable descriptive key is
+            // recorded in diagnostics and handled by the legacy ledger.
+            RSIntegrationMod.LOGGER.debug("[RSI-Ledger] settlement mirror skipped for entry {}", entry.id, ex);
+        }
     }
 
     // ── reservations ─────────────────────────────────────────────
@@ -396,10 +438,12 @@ public final class ExtractionLedger implements AutoCloseable {
         }
 
         transition(State.COMMITTING);
+        settlementLedger.beginCommit();
 
         // ── Phase 1: Pre-check ──────────────────────────────────
         if (!preCheck(network, player)) {
             RSIntegrationMod.LOGGER.warn(fmt("Ledger commit pre-check failed, rolling back"));
+            resetSettlementMirror();
             transition(State.ROLLED_BACK);
             return false;
         }
@@ -418,6 +462,7 @@ public final class ExtractionLedger implements AutoCloseable {
                                 entry.altarDim, entry.altarPos, entry.sourceNetwork));
                     }
                     rollbackExtractedPhases(extracted, player);
+                    resetSettlementMirror();
                     transition(State.ROLLED_BACK);
                     return false;
                 }
@@ -427,6 +472,7 @@ public final class ExtractionLedger implements AutoCloseable {
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-Ledger] Commit exception during extraction", e);
             rollbackExtractedPhases(extracted, player);
+            resetSettlementMirror();
             transition(State.ROLLED_BACK);
             return false;
         }
@@ -435,7 +481,7 @@ public final class ExtractionLedger implements AutoCloseable {
         boolean extractedFromInv = entries.stream().anyMatch(e -> e.source == Source.PLAYER_INVENTORY);
         if (extractedFromInv) {
             player.getInventory().setChanged();
-            player.inventoryMenu.broadcastChanges();
+            PlayerUtils.broadcastInventoryChanges(player);
         }
 
         // ── Phase 3: Confirm ────────────────────────────────────
@@ -443,10 +489,39 @@ public final class ExtractionLedger implements AutoCloseable {
             Entry entry = entriesById.get(record.entryId);
             if (entry == null) {
                 rollbackExtractedPhases(extracted, player);
+                resetSettlementMirror();
                 transition(State.ROLLED_BACK);
                 return false;
             }
             entry.confirmExtracted(record.stack);
+            StorageSettlementLedger.EntryId settlementId = settlementEntries.get(entry.id);
+            if (settlementId != null) {
+                try {
+                    StorageOperationResult result = StorageOperationResult.extracted(
+                            StorageOperationMode.PERFORM, entry.count, List.of(record.stack));
+                    CraftStorageEndpoint endpoint = endpointFor(entry.sourceNetwork);
+                    settlementLedger.recordExtraction(settlementId, result,
+                            stack -> entry.exactIdentity && endpoint != null
+                                    ? endpoint.session().itemKey(stack)
+                                    : StorageItemKey.fromItemStack(
+                                            new com.huanghuang.rsintegration.storage.StorageBackendId(
+                                                    endpoint == null ? "unknown" : endpoint.session().reference().backendId().value()),
+                                            entry.template));
+                } catch (RuntimeException mirrorFailure) {
+                    RSIntegrationMod.LOGGER.debug(
+                            "[RSI-Ledger] settlement mirror extraction skipped for entry {}", entry.id,
+                            mirrorFailure);
+                }
+            }
+        }
+        if (settlementLedger.state() == StorageSettlementLedger.State.COMMITTING) {
+            try {
+                settlementLedger.finishCommit();
+            } catch (RuntimeException mirrorFailure) {
+                // The legacy ledger remains authoritative for this transition.
+                RSIntegrationMod.LOGGER.debug("[RSI-Ledger] settlement mirror commit skipped", mirrorFailure);
+                resetSettlementMirror();
+            }
         }
         MaterialSources.invalidateFor(player);
         pendingNet.clear();
@@ -568,6 +643,7 @@ public final class ExtractionLedger implements AutoCloseable {
         }
         requireState(State.RESERVING, State.RESERVED, State.COMMITTING);
         releaseReservations(player);
+        resetSettlementMirror();
         transition(State.ROLLED_BACK);
     }
 
@@ -577,6 +653,11 @@ public final class ExtractionLedger implements AutoCloseable {
         pendingNet.clear();
         pendingInv.clear();
         networkEntryCache.clear();
+    }
+
+    private void resetSettlementMirror() {
+        settlementLedger.reset();
+        settlementEntries.clear();
     }
 
     /**
@@ -621,8 +702,17 @@ public final class ExtractionLedger implements AutoCloseable {
     public void settleCommitted(ReservationToken token) {
         requireState(State.COMMITTED);
         List<Entry> owned = requireOwnedEntries(token);
+        List<StorageSettlementLedger.EntryId> settlementIds = owned.stream()
+                .map(entry -> settlementEntries.get(entry.id))
+                .filter(Objects::nonNull)
+                .toList();
         entries.removeAll(owned);
         for (Entry entry : owned) entriesById.remove(entry.id);
+        if (!settlementIds.isEmpty()
+                && settlementLedger.state() == StorageSettlementLedger.State.COMMITTED) {
+            settlementLedger.settle(new StorageSettlementLedger.ReservationToken(settlementIds));
+        }
+        for (Entry entry : owned) settlementEntries.remove(entry.id);
     }
 
     /** Refund only the committed entries owned by operations that never dispatched. */
@@ -633,6 +723,7 @@ public final class ExtractionLedger implements AutoCloseable {
         for (Entry entry : owned) refundEntry(entry, network, player);
         entries.removeAll(owned);
         for (Entry entry : owned) entriesById.remove(entry.id);
+        resetSettlementMirror();
     }
 
     private List<Entry> requireOwnedEntries(ReservationToken token) {
@@ -653,6 +744,7 @@ public final class ExtractionLedger implements AutoCloseable {
         requireState(State.COMMITTED);
         entries.clear();
         entriesById.clear();
+        resetSettlementMirror();
     }
 
     public void reset() {
@@ -685,6 +777,7 @@ public final class ExtractionLedger implements AutoCloseable {
         pendingNet.clear();
         pendingInv.clear();
         networkEntryCache.clear();
+        resetSettlementMirror();
         state = State.ROLLED_BACK;
     }
 
@@ -1352,7 +1445,8 @@ public final class ExtractionLedger implements AutoCloseable {
 
         ItemStack leftover = stack;
         if (network != null) {
-            leftover = network.insertItem(stack, stack.getCount(), Action.PERFORM);
+            leftover = CraftStorageEndpoints.fromLegacyNetwork(network)
+                    .insert(stack, false).remainder().orElse(ItemStack.EMPTY);
             if (leftover.isEmpty()) return;
         }
 

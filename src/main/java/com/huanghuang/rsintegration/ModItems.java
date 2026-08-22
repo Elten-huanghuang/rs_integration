@@ -1,7 +1,5 @@
 package com.huanghuang.rsintegration;
 
-import com.huanghuang.rsintegration.resonance.backpack.ResonanceBackpackContainer;
-import com.huanghuang.rsintegration.resonance.item.ResonanceDiskItem;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
@@ -16,6 +14,8 @@ import net.minecraftforge.registries.DeferredRegister;
 import net.minecraftforge.registries.ForgeRegistries;
 import net.minecraftforge.registries.RegistryObject;
 
+import java.util.function.Supplier;
+
 public final class ModItems {
 
     private static final DeferredRegister<Item> ITEMS =
@@ -27,19 +27,19 @@ public final class ModItems {
     private static final DeferredRegister<CreativeModeTab> TABS =
             DeferredRegister.create(Registries.CREATIVE_MODE_TAB, RSIntegrationMod.MOD_ID);
 
-    public static final RegistryObject<ResonanceDiskItem> RESONANCE_STORAGE_DISK =
-            ITEMS.register("resonance_storage_disk", () -> ResonanceDiskItem.INSTANCE);
-
-    public static final RegistryObject<MenuType<ResonanceBackpackContainer>> RESONANCE_BACKPACK =
-            MENUS.register("resonance_backpack",
-                    () -> IForgeMenuType.create(ResonanceBackpackContainer::new));
+    /** Optional RS-owned entries are registered only by RSOptionalBootstrap. */
+    public static RegistryObject<Item> RESONANCE_STORAGE_DISK;
+    public static RegistryObject<MenuType<?>> RESONANCE_BACKPACK;
 
     public static final RegistryObject<CreativeModeTab> RSI_TAB = TABS.register("main",
             () -> CreativeModeTab.builder()
                     .title(Component.translatable("itemGroup.rs_integration.main"))
-                    .icon(() -> new ItemStack(RESONANCE_STORAGE_DISK.get()))
+                    .icon(() -> new ItemStack(RESONANCE_STORAGE_DISK == null
+                            ? Items.CHEST : RESONANCE_STORAGE_DISK.get()))
                     .displayItems((params, output) -> {
-                        output.accept(RESONANCE_STORAGE_DISK.get());
+                        if (RESONANCE_STORAGE_DISK != null) {
+                            output.accept(RESONANCE_STORAGE_DISK.get());
+                        }
                         // Backpack upgrades are only registered when Sophisticated
                         // Backpacks is present. Look them up by registry name so we
                         // never link SophisticatedBackpacksItems (which would throw
@@ -65,5 +65,12 @@ public final class ModItems {
         ITEMS.register(modBus);
         MENUS.register(modBus);
         TABS.register(modBus);
+    }
+
+    public static void registerOptionalResonance(IEventBus modBus,
+                                                  Supplier<? extends Item> diskSupplier,
+                                                  Supplier<? extends MenuType<?>> backpackSupplier) {
+        RESONANCE_STORAGE_DISK = ITEMS.register("resonance_storage_disk", diskSupplier);
+        RESONANCE_BACKPACK = MENUS.register("resonance_backpack", backpackSupplier);
     }
 }
