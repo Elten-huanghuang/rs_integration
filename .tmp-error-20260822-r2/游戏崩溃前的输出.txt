@@ -1,0 +1,422 @@
+[0.395s][warning][jfr,start] The .jfc option/setting 'jdk.ExceptionThrow#stackTrace' doesn't exist.
+[0.395s][warning][jfr,start] The .jfc option/setting 'jdk.ExceptionThrow#enabled' doesn't exist.
+[0.395s][warning][jfr,start] The .jfc option/setting 'jdk.ExceptionThrow#threshold' doesn't exist.
+[1.089s][info   ][jfr,startup] Started recording 1. No limit specified, using maxsize=250MB as default.
+[1.089s][info   ][jfr,startup] 
+[1.089s][info   ][jfr,startup] Use jcmd 32076 JFR.dump name=1 to copy recording data to file.
+2026-08-22 21:14:47,244 main WARN Advanced terminal features are not available in this environment
+2026-08-22 21:14:47,393 main ERROR Unable to delete file D:\E\桌面\游戏\PCL\.minecraft\versions\植物科技\logs\latest.log: java.nio.file.FileSystemException D:\E\桌面\游戏\PCL\.minecraft\versions\植物科技\logs\latest.log: 另一个程序正在使用此文件，进程无法访问。
+2026-08-22 21:14:47,412 main ERROR Unable to delete file D:\E\桌面\游戏\PCL\.minecraft\versions\植物科技\logs\debug.log: java.nio.file.FileSystemException D:\E\桌面\游戏\PCL\.minecraft\versions\植物科技\logs\debug.log: 另一个程序正在使用此文件，进程无法访问。
+[21:14:47] [main/INFO] [cp.mo.mo.Launcher/MODLAUNCHER]: ModLauncher running: args [--username, Huang_Love, --version, 植物科技, --gameDir, D:\E\桌面\游戏\PCL\.minecraft\versions\植物科技, --assetsDir, D:\E\桌面\游戏\PCL\.minecraft\assets, --assetIndex, 5, --uuid, 8dc98ac80f55437fbeb9bfae1c585be2, --accessToken, ❄❄❄❄❄❄❄❄, --clientId, ${clientid}, --xuid, ${auth_xuid}, --userType, msa, --versionType, PCL, --width, 854, --height, 480, --launchTarget, forgeclient, --fml.forgeVersion, 47.4.21, --fml.mcVersion, 1.20.1, --fml.forgeGroup, net.minecraftforge, --fml.mcpVersion, 20230612.114412]
+[21:14:47] [main/INFO] [cp.mo.mo.Launcher/MODLAUNCHER]: ModLauncher 10.0.9+10.0.9+main.dcd20f30 starting: java version 21.0.2 by Oracle Corporation; OS Windows 11 arch amd64 version 10.0
+[21:14:48] [main/INFO] [ne.mi.fm.lo.ImmediateWindowHandler/]: Loading ImmediateWindowProvider fmlearlywindow
+[LWJGL] [ThreadLocalUtil] Unsupported JNI version detected, this may result in a crash. Please inform LWJGL developers.
+[21:14:49] [main/INFO] [EARLYDISPLAY/]: Trying GL version 4.6
+[21:14:49] [main/INFO] [EARLYDISPLAY/]: Requested GL version 4.6 got version 4.6
+[21:14:50] [main/INFO] [mixin/]: SpongePowered MIXIN Subsystem Version=0.8.5 Source=union:/D:/E/桌面/游戏/PCL/.minecraft/libraries/org/spongepowered/mixin/0.8.5/mixin-0.8.5.jar%23150!/ Service=ModLauncher Env=CLIENT
+[21:14:50] [pool-2-thread-1/INFO] [EARLYDISPLAY/]: GL info: NVIDIA GeForce RTX 3060 Laptop GPU/PCIe/SSE2 GL version 4.6.0 NVIDIA 592.00, NVIDIA Corporation
+[21:14:50] [main/WARN] [ne.mi.fm.lo.mo.ModFileParser/LOADING]: Mod file D:\E\桌面\游戏\PCL\.minecraft\libraries\net\minecraftforge\fmlcore\1.20.1-47.4.21\fmlcore-1.20.1-47.4.21.jar is missing mods.toml file
+[21:14:50] [main/WARN] [ne.mi.fm.lo.mo.ModFileParser/LOADING]: Mod file D:\E\桌面\游戏\PCL\.minecraft\libraries\net\minecraftforge\javafmllanguage\1.20.1-47.4.21\javafmllanguage-1.20.1-47.4.21.jar is missing mods.toml file
+[21:14:50] [main/WARN] [ne.mi.fm.lo.mo.ModFileParser/LOADING]: Mod file D:\E\桌面\游戏\PCL\.minecraft\libraries\net\minecraftforge\lowcodelanguage\1.20.1-47.4.21\lowcodelanguage-1.20.1-47.4.21.jar is missing mods.toml file
+[21:14:50] [main/WARN] [ne.mi.fm.lo.mo.ModFileParser/LOADING]: Mod file D:\E\桌面\游戏\PCL\.minecraft\libraries\net\minecraftforge\mclanguage\1.20.1-47.4.21\mclanguage-1.20.1-47.4.21.jar is missing mods.toml file
+[21:14:50] [main/WARN] [ne.mi.ja.se.JarSelector/]: Attempted to select two dependency jars from JarJar which have the same identification: Mod File:  and Mod File: . Using Mod File: 
+[21:14:50] [main/WARN] [ne.mi.ja.se.JarSelector/]: Attempted to select a dependency jar for JarJar which was passed in as source: curios. Using Mod File: D:\E\桌面\游戏\PCL\.minecraft\versions\植物科技\mods\curios-forge-5.14.0+1.20.1.jar
+[21:14:50] [main/WARN] [ne.mi.ja.se.JarSelector/]: Attempted to select a dependency jar for JarJar which was passed in as source: geckolib. Using Mod File: D:\E\桌面\游戏\PCL\.minecraft\versions\植物科技\mods\geckolib-forge-1.20.1-4.4.9.jar
+[21:14:50] [main/INFO] [ne.mi.fm.lo.mo.JarInJarDependencyLocator/]: Found 6 dependencies adding them to mods collection
+[21:14:52] [main/INFO] [mixin/]: Compatibility level set to JAVA_17
+[21:14:53] [main/INFO] [cp.mo.mo.LaunchServiceHandler/MODLAUNCHER]: Launching target 'forgeclient' with arguments [--version, 植物科技, --gameDir, D:\E\桌面\游戏\PCL\.minecraft\versions\植物科技, --assetsDir, D:\E\桌面\游戏\PCL\.minecraft\assets, --uuid, 8dc98ac80f55437fbeb9bfae1c585be2, --username, Huang_Love, --assetIndex, 5, --accessToken, ❄❄❄❄❄❄❄❄, --clientId, ${clientid}, --xuid, ${auth_xuid}, --userType, msa, --versionType, PCL, --width, 854, --height, 480]
+[21:14:53] [main/WARN] [mixin/]: Reference map 'nitrogen_internals.refmap.json' for nitrogen_internals.mixins.json could not be read. If this is a development environment you can ignore this message
+[21:14:54] [main/INFO] [ne.mi.co.Co.placebo/COREMODLOG]: Patching IForgeItemStack#getEnchantmentLevel
+[21:14:54] [main/INFO] [ne.mi.co.Co.placebo/COREMODLOG]: Patching IForgeItemStack#getEnchantmentLevel
+[21:14:54] [main/INFO] [ne.mi.co.Co.apotheosis/COREMODLOG]: Replaced 2 calls to Enchantment#getMaxLevel() in net/minecraft/world/inventory/AnvilMenu
+[21:14:54] [main/WARN] [mixin/]: Error loading class: org/violetmoon/quark/content/tweaks/module/GoldToolsHaveFortuneModule (java.lang.ClassNotFoundException: org.violetmoon.quark.content.tweaks.module.GoldToolsHaveFortuneModule)
+[21:14:54] [main/INFO] [ne.mi.co.Co.placebo/COREMODLOG]: Patching IForgeItemStack#getEnchantmentLevel
+[21:14:54] [main/INFO] [ne.mi.co.Co.placebo/COREMODLOG]: Patching IForgeItemStack#getEnchantmentLevel
+[21:14:54] [main/WARN] [mixin/]: Error loading class: org/violetmoon/quark/content/client/tooltip/AttributeTooltips (java.lang.ClassNotFoundException: org.violetmoon.quark.content.client.tooltip.AttributeTooltips)
+[21:14:54] [main/WARN] [mixin/]: Error loading class: com/aetherteam/aether_genesis/block/natural/GreenAercloudBlock (java.lang.ClassNotFoundException: com.aetherteam.aether_genesis.block.natural.GreenAercloudBlock)
+[21:14:54] [main/WARN] [mixin/]: @Mixin target com.aetherteam.aether_genesis.block.natural.GreenAercloudBlock was not found aether_redux.mixins.json:common.block.GreenAercloudBlockMixin
+[21:14:54] [main/WARN] [mixin/]: Error loading class: com/aetherteam/aether_genesis/block/natural/OrangeTreeBlock (java.lang.ClassNotFoundException: com.aetherteam.aether_genesis.block.natural.OrangeTreeBlock)
+[21:14:54] [main/WARN] [mixin/]: @Mixin target com.aetherteam.aether_genesis.block.natural.OrangeTreeBlock was not found aether_redux.mixins.json:common.block.OrangeTreeMixin
+[21:14:54] [main/WARN] [mixin/]: Error loading class: com/aetherteam/aether_genesis/block/natural/PurpleAercloudBlock (java.lang.ClassNotFoundException: com.aetherteam.aether_genesis.block.natural.PurpleAercloudBlock)
+[21:14:54] [main/WARN] [mixin/]: @Mixin target com.aetherteam.aether_genesis.block.natural.PurpleAercloudBlock was not found aether_redux.mixins.json:common.block.PurpleAercloudBlockMixin
+[21:14:54] [main/WARN] [mixin/]: Error loading class: com/aetherteam/aether_genesis/client/GenesisMusic (java.lang.ClassNotFoundException: com.aetherteam.aether_genesis.client.GenesisMusic)
+[21:14:54] [main/WARN] [mixin/]: @Mixin target com.aetherteam.aether_genesis.client.GenesisMusic was not found aether_redux.mixins.json:client.audio.GoTVMusicMixin
+[21:14:54] [main/WARN] [mixin/]: Error loading class: com/aetherteam/aether_genesis/client/renderer/entity/SkyrootMimicRenderer (java.lang.ClassNotFoundException: com.aetherteam.aether_genesis.client.renderer.entity.SkyrootMimicRenderer)
+[21:14:54] [main/WARN] [mixin/]: @Mixin target com.aetherteam.aether_genesis.client.renderer.entity.SkyrootMimicRenderer was not found aether_redux.mixins.json:client.render.MimicRendererMixin
+[21:14:54] [main/WARN] [mixin/]: Error loading class: net/builderdog/ancient_aether/client/renderer/entity/FestiveSwetRenderer (java.lang.ClassNotFoundException: net.builderdog.ancient_aether.client.renderer.entity.FestiveSwetRenderer)
+[21:14:54] [main/WARN] [mixin/]: @Mixin target net.builderdog.ancient_aether.client.renderer.entity.FestiveSwetRenderer was not found aether_redux.mixins.json:client.render.SwetRendererMixin
+[21:14:54] [main/WARN] [mixin/]: Error loading class: com/aetherteam/protect_your_moa/client/renderer/entity/layers/MoaArmorLayer (java.lang.ClassNotFoundException: com.aetherteam.protect_your_moa.client.renderer.entity.layers.MoaArmorLayer)
+[21:14:54] [main/WARN] [mixin/]: @Mixin target com.aetherteam.protect_your_moa.client.renderer.entity.layers.MoaArmorLayer was not found aether_redux.mixins.json:client.render.layer.MoaArmorLayerMixin
+[21:14:54] [main/WARN] [mixin/]: Error loading class: com/aetherteam/protect_your_moa/client/renderer/entity/layers/MoaChestLayer (java.lang.ClassNotFoundException: com.aetherteam.protect_your_moa.client.renderer.entity.layers.MoaChestLayer)
+[21:14:54] [main/WARN] [mixin/]: @Mixin target com.aetherteam.protect_your_moa.client.renderer.entity.layers.MoaChestLayer was not found aether_redux.mixins.json:client.render.layer.MoaChestLayerMixin
+[21:14:54] [main/WARN] [mixin/]: Error loading class: com/legacy/lost_aether/client/render/layer/MoaHeadFeatherLayer (java.lang.ClassNotFoundException: com.legacy.lost_aether.client.render.layer.MoaHeadFeatherLayer)
+[21:14:54] [main/WARN] [mixin/]: @Mixin target com.legacy.lost_aether.client.render.layer.MoaHeadFeatherLayer was not found aether_redux.mixins.json:client.render.layer.MoaFeathersLayerMixin
+[21:14:54] [main/WARN] [mixin/]: Error loading class: reliquary/item/ToggleableItem (java.lang.ClassNotFoundException: reliquary.item.ToggleableItem)
+[21:14:54] [main/WARN] [mixin/]: @Mixin target reliquary.item.ToggleableItem was not found rs_integration.mixins.json:reliquary.PyromancerStaffMixin
+[21:14:54] [main/WARN] [mixin/]: Error loading class: auviotre/enigmatic/addon/contents/items/AvariceRing (java.lang.ClassNotFoundException: auviotre.enigmatic.addon.contents.items.AvariceRing)
+[21:14:54] [main/WARN] [mixin/]: @Mixin target auviotre.enigmatic.addon.contents.items.AvariceRing was not found rs_integration.mixins.json:enigmaticaddons.AvariceRingMixin
+[21:14:54] [main/WARN] [mixin/]: Error loading class: com/moonstone/moonstonemod/item/maxitem/book/nine_sword_books (java.lang.ClassNotFoundException: com.moonstone.moonstonemod.item.maxitem.book.nine_sword_books)
+[21:14:54] [main/WARN] [mixin/]: @Mixin target com.moonstone.moonstonemod.item.maxitem.book.nine_sword_books was not found rs_integration.mixins.json:moonstone.NineSwordBooksMixin
+[21:14:54] [main/WARN] [mixin/]: Error loading class: com/aizistral/enigmaticlegacy/handlers/SuperpositionHandler (java.lang.ClassNotFoundException: com.aizistral.enigmaticlegacy.handlers.SuperpositionHandler)
+[21:14:54] [main/WARN] [mixin/]: @Mixin target com.aizistral.enigmaticlegacy.handlers.SuperpositionHandler was not found rs_integration.mixins.json:enigmaticlegacy.SuperpositionHandlerMixin
+[21:14:54] [main/WARN] [mixin/]: Error loading class: com/sammy/malum/common/recipe/AbstractSpiritListMalumRecipe (java.lang.ClassNotFoundException: com.sammy.malum.common.recipe.AbstractSpiritListMalumRecipe)
+[21:14:54] [main/WARN] [mixin/]: @Mixin target com.sammy.malum.common.recipe.AbstractSpiritListMalumRecipe was not found rs_integration.mixins.json:malum.AbstractSpiritListMalumRecipeMixin
+[21:14:54] [main/WARN] [mixin/]: Error loading class: com/sammy/malum/core/handlers/TouchOfDarknessHandler (java.lang.ClassNotFoundException: com.sammy.malum.core.handlers.TouchOfDarknessHandler)
+[21:14:54] [main/WARN] [mixin/]: @Mixin target com.sammy.malum.core.handlers.TouchOfDarknessHandler was not found rs_integration.mixins.json:malum.TouchOfDarknessHandlerMixin
+[21:14:54] [main/WARN] [mixin/]: Error loading class: com/sammy/malum/common/block/curiosities/weeping_well/VoidConduitBlockEntity (java.lang.ClassNotFoundException: com.sammy.malum.common.block.curiosities.weeping_well.VoidConduitBlockEntity)
+[21:14:54] [main/WARN] [mixin/]: @Mixin target com.sammy.malum.common.block.curiosities.weeping_well.VoidConduitBlockEntity was not found rs_integration.mixins.json:malum.VoidConduitBlockEntityMixin
+[21:14:54] [main/WARN] [mixin/]: Error loading class: com/inolia_zaicek/wizard_terra_cuiros/Item/BuffItem (java.lang.ClassNotFoundException: com.inolia_zaicek.wizard_terra_cuiros.Item.BuffItem)
+[21:14:54] [main/WARN] [mixin/]: @Mixin target com.inolia_zaicek.wizard_terra_cuiros.Item.BuffItem was not found rs_integration.mixins.json:wizardterracurios.BuffItemMixin
+[21:14:54] [main/WARN] [mixin/]: Error loading class: com/aetherteam/aether_genesis/client/renderer/entity/SkyrootMimicRenderer (java.lang.ClassNotFoundException: com.aetherteam.aether_genesis.client.renderer.entity.SkyrootMimicRenderer)
+[21:14:54] [main/WARN] [mixin/]: Error loading class: com/aetherteam/aether_genesis/client/renderer/entity/SkyrootMimicRenderer (java.lang.ClassNotFoundException: com.aetherteam.aether_genesis.client.renderer.entity.SkyrootMimicRenderer)
+[21:14:54] [main/WARN] [mixin/]: Error loading class: net/builderdog/ancient_aether/client/renderer/entity/FestiveSwetRenderer (java.lang.ClassNotFoundException: net.builderdog.ancient_aether.client.renderer.entity.FestiveSwetRenderer)
+[21:14:54] [main/WARN] [mixin/]: Error loading class: net/builderdog/ancient_aether/client/renderer/entity/FestiveSwetRenderer (java.lang.ClassNotFoundException: net.builderdog.ancient_aether.client.renderer.entity.FestiveSwetRenderer)
+[21:14:54] [main/INFO] [MixinExtras|Service/]: Initializing MixinExtras via com.llamalad7.mixinextras.service.MixinExtrasServiceImpl(version=0.3.6).
+[21:14:56] [main/WARN] [mixin/]: Mixin immortalers_delight.mixins.json:EntityFireImmuneMixin has multiple constructors, (Ljava/lang/Class;)V was selected
+
+[21:14:56] [main/INFO] [ne.mi.co.Co.attributeslib/COREMODLOG]: Patching EffectRenderingInventoryScreen#renderEffects
+[21:14:56] [main/INFO] [ne.mi.co.Co.attributeslib/COREMODLOG]: Patching EffectRenderingInventoryScreen#renderEffects
+[21:14:56] [main/INFO] [mixin/]: BeforeConstant is searching for constants in method with descriptor (Lnet/minecraft/network/chat/Component;Z)V
+[21:14:56] [main/INFO] [mixin/]:   BeforeConstant found INTEGER constant: value = 0, intValue = null
+[21:14:56] [main/INFO] [mixin/]:     BeforeConstant found a matching constant TYPE at ordinal 0
+[21:14:56] [main/INFO] [mixin/]:       BeforeConstant found Insn [ICONST_0] 
+[21:14:56] [main/INFO] [mixin/]:   BeforeConstant found INTEGER constant: value = 60, intValue = null
+[21:14:56] [main/INFO] [mixin/]:     BeforeConstant found a matching constant TYPE at ordinal 1
+[21:14:56] [main/INFO] [mixin/]:       BeforeConstant found IntInsn 60
+[21:14:57] [pool-4-thread-1/INFO] [ne.mi.co.Co.apotheosis/COREMODLOG]: Replaced 2 calls to Enchantment#getMaxLevel() in net/minecraft/world/item/CreativeModeTabs
+[21:14:58] [pool-4-thread-1/INFO] [ne.mi.co.Co.placebo/COREMODLOG]: Patching IForgeItemStack#getEnchantmentLevel
+[21:14:58] [pool-4-thread-1/INFO] [ne.mi.co.Co.placebo/COREMODLOG]: Patching IForgeItemStack#getEnchantmentLevel
+[21:14:58] [pool-4-thread-1/INFO] [ne.mi.co.Co.apotheosis/COREMODLOG]: Replaced 2 calls to Enchantment#getMaxLevel() in net/minecraft/world/inventory/AnvilMenu
+[21:14:59] [Datafixer Bootstrap/INFO] [mojang/DataFixerBuilder]: 188 Datafixer optimizations took 130 milliseconds
+[21:15:00] [pool-4-thread-1/INFO] [ne.mi.co.Co.apotheosis/COREMODLOG]: Patching FishingHook#catchingFish
+[21:15:00] [pool-4-thread-1/INFO] [ne.mi.co.Co.apotheosis/COREMODLOG]: Replaced 1 calls to Enchantment#getMaxLevel() in net/minecraft/world/level/storage/loot/functions/EnchantRandomlyFunction
+[21:15:00] [pool-4-thread-1/INFO] [ne.mi.co.Co.apotheosis/COREMODLOG]: Replaced 1 calls to Enchantment#isDiscoverable() in net/minecraft/world/level/storage/loot/functions/EnchantRandomlyFunction
+[21:15:01] [Render thread/WARN] [minecraft/VanillaPackResourcesBuilder]: Assets URL 'union:/D:/E/桌面/游戏/PCL/.minecraft/libraries/net/minecraft/client/1.20.1-20230612.114412/client-1.20.1-20230612.114412-srg.jar%23206!/assets/.mcassetsroot' uses unexpected schema
+[21:15:01] [Render thread/WARN] [minecraft/VanillaPackResourcesBuilder]: Assets URL 'union:/D:/E/桌面/游戏/PCL/.minecraft/libraries/net/minecraft/client/1.20.1-20230612.114412/client-1.20.1-20230612.114412-srg.jar%23206!/data/.mcassetsroot' uses unexpected schema
+[21:15:01] [Render thread/INFO] [mojang/YggdrasilAuthenticationService]: Environment: authHost='https://authserver.mojang.com', accountsHost='https://api.mojang.com', sessionHost='https://sessionserver.mojang.com', servicesHost='https://api.minecraftservices.com', name='PROD'
+[21:15:02] [Render thread/INFO] [minecraft/Minecraft]: Setting user: Huang_Love
+[21:15:02] [Render thread/INFO] [mixin/]: BeforeConstant is searching for constants in method with descriptor (Lnet/minecraft/network/chat/Component;Lnet/minecraft/client/GuiMessageTag;)V
+[21:15:02] [Render thread/INFO] [mixin/]:   BeforeConstant found STRING constant: value = 
+, stringValue = null
+[21:15:02] [Render thread/INFO] [mixin/]:     BeforeConstant found a matching constant TYPE at ordinal 0
+[21:15:02] [Render thread/INFO] [mixin/]:       BeforeConstant found LdcInsn 
+
+[21:15:02] [Render thread/INFO] [mixin/]:   BeforeConstant found STRING constant: value = \\r, stringValue = null
+[21:15:02] [Render thread/INFO] [mixin/]:     BeforeConstant found a matching constant TYPE at ordinal 1
+[21:15:02] [Render thread/INFO] [mixin/]:       BeforeConstant found LdcInsn \\r
+[21:15:02] [Render thread/INFO] [mixin/]:   BeforeConstant found STRING constant: value = 
+, stringValue = null
+[21:15:02] [Render thread/INFO] [mixin/]:     BeforeConstant found a matching constant TYPE at ordinal 2
+[21:15:02] [Render thread/INFO] [mixin/]:       BeforeConstant found LdcInsn 
+
+[21:15:02] [Render thread/INFO] [mixin/]:   BeforeConstant found STRING constant: value = \\n, stringValue = null
+[21:15:02] [Render thread/INFO] [mixin/]:     BeforeConstant found a matching constant TYPE at ordinal 3
+[21:15:02] [Render thread/INFO] [mixin/]:       BeforeConstant found LdcInsn \\n
+[21:15:02] [Render thread/INFO] [mixin/]:   BeforeConstant found CLASS constant: value = Ljava/lang/String;, typeValue = null
+[21:15:02] [Render thread/INFO] [mixin/]:   BeforeConstant found STRING constant: value = [{}] [CHAT] {}, stringValue = null
+[21:15:02] [Render thread/INFO] [mixin/]:     BeforeConstant found a matching constant TYPE at ordinal 4
+[21:15:02] [Render thread/INFO] [mixin/]:       BeforeConstant found LdcInsn [{}] [CHAT] {}
+[21:15:02] [Render thread/INFO] [mixin/]:   BeforeConstant found STRING constant: value = [CHAT] {}, stringValue = null
+[21:15:02] [Render thread/INFO] [mixin/]:     BeforeConstant found a matching constant TYPE at ordinal 5
+[21:15:02] [Render thread/INFO] [mixin/]:       BeforeConstant found LdcInsn [CHAT] {}
+[21:15:02] [Render thread/INFO] [minecraft/Minecraft]: Backend library: LWJGL version 3.3.1 build 7
+[Mouse Tweaks] Main.initialize()
+[Mouse Tweaks] Initialized.
+[21:15:02] [modloading-worker-0/INFO] [ne.mi.co.ForgeMod/FORGEMOD]: Forge mod loading, version 47.4.21, for MC 1.20.1 with MCP 20230612.114412
+[21:15:02] [modloading-worker-0/INFO] [ne.mi.co.MinecraftForge/FORGE]: MinecraftForge v47.4.21 Initialized
+[21:15:03] [modloading-worker-0/ERROR] [ne.mi.fm.ja.FMLModContainer/LOADING]: Failed to register automatic subscribers. ModID: rs_integration, class com.huanghuang.rsintegration.RSIntegrationMod
+java.lang.NoClassDefFoundError: com/refinedmods/refinedstorage/screen/grid/GridScreen
+	at java.lang.Class.getDeclaredMethods0(Native Method) ~[?:?] {re:mixin}
+	at java.lang.Class.privateGetDeclaredMethods(Class.java:3578) ~[?:?] {re:mixin}
+	at java.lang.Class.privateGetPublicMethods(Class.java:3603) ~[?:?] {re:mixin}
+	at java.lang.Class.getMethods(Class.java:2185) ~[?:?] {re:mixin}
+	at net.minecraftforge.eventbus.EventBus.registerClass(EventBus.java:72) ~[eventbus-6.2.33.jar%23137!/:?] {}
+	at net.minecraftforge.eventbus.EventBus.register(EventBus.java:132) ~[eventbus-6.2.33.jar%23137!/:?] {}
+	at net.minecraftforge.fml.javafmlmod.AutomaticEventSubscriber.lambda$inject$6(AutomaticEventSubscriber.java:61) ~[javafmllanguage-1.20.1-47.4.21.jar%23208!/:?] {}
+	at java.util.ArrayList.forEach(ArrayList.java:1596) ~[?:?] {re:mixin}
+	at net.minecraftforge.fml.javafmlmod.AutomaticEventSubscriber.inject(AutomaticEventSubscriber.java:48) ~[javafmllanguage-1.20.1-47.4.21.jar%23208!/:?] {}
+	at net.minecraftforge.fml.javafmlmod.FMLModContainer.constructMod(FMLModContainer.java:92) ~[javafmllanguage-1.20.1-47.4.21.jar%23208!/:?] {}
+	at net.minecraftforge.fml.ModContainer.lambda$buildTransitionHandler$5(ModContainer.java:126) ~[fmlcore-1.20.1-47.4.21.jar%23207!/:?] {}
+	at java.util.concurrent.CompletableFuture$AsyncRun.run(CompletableFuture.java:1804) ~[?:?] {}
+	at java.util.concurrent.CompletableFuture$AsyncRun.exec(CompletableFuture.java:1796) ~[?:?] {}
+	at java.util.concurrent.ForkJoinTask.doExec(ForkJoinTask.java:387) ~[?:?] {}
+	at java.util.concurrent.ForkJoinPool$WorkQueue.topLevelExec(ForkJoinPool.java:1312) ~[?:?] {}
+	at java.util.concurrent.ForkJoinPool.scan(ForkJoinPool.java:1843) ~[?:?] {}
+	at java.util.concurrent.ForkJoinPool.runWorker(ForkJoinPool.java:1808) ~[?:?] {}
+	at java.util.concurrent.ForkJoinWorkerThread.run(ForkJoinWorkerThread.java:188) ~[?:?] {}
+Caused by: java.lang.ClassNotFoundException: com.refinedmods.refinedstorage.screen.grid.GridScreen
+	at jdk.internal.loader.BuiltinClassLoader.loadClass(BuiltinClassLoader.java:641) ~[?:?] {}
+	at java.lang.ClassLoader.loadClass(ClassLoader.java:526) ~[?:?] {}
+	at cpw.mods.cl.ModuleClassLoader.loadClass(ModuleClassLoader.java:137) ~[securejarhandler-2.1.10.jar:?] {}
+	at java.lang.ClassLoader.loadClass(ClassLoader.java:526) ~[?:?] {}
+	at cpw.mods.cl.ModuleClassLoader.loadClass(ModuleClassLoader.java:137) ~[securejarhandler-2.1.10.jar:?] {}
+	at java.lang.ClassLoader.loadClass(ClassLoader.java:526) ~[?:?] {}
+	... 18 more
+[21:15:03] [modloading-worker-0/INFO] [me.je.li.lo.PluginCaller/]: Sending ConfigManager...
+[21:15:03] [modloading-worker-0/INFO] [me.je.li.lo.PluginCaller/]: Sending ConfigManager took 8.200 milliseconds
+[21:15:04] [Render thread/FATAL] [ne.mi.fm.ModLoader/LOADING]: Failed to complete lifecycle event CONSTRUCT, 1 errors found
+[21:15:04] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.sound.SoundEngineLoadEvent to a broken mod state
+[21:15:04] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.RegisterColorHandlersEvent$Block to a broken mod state
+[21:15:04] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.RegisterColorHandlersEvent$Item to a broken mod state
+[21:15:04] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.RenderLevelStageEvent$RegisterStageEvent to a broken mod state
+[21:15:04] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.RegisterParticleProvidersEvent to a broken mod state
+[21:15:04] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.RegisterClientReloadListenersEvent to a broken mod state
+[21:15:04] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.EntityRenderersEvent$RegisterLayerDefinitions to a broken mod state
+[21:15:04] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.EntityRenderersEvent$RegisterRenderers to a broken mod state
+[21:15:04] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.RegisterTextureAtlasSpriteLoadersEvent to a broken mod state
+[21:15:04] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.RegisterClientTooltipComponentFactoriesEvent to a broken mod state
+[21:15:04] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.RegisterEntitySpectatorShadersEvent to a broken mod state
+[21:15:04] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.RegisterKeyMappingsEvent to a broken mod state
+[21:15:04] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.RegisterRecipeBookCategoriesEvent to a broken mod state
+[21:15:04] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.RegisterGuiOverlaysEvent to a broken mod state
+[21:15:04] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.RegisterDimensionSpecialEffectsEvent to a broken mod state
+[21:15:04] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.RegisterNamedRenderTypesEvent to a broken mod state
+[21:15:04] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.RegisterColorHandlersEvent$ColorResolvers to a broken mod state
+[21:15:04] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.RegisterItemDecorationsEvent to a broken mod state
+[21:15:04] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.RegisterPresetEditorsEvent to a broken mod state
+[21:15:04] [Render thread/INFO] [minecraft/ReloadableResourceManager]: Reloading ResourceManager: vanilla
+[21:15:04] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.ModelEvent$RegisterGeometryLoaders to a broken mod state
+[21:15:04] [Worker-Main-5/INFO] [minecraft/UnihexProvider]: Found unifont_all_no_pua-15.0.06.hex, loading
+[21:15:05] [Worker-Main-13/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.ModelEvent$RegisterAdditional to a broken mod state
+[21:15:05] [Worker-Main-13/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.ModelEvent$ModifyBakingResult to a broken mod state
+[21:15:06] [Render thread/WARN] [minecraft/SoundEngine]: Missing sound for event: minecraft:item.goat_horn.play
+[21:15:06] [Render thread/WARN] [minecraft/SoundEngine]: Missing sound for event: minecraft:entity.goat.screaming.horn_break
+[21:15:06] [Render thread/INFO] [mojang/Library]: OpenAL initialized on device OpenAL Soft on 扬声器 (C-Media(R) Audio)
+[21:15:06] [Render thread/INFO] [minecraft/SoundEngine]: Sound engine started
+[21:15:06] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.sound.SoundEngineLoadEvent to a broken mod state
+[21:15:06] [Render thread/INFO] [minecraft/TextureAtlas]: Created: 1024x512x3 minecraft:textures/atlas/blocks.png-atlas
+[21:15:06] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.TextureStitchEvent$Post to a broken mod state
+[21:15:06] [Render thread/INFO] [minecraft/TextureAtlas]: Created: 256x256x3 minecraft:textures/atlas/signs.png-atlas
+[21:15:06] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.TextureStitchEvent$Post to a broken mod state
+[21:15:06] [Render thread/INFO] [minecraft/TextureAtlas]: Created: 512x512x3 minecraft:textures/atlas/shield_patterns.png-atlas
+[21:15:06] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.TextureStitchEvent$Post to a broken mod state
+[21:15:06] [Render thread/INFO] [minecraft/TextureAtlas]: Created: 512x512x3 minecraft:textures/atlas/banner_patterns.png-atlas
+[21:15:06] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.TextureStitchEvent$Post to a broken mod state
+[21:15:06] [Render thread/INFO] [minecraft/TextureAtlas]: Created: 1024x1024x3 minecraft:textures/atlas/armor_trims.png-atlas
+[21:15:06] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.TextureStitchEvent$Post to a broken mod state
+[21:15:06] [Render thread/INFO] [minecraft/TextureAtlas]: Created: 128x64x3 minecraft:textures/atlas/decorated_pot.png-atlas
+[21:15:06] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.TextureStitchEvent$Post to a broken mod state
+[21:15:06] [Render thread/INFO] [minecraft/TextureAtlas]: Created: 256x256x3 minecraft:textures/atlas/chest.png-atlas
+[21:15:06] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.TextureStitchEvent$Post to a broken mod state
+[21:15:06] [Render thread/INFO] [minecraft/TextureAtlas]: Created: 512x256x3 minecraft:textures/atlas/shulker_boxes.png-atlas
+[21:15:06] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.TextureStitchEvent$Post to a broken mod state
+[21:15:06] [Render thread/INFO] [minecraft/TextureAtlas]: Created: 512x256x3 minecraft:textures/atlas/beds.png-atlas
+[21:15:06] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.TextureStitchEvent$Post to a broken mod state
+[21:15:06] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.ModelEvent$BakingCompleted to a broken mod state
+[21:15:06] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.EntityRenderersEvent$CreateSkullModels to a broken mod state
+[21:15:06] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.EntityRenderersEvent$CreateSkullModels to a broken mod state
+[21:15:06] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.EntityRenderersEvent$CreateSkullModels to a broken mod state
+[21:15:06] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.EntityRenderersEvent$CreateSkullModels to a broken mod state
+[21:15:06] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.EntityRenderersEvent$CreateSkullModels to a broken mod state
+[21:15:06] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.EntityRenderersEvent$CreateSkullModels to a broken mod state
+[21:15:06] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.EntityRenderersEvent$CreateSkullModels to a broken mod state
+[21:15:06] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.EntityRenderersEvent$CreateSkullModels to a broken mod state
+[21:15:06] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.EntityRenderersEvent$CreateSkullModels to a broken mod state
+[21:15:06] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.EntityRenderersEvent$CreateSkullModels to a broken mod state
+[21:15:06] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.EntityRenderersEvent$CreateSkullModels to a broken mod state
+[21:15:06] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.EntityRenderersEvent$CreateSkullModels to a broken mod state
+[21:15:06] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.EntityRenderersEvent$CreateSkullModels to a broken mod state
+[21:15:06] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.EntityRenderersEvent$CreateSkullModels to a broken mod state
+[21:15:06] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.EntityRenderersEvent$CreateSkullModels to a broken mod state
+[21:15:06] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.EntityRenderersEvent$CreateSkullModels to a broken mod state
+[21:15:06] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.EntityRenderersEvent$CreateSkullModels to a broken mod state
+[21:15:06] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.EntityRenderersEvent$CreateSkullModels to a broken mod state
+[21:15:06] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.EntityRenderersEvent$CreateSkullModels to a broken mod state
+[21:15:06] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.EntityRenderersEvent$CreateSkullModels to a broken mod state
+[21:15:06] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.EntityRenderersEvent$CreateSkullModels to a broken mod state
+[21:15:06] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.EntityRenderersEvent$AddLayers to a broken mod state
+[21:15:06] [Render thread/WARN] [minecraft/ShaderInstance]: Shader rendertype_entity_translucent_emissive could not find sampler named Sampler2 in the specified shader program.
+[21:15:06] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.RegisterShadersEvent to a broken mod state
+[21:15:06] [Render thread/INFO] [minecraft/TextureAtlas]: Created: 256x256x0 minecraft:textures/atlas/particles.png-atlas
+[21:15:06] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.TextureStitchEvent$Post to a broken mod state
+[21:15:06] [Render thread/INFO] [minecraft/TextureAtlas]: Created: 256x256x0 minecraft:textures/atlas/paintings.png-atlas
+[21:15:06] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.TextureStitchEvent$Post to a broken mod state
+[21:15:06] [Render thread/INFO] [minecraft/TextureAtlas]: Created: 128x128x0 minecraft:textures/atlas/mob_effects.png-atlas
+[21:15:06] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.TextureStitchEvent$Post to a broken mod state
+Negative index in crash report handler (23/25)
+[21:15:06] [Render thread/WARN] [mixin/]: @Inject(@At("INVOKE")) Shift.BY=5 on attributeslib.mixins.json:client.ClientPacketListenerMixin::handler$zho000$apoth_postAttrChangedEvent exceeds the maximum allowed value: 0. Increase the value of maxShiftBy to suppress this warning.
+[21:15:06] [Render thread/FATAL] [ne.mi.co.ForgeMod/]: Preparing crash report with UUID e8e19ef6-2e6c-48d2-8d4f-4c7937ac6b50
+[21:15:06] [Render thread/FATAL] [ne.mi.cl.lo.ClientModLoader/]: Crash report saved to D:\E\桌面\游戏\PCL\.minecraft\versions\植物科技\crash-reports\crash-2026-08-22_21.15.06-fml.txt
+[21:15:06] [Render thread/FATAL] [ne.mi.co.ForgeMod/]: Preparing crash report with UUID 88196452-9e6f-4bbf-90e2-02a4b252ae57
+---- Minecraft Crash Report ----
+// You're mean.
+
+Time: 2026-08-22 21:15:06
+Description: Mod loading error has occurred
+
+java.lang.Exception: Mod Loading has failed
+	at net.minecraftforge.logging.CrashReportExtender.dumpModLoadingCrashReport(CrashReportExtender.java:60) ~[forge-1.20.1-47.4.21-universal.jar%23211!/:?] {re:classloading}
+	at net.minecraftforge.client.loading.ClientModLoader.completeModLoading(ClientModLoader.java:135) ~[forge-1.20.1-47.4.21-universal.jar%23211!/:?] {re:classloading}
+	at net.minecraft.client.Minecraft.lambda$new$4(Minecraft.java:571) ~[client-1.20.1-20230612.114412-srg.jar%23206!/:?] {re:mixin,pl:accesstransformer:B,re:classloading,pl:accesstransformer:B,pl:mixin:A}
+	at net.minecraft.Util.m_137521_(Util.java:421) ~[client-1.20.1-20230612.114412-srg.jar%23206!/:?] {re:classloading}
+	at net.minecraft.client.Minecraft.lambda$new$5(Minecraft.java:564) ~[client-1.20.1-20230612.114412-srg.jar%23206!/:?] {re:mixin,pl:accesstransformer:B,re:classloading,pl:accesstransformer:B,pl:mixin:A}
+	at net.minecraftforge.client.loading.ForgeLoadingOverlay.m_88315_(ForgeLoadingOverlay.java:146) ~[forge-1.20.1-47.4.21-universal.jar%23211!/:?] {re:classloading}
+	at net.minecraft.client.renderer.GameRenderer.m_109093_(GameRenderer.java:954) ~[client-1.20.1-20230612.114412-srg.jar%23206!/:?] {re:mixin,pl:accesstransformer:B,re:classloading,pl:accesstransformer:B,pl:mixin:A}
+	at net.minecraft.client.Minecraft.m_91383_(Minecraft.java:1146) ~[client-1.20.1-20230612.114412-srg.jar%23206!/:?] {re:mixin,pl:accesstransformer:B,re:classloading,pl:accesstransformer:B,pl:mixin:A}
+	at net.minecraft.client.Minecraft.m_91374_(Minecraft.java:718) ~[client-1.20.1-20230612.114412-srg.jar%23206!/:?] {re:mixin,pl:accesstransformer:B,re:classloading,pl:accesstransformer:B,pl:mixin:A}
+	at net.minecraft.client.main.Main.main(Main.java:218) ~[%e6%a4%8d%e7%89%a9%e7%a7%91%e6%8a%80.jar:?] {re:classloading}
+	at jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:103) ~[?:?] {}
+	at java.lang.reflect.Method.invoke(Method.java:580) ~[?:?] {re:mixin}
+	at net.minecraftforge.fml.loading.targets.CommonLaunchHandler.runTarget(CommonLaunchHandler.java:111) ~[fmlloader-1.20.1-47.4.21.jar:?] {}
+	at net.minecraftforge.fml.loading.targets.CommonLaunchHandler.clientService(CommonLaunchHandler.java:99) ~[fmlloader-1.20.1-47.4.21.jar:?] {}
+	at net.minecraftforge.fml.loading.targets.CommonClientLaunchHandler.lambda$makeService$0(CommonClientLaunchHandler.java:25) ~[fmlloader-1.20.1-47.4.21.jar:?] {}
+	at cpw.mods.modlauncher.LaunchServiceHandlerDecorator.launch(LaunchServiceHandlerDecorator.java:30) ~[modlauncher-10.0.9.jar:?] {}
+	at cpw.mods.modlauncher.LaunchServiceHandler.launch(LaunchServiceHandler.java:53) ~[modlauncher-10.0.9.jar:?] {}
+	at cpw.mods.modlauncher.LaunchServiceHandler.launch(LaunchServiceHandler.java:71) ~[modlauncher-10.0.9.jar:?] {}
+	at cpw.mods.modlauncher.Launcher.run(Launcher.java:108) ~[modlauncher-10.0.9.jar:?] {}
+	at cpw.mods.modlauncher.Launcher.main(Launcher.java:78) ~[modlauncher-10.0.9.jar:?] {}
+	at cpw.mods.modlauncher.BootstrapLaunchConsumer.accept(BootstrapLaunchConsumer.java:26) ~[modlauncher-10.0.9.jar:?] {}
+	at cpw.mods.modlauncher.BootstrapLaunchConsumer.accept(BootstrapLaunchConsumer.java:23) ~[modlauncher-10.0.9.jar:?] {}
+	at cpw.mods.bootstraplauncher.BootstrapLauncher.main(BootstrapLauncher.java:141) ~[bootstraplauncher-1.1.2.jar:?] {}
+
+
+A detailed walkthrough of the error, its code path and all known details is as follows:
+---------------------------------------------------------------------------------------
+
+-- Head --
+Thread: Render thread
+Suspected Mods: NONE
+Stacktrace:
+	at jdk.internal.loader.BuiltinClassLoader.loadClass(BuiltinClassLoader.java:641) ~[?:?] {}
+-- MOD rs_integration --
+Details:
+	Caused by 0: java.lang.NoClassDefFoundError: com/refinedmods/refinedstorage/screen/grid/GridScreen
+		at java.lang.Class.getDeclaredMethods0(Native Method) ~[?:?] {re:mixin}
+		at java.lang.Class.privateGetDeclaredMethods(Class.java:3578) ~[?:?] {re:mixin}
+		at java.lang.Class.privateGetPublicMethods(Class.java:3603) ~[?:?] {re:mixin}
+		at java.lang.Class.getMethods(Class.java:2185) ~[?:?] {re:mixin}
+		at net.minecraftforge.eventbus.EventBus.registerClass(EventBus.java:72) ~[eventbus-6.2.33.jar%23137!/:?] {}
+		at net.minecraftforge.eventbus.EventBus.register(EventBus.java:132) ~[eventbus-6.2.33.jar%23137!/:?] {}
+		at net.minecraftforge.fml.javafmlmod.AutomaticEventSubscriber.lambda$inject$6(AutomaticEventSubscriber.java:61) ~[javafmllanguage-1.20.1-47.4.21.jar%23208!/:?] {}
+		at java.util.ArrayList.forEach(ArrayList.java:1596) ~[?:?] {re:mixin}
+		at net.minecraftforge.fml.javafmlmod.AutomaticEventSubscriber.inject(AutomaticEventSubscriber.java:48) ~[javafmllanguage-1.20.1-47.4.21.jar%23208!/:?] {}
+		at net.minecraftforge.fml.javafmlmod.FMLModContainer.constructMod(FMLModContainer.java:92) ~[javafmllanguage-1.20.1-47.4.21.jar%23208!/:?] {}
+		at net.minecraftforge.fml.ModContainer.lambda$buildTransitionHandler$5(ModContainer.java:126) ~[fmlcore-1.20.1-47.4.21.jar%23207!/:?] {}
+		at java.util.concurrent.CompletableFuture$AsyncRun.run(CompletableFuture.java:1804) ~[?:?] {}
+		at java.util.concurrent.CompletableFuture$AsyncRun.exec(CompletableFuture.java:1796) ~[?:?] {}
+		at java.util.concurrent.ForkJoinTask.doExec(ForkJoinTask.java:387) ~[?:?] {}
+		at java.util.concurrent.ForkJoinPool$WorkQueue.topLevelExec(ForkJoinPool.java:1312) ~[?:?] {}
+		at java.util.concurrent.ForkJoinPool.scan(ForkJoinPool.java:1843) ~[?:?] {}
+		at java.util.concurrent.ForkJoinPool.runWorker(ForkJoinPool.java:1808) ~[?:?] {}
+		at java.util.concurrent.ForkJoinWorkerThread.run(ForkJoinWorkerThread.java:188) ~[?:?] {}
+
+	Mod File: /D:/E/桌面/游戏/PCL/.minecraft/versions/植物科技/mods/rs_integration-1.3.5.jar
+	Failure message: RS Integration (rs_integration) has failed to load correctly
+		java.lang.NoClassDefFoundError: com/refinedmods/refinedstorage/screen/grid/GridScreen
+	Mod Version: 1.3.5
+	Mod Issue URL: NOT PROVIDED
+	Exception message: java.lang.ClassNotFoundException: com.refinedmods.refinedstorage.screen.grid.GridScreen
+Stacktrace:
+	at jdk.internal.loader.BuiltinClassLoader.loadClass(BuiltinClassLoader.java:641) ~[?:?] {}
+	at java.lang.ClassLoader.loadClass(ClassLoader.java:526) ~[?:?] {}
+	at cpw.mods.cl.ModuleClassLoader.loadClass(ModuleClassLoader.java:137) ~[securejarhandler-2.1.10.jar:?] {}
+	at java.lang.ClassLoader.loadClass(ClassLoader.java:526) ~[?:?] {}
+	at cpw.mods.cl.ModuleClassLoader.loadClass(ModuleClassLoader.java:137) ~[securejarhandler-2.1.10.jar:?] {}
+	at java.lang.ClassLoader.loadClass(ClassLoader.java:526) ~[?:?] {}
+	at java.lang.Class.getDeclaredMethods0(Native Method) ~[?:?] {re:mixin}
+	at java.lang.Class.privateGetDeclaredMethods(Class.java:3578) ~[?:?] {re:mixin}
+	at java.lang.Class.privateGetPublicMethods(Class.java:3603) ~[?:?] {re:mixin}
+	at java.lang.Class.getMethods(Class.java:2185) ~[?:?] {re:mixin}
+	at net.minecraftforge.eventbus.EventBus.registerClass(EventBus.java:72) ~[eventbus-6.2.33.jar%23137!/:?] {}
+	at net.minecraftforge.eventbus.EventBus.register(EventBus.java:132) ~[eventbus-6.2.33.jar%23137!/:?] {}
+	at net.minecraftforge.fml.javafmlmod.AutomaticEventSubscriber.lambda$inject$6(AutomaticEventSubscriber.java:61) ~[javafmllanguage-1.20.1-47.4.21.jar%23208!/:?] {}
+	at java.util.ArrayList.forEach(ArrayList.java:1596) ~[?:?] {re:mixin}
+	at net.minecraftforge.fml.javafmlmod.AutomaticEventSubscriber.inject(AutomaticEventSubscriber.java:48) ~[javafmllanguage-1.20.1-47.4.21.jar%23208!/:?] {}
+	at net.minecraftforge.fml.javafmlmod.FMLModContainer.constructMod(FMLModContainer.java:92) ~[javafmllanguage-1.20.1-47.4.21.jar%23208!/:?] {}
+	at net.minecraftforge.fml.ModContainer.lambda$buildTransitionHandler$5(ModContainer.java:126) ~[fmlcore-1.20.1-47.4.21.jar%23207!/:?] {}
+	at java.util.concurrent.CompletableFuture$AsyncRun.run(CompletableFuture.java:1804) ~[?:?] {}
+	at java.util.concurrent.CompletableFuture$AsyncRun.exec(CompletableFuture.java:1796) ~[?:?] {}
+	at java.util.concurrent.ForkJoinTask.doExec(ForkJoinTask.java:387) ~[?:?] {}
+	at java.util.concurrent.ForkJoinPool$WorkQueue.topLevelExec(ForkJoinPool.java:1312) ~[?:?] {}
+	at java.util.concurrent.ForkJoinPool.scan(ForkJoinPool.java:1843) ~[?:?] {}
+	at java.util.concurrent.ForkJoinPool.runWorker(ForkJoinPool.java:1808) ~[?:?] {}
+	at java.util.concurrent.ForkJoinWorkerThread.run(ForkJoinWorkerThread.java:188) ~[?:?] {}
+
+
+-- System Details --
+Details:
+	Minecraft Version: 1.20.1
+	Minecraft Version ID: 1.20.1
+	Operating System: Windows 11 (amd64) version 10.0
+	Java Version: 21.0.2, Oracle Corporation
+	Java VM Version: OpenJDK 64-Bit Server VM (mixed mode, sharing), Oracle Corporation
+	Memory: 145505744 bytes (138 MiB) / 704643072 bytes (672 MiB) up to 4429185024 bytes (4224 MiB)
+	CPUs: 20
+	Processor Vendor: GenuineIntel
+	Processor Name: 12th Gen Intel(R) Core(TM) i7-12700H
+	Identifier: Intel64 Family 6 Model 154 Stepping 3
+	Microarchitecture: Alder Lake
+	Frequency (GHz): 2.69
+	Number of physical packages: 1
+	Number of physical CPUs: 14
+	Number of logical CPUs: 20
+	Graphics card #0 name: NVIDIA GeForce RTX 3060 Laptop GPU
+	Graphics card #0 vendor: NVIDIA (0x10de)
+	Graphics card #0 VRAM (MB): 4095.00
+	Graphics card #0 deviceId: 0x2520
+	Graphics card #0 versionInfo: DriverVersion=32.0.15.9200
+	Graphics card #1 name: Intel(R) Iris(R) Xe Graphics
+	Graphics card #1 vendor: Intel Corporation (0x8086)
+	Graphics card #1 VRAM (MB): 2048.00
+	Graphics card #1 deviceId: 0x46a6
+	Graphics card #1 versionInfo: DriverVersion=32.0.101.6790
+	Memory slot #0 capacity (MB): 8192.00
+	Memory slot #0 clockSpeed (GHz): 4.80
+	Memory slot #0 type: Unknown
+	Memory slot #1 capacity (MB): 8192.00
+	Memory slot #1 clockSpeed (GHz): 4.80
+	Memory slot #1 type: Unknown
+	Virtual memory max (MB): 48222.97
+	Virtual memory used (MB): 25951.91
+	Swap memory total (MB): 32218.43
+	Swap memory used (MB): 3172.96
+	JVM Flags: 13 total; -XX:HeapDumpPath=MojangTricksIntelDriversForPerformance_javaw.exe_minecraft.exe.heapdump -XX:-OmitStackTraceInFastThrow -XX:StartFlightRecording=filename=exceptions.jfr,settings=default,jdk.ExceptionThrow#enabled=true,jdk.ExceptionThrow#stackTrace=true,jdk.ExceptionThrow#threshold=0ms -Xmx4198m -XX:+UnlockExperimentalVMOptions -XX:+UseG1GC -XX:G1NewSizePercent=20 -XX:G1ReservePercent=20 -XX:G1HeapRegionSize=32M -XX:MaxGCPauseMillis=50 -XX:+PerfDisableSharedMem -XX:MinHeapFreeRatio=25 -XX:MaxHeapFreeRatio=40
+	ModLauncher: 10.0.9+10.0.9+main.dcd20f30
+	ModLauncher launch target: forgeclient
+	ModLauncher naming: srg
+	ModLauncher services: 
+		mixin-0.8.5.jar mixin PLUGINSERVICE 
+		eventbus-6.2.33.jar eventbus PLUGINSERVICE 
+		fmlloader-1.20.1-47.4.21.jar slf4jfixer PLUGINSERVICE 
+		fmlloader-1.20.1-47.4.21.jar object_holder_definalize PLUGINSERVICE 
+		fmlloader-1.20.1-47.4.21.jar runtime_enum_extender PLUGINSERVICE 
+		fmlloader-1.20.1-47.4.21.jar capability_token_subclass PLUGINSERVICE 
+		accesstransformers-8.0.4.jar accesstransformer PLUGINSERVICE 
+		fmlloader-1.20.1-47.4.21.jar runtimedistcleaner PLUGINSERVICE 
+		modlauncher-10.0.9.jar mixin TRANSFORMATIONSERVICE 
+		modlauncher-10.0.9.jar fml TRANSFORMATIONSERVICE 
+	FML Language Providers: 
+		minecraft@1.0
+		lowcodefml@null
+		javafml@null
+	Mod List: 
+		client-1.20.1-20230612.114412-srg.jar             |Minecraft                     |minecraft                     |1.20.1              |COMMON_SET|Manifest: a1:d4:5e:04:4f:d3:d6:e0:7b:37:97:cf:77:b0:de:ad:4a:47:ce:8c:96:49:5f:0a:cf:8c:ae:b2:6d:4b:8a:3f
+		FarmersDelight-1.20.1-1.3.2.jar                   |Farmer's Delight              |farmersdelight                |1.20.1-1.3.2        |COMMON_SET|Manifest: NOSIGNATURE
+		TerraBlender-forge-1.20.1-3.0.1.7.jar             |TerraBlender                  |terrablender                  |3.0.1.7             |COMMON_SET|Manifest: NOSIGNATURE
+		MouseTweaks-forge-mc1.20-2.25.jar                 |Mouse Tweaks                  |mousetweaks                   |2.25                |COMMON_SET|Manifest: NOSIGNATURE
+		[玉 🔍] Jade-1.20.1-Forge-11.13.2.jar              |Jade                          |jade                          |11.13.2+forge       |COMMON_SET|Manifest: NOSIGNATURE
+		geckolib-forge-1.20.1-4.4.9.jar                   |GeckoLib 4                    |geckolib                      |4.4.9               |COMMON_SET|Manifest: NOSIGNATURE
+		aether-1.20.1-1.4.2-neoforge.jar                  |The Aether                    |aether                        |1.20.1-1.4.2-neoforg|COMMON_SET|Manifest: NOSIGNATURE
+		jei-1.20.1-forge-15.49.0.191.jar                  |Just Enough Items             |jei                           |15.49.0.191         |COMMON_SET|Manifest: NOSIGNATURE
+		immortalers_delight-1.20.1-forge-1.2.3.jar        |ImmortalersDelight            |immortalers_delight           |1.20.1-forge-1.2.3  |COMMON_SET|Manifest: NOSIGNATURE
+		Botania-1.20.1-454-FORGE.jar                      |Botania                       |botania                       |1.20.1-454-FORGE    |COMMON_SET|Manifest: NOSIGNATURE
+		aeroblender-1.20.1-1.0.1-neoforge.jar             |AeroBlender                   |aeroblender                   |1.20.1-1.0.1-neoforg|COMMON_SET|Manifest: NOSIGNATURE
+		[精妙核心] sophisticatedcore-1.20.1-1.3.9.1537.jar    |Sophisticated Core            |sophisticatedcore             |1.3.9.1537          |COMMON_SET|Manifest: NOSIGNATURE
+		curios-forge-5.14.0+1.20.1.jar                    |Curios API                    |curios                        |5.14.0+1.20.1       |COMMON_SET|Manifest: NOSIGNATURE
+		[交易刷新] traderefresh-2.5.2.jar                     |Trade Refresh                 |traderefresh                  |2.5.2               |COMMON_SET|Manifest: NOSIGNATURE
+		[帕秋莉手册] Patchouli-1.20.1-85-FORGE.jar             |Patchouli                     |patchouli                     |1.20.1-85-FORGE     |COMMON_SET|Manifest: NOSIGNATURE
+		Placebo-1.20.1-8.6.3.jar                          |Placebo                       |placebo                       |8.6.3               |COMMON_SET|Manifest: NOSIGNATURE
+		ApothicAttributes-1.20.1-1.3.7.jar                |Apothic Attributes            |attributeslib                 |1.3.7               |COMMON_SET|Manifest: NOSIGNATURE
+		jecharacters-1.20.1-forge-4.6.7.jar               |Just Enough Characters        |jecharacters                  |4.6.7               |COMMON_SET|Manifest: NOSIGNATURE
+		mixinextras-forge-0.2.0-beta.9.jar                |MixinExtras                   |mixinextras                   |0.2.0-beta.9        |COMMON_SET|Manifest: NOSIGNATURE
+		[精妙背包] sophisticatedbackpacks-1.20.1-3.24.29.1588.|Sophisticated Backpacks       |sophisticatedbackpacks        |3.24.29.1588        |COMMON_SET|Manifest: NOSIGNATURE
+		cumulus_menus-1.20.1-1.0.0-neoforge.jar           |Cumulus                       |cumulus_menus                 |1.20.1-1.0.0-neoforg|COMMON_SET|Manifest: NOSIGNATURE
+		[神化] Apotheosis-1.20.1-7.4.6.jar                  |Apotheosis                    |apotheosis                    |7.4.6               |COMMON_SET|Manifest: NOSIGNATURE
+		rs_integration-1.3.5.jar                          |RS Integration                |rs_integration                |1.3.5               |ERROR     |Manifest: NOSIGNATURE
+		nitrogen_internals-1.20.1-1.0.7-neoforge.jar      |Nitrogen                      |nitrogen_internals            |1.20.1-1.0.7-neoforg|COMMON_SET|Manifest: NOSIGNATURE
+		[新生魔艺] ars_nouveau-1.20.1-4.12.6-all.jar          |Ars Nouveau                   |ars_nouveau                   |4.12.6              |COMMON_SET|Manifest: NOSIGNATURE
+		forge-1.20.1-47.4.21-universal.jar                |Forge                         |forge                         |47.4.21             |COMMON_SET|Manifest: NOSIGNATURE
+		aether-redux-2.0.17-1.20.1-neoforge.jar           |The Aether: Redux             |aether_redux                  |2.0.17              |COMMON_SET|Manifest: NOSIGNATURE
+		aether_redux_audit-1.0.1.jar                      |Aether Redux Audit            |aether_redux_audit            |1.0.1               |COMMON_SET|Manifest: NOSIGNATURE
+	Crash Report UUID: 88196452-9e6f-4bbf-90e2-02a4b252ae57
+	FML: 47.4

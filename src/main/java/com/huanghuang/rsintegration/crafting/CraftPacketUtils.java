@@ -598,7 +598,7 @@ public final class CraftPacketUtils {
                 stillNeeded -= take;
                 if (stillNeeded <= 0) {
                     player.getInventory().setChanged();
-                    player.inventoryMenu.broadcastChanges();
+                    PlayerUtils.broadcastInventoryChanges(player);
                     return aggregated;
                 }
             }

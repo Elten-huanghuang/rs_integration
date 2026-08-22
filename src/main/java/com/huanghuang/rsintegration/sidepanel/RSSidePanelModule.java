@@ -1,22 +1,27 @@
 package com.huanghuang.rsintegration.sidepanel;
 
-public final class RSSidePanelModule {
+import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.util.ModIds;
+import net.minecraftforge.fml.ModList;
 
-    // Temporarily hard-disabled while the full-sync performance issue is investigated.
-    private static final boolean ENABLED = false;
+public final class RSSidePanelModule {
 
     private RSSidePanelModule() {}
 
     public static boolean isEnabled() {
-        return ENABLED;
+        // The side panel is an RS-only UI. Its availability must be decided at
+        // the boundary, while the rest of RSI remains fully usable without RS.
+        return ModList.get().isLoaded(ModIds.REFINED_STORAGE)
+                && RSIntegrationConfig.ENABLE_RS_SIDE_PANEL.get();
     }
 
     public static void initCommon() {
+        if (!isEnabled()) return;
         RSSidePanelNetworkHandler.register();
     }
 
     public static void initClient() {
-        if (!ENABLED) return;
+        if (!isEnabled()) return;
         RSSidePanelClient.init();
     }
 }

@@ -443,6 +443,18 @@ public final class GenericCraftPacket {
             context.setPacketHandled(true);
             return;
         }
+        // Recipe-tree buttons remain visible without RS so another storage
+        // backend can own execution later. Until such a backend is registered,
+        // stop before any RS-specific network lookup (NetworkItem, INetwork,
+        // etc.) to keep the standalone mode linkage-safe.
+        if (!packet.preview
+                && !net.minecraftforge.fml.ModList.get().isLoaded(ModIds.REFINED_STORAGE)
+                && packet.outputDestination != OutputDestination.PLAYER_INVENTORY) {
+            player.sendSystemMessage(Component.translatable("rsi.generic.error.network_unavailable"));
+            RSIntegrationMod.debug("[RSI-Generic] RS destination rejected without RS backend: recipeId={}", packet.recipeId);
+            context.setPacketHandled(true);
+            return;
+        }
         if (player instanceof net.minecraftforge.common.util.FakePlayer) {
             RSIntegrationMod.LOGGER.warn("[RSI-Generic] handle() DROP: FakePlayer, recipeId={}", packet.recipeId);
             context.setPacketHandled(true);
@@ -1041,7 +1053,9 @@ public final class GenericCraftPacket {
                 return;
             }
         }
-        INetwork network = resolveNetworkForRecipe(player, dim, pos, modType);
+        INetwork network = outputDestination == OutputDestination.PLAYER_INVENTORY
+                ? null
+                : resolveNetworkForRecipe(player, dim, pos, modType);
 
         // Auto-select a bound machine for mod recipes when dim/pos are not
         // explicitly provided (e.g. triggered from RS terminal instead of
@@ -1054,7 +1068,7 @@ public final class GenericCraftPacket {
             effectiveDim = player.level().dimension().location();
             effectivePos = player.blockPosition();
         } else if ((effectiveDim == null || effectivePos == null)
-                && !(recipe instanceof CraftingRecipe) && modType != null) {
+                && isPhysicalMachineRecipe(recipe, modType)) {
             String reqKeyword = getMachineKeywordForRecipe(recipe);
             for (var m : AltarBindingRegistry
                     .getBoundMachinesForRecipe(player, modType, recipeId)) {
@@ -1062,7 +1076,7 @@ public final class GenericCraftPacket {
                     continue;
                 effectiveDim = m.dim();
                 effectivePos = m.pos();
-                if (network == null) {
+                if (network == null && outputDestination != OutputDestination.PLAYER_INVENTORY) {
                     network = resolveNetworkForRecipe(player, effectiveDim, effectivePos, modType);
                 }
                 break;
@@ -1071,7 +1085,7 @@ public final class GenericCraftPacket {
 
         // Smithing is authorized by its bound table above, then assembled
         // directly from the concrete extracted inputs below.
-        if (!(recipe instanceof CraftingRecipe) && effectiveDim != null && effectivePos != null
+        if (isPhysicalMachineRecipe(recipe, modType) && effectiveDim != null && effectivePos != null
                 && network != null && ((modType != null && modType.isVirtual())
                 || RSIntegrationConfig.ENABLE_MULTIBLOCK_AUTO_CRAFTING.get())
                 && modType != ModType.byId("smithing")) {
@@ -1342,8 +1356,7 @@ public final class GenericCraftPacket {
         // Guard: non-CraftingRecipe mod recipes REQUIRE a bound machine.
         // Falling through to grouped extraction would consume items without
         // actually running the machine crafting.
-        if (!(recipe instanceof CraftingRecipe) && modType != null && modType != ModType.GENERIC
-                && !modType.isVirtual()
+        if (isPhysicalMachineRecipe(recipe, modType)
                 && (effectiveDim == null || effectivePos == null)) {
             player.sendSystemMessage(Component.translatable(
                     "rsi.generic.error.no_bound_machine", modType.id()));
@@ -1353,7 +1366,8 @@ public final class GenericCraftPacket {
         // Re-resolve network in case the top-level resolution failed but
         // ensureMaterialAvailable succeeded via binding/NBT fallback internally.
         // The ledger's NETWORK entries need a valid network for commit extraction.
-        network = network != null ? network
+        network = network != null || outputDestination == OutputDestination.PLAYER_INVENTORY
+                ? network
                 : CraftPacketUtils.resolveNetworkForCraft(player,
                         player.serverLevel().dimension(), player.blockPosition());
 
@@ -1420,7 +1434,7 @@ public final class GenericCraftPacket {
             }
         }
 
-        if (recipe instanceof CraftingRecipe
+        if (recipe instanceof CraftingRecipe && !isPhysicalMachineRecipe(recipe, modType)
                 && shouldExecuteGenericChainAsync(
                 List.of(genericTerminalStep(recipeId, repeatCount)))) {
             launchAsyncChain(player,
@@ -2051,7 +2065,9 @@ public final class GenericCraftPacket {
                         ? net.minecraft.resources.ResourceKey.create(Registries.DIMENSION, dim)
                         : player.serverLevel().dimension();
                 net.minecraft.core.BlockPos cpPos = pos != null ? pos : player.blockPosition();
-                INetwork cpNetwork = CraftPacketUtils.resolveNetworkForCraft(player, cpDim, cpPos);
+                INetwork cpNetwork = net.minecraftforge.fml.ModList.get().isLoaded(ModIds.REFINED_STORAGE)
+                        ? CraftPacketUtils.resolveNetworkForCraft(player, cpDim, cpPos)
+                        : null;
                 specs = CrockPotBatchDelegate.buildCategoryPlanIngredients(
                         recipe, cpNetwork, player.serverLevel(), cpPos);
                 if (specs == null || specs.isEmpty()) {
@@ -2156,7 +2172,12 @@ public final class GenericCraftPacket {
                         net.minecraft.core.registries.Registries.DIMENSION, dim)
                 : player.serverLevel().dimension();
         net.minecraft.core.BlockPos planLookupPos = pos != null ? pos : player.blockPosition();
-        INetwork network = CraftPacketUtils.resolveNetworkForCraft(player, planDimKey, planLookupPos);
+        // Preview planning can run without a storage mod: null means the
+        // material snapshot is sourced from the player's inventory. Never
+        // probe RS NetworkItem in this standalone path.
+        INetwork network = net.minecraftforge.fml.ModList.get().isLoaded(ModIds.REFINED_STORAGE)
+                ? CraftPacketUtils.resolveNetworkForCraft(player, planDimKey, planLookupPos)
+                : null;
         if (RSIntegrationConfig.REQUIRE_RS_NETWORK_FOR_RECIPE_TREE.get() && network == null) {
             sink.error(Component.translatable("rsi.generic.error.network_unavailable"));
             return;
@@ -3611,8 +3632,21 @@ public final class GenericCraftPacket {
                 .sameSpellScroll(left, right));
     }
 
+    /**
+     * Some machine recipes (notably Malum SpiritFocusingRecipe) implement
+     * CraftingRecipe for JEI/recipe-manager compatibility.  That interface
+     * does not mean they can be executed in a vanilla crafting grid.
+     */
+    static boolean isPhysicalMachineRecipe(Recipe<?> recipe, @Nullable ModType modType) {
+        return modType != null
+                && modType != ModType.GENERIC
+                && !modType.isVirtual()
+                && modType != ModType.byId("smithing");
+    }
+
     static boolean usesPhysicalMachineInputSlots(Recipe<?> recipe) {
-        return !(recipe instanceof CraftingRecipe) && recipe.getType() != null;
+        ModType type = ModType.classifyRecipe(recipe);
+        return isPhysicalMachineRecipe(recipe, type) && recipe.getType() != null;
     }
 
     static boolean requiresBoundMachine(@Nullable ModType modType) {
@@ -3620,7 +3654,7 @@ public final class GenericCraftPacket {
     }
 
     static boolean requiresBoundMachine(Recipe<?> recipe, @Nullable ModType modType) {
-        if (recipe instanceof CraftingRecipe) return false;
+        if (recipe instanceof CraftingRecipe && !isPhysicalMachineRecipe(recipe, modType)) return false;
         return recipe instanceof SmithingTransformRecipe
                 || recipe instanceof SmithingTrimRecipe
                 || requiresBoundMachine(modType);

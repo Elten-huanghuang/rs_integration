@@ -1620,3 +1620,45 @@ RS session 仍然按玩家解析请求临时创建；runtime 只长期持有无�
 | 共鸣磁盘 | 首期 RS 专属 | 与 RS 磁盘 API 深度绑定，独立重构成本高 |
 | 次元磁铁与网络升级 | 首期双后端必达 | 属于 RSI 自有功能，存取目标应由 `StorageReference` 决定 |
 | 发布形态 | 优先单 JAR 双可选后端 | 用户体验最好，必要时再拆兼容 JAR |
+
+### 17.17 2026-08-22：RS 业务 endpoint 迁移进度修订
+
+本节覆盖 17.16 之后的实际工作树状态，用于覆盖此前“业务仍全部走旧 RS 路径”的过时判断；前文历史记录保留不改。
+
+#### 已完成
+
+- 核心合成、递归合成、异步节点、并行机器组、FTB 提交和账本退款已使用统一 storage endpoint 作为存取边界。
+- Pure Daisy、Ars Imbuement 等并行机器取消时的 in-flight 退款状态已修复，并增加失败清理日志。
+- 机器 delegate 的材料失败回滚、燃料补充、容器回收、产物回存已批量迁移，覆盖 Vanilla、Botania、Ars、Aether、Farmer's Delight、Youkai Homecoming、Forbidden、Embers、Goety、Malum、Avaritia、Wizards Reborn、Touhou Little Maid、Distant Worlds 等路径。
+- 自动吃、次元磁铁、拾取、补货、喂食、机器管理中心和侧边栏的主要物品存取路径已切换到 endpoint；RS 绑定解析仍由 RS adapter 提供。
+- 附魔台补货、FA/Malum 独立 CraftPacket、Lithum 燃料辅助、背包补货和离线退款回存已完成 endpoint 化。
+- endpoint 已支持 `ServerPlayer`、普通 `Player`、假玩家和无玩家上下文；RS tracker 通知、材料缓存失效和容器同步已集中到 RS adapter 边界。
+- 当前业务层全局扫描中，直接 `INetwork.extractItem/insertItem` 已基本只剩 RS driver、legacy endpoint、RS 网络解析辅助和 RS 原生 Crafting Grid Mixin。
+
+#### 当前仍未完成
+
+- `mods.toml` 仍将 `refinedstorage` 声明为强制依赖；无 RS 环境仍不能启动。
+- 尚未实现 `BeyondDimensionsBackend`、BD session 注册、BD 网络解析和 BD 权限适配。
+- RS 专属网络发现、绑定 NBT、Grid Mixin、共鸣磁盘和部分 RS UI 仍未完成可选类加载隔离。
+- 当前 endpoint 的生产实现仍只有 RS；因此现阶段只能称为“RS 业务 endpoint 迁移完成度较高”，不能称为“RS/BD 二选一已支持”。
+
+#### 阶段修订
+
+当前不再是阶段 0，也不再是“只写抽象未迁移业务”的阶段。更准确的定位是：
+
+1. 阶段 1 通用存储契约：已冻结并在 RS 业务路径中广泛使用。
+2. 阶段 2 RS adapter 与 RS 业务迁移：主体已完成，仍需保留 RS-only 游戏回归。
+3. 阶段 3 BD adapter：尚未开始正式接入，下一步应实现 BD `StorageSession`/`StorageBackend`、网络引用解析、成员权限和运行时注册。
+4. 阶段 4 可选依赖与无 RS 类加载隔离：尚未完成，必须在 BD adapter 可用后再修改 `mods.toml`，并进行无 RS 客户端/专服启动验收。
+
+#### 当前结论
+
+RSI 现在已经具备较完整的后端无关业务边界，继续接入 BD 的改动重点从“逐个机器迁移”转为“实现 BD backend 和隔离 RS 专属类”。但在 BD backend、可选依赖和无 RS 启动验收完成前，发布物仍然是 RS 必需版本，不能对外宣称支持无 RS 独立运行。
+
+### 17.18 2026-08-22：无 RS 启动隔离实施状态
+
+- `mods.toml` 中 `refinedstorage` 已改为可选依赖。
+- 主类已移除 RS API 字段/方法签名；共振磁盘、共振背包、RS 绑定、侧栏和 RS 网络监听集中到 `RSOptionalBootstrap`，仅在检测到 RS 时加载。
+- 无 RS 时 common setup 会跳过 RS 业务模块注册；RS 专属 Mixin 由插件统一拒绝，避免目标类和 Mixin 本体提前加载。
+- `compileJava` 与 `jar` 已通过，产物为 `build/libs/rs_integration-1.3.5.jar`。
+- 仍需使用不含 RS 的 Forge 1.20.1 实例实际启动一次，确认 Forge/Mixin/可选模组组合的运行时边界；在该验证完成前，不宣称无 RS 已最终验收。

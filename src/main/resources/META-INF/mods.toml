@@ -30,7 +30,7 @@ cross-mod automation for Minecraft 1.20.1.
 
 [[dependencies.${mod_id}]]
     modId = "refinedstorage"
-    mandatory = true
+    mandatory = false
     versionRange = "[1.12,)"
     ordering = "AFTER"
     side = "BOTH"

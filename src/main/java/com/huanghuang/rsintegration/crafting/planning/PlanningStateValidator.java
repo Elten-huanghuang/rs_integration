@@ -31,7 +31,10 @@ public final class PlanningStateValidator {
                 || !requests.isCurrent(player.getUUID(), snapshot.requestGeneration())) {
             return false;
         }
-        INetwork currentNetwork = CraftPacketUtils.resolveNetworkForCraft(player, dimension, lookupPos);
+        INetwork currentNetwork = net.minecraftforge.fml.ModList.get().isLoaded(
+                com.huanghuang.rsintegration.util.ModIds.REFINED_STORAGE)
+                ? CraftPacketUtils.resolveNetworkForCraft(player, dimension, lookupPos)
+                : null;
         Map<StackKey, Integer> currentAvailable = MaterialSources.listAllAvailable(player, currentNetwork);
         return snapshot.networkFingerprint().equals(networkFingerprint(currentNetwork, currentAvailable))
                 && snapshot.bindingFingerprint().equals(bindingFingerprint(player, dimension, lookupPos));
@@ -44,7 +47,10 @@ public final class PlanningStateValidator {
                 || !CraftPlanningRevision.isCurrent(snapshot.recipeRevision())) {
             return false;
         }
-        INetwork currentNetwork = CraftPacketUtils.resolveNetworkForCraft(player, dimension, lookupPos);
+        INetwork currentNetwork = net.minecraftforge.fml.ModList.get().isLoaded(
+                com.huanghuang.rsintegration.util.ModIds.REFINED_STORAGE)
+                ? CraftPacketUtils.resolveNetworkForCraft(player, dimension, lookupPos)
+                : null;
         Map<StackKey, Integer> currentAvailable = MaterialSources.listAllAvailable(player, currentNetwork);
         return snapshot.networkFingerprint().equals(networkFingerprint(currentNetwork, currentAvailable))
                 && snapshot.bindingFingerprint().equals(bindingFingerprint(player, dimension, lookupPos));

@@ -19,7 +19,6 @@ import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fluids.FluidStack;
 import net.minecraftforge.fml.ModList;
-import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.loading.FMLPaths;
 import net.minecraftforge.registries.ForgeRegistries;
 
@@ -54,7 +53,6 @@ import java.util.concurrent.atomic.AtomicInteger;
  * never run from a full-grid filtering pass.
  */
 @OnlyIn(Dist.CLIENT)
-@Mod.EventBusSubscriber(value = Dist.CLIENT)
 public final class RSGridSearchCache {
     private static final int[] MODES = {
             GridSearchQuery.TOOLTIP, GridSearchQuery.TAG, GridSearchQuery.MOD

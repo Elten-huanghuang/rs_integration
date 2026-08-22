@@ -342,7 +342,11 @@ final class AetherworksHelper {
         if (mc.hitResult instanceof BlockHitResult hit
                 && hit.getType() == BlockHitResult.Type.BLOCK) {
             BlockEntity be = mc.level.getBlockEntity(hit.getBlockPos());
-            if (isAnvil(be) || isToolStation(be)) return be;
+            // LeverBinder reads the Aetherium Anvil's private inventory field.
+            // A Tool Station is a different BE with a different inventory
+            // layout; returning it here causes IllegalArgumentException every
+            // client tick and prevents the side systems from being reliable.
+            if (isAnvil(be)) return be;
         }
         return null;
     }

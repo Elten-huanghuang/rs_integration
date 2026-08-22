@@ -446,8 +446,18 @@ public final class RSIntegrationNetwork {
             if (!result.isEmpty()) {
                 RSIntegrationMod.LOGGER.warn("[RSI] extractFromNetwork: partial extraction — "
                         + "requested {} but only got {}", count, result.getCount());
+                // A ledger reservation is atomic from the caller's point of
+                // view. Never leave a partial intermediate-material debit in
+                // RS: the following craft step cannot use it and the ledger
+                // would report a misleading commit failure. Put the partial
+                // result back before returning failure.
+                ItemStack refund = network.insertItem(result.copy(), result.getCount(), Action.PERFORM);
+                if (!refund.isEmpty()) {
+                    RSIntegrationMod.LOGGER.error("[RSI] partial extraction refund was rejected: {} x{}",
+                            refund.getHoverName().getString(), refund.getCount());
+                }
             }
-            return result;
+            return ItemStack.EMPTY;
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.error("[RSI] extractFromNetwork error — items may have been lost", e);
         }
@@ -469,8 +479,22 @@ public final class RSIntegrationNetwork {
             }
             ItemStack request = template.copyWithCount(1);
             ItemStack extracted = network.extractItem(request, count, Action.PERFORM);
-            if (extracted.isEmpty() || ItemStack.isSameItemSameTags(extracted, template)) {
+            if (extracted.isEmpty()) {
                 return extracted;
+            }
+            if (ItemStack.isSameItemSameTags(extracted, template)
+                    && extracted.getCount() >= count) {
+                return extracted;
+            }
+            if (ItemStack.isSameItemSameTags(extracted, template)) {
+                RSIntegrationMod.LOGGER.warn("[RSI] extractExactFromNetwork: partial extraction — requested {} but only got {}",
+                        count, extracted.getCount());
+                ItemStack partialRefund = network.insertItem(extracted.copy(), extracted.getCount(), Action.PERFORM);
+                if (!partialRefund.isEmpty()) {
+                    RSIntegrationMod.LOGGER.error("[RSI] partial exact extraction refund was rejected: {} x{}",
+                            partialRefund.getHoverName().getString(), partialRefund.getCount());
+                }
+                return ItemStack.EMPTY;
             }
             RSIntegrationMod.LOGGER.error("[RSI] Exact extraction returned the wrong identity; refunding {} x{}",
                     extracted.getDisplayName().getString(), extracted.getCount());
