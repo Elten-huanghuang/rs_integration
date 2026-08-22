@@ -6,6 +6,8 @@ import net.minecraft.world.item.ItemStack;
 
 /** Replaceable boundary around native RS calls. This interface deliberately exposes no RS types. */
 interface RefinedStorageDriver {
+    boolean isAvailable();
+
     RefinedStorageSnapshotRead snapshotItems();
 
     boolean hasPermission(ServerPlayer player, StoragePermission permission);

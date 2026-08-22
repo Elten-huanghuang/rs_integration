@@ -121,6 +121,34 @@ class StorageItemKeyTest extends BootstrapTest {
                 new StorageItemKey(backend, ints, new ItemStack(Items.DIAMOND)));
     }
 
+    @Test
+    void identityInputsEnforceDepthAndSizeLimits() {
+        CompoundTag root = new CompoundTag();
+        CompoundTag cursor = root;
+        for (int depth = 0; depth <= StorageItemKey.MAX_NBT_DEPTH; depth++) {
+            CompoundTag child = new CompoundTag();
+            cursor.put("nested", child);
+            cursor = child;
+        }
+        StorageBackendId backend = new StorageBackendId("bounded");
+
+        assertThrows(IllegalArgumentException.class,
+                () -> new StorageItemKey(backend, root, new ItemStack(Items.DIAMOND)));
+
+        CompoundTag smallPayload = new CompoundTag();
+        smallPayload.putString("item", "diamond");
+        assertThrows(IllegalArgumentException.class, () -> StorageItemKey.withCanonicalIdentity(
+                backend, smallPayload,
+                new byte[StorageItemKey.MAX_CANONICAL_IDENTITY_BYTES + 1],
+                new ItemStack(Items.DIAMOND)));
+
+        CompoundTag oversizedPayload = new CompoundTag();
+        oversizedPayload.putByteArray("payload",
+                new byte[StorageItemKey.MAX_BACKEND_PAYLOAD_BYTES]);
+        assertThrows(IllegalArgumentException.class, () -> StorageItemKey.withCanonicalIdentity(
+                backend, oversizedPayload, new byte[] { 1 }, new ItemStack(Items.DIAMOND)));
+    }
+
     private static ListTag emptyListOf(byte elementType) throws IOException {
         byte[] encoded = { elementType, 0, 0, 0, 0 };
         return ListTag.TYPE.load(new DataInputStream(new ByteArrayInputStream(encoded)),

@@ -18,7 +18,8 @@ class StorageOperationResultTest extends BootstrapTest {
         ItemStack input = new ItemStack(Items.IRON_INGOT, 10);
         ItemStack remainder = new ItemStack(Items.IRON_INGOT, 3);
 
-        StorageOperationResult result = StorageOperationResult.inserted(input, remainder);
+        StorageOperationResult result = StorageOperationResult.inserted(
+                StorageOperationMode.PERFORM, input, remainder);
         remainder.setCount(1);
 
         assertEquals(StorageOperationResult.Kind.INSERT, result.kind());
@@ -38,7 +39,8 @@ class StorageOperationResultTest extends BootstrapTest {
     void extractionPreservesAllActualFragmentsAndCopiesThem() {
         ItemStack first = new ItemStack(Items.APPLE, 2);
         ItemStack second = new ItemStack(Items.GOLDEN_APPLE, 1);
-        StorageOperationResult result = StorageOperationResult.extracted(3, List.of(first, second));
+        StorageOperationResult result = StorageOperationResult.extracted(
+                StorageOperationMode.PERFORM, 3, List.of(first, second));
         first.setCount(1);
 
         assertEquals(StorageOperationResult.Kind.EXTRACT, result.kind());
@@ -54,10 +56,13 @@ class StorageOperationResultTest extends BootstrapTest {
     @Test
     void rejectsImpossibleBackendResults() {
         assertThrows(IllegalArgumentException.class, () -> StorageOperationResult.inserted(
+                StorageOperationMode.PERFORM,
                 ItemStack.EMPTY, new ItemStack(Items.IRON_INGOT, 1)));
         assertThrows(IllegalArgumentException.class, () -> StorageOperationResult.inserted(
+                StorageOperationMode.PERFORM,
                 new ItemStack(Items.IRON_INGOT, 2), new ItemStack(Items.GOLD_INGOT, 1)));
         assertThrows(IllegalArgumentException.class, () -> StorageOperationResult.extracted(
+                StorageOperationMode.PERFORM,
                 1, List.of(new ItemStack(Items.IRON_INGOT, 2))));
     }
 
@@ -69,9 +74,10 @@ class StorageOperationResultTest extends BootstrapTest {
         remainder.getOrCreateTag().putString("native", "second");
 
         assertThrows(IllegalArgumentException.class,
-                () -> StorageOperationResult.inserted(input, remainder));
+                () -> StorageOperationResult.inserted(
+                        StorageOperationMode.PERFORM, input, remainder));
         StorageOperationResult result = StorageOperationResult.inserted(
-                input, remainder, (left, right) -> {
+                StorageOperationMode.PERFORM, input, remainder, (left, right) -> {
                     left.setCount(64);
                     right.setCount(64);
                     return true;
@@ -82,15 +88,18 @@ class StorageOperationResultTest extends BootstrapTest {
         assertEquals(2, input.getCount());
         assertEquals(1, remainder.getCount());
         assertThrows(IllegalArgumentException.class, () -> StorageOperationResult.inserted(
+                StorageOperationMode.PERFORM,
                 input, new ItemStack(Items.GOLD_INGOT), (left, right) -> true));
     }
 
     @Test
     void failuresRemainDistinctAndRecoveryStacksAreNotCountedAsTransfers() {
         ItemStack wrongIdentity = new ItemStack(Items.GOLD_INGOT, 2);
-        StorageOperationResult result = StorageOperationResult.failedExtraction(4,
+        StorageOperationResult result = StorageOperationResult.failedExtraction(
+                StorageOperationMode.PERFORM, 4,
                 StorageOperationStatus.INVALID_RESPONSE,
-                List.of(new ItemStack(Items.IRON_INGOT, 1)), List.of(wrongIdentity));
+                List.of(new ItemStack(Items.IRON_INGOT, 1)), List.of(wrongIdentity),
+                StorageDiagnosticCode.INVALID_NATIVE_RESPONSE);
         wrongIdentity.setCount(1);
 
         assertEquals(StorageOperationStatus.INVALID_RESPONSE, result.status());
@@ -102,6 +111,7 @@ class StorageOperationResultTest extends BootstrapTest {
     @Test
     void deniedInsertRetainsTheWholeInput() {
         StorageOperationResult result = StorageOperationResult.failedInsert(
+                StorageOperationMode.PERFORM,
                 new ItemStack(Items.DIAMOND, 5), StorageOperationStatus.DENIED);
 
         assertEquals(StorageOperationStatus.DENIED, result.status());
@@ -128,9 +138,9 @@ class StorageOperationResultTest extends BootstrapTest {
 
     @Test
     void operationSpecificFieldsRejectTheWrongResultKind() {
-        StorageOperationResult insert = StorageOperationResult.inserted(
+        StorageOperationResult insert = StorageOperationResult.inserted(StorageOperationMode.PERFORM,
                 new ItemStack(Items.DIAMOND), ItemStack.EMPTY);
-        StorageOperationResult extract = StorageOperationResult.extracted(
+        StorageOperationResult extract = StorageOperationResult.extracted(StorageOperationMode.PERFORM,
                 1, List.of(new ItemStack(Items.DIAMOND)));
 
         assertThrows(IllegalStateException.class, insert::extractedStacks);
@@ -149,5 +159,19 @@ class StorageOperationResultTest extends BootstrapTest {
 
         assertEquals(StorageOperationMode.SIMULATE, simulated.mode());
         assertEquals(1, simulated.transferredAmount().orElseThrow());
+    }
+
+    @Test
+    void failureStatusesRequireConsistentDiagnostics() {
+        ItemStack input = new ItemStack(Items.DIAMOND);
+
+        assertThrows(IllegalArgumentException.class, () -> StorageOperationResult.failedInsert(
+                StorageOperationMode.PERFORM, input, StorageOperationStatus.FAILED));
+        assertThrows(IllegalArgumentException.class, () -> StorageOperationResult.failedExtraction(
+                StorageOperationMode.PERFORM, 1, StorageOperationStatus.INVALID_RESPONSE,
+                List.of(), List.of()));
+        assertThrows(IllegalArgumentException.class, () -> StorageOperationResult.failedInsert(
+                StorageOperationMode.PERFORM, input, StorageOperationStatus.DENIED,
+                StorageDiagnosticCode.BACKEND_EXCEPTION));
     }
 }

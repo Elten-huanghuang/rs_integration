@@ -523,7 +523,28 @@ public class RecipeGuiLayoutsMixin {
 
     @Unique
     private static Rect2i rsi$getTransferButtonArea(Object layout, IRecipeLayoutDrawable<?> recipeLayout) {
-        return recipeLayout != null ? recipeLayout.getRecipeTransferButtonArea() : null;
+        if (layout == null || recipeLayout == null) return null;
+
+        // Both JEI 15.20 and 15.49 expose transferButton() on their concrete
+        // layout wrapper. Its GuiIconButton area is the authoritative absolute
+        // screen position after JEI has laid out the recipe. The recipe-layout
+        // API only returns a relative declaration in these versions.
+        try {
+            Method method = layout.getClass().getMethod("transferButton");
+            Object transferButton = method.invoke(layout);
+            if (transferButton instanceof GuiIconToggleButtonAccessor accessor) {
+                ImmutableRect2i area = accessor.getButton().getArea();
+                if (area != null && area.getWidth() > 0 && area.getHeight() > 0) {
+                    return new Rect2i(area.getX(), area.getY(), area.getWidth(), area.getHeight());
+                }
+            }
+        } catch (ReflectiveOperationException | RuntimeException ignored) {
+            // JEI 15.49 can also provide an errored IRecipeLayoutWithButtons
+            // implementation without transferButton(); use the API fallback.
+        }
+
+        return rsi$absoluteRecipeArea(recipeLayout,
+                recipeLayout.getRecipeTransferButtonArea());
     }
 
     @Unique
@@ -533,10 +554,23 @@ public class RecipeGuiLayoutsMixin {
             IRecipeLayoutDrawable<?> drawable = rsi$getRecipeLayout(layout);
             if (drawable == null) continue;
             rsi$addOccupiedArea(occupied, drawable.getRectWithBorder());
-            rsi$addOccupiedArea(occupied, drawable.getRecipeTransferButtonArea());
-            rsi$addOccupiedArea(occupied, drawable.getRecipeBookmarkButtonArea());
+            rsi$addOccupiedArea(occupied, rsi$getTransferButtonArea(layout, drawable));
+            rsi$addOccupiedArea(occupied, rsi$absoluteRecipeArea(
+                    drawable, drawable.getRecipeBookmarkButtonArea()));
         }
         return occupied;
+    }
+
+    @Unique
+    private static Rect2i rsi$absoluteRecipeArea(IRecipeLayoutDrawable<?> recipeLayout,
+                                                  Rect2i relativeArea) {
+        if (recipeLayout == null || relativeArea == null) return null;
+        Rect2i recipeArea = recipeLayout.getRect();
+        if (recipeArea == null) return relativeArea;
+        return new Rect2i(
+                recipeArea.getX() + relativeArea.getX(),
+                recipeArea.getY() + relativeArea.getY(),
+                relativeArea.getWidth(), relativeArea.getHeight());
     }
 
     @Unique

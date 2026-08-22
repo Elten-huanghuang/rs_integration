@@ -45,21 +45,12 @@ public final class StorageOperationResult {
         this.diagnosticCode = Objects.requireNonNull(diagnosticCode, "diagnosticCode");
     }
 
-    public static StorageOperationResult inserted(ItemStack input, ItemStack remainder) {
-        return inserted(StorageOperationMode.PERFORM, input, remainder);
-    }
-
     public static StorageOperationResult inserted(StorageOperationMode mode,
                                                   ItemStack input, ItemStack remainder) {
         return inserted(mode, input, remainder, StorageOperationResult::sameSerializedIdentity);
     }
 
     /** Uses the backend's authoritative identity rule to validate a non-empty remainder. */
-    public static StorageOperationResult inserted(ItemStack input, ItemStack remainder,
-                                                  BiPredicate<ItemStack, ItemStack> sameIdentity) {
-        return inserted(StorageOperationMode.PERFORM, input, remainder, sameIdentity);
-    }
-
     public static StorageOperationResult inserted(StorageOperationMode mode,
                                                   ItemStack input, ItemStack remainder,
                                                   BiPredicate<ItemStack, ItemStack> sameIdentity) {
@@ -74,29 +65,19 @@ public final class StorageOperationResult {
                 List.of(), List.of(), remainder, true, true, StorageDiagnosticCode.NONE);
     }
 
-    public static StorageOperationResult failedInsert(ItemStack input, StorageOperationStatus status) {
-        return failedInsert(StorageOperationMode.PERFORM, input, status);
-    }
-
     public static StorageOperationResult failedInsert(StorageOperationMode mode, ItemStack input,
                                                       StorageOperationStatus status) {
-        Objects.requireNonNull(mode, "mode");
-        Objects.requireNonNull(input, "input");
-        requireFailure(status);
-        return new StorageOperationResult(Kind.INSERT, mode, status, input.getCount(), 0,
-                List.of(), List.of(), input, true, true, StorageDiagnosticCode.NONE);
-    }
-
-    public static StorageOperationResult failedInsert(ItemStack input, StorageOperationStatus status,
-                                                      StorageDiagnosticCode diagnosticCode) {
-        return failedInsert(StorageOperationMode.PERFORM, input, status, diagnosticCode);
+        return failedInsert(mode, input, status, StorageDiagnosticCode.NONE);
     }
 
     public static StorageOperationResult failedInsert(StorageOperationMode mode, ItemStack input,
                                                       StorageOperationStatus status,
                                                       StorageDiagnosticCode diagnosticCode) {
-        StorageOperationResult base = failedInsert(mode, input, status);
-        return new StorageOperationResult(base.kind, base.mode, base.status, base.requestedAmount, 0,
+        Objects.requireNonNull(mode, "mode");
+        Objects.requireNonNull(input, "input");
+        requireFailure(status);
+        requireFailureDiagnostic(status, diagnosticCode);
+        return new StorageOperationResult(Kind.INSERT, mode, status, input.getCount(), 0,
                 List.of(), List.of(), input, true, true, diagnosticCode);
     }
 
@@ -108,10 +89,6 @@ public final class StorageOperationResult {
                 StorageOperationStatus.INDETERMINATE,
                 input.getCount(), 0, List.of(), List.of(), ItemStack.EMPTY,
                 false, false, diagnosticCode);
-    }
-
-    public static StorageOperationResult extracted(long requestedAmount, List<ItemStack> extractedStacks) {
-        return extracted(StorageOperationMode.PERFORM, requestedAmount, extractedStacks);
     }
 
     public static StorageOperationResult extracted(StorageOperationMode mode, long requestedAmount,
@@ -126,34 +103,13 @@ public final class StorageOperationResult {
                 copied, List.of(), ItemStack.EMPTY, true, false, StorageDiagnosticCode.NONE);
     }
 
-    public static StorageOperationResult failedExtraction(long requestedAmount,
-                                                          StorageOperationStatus status,
-                                                          List<ItemStack> validExtracted,
-                                                          List<ItemStack> recoveryStacks) {
-        return failedExtraction(StorageOperationMode.PERFORM, requestedAmount, status,
-                validExtracted, recoveryStacks);
-    }
-
     public static StorageOperationResult failedExtraction(StorageOperationMode mode,
                                                           long requestedAmount,
                                                           StorageOperationStatus status,
                                                           List<ItemStack> validExtracted,
                                                           List<ItemStack> recoveryStacks) {
-        Objects.requireNonNull(mode, "mode");
-        requireFailure(status);
-        List<ItemStack> valid = validatedExtracted(requestedAmount, validExtracted);
-        Objects.requireNonNull(recoveryStacks, "recoveryStacks");
-        return new StorageOperationResult(Kind.EXTRACT, mode, status, requestedAmount, stackCount(valid),
-                valid, recoveryStacks, ItemStack.EMPTY, true, false, StorageDiagnosticCode.NONE);
-    }
-
-    public static StorageOperationResult failedExtraction(long requestedAmount,
-                                                          StorageOperationStatus status,
-                                                          List<ItemStack> validExtracted,
-                                                          List<ItemStack> recoveryStacks,
-                                                          StorageDiagnosticCode diagnosticCode) {
-        return failedExtraction(StorageOperationMode.PERFORM, requestedAmount, status,
-                validExtracted, recoveryStacks, diagnosticCode);
+        return failedExtraction(mode, requestedAmount, status, validExtracted, recoveryStacks,
+                StorageDiagnosticCode.NONE);
     }
 
     public static StorageOperationResult failedExtraction(StorageOperationMode mode,
@@ -164,6 +120,7 @@ public final class StorageOperationResult {
                                                           StorageDiagnosticCode diagnosticCode) {
         Objects.requireNonNull(mode, "mode");
         requireFailure(status);
+        requireFailureDiagnostic(status, diagnosticCode);
         List<ItemStack> valid = validatedExtracted(requestedAmount, validExtracted);
         return new StorageOperationResult(Kind.EXTRACT, mode, status, requestedAmount, stackCount(valid),
                 valid, recoveryStacks, ItemStack.EMPTY, true, false, diagnosticCode);
@@ -245,6 +202,22 @@ public final class StorageOperationResult {
         Objects.requireNonNull(diagnosticCode, "diagnosticCode");
         if (diagnosticCode == StorageDiagnosticCode.NONE) {
             throw new IllegalArgumentException("indeterminate operation requires a diagnostic code");
+        }
+    }
+
+    private static void requireFailureDiagnostic(StorageOperationStatus status,
+                                                 StorageDiagnosticCode diagnosticCode) {
+        Objects.requireNonNull(diagnosticCode, "diagnosticCode");
+        boolean required = status == StorageOperationStatus.FAILED
+                || status == StorageOperationStatus.INVALID_RESPONSE;
+        if (required == (diagnosticCode == StorageDiagnosticCode.NONE)) {
+            throw new IllegalArgumentException(
+                    "failed or invalid operations require a diagnostic code");
+        }
+        if ((status == StorageOperationStatus.DENIED
+                || status == StorageOperationStatus.INVALID_REQUEST)
+                && diagnosticCode != StorageDiagnosticCode.NONE) {
+            throw new IllegalArgumentException("operation status cannot carry a diagnostic code");
         }
     }
 

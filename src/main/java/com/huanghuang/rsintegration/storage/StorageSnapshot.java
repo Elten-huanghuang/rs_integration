@@ -12,21 +12,48 @@ import java.util.Objects;
 /** Immutable point-in-time view of the item identities visible in a session. */
 public final class StorageSnapshot {
     public static final long UNKNOWN_REVISION = -1;
-    public static final StorageSnapshot EMPTY = new StorageSnapshot(List.of(), UNKNOWN_REVISION);
 
+    private final StorageBackendId backendId;
     private final List<StoredItem> items;
     private final long revision;
 
-    public StorageSnapshot(List<StoredItem> items) {
-        this(items, UNKNOWN_REVISION);
+    public enum MatchStatus { SUCCESS, EMPTY_INGREDIENT, FAILED }
+
+    public record MatchResult(MatchStatus status, List<StoredItem> items,
+                              StorageDiagnosticCode diagnosticCode) {
+        public MatchResult {
+            Objects.requireNonNull(status, "status");
+            items = List.copyOf(Objects.requireNonNull(items, "items"));
+            Objects.requireNonNull(diagnosticCode, "diagnosticCode");
+            if (status == MatchStatus.SUCCESS) {
+                if (diagnosticCode != StorageDiagnosticCode.NONE) {
+                    throw new IllegalArgumentException("successful match cannot carry a diagnostic");
+                }
+            } else if (!items.isEmpty()) {
+                throw new IllegalArgumentException("unsuccessful match cannot carry items");
+            } else if ((status == MatchStatus.FAILED)
+                    != (diagnosticCode != StorageDiagnosticCode.NONE)) {
+                throw new IllegalArgumentException("failed match requires a diagnostic");
+            }
+        }
+
+        public boolean successful() { return status == MatchStatus.SUCCESS; }
     }
 
-    public StorageSnapshot(List<StoredItem> items, long revision) {
+    public StorageSnapshot(StorageBackendId backendId, List<StoredItem> items) {
+        this(backendId, items, UNKNOWN_REVISION);
+    }
+
+    public StorageSnapshot(StorageBackendId backendId, List<StoredItem> items, long revision) {
+        this.backendId = Objects.requireNonNull(backendId, "backendId");
         Objects.requireNonNull(items, "items");
         if (revision < UNKNOWN_REVISION) throw new IllegalArgumentException("invalid snapshot revision");
         Map<StorageItemKey, Long> amounts = new LinkedHashMap<>();
         for (StoredItem item : items) {
             Objects.requireNonNull(item, "item");
+            if (!backendId.equals(item.key().backendId())) {
+                throw new IllegalArgumentException("snapshot contains an item from another backend");
+            }
             amounts.merge(item.key(), item.amount(), StorageSnapshot::saturatedAdd);
         }
         List<StoredItem> normalized = new ArrayList<>(amounts.size());
@@ -36,6 +63,8 @@ public final class StorageSnapshot {
         this.items = List.copyOf(normalized);
         this.revision = revision;
     }
+
+    public StorageBackendId backendId() { return backendId; }
 
     public List<StoredItem> items() {
         return items;
@@ -52,16 +81,24 @@ public final class StorageSnapshot {
         return total;
     }
 
-    public List<StoredItem> matching(Ingredient ingredient) {
+    public MatchResult match(Ingredient ingredient) {
         Objects.requireNonNull(ingredient, "ingredient");
-        if (ingredient.isEmpty()) return List.of();
-        List<StoredItem> matches = new ArrayList<>();
-        for (StoredItem item : items) {
-            if (ingredient.test(item.stack())) {
-                matches.add(item);
+        try {
+            if (ingredient.isEmpty()) {
+                return new MatchResult(MatchStatus.EMPTY_INGREDIENT, List.of(),
+                        StorageDiagnosticCode.NONE);
             }
+            List<StoredItem> matches = new ArrayList<>();
+            for (StoredItem item : items) {
+                if (ingredient.test(item.stack())) {
+                    matches.add(item);
+                }
+            }
+            return new MatchResult(MatchStatus.SUCCESS, matches, StorageDiagnosticCode.NONE);
+        } catch (RuntimeException | LinkageError e) {
+            return new MatchResult(MatchStatus.FAILED, List.of(),
+                    StorageDiagnosticCode.INGREDIENT_MATCH_FAILED);
         }
-        return List.copyOf(matches);
     }
 
     private static long saturatedAdd(long left, long right) {

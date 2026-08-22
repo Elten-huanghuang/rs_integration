@@ -27,9 +27,10 @@ final class StorageIdentityBytes {
 
     static byte[] exact(CompoundTag identity) {
         try {
-            ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+            LimitedByteArrayOutputStream bytes = new LimitedByteArrayOutputStream(
+                    StorageItemKey.MAX_BACKEND_PAYLOAD_BYTES);
             try (DataOutputStream output = new DataOutputStream(bytes)) {
-                writeTag(output, identity);
+                writeTag(output, identity, 0);
             }
             return bytes.toByteArray();
         } catch (IOException e) {
@@ -37,7 +38,14 @@ final class StorageIdentityBytes {
         }
     }
 
-    private static void writeTag(DataOutputStream output, Tag tag) throws IOException {
+    static void validateBounds(CompoundTag identity) {
+        exact(identity);
+    }
+
+    private static void writeTag(DataOutputStream output, Tag tag, int depth) throws IOException {
+        if (depth > StorageItemKey.MAX_NBT_DEPTH) {
+            throw new IllegalArgumentException("storage item payload is nested too deeply");
+        }
         output.writeByte(tag.getId());
         switch (tag.getId()) {
             case Tag.TAG_END -> { }
@@ -68,7 +76,7 @@ final class StorageIdentityBytes {
             case Tag.TAG_LIST -> {
                 ListTag list = (ListTag) tag;
                 output.writeInt(list.size());
-                for (Tag element : list) writeTag(output, element);
+                for (Tag element : list) writeTag(output, element, depth + 1);
             }
             case Tag.TAG_COMPOUND -> {
                 CompoundTag compound = (CompoundTag) tag;
@@ -77,7 +85,7 @@ final class StorageIdentityBytes {
                 output.writeInt(keys.size());
                 for (String key : keys) {
                     writeString(output, key);
-                    writeTag(output, compound.get(key));
+                    writeTag(output, compound.get(key), depth + 1);
                 }
             }
             case Tag.TAG_INT_ARRAY -> {
@@ -98,5 +106,31 @@ final class StorageIdentityBytes {
         byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
         output.writeInt(bytes.length);
         output.write(bytes);
+    }
+
+    private static final class LimitedByteArrayOutputStream extends ByteArrayOutputStream {
+        private final int limit;
+
+        private LimitedByteArrayOutputStream(int limit) {
+            this.limit = limit;
+        }
+
+        @Override
+        public synchronized void write(int value) {
+            requireCapacity(1);
+            super.write(value);
+        }
+
+        @Override
+        public synchronized void write(byte[] values, int offset, int length) {
+            requireCapacity(length);
+            super.write(values, offset, length);
+        }
+
+        private void requireCapacity(int additionalBytes) {
+            if (additionalBytes < 0 || count > limit - additionalBytes) {
+                throw new IllegalArgumentException("storage item payload is too large");
+            }
+        }
     }
 }

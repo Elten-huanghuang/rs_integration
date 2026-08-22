@@ -1,6 +1,5 @@
 package com.huanghuang.rsintegration.storage.rs;
 
-import com.huanghuang.rsintegration.storage.StorageBackendId;
 import com.huanghuang.rsintegration.storage.StorageDiagnosticCode;
 import com.huanghuang.rsintegration.storage.StorageItemKey;
 import com.huanghuang.rsintegration.storage.StorageOperationResult;
@@ -21,8 +20,6 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RefinedStorageOperationExecutorTest extends BootstrapTest {
-    private static final StorageBackendId BACKEND = new StorageBackendId("test_rs");
-
     @Test
     void trackedInsertRecordsAcceptedAmountBeforePerform() {
         FakeDriver driver = new FakeDriver();
@@ -66,6 +63,21 @@ class RefinedStorageOperationExecutorTest extends BootstrapTest {
         assertEquals(StorageOperationStatus.INDETERMINATE, result.status());
         assertTrue(result.transferredAmount().isEmpty());
         assertTrue(result.remainder().isEmpty());
+    }
+
+    @Test
+    void networkBecomingUnavailableBeforePerformIsKnownZero() {
+        FakeDriver driver = new FakeDriver();
+        driver.simulatedInsertRemainder = ItemStack.EMPTY;
+        driver.unavailableOnPerformInsert = true;
+
+        StorageOperationResult result = RefinedStorageOperationExecutor.insert(driver,
+                new ItemStack(Items.DIAMOND, 5), false, accepted -> { });
+
+        assertEquals(List.of("simulate", "perform"), driver.events);
+        assertEquals(StorageOperationStatus.UNAVAILABLE, result.status());
+        assertEquals(0, result.transferredAmount().orElseThrow());
+        assertEquals(5, result.remainder().orElseThrow().getCount());
     }
 
     @Test
@@ -140,7 +152,7 @@ class RefinedStorageOperationExecutorTest extends BootstrapTest {
     void partialExtractionPreservesConfirmedReturnedStack() {
         FakeDriver driver = new FakeDriver();
         driver.extractResults.add(new ItemStack(Items.DIAMOND, 3));
-        StorageItemKey key = StorageItemKey.fromItemStack(BACKEND, new ItemStack(Items.DIAMOND));
+        StorageItemKey key = RefinedStorageItemKeys.fromStack(new ItemStack(Items.DIAMOND));
 
         StorageOperationResult result = RefinedStorageOperationExecutor.extract(driver, key,
                 new ItemStack(Items.DIAMOND), 5, 5, false);
@@ -154,7 +166,7 @@ class RefinedStorageOperationExecutorTest extends BootstrapTest {
     void simulatedExtractionIsMarkedAsNonMutating() {
         FakeDriver driver = new FakeDriver();
         driver.extractResults.add(new ItemStack(Items.DIAMOND, 1));
-        StorageItemKey key = StorageItemKey.fromItemStack(BACKEND, new ItemStack(Items.DIAMOND));
+        StorageItemKey key = RefinedStorageItemKeys.fromStack(new ItemStack(Items.DIAMOND));
 
         StorageOperationResult result = RefinedStorageOperationExecutor.extract(driver, key,
                 new ItemStack(Items.DIAMOND), 1, 1, true);
@@ -167,7 +179,7 @@ class RefinedStorageOperationExecutorTest extends BootstrapTest {
     void extractionExceptionAfterPerformStartsIsIndeterminate() {
         FakeDriver driver = new FakeDriver();
         driver.throwOnExtract = true;
-        StorageItemKey key = StorageItemKey.fromItemStack(BACKEND, new ItemStack(Items.DIAMOND));
+        StorageItemKey key = RefinedStorageItemKeys.fromStack(new ItemStack(Items.DIAMOND));
 
         StorageOperationResult result = RefinedStorageOperationExecutor.extract(driver, key,
                 new ItemStack(Items.DIAMOND), 1, 1, false);
@@ -177,17 +189,44 @@ class RefinedStorageOperationExecutorTest extends BootstrapTest {
     }
 
     @Test
+    void unavailableNetworkDoesNotBecomeIndeterminateExtraction() {
+        FakeDriver driver = new FakeDriver();
+        driver.unavailableOnExtract = true;
+        StorageItemKey key = RefinedStorageItemKeys.fromStack(new ItemStack(Items.DIAMOND));
+
+        StorageOperationResult result = RefinedStorageOperationExecutor.extract(driver, key,
+                new ItemStack(Items.DIAMOND), 1, 1, false);
+
+        assertEquals(StorageOperationStatus.UNAVAILABLE, result.status());
+        assertEquals(0, result.transferredAmount().orElseThrow());
+        assertTrue(result.extractedStacks().isEmpty());
+    }
+
+    @Test
     void wrongIdentityRecoveryExceptionDoesNotExposeDuplicateRecoveryStack() {
         FakeDriver driver = new FakeDriver();
         driver.extractResults.add(new ItemStack(Items.GOLD_INGOT, 1));
         driver.throwOnPerformInsert = true;
-        StorageItemKey key = StorageItemKey.fromItemStack(BACKEND, new ItemStack(Items.DIAMOND));
+        StorageItemKey key = RefinedStorageItemKeys.fromStack(new ItemStack(Items.DIAMOND));
 
         StorageOperationResult result = RefinedStorageOperationExecutor.extract(driver, key,
                 new ItemStack(Items.DIAMOND), 1, 1, false);
 
         assertEquals(StorageOperationStatus.INDETERMINATE, result.status());
         assertTrue(result.recoveryStacks().isEmpty());
+    }
+
+    @Test
+    void mismatchedTemplateIsRejectedBeforeNativeExtraction() {
+        FakeDriver driver = new FakeDriver();
+        StorageItemKey expected = RefinedStorageItemKeys.fromStack(new ItemStack(Items.DIAMOND));
+
+        StorageOperationResult result = RefinedStorageOperationExecutor.extract(driver, expected,
+                new ItemStack(Items.GOLD_INGOT), 1, 1, false);
+
+        assertEquals(StorageOperationStatus.INVALID_REQUEST, result.status());
+        assertEquals(0, result.transferredAmount().orElseThrow());
+        assertTrue(driver.events.isEmpty());
     }
 
     private static final class FakeDriver implements RefinedStorageDriver {
@@ -197,6 +236,10 @@ class RefinedStorageOperationExecutorTest extends BootstrapTest {
         ItemStack performedInsertRemainder = ItemStack.EMPTY;
         boolean throwOnPerformInsert;
         boolean throwOnExtract;
+        boolean unavailableOnPerformInsert;
+        boolean unavailableOnExtract;
+
+        @Override public boolean isAvailable() { return true; }
 
         @Override public RefinedStorageSnapshotRead snapshotItems() {
             return RefinedStorageSnapshotRead.available(List.of());
@@ -208,12 +251,16 @@ class RefinedStorageOperationExecutorTest extends BootstrapTest {
 
         @Override public ItemStack extract(ItemStack template, int amount, boolean simulate) {
             events.add(simulate ? "extract-simulate" : "extract-perform");
+            if (unavailableOnExtract) throw new RefinedStorageUnavailableException();
             if (throwOnExtract) throw new IllegalStateException("extract");
             return extractResults.isEmpty() ? ItemStack.EMPTY : extractResults.remove(0).copy();
         }
 
         @Override public ItemStack insert(ItemStack stack, boolean simulate) {
             events.add(simulate ? "simulate" : "perform");
+            if (!simulate && unavailableOnPerformInsert) {
+                throw new RefinedStorageUnavailableException();
+            }
             if (!simulate && throwOnPerformInsert) throw new IllegalStateException("insert");
             ItemStack result = simulate ? simulatedInsertRemainder : performedInsertRemainder;
             return result == null ? null : result.copy();

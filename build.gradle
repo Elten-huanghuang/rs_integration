@@ -60,6 +60,10 @@ dependencies {
     // remaps the classes to match the dev-environment mappings.
     compileOnly fg.deobf(fileTree(dir: 'libs', include: ['*.jar']))
 
+    // A production RS jar in run/mods is not remapped for the userdev namespace.
+    // Keep the release artifact compile-only, but provide a deobfuscated runtime copy for dev runs.
+    runtimeOnly fg.deobf("local:refinedstorage:1.12.4")
+
     // JEI
     compileOnly "mezz.jei:jei-${minecraft_version}-forge-api:${jei_version}"
     compileOnly "mezz.jei:jei-${minecraft_version}-common-api:${jei_version}"
