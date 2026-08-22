@@ -340,7 +340,8 @@ public final class RSSidePanelClickPacket {
         extractTemplate.setCount(1);
 
         // SIMULATE first — matches RS ItemGridHandler.onExtract
-        ItemStack simulated = network.extractItem(extractTemplate, count, Action.SIMULATE);
+        ItemStack simulated = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
+                .extractExactLegacy(network, player, extractTemplate, count, true);
         if (simulated.isEmpty()) {
             forceSyncZero(player, targetItem, stackId);
             return;
@@ -353,7 +354,8 @@ public final class RSSidePanelClickPacket {
         }
 
         // PERFORM extract
-        ItemStack extracted = network.extractItem(extractTemplate, count, Action.PERFORM);
+        ItemStack extracted = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
+                .extractExactLegacy(network, player, extractTemplate, count, false);
         if (extracted.isEmpty()) return;
 
         if (action == ACTION_PICK_BLOCK) {
@@ -474,12 +476,14 @@ public final class RSSidePanelClickPacket {
             req.setCount(1);
 
             // SIMULATE first — matches RS pattern
-            ItemStack sim = network.extractItem(req, 1, Action.SIMULATE);
+            ItemStack sim = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
+                    .extractExactLegacy(network, player, req, 1, true);
             if (sim.isEmpty()) continue;
 
             if (tracker != null) tracker.changed(player, req.copy());
 
-            ItemStack extracted = network.extractItem(req, 1, Action.PERFORM);
+            ItemStack extracted = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
+                    .extractExactLegacy(network, player, req, 1, false);
             if (!extracted.isEmpty()) {
                 ItemStack remainder = ItemHandlerHelper.insertItemStacked(
                         playerFullInv(player), extracted, false);

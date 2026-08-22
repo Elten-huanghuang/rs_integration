@@ -108,8 +108,7 @@ public final class CompressorBatchDelegate extends AbstractBatchDelegate {
             if (!tryStartWithMaterials(player, materials, ledger)) {
                 for (ItemStack mat : materials) {
                     if (!mat.isEmpty())
-                        network.insertItem(mat.copy(), mat.getCount(),
-                                com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                        insertIntoStorage(player, mat.copy(), false);
                 }
                 return false;
             }
@@ -195,8 +194,7 @@ public final class CompressorBatchDelegate extends AbstractBatchDelegate {
             if (handler != null) {
                 ItemStack input = handler.extractItem(1, 64, false);
                 if (!input.isEmpty()) {
-                    network.insertItem(input.copy(), input.getCount(),
-                            com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                    insertIntoStorage(player, input.copy(), false);
                 }
             }
         }

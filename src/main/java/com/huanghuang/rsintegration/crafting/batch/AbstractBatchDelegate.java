@@ -2,6 +2,8 @@ package com.huanghuang.rsintegration.crafting.batch;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.util.ForcedChunkTicketManager;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
@@ -41,6 +43,9 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
     protected ExtractionLedger ledger;
     protected ExtractionLedger sharedLedger;
     protected INetwork network;
+    /** Backend-neutral view of {@link #network}; populated lazily for legacy delegates. */
+    @Nullable
+    protected CraftStorageEndpoint storageEndpoint;
     protected boolean usingSharedLedger;
     protected CraftPhase phase = CraftPhase.WAITING_FOR_START;
 
@@ -353,6 +358,53 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
     }
 
     /**
+     * Returns the storage boundary for this delegate. The lazy bridge keeps
+     * existing machine initialization code source-compatible while allowing
+     * refund/output paths to stop calling the RS API directly.
+     */
+    @Nullable
+    protected final CraftStorageEndpoint storageEndpoint() {
+        if (storageEndpoint == null && network != null) {
+            storageEndpoint = CraftStorageEndpoints.fromLegacyNetwork(network);
+        }
+        return storageEndpoint;
+    }
+
+    /** Insert into the selected storage backend and return any remainder. */
+    @Nonnull
+    protected final net.minecraft.world.item.ItemStack insertIntoStorage(
+            @Nullable ServerPlayer player,
+            @Nonnull net.minecraft.world.item.ItemStack stack,
+            boolean simulate) {
+        if (stack.isEmpty()) return net.minecraft.world.item.ItemStack.EMPTY;
+        CraftStorageEndpoint endpoint = storageEndpoint();
+        if (endpoint == null || player == null) return stack.copy();
+        return endpoint.insert(player, stack, simulate).remainder().orElse(net.minecraft.world.item.ItemStack.EMPTY);
+    }
+
+    /** Extract an exact item count through the selected storage backend. */
+    @Nonnull
+    protected final net.minecraft.world.item.ItemStack extractExactFromStorage(
+            @Nullable ServerPlayer player,
+            @Nonnull net.minecraft.world.item.ItemStack template,
+            int amount,
+            boolean simulate) {
+        if (player == null || amount <= 0) return net.minecraft.world.item.ItemStack.EMPTY;
+        CraftStorageEndpoint endpoint = storageEndpoint();
+        if (endpoint == null) return net.minecraft.world.item.ItemStack.EMPTY;
+        var result = endpoint.extractExact(player, template, amount, simulate);
+        net.minecraft.world.item.ItemStack combined = net.minecraft.world.item.ItemStack.EMPTY;
+        for (net.minecraft.world.item.ItemStack extracted : result.extractedStacks()) {
+            if (extracted == null || extracted.isEmpty()) continue;
+            if (combined.isEmpty()) combined = extracted.copy();
+            else if (net.minecraft.world.item.ItemStack.isSameItemSameTags(combined, extracted)) {
+                combined.grow(extracted.getCount());
+            }
+        }
+        return combined;
+    }
+
+    /**
      * Whether failure cleanup reached a loaded machine and ran its inventory
      * cleanup hook. Graph execution uses this to distinguish recoverable
      * in-machine inputs from items that may still be inside an unavailable block.
@@ -419,6 +471,7 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
         ledger = null;
         sharedLedger = null;
         network = null;
+        storageEndpoint = null;
         usingSharedLedger = false;
         machineDim = null;
         machineServer = null;

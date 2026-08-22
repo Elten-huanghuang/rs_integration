@@ -98,8 +98,8 @@ public final class PlayerUtils {
         if (network != null) {
             // insertItem returns whatever the network could not store; if we
             // discard it (RS full / no matching storage) those items are voided.
-            ItemStack remainder = network.insertItem(stack, stack.getCount(),
-                com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+            ItemStack remainder = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
+                .insertLegacy(network, player, stack, false);
             int stored = stack.getCount() - remainder.getCount();
             if (stored > 0) {
                 RSIntegrationMod.LOGGER.warn("[RSI] Refund redirected to RS network (player chunk unloaded): {} x{}",

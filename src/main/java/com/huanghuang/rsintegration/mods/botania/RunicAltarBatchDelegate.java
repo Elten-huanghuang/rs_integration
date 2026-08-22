@@ -5,7 +5,6 @@ import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.util.PlayerUtils;
-import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.resources.ResourceKey;
@@ -297,9 +296,7 @@ public final class RunicAltarBatchDelegate extends AbstractBatchDelegate {
 
     private void refundStandalone(@Nullable ServerPlayer player, ItemStack stack) {
         if (stack == null || stack.isEmpty()) return;
-        ItemStack leftover = network == null
-                ? stack.copy()
-                : network.insertItem(stack.copy(), stack.getCount(), Action.PERFORM);
+        ItemStack leftover = insertIntoStorage(player, stack, false);
         if (leftover.isEmpty()) return;
         if (player != null) {
             PlayerUtils.safeGiveToPlayer(player, leftover, network);

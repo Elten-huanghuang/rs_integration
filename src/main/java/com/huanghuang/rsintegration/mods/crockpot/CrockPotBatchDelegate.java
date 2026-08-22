@@ -222,7 +222,7 @@ public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
             if (!tryStartWithMaterialsImpl(player, materials, ledger, false)) {
                 for (ItemStack mat : materials) {
                     if (!mat.isEmpty())
-                        network.insertItem(mat.copy(), mat.getCount(), Action.PERFORM);
+                        insertIntoStorage(player, mat, false);
                 }
                 return false;
             }
@@ -748,13 +748,13 @@ public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
                 current, fuelType, handler.getSlotLimit(fuelSlot));
         if (room <= 0) return isFuel(current);
 
-        ItemStack extracted = network.extractItem(fuelType.copyWithCount(1), room, Action.PERFORM);
+        ItemStack extracted = extractExactFromStorage(player, fuelType.copyWithCount(1), room, false);
         if (extracted.isEmpty()) return isFuel(current);
 
         ItemStack remainder = handler.insertItem(fuelSlot, extracted, false);
         int inserted = extracted.getCount() - remainder.getCount();
         if (!remainder.isEmpty()) {
-            network.insertItem(remainder, remainder.getCount(), Action.PERFORM);
+            insertIntoStorage(player, remainder, false);
         }
         if (inserted > 0) {
             if (suppliedFuelType.isEmpty()) {
@@ -864,13 +864,9 @@ public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
     }
 
     private void refundToRSNetwork(ItemStack stack) {
-        if (network != null) {
-            ItemStack leftover = network.insertItem(stack.copy(), stack.getCount(), Action.PERFORM);
-            if (!leftover.isEmpty() && player != null) {
-                ItemHandlerHelper.giveItemToPlayer(player, leftover);
-            }
-        } else if (player != null) {
-            ItemHandlerHelper.giveItemToPlayer(player, stack.copy());
+        ItemStack leftover = insertIntoStorage(player, stack, false);
+        if (!leftover.isEmpty() && player != null) {
+            ItemHandlerHelper.giveItemToPlayer(player, leftover);
         }
     }
 

@@ -65,8 +65,8 @@ public final class EnchantingRestockRequestPacket {
             return;
         }
 
-        ItemStack extracted = network.extractItem(
-                new ItemStack(Items.LAPIS_LAZULI), missing, Action.PERFORM);
+        ItemStack extracted = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
+                .extractExactLegacy(network, player, new ItemStack(Items.LAPIS_LAZULI), missing, false);
         int inserted = extracted.getCount();
         if (inserted > 0) {
             if (existing.isEmpty()) lapisSlot.set(extracted.copy());

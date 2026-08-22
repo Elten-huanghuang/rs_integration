@@ -138,7 +138,7 @@ public final class MokaPotBatchDelegate extends AbstractBatchDelegate {
             if (!tryStartWithMaterials(player, materials, ledger)) {
                 for (ItemStack mat : materials) {
                     if (!mat.isEmpty())
-                        network.insertItem(mat.copy(), mat.getCount(), Action.PERFORM);
+                        insertIntoStorage(player, mat, false);
                 }
                 return false;
             }
@@ -206,7 +206,7 @@ public final class MokaPotBatchDelegate extends AbstractBatchDelegate {
         // which routes to the first empty slot (slot 0, an ingredient slot).
         ItemStack container = getOutputContainer(recipe);
         if (!container.isEmpty() && handler.getStackInSlot(CONTAINER_SLOT).isEmpty()) {
-            ItemStack extracted = network.extractItem(container.copyWithCount(1), 1, Action.PERFORM);
+            ItemStack extracted = extractExactFromStorage(player, container.copyWithCount(1), 1, false);
             if (!extracted.isEmpty()) {
                 handler.insertItem(CONTAINER_SLOT, extracted, false);
             }
@@ -225,11 +225,11 @@ public final class MokaPotBatchDelegate extends AbstractBatchDelegate {
                 for (int i = 0; i < INPUT_SLOTS; i++) {
                     ItemStack refund = handler.extractItem(i, 64, false);
                     if (!refund.isEmpty() && !usingSharedLedger && network != null)
-                        network.insertItem(refund, refund.getCount(), Action.PERFORM);
+                        insertIntoStorage(player, refund, false);
                 }
                 ItemStack refundC = handler.extractItem(CONTAINER_SLOT, 64, false);
                 if (!refundC.isEmpty() && !usingSharedLedger && network != null)
-                    network.insertItem(refundC, refundC.getCount(), Action.PERFORM);
+                    insertIntoStorage(player, refundC, false);
                 be.setChanged();
                 forceChunkLoad(false);
                 return false;
@@ -575,13 +575,9 @@ public final class MokaPotBatchDelegate extends AbstractBatchDelegate {
     }
 
     private void refund(ItemStack stack) {
-        if (network != null) {
-            ItemStack leftover = network.insertItem(stack.copy(), stack.getCount(), Action.PERFORM);
-            if (!leftover.isEmpty() && player != null)
-                ItemHandlerHelper.giveItemToPlayer(player, leftover);
-        } else if (player != null) {
-            ItemHandlerHelper.giveItemToPlayer(player, stack.copy());
-        }
+        ItemStack leftover = insertIntoStorage(player, stack, false);
+        if (!leftover.isEmpty() && player != null)
+            ItemHandlerHelper.giveItemToPlayer(player, leftover);
     }
 
     private void forceChunkLoad(boolean load) {

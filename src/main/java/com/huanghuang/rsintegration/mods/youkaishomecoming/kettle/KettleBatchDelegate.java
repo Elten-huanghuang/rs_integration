@@ -145,7 +145,7 @@ public final class KettleBatchDelegate extends AbstractBatchDelegate {
             if (!tryStartWithMaterials(player, materials, ledger)) {
                 for (ItemStack mat : materials) {
                     if (!mat.isEmpty())
-                        network.insertItem(mat.copy(), mat.getCount(), Action.PERFORM);
+                        insertIntoStorage(player, mat.copy(), false);
                 }
                 return false;
             }
@@ -592,8 +592,8 @@ public final class KettleBatchDelegate extends AbstractBatchDelegate {
             return false;
         }
 
-        ItemStack waterBucket = network.extractItem(
-                new ItemStack(net.minecraft.world.item.Items.WATER_BUCKET), 1, Action.PERFORM);
+        ItemStack waterBucket = extractExactFromStorage(player,
+                new ItemStack(net.minecraft.world.item.Items.WATER_BUCKET), 1, false);
         if (waterBucket.isEmpty()) {
             RSIntegrationMod.LOGGER.warn("[RSI-Kettle] No water bucket in RS network");
             player.sendSystemMessage(Component.translatable("rsi.youkaishomecoming.kettle_water_warning"));
@@ -603,8 +603,8 @@ public final class KettleBatchDelegate extends AbstractBatchDelegate {
         filled = fluidHandler.fill(new FluidStack(Fluids.WATER, 1000),
                 IFluidHandler.FluidAction.EXECUTE);
         if (filled > 0) {
-            ItemStack leftover = network.insertItem(
-                    new ItemStack(net.minecraft.world.item.Items.BUCKET), 1, Action.PERFORM);
+            ItemStack leftover = insertIntoStorage(player,
+                    new ItemStack(net.minecraft.world.item.Items.BUCKET), false);
             if (!leftover.isEmpty()) {
                 ItemHandlerHelper.giveItemToPlayer(player, leftover);
             }
@@ -613,7 +613,7 @@ public final class KettleBatchDelegate extends AbstractBatchDelegate {
         }
 
         // Refund the water bucket -- we couldn't use it
-        network.insertItem(waterBucket, 1, Action.PERFORM);
+        insertIntoStorage(player, waterBucket, false);
         RSIntegrationMod.LOGGER.warn("[RSI-Kettle] Fluid handler rejected water fill");
         return false;
     }
@@ -684,13 +684,9 @@ public final class KettleBatchDelegate extends AbstractBatchDelegate {
     }
 
     private void refund(ItemStack stack) {
-        if (network != null) {
-            ItemStack leftover = network.insertItem(stack.copy(), stack.getCount(), Action.PERFORM);
-            if (!leftover.isEmpty() && player != null)
-                ItemHandlerHelper.giveItemToPlayer(player, leftover);
-        } else if (player != null) {
-            ItemHandlerHelper.giveItemToPlayer(player, stack.copy());
-        }
+        ItemStack leftover = insertIntoStorage(player, stack, false);
+        if (!leftover.isEmpty() && player != null)
+            ItemHandlerHelper.giveItemToPlayer(player, leftover);
     }
 
     private void forceChunkLoad(boolean load) {

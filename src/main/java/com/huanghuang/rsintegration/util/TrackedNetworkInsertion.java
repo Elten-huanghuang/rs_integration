@@ -13,6 +13,11 @@ public final class TrackedNetworkInsertion {
 
     public static ItemStack insert(INetwork network, Player player, ItemStack input) {
         if (network == null) return input == null ? ItemStack.EMPTY : input.copy();
+        if (player != null && !(player instanceof net.minecraft.server.level.ServerPlayer)) {
+            var result = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
+                    .fromLegacyNetwork(network).insert(player, input, false);
+            return result.remainder().orElse(ItemStack.EMPTY);
+        }
         return TrackedInsertionSequence.insert(input,
                 (stack, phase) -> network.insertItem(stack, stack.getCount(),
                         phase == TrackedInsertionSequence.Phase.SIMULATE

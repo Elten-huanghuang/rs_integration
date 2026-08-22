@@ -59,7 +59,8 @@ public final class LithumAltarFuelHelper {
         return false;
     }
 
-    public boolean ensureFuel(net.minecraft.server.level.ServerLevel level, INetwork network) {
+    public boolean ensureFuel(net.minecraft.server.level.ServerLevel level, INetwork network,
+                              net.minecraft.server.level.ServerPlayer player) {
         if (furnacePos == null || network == null) return false;
         BlockEntity furnace = level.getBlockEntity(furnacePos);
         if (!LithumAltarStructureHelper.isFurnace(furnace)) return false;
@@ -76,16 +77,18 @@ public final class LithumAltarFuelHelper {
         ItemStack simulated = handler.insertItem(FUEL_SLOT, candidate.copyWithCount(requested), true);
         int accepted = requested - simulated.getCount();
         if (accepted <= 0) return false;
-        ItemStack simulatedExtract = network.extractItem(candidate.copyWithCount(1), accepted, Action.SIMULATE);
+        ItemStack simulatedExtract = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
+                .extractExactLegacy(network, player, candidate.copyWithCount(1), accepted, true);
         if (simulatedExtract.getCount() != accepted) return false;
-        ItemStack extracted = network.extractItem(candidate.copyWithCount(1), accepted, Action.PERFORM);
+        ItemStack extracted = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
+                .extractExactLegacy(network, player, candidate.copyWithCount(1), accepted, false);
         if (extracted.getCount() != accepted) {
-            refund(network, extracted);
+            refund(network, extracted, player);
             return false;
         }
         ItemStack remainder = handler.insertItem(FUEL_SLOT, extracted, false);
         int inserted = extracted.getCount() - remainder.getCount();
-        refund(network, remainder);
+        refund(network, remainder, player);
         if (inserted <= 0) return false;
         fuelType = candidate.copyWithCount(1);
         insertedCount += inserted;
@@ -104,7 +107,7 @@ public final class LithumAltarFuelHelper {
         int count = LithumFuelInventoryLogic.refundableAddedCount(baseline, insertedCount, current);
         if (count <= 0) return;
         ItemStack extracted = handler.extractItem(FUEL_SLOT, count, false);
-        ItemStack remainder = refund(network, extracted);
+        ItemStack remainder = refund(network, extracted, player);
         if (!remainder.isEmpty() && player != null) {
             net.minecraftforge.items.ItemHandlerHelper.giveItemToPlayer(player, remainder);
         } else if (!remainder.isEmpty()) {
@@ -121,9 +124,11 @@ public final class LithumAltarFuelHelper {
         return be == null ? null : be.getCapability(ForgeCapabilities.ITEM_HANDLER, null).orElse(null);
     }
 
-    private static ItemStack refund(INetwork network, ItemStack stack) {
+    private static ItemStack refund(INetwork network, ItemStack stack,
+                                    net.minecraft.server.level.ServerPlayer player) {
         if (stack == null || stack.isEmpty()) return ItemStack.EMPTY;
-        return network.insertItem(stack, stack.getCount(), Action.PERFORM);
+        return com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
+                .insertLegacy(network, player, stack, false);
     }
 
     private static ItemStack selectFuel(INetwork network) {

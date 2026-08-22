@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.compat.ftbquests;
 
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.util.PlayerUtils;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.server.level.ServerPlayer;
@@ -24,11 +25,12 @@ final class QuestSubmissionEscrow implements AutoCloseable {
     QuestSubmissionEscrow(ServerPlayer player, INetwork network) {
         this.player = player;
         this.network = network;
+        this.ledger.setStorageEndpoint(CraftStorageEndpoints.fromLegacyNetwork(network));
     }
 
     boolean reserve(long taskId, Ingredient ingredient, int count) {
         int mark = ledger.reservationMark();
-        ItemStack stack = ledger.reserveFromNetwork(ingredient, count, network);
+        ItemStack stack = ledger.reserveFromNetwork(ingredient, count, network, player);
         if (stack.isEmpty()) stack = ledger.reserveFromInventory(ingredient, count, player);
         if (stack.isEmpty()) return false;
         entries.add(new Entry(taskId, stack.copy(), ledger.tokenSince(mark)));
@@ -54,9 +56,13 @@ final class QuestSubmissionEscrow implements AutoCloseable {
 
     private void refund(ItemStack stack) {
         if (stack.isEmpty()) return;
-        ItemStack remainder = network.insertItem(stack.copy(), stack.getCount(),
-                com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+        ItemStack remainder = ledgerStorageInsert(stack);
         if (!remainder.isEmpty()) PlayerUtils.safeGiveToPlayer(player, remainder, network);
+    }
+
+    private ItemStack ledgerStorageInsert(ItemStack stack) {
+        return CraftStorageEndpoints.fromLegacyNetwork(network).insert(player, stack, false)
+                .remainder().orElse(ItemStack.EMPTY);
     }
 
     @Override

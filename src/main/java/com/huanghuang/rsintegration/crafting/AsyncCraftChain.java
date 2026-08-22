@@ -918,6 +918,9 @@ public final class AsyncCraftChain {
             currentStepIdx = idx;
             ExtractionLedger nodeLedger = new ExtractionLedger();
             nodeLedger.setLogContext(ctx);
+            if (network != null) {
+                nodeLedger.setStorageEndpoint(CraftStorageEndpoints.fromLegacyNetwork(network));
+            }
             OperationExecutionKernel.Session operation = operationKernel.prepareLogical();
             MaterialBroker.Checkout checkout = graphMaterials.checkout(admission.materialToken());
             List<ItemStack> operationInventory = new ArrayList<>(checkout.producerStacks());
@@ -1389,8 +1392,11 @@ public final class AsyncCraftChain {
                                       List<IBatchDelegate.MaterialReservationScope> scopes,
                                       ServerPlayer online, @Nullable INetwork network) {
         if (specs == null || specs.isEmpty() || online == null) return 1;
-        return reusableWorkerCapacity(specs, scopes,
-                MaterialSources.listAllAvailable(online, network));
+        Map<CraftingResolver.StackKey, Integer> available = network == null
+                ? MaterialSources.listAllAvailable(online, (INetwork) null)
+                : MaterialSources.listAllAvailable(online,
+                        CraftStorageEndpoints.fromLegacyNetwork(network));
+        return reusableWorkerCapacity(specs, scopes, available);
     }
 
     static int reusableWorkerCapacity(List<IngredientSpec> specs,
@@ -1420,6 +1426,9 @@ public final class AsyncCraftChain {
             NodeAdmissionCoordinator.Admission admission) {
         ExtractionLedger nodeLedger = new ExtractionLedger();
         nodeLedger.setLogContext(ctx);
+        if (network != null) {
+            nodeLedger.setStorageEndpoint(CraftStorageEndpoints.fromLegacyNetwork(network));
+        }
         IBatchDelegate delegate = prepared.delegate();
         OperationExecutionKernel.Session operationSession = null;
         boolean ownershipTransferred = false;

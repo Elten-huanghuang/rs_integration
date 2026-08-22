@@ -275,9 +275,8 @@ public final class ManaPoolBatchDelegate extends AbstractBatchDelegate {
 
     private void refundStandalone(@Nullable ServerPlayer player, ItemStack stack) {
         if (stack == null || stack.isEmpty()) return;
-        ItemStack leftover = rsNetwork == null
-                ? stack.copy()
-                : rsNetwork.insertItem(stack.copy(), stack.getCount(), Action.PERFORM);
+        this.network = rsNetwork;
+        ItemStack leftover = insertIntoStorage(player, stack, false);
         if (leftover.isEmpty()) return;
         if (player != null) {
             PlayerUtils.safeGiveToPlayer(player, leftover, rsNetwork);

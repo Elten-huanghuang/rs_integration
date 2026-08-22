@@ -204,7 +204,8 @@ public final class ApothSpawnerUpgradeService {
                     ItemStack reserved = ledger.reserveFromNetwork(modifier.getMainhandInput(), 1, network);
                     if (reserved.isEmpty() || !ledger.commit(network, player)) { skipped++; break; }
                     if (!modifier.apply(context.tile)) {
-                        ItemStack remaining = network.insertItem(reserved.copy(), reserved.getCount(), Action.PERFORM);
+                        ItemStack remaining = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
+                                .insertLegacy(network, player, reserved, false);
                         if (!remaining.isEmpty()) player.drop(remaining, false);
                         skipped++;
                         break;

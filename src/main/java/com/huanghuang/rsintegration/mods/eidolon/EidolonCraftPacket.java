@@ -322,8 +322,8 @@ public final class EidolonCraftPacket {
             for (ItemStack refundStack : allExtracted) {
                 if (refundStack.isEmpty()) continue;
                 if (network != null) {
-                    ItemStack leftover = network.insertItem(refundStack.copy(), refundStack.getCount(),
-                            com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                    ItemStack leftover = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
+                            .insertLegacy(network, player, refundStack, false);
                     if (!leftover.isEmpty()) {
                         ItemHandlerHelper.giveItemToPlayer(player, leftover);
                     }

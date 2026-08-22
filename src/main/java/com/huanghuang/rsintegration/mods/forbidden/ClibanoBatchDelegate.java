@@ -328,7 +328,7 @@ public final class ClibanoBatchDelegate extends AbstractBatchDelegate {
                 ClibanoInventoryLogic.SECOND_OUTPUT_SLOT}) {
             ItemStack stack = inventory.getStackInSlot(slot);
             if (stack.isEmpty()) continue;
-            ItemStack remainder = network.insertItem(stack.copy(), stack.getCount(), Action.SIMULATE);
+            ItemStack remainder = insertIntoStorage(player, stack.copy(), true);
             if (!remainder.isEmpty()) return false;
         }
         return true;
@@ -405,7 +405,7 @@ public final class ClibanoBatchDelegate extends AbstractBatchDelegate {
         ItemStack candidate = findNetworkItem(stack -> ClibanoFireType.fromItem(stack).ordinal() >= required
                 && ClibanoFireType.fromItem(stack) != ClibanoFireType.FIRE);
         if (candidate.isEmpty()) return false;
-        ItemStack extracted = network.extractItem(candidate.copyWithCount(1), 1, Action.PERFORM);
+        ItemStack extracted = extractExactFromStorage(player, candidate.copyWithCount(1), 1, false);
         if (extracted.getCount() != 1) {
             safeDeliver(extracted);
             return false;
@@ -438,9 +438,9 @@ public final class ClibanoBatchDelegate extends AbstractBatchDelegate {
         count = Math.min(count, room);
         if (count <= 0) return true;
 
-        ItemStack extracted = network.extractItem(fuelType.copyWithCount(1), count, Action.SIMULATE);
+        ItemStack extracted = extractExactFromStorage(player, fuelType.copyWithCount(1), count, true);
         if (extracted.getCount() != count) return false;
-        extracted = network.extractItem(fuelType.copyWithCount(1), count, Action.PERFORM);
+        extracted = extractExactFromStorage(player, fuelType.copyWithCount(1), count, false);
         if (extracted.getCount() != count) {
             safeDeliver(extracted);
             return false;

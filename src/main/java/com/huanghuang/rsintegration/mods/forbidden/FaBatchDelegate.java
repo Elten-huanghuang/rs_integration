@@ -782,8 +782,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
     @Override
     protected void clearMachineState(BlockEntity be, ServerPlayer player) {
         if (starterFromRS != null && network != null) {
-            ItemStack leftover = network.insertItem(starterFromRS, starterFromRS.getCount(),
-                    com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+            ItemStack leftover = insertIntoStorage(player, starterFromRS, false);
             if (!leftover.isEmpty()) {
                 ItemHandlerHelper.giveItemToPlayer(player, leftover);
             }
@@ -831,8 +830,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
             ItemStack stack = FaRitualHelper.getForgeSlot(forge, mainSlot);
             if (!stack.isEmpty()) {
                 if (network != null) {
-                    ItemStack leftover = network.insertItem(stack, stack.getCount(),
-                            com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                    ItemStack leftover = insertIntoStorage(player, stack, false);
                     if (!leftover.isEmpty()) {
                         ItemHandlerHelper.giveItemToPlayer(player, leftover);
                     }
@@ -851,8 +849,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
                 ItemStack stack = (ItemStack) Reflect.getMethodOrThrow(FAReflection.pedestalBEClass, "getStack", "getStack").invoke(ped);
                 if (stack != null && !stack.isEmpty()) {
                     if (network != null) {
-                        ItemStack leftover = network.insertItem(stack, stack.getCount(),
-                                com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                        ItemStack leftover = insertIntoStorage(player, stack, false);
                         if (!leftover.isEmpty()) {
                             ItemHandlerHelper.giveItemToPlayer(player, leftover);
                         }

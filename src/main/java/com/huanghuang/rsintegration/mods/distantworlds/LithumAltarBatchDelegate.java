@@ -247,8 +247,8 @@ public final class LithumAltarBatchDelegate extends AbstractBatchDelegate {
     private void releaseNetworkStaff() {
         if (!staffFromNetwork || networkStaff.isEmpty()) return;
         ItemStack remainder = network == null ? networkStaff.copy()
-                : network.insertItem(networkStaff, networkStaff.getCount(),
-                com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                : com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
+                .insertLegacy(network, player, networkStaff, false);
         if (!remainder.isEmpty()) deliver(remainder);
         networkStaff = ItemStack.EMPTY;
         staffFromNetwork = false;
@@ -352,7 +352,7 @@ public final class LithumAltarBatchDelegate extends AbstractBatchDelegate {
                 LithumAltarStateReader.Snapshot snapshot = LithumAltarStateReader.read(level, pos);
                 if (snapshot != null && snapshot.maxEnergy() > 0
                         && snapshot.currentEnergy() < snapshot.maxEnergy()
-                        && !fuelHelper.ensureFuel(level, network)) {
+                        && !fuelHelper.ensureFuel(level, network, player)) {
                     warnOnce("fuel", "[RSI-DW] No Lithum Furnace fuel available for altar at {}", pos);
                 }
             }

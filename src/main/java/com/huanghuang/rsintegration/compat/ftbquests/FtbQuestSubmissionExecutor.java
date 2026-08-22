@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.compat.ftbquests;
 
+import com.huanghuang.rsintegration.RSIntegrationMod;
 import dev.ftb.mods.ftbquests.quest.Quest;
 import dev.ftb.mods.ftbquests.quest.ServerQuestFile;
 import dev.ftb.mods.ftbquests.quest.TeamData;
@@ -18,6 +19,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Stream;
 
 /** Executes one server-authoritative, consumption-based FTB Quest submission. */
 public final class FtbQuestSubmissionExecutor {
@@ -65,15 +67,22 @@ public final class FtbQuestSubmissionExecutor {
                 ItemTask task = tasks.get(requirement.taskId());
                 if (task == null) return;
                 int remaining = Math.toIntExact(requirement.remaining());
-                Ingredient ingredient = requirement.validDisplayItems().isEmpty()
-                        ? Ingredient.of(requirement.displayStack())
-                        : Ingredient.of(requirement.validDisplayItems().stream());
+                // FTB task filters can encode NBT, tags, and custom predicates
+                // that are not represented by the JEI/display item list.
+                // Reserve with the task's authoritative matcher, just like the
+                // native single-task submit path does.
+                Ingredient ingredient = new TaskIngredient(task, requirement.displayStack());
                 if (!escrow.reserve(task.getId(), ingredient, remaining)) {
+                    RSIntegrationMod.LOGGER.warn(
+                            "[RSI-FTBQuests] Escrow reservation failed task={} remaining={} display={}",
+                            task.getId(), remaining, requirement.displayStack().getHoverName().getString());
                     player.sendSystemMessage(Component.translatable("rsi.ftb_quest.error.material_changed"));
                     return;
                 }
             }
             if (!escrow.commit()) {
+                RSIntegrationMod.LOGGER.warn("[RSI-FTBQuests] Escrow commit failed quest={} requirements={}",
+                        quest.getId(), snapshot.requirements().size());
                 player.sendSystemMessage(Component.translatable("rsi.ftb_quest.error.material_changed"));
                 return;
             }
@@ -122,4 +131,18 @@ public final class FtbQuestSubmissionExecutor {
     }
 
     private record LockKey(UUID teamId, long questId) {}
+
+    private static final class TaskIngredient extends Ingredient {
+        private final ItemTask task;
+
+        private TaskIngredient(ItemTask task, ItemStack display) {
+            super(Stream.of(new ItemValue(display.copyWithCount(1))));
+            this.task = task;
+        }
+
+        @Override
+        public boolean test(ItemStack stack) {
+            return stack != null && task.test(stack);
+        }
+    }
 }

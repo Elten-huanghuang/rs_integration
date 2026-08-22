@@ -32,7 +32,8 @@ final class ArsPedestalRecovery {
 
             ItemStack remainder = stack;
             if (network != null) {
-                remainder = network.insertItem(stack, stack.getCount(), Action.PERFORM);
+                remainder = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
+                        .insertLegacy(network, player, stack, false);
             }
             if (!remainder.isEmpty()) {
                 PlayerUtils.safeGiveToPlayer(player, remainder, network);

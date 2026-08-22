@@ -813,8 +813,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
                         continue;
                     }
                     if (network != null) {
-                        ItemStack leftover = network.insertItem(stack, stack.getCount(),
-                                com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                        ItemStack leftover = insertIntoStorage(player, stack, false);
                         if (!leftover.isEmpty()) {
                             ItemHandlerHelper.giveItemToPlayer(player, leftover);
                         }
@@ -847,8 +846,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
                 if (!stack.isEmpty()) {
                     if (!usingSharedLedger && refundToRS) {
                         if (network != null) {
-                            ItemStack leftover = network.insertItem(stack, stack.getCount(),
-                                    com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                            ItemStack leftover = insertIntoStorage(player, stack, false);
                             if (!leftover.isEmpty()) {
                                 ItemHandlerHelper.giveItemToPlayer(player, leftover);
                             }

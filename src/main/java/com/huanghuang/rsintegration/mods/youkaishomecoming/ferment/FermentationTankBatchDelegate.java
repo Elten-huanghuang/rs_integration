@@ -172,7 +172,7 @@ public final class FermentationTankBatchDelegate extends AbstractBatchDelegate {
             if (!tryStartWithMaterials(player, materials, ledger)) {
                 for (ItemStack mat : materials) {
                     if (!mat.isEmpty())
-                        network.insertItem(mat.copy(), mat.getCount(), Action.PERFORM);
+                        insertIntoStorage(player, mat.copy(), false);
                 }
                 return false;
             }
@@ -1077,7 +1077,7 @@ public final class FermentationTankBatchDelegate extends AbstractBatchDelegate {
             }
 
             // Extract the fluid holder from RS
-            ItemStack extracted = network.extractItem(waterBottle.copyWithCount(1), 1, Action.PERFORM);
+            ItemStack extracted = extractExactFromStorage(player, waterBottle.copyWithCount(1), 1, false);
             if (extracted.isEmpty()) {
                 player.sendSystemMessage(Component.translatable("rsi.youkaishomecoming.ferment_water_warning"));
                 return false;
@@ -1089,7 +1089,7 @@ public final class FermentationTankBatchDelegate extends AbstractBatchDelegate {
                     IFluidHandler.FluidAction.EXECUTE);
             if (bottleFilled <= 0) {
                 // Can't fill — refund the water bottle to RS
-                network.insertItem(extracted, 1, Action.PERFORM);
+                insertIntoStorage(player, extracted, false);
                 RSIntegrationMod.LOGGER.warn("[RSI-Ferment] Fluid handler rejected water fill (bottle {})", i);
                 player.sendSystemMessage(Component.translatable("rsi.youkaishomecoming.ferment_water_warning"));
                 return false;
@@ -1098,7 +1098,7 @@ public final class FermentationTankBatchDelegate extends AbstractBatchDelegate {
             // Return the empty container (if any) to RS
             ItemStack emptyContainer = getYHWaterEmptyContainer(extracted);
             if (!emptyContainer.isEmpty()) {
-                ItemStack leftover = network.insertItem(emptyContainer, 1, Action.PERFORM);
+                ItemStack leftover = insertIntoStorage(player, emptyContainer, false);
                 if (!leftover.isEmpty())
                     ItemHandlerHelper.giveItemToPlayer(player, leftover);
             }
@@ -1294,13 +1294,9 @@ public final class FermentationTankBatchDelegate extends AbstractBatchDelegate {
     }
 
     private void refund(ItemStack stack) {
-        if (network != null) {
-            ItemStack leftover = network.insertItem(stack.copy(), stack.getCount(), Action.PERFORM);
-            if (!leftover.isEmpty() && player != null)
-                ItemHandlerHelper.giveItemToPlayer(player, leftover);
-        } else if (player != null) {
-            ItemHandlerHelper.giveItemToPlayer(player, stack.copy());
-        }
+        ItemStack leftover = insertIntoStorage(player, stack, false);
+        if (!leftover.isEmpty() && player != null)
+            ItemHandlerHelper.giveItemToPlayer(player, leftover);
     }
 
     private void forceChunkLoad(boolean load) {

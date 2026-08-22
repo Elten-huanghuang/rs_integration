@@ -768,7 +768,7 @@ extends AbstractBatchDelegate {
             if (tracker != null && this.player != null) {
                 tracker.changed(this.player, s.copy());
             }
-            if ((leftover = this.network.insertItem(s, s.getCount(), Action.PERFORM)).isEmpty()) continue;
+            if ((leftover = insertIntoStorage(player, s, false)).isEmpty()) continue;
             RSIntegrationMod.LOGGER.warn("[RSI-Embers-Infer] Refund leftover: {} x{}", (Object)leftover.getHoverName().getString(), (Object)leftover.getCount());
             if (this.player == null) continue;
             ItemHandlerHelper.giveItemToPlayer(this.player, (ItemStack)leftover);
@@ -842,7 +842,7 @@ extends AbstractBatchDelegate {
                 if (tracker != null && this.player != null) {
                     tracker.changed(this.player, (Object)s2.copy());
                 }
-                if ((leftover = this.network.insertItem(s2, s2.getCount(), Action.PERFORM)).isEmpty()) continue;
+                if ((leftover = insertIntoStorage(player, s2, false)).isEmpty()) continue;
                 RSIntegrationMod.LOGGER.warn("[RSI-Embers-Infer] Survivor refund partial: {} x{}", (Object)leftover.getHoverName().getString(), (Object)leftover.getCount());
                 if (this.player == null) continue;
                 ItemHandlerHelper.giveItemToPlayer(this.player, (ItemStack)leftover);

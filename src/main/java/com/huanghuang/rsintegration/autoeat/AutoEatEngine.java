@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.autoeat;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.autoeat.network.AutoEatSyncPacket;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;
 import com.huanghuang.rsintegration.util.TrackedNetworkInsertion;
 import com.refinedmods.refinedstorage.api.network.INetwork;
@@ -321,11 +322,11 @@ public final class AutoEatEngine {
             if (key != null && blacklist.contains(key)) continue;
             if (hasBlacklistedEffect(stack, player, effectBlacklist)) continue;
 
-            ItemStack taken = network.extractItem(stack.copy(), 1, Action.PERFORM);
+            ItemStack taken = extract(network, player, stack, 1, false);
             if (taken.isEmpty()) continue;
 
             if (!payCost(network, player, AutoEatMode.DIVERSITY)) {
-                network.insertItem(taken, taken.getCount(), Action.PERFORM);
+                insert(network, player, taken, false);
                 break;
             }
 
@@ -362,6 +363,16 @@ public final class AutoEatEngine {
         }
     }
 
+    private static ItemStack extract(INetwork network, ServerPlayer player,
+                                     ItemStack template, int amount, boolean simulate) {
+        return CraftStorageEndpoints.extractExactLegacy(network, player, template, amount, simulate);
+    }
+
+    private static ItemStack insert(INetwork network, ServerPlayer player,
+                                    ItemStack stack, boolean simulate) {
+        return CraftStorageEndpoints.insertLegacy(network, player, stack, simulate);
+    }
+
     // ── Cost deduction ────────────────────────────────────────────
 
     private static boolean payCost(INetwork network, ServerPlayer player, AutoEatMode mode) {
@@ -374,10 +385,10 @@ public final class AutoEatEngine {
         if (costItem == null) return true;
 
         ItemStack template = new ItemStack(costItem, perItem);
-        ItemStack extracted = network.extractItem(template, perItem, Action.PERFORM);
+        ItemStack extracted = extract(network, player, template, perItem, false);
         if (extracted.getCount() < perItem) {
             if (!extracted.isEmpty()) {
-                network.insertItem(extracted, extracted.getCount(), Action.PERFORM);
+                insert(network, player, extracted, false);
             }
             NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
                     new AutoEatSyncPacket(mode, 0,
@@ -423,8 +434,7 @@ public final class AutoEatEngine {
             sendFailure(player, AutoEatMode.STACK, "rsi.autoeat.effect_blacklisted");
             return;
         }
-        ItemStack extracted = network.extractItem(template, toExtract,
-                com.refinedmods.refinedstorage.api.util.IComparer.COMPARE_NBT, Action.PERFORM);
+        ItemStack extracted = extract(network, player, template, toExtract, false);
         if (extracted.isEmpty()) {
             NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
                     new AutoEatSyncPacket(AutoEatMode.STACK, 0,
@@ -456,14 +466,14 @@ public final class AutoEatEngine {
             boolean ignoreFullHunger = AutoEatHungerPolicy.canIgnoreFullHunger(alwaysEat, hasGnawsGift);
             if (!player.canEat(ignoreFullHunger)) {
                 if (!extracted.isEmpty()) {
-                    network.insertItem(extracted, extracted.getCount(), Action.PERFORM);
+                    insert(network, player, extracted, false);
                 }
                 sendFailure(player, AutoEatMode.STACK, "rsi.autoeat.full");
                 return;
             }
             if (!payCost(network, player, AutoEatMode.STACK)) {
                 if (!extracted.isEmpty()) {
-                    network.insertItem(extracted, extracted.getCount(), Action.PERFORM);
+                    insert(network, player, extracted, false);
                 }
                 break;
             }
@@ -494,7 +504,7 @@ public final class AutoEatEngine {
             }
         }
         if (!extracted.isEmpty()) {
-            ItemStack leftover = network.insertItem(extracted, extracted.getCount(), Action.PERFORM);
+            ItemStack leftover = insert(network, player, extracted, false);
             if (!leftover.isEmpty()) {
                 if (!player.getInventory().add(leftover)) {
                     player.drop(leftover, false);
@@ -605,14 +615,14 @@ public final class AutoEatEngine {
                 continue;
             }
 
-            ItemStack taken = network.extractItem(foodToEat.copy(), 1, Action.PERFORM);
+            ItemStack taken = extract(network, player, foodToEat, 1, false);
             if (taken.isEmpty()) {
                 values.put(lowestGroup, 1.0f);
                 continue;
             }
 
             if (!payCost(network, player, AutoEatMode.DIET)) {
-                network.insertItem(taken, taken.getCount(), Action.PERFORM);
+                insert(network, player, taken, false);
                 break;
             }
 

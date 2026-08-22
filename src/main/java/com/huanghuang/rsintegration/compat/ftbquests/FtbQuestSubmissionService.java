@@ -10,6 +10,7 @@ import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.CraftingResolver;
 import com.huanghuang.rsintegration.crafting.AsyncCraftChain;
 import com.huanghuang.rsintegration.crafting.AsyncCraftManager;
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.crafting.plan.PlanResponse;
 import com.huanghuang.rsintegration.crafting.plan.PlanResponsePacket;
 import com.huanghuang.rsintegration.crafting.plan.PlanStep;
@@ -40,7 +41,8 @@ public final class FtbQuestSubmissionService {
             return;
         }
 
-        QuestSubmissionPlan questPlan = FtbQuestSubmissionPlanner.plan(player, snapshot, network);
+        QuestSubmissionPlan questPlan = FtbQuestSubmissionPlanner.plan(player, snapshot,
+                CraftStorageEndpoints.fromLegacyNetwork(network), network);
         List<PlanStep> steps = questPlan.graphView().nodes().stream()
                 .map(node -> node.asPlanStep())
                 .toList();
@@ -70,7 +72,8 @@ public final class FtbQuestSubmissionService {
             return;
         }
 
-        QuestSubmissionPlan plan = FtbQuestSubmissionPlanner.plan(player, snapshot, network);
+        QuestSubmissionPlan plan = FtbQuestSubmissionPlanner.plan(player, snapshot,
+                CraftStorageEndpoints.fromLegacyNetwork(network), network);
         if (!plan.feasible()) {
             player.sendSystemMessage(Component.translatable("rsi.generic.error.missing_materials",
                     CraftPacketUtils.formatMissingSummary(plan.missing())));

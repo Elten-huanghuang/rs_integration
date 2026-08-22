@@ -81,6 +81,9 @@ public final class MaterialSources {
      * locking. Expensive network scans are performed outside any lock.</p>
      */
     public static Map<StackKey, Integer> listAllAvailable(ServerPlayer player, @Nullable INetwork network) {
+        if (network != null) {
+            return listAllAvailable(player, CraftStorageEndpoints.fromLegacyNetwork(network));
+        }
         MinecraftServer server = player.getServer();
         int currentTick = server != null ? server.getTickCount() : 0;
         String cacheKey = player.getUUID() + ":" + (network != null);
@@ -98,11 +101,17 @@ public final class MaterialSources {
         if (cached != null) return cached;
 
         Map<StackKey, Integer> available = countInventory(player);
-        if (network != null) {
-            addNetworkItems(available, network);
-        }
-
         cache.putIfAbsent(cacheKey, available);
+        return available;
+    }
+
+    /** Backend-neutral availability view used by migrated planning callers. */
+    public static Map<StackKey, Integer> listAllAvailable(ServerPlayer player,
+                                                           CraftStorageEndpoint endpoint) {
+        Map<StackKey, Integer> available = countInventory(player);
+        endpoint.snapshot(player).snapshot().ifPresent(snapshot -> snapshot.items().forEach(item ->
+                available.merge(StackKey.of(item.stack(), true),
+                        (int) Math.min(Integer.MAX_VALUE, item.amount()), Integer::sum)));
         return available;
     }
 

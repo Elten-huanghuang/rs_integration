@@ -8,7 +8,6 @@ import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.reflection.probes.YHKReflection;
 import com.refinedmods.refinedstorage.api.network.INetwork;
-import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
@@ -146,8 +145,10 @@ public final class CuisineBoardBatchDelegate extends AbstractBatchDelegate {
 
             if (!tryStartWithMaterials(player, materials, ledger)) {
                 for (ItemStack mat : materials) {
-                    if (!mat.isEmpty())
-                        network.insertItem(mat.copy(), mat.getCount(), Action.PERFORM);
+                    if (!mat.isEmpty()) {
+                        ItemStack leftover = insertIntoStorage(player, mat, false);
+                        if (!leftover.isEmpty()) ItemHandlerHelper.giveItemToPlayer(player, leftover);
+                    }
                 }
                 return false;
             }

@@ -155,9 +155,7 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
             if (!tryStartWithMaterialsImpl(player, materials, false)) {
                 // Craft couldn't start — refund materials back to RS.
                 for (ItemStack mat : materials) {
-                    if (!mat.isEmpty())
-                        network.insertItem(mat.copy(), mat.getCount(),
-                                com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                    if (!mat.isEmpty()) insertIntoStorage(player, mat, false);
                 }
                 return false;
             }
@@ -218,7 +216,7 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
         // Icestone, Ambrosium, etc.) rarely lasts a whole craft. Any unconsumed
         // remainder is refunded to RS when the batch finishes.
         if (network != null) {
-            ItemStack insertedFuel = fillFuelSlot(be, handler, network);
+            ItemStack insertedFuel = fillFuelSlot(be, handler, network, player);
             if (!insertedFuel.isEmpty()) {
                 suppliedFuel = insertedFuel.copyWithCount(1);
                 suppliedFuelCount += insertedFuel.getCount();
@@ -320,14 +318,9 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
     }
 
     private void refundToRSNetwork(ItemStack stack) {
-        if (network != null) {
-            ItemStack leftover = network.insertItem(stack.copy(), stack.getCount(),
-                    com.refinedmods.refinedstorage.api.util.Action.PERFORM);
-            if (!leftover.isEmpty() && player != null) {
-                net.minecraftforge.items.ItemHandlerHelper.giveItemToPlayer(player, leftover);
-            }
-        } else if (player != null) {
-            net.minecraftforge.items.ItemHandlerHelper.giveItemToPlayer(player, stack.copy());
+        ItemStack leftover = insertIntoStorage(player, stack, false);
+        if (!leftover.isEmpty() && player != null) {
+            net.minecraftforge.items.ItemHandlerHelper.giveItemToPlayer(player, leftover);
         }
     }
 
@@ -417,7 +410,8 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
      * the slot up to its stack limit; any unconsumed remainder is refunded to RS when
      * the batch finishes via {@link #refundLeftoverFuel}.
      */
-    private static ItemStack fillFuelSlot(BlockEntity be, IItemHandler handler, INetwork network) {
+    private static ItemStack fillFuelSlot(BlockEntity be, IItemHandler handler, INetwork network,
+                                          ServerPlayer player) {
         ItemStack fuelSlot = handler.getStackInSlot(1);
 
         // Slot occupied by a non-fuel item — leave it alone.
@@ -431,14 +425,14 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
         int room = slotLimit - fuelSlot.getCount();
         if (room <= 0) return ItemStack.EMPTY;
 
-        ItemStack extracted = network.extractItem(fuelType.copyWithCount(1), room,
-                com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+        ItemStack extracted = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
+                .extractExactLegacy(network, player, fuelType.copyWithCount(1), room, false);
         if (extracted.isEmpty()) return ItemStack.EMPTY;
 
         ItemStack remainder = handler.insertItem(1, extracted, false);
         if (!remainder.isEmpty()) {
-            network.insertItem(remainder, remainder.getCount(),
-                    com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+            com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
+                    .insertLegacy(network, player, remainder, false);
         }
         int inserted = extracted.getCount() - remainder.getCount();
         return inserted > 0 ? extracted.copyWithCount(inserted) : ItemStack.EMPTY;

@@ -299,7 +299,7 @@ public final class OpenBoundMachineGuiPacket {
                 // Already has the right item — skip extraction
             } else {
                 // Extract one unit of the input from RS
-                ItemStack extracted = extractIngredientFromRS(network, input);
+                ItemStack extracted = extractIngredientFromRS(network, input, player);
                 if (extracted.isEmpty()) {
                     player.sendSystemMessage(Component.translatable(
                             "rsi.generic.error.missing_materials",
@@ -331,14 +331,15 @@ public final class OpenBoundMachineGuiPacket {
                 levelOpt.getBlockState(pos), levelOpt.getBlockState(pos), 3);
     }
 
-    private static ItemStack extractIngredientFromRS(INetwork network, Ingredient ingredient) {
+    private static ItemStack extractIngredientFromRS(INetwork network, Ingredient ingredient,
+                                                     ServerPlayer player) {
         var stacks = new ArrayList<>(network.getItemStorageCache().getList().getStacks());
         for (var entry : stacks) {
             ItemStack stack = entry.getStack();
             if (stack.isEmpty()) continue;
             if (ingredient.test(stack)) {
-                ItemStack extracted = network.extractItem(
-                        stack.copyWithCount(1), 1, Action.PERFORM);
+                ItemStack extracted = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
+                        .extractExactLegacy(network, player, stack.copyWithCount(1), 1, false);
                 if (!extracted.isEmpty()) return extracted;
             }
         }
@@ -356,9 +357,11 @@ public final class OpenBoundMachineGuiPacket {
             if (burn <= 0 || needed > existing.getMaxStackSize()) return;
             if (existing.getCount() >= needed) return;
             int topUp = needed - existing.getCount();
-            ItemStack extra = network.extractItem(existing.copyWithCount(1), topUp, Action.PERFORM);
+            ItemStack extra = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
+                    .extractExactLegacy(network, player, existing.copyWithCount(1), topUp, false);
             if (extra.getCount() < topUp) {
-                if (!extra.isEmpty()) network.insertItem(extra, extra.getCount(), Action.PERFORM);
+                if (!extra.isEmpty()) com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
+                        .insertLegacy(network, player, extra, false);
                 return;
             }
             ItemStack merged = existing.copy();
@@ -377,10 +380,12 @@ public final class OpenBoundMachineGuiPacket {
                 stack -> BrickFurnaceCompat.effectiveBurnTicks(
                         furnace, stack, recipeTypeFor(furnace, recipe)));
         if (selection == null) return;
-        ItemStack extracted = network.extractItem(selection.fuel().copyWithCount(1),
-                selection.amount(), Action.PERFORM);
+        ItemStack extracted = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
+                .extractExactLegacy(network, player, selection.fuel().copyWithCount(1),
+                        selection.amount(), false);
         if (extracted.getCount() < selection.amount()) {
-            if (!extracted.isEmpty()) network.insertItem(extracted, extracted.getCount(), Action.PERFORM);
+            if (!extracted.isEmpty()) com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
+                    .insertLegacy(network, player, extracted, false);
             return;
         }
         if (!extracted.isEmpty()) {
@@ -442,7 +447,7 @@ public final class OpenBoundMachineGuiPacket {
         int needed = maxStack - existingCount;
         if (needed <= 0) return;
 
-        ItemStack extracted = extractIngredientFromRS(network, input, needed);
+        ItemStack extracted = extractIngredientFromRS(network, input, needed, player);
         if (!extracted.isEmpty()) {
             if (existing.isEmpty()) {
                 menu.getSlot(0).set(extracted.copy());
@@ -521,7 +526,7 @@ public final class OpenBoundMachineGuiPacket {
                 continue;
             }
 
-            ItemStack extracted = extractIngredientFromRS(network, ing, 1);
+            ItemStack extracted = extractIngredientFromRS(network, ing, 1, player);
             if (!extracted.isEmpty()) {
                 menu.getSlot(slotIdx).set(extracted.copy());
                 filled++;
@@ -557,7 +562,7 @@ public final class OpenBoundMachineGuiPacket {
             if (!template.isEmpty()) {
                 ItemStack existing = menu.getSlot(0).getItem();
                 if (existing.isEmpty()) {
-                    ItemStack extracted = extractIngredientFromRS(network, template, 1);
+                    ItemStack extracted = extractIngredientFromRS(network, template, 1, player);
                     if (!extracted.isEmpty()) {
                         menu.getSlot(0).set(extracted.copy());
                         filled++;
@@ -567,8 +572,8 @@ public final class OpenBoundMachineGuiPacket {
             // container slot 1 = base
             if (menu.getSlot(1).getItem().isEmpty()) {
                 if (baseItem != null && !baseItem.isEmpty()) {
-                    ItemStack extracted = network.extractItem(baseItem.copyWithCount(1), 1,
-                            com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+                    ItemStack extracted = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
+                            .extractExactLegacy(network, player, baseItem.copyWithCount(1), 1, false);
                     if (!extracted.isEmpty()) {
                         menu.getSlot(1).set(extracted.copy());
                         filled++;
@@ -579,7 +584,7 @@ public final class OpenBoundMachineGuiPacket {
             if (!addition.isEmpty()) {
                 ItemStack existing = menu.getSlot(2).getItem();
                 if (existing.isEmpty()) {
-                    ItemStack extracted = extractIngredientFromRS(network, addition, 1);
+                    ItemStack extracted = extractIngredientFromRS(network, addition, 1, player);
                     if (!extracted.isEmpty()) {
                         menu.getSlot(2).set(extracted.copy());
                         filled++;
@@ -598,7 +603,8 @@ public final class OpenBoundMachineGuiPacket {
     }
 
     /** Extract up to {@code count} of an ingredient from RS. */
-    private static ItemStack extractIngredientFromRS(INetwork network, Ingredient ingredient, int count) {
+    private static ItemStack extractIngredientFromRS(INetwork network, Ingredient ingredient, int count,
+                                                     ServerPlayer player) {
         var stacks = new ArrayList<>(network.getItemStorageCache().getList().getStacks());
         ItemStack result = ItemStack.EMPTY;
         int remaining = count;
@@ -608,8 +614,8 @@ public final class OpenBoundMachineGuiPacket {
             if (stack.isEmpty()) continue;
             if (ingredient.test(stack)) {
                 int toExtract = Math.min(remaining, stack.getCount());
-                ItemStack extracted = network.extractItem(
-                        stack.copyWithCount(1), toExtract, Action.PERFORM);
+                    ItemStack extracted = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
+                            .extractExactLegacy(network, player, stack.copyWithCount(1), toExtract, false);
                 if (!extracted.isEmpty()) {
                     if (result.isEmpty()) {
                         result = extracted;

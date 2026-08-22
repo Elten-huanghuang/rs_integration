@@ -158,7 +158,20 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
     boolean wasDispatched() { return dispatched; }
 
     @Nullable OperationExecutionKernel.TerminalClass operationTerminalClass() {
-        return operationSession == null ? null : operationSession.terminalClass();
+        if (operationSession != null) return operationSession.terminalClass();
+        if (delegate instanceof ParallelCraftGroup group) {
+            OperationExecutionKernel.TerminalClass failure = group.failureTerminalClass();
+            if (failure != null) return failure;
+            if (group.getRunningOperations() > 0) {
+                return OperationExecutionKernel.TerminalClass.IN_FLIGHT;
+            }
+            if (group.getTotalOperations() > group.getCompletedOperations()) {
+                return OperationExecutionKernel.TerminalClass.PRE_START;
+            }
+            return group.getTotalOperations() > 0
+                    ? OperationExecutionKernel.TerminalClass.SETTLED : null;
+        }
+        return null;
     }
 
     OperationExecutionKernel.CompletionResult completeOperation(
@@ -387,6 +400,9 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
                         if (delegate instanceof com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate abstractDelegate) {
                             physicalFailureCleanupCompleted =
                                     abstractDelegate.physicalFailureCleanupCompleted();
+                        } else if (delegate instanceof ParallelCraftGroup group) {
+                            physicalFailureCleanupCompleted =
+                                    group.physicalFailureCleanupCompleted();
                         }
                     });
         }
